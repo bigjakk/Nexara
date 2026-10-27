@@ -1764,6 +1764,24 @@ type Querier interface {
 	//                           details key (an ACL's users). Read by resource
 	//                           type alone, so for a type with few rows.
 	//
+	// or, alone, the whole cluster (whole_cluster, HistoryKind.WholeCluster): every
+	// row of every source filed under the path's cluster, none of them a guest's
+	// or an object's — a cluster's History. Rows of one (resource type, action)
+	// repeated in bursts — the sync failures of an unreachable cluster — are read
+	// as runs (collapse_*: one entry per run, kind run, a gap longer than the
+	// pair's starting the next), and every other source is read newest first up
+	// to row_cap rows when the handler sets one, so a cluster's whole audit trail
+	// is never read to show one page of it; total then stops at row_cap + 1. The
+	// audit arm reads by the (cluster_id, created_at) index built after startup,
+	// through a row comparison only that index can serve: written cluster_id = X
+	// with an ORDER BY created_at, a generic plan — which takes X for an average
+	// cluster — walks the created_at index instead, through every other cluster's
+	// rows, and a small cluster's History in a big install read all 1M of them.
+	// The runs are read per pair (OFFSET 0 keeps the lateral a lateral), and the
+	// collapsed pairs are left out of the audit arm by a hashed NOT IN, a filter
+	// the index scan keeps its order through, where NOT EXISTS became an anti join
+	// the planner sorted after.
+	//
 	// Every branch reads one cluster, a REQUIRED argument: the route's, which its
 	// cluster-scoped gate authorized. The one exception is a global kind's objects
 	// (global, HistoryKind.Global): read in every cluster and in none, because
@@ -1786,13 +1804,14 @@ type Querier interface {
 	//            says who asked. A twin outside the selection drops nothing — a
 	//            node's History keeps a guest task it selects by details.node even
 	//            when the Nexara row of it, filed under the guest, is not its own.
-	//            A row that names a guest outside the guests, filed under none of
-	//            them — one filed into a folder, a task run on a node — is the
-	//            caller's only under that guest's own view permission, as the
-	//            guests are (viewableGuests): its type in status_guest_types, or
-	//            both types for a guest the inventory no longer holds. A row filed
-	//            under one of the guests is that guest's, as the clone into it,
-	//            which names its source, is.
+	//            An entry that names a guest outside the guests, filed under none
+	//            of them — one filed into a folder, a task run on a node, any of a
+	//            whole cluster's — is the caller's only under that guest's own
+	//            view permission, as the guests are (viewableGuests): its type in
+	//            status_guest_types, or both types for a guest the inventory no
+	//            longer holds. Checked on the page, for every source alike. An
+	//            entry filed under one of the guests is that guest's, as the clone
+	//            into it, which names its source, is.
 	//   task     a guest task with NO audit row, from task_history or its archive
 	//            — only when include_tasks, which the handler sets from view:task.
 	//            Every task path writes an audit row too, so this is the rare row
@@ -1827,7 +1846,8 @@ type Querier interface {
 	// The Proxmox-duplicate probe reads the selection
 	// itself, never audit_log: probed there by UPID, a generic plan — pgx's
 	// statement cache lets Postgres switch to one after five executions — scans
-	// the whole cluster's rows on every request.
+	// the whole cluster's rows on every request. It is an IN over the selection's
+	// Nexara UPIDs, hashed once, rather than an EXISTS run for every row.
 	//
 	// subject is the guest an entry is filed under — the clone's target, the HA
 	// sid's guest — and picks the cutoff it is held to: cutoff_after and

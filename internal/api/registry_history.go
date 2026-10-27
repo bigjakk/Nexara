@@ -45,6 +45,7 @@ func historyRoutes() []historyRoute {
 	return []historyRoute{
 		guestHistoryRoute(),
 		folderHistoryRoute(),
+		clusterHistoryRoute(),
 	}
 }
 

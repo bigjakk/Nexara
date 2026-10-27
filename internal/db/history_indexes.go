@@ -12,11 +12,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// historyIndexes are the audit_log indexes the History's generic selector
-// reads (queries/history.sql, ListHistory): an object's own rows by
-// (resource_type, resource_id) within a time window, and the rows naming it in
-// a details key, through details @> {key: value}. Without them the selector
-// works, reading every row of the type instead.
+// historyIndexes are the audit_log indexes the History's selectors read
+// (queries/history.sql, ListHistory): an object's own rows by (resource_type,
+// resource_id) within a time window, the rows naming it in a details key,
+// through details @> {key: value}, and a cluster's own rows newest first, for
+// its History. Without them the selectors work, reading every row of the type
+// — or of every cluster — instead.
 //
 // They are built here, after startup, rather than in migration 000117: see
 // that migration's header. Infrastructure DDL like EnsureSchema's, so it is
@@ -31,6 +32,8 @@ var historyIndexes = []historyIndex{
 		method: "btree", keys: []string{"resource_type", "resource_id", "created_at"}, opclasses: []string{"", "", ""}},
 	{name: "idx_audit_log_details", columns: "USING gin (details jsonb_path_ops)",
 		method: "gin", keys: []string{"details"}, opclasses: []string{"jsonb_path_ops"}},
+	{name: "idx_audit_log_cluster_created", columns: "(cluster_id, created_at)",
+		method: "btree", keys: []string{"cluster_id", "created_at"}, opclasses: []string{"", ""}},
 }
 
 // historyIndex is one of historyIndexes: columns is what CREATE INDEX builds

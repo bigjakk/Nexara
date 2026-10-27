@@ -95,6 +95,28 @@ type HistoryKind struct {
 	// right for an object that is the guest's, as its HA resource is. Set it
 	// where an object's rows stand on their own, as a node's tasks do.
 	ObjectsIgnoreGuestCutoff bool
+	// WholeCluster reads every row of every source filed under the path's
+	// cluster — a cluster's own History — and no guests or objects: Select
+	// returns an empty selection, which List holds it to.
+	WholeCluster bool
+	// Collapse is the (resource type, action) pairs a whole-cluster kind reads
+	// as runs: one entry per burst of them, a gap longer than Gap ending it.
+	Collapse []HistoryCollapse
+	// RowCap bounds a whole-cluster kind's read when nothing is filtered out
+	// after it — no filter, and a caller who may view every guest: each source
+	// newest first up to RowCap rows, so a page of a busy cluster's History
+	// costs RowCap rows, not its whole trail. The total then stops at
+	// RowCap+1, which the reader shows as "more than RowCap". Any other read
+	// is not capped, so what it finds is all of it.
+	RowCap int
+}
+
+// HistoryCollapse is one kind of repeated row a whole-cluster History reads
+// as runs (HistoryKind.Collapse).
+type HistoryCollapse struct {
+	ResourceType, Action string
+	// Gap is the longest quiet spell within one run.
+	Gap time.Duration
 }
 
 // HistoryObservedType is one type whose changes seen in Proxmox a kind shows,
@@ -294,6 +316,19 @@ func (k HistoryKind) Validate() error {
 	if k.Global && k.GuestFromPath != "" {
 		return fmt.Errorf("history kind %q is global, and a global kind has no guests", k.Name)
 	}
+	if k.WholeCluster && (k.Global || k.GuestFromPath != "" || len(k.ObjectTypes) > 0) {
+		return fmt.Errorf("history kind %q reads its whole cluster, so it names no guest or object and is no "+
+			"global kind", k.Name)
+	}
+	if !k.WholeCluster && (len(k.Collapse) > 0 || k.RowCap != 0) {
+		return fmt.Errorf("history kind %q collapses or caps rows, which only a whole-cluster read does", k.Name)
+	}
+	for _, c := range k.Collapse {
+		if c.ResourceType == "" || c.Action == "" || c.Gap <= 0 {
+			return fmt.Errorf("history kind %q collapses %+v, which needs a resource type, an action and a gap",
+				k.Name, c)
+		}
+	}
 	for _, t := range k.ObjectTypes {
 		if k.Global && !slices.Contains(globalHistoryResourceTypes, t) {
 			return fmt.Errorf("history kind %q is global and reads %q, whose ids are unique only within a cluster", k.Name, t)
@@ -425,6 +460,9 @@ type historyEntry struct {
 	// task log that are this guest's part, by Proxmox's line numbers.
 	LogStart int32 `json:"log_start,omitempty"`
 	LogEnd   int32 `json:"log_end,omitempty"`
+	// RunCount is, for a run, how many rows it is: from LastSeenAt, its
+	// first, to OccurredAt, its last; Details are the last one's.
+	RunCount int32 `json:"run_count,omitempty"`
 }
 
 // historyTaskOutcome is how a task ended, from the task row when there is
@@ -561,6 +599,18 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		ObjectValues:        make([]string, 0, len(sel.Objects)),
 		ObjectInList:        make([]bool, 0, len(sel.Objects)),
 		ExcludeCategories:   []string{},
+		WholeCluster:        k.WholeCluster,
+		CollapseTypes:       make([]string, 0, len(k.Collapse)),
+		CollapseActions:     make([]string, 0, len(k.Collapse)),
+		CollapseGaps:        make([]int32, 0, len(k.Collapse)),
+	}
+	if k.WholeCluster && len(sel.Guests)+len(sel.GuestWorkers)+len(sel.Objects) > 0 {
+		return db.ListHistoryParams{}, fmt.Errorf("history kind %q reads its whole cluster and selected more", k.Name)
+	}
+	for _, c := range k.Collapse {
+		params.CollapseTypes = append(params.CollapseTypes, c.ResourceType)
+		params.CollapseActions = append(params.CollapseActions, c.Action)
+		params.CollapseGaps = append(params.CollapseGaps, safeconv.Int32(int(c.Gap/time.Second)))
 	}
 	for _, w := range sel.GuestWorkers {
 		if w == "" || !likePatternOK(w) {
@@ -741,6 +791,11 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	if source := p.String("source"); source != "" {
 		params.Source = pgtype.Text{String: source, Valid: true}
 	}
+	// The cap only where nothing is filtered out after it: no filter, and a
+	// caller who sees every guest — the page drops the rest after the cap.
+	if !params.Category.Valid && len(params.ExcludeCategories) == 0 && !params.Source.Valid && len(statusTypes) == 2 {
+		params.RowCap = safeconv.Int32(r.kind.RowCap)
+	}
 
 	rows, err := r.h.queries.ListHistory(ctx, params)
 	if err != nil {
@@ -786,6 +841,7 @@ func toHistoryEntry(r db.ListHistoryRow, visible map[string]bool, showExitText b
 		ToStatus:    r.ToStatus,
 		LogStart:    r.LogStart,
 		LogEnd:      r.LogEnd,
+		RunCount:    r.RunCount,
 	}
 	if r.ClusterID.Valid {
 		e.ClusterID = uuid.UUID(r.ClusterID.Bytes).String()

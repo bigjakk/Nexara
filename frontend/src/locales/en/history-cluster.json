@@ -1,0 +1,30 @@
+{
+  "categories": {
+    "guests": "Guests",
+    "nodes": "Nodes",
+    "storage": "Storage",
+    "backup": "Backup",
+    "ceph": "Ceph",
+    "ha": "HA",
+    "network": "Network",
+    "access": "Access",
+    "certificates": "Certificates",
+    "replication": "Replication",
+    "drs": "DRS",
+    "sync": "Sync",
+    "options": "Options",
+    "other": "Other"
+  },
+  "categoryNotes": {
+    "sync": "A burst of failed syncs is one entry: how many there were, and between when. The error is the last one's."
+  },
+  "empty": "Nothing has been recorded for this cluster yet.",
+  "actions": {
+    "sync_failed": "Sync failed",
+    "tls_fingerprint_mismatch": "TLS fingerprint mismatch",
+    "tls_fingerprint_verified": "TLS fingerprint verified",
+    "cluster_endpoint_failover": "Endpoint failover",
+    "cluster_created": "Cluster added",
+    "cluster_updated": "Cluster updated"
+  }
+}

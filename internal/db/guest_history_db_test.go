@@ -24,6 +24,7 @@ import (
 var (
 	historyClusterID = uuid.MustParse("115a0000-0000-4000-8000-00000000000a")
 	historyOtherID   = uuid.MustParse("115a0000-0000-4000-8000-00000000000b")
+	historyThirdID   = uuid.MustParse("115a0000-0000-4000-8000-00000000000c")
 	historyUserID    = uuid.MustParse("115a0000-0000-4000-8000-000000000001")
 	historyNodeID    = uuid.MustParse("115a0000-0000-4000-8000-0000000000d1")
 	// A firewall template's audit rows outlive any cluster: no cluster_id.
@@ -56,8 +57,8 @@ func TestGuestHistory(t *testing.T) {
 		defer cancel()
 		// Every fixture table cascades from clusters except audit_log, whose entries
 		// outlive a removed cluster (000122), so they go first, by cluster.
-		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE cluster_id = ANY($1)`, []uuid.UUID{historyClusterID, historyOtherID})
-		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{historyClusterID, historyOtherID})
+		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE cluster_id = ANY($1)`, []uuid.UUID{historyClusterID, historyOtherID, historyThirdID})
+		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{historyClusterID, historyOtherID, historyThirdID})
 		_, _ = pool.Exec(pctx, `DELETE FROM users WHERE id = $1`, historyUserID)
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE resource_type = 'firewall_template' AND resource_id = $1`, historyTemplateID)
 	}
@@ -86,7 +87,7 @@ func TestGuestHistory(t *testing.T) {
 	for _, c := range []struct {
 		id   uuid.UUID
 		name string
-	}{{historyClusterID, "cluster01"}, {historyOtherID, "cluster02"}} {
+	}{{historyClusterID, "cluster01"}, {historyOtherID, "cluster02"}, {historyThirdID, "cluster03"}} {
 		exec("cluster", `INSERT INTO clusters (id, name, api_url, token_id, token_secret_encrypted)
 			VALUES ($1, $2, 'https://invalid.local', 'tok', 'enc')`, c.id, c.name)
 	}
@@ -1001,6 +1002,102 @@ func TestGuestHistory(t *testing.T) {
 	// the node's reboot and the four other object shapes.
 	if ownRows != 12 {
 		t.Errorf("the other cluster's own History holds %d of its 12 rows", ownRows)
+	}
+
+	// ── A cluster's History: every row of every source filed under it — the
+	// third cluster's, so the other two's many rows must all stay out — its
+	// sync failures as runs, split where they paused, the last one's error
+	// their details.
+	thirdNode := uuid.New()
+	exec("third node", `INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'pve-01')`, thirdNode, historyThirdID)
+	if _, err := q.UpsertVM(ctx, gen.UpsertVMParams{ClusterID: historyThirdID, NodeID: thirdNode,
+		Vmid: 300, Name: "linux30", Type: "qemu", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	for i, m := range []float64{100, 95, 90, 40, 35} {
+		audit(historyThirdID, minsAgo(m), "nexara", "cluster", historyThirdID.String(), "sync_failed",
+			map[string]any{"error": fmt.Sprintf("refused %d", i)})
+	}
+	audit(historyThirdID, minsAgo(60), "nexara", "node", "pve-01", "apt_update", map[string]any{})
+	audit(historyThirdID, minsAgo(50), "proxmox", "vm", "300", "start", map[string]any{"upid": historyUPID(41, "qmstart", "300"), "status": "OK"})
+	// Tasks: the start's, which its audit row is; one with no audit row.
+	for _, tk := range []struct {
+		upid, typ string
+		at        float64
+	}{{historyUPID(41, "qmstart", "300"), "qmstart", 50}, {historyUPID(42, "cephcreatemgr", "pve-01"), "cephcreatemgr", 30}} {
+		exec("third task", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, started_at, source)
+			VALUES ($1, $2, $3, 'completed', 'pve-01', $4, $5, 'proxmox')`, historyThirdID, systemUserID, tk.upid, tk.typ, minsAgo(tk.at))
+	}
+	// VM 300's status change, and one of the container that held VMID 300
+	// before it: each is held to its own type.
+	for _, st := range []struct {
+		typ string
+		at  float64
+	}{{"qemu", 20}, {"lxc", 25}} {
+		exec("third status", `INSERT INTO guest_status_changes (cluster_id, vmid, guest_type, node, from_status, to_status, last_seen_at, observed_at, explained)
+			VALUES ($1, 300, $2, 'pve-01', 'running', 'stopped', $3, $3, false)`, historyThirdID, st.typ, minsAgo(st.at))
+	}
+	exec("third backup", `INSERT INTO guest_backups (cluster_id, upid, vmid, node, source, status, started_at, finished_at, log_start, log_end)
+		VALUES ($1, $2, 300, 'pve-01', 'proxmox', 'completed', $3, $3, 1, 2)`, historyThirdID, historyUPID(43, "vzdump", ""), minsAgo(10))
+	clusterHistory := func(f func(*gen.ListHistoryParams)) ([]string, int64) {
+		t.Helper()
+		p, err := handlers.ClusterHistory().ListParams(historyThirdID, handlers.HistorySelection{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 50, true, []string{"qemu", "lxc"}
+		f(&p)
+		rows, err := q.ListHistory(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, 0, len(rows))
+		var total int64
+		for _, r := range rows {
+			if uuid.UUID(r.ClusterID.Bytes) != historyThirdID {
+				t.Errorf("the cluster's History holds %s %s of cluster %s", r.Kind, r.Action, uuid.UUID(r.ClusterID.Bytes))
+			}
+			entry := r.Kind + " " + r.Action + " " + r.Category
+			if r.Kind == "run" {
+				var d map[string]any
+				_ = json.Unmarshal(r.Details, &d)
+				entry += fmt.Sprintf(" %d since %s, %v", r.RunCount, r.LastSeenAt.Time.Format("15:04:05"), d["error"])
+			}
+			got = append(got, entry)
+			total = r.Total
+		}
+		return got, total
+	}
+	runSince := func(m float64) string { return minsAgo(m).Format("15:04:05") }
+	for _, tt := range []struct {
+		name      string
+		f         func(*gen.ListHistoryParams)
+		want      []string
+		wantTotal int64
+	}{
+		{"everything", func(*gen.ListHistoryParams) {}, []string{"backup vzdump backup", "status status_change guests",
+			"status status_change guests", "task cephcreatemgr ceph", "run sync_failed sync 2 since " + runSince(40) + ", refused 4",
+			"audit start guests", "audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 8},
+		{"without view:vm", func(p *gen.ListHistoryParams) { p.StatusGuestTypes = []string{"lxc"} }, []string{
+			"task cephcreatemgr ceph", "run sync_failed sync 2 since " + runSince(40) + ", refused 4",
+			"audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 4},
+		{"without view:container", func(p *gen.ListHistoryParams) { p.StatusGuestTypes = []string{"qemu"} }, []string{
+			"backup vzdump backup", "status status_change guests", "task cephcreatemgr ceph",
+			"run sync_failed sync 2 since " + runSince(40) + ", refused 4", "audit start guests", "audit apt_update nodes",
+			"run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 7},
+		{"without view:task", func(p *gen.ListHistoryParams) { p.IncludeTasks = false }, []string{
+			"status status_change guests", "status status_change guests", "run sync_failed sync 2 since " + runSince(40) + ", refused 4",
+			"audit start guests", "audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 6},
+		// Capped, each source is read newest first to the cap — not the apt
+		// update behind the start — and the total stops one past it.
+		{"capped", func(p *gen.ListHistoryParams) { p.RowCap = 1 }, []string{
+			"backup vzdump backup", "status status_change guests", "task cephcreatemgr ceph",
+			"run sync_failed sync 2 since " + runSince(40) + ", refused 4", "audit start guests",
+			"run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 2},
+	} {
+		if got, total := clusterHistory(tt.f); !slices.Equal(got, tt.want) || total != tt.wantTotal {
+			t.Errorf("%s: the cluster's History =\n\t%v (total %d)\nwant\n\t%v (total %d)", tt.name, got, total, tt.want, tt.wantTotal)
+		}
 	}
 
 	// ── A global kind's objects are read in every cluster, and in none.

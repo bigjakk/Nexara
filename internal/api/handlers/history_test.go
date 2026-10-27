@@ -161,6 +161,14 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"an observed type with no view", func(k *HistoryKind) {
 			k.ObjectTypes, k.ObservedTypes = []string{"pool", "probe"}, []HistoryObservedType{{Type: "probe"}}
 		}, "observed changes"},
+		{"a whole-cluster kind naming objects", func(k *HistoryKind) { k.WholeCluster = true }, "whole cluster"},
+		{"runs outside a whole-cluster read", func(k *HistoryKind) {
+			k.Collapse = []HistoryCollapse{{ResourceType: "cluster", Action: "sync_failed", Gap: time.Minute}}
+		}, "only a whole-cluster read"},
+		{"a run with no gap", func(k *HistoryKind) {
+			k.WholeCluster, k.ObjectTypes = true, nil
+			k.Collapse = []HistoryCollapse{{ResourceType: "cluster", Action: "sync_failed"}}
+		}, "needs a resource type, an action and a gap"},
 	} {
 		k := valid()
 		tt.mutate(&k)
@@ -331,7 +339,9 @@ func TestHistoryListDropsGuestsTheCallerCannotOpen(t *testing.T) {
 		// History failing over it.
 		saw := 0
 		for _, arg := range call.args {
-			if vmids, ok := arg.([]int32); ok {
+			// The guests are the one []int32 that is not empty: the runs' gaps
+			// are one too, and this kind collapses nothing.
+			if vmids, ok := arg.([]int32); ok && len(vmids) > 0 {
 				saw++
 				if !slices.Equal(vmids, []int32{100}) {
 					t.Errorf("ListHistory was asked for guests %v, want only the VM [100]", vmids)
@@ -418,5 +428,50 @@ func TestHistoryListRefusesAGuestBesideThePath(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusInternalServerError || len(dbtx.calls) != 0 {
 		t.Errorf("status %d after %d queries, want 500 before any", resp.StatusCode, len(dbtx.calls))
+	}
+}
+
+// A whole-cluster kind's unfiltered read by a caller who sees every guest is
+// capped; a filtered one, or one whose guest rows the page drops after the
+// cap, reads everything, so what it finds is all of it.
+func TestHistoryListCapsOnlyAnUnfilteredReadOfEveryGuest(t *testing.T) {
+	t.Parallel()
+	cluster := uuid.New()
+	every := func() permissionEngine { return &recordingEngine{actions: map[string]bool{"view": true}} }
+	for _, tt := range []struct {
+		name, query string
+		engine      permissionEngine
+		capped      bool
+	}{
+		{"unfiltered", "", every(), true},
+		{"a category", "?category=sync", every(), false},
+		{"categories left out", "?exclude_category=other", every(), false},
+		{"a source", "?source=nexara", every(), false},
+		{"a caller without view:container", "", clusterGrantEngine{action: "view", resource: "vm", cluster: cluster}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dbtx := &auditRowsDBTX{}
+			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+			app.Use(func(c fiber.Ctx) error {
+				c.Locals("user_id", uuid.New())
+				c.Locals("rbac_engine", tt.engine)
+				return c.Next()
+			})
+			app.Get("/clusters/:cluster_id/history", withRequestParams(t,
+				historyTestProps("cluster_id", apischema.StdOption("cluster-id")), []string{"cluster_id"},
+				NewHistoryHandler(db.New(dbtx)).Route(ClusterHistory()).List))
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/history"+tt.query, nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if len(dbtx.calls) != 1 {
+				t.Fatalf("status %d after %d queries, want ListHistory", resp.StatusCode, len(dbtx.calls))
+			}
+			if capped := slices.Contains(dbtx.calls[0].args, any(int32(clusterHistoryRowCap))); capped != tt.capped {
+				t.Errorf("capped = %v, want %v", capped, tt.capped)
+			}
+		})
 	}
 }

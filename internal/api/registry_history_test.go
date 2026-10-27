@@ -16,13 +16,15 @@ import (
 	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
-const historyRouteCount = 2
+const historyRouteCount = 3
 
 // historyRoutesOutsideTheClusterCheckShape are the History routes gated on
 // AllOf view:audit and the kind's own view permission (historyRoute.Resource).
 var historyRoutesOutsideTheClusterCheckShape = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/vm-folders/:folder_id/history": "AllOf: view:audit for the rows, " +
 		"view:vm_folder for the folder that selects them",
+	"GET /api/v1/clusters/:cluster_id/history": "AllOf: view:audit for the rows, view:cluster for the cluster " +
+		"they are all filed under",
 }
 
 // The guest is the one kind gated on view:audit alone, and the one whose
