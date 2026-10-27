@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -48,6 +49,27 @@ func migrationByName(t *testing.T, tail string) (before, version uint, up string
 	return before, version, up
 }
 
+// migrationDown is the down SQL of the migration migrationByName finds by the
+// same tail.
+func migrationDown(t *testing.T, tail string) string {
+	t.Helper()
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatalf("read migrations: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), tail+".down.sql") {
+			raw, err := fs.ReadFile(migrations.FS, e.Name())
+			if err != nil {
+				t.Fatalf("read %s: %v", e.Name(), err)
+			}
+			return string(raw)
+		}
+	}
+	t.Fatalf("no migration named *%s.down.sql", tail)
+	return ""
+}
+
 // auditIdentityID is a fixed id for the back-fill's fixture, so a run that aborts
 // before its purge leaves rows the next run's up-front purge can find.
 func auditIdentityID(n int) uuid.UUID {
@@ -57,13 +79,15 @@ func auditIdentityID(n int) uuid.UUID {
 // Legacy audit rows of the shapes the dev install holds are seeded at the schema
 // just before the back-fill. Each ends where today's identity would put it, with
 // the originals in details.rekeyed_from, or — when the row says too little —
-// exactly where it was. A second run of the same SQL changes nothing.
+// exactly where it was. A second run of the same SQL changes nothing, and the
+// down puts back the rows that carry this migration's tag and only those.
 func TestMigrationAuditIdentityBackfill_RefilesWhatItCanResolve(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
 	ctx, pool, m := env.Ctx, env.Pool, env.Migrate
 
 	before, version, upSQL := migrationByName(t, "audit_identity_backfill")
+	downSQL := migrationDown(t, "audit_identity_backfill")
 	var (
 		user         = auditIdentityID(1)
 		clusterA     = auditIdentityID(2)
@@ -268,29 +292,40 @@ func TestMigrationAuditIdentityBackfill_RefilesWhatItCanResolve(t *testing.T) {
 	if err := m.Migrate(version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		t.Fatalf("migrate over the back-fill: %v", err)
 	}
-	for i, r := range rows {
-		var typ, id, action string
-		var details []byte
+	readBack := func(i int) (typ, id, action string, details map[string]any) {
+		t.Helper()
+		var raw []byte
 		if err := pool.QueryRow(ctx, `SELECT resource_type, resource_id, action, details FROM audit_log WHERE id = $1`,
-			auditIdentityID(100+i)).Scan(&typ, &id, &action, &details); err != nil {
-			t.Fatalf("%s: read back: %v", r.name, err)
+			auditIdentityID(100+i)).Scan(&typ, &id, &action, &raw); err != nil {
+			t.Fatalf("%s: read back: %v", rows[i].name, err)
 		}
-		var got, want, seededDetails map[string]any
-		if err := json.Unmarshal(details, &got); err != nil {
-			t.Fatalf("%s: details: %v", r.name, err)
+		if err := json.Unmarshal(raw, &details); err != nil {
+			t.Fatalf("%s: details: %v", rows[i].name, err)
 		}
+		return typ, id, action, details
+	}
+	// afterUp is each row's expected details once the up has run; tagged is whether
+	// the up re-filed it under its own tag (a row that already carried a trace from
+	// anyone else keeps that one, and is not the down's to put back).
+	afterUp, tagged := make([]map[string]any, len(rows)), make([]bool, len(rows))
+	for i, r := range rows {
+		typ, id, action, got := readBack(i)
+		var want, seededDetails map[string]any
 		if err := json.Unmarshal([]byte(r.wantDetails), &want); err != nil {
 			t.Fatalf("%s: want details: %v", r.name, err)
 		}
 		_ = json.Unmarshal([]byte(r.details), &seededDetails)
-		// A row that moved records where it was, unless it already said so; a row
-		// that did not move gains nothing.
-		if _, has := seededDetails["rekeyed_from"]; !has && (r.wantTyp != r.typ || r.wantID != r.id || r.wantAct != r.action) {
-			want["rekeyed_from"] = map[string]any{"resource_type": r.typ, "resource_id": r.id, "action": r.action}
+		// A row that moved records where it was, and by whom, unless it already said
+		// so; a row that did not move gains nothing.
+		_, hasTrace := seededDetails["rekeyed_from"]
+		moved := r.wantTyp != r.typ || r.wantID != r.id || r.wantAct != r.action
+		if tagged[i] = moved && !hasTrace; tagged[i] {
+			want["rekeyed_from"] = map[string]any{"resource_type": r.typ, "resource_id": r.id, "action": r.action, "by": "audit_identity_backfill"}
 		}
+		afterUp[i] = want
 		if typ != r.wantTyp || id != r.wantID || action != r.wantAct || !reflect.DeepEqual(got, want) {
-			t.Errorf("%s:\n  got  (%s, %q, %s) %s\n  want (%s, %q, %s) %s",
-				r.name, typ, id, action, details, r.wantTyp, r.wantID, r.wantAct, r.wantDetails)
+			t.Errorf("%s:\n  got  (%s, %q, %s) %v\n  want (%s, %q, %s) %s",
+				r.name, typ, id, action, got, r.wantTyp, r.wantID, r.wantAct, r.wantDetails)
 		}
 	}
 	afterFirst := fingerprint()
@@ -304,5 +339,24 @@ func TestMigrationAuditIdentityBackfill_RefilesWhatItCanResolve(t *testing.T) {
 	}
 	if again := fingerprint(); again != afterFirst {
 		t.Error("a second run of the back-fill changed rows the first had already re-filed")
+	}
+
+	// The down puts back the rows that carry the tag, taking their trace out and
+	// leaving the keys the up added; every other row stays as the up left it.
+	if _, err := pool.Exec(ctx, downSQL); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	for i, r := range rows {
+		typ, id, action, got := readBack(i)
+		wantTyp, wantID, wantAct, want := r.wantTyp, r.wantID, r.wantAct, afterUp[i]
+		if tagged[i] {
+			wantTyp, wantID, wantAct = r.typ, r.id, r.action
+			want = maps.Clone(afterUp[i])
+			delete(want, "rekeyed_from")
+		}
+		if typ != wantTyp || id != wantID || action != wantAct || !reflect.DeepEqual(got, want) {
+			t.Errorf("after the down, %s:\n  got  (%s, %q, %s) %v\n  want (%s, %q, %s) %v",
+				r.name, typ, id, action, got, wantTyp, wantID, wantAct, want)
+		}
 	}
 }

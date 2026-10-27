@@ -1992,9 +1992,11 @@ v1.17.0 upgrade did re-file the entries it could resolve under the identity
 above: a new `resource_type` and `resource_id` (and, for a volume deleted or
 backups pruned outside Nexara, the action `delete_content` or `prune_backups`).
 An entry so re-filed keeps the type, id and action it was written with in
-`details.rekeyed_from`; where the object's name left `resource_id` it also gains
-the `details` keys a new entry carries (`storage`, `datastore`, `resource_name`,
-`job_id`). These were re-filed:
+`details.rekeyed_from`, whose `by` names the migration that did it
+(`audit_identity_backfill`); rolling the upgrade back puts those entries back.
+Where the object's name left `resource_id` the entry also gains the `details`
+keys a new entry carries (`storage`, `datastore`, `resource_name`, `job_id`).
+These were re-filed:
 
 - a storage entry keyed by an inventory row id that still existed, or whose
   `details.storage` named the storage;
