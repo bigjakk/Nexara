@@ -393,8 +393,8 @@ type MarkClusterObjectBaselineParams struct {
 	ResourceType string    `json:"resource_type"`
 }
 
-// Changes to the cluster page's objects that reach no audit row (migrations/000124,
-// 000125): a replication job edited in the Proxmox GUI, an OSD that went down, a
+// Changes to the cluster page's objects that reach no audit row (migrations/000119,
+// 000120): a replication job edited in the Proxmox GUI, an OSD that went down, a
 // pool whose size was changed there. Keyed as audit_log is — cluster_id,
 // resource_type, resource_id — so a History reads both with one selector.
 // MarkClusterObjectBaseline says a cluster's objects of one kind have been read

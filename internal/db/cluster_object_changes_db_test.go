@@ -17,13 +17,13 @@ import (
 // run's up-front purge deletes.
 var (
 	objChangesCluster  = uuid.MustParse("125a0000-0000-4000-8000-00000000000a") // replication baselined
-	objChangesOther    = uuid.MustParse("125a0000-0000-4000-8000-00000000000b") // an upgrade: rows from before 000125
+	objChangesOther    = uuid.MustParse("125a0000-0000-4000-8000-00000000000b") // an upgrade: rows from before 000120
 	objChangesDoomed   = uuid.MustParse("125a0000-0000-4000-8000-00000000000c") // deleted with its jobs
 	objChangesUnmarked = uuid.MustParse("125a0000-0000-4000-8000-00000000000d") // never baselined
 )
 
 // TestClusterObjectChanges runs the SQL behind the History of the cluster page's
-// objects (migrations 000124 and 000125, queries/cluster_object_changes.sql): what
+// objects (migrations 000119 and 000120, queries/cluster_object_changes.sql): what
 // the replication triggers record and must not, when a change counts as explained,
 // and what the prune and the read keep. Not parallel: it shares a schema with the
 // package's other DB tests. Skipped unless NEXARA_TEST_DB_URL names a throwaway DB.
@@ -174,7 +174,7 @@ func TestClusterObjectChanges(t *testing.T) {
 		t.Fatalf("baseline: %v", err)
 	}
 	upsert(objChangesOther, job{id: "200-0", target: "pve-02", schedule: "*/15", rate: "10", comment: "x"})
-	expectN("the first reading of a job from before 000125", objChangesOther, 0)
+	expectN("the first reading of a job from before 000120", objChangesOther, 0)
 
 	exec("age a job", `UPDATE replication_jobs SET last_seen_at = now() - interval '20 minutes'
 		WHERE cluster_id = $1 AND job_id = '101-0'`, objChangesCluster)

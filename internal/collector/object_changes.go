@@ -15,12 +15,12 @@ import (
 
 // Changes to the cluster page's objects that reach no audit row — a replication
 // job edited in the Proxmox GUI, an OSD that went down, a pool resized there —
-// are recorded in cluster_object_changes (migrations/000124), keyed as audit_log
+// are recorded in cluster_object_changes (migrations/000119), keyed as audit_log
 // is, and classified like a guest's status changes (status_change.go): a change
 // something on record explains is not shown.
 //
 // Replication jobs are recorded by triggers on replication_jobs
-// (migrations/000125), whatever wrote the row. The Ceph objects are diffed here,
+// (migrations/000120), whatever wrote the row. The Ceph objects are diffed here,
 // pass against pass.
 
 // objectChange is one difference between two readings of a cluster's objects.

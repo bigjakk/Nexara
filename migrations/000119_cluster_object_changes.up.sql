@@ -15,7 +15,7 @@
 -- has to outlive it) — so a History reads both with one selector.
 --
 -- Three writers file into it, told apart by observed_by: 'trigger' (the trigger
--- on replication_jobs, 000125), 'ceph' (the collector's Ceph pass, which diffs
+-- on replication_jobs, 000120), 'ceph' (the collector's Ceph pass, which diffs
 -- one reading against the last) and 'observer' (the diff of what Proxmox reports
 -- against what Nexara last wrote, for the configuration of objects edited
 -- directly in Proxmox). observed_by says how a change was seen; it is not

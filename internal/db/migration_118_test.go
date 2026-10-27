@@ -21,9 +21,9 @@ import (
 // Fixed ids so a run that aborts before its purge leaves rows the next run's
 // up-front purge can find.
 var (
-	m123Cluster = uuid.MustParse("12300000-0000-4000-8000-000000000001")
-	m123Node    = uuid.MustParse("12300000-0000-4000-8000-000000000002")
-	m123Other   = uuid.MustParse("12300000-0000-4000-8000-000000000003")
+	m118Cluster = uuid.MustParse("12300000-0000-4000-8000-000000000001")
+	m118Node    = uuid.MustParse("12300000-0000-4000-8000-000000000002")
+	m118Other   = uuid.MustParse("12300000-0000-4000-8000-000000000003")
 )
 
 func firstNotice(notices []string) string {
@@ -66,13 +66,15 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 	purge := func() {
 		pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		// audit_log, nodes and vms all cascade from the cluster.
-		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{m123Cluster, m123Other})
+		// The audit rows go first: a cluster's delete may only detach them (audit_log.cluster_id is SET NULL);
+		// nodes and vms cascade from the cluster.
+		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE cluster_id = ANY($1)`, []uuid.UUID{m118Cluster, m118Other})
+		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{m118Cluster, m118Other})
 	}
 	purge()
 	defer purge()
 
-	for _, id := range []uuid.UUID{m123Cluster, m123Other} {
+	for _, id := range []uuid.UUID{m118Cluster, m118Other} {
 		if _, err := pool.Exec(ctx,
 			`INSERT INTO clusters (id, name, api_url, token_id, token_secret_encrypted)
 			 VALUES ($1, $2, 'https://192.0.2.10:8006', 'user@pam!test', 'x')`, id, "cluster-"+id.String()[:12]); err != nil {
@@ -80,12 +82,12 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		}
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'pve-01')`,
-		m123Node, m123Cluster); err != nil {
+		m118Node, m118Cluster); err != nil {
 		t.Fatalf("seed node: %v", err)
 	}
 	// 109 is a container the stale HA row names by its bare VMID.
 	if _, err := pool.Exec(ctx, `INSERT INTO vms (cluster_id, node_id, vmid, type) VALUES ($1, $2, 109, 'lxc')`,
-		m123Cluster, m123Node); err != nil {
+		m118Cluster, m118Node); err != nil {
 		t.Fatalf("seed vm: %v", err)
 	}
 
@@ -136,7 +138,7 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 			old: shape{"sdn", "vnet05/192.0.2.0/24", "sdn_subnet_created"}, want: shape{"sdn_subnet", "vnet05/192.0.2.0/24", "sdn_subnet_created"}},
 		{name: "that other subnet's edit", offset: time.Minute,
 			old: shape{"sdn", "vnet05/zone05-198.51.100.0-24", "sdn_subnet_updated"}, want: shape{"sdn_subnet", "vnet05/zone05-198.51.100.0-24", "sdn_subnet_updated"}},
-		{name: "another cluster's subnet create has neither this cluster's edit nor its VNet", cluster: m123Other, offset: 2 * time.Minute, details: `{"vnet":"vnet06","subnet":"192.0.2.0/24"}`,
+		{name: "another cluster's subnet create has neither this cluster's edit nor its VNet", cluster: m118Other, offset: 2 * time.Minute, details: `{"vnet":"vnet06","subnet":"192.0.2.0/24"}`,
 			old: shape{"sdn", "vnet06/192.0.2.0/24", "sdn_subnet_created"}, want: shape{"sdn_subnet", "vnet06/192.0.2.0/24", "sdn_subnet_created"}},
 		{name: "this cluster's VNet of that name", details: `{"vnet":"vnet06","zone":"zone06"}`,
 			old: shape{"sdn", "vnet06", "sdn_vnet_created"}, want: shape{"sdn_vnet", "vnet06", "sdn_vnet_created"}},
@@ -285,7 +287,7 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 			details: taskDetails("srvreload", "networking", "pve-05", "user@pam", "user@pam!token01"),
 			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-05", "network_applied"}},
 		// An apply of Nexara's on ANOTHER cluster is nobody's twin here.
-		{name: "another cluster's apply", cluster: m123Other, offset: 5 * time.Hour, old: shape{"sdn", "cluster", "sdn_applied"}},
+		{name: "another cluster's apply", cluster: m118Other, offset: 5 * time.Hour, old: shape{"sdn", "cluster", "sdn_applied"}},
 		{name: "a copy whose only twin is on another cluster moves", source: px, offset: 5*time.Hour + 10*time.Second,
 			details: taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!token01"),
 			old:     shape{"network", "pve-01", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
@@ -318,7 +320,7 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 			source = nx
 		}
 		if cluster == uuid.Nil {
-			cluster = m123Cluster
+			cluster = m118Cluster
 		}
 		if details == "" {
 			details = `{}`

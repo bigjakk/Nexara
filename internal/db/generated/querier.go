@@ -2141,8 +2141,8 @@ type Querier interface {
 	ListVirtioWinReleases(ctx context.Context) ([]VirtioWinRelease, error)
 	ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVCInScanParams) ([]ListVulnsBySSVCInScanRow, error)
 	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
-	// Changes to the cluster page's objects that reach no audit row (migrations/000124,
-	// 000125): a replication job edited in the Proxmox GUI, an OSD that went down, a
+	// Changes to the cluster page's objects that reach no audit row (migrations/000119,
+	// 000120): a replication job edited in the Proxmox GUI, an OSD that went down, a
 	// pool whose size was changed there. Keyed as audit_log is — cluster_id,
 	// resource_type, resource_id — so a History reads both with one selector.
 	// MarkClusterObjectBaseline says a cluster's objects of one kind have been read
@@ -2700,7 +2700,7 @@ type Querier interface {
 	// so failing jobs can surface in the health indicator.
 	//
 	// schedule, rate, disable and comment are the job's configuration as listed;
-	// the triggers on this table (migrations/000125) record a change to one of them,
+	// the triggers on this table (migrations/000120) record a change to one of them,
 	// a job appearing, and a job going. Run state — fail_count, error, last_seen_at —
 	// changes on a healthy job every pass and is not watched.
 	UpsertReplicationJob(ctx context.Context, arg UpsertReplicationJobParams) error

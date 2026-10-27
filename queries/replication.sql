@@ -3,7 +3,7 @@
 
 --
 -- schedule, rate, disable and comment are the job's configuration as listed;
--- the triggers on this table (migrations/000125) record a change to one of them,
+-- the triggers on this table (migrations/000120) record a change to one of them,
 -- a job appearing, and a job going. Run state — fail_count, error, last_seen_at —
 -- changes on a healthy job every pass and is not watched.
 -- name: UpsertReplicationJob :exec
