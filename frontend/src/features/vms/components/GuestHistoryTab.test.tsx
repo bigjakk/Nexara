@@ -3,7 +3,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
-import type { GuestHistoryEntry } from "../api/guest-history-queries";
+import { makeHistoryEntry } from "@/test/history.fixtures";
 import { GuestHistoryTab } from "./GuestHistoryTab";
 
 vi.mock("@/lib/api-client", async () =>
@@ -12,12 +12,13 @@ vi.mock("@/lib/api-client", async () =>
 
 const mockedPage = vi.mocked(apiClient.page);
 const mockedList = vi.mocked(apiClient.list);
+const mockedGet = vi.mocked(apiClient.get);
 
 const MIGRATE_UPID =
   "UPID:pve-01:00001A2B:00003344:5F2E1A00:qmigrate:100:root@pam:";
 
-const items: GuestHistoryEntry[] = [
-  {
+const items = [
+  makeHistoryEntry({
     id: "status:1",
     kind: "status",
     occurred_at: "2026-01-02T00:00:00Z",
@@ -25,49 +26,60 @@ const items: GuestHistoryEntry[] = [
     source: "detected",
     action: "status_change",
     resource_type: "status",
-    vmid: 100,
     user_id: "",
     user_email: "",
     user_display_name: "",
-    details: "{}",
-    upid: "",
-    node: "pve-01",
-    description: "",
-    task_type: "",
-    outcome: "",
-    exit_status: "",
-    finished_at: null,
     from_status: "running",
     to_status: "stopped",
-  },
-  {
+  }),
+  makeHistoryEntry({
     id: "audit:2",
-    kind: "audit",
-    occurred_at: "2026-01-01T00:00:00Z",
     category: "migration",
     source: "proxmox",
     action: "migrate",
-    resource_type: "vm",
-    vmid: 100,
+    resource_id: "100",
     user_id: "00000000-0000-0000-0000-000000000001",
     user_email: "",
     user_display_name: "",
     details: JSON.stringify({ upid: MIGRATE_UPID, proxmox_user: "root@pam" }),
     upid: MIGRATE_UPID,
-    node: "pve-01",
-    description: "",
     task_type: "qmigrate",
     outcome: "failed",
     exit_status: "migration aborted",
     finished_at: "2026-01-01T00:01:00Z",
-  },
+  }),
 ];
 
 describe("GuestHistoryTab", () => {
   beforeEach(() => {
     mockedPage.mockReset();
     mockedList.mockReset();
+    mockedGet.mockReset();
     mockedPage.mockResolvedValue({ items, total: 2 });
+  });
+
+  // The guest's own rows above the shared timeline's first page.
+  it("shows a running VM's block jobs above the history", async () => {
+    mockedGet.mockResolvedValue({
+      running: true,
+      jobs: [
+        {
+          type: "mirror",
+          device: "mirror-scsi0",
+          completed: 1,
+          total: 4,
+          speed_limit: 0,
+        },
+      ],
+      unparsed: [],
+    });
+    renderWithProviders(
+      <GuestHistoryTab clusterId="c1" vmId="v1" vmid={100} showBlockJobs />,
+    );
+    const job = await screen.findByTestId("block-job");
+    expect(job.closest("tbody")).toBe(
+      screen.getByText("Stopped, no task").closest("tbody"),
+    );
   });
 
   it("lists the guest's history, filters it on the server, and opens a task's log", async () => {
@@ -118,7 +130,7 @@ describe("GuestHistoryTab", () => {
   it("shows a backup job entry's own part of the job's log", async () => {
     const user = userEvent.setup({ delay: null });
     const jobUPID = "UPID:pve-01:00001A2B:00003344:5F2E1A00:vzdump::root@pam:";
-    const backup: GuestHistoryEntry = {
+    const backup = makeHistoryEntry({
       id: `backup:${jobUPID}`,
       kind: "backup",
       occurred_at: "2026-01-03T00:00:00Z",
@@ -126,13 +138,10 @@ describe("GuestHistoryTab", () => {
       source: "proxmox",
       action: "vzdump",
       resource_type: "backup",
-      vmid: 100,
       user_id: "00000000-0000-0000-0000-000000000001",
       user_email: "",
       user_display_name: "",
-      details: "{}",
       upid: jobUPID,
-      node: "pve-01",
       description: "backup",
       task_type: "vzdump",
       outcome: "ok",
@@ -140,7 +149,7 @@ describe("GuestHistoryTab", () => {
       finished_at: "2026-01-03T00:00:12Z",
       log_start: 41,
       log_end: 42,
-    };
+    });
     mockedPage.mockResolvedValue({ items: [backup], total: 1 });
     mockedList.mockResolvedValue([
       { n: 41, t: "INFO: Starting Backup of VM 100 (qemu)" },

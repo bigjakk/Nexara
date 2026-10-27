@@ -90,13 +90,13 @@ export function useEventInvalidation(clusterIds: string[]): void {
           // settle itself arrives as schedule_change, below. Scoped to the
           // event's cluster; an event without one (a hand-made task update)
           // names no schedule list.
-          // A guest's History tab (useGuestHistory) shows the task and how it
-          // ended. Scoped to the event's cluster: History is per guest, and an
-          // event names its cluster but not always its guest.
+          // Every History of the cluster (useHistory) shows the task and how
+          // it ended. Scoped to the event's cluster: a History is per object,
+          // and an event names its cluster but not always its object.
           if (cid) {
             scheduleInvalidation(
               ["clusters", cid, "schedules"],
-              ["guest-history", cid],
+              ["history", cid],
             );
           }
           break;
@@ -104,9 +104,9 @@ export function useEventInvalidation(clusterIds: string[]): void {
         case "audit_entry":
           scheduleInvalidation(["audit-log"], ["recent-activity"]);
           // A change with no task (a config edit, an HA resource) reaches a
-          // guest's History only as its audit entry.
+          // History only as its audit entry.
           if (cid) {
-            scheduleInvalidation(["guest-history", cid]);
+            scheduleInvalidation(["history", cid]);
           }
           break;
 

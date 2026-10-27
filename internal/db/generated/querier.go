@@ -63,19 +63,11 @@ type Querier interface {
 	// The claim clears last_error and last_upid, which belong to the previous run:
 	// without that, a run being started would show beside the last run's error.
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
-	// A guest's History tab: everything that happened to one guest, newest first.
-	// Served by GET /api/v1/clusters/:cluster_id/guests/:vmid/history
-	// (internal/api/handlers/guest_history.go), from four stores:
-	//
-	//   audit_log            every action Nexara recorded about the guest — its own
-	//                        tasks, Proxmox's (ingested by the collector), DRS, the
-	//                        scheduler, config changes with no task. Kept forever.
-	//   task_history (+ the  how each task ended. task_history_archive holds the
-	//   _archive)            guest tasks task_history has pruned (000115).
-	//   guest_status_changes run-state changes no task explains (000115).
-	//   guest_backups        the guest's part of each backup JOB — a vzdump of
-	//                        several guests, whose task names none — read from the
-	//                        job's log by the collector (000116).
+	// The guest kind's own SQL: what only a guest's History needs beyond the
+	// shared timeline (queries/history.sql, ListHistory) — where its timeline
+	// starts (ListGuestLifecycleEvents), and the collector's two records of what
+	// no task row says: the status changes no task explains, and each guest's
+	// part of a backup job, read from the job's log.
 	//
 	// A guest is (cluster_id, vmid), never a vms.id: the collector re-issues those
 	// (000068/000084), and a VMID is only unique within its cluster — the other
@@ -1389,69 +1381,6 @@ type Querier interface {
 	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
 	// No row-level tiebreak, for the reasons noted on ListSettingsByScope above.
 	ListGlobalSettings(ctx context.Context) ([]Setting, error)
-	// ListGuestHistory is the timeline: one page of a guest's entries, newest
-	// first, with the total under the same filters.
-	//
-	// Entries, one per thing that happened:
-	//
-	//   audit    an audit row naming the guest: by vmid (000084); a clone INTO it,
-	//            which names its source (see ListGuestLifecycleEvents); or an HA
-	//            resource row, which names the guest only by its HA sid ("vm:100",
-	//            "ct:100") and so carries no vmid. A Proxmox-ingested row is
-	//            dropped when a Nexara row carries the same UPID: the collector's
-	//            dedupe can lose a race with a handler's own insert, and the two
-	//            rows are one task, the Nexara one the one that says who asked.
-	//   task     a guest task with NO audit row, from task_history or its archive
-	//            — only when include_tasks, which the handler sets from view:task.
-	//            Every task path writes an audit row too, so this is the rare row
-	//            whose audit insert failed; sharing a UPID with an audit row makes
-	//            a task the same entry, never a second one.
-	//   status   a status change no task explains (ClassifyGuestStatusChanges),
-	//            for the guest types in status_guest_types — the run state is
-	//            inventory data, which the handler reads under view:vm for a VM and
-	//            view:container for a container.
-	//   backup   the guest's part of a backup JOB (guest_backups), with the
-	//            guest's own outcome and times rather than the job's — only when
-	//            include_tasks, since all of it is read from the job's task log.
-	//            A job's own audit row names no guest, so it is never a second
-	//            entry; nor is its task row, whose vmid is NULL.
-	//
-	// Guest tasks only: is_guest_upid, never vmid alone, because InsertTaskHistory
-	// stamps a vmid on any numeric worker id — cephdestroyosd's is an OSD number,
-	// so "destroy OSD 113" would otherwise read as something done to VM 113.
-	// audit_log.vmid is already gated the same way at insert.
-	//
-	// guest_audit is three branches rather than one OR, so each reads its own
-	// index — the vmid arm (cluster_id, vmid), the clone arm the action index, the
-	// HA arm the resource_type index — instead of the planner settling on the
-	// whole cluster's rows. The second and third exclude the first's rows, so no
-	// row is read twice. The Proxmox-duplicate probe is scoped to the same guest
-	// by parameter, not by correlation: correlated on the UPID alone, the planner
-	// hashes every Nexara row the install has ever written, on every request.
-	//
-	// after/after_inclusive is the cutoff guestHistoryCutoff derived from
-	// ListGuestLifecycleEvents: inclusive from a birth, so the create or clone is
-	// the first entry; exclusive after a destroy, so the previous guest's last act
-	// is not this one's first.
-	//
-	// category is derived HERE, once, so it can be filtered on before the page is
-	// cut; the handler's guestHistoryCategories lists the same values (pinned by
-	// TestGuestHistoryCategoryVocabulary). Nexara's own action names are matched
-	// before the Proxmox worker type, because they are the more specific of the
-	// two: DRS asks an HA-managed guest to migrate through an hamigrate task, and
-	// that is a migration. A start or stop of an HA-managed guest runs as hastart
-	// or hastop, from Nexara or the Proxmox GUI alike, and is a power action; 'ha'
-	// is what is left — the guest's HA resource itself. Unmatched is 'other' —
-	// still listed, under its own action name.
-	//
-	// The page is cut on narrow rows, and only its rows are joined to their audit
-	// details, task outcome and user: a guest with ten thousand entries carries
-	// ten thousand jsonb blobs through the sort otherwise. A backup entry's
-	// outcome, end and log lines are the guest's own, from guest_backups; the
-	// job's own task row, joined like any other, gives the rest. total is
-	// count(*) OVER the filtered set, computed before LIMIT — the Items and the
-	// Total come from one query and so cannot be counted under different filters.
-	ListGuestHistory(ctx context.Context, arg ListGuestHistoryParams) ([]ListGuestHistoryRow, error)
 	// ListGuestLifecycleEvents returns the audit rows that begin or end a guest's
 	// occupancy of a VMID, newest first, for the handler to pick where the
 	// timeline starts (guestHistoryCutoff). Proxmox hands out the lowest free
@@ -1498,6 +1427,105 @@ type Querier interface {
 	ListGuestToolsPolicies(ctx context.Context, clusterID uuid.UUID) ([]GuestToolsPolicy, error)
 	// Guests whose HA resource state is "error" (needs manual intervention).
 	ListHAErrorGuests(ctx context.Context) ([]ListHAErrorGuestsRow, error)
+	// The History timeline every kind of object shares: one page of an object's
+	// entries, newest first, with the total under the same filters. Served by the
+	// History routes (internal/api/registry_history.go), each a kind of object
+	// whose handlers.HistoryKind says which rows are its own and how they are
+	// categorized, from these stores:
+	//
+	//   audit_log            every action Nexara recorded — its own tasks,
+	//                        Proxmox's (ingested by the collector), DRS, the
+	//                        scheduler, config changes with no task. Kept forever.
+	//   task_history (+ the  how each task ended. task_history_archive holds the
+	//   _archive)            guest tasks task_history has pruned (000115).
+	//   guest_status_changes run-state changes no task explains (000115).
+	//   guest_backups        a guest's part of each backup JOB — a vzdump of
+	//                        several guests, whose task names none — read from the
+	//                        job's log by the collector (000116).
+	//
+	// A kind names its rows through two families of selector, either or both:
+	//
+	//   guests   (vmids, each with its own cutoff): the guest-shaped sources. A
+	//            guest is (cluster_id, vmid), never a vms.id: the collector
+	//            re-issues those (000068/000084), and a VMID is only unique within
+	//            its cluster — the other cluster's VM 100 is a different guest.
+	//   objects  (object_types/keys/values): the generic selector — every audit
+	//            row of the cluster of one of the resource types whose resource_id,
+	//            or, where a key is named, that details key, is the value.
+	//
+	// The cluster is a REQUIRED argument on every branch: the route's
+	// cluster-scoped gate authorized exactly that cluster.
+	// ListHistory is the timeline.
+	//
+	// Entries, one per thing that happened:
+	//
+	//   audit    an audit row the selectors name. For a guest: by vmid (000084); a
+	//            clone INTO it, which names its source (see
+	//            ListGuestLifecycleEvents); or an HA resource row, which names the
+	//            guest only by its HA sid ("vm:100", "ct:100") and so carries no
+	//            vmid. For an object: by its resource identity. A Proxmox-ingested
+	//            row is dropped when a Nexara row of the selection's guests or
+	//            resource types carries the same UPID: the collector's dedupe can
+	//            lose a race with a handler's own insert, and the two rows are one
+	//            task, the Nexara one the one that says who asked.
+	//   task     a guest task with NO audit row, from task_history or its archive
+	//            — only when include_tasks, which the handler sets from view:task.
+	//            Every task path writes an audit row too, so this is the rare row
+	//            whose audit insert failed; sharing a UPID with an audit row makes
+	//            a task the same entry, never a second one.
+	//   status   a status change no task explains (ClassifyGuestStatusChanges),
+	//            for the guest types in status_guest_types — the run state is
+	//            inventory data, which the handler reads under view:vm for a VM and
+	//            view:container for a container.
+	//   backup   a guest's part of a backup JOB (guest_backups), with the guest's
+	//            own outcome and times rather than the job's — only when
+	//            include_tasks, since all of it is read from the job's task log.
+	//            A job's own audit row names no guest, so it is never a second
+	//            entry; nor is its task row, whose vmid is NULL.
+	//
+	// Guest tasks only: is_guest_upid, never vmid alone, because InsertTaskHistory
+	// stamps a vmid on any numeric worker id — cephdestroyosd's is an OSD number,
+	// so "destroy OSD 113" would otherwise read as something done to VM 113.
+	// audit_log.vmid is already gated the same way at insert.
+	//
+	// The audit branches are four rather than one OR, so each reads its own index
+	// — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA and
+	// object arms the resource_type index — instead of the planner settling on the
+	// whole cluster's rows. Each later arm excludes the rows an earlier one takes,
+	// so no row is read twice. "vmid IS NOT NULL" lets the vmid arms use their
+	// partial indexes whatever the plan: a generic plan cannot prove it from
+	// "= ANY(<parameter>)". The Proxmox-duplicate probes are scoped to the
+	// selection by parameter, not by correlation: correlated on the UPID alone,
+	// the planner hashes every Nexara row the install has ever written, on every
+	// request.
+	//
+	// subject is the guest an entry is filed under — the clone's target, the HA
+	// sid's guest — and picks the cutoff it is held to: cutoff_after and
+	// cutoff_inclusive, parallel to vmids, from guestHistoryCutoff. Inclusive from
+	// a birth, so the create or clone is the first entry; exclusive after a
+	// destroy, so the previous guest's last act is not this one's first. The zero
+	// time is no cutoff. An object's rows have no subject and no cutoff.
+	//
+	// category is derived HERE, once, so it can be filtered on before the page is
+	// cut. The rules are the kind's (HistoryKind.Rules), passed in order as
+	// parallel arrays: an entry takes the category of the first rule whose field
+	// is LIKE its pattern, else default_category. Only four fields decide it, so
+	// category_map works it out once per distinct (entry kind, action, resource
+	// type, UPID worker type) the selection holds — a few dozen, against
+	// thousands of rows — and each row looks its own up. Rules matched per row
+	// cost four times as much on the busiest guest on dev. The map's key is
+	// unambiguous: the entry kind is a constant and the worker type a UPID field,
+	// so neither holds a ':', and the resource type is length-prefixed, which
+	// leaves the action, last, to be the rest.
+	//
+	// The page is cut on narrow rows, and only its rows are joined to their audit
+	// details, task outcome and user: a guest with ten thousand entries carries
+	// ten thousand jsonb blobs through the sort otherwise. A backup entry's
+	// outcome, end and log lines are the guest's own, from guest_backups; the
+	// job's own task row, joined like any other, gives the rest. total is
+	// count(*) OVER the filtered set, computed before LIMIT — the Items and the
+	// Total come from one query and so cannot be counted under different filters.
+	ListHistory(ctx context.Context, arg ListHistoryParams) ([]ListHistoryRow, error)
 	// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).
 	ListIOErrorGuests(ctx context.Context) ([]ListIOErrorGuestsRow, error)
 	// Storage that is enabled but not currently active (unreachable). Shared pools

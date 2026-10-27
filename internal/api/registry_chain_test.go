@@ -302,6 +302,29 @@ func TestRegistryPermissionGateDeniesAndAllows(t *testing.T) {
 			t.Errorf("message = %q, want it to name both alternatives", env.Message)
 		}
 	})
+
+	t.Run("all of passes only on both", func(t *testing.T) {
+		all := Permissions{AllOf: []Check{
+			{Action: "view", Resource: "audit", Scope: ScopeCluster},
+			{Action: "view", Resource: "node", Scope: ScopeCluster},
+		}}
+		for granted, want := range map[string]int{"view:audit": fiber.StatusForbidden,
+			"view:node": fiber.StatusForbidden, "view:audit view:node": fiber.StatusNoContent} {
+			grants := map[string]bool{}
+			for _, g := range strings.Fields(granted) {
+				grants[g] = true
+			}
+			cap := &capture{}
+			app := newRegistryApp(t, stubAuth(grants), gatedEndpoint(cap, all))
+			status, env := send(t, app, authedRequest(http.MethodPost, target))
+			if status != want || cap.called != (want == fiber.StatusNoContent) {
+				t.Errorf("holding %s: status = %d (%q), handler ran %v; want %d", granted, status, env.Message, cap.called, want)
+			}
+			if want == fiber.StatusForbidden && !strings.Contains(env.Message, "view:audit, view:node") {
+				t.Errorf("holding %s: message = %q, want it to name both requirements", granted, env.Message)
+			}
+		}
+	})
 }
 
 // TestRegistryLimiterRunsAheadOfThePermissionCheck is the behavioural
@@ -482,7 +505,7 @@ func TestGuard_EveryDeclaredGateIsMountedAsMiddleware(t *testing.T) {
 				"middleware: %v", key, e.Permissions.Describe(), chain)
 		}
 
-		if e.Permissions.Check == nil && len(e.Permissions.Alternatives) == 0 {
+		if e.Permissions.Check == nil && len(e.Permissions.Alternatives) == 0 && len(e.Permissions.AllOf) == 0 {
 			// Deferred, Advisory, Public and SelfService install no gate by
 			// design; registryEnforcementGaps is what holds the first two
 			// to reaching a permission leaf inside the handler.
@@ -511,6 +534,7 @@ var permissionGateConstructors = []string{
 	"/handlers.RequirePermission.",
 	"/handlers.RequireClusterPermission.",
 	"/handlers.RequireAnyPermission.",
+	"/handlers.RequireAllPermissions.",
 }
 
 // isPermissionGateLink reports whether a handler-chain entry is one of the

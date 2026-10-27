@@ -85,6 +85,10 @@ func TestPermissionMiddlewareFailsClosed(t *testing.T) {
 			PermissionRef{Action: "view", Resource: "vm", ClusterScoped: true},
 			PermissionRef{Action: "view", Resource: "container", ClusterScoped: true},
 		),
+		"RequireAllPermissions": RequireAllPermissions(
+			PermissionRef{Action: "view", Resource: "audit", ClusterScoped: true},
+			PermissionRef{Action: "view", Resource: "node", ClusterScoped: true},
+		),
 	}
 
 	for name, gate := range gates {
@@ -122,6 +126,10 @@ func TestPermissionMiddlewareAllowsAndContinues(t *testing.T) {
 		"RequireClusterPermission": RequireClusterPermission("manage", "cluster"),
 		"RequireAnyPermission": RequireAnyPermission(
 			PermissionRef{Action: "manage", Resource: "cluster", ClusterScoped: true},
+		),
+		"RequireAllPermissions": RequireAllPermissions(
+			PermissionRef{Action: "view", Resource: "audit", ClusterScoped: true},
+			PermissionRef{Action: "view", Resource: "node", ClusterScoped: true},
 		),
 	} {
 		t.Run(name, func(t *testing.T) {

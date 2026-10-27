@@ -66,14 +66,15 @@ describe("useEventInvalidation — task events and the schedule list", () => {
       vi.useFakeTimers();
       const stale = {
         "the cluster's schedules": ["clusters", CLUSTER, "schedules"],
-        "a guest's History": ["guest-history", CLUSTER, 100, 0, "", "", ""],
+        "a guest's History": ["history", CLUSTER, "guest", "100", 0, "", "", ""],
       };
       const fresh = {
         "another cluster's schedules": ["clusters", OTHER_CLUSTER, "schedules"],
         "another cluster's guest History": [
-          "guest-history",
+          "history",
           OTHER_CLUSTER,
-          100,
+          "guest",
+          "100",
           0,
           "",
           "",
@@ -140,8 +141,8 @@ describe("useEventInvalidation — task events and the schedule list", () => {
 describe("useEventInvalidation — audit_entry and guest History", () => {
   it("marks the event's cluster's guest histories stale, and no other cluster's", () => {
     vi.useFakeTimers();
-    const history = ["guest-history", CLUSTER, 100, 0, "", "", ""];
-    const otherHistory = ["guest-history", OTHER_CLUSTER, 100, 0, "", "", ""];
+    const history = ["history", CLUSTER, "guest", "100", 0, "", "", ""];
+    const otherHistory = ["history", OTHER_CLUSTER, "guest", "100", 0, "", "", ""];
     const client = mount([history, otherHistory]);
 
     act(() => {

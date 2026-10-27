@@ -130,6 +130,48 @@ func RequireAnyPermission(refs ...PermissionRef) fiber.Handler {
 	}
 }
 
+// RequireAllPermissions passes only when the caller holds EVERY one of refs,
+// and is how a route over two kinds of data declares both — a History, which
+// is audit rows (view:audit) about one object (view:node, view:cluster, …).
+//
+// It is RequireAnyPermission's conjunction, resolved the same way: the
+// cluster once, up front; an engine that cannot answer is the error it
+// returns rather than a 403; and the refusal names every requirement, not
+// only the first one missing, so a role builder sees the whole of what the
+// route needs.
+func RequireAllPermissions(refs ...PermissionRef) fiber.Handler {
+	wantsCluster := slices.ContainsFunc(refs, func(r PermissionRef) bool { return r.ClusterScoped })
+	return func(c fiber.Ctx) error {
+		var clusterID uuid.UUID
+		if wantsCluster {
+			id, err := clusterIDFromParam(c)
+			if err != nil {
+				return err
+			}
+			clusterID = id
+		}
+		for _, ref := range refs {
+			var (
+				allowed bool
+				err     error
+			)
+			if ref.ClusterScoped {
+				allowed, err = hasClusterPerm(c, ref.Action, ref.Resource, clusterID)
+			} else {
+				allowed, err = hasGlobalPerm(c, ref.Action, ref.Resource)
+			}
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return fiber.NewError(fiber.StatusForbidden,
+					"Requires all of: "+strings.Join(refNames(refs), ", "))
+			}
+		}
+		return c.Next()
+	}
+}
+
 func refNames(refs []PermissionRef) []string {
 	names := make([]string, 0, len(refs))
 	for _, ref := range refs {

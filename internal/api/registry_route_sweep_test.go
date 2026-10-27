@@ -202,7 +202,7 @@ var sweepDeferredPermissionPairs = []auth.ScopedPermission{
 }
 
 // sweepDeclaredPermissionPairs walks reg's OWN declarations — Check,
-// Alternatives and Advisory alike — so the grant list stays complete as the
+// Alternatives, AllOf and Advisory alike — so the grant list stays complete as the
 // registry grows, with no manual bookkeeping for the common (gate-shaped)
 // case. Combined with sweepDeferredPermissionPairs in sweepAuth.
 func sweepDeclaredPermissionPairs(reg *Registry) []auth.ScopedPermission {
@@ -225,6 +225,9 @@ func sweepDeclaredPermissionPairs(reg *Registry) []auth.ScopedPermission {
 		}
 		for _, alt := range e.Permissions.Alternatives {
 			add(alt.Action, alt.Resource)
+		}
+		for _, c := range e.Permissions.AllOf {
+			add(c.Action, c.Resource)
 		}
 		if e.Permissions.Advisory != nil {
 			add(e.Permissions.Advisory.Action, e.Permissions.Advisory.Resource)
@@ -1174,11 +1177,11 @@ var sweepVariants = []sweepVariant{
 	{"with-optional", true},
 }
 
-// sweepGated reports whether e is mounted behind Permissions.Check or
-// .Alternatives — the only shapes sweepAuth's grant actually sits in front
-// of. See case 4 of classifySweepOutcome.
+// sweepGated reports whether e is mounted behind Permissions.Check,
+// .Alternatives or .AllOf — the only shapes sweepAuth's grant actually sits
+// in front of. See case 4 of classifySweepOutcome.
 func sweepGated(e Endpoint) bool {
-	return e.Permissions.Check != nil || len(e.Permissions.Alternatives) > 0
+	return e.Permissions.Check != nil || len(e.Permissions.Alternatives) > 0 || len(e.Permissions.AllOf) > 0
 }
 
 // TestGuard_EveryRegistryRouteDispatchesWithoutPanicking is the dynamic

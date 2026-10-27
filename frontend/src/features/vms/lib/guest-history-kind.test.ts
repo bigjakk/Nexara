@@ -1,43 +1,21 @@
 import { describe, it, expect } from "vitest";
-import type { GuestHistoryEntry } from "../api/guest-history-queries";
+import i18n from "@/lib/i18n";
+import { makeHistoryEntry } from "@/test/history.fixtures";
 import {
-  historyActor,
-  historyDisplayStatus,
   historyEventLabel,
+  historyNamespace,
   historySummary,
-} from "./guest-history";
+} from "@/features/history/lib/history";
+import { guestHistoryKind } from "./guest-history-kind";
 
-const SYSTEM = "00000000-0000-0000-0000-000000000001";
+const t = i18n.getFixedT(null, historyNamespace(guestHistoryKind));
 
-function entry(over: Partial<GuestHistoryEntry>): GuestHistoryEntry {
-  return {
-    id: "audit:1",
-    kind: "audit",
-    occurred_at: "2026-01-01T00:00:00Z",
-    category: "other",
-    source: "nexara",
-    action: "",
-    resource_type: "vm",
-    vmid: 100,
-    user_id: "u1",
-    user_email: "ops@example.com",
-    user_display_name: "Ops",
-    details: "{}",
-    upid: "",
-    node: "pve-01",
-    description: "",
-    task_type: "",
-    outcome: "",
-    exit_status: "",
-    finished_at: null,
-    ...over,
-  };
-}
+const entry = makeHistoryEntry;
 
 const upid = (type: string) =>
   `UPID:pve-01:00001A2B:00003344:5F2E1A00:${type}:100:root@pam:`;
 
-describe("historyEventLabel", () => {
+describe("the guest kind's event labels", () => {
   it.each([
     // Nexara's own action names say more than the task behind them.
     [
@@ -95,11 +73,11 @@ describe("historyEventLabel", () => {
     // A guest's part of a backup job, whose UPID names no guest.
     [{ kind: "backup" as const, upid: upid("vzdump") }, "Back up (job)"],
   ])("labels %o as %s", (over, want) => {
-    expect(historyEventLabel(entry(over), 100)).toBe(want);
+    expect(historyEventLabel(guestHistoryKind, entry(over), t)).toBe(want);
   });
 });
 
-describe("historySummary", () => {
+describe("the guest kind's summaries", () => {
   it.each([
     [
       {
@@ -156,7 +134,7 @@ describe("historySummary", () => {
       "",
     ],
   ])("summarises %o", (over, want) => {
-    expect(historySummary(entry(over), 100)).toBe(want);
+    expect(historySummary(guestHistoryKind, entry(over), t)).toBe(want);
   });
 
   // Only a stop has an everyday cause no task records.
@@ -175,47 +153,10 @@ describe("historySummary", () => {
   ])("says what a %s → %s change no task explains means", (from, to, want) => {
     expect(
       historySummary(
+        guestHistoryKind,
         entry({ kind: "status", from_status: from, to_status: to }),
-        100,
+        t,
       ),
     ).toBe(want);
-  });
-});
-
-describe("historyActor", () => {
-  it.each([
-    [
-      {
-        source: "proxmox" as const,
-        user_id: SYSTEM,
-        details: JSON.stringify({ proxmox_user: "root@pam" }),
-      },
-      "root@pam",
-    ],
-    [
-      { kind: "task" as const, source: "proxmox" as const, user_id: SYSTEM },
-      "Proxmox",
-    ],
-    [{ user_id: SYSTEM }, "System"],
-    [{}, "Ops"],
-    [{ kind: "status" as const }, ""],
-  ])("credits %o to %s", (over, want) => {
-    expect(historyActor(entry(over))).toBe(want);
-  });
-});
-
-describe("historyDisplayStatus", () => {
-  it.each([
-    ["ok", undefined, "ok"],
-    ["failed", undefined, "failed"],
-    ["", undefined, null],
-    ["running", undefined, "running"],
-    // A poll finishes a row the server still calls running…
-    ["running", { status: "stopped", exit_status: "WARNINGS: 1" }, "ok"],
-    ["running", { status: "stopped", exit_status: "unable to lock" }, "failed"],
-    // …and never overrides the server's own verdict.
-    ["ok", { status: "running", exit_status: "" }, "ok"],
-  ] as const)("outcome %s with poll %o shows %s", (outcome, live, want) => {
-    expect(historyDisplayStatus(entry({ outcome }), live)).toBe(want);
   });
 });

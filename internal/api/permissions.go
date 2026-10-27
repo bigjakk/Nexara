@@ -61,20 +61,21 @@ type AdvisoryCheck struct {
 // may be set — Register rejects zero (a route nobody decided about) and
 // rejects two (a route whose declaration contradicts itself).
 //
-// The six shapes are not stylistic alternatives; they are the six answers
-// that a survey of the existing 544 hand-placed checks actually produced,
-// and each one means something different to a reader deciding whether a
-// route is safe:
+// The shapes are not stylistic alternatives. Six are the answers that a
+// survey of the existing 544 hand-placed checks actually produced, AllOf came
+// with the History routes (registry_history.go), and each one means
+// something different to a reader deciding whether a route is safe:
 //
 //	Check        the gate runs as middleware, before the handler
 //	Alternatives the gate passes if ANY of them holds
+//	AllOf        the gate passes only if EVERY one of them holds
 //	Deferred     the handler computes the gate itself; the reason says why
 //	Advisory     the handler FILTERS on it; there is no gate
 //	Public       no session at all
 //	SelfService  authenticated, acting solely on the caller's own identity
 //
-// Only Check and Alternatives install middleware. The other four install
-// none, which is the point of making each of them say so out loud.
+// Only Check, Alternatives and AllOf install middleware. The other four
+// install none, which is the point of making each of them say so out loud.
 type Permissions struct {
 	// Check is the declarative gate: the common case, and the one the
 	// whole registry exists to make possible.
@@ -84,6 +85,12 @@ type Permissions struct {
 	// "view:vm or view:container" endpoints that serve both guest kinds
 	// through one path.
 	Alternatives []Check
+
+	// AllOf passes only if the caller holds every one of them — a route over
+	// two kinds of data, such as an object's History: audit rows (view:audit)
+	// about that object (view:node, view:cluster, …). Each is resolved as a
+	// Check is, in its own scope.
+	AllOf []Check
 
 	// Deferred means the handler decides for itself, because what to
 	// check depends on something only the handler knows (the content type
@@ -129,6 +136,12 @@ func (p Permissions) middleware() fiber.Handler {
 			refs = append(refs, alt.ref())
 		}
 		return handlers.RequireAnyPermission(refs...)
+	case len(p.AllOf) > 0:
+		refs := make([]handlers.PermissionRef, 0, len(p.AllOf))
+		for _, c := range p.AllOf {
+			refs = append(refs, c.ref())
+		}
+		return handlers.RequireAllPermissions(refs...)
 	default:
 		return nil
 	}
@@ -136,7 +149,7 @@ func (p Permissions) middleware() fiber.Handler {
 
 // Describe renders the declaration the way the API documentation and a
 // role-building operator want to read it: "view:cluster", "view:vm |
-// view:container", "deferred", "public".
+// view:container", "view:audit + view:node", "deferred", "public".
 func (p Permissions) Describe() string {
 	switch {
 	case p.Check != nil:
@@ -147,6 +160,12 @@ func (p Permissions) Describe() string {
 			names = append(names, alt.String())
 		}
 		return strings.Join(names, " | ")
+	case len(p.AllOf) > 0:
+		names := make([]string, 0, len(p.AllOf))
+		for _, c := range p.AllOf {
+			names = append(names, c.String())
+		}
+		return strings.Join(names, " + ")
 	case p.Advisory != nil:
 		return p.Advisory.String() + " (filtered)"
 	case p.Deferred != "":
@@ -173,7 +192,7 @@ func (p Permissions) validate(path string, pathParams []string) error {
 	case 1:
 	case 0:
 		return errors.New("declares no Permissions field; " +
-			"set exactly one of Check, Alternatives, Deferred, Advisory, Public or SelfService")
+			"set exactly one of Check, Alternatives, AllOf, Deferred, Advisory, Public or SelfService")
 	default:
 		return fmt.Errorf("declares %d Permissions fields (%s); exactly one may be set",
 			len(set), strings.Join(set, ", "))
@@ -192,6 +211,17 @@ func (p Permissions) validate(path string, pathParams []string) error {
 		}
 		for i, alt := range p.Alternatives {
 			if err := validateCheck(fmt.Sprintf("Alternatives[%d]", i), alt, path, pathParams); err != nil {
+				return err
+			}
+		}
+		return nil
+	case len(p.AllOf) > 0:
+		if len(p.AllOf) < 2 {
+			// The same reasoning as Alternatives: one requirement is a Check.
+			return errors.New("declares a single AllOf entry; use Check for one requirement")
+		}
+		for i, c := range p.AllOf {
+			if err := validateCheck(fmt.Sprintf("AllOf[%d]", i), c, path, pathParams); err != nil {
 				return err
 			}
 		}
@@ -253,6 +283,9 @@ func (p Permissions) setFields() []string {
 	if len(p.Alternatives) > 0 {
 		set = append(set, "Alternatives")
 	}
+	if len(p.AllOf) > 0 {
+		set = append(set, "AllOf")
+	}
 	if p.Deferred != "" {
 		set = append(set, "Deferred")
 	}
@@ -285,7 +318,7 @@ func validateVocabulary(field string, c Check) error {
 }
 
 // validateCheck rejects the shapes of Check that cannot authorize anyone.
-// It is for the two shapes that INSTALL a gate, so it additionally
+// It is for the three shapes that INSTALL a gate, so it additionally
 // requires the path to name the cluster a cluster-scoped gate will
 // resolve. See validateAdvisory for the shape that installs none.
 func validateCheck(field string, c Check, path string, pathParams []string) error {

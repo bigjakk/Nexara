@@ -435,7 +435,7 @@ var registryDomainRouteCounts = map[string]int{
 	"registerTaskEndpoints":            taskRouteCount,
 	"registerClusterEndpoints":         clusterRouteCount,
 	"registerAuditEndpoints":           auditRouteCount,
-	"registerGuestHistoryEndpoints":    guestHistoryRouteCount,
+	"registerHistoryEndpoints":         historyRouteCount,
 	"registerSettingsEndpoints":        settingsRouteCount,
 	"registerChangelogEndpoints":       changelogRouteCount,
 	"registerVersionEndpoint":          versionRouteCount,
@@ -505,7 +505,7 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 		"registerTaskEndpoints":            0,
 		"registerClusterEndpoints":         0,
 		"registerAuditEndpoints":           0,
-		"registerGuestHistoryEndpoints":    0,
+		"registerHistoryEndpoints":         0,
 		"registerSettingsEndpoints":        0,
 		"registerChangelogEndpoints":       0,
 		"registerVersionEndpoint":          0,
@@ -697,8 +697,8 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	declared["registerAuditEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
-	registerGuestHistoryEndpoints(reg, s.guestHistoryHandler)
-	declared["registerGuestHistoryEndpoints"] = reg.Len() - before
+	registerHistoryEndpoints(reg, s.historyHandler)
+	declared["registerHistoryEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
 	registerSettingsEndpoints(reg, s.settingsHandler)

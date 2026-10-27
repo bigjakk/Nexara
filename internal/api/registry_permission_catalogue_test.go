@@ -298,8 +298,8 @@ func TestPermissionCatalogueParsesTheKnownSeed(t *testing.T) {
 // TestGuard_DeclaredPermissionsExistInTheCatalogue is the production
 // guard: every (action, resource) any route declares must be seeded.
 //
-// It covers all three declaration shapes that name a resource — Check,
-// Alternatives and Advisory. Deferred, Public and SelfService name none,
+// It covers all four declaration shapes that name a resource — Check,
+// Alternatives, AllOf and Advisory. Deferred, Public and SelfService name none,
 // and a Deferred handler's own check is out of reach of a static test;
 // rbac_route_guard_test.go carries that limitation already.
 func TestGuard_DeclaredPermissionsExistInTheCatalogue(t *testing.T) {
@@ -318,6 +318,9 @@ func TestGuard_DeclaredPermissionsExistInTheCatalogue(t *testing.T) {
 		for range e.Permissions.Alternatives {
 			sites = append(sites, site{route, "Alternatives"})
 		}
+		for range e.Permissions.AllOf {
+			sites = append(sites, site{route, "AllOf"})
+		}
 		if e.Permissions.Advisory != nil {
 			sites = append(sites, site{route, "Advisory"})
 		}
@@ -327,6 +330,7 @@ func TestGuard_DeclaredPermissionsExistInTheCatalogue(t *testing.T) {
 			checks = append(checks, *c)
 		}
 		checks = append(checks, e.Permissions.Alternatives...)
+		checks = append(checks, e.Permissions.AllOf...)
 		if a := e.Permissions.Advisory; a != nil {
 			checks = append(checks, a.Check)
 		}
@@ -386,6 +390,7 @@ func TestGuard_DeclaredActionsAreInTheCatalogue(t *testing.T) {
 			checks = append(checks, *c)
 		}
 		checks = append(checks, e.Permissions.Alternatives...)
+		checks = append(checks, e.Permissions.AllOf...)
 		if a := e.Permissions.Advisory; a != nil {
 			checks = append(checks, a.Check)
 		}

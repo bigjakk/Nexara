@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/handlers"
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -29,10 +30,11 @@ func historyUPID(seq int, workerType, id string) string {
 	return fmt.Sprintf("UPID:pve-01:%08X:00000001:66000001:%s:%s:root@pam:", seq, workerType, id)
 }
 
-// TestGuestHistory runs the History tab's SQL (queries/guest_history.sql,
-// migrations/000115 and 000116) against Postgres: which rows make one guest's timeline,
-// how a status change is classified, and what the prune keeps. Each fixture
-// row is in or out of the timeline for exactly one reason, named beside it.
+// TestGuestHistory runs the History SQL (queries/history.sql and
+// guest_history.sql, migrations/000115 and 000116) against Postgres: which rows make one guest's
+// timeline, how a status change is classified, and what the prune keeps — and
+// the generic selector's rows for an object. Each fixture row is in or out of
+// the timeline for exactly one reason, named beside it.
 //
 // Not parallel: it writes rows the package's other DB tests share a schema
 // with. Skipped unless NEXARA_TEST_DB_URL names a throwaway database.
@@ -434,14 +436,24 @@ func TestGuestHistory(t *testing.T) {
 		t.Fatalf("lifecycle events = %v, want %v (the clone, the old guest's destroy, its create)", shapes, want)
 	}
 
-	list := func(p gen.ListGuestHistoryParams) ([]string, int64) {
+	// The timeline, through the guest kind's own rules and selection as the
+	// handler builds them (HistoryKind.ListParams): VM 100 from its clone.
+	guest := func(inclusive bool, guests ...handlers.HistoryGuest) gen.ListHistoryParams {
 		t.Helper()
-		p.ClusterID, p.Vmid = historyClusterID, 100
-		p.After = pgtype.Timestamptz{Time: hoursAgo(7), Valid: true}
-		if p.RowLimit == 0 {
-			p.RowLimit = 50
+		if len(guests) == 0 {
+			guests = []handlers.HistoryGuest{{VMID: 100,
+				After: pgtype.Timestamptz{Time: hoursAgo(7), Valid: true}, Inclusive: inclusive}}
 		}
-		rows, err := q.ListGuestHistory(ctx, p)
+		p, err := handlers.GuestHistory().ListParams(historyClusterID, handlers.HistorySelection{Guests: guests})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.RowLimit = 50
+		return p
+	}
+	list := func(p gen.ListHistoryParams) ([]string, int64) {
+		t.Helper()
+		rows, err := q.ListHistory(ctx, p)
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -453,7 +465,9 @@ func TestGuestHistory(t *testing.T) {
 		}
 		return got, total
 	}
-	full := gen.ListGuestHistoryParams{IncludeTasks: true, AfterInclusive: true, StatusGuestTypes: []string{"qemu"}}
+	full := withFilter(guest(true), func(p *gen.ListHistoryParams) {
+		p.IncludeTasks, p.StatusGuestTypes = true, []string{"qemu"}
+	})
 	got, total := list(full)
 	want := []string{
 		"task vzsuspend power completed",  // task-only, live; it explained its status change
@@ -474,8 +488,7 @@ func TestGuestHistory(t *testing.T) {
 		t.Fatalf("timeline =\n\t%v (total %d)\nwant\n\t%v (total %d)", got, total, want, len(want))
 	}
 	// The backup entry's end, error and lines are VM 100's, not the job's.
-	backups, err := q.ListGuestHistory(ctx, withFilter(full, func(p *gen.ListGuestHistoryParams) {
-		p.ClusterID, p.Vmid, p.RowLimit = historyClusterID, 100, 50
+	backups, err := q.ListHistory(ctx, withFilter(full, func(p *gen.ListHistoryParams) {
 		p.Category = pgtype.Text{String: "backup", Valid: true}
 	}))
 	if err != nil || len(backups) != 1 {
@@ -489,26 +502,65 @@ func TestGuestHistory(t *testing.T) {
 
 	for _, tt := range []struct {
 		name      string
-		p         gen.ListGuestHistoryParams
+		p         gen.ListHistoryParams
 		wantTotal int64
 		wantFirst string
 	}{
-		{"without view:task the task-only rows go", gen.ListGuestHistoryParams{AfterInclusive: true, StatusGuestTypes: []string{"qemu"}}, 9, ""},
-		{"without view:vm the status change goes", gen.ListGuestHistoryParams{IncludeTasks: true, AfterInclusive: true, StatusGuestTypes: []string{"lxc"}}, 12, ""},
-		{"exclusive after a destroy drops the event itself", gen.ListGuestHistoryParams{IncludeTasks: true, StatusGuestTypes: []string{"qemu"}}, 12, ""},
-		{"category", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.Category = pgtype.Text{String: "power", Valid: true} }), 6, ""},
-		{"source", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.Source = pgtype.Text{String: "detected", Valid: true} }), 1, "status status_change power "},
-		{"since", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.Since = pgtype.Timestamptz{Time: hoursAgo(3.25), Valid: true} }), 8, ""},
-		{"a page", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.RowLimit, p.RowOffset = 3, 3 }), 13, "status status_change power "},
+		{"without view:task the task-only rows go", withFilter(guest(true), func(p *gen.ListHistoryParams) { p.StatusGuestTypes = []string{"qemu"} }), 9, ""},
+		{"without view:vm the status change goes", withFilter(full, func(p *gen.ListHistoryParams) { p.StatusGuestTypes = []string{"lxc"} }), 12, ""},
+		{"exclusive after a destroy drops the event itself", withFilter(guest(false), func(p *gen.ListHistoryParams) {
+			p.IncludeTasks, p.StatusGuestTypes = true, []string{"qemu"}
+		}), 12, ""},
+		{"category", withFilter(full, func(p *gen.ListHistoryParams) { p.Category = pgtype.Text{String: "power", Valid: true} }), 6, ""},
+		{"source", withFilter(full, func(p *gen.ListHistoryParams) { p.Source = pgtype.Text{String: "detected", Valid: true} }), 1, "status status_change power "},
+		{"since", withFilter(full, func(p *gen.ListHistoryParams) { p.Since = pgtype.Timestamptz{Time: hoursAgo(3.25), Valid: true} }), 8, ""},
+		{"a page", withFilter(full, func(p *gen.ListHistoryParams) { p.RowLimit, p.RowOffset = 3, 3 }), 13, "status status_change power "},
+		// Each guest is held to its own cutoff: VM 101's, an hour ago, keeps
+		// its part of the recent job and drops its older part and its status
+		// change, which VM 100's cutoff would both have kept.
+		{"a second guest from its own cutoff", withFilter(guest(true, handlers.HistoryGuest{VMID: 100,
+			After: pgtype.Timestamptz{Time: hoursAgo(7), Valid: true}, Inclusive: true}, handlers.HistoryGuest{VMID: 101,
+			After: pgtype.Timestamptz{Time: hoursAgo(1), Valid: true}}),
+			func(p *gen.ListHistoryParams) { p.IncludeTasks, p.StatusGuestTypes = true, []string{"qemu"} }), 14, ""},
+		// An object naming rows a guest arm already takes — the ingested
+		// rows' resource_id is the VMID — adds none of them a second time.
+		{"a guest and an object over the same rows", withFilter(full, func(p *gen.ListHistoryParams) {
+			p.ObjectTypes, p.ObjectKeys, p.ObjectValues = []string{"vm"}, []string{""}, []string{"100"}
+		}), 13, ""},
 	} {
 		got, total := list(tt.p)
 		if total != tt.wantTotal || (tt.wantFirst != "" && (len(got) == 0 || got[0] != tt.wantFirst)) {
 			t.Errorf("%s: total %d, rows %v; want total %d, first %q", tt.name, total, got, tt.wantTotal, tt.wantFirst)
 		}
 	}
+
+	// ── The generic selector: one node's own audit rows, and its parts' by a
+	// details key — not another node's, nor the other cluster's node of the
+	// same name. A Proxmox duplicate of a Nexara task is one entry here too.
+	aptUPID := historyUPID(30, "aptupdate", "")
+	audit(historyClusterID, minsAgo(4), "nexara", "node", "pve-01", "apt_update", map[string]any{"upid": aptUPID})
+	audit(historyClusterID, minsAgo(4), "proxmox", "node", "pve-01", "apt_update", map[string]any{"upid": aptUPID, "status": "OK"})
+	audit(historyClusterID, minsAgo(3), "nexara", "network", "vmbr0", "interface_updated", map[string]any{"node": "pve-01"})
+	audit(historyClusterID, minsAgo(2), "nexara", "node", "pve-02", "reboot", map[string]any{})
+	audit(historyOtherID, minsAgo(2), "nexara", "node", "pve-01", "reboot", map[string]any{})
+	// Both rules match the apt update: the first one decides.
+	node := handlers.HistoryKind{Name: "node", Categories: []string{"updates", "tasks", "other"}, Default: "other",
+		Rules: []handlers.HistoryRule{
+			{Category: "updates", Field: handlers.HistoryFieldAction, Equals: []string{"apt_update"}},
+			{Category: "tasks", Field: handlers.HistoryFieldWorker, Like: []string{"apt%"}},
+		}}
+	nodeParams, err := node.ListParams(historyClusterID, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+		{ResourceType: "node", Value: "pve-01"}, {ResourceType: "network", DetailKey: "node", Value: "pve-01"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeParams.RowLimit = 50
+	if got, total := list(nodeParams); !slices.Equal(got, []string{"audit interface_updated other ", "audit apt_update updates "}) || total != 2 {
+		t.Errorf("node timeline = %v (total %d), want its network change, then its one apt update", got, total)
+	}
 }
 
-func withFilter(p gen.ListGuestHistoryParams, f func(*gen.ListGuestHistoryParams)) gen.ListGuestHistoryParams {
+func withFilter(p gen.ListHistoryParams, f func(*gen.ListHistoryParams)) gen.ListHistoryParams {
 	f(&p)
 	return p
 }

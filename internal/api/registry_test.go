@@ -368,6 +368,13 @@ func TestRegisterRejectsMalformedDeclarations(t *testing.T) {
 			},
 			want: `Alternatives[1] has scope ""`,
 		},
+		{
+			name: "a single requirement is not all of anything",
+			edit: func(e *Endpoint) {
+				e.Permissions = Permissions{AllOf: []Check{{Action: "view", Resource: "audit", Scope: ScopeCluster}}}
+			},
+			want: "declares a single AllOf entry",
+		},
 	}
 
 	for _, tc := range cases {
@@ -600,6 +607,10 @@ func TestPermissionsDescribe(t *testing.T) {
 			{Action: "view", Resource: "vm", Scope: ScopeCluster},
 			{Action: "view", Resource: "container", Scope: ScopeCluster},
 		}}, "view:vm | view:container"},
+		{"all of", Permissions{AllOf: []Check{
+			{Action: "view", Resource: "audit", Scope: ScopeCluster},
+			{Action: "view", Resource: "node", Scope: ScopeCluster},
+		}}, "view:audit + view:node"},
 		{"advisory", Permissions{Advisory: &AdvisoryCheck{
 			Check:  Check{Action: "view", Resource: "cluster", Scope: ScopeGlobal},
 			Reason: "accessibleClusters filters the listing",

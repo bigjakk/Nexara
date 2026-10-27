@@ -1,24 +1,14 @@
 /**
- * How each History column renders. Split from guest-history.ts so that module
+ * How each History column renders. Split from history.ts so that module
  * stays JSX-free, as task-column-defs.tsx is split from task-columns.ts.
  */
 import {
   AlertTriangle,
-  Archive,
-  ArrowLeftRight,
-  Camera,
   CheckCircle2,
   ChevronDown,
   Circle,
-  Copy,
   Loader2,
-  Package,
-  Power,
-  Settings2,
-  ShieldCheck,
-  Terminal,
   XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import {
   STATUS_LABEL,
@@ -28,27 +18,8 @@ import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { formatDateTime } from "@/lib/format";
-import type {
-  GuestHistoryCategory,
-  GuestHistoryEntry,
-} from "../api/guest-history-queries";
-import type {
-  GuestHistoryCellCtx,
-  GuestHistoryColumnKey,
-} from "./guest-history";
-
-const CATEGORY_ICON: Record<GuestHistoryCategory, LucideIcon> = {
-  power: Power,
-  migration: ArrowLeftRight,
-  snapshot: Camera,
-  backup: Archive,
-  clone: Copy,
-  lifecycle: Package,
-  config: Settings2,
-  ha: ShieldCheck,
-  console: Terminal,
-  other: Circle,
-};
+import type { HistoryEntry } from "../types/history";
+import type { HistoryCellCtx, HistoryColumnKey } from "./history";
 
 /** A plain render helper rather than a component, so this module exports only
  *  data and fast refresh treats it as such. */
@@ -68,10 +39,10 @@ const STATUS_BADGE: Record<DisplayStatus, string> = {
   failed: "bg-red-500/15 text-red-600 dark:text-red-400",
 };
 
-export const GUEST_HISTORY_COLUMNS: ColumnDef<
-  GuestHistoryEntry,
-  GuestHistoryColumnKey,
-  GuestHistoryCellCtx
+export const HISTORY_COLUMNS: ColumnDef<
+  HistoryEntry,
+  HistoryColumnKey,
+  HistoryCellCtx
 >[] = [
   {
     key: "time",
@@ -94,7 +65,7 @@ export const GUEST_HISTORY_COLUMNS: ColumnDef<
     cell: (entry, ctx) => {
       // A change no task explains is the one an operator is looking for.
       const Icon =
-        entry.kind === "status" ? AlertTriangle : CATEGORY_ICON[entry.category];
+        entry.kind === "status" ? AlertTriangle : (ctx.icon ?? Circle);
       return (
         <div className="flex items-center gap-2">
           <Icon

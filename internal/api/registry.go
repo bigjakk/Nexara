@@ -476,6 +476,11 @@ func (e Endpoint) runsClusterGate() bool {
 			return true
 		}
 	}
+	for _, c := range e.Permissions.AllOf {
+		if c.Scope == ScopeCluster {
+			return true
+		}
+	}
 	return false
 }
 

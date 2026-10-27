@@ -254,6 +254,9 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 	for _, alt := range e.Permissions.Alternatives {
 		grants[alt.String()] = true
 	}
+	for _, c := range e.Permissions.AllOf {
+		grants[c.String()] = true
+	}
 
 	// build synthesizes a request that satisfies the whole schema, as the route sweep
 	// does, with the cluster and the node parameters set here.

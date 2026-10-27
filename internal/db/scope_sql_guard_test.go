@@ -55,12 +55,12 @@ var auditReadsExemptFromScope = map[string]string{
 	// user in scope, and there is no RBAC context to apply.
 	"proxmox_task_sync.sql.ListExistingAuditLogUPIDs": "collector-internal dedup; echoes back caller-supplied UPIDs, no user context",
 
-	// One guest's history: both pin the cluster with a REQUIRED cluster_id
+	// One object's History: both pin the cluster with a REQUIRED cluster_id
 	// argument, never a nullable filter, and the route's cluster-scoped
-	// view:audit Check (registry_guest_history.go) authorized exactly that
-	// cluster before either runs — the scope is the path, not a set to stamp.
+	// view:audit gate (registry_history.go) authorized exactly that cluster
+	// before either runs — the scope is the path, not a set to stamp.
 	"guest_history.sql.ListGuestLifecycleEvents": "one cluster, a required arg the route's cluster-scoped view:audit Check authorized",
-	"guest_history.sql.ListGuestHistory":         "one cluster, a required arg the route's cluster-scoped view:audit Check authorized",
+	"history.sql.ListHistory":                    "one cluster, a required arg the route's cluster-scoped view:audit gate authorized",
 }
 
 // readsAuditLogRe identifies a query that reads audit_log, through FROM or a
