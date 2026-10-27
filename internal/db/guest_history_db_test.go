@@ -100,7 +100,10 @@ func TestGuestHistory(t *testing.T) {
 			historyClusterID, systemUserID, upid, status, vmid, started, finished)
 	}
 
-	// ── The previous guest to hold VMID 100: before the cutoff, so absent.
+	// ── The previous guest to hold VMID 100: before the cutoff, so absent —
+	// and an older holder's clone into the VMID and HA resource.
+	audit(historyClusterID, hoursAgo(11), "nexara", "vm", uuid.NewString(), "clone", map[string]any{"upid": historyUPID(36, "qmclone", "60"), "vmid": 60, "new_id": 100})
+	audit(historyClusterID, hoursAgo(10.5), "nexara", "ha_resource", "vm:100", "created", map[string]any{"state": "started"})
 	audit(historyClusterID, hoursAgo(10), "proxmox", "vm", "100", "create", map[string]any{"upid": historyUPID(1, "qmcreate", "100"), "status": "OK"})
 	audit(historyClusterID, hoursAgo(9), "proxmox", "vm", "100", "start", map[string]any{"upid": historyUPID(2, "qmstart", "100"), "status": "OK"})
 	audit(historyClusterID, hoursAgo(8), "proxmox", "vm", "100", "destroy", map[string]any{"upid": historyUPID(3, "qmdestroy", "100"), "status": "OK"})
@@ -432,8 +435,8 @@ func TestGuestHistory(t *testing.T) {
 		}
 		shapes = append(shapes, shape)
 	}
-	if want := []string{"birth", "destroy OK", "birth"}; !slices.Equal(shapes, want) {
-		t.Fatalf("lifecycle events = %v, want %v (the clone, the old guest's destroy, its create)", shapes, want)
+	if want := []string{"birth", "destroy OK", "birth", "birth"}; !slices.Equal(shapes, want) {
+		t.Fatalf("lifecycle events = %v, want %v (the clone, the old guest's destroy, its create, an older clone)", shapes, want)
 	}
 
 	// The timeline, through the guest kind's own rules and selection as the
@@ -650,6 +653,12 @@ func TestGuestHistory(t *testing.T) {
 			GuestWorkers: []string{"ha%"}, Objects: []handlers.HistoryObject{{ResourceType: "ha_resource", Value: "vm:100"},
 				{ResourceType: "vm", DetailKey: "new_id", Value: "100"}}},
 			[]string{"audit created vm:100", "audit clone " + cloneRow}},
+		// The rows of VM 100 an object takes are still held to its cutoff:
+		// not the previous guest's create, start and destroy.
+		{"an object's rows naming a guest keep its cutoff", handlers.HistorySelection{
+			Guests:       []handlers.HistoryGuest{{VMID: 100, After: pgtype.Timestamptz{Time: hoursAgo(7), Valid: true}, Inclusive: true}},
+			GuestWorkers: []string{"ha%"}, Objects: []handlers.HistoryObject{{ResourceType: "vm", Value: "100"}}},
+			[]string{"audit start 100", "audit shutdown 100", "audit stop 100", "audit migrate 100", "audit start 100"}},
 	} {
 		rows, err := q.ListHistory(ctx, selection(tt.sel))
 		if err != nil {
