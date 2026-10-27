@@ -44,6 +44,7 @@ import { useChangelog } from "@/features/changelog/api/changelog-queries";
 import { Sidebar } from "./Sidebar";
 import { TaskLogPanel } from "./TaskLogPanel";
 import { TaskProgressDialog } from "./TaskProgressDialog";
+import { HistoryDrawerHost } from "@/features/history/components/HistoryDrawer";
 import { ThemeToggle } from "./ThemeToggle";
 import { ChangelogDialog } from "./ChangelogDialog";
 import { AboutDialog } from "./AboutDialog";
@@ -290,6 +291,7 @@ export function AppShell() {
         </main>
         <TaskLogPanel />
         <TaskProgressDialog />
+        <HistoryDrawerHost />
         <VMContextDialogs />
         <CreateResourceDialogs />
         <PendingPBSKeyNavigationGuard />

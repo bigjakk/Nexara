@@ -6,9 +6,10 @@ import { makeHistoryEntry } from "@/test/history.fixtures";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { useAuthStore } from "@/stores/auth-store";
+import { useHistoryDrawerStore } from "@/stores/history-drawer-store";
 import { guestHistoryKind } from "@/features/vms/lib/guest-history-kind";
 import type { HistoryTarget } from "../types/history";
-import { HistoryButton } from "./HistoryDrawer";
+import { HistoryButton, HistoryDrawerHost } from "./HistoryDrawer";
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
@@ -37,6 +38,7 @@ function setPermissions(permissions: string[]) {
 }
 
 afterEach(() => {
+  useHistoryDrawerStore.getState().resetSession();
   useAuthStore.setState({
     user: null,
     permissions: [],
@@ -67,16 +69,19 @@ describe("HistoryButton", () => {
 
     setPermissions(["view:audit", "view:task"]);
     renderWithProviders(
-      <HistoryButton
-        kind={guestHistoryKind}
-        target={target}
-        title="rule01"
-        rowsAbove={(colSpan) => (
-          <tr>
-            <td colSpan={colSpan}>a live task</td>
-          </tr>
-        )}
-      />,
+      <>
+        <HistoryDrawerHost />
+        <HistoryButton
+          kind={guestHistoryKind}
+          target={target}
+          title="rule01"
+          rowsAbove={(colSpan) => (
+            <tr>
+              <td colSpan={colSpan}>a live task</td>
+            </tr>
+          )}
+        />
+      </>,
     );
     expect(mockedPage).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "History of rule01" }));
@@ -89,32 +94,43 @@ describe("HistoryButton", () => {
     );
   });
 
-  // React bubbles a portal's events up its tree: the drawer's would reach the
-  // list row it was opened from.
-  it("keeps what is done inside the drawer from reaching the row it was opened from", async () => {
+  // React bubbles a portal's events up its tree: the button's, the drawer's
+  // and its overlay's would reach the list row it sits in.
+  it("keeps what is done in the History from reaching the row it was opened from", async () => {
     const user = setupUser();
     mockedPage.mockResolvedValue({ items: [], total: 0 });
     setPermissions(["view:audit", "view:task"]);
     const onRow = vi.fn();
     renderWithProviders(
-      <table>
-        <tbody>
-          <tr onClick={onRow} onPointerDown={onRow} onKeyDown={onRow}>
-            <td>
-              <HistoryButton
-                kind={guestHistoryKind}
-                target={target}
-                title="rule01"
-              />
-            </td>
-          </tr>
-        </tbody>
-      </table>,
+      <>
+        <HistoryDrawerHost />
+        <table>
+          <tbody>
+            <tr onClick={onRow} onPointerDown={onRow} onKeyDown={onRow}>
+              <td>
+                <HistoryButton
+                  kind={guestHistoryKind}
+                  target={target}
+                  title="rule01"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </>,
     );
     await user.click(screen.getByRole("button", { name: "History of rule01" }));
-    onRow.mockClear();
     await user.click(await screen.findByText("History: rule01"));
     await user.keyboard("a");
+    // The overlay dismisses the drawer, from beside it in the portal.
+    const overlay = screen.getByRole("dialog").previousElementSibling;
+    if (!(overlay instanceof HTMLElement))
+      throw new Error("no overlay beside the drawer");
+    await user.click(overlay);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Focus is back on the button, whose Enter opens it again.
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(onRow).not.toHaveBeenCalled();
   });
 });

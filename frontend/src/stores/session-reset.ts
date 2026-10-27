@@ -3,6 +3,7 @@ import { queryClient } from "@/lib/query-client";
 import { useConsoleStore } from "@/stores/console-store";
 import { useCreateResourceStore } from "@/stores/create-resource-store";
 import { useHealthDismissStore } from "@/stores/health-dismiss-store";
+import { useHistoryDrawerStore } from "@/stores/history-drawer-store";
 import { useMetricStore } from "@/stores/metric-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
@@ -136,6 +137,7 @@ export function resetSessionState(): void {
   // leaves what another tab persisted.
   useHealthDismissStore.getState().resetSession();
   useVMContextMenuStore.getState().resetSession();
+  useHistoryDrawerStore.getState().resetSession();
   useCreateResourceStore.getState().resetSession();
   useConsoleStore.getState().resetSession();
 }

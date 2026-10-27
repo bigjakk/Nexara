@@ -1,6 +1,9 @@
 import { useConsoleStore } from "@/stores/console-store";
 import { useCreateResourceStore } from "@/stores/create-resource-store";
 import { useHealthDismissStore } from "@/stores/health-dismiss-store";
+import { useHistoryDrawerStore } from "@/stores/history-drawer-store";
+import { apiPath } from "@/lib/api-path";
+import { guestHistoryKind } from "@/features/vms/lib/guest-history-kind";
 import { useMetricStore } from "@/stores/metric-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
@@ -71,6 +74,20 @@ export const PER_SESSION_STORES: Record<string, StoreProbe> = {
         .dismiss("cluster01|node_offline|pve-01|critical|pve-01 is offline");
     },
     holdsData: () => useHealthDismissStore.getState().dismissed.length > 0,
+  },
+  "history-drawer-store.ts": {
+    dirty: () => {
+      useHistoryDrawerStore.getState().open({
+        kind: guestHistoryKind,
+        target: {
+          clusterId: "cluster01",
+          path: (query) =>
+            apiPath`/api/v1/clusters/cluster01/guests/101/history?${query}`,
+        },
+        title: "linux01",
+      });
+    },
+    holdsData: () => useHistoryDrawerStore.getState().request !== null,
   },
   "vm-context-menu-store.ts": {
     dirty: () => {
