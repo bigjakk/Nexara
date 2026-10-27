@@ -268,6 +268,13 @@ var observedChangeRules = slices.Concat(
 			Member: "sole", MemberOf: "upid:resources:vm:%s"},
 		{Kind: "ha_rule", Change: "removed", MatchKey: "cluster", WorkerRe: `^vzdestroy$`,
 			Member: "sole", MemberOf: "upid:resources:ct:%s"},
+		// An HA resource's delete purges by default (pve-ha-manager
+		// API2/HA/Resources.pm delete: purge // 1), which Nexara leaves as it
+		// is: the sid leaves every rule, and a rule it was the last of goes.
+		{Kind: "ha_rule", Change: "changed", AuditType: "ha_resource", MatchKey: "cluster", ActionRe: `^deleted$`,
+			FieldRe: `^resources$`, Member: "left", MemberOf: "audit:resources:%s"},
+		{Kind: "ha_rule", Change: "removed", AuditType: "ha_resource", MatchKey: "cluster", ActionRe: `^deleted$`,
+			Member: "sole", MemberOf: "audit:resources:%s"},
 	},
 
 	sdnCRUD("sdn_zone"),

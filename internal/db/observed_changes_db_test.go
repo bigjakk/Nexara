@@ -205,6 +205,9 @@ func TestObservedChanges(t *testing.T) {
 	members(jobEmptied, []string{}, []string{"vmid:111"})
 	jobNotEmptied := seed(observedCluster, "backup", "backup-03", 0, "removed", "", nil, at)
 	members(jobNotEmptied, []string{}, []string{"vmid:111", "vmid:121"})
+	byResourceDelete := seed(observedCluster, "ha_rule", "apart", 0, "changed", "", []string{"resources"}, at)
+	members(byResourceDelete, []string{}, []string{"resources:vm:160"})
+	audit(observedCluster, in, "ha_resource", "vm:160", 160, "deleted", nil)
 	// A task reaching another object counts from an hour before the window,
 	// not the day a task on the object itself does.
 	byLongRestore := seed(observedCluster, "pool", "db2", 0, "changed", "", []string{"vms"}, ago(600))
@@ -270,6 +273,8 @@ func TestObservedChanges(t *testing.T) {
 			"member_of", "upid:vmid:%s"),
 		with(with(rule("pool", "changed", "", "cluster", false, "", "", "^qmrestore$", "^vms$"), "member", "joined"),
 			"member_of", "upid:vms:%s"),
+		with(with(rule("ha_rule", "changed", "ha_resource", "cluster", false, "^deleted$", "", "", "^resources$"),
+			"member", "left"), "member_of", "audit:resources:%s"),
 		with(with(rule("pool", "changed", "vm", "details:new_pool", false, "^set_pool$", "", "", "^vms$"), "member", "joined"),
 			"member_of", "vmid:vms:%s"),
 		with(with(rule("pool", "changed", "vm", "cluster", false, "^clone$", "", "", "^vms$"), "member", "joined"),
@@ -331,6 +336,7 @@ func TestObservedChanges(t *testing.T) {
 		{"a guest's destroy, another guest leaving too", besideTask, "shown"},
 		{"a job removed with its last guest's destroy", jobEmptied, "explained"},
 		{"a job removed that held another guest too", jobNotEmptied, "shown"},
+		{"an HA resource deleted, its sid leaving a rule", byResourceDelete, "explained"},
 		{"a restore started more than an hour before", byLongRestore, "shown"},
 		{"a guest moved into the pool from its page", byDetails, "explained"},
 		{"a guest cloned into the pool through Nexara", byClone, "explained"},
