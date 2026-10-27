@@ -71,7 +71,8 @@ VALUES ($1, $2, $3, $4, $5, $6,
             THEN split_part($6::jsonb->>'upid', ':', 7)::int
         WHEN $3 IN ('vm', 'container') AND $4 ~ '^[0-9]{1,9}$'
             THEN $4::int
-        ELSE (SELECT v.vmid FROM vms v WHERE v.id::text = $4)
+        WHEN $3 IN ('vm', 'container', 'vm_folder_membership')
+            THEN (SELECT v.vmid FROM vms v WHERE v.id::text = $4)
     END)
 `
 
@@ -100,7 +101,13 @@ type InsertAuditLogParams struct {
 //  3. resource_id, for the handlers that record the VMID there (VM create);
 //  4. the vms row resource_id points at — resolved now, while the UUID is
 //     still live, because that is the whole point: vms.id churns on collector
-//     resync and this freezes the guest identity before it does.
+//     resync and this freezes the guest identity before it does. Only for the
+//     resource types whose handlers record a vms.id (a guest's own rows and
+//     its folder membership): the id of any other object is a name somebody
+//     chose — a pool, an alias — and one spelled like a guest's UUID would
+//     otherwise land in that guest's History. The sourced insert does it only
+//     for source 'nexara': what the collector files from Proxmox is keyed by a
+//     name or number Proxmox chose, never by a vms.id.
 //
 // Non-guest entries (settings, logins, node actions) resolve to NULL and stay
 // NULL. {1,9} digits bounds the ::int cast, as in 000076.
@@ -126,7 +133,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
             THEN split_part($6::jsonb->>'upid', ':', 7)::int
         WHEN $3 IN ('vm', 'container') AND $4 ~ '^[0-9]{1,9}$'
             THEN $4::int
-        ELSE (SELECT v.vmid FROM vms v WHERE v.id::text = $4)
+        WHEN $7 = 'nexara' AND $3 IN ('vm', 'container', 'vm_folder_membership')
+            THEN (SELECT v.vmid FROM vms v WHERE v.id::text = $4)
     END)
 `
 
