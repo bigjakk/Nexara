@@ -359,12 +359,13 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		}
 	}
 	// What the migration left unmoved on the user's word alone it counts in one audit row, for
-	// global auditors: no cluster, no user. The count is -1 when there is no such row.
+	// global auditors: no cluster, by the system user (which the exports show as System, not as a
+	// deleted user). The count is -1 when there is no such row.
 	noticeRows := func() (rows, copies int) {
 		t.Helper()
 		if err := pool.QueryRow(ctx, `SELECT count(*), COALESCE(max((details->>'copies')::int), -1)
-			FROM audit_log WHERE resource_type = 'system' AND action = 'migration_notice' AND cluster_id IS NULL AND user_id IS NULL
-			AND details->>'migration' = 'cluster_object_audit_keys'`).Scan(&rows, &copies); err != nil {
+			FROM audit_log WHERE resource_type = 'system' AND action = 'migration_notice' AND cluster_id IS NULL AND user_id = $1
+			AND details->>'migration' = 'cluster_object_audit_keys'`, systemUserID).Scan(&rows, &copies); err != nil {
 			t.Fatalf("read the migration's notice: %v", err)
 		}
 		return rows, copies

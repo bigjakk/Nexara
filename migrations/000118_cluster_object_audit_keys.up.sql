@@ -52,8 +52,10 @@
 --     in as the same user — is Nexara's more likely than not: it stays where it
 --     is all the same, and the end of this file counts those: in a NOTICE, which
 --     the runner that applies this at start-up does not show, and in one audit
---     row (type system, action migration_notice, no cluster, no user), which a
---     holder of global view:audit reads on the Events page;
+--     row (type system, action migration_notice, no cluster, by the system user so
+--     that the exports show it as System and not as a deleted user), which a holder
+--     of global view:audit reads on the Events page. It is written by SQL, which the
+--     syslog forwarder does not see, so it is not forwarded;
 --   - a row that already carries a rekeyed_from of another origin (another
 --     migration's, or one without a name): its trace is the first original, and
 --     recording this migration's would overwrite it, so the row stays as it is.
@@ -403,7 +405,8 @@ BEGIN
         RAISE NOTICE 'cluster_object_audit_keys: % Proxmox-sourced applies were left under their old key as copies of Nexara''s own, on the strength of a token of the cluster''s user other than the one it is configured with', ambiguous;
         -- Once: a second run finds the row there.
         INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details, source)
-        SELECT NULL, NULL, 'system', 'migration', 'migration_notice',
+        SELECT NULL, (SELECT id FROM users WHERE id = '00000000-0000-0000-0000-000000000001'),
+               'system', 'migration', 'migration_notice',
                jsonb_build_object(
                    'migration', 'cluster_object_audit_keys',
                    'copies', ambiguous,
