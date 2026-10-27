@@ -30,7 +30,7 @@ import (
 // explainRule is one rule, as ClassifyObservedChanges decodes it.
 type explainRule struct {
 	Kind      string `json:"kind"`       // the change's resource_type
-	Change    string `json:"change"`     // added, removed or changed; "" any
+	Change    string `json:"change"`     // added, removed or changed: every rule names one
 	AuditType string `json:"audit_type"` // audit_log.resource_type; "" any (vmid, sid and cluster keys only)
 	MatchKey  string `json:"match_key"`  // id, node, vmid, sid, cluster or details:<key>
 	Untasked  bool   `json:"untasked"`   // only an audit row with no task
@@ -38,6 +38,10 @@ type explainRule struct {
 	ExceptRe  string `json:"except_re"`  // an action that never explains; "" none
 	WorkerRe  string `json:"worker_re"`  // the row's UPID worker type; "" any
 	FieldRe   string `json:"field_re"`   // the fields it explains; "" any
+	DetailKey string `json:"detail_key"` // only a row whose details carry this key; "" any
+	// UPIDObject keeps a rule to the task that names the object: the change's
+	// resource_id must be this format of the UPID's id (%s); "" any.
+	UPIDObject string `json:"upid_object"`
 }
 
 // byAction is the rules a kind's own audit rows give: an audit row for the same
@@ -70,6 +74,35 @@ func sdnCRUD(kind string) []explainRule {
 	return byAction(kind, []string{kind + "_created"}, []string{kind + "_updated"}, []string{kind + "_deleted"})
 }
 
+// inDirections is one rule for each direction named: an action that can change
+// an object or take it away, but never create one, gets two.
+func inDirections(r explainRule, changes ...string) []explainRule {
+	rules := make([]explainRule, 0, len(changes))
+	for _, change := range changes {
+		r.Change = change
+		rules = append(rules, r)
+	}
+	return rules
+}
+
+// The tasks that define, extend or remove a storage (pve-storage
+// API2/Disks/*.pm, pve-manager API2/Ceph/{Pool,FS}.pm). Each names the disk
+// object it made or removed in its UPID, which is the storage's id when the
+// task defined the storage — except lvmthinremove's "<vg>-<lv>", which no
+// format of a storage id is. A disk created on another node of a storage with
+// a node list adds the node (API2/Storage/Config.pm create_or_update); a disk
+// removed with cleanup-config takes the node out, or the storage with its last
+// node (cleanup_storages_for_node), and with it the storage's ACL and its place
+// in every pool (AccessControl.pm remove_storage_access).
+var (
+	diskCreateWorkers  = []string{"dircreate", "lvmcreate", "lvmthincreate", "zfscreate"}
+	cephCreateWorkers  = []string{"cephfscreate", "cephcreatepool"}
+	diskRemoveWorkers  = []string{"dirremove", "lvmremove", "zfsremove"}
+	cephRemoveWorkers  = []string{"cephdestroyfs", "cephdestroypool"}
+	storageRemovals    = slices.Concat(diskRemoveWorkers, cephRemoveWorkers, []string{"lvmthinremove"})
+	guestDestroyWorker = `^(qmdestroy|vzdestroy)$`
+)
+
 const (
 	qemuDiskFields = `^((ide|sata|scsi|virtio)[0-9]+|efidisk0|tpmstate0|unused[0-9]+)$`
 	lxcDiskFields  = `^(rootfs|mp[0-9]+|unused[0-9]+)$`
@@ -78,7 +111,7 @@ const (
 // guestConfigActions are Nexara's own edits of a guest's configuration that run
 // no task, so no worker type says what they are. Every action Nexara files for
 // a guest with no task is either here or in guestOtherActions, which
-// TestObservedGuestActionVocabulary holds to the handlers.
+// TestObservedActionVocabulary holds to the handlers.
 var guestConfigActions = []string{
 	"config_update", "disk_attach", "disk_detach", "disk_resize", "media_mount", "media_eject",
 	"guest_tools_stage", "guest_tools_update", "guest_tools_cancel", "guest_tools_auto_cancel",
@@ -130,27 +163,34 @@ var observedChangeRules = slices.Concat(
 			ActionRe: `^set_pool$`, FieldRe: `^vms$`},
 		{Kind: "pool", Change: "changed", AuditType: "storage", MatchKey: "cluster",
 			ActionRe: `^(delete|delete_import_source)$`, FieldRe: `^storage$`},
-		{Kind: "pool", Change: "changed", MatchKey: "cluster",
-			WorkerRe: `^ceph(destroypool|destroyfs)$`, FieldRe: `^storage$`},
+		{Kind: "pool", Change: "changed", MatchKey: "cluster", WorkerRe: anyOf(storageRemovals...), FieldRe: `^storage$`},
 	},
 
 	// A storage, created, edited and removed through Nexara — an ESXi import
-	// source is one, and enabling import content edits one — and by the disk
-	// and Ceph tasks that add or clean one up.
-	byAction("storage", []string{"create", "create_import_source"}, []string{"update", "enable_import_content"},
+	// source is one, and enabling import content edits its content — and by
+	// the disk and Ceph tasks that define, extend or remove the one they name.
+	byAction("storage", []string{"create", "create_import_source"}, []string{"update"},
 		[]string{"delete", "delete_import_source"}),
 	[]explainRule{
+		{Kind: "storage", Change: "changed", AuditType: "storage", MatchKey: "id",
+			ActionRe: `^enable_import_content$`, FieldRe: `^content$`},
 		{Kind: "storage", Change: "added", MatchKey: "cluster",
-			WorkerRe: anyOf("dircreate", "lvmcreate", "lvmthincreate", "zfscreate", "cephfscreate", "cephcreatepool")},
+			WorkerRe: anyOf(slices.Concat(diskCreateWorkers, cephCreateWorkers)...), UPIDObject: "%s"},
+		{Kind: "storage", Change: "changed", MatchKey: "cluster",
+			WorkerRe: anyOf(slices.Concat(diskCreateWorkers, diskRemoveWorkers)...), FieldRe: `^nodes$`, UPIDObject: "%s"},
 		{Kind: "storage", Change: "removed", MatchKey: "cluster",
-			WorkerRe: anyOf("dirremove", "lvmremove", "lvmthinremove", "zfsremove", "cephdestroyfs", "cephdestroypool")},
+			WorkerRe: anyOf(slices.Concat(diskRemoveWorkers, cephRemoveWorkers)...), UPIDObject: "%s"},
+		{Kind: "storage", Change: "changed", MatchKey: "cluster", WorkerRe: `^lvmthinremove$`, FieldRe: `^nodes$`},
+		{Kind: "storage", Change: "removed", MatchKey: "cluster", WorkerRe: `^lvmthinremove$`},
 	},
 
-	// A backup job; a guest destroyed with purge leaves every job it was in
-	// (VZDump::Plugin remove_vmid_from_backup_jobs).
+	// A backup job; a guest destroyed with purge leaves every job it was in,
+	// and a job it was the last guest of is deleted (VZDump::Plugin
+	// remove_vmid_from_backup_jobs).
 	byAction("backup", []string{"backup_job_created"}, []string{"backup_job_updated"}, []string{"backup_job_deleted"}),
 	[]explainRule{
-		{Kind: "backup", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`, FieldRe: `^vmid$`},
+		{Kind: "backup", Change: "changed", MatchKey: "cluster", WorkerRe: guestDestroyWorker, FieldRe: `^(vmid|exclude)$`},
+		{Kind: "backup", Change: "removed", MatchKey: "cluster", WorkerRe: guestDestroyWorker},
 	},
 
 	// A mapping's delete that found it already gone is a no-op, which explains
@@ -159,16 +199,23 @@ var observedChangeRules = slices.Concat(
 	crud("pci_mapping"),
 	crud("metric_server"),
 	// The datacenter options, which the rolling update also edits (it pauses
-	// and restores the CRS option).
-	byAction("cluster_options", nil, []string{"updated", "description_updated", "tags_updated"}, nil),
+	// and restores the CRS option). The notes and the tag settings have routes
+	// of their own, which write nothing else.
+	byAction("cluster_options", nil, []string{"updated"}, nil),
+	[]explainRule{
+		{Kind: "cluster_options", Change: "changed", AuditType: "cluster_options", MatchKey: "id",
+			ActionRe: `^description_updated$`, FieldRe: `^description$`},
+		{Kind: "cluster_options", Change: "changed", AuditType: "cluster_options", MatchKey: "id",
+			ActionRe: `^tags_updated$`, FieldRe: `^(registered-tags|user-tag-access|tag-style)$`},
+	},
 	byAction("acme_config", nil, []string{"updated"}, nil),
 
 	// A node's interfaces: their own rows, and a revert of the pending
-	// changes, which is filed under the node and undoes any of them.
+	// changes, which is filed under the node and undoes any of them, in any
+	// direction.
 	byAction("network", []string{"interface_created"}, []string{"interface_updated"}, []string{"interface_deleted"}),
-	[]explainRule{
-		{Kind: "network", AuditType: "network", MatchKey: "node", ActionRe: `^network_reverted$`},
-	},
+	inDirections(explainRule{Kind: "network", AuditType: "network", MatchKey: "node", ActionRe: `^network_reverted$`},
+		"added", "changed", "removed"),
 
 	// A node's own objects all file as node / <node>, beside everything else
 	// done to the node, so each action explains only its own fields.
@@ -193,8 +240,9 @@ var observedChangeRules = slices.Concat(
 	crud("ha_rule"),
 	[]explainRule{
 		{Kind: "ha_resource", Change: "changed", MatchKey: "sid", WorkerRe: anyOf("hastart", "hastop"), FieldRe: `^state$`},
-		{Kind: "ha_resource", Change: "removed", MatchKey: "sid", WorkerRe: `^(qmdestroy|vzdestroy)$`},
-		{Kind: "ha_rule", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`, FieldRe: `^resources$`},
+		{Kind: "ha_resource", Change: "removed", MatchKey: "sid", WorkerRe: guestDestroyWorker},
+		{Kind: "ha_rule", Change: "changed", MatchKey: "cluster", WorkerRe: guestDestroyWorker, FieldRe: `^resources$`},
+		{Kind: "ha_rule", Change: "removed", MatchKey: "cluster", WorkerRe: guestDestroyWorker},
 	},
 
 	sdnCRUD("sdn_zone"),
@@ -208,13 +256,15 @@ var observedChangeRules = slices.Concat(
 	// only change; a template applied adds to the rules. An alias renamed
 	// through Nexara is filed under its old name with the new one in
 	// details.rename: the old name's removal and the new one's addition are
-	// both that update.
+	// both that update, and an update that renamed nothing removes nothing.
 	byAction("firewall_options", nil, []string{"firewall_options_updated"}, nil),
 	byAction("firewall_rule", nil,
 		[]string{"firewall_rule_created", "firewall_rule_updated", "firewall_rule_deleted", "template_applied"}, nil),
-	byAction("firewall_alias", []string{"created"}, []string{"updated"}, []string{"deleted", "updated"}),
+	byAction("firewall_alias", []string{"created"}, []string{"updated"}, []string{"deleted"}),
 	[]explainRule{
 		{Kind: "firewall_alias", Change: "added", AuditType: "firewall_alias", MatchKey: "details:rename", ActionRe: `^updated$`},
+		{Kind: "firewall_alias", Change: "removed", AuditType: "firewall_alias", MatchKey: "id", ActionRe: `^updated$`,
+			DetailKey: "rename"},
 	},
 	byAction("firewall_ipset", []string{"created"}, nil, []string{"deleted"}),
 	byAction("firewall_ipset_entry", []string{"created"}, nil, []string{"deleted"}),
@@ -225,8 +275,8 @@ var observedChangeRules = slices.Concat(
 	// group's members when a user's groups are; a user deleted takes its
 	// tokens, and anything deleted takes its ACL entries with it
 	// (AccessControl.pm delete_user_acl and the like), as a guest or a storage
-	// removed does (remove_vm_access, remove_storage_access). An ACL path is
-	// added by its first grant and removed with its last.
+	// removed takes its own path (remove_vm_access, remove_storage_access). An
+	// ACL path is added by its first grant and removed with its last.
 	crud("pve_user"),
 	byAction("pve_token", []string{"created"}, []string{"updated", "regenerated"}, []string{"deleted"}),
 	crud("pve_group"),
@@ -238,13 +288,21 @@ var observedChangeRules = slices.Concat(
 		{Kind: "pve_group", Change: "changed", AuditType: "pve_user", MatchKey: "cluster",
 			ActionRe: anyOf("created", "updated", "deleted"), FieldRe: `^users$`},
 		{Kind: "pve_token", Change: "removed", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^deleted$`},
-		{Kind: "pve_acl", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`},
-		{Kind: "pve_acl", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^deleted$`},
-		{Kind: "pve_acl", AuditType: "pve_group", MatchKey: "cluster", ActionRe: `^deleted$`},
-		{Kind: "pve_acl", AuditType: "pve_token", MatchKey: "cluster", ActionRe: `^deleted$`},
-		{Kind: "pve_acl", AuditType: "pve_role", MatchKey: "cluster", ActionRe: `^deleted$`},
-		{Kind: "pve_acl", AuditType: "storage", MatchKey: "cluster", ActionRe: `^(delete|delete_import_source)$`},
+		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: guestDestroyWorker, UPIDObject: "/vms/%s"},
+		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster",
+			WorkerRe: anyOf(slices.Concat(diskRemoveWorkers, cephRemoveWorkers)...), UPIDObject: "/storage/%s"},
+		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: `^lvmthinremove$`},
+		{Kind: "pve_acl", Change: "removed", AuditType: "storage", MatchKey: "cluster",
+			ActionRe: `^(delete|delete_import_source)$`},
 	},
+	inDirections(explainRule{Kind: "pve_acl", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^deleted$`},
+		"changed", "removed"),
+	inDirections(explainRule{Kind: "pve_acl", AuditType: "pve_group", MatchKey: "cluster", ActionRe: `^deleted$`},
+		"changed", "removed"),
+	inDirections(explainRule{Kind: "pve_acl", AuditType: "pve_token", MatchKey: "cluster", ActionRe: `^deleted$`},
+		"changed", "removed"),
+	inDirections(explainRule{Kind: "pve_acl", AuditType: "pve_role", MatchKey: "cluster", ActionRe: `^deleted$`},
+		"changed", "removed"),
 
 	// ACME. An account registered or deactivated in the Proxmox GUI is a task
 	// whose UPID names no account.
@@ -282,7 +340,8 @@ var observedActionsExplainingNothing = map[string][]string{
 // observedGlobalRules is the rules for the global kinds' rows. A PBS sync or
 // verify job is never edited by Nexara — it only runs them — so nothing on
 // record explains one edited on the PBS, and a run or a garbage collection
-// Nexara started on the same server must not hide it.
+// Nexara started on the same server must not hide it. Their classifier reads
+// 'id' rules only, without detail_key or upid_object.
 var observedGlobalRules = []explainRule{}
 
 var (

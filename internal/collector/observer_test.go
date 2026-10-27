@@ -744,6 +744,13 @@ func TestObservedChangeRules(t *testing.T) {
 		if !keys.MatchString(r.MatchKey) || (r.AuditType == "" && !slices.Contains([]string{"vmid", "sid", "cluster"}, r.MatchKey)) {
 			t.Errorf("rule %+v: match key or audit type", r)
 		}
+		if !slices.Contains([]string{"added", "changed", "removed"}, r.Change) {
+			t.Errorf("rule %+v names no direction", r)
+		}
+		if (r.UPIDObject != "" && (strings.Count(r.UPIDObject, "%") != 1 || !strings.Contains(r.UPIDObject, "%s"))) ||
+			!regexp.MustCompile(`^[a-z_]*$`).MatchString(r.DetailKey) {
+			t.Errorf("rule %+v: upid_object or detail_key", r)
+		}
 		for _, re := range []string{r.ActionRe, r.ExceptRe, r.WorkerRe, r.FieldRe} {
 			if _, err := regexp.Compile(re); err != nil || (re != "" && !strings.HasPrefix(re, "^")) {
 				t.Errorf("rule %+v: pattern %q", r, re)

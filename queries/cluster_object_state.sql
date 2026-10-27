@@ -95,11 +95,15 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- any row of the cluster, 'details:<k>' a row whose details-><k> is the
 -- change's resource_id — and which of those rows: by action and UPID worker
 -- type (anchored patterns, '' any), never an action matching except_re, only a
--- row with no task when untasked. field_re says which fields such a row can
--- explain ('' any): a disk move explains the disk it moved, not the memory
--- someone changed in the GUI meanwhile. A change is explained when every field
--- it names is covered by some rule's row; an added or removed object, when any
--- rule's row is found.
+-- row with no task when untasked, only a row whose details carry detail_key
+-- ('' any: an alias update that renamed it), only a task whose UPID names the
+-- object when upid_object is set (the change's resource_id is that format of
+-- the UPID's id: '%s' the storage a disk task defined, '/vms/%s' the ACL path of
+-- the guest it destroyed). field_re says which fields such a row can explain
+-- ('' any): a disk move explains the disk it moved, not the memory someone
+-- changed in the GUI meanwhile. A change is explained when every field it names
+-- is covered by some rule's row; an added or removed object, when any rule's
+-- row is found.
 --
 -- The window opens no earlier than lookback_seconds before the change was seen
 -- (observedLookback says how long and why): after an outage a change's window
@@ -122,7 +126,9 @@ WITH rules AS MATERIALIZED (
            e.value->>'action_re'           AS action_re,
            e.value->>'except_re'           AS except_re,
            e.value->>'worker_re'           AS worker_re,
-           e.value->>'field_re'            AS field_re
+           e.value->>'field_re'            AS field_re,
+           e.value->>'detail_key'          AS detail_key,
+           e.value->>'upid_object'         AS upid_object
     FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
 ), pending AS MATERIALIZED (
     SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.node,
@@ -138,32 +144,32 @@ WITH rules AS MATERIALIZED (
 ), candidates AS (
     -- One arm per match_key, so each reads audit_log through the index its key
     -- can use.
-    SELECT p.id, p.cluster_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re, r.worker_re, r.field_re,
-           a.action, a.details->>'upid' AS upid, a.created_at
+    SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
+           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
                     AND a.resource_id = p.resource_id
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
-    SELECT p.id, p.cluster_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re, r.worker_re, r.field_re,
-           a.action, a.details->>'upid', a.created_at
+    SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
+           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
                     AND p.node <> '' AND a.resource_id = p.node
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
-    SELECT p.id, p.cluster_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re, r.worker_re, r.field_re,
-           a.action, a.details->>'upid', a.created_at
+    SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
+           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.vmid = p.vmid
                     AND (r.audit_type = '' OR a.resource_type = r.audit_type)
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
-    SELECT p.id, p.cluster_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re, r.worker_re, r.field_re,
-           a.action, a.details->>'upid', a.created_at
+    SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
+           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
     JOIN audit_log a ON a.cluster_id = p.cluster_id
@@ -171,16 +177,16 @@ WITH rules AS MATERIALIZED (
                     AND (r.audit_type = '' OR a.resource_type = r.audit_type)
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
-    SELECT p.id, p.cluster_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re, r.worker_re, r.field_re,
-           a.action, a.details->>'upid', a.created_at
+    SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
+           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
     JOIN audit_log a ON a.cluster_id = p.cluster_id
                     AND (r.audit_type = '' OR a.resource_type = r.audit_type)
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
-    SELECT p.id, p.cluster_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re, r.worker_re, r.field_re,
-           a.action, a.details->>'upid', a.created_at
+    SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
+           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
@@ -189,11 +195,14 @@ WITH rules AS MATERIALIZED (
 ), hits AS (
     SELECT k.id, k.field_re
     FROM candidates k
-    LEFT JOIN task_history th ON th.cluster_id = k.cluster_id AND th.upid = k.upid
-    WHERE (NOT k.untasked OR k.upid IS NULL)
+    LEFT JOIN task_history th ON th.cluster_id = k.cluster_id AND th.upid = k.details->>'upid'
+    WHERE (NOT k.untasked OR k.details->>'upid' IS NULL)
       AND (k.action_re = '' OR k.action ~ k.action_re)
       AND (k.except_re = '' OR k.action !~ k.except_re)
-      AND (k.worker_re = '' OR COALESCE(split_part(k.upid, ':', 6) ~ k.worker_re, false))
+      AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
+      AND (k.detail_key = '' OR k.details ? k.detail_key)
+      AND (k.upid_object = '' OR (k.details->>'upid' IS NOT NULL
+           AND format(k.upid_object, split_part(k.details->>'upid', ':', 7)) = k.resource_id))
       AND COALESCE(th.started_at, k.created_at) <= k.win_to
       AND CASE WHEN th.upid IS NULL THEN k.created_at ELSE COALESCE(th.finished_at, now()) END >= k.win_from
 )
@@ -212,7 +221,8 @@ WHERE c.id = p.id;
 -- ClassifyGlobalObjectChanges is ClassifyObservedChanges for the rows of a
 -- global kind — a PBS server's jobs (000130), whoever recorded them — which
 -- belong to no cluster: their explaining rows are found by resource_type and
--- resource_id alone ('id' rules only), and there is no node list to wait for.
+-- resource_id alone ('id' rules only, without detail_key or upid_object), and
+-- there is no node list to wait for.
 -- name: ClassifyGlobalObjectChanges :execrows
 WITH rules AS MATERIALIZED (
     SELECT e.value->>'kind'                AS kind,

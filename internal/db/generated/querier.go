@@ -139,7 +139,8 @@ type Querier interface {
 	// ClassifyGlobalObjectChanges is ClassifyObservedChanges for the rows of a
 	// global kind — a PBS server's jobs (000130), whoever recorded them — which
 	// belong to no cluster: their explaining rows are found by resource_type and
-	// resource_id alone ('id' rules only), and there is no node list to wait for.
+	// resource_id alone ('id' rules only, without detail_key or upid_object), and
+	// there is no node list to wait for.
 	ClassifyGlobalObjectChanges(ctx context.Context, arg ClassifyGlobalObjectChangesParams) (int64, error)
 	// The guest kind's own SQL: what only a guest's History needs beyond the
 	// shared timeline (queries/history.sql, ListHistory) — where its timeline
@@ -228,11 +229,15 @@ type Querier interface {
 	// any row of the cluster, 'details:<k>' a row whose details-><k> is the
 	// change's resource_id — and which of those rows: by action and UPID worker
 	// type (anchored patterns, '' any), never an action matching except_re, only a
-	// row with no task when untasked. field_re says which fields such a row can
-	// explain ('' any): a disk move explains the disk it moved, not the memory
-	// someone changed in the GUI meanwhile. A change is explained when every field
-	// it names is covered by some rule's row; an added or removed object, when any
-	// rule's row is found.
+	// row with no task when untasked, only a row whose details carry detail_key
+	// ('' any: an alias update that renamed it), only a task whose UPID names the
+	// object when upid_object is set (the change's resource_id is that format of
+	// the UPID's id: '%s' the storage a disk task defined, '/vms/%s' the ACL path of
+	// the guest it destroyed). field_re says which fields such a row can explain
+	// ('' any): a disk move explains the disk it moved, not the memory someone
+	// changed in the GUI meanwhile. A change is explained when every field it names
+	// is covered by some rule's row; an added or removed object, when any rule's
+	// row is found.
 	//
 	// The window opens no earlier than lookback_seconds before the change was seen
 	// (observedLookback says how long and why): after an outage a change's window

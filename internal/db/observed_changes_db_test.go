@@ -175,6 +175,8 @@ func TestObservedChanges(t *testing.T) {
 	audit(observedCluster, in, "vm", uuid.NewString(), 103, "config_update", nil)
 	byOtherUntasked := seed(observedCluster, "vm", "104", 104, "changed", "pve-01", []string{"memory"}, at)
 	audit(observedCluster, in, "vm", uuid.NewString(), 104, "drs_migrate", nil)
+	byTaskedEdit := seed(observedCluster, "vm", "107", 107, "changed", "pve-01", []string{"memory"}, at)
+	audit(observedCluster, in, "vm", uuid.NewString(), 107, "config_update", map[string]any{"upid": upid("resize", 10)})
 	byLongTask := seed(observedCluster, "vm", "105", 105, "changed", "pve-01", []string{"memory"}, at)
 	audit(observedCluster, at.Add(-3*time.Hour), "vm", "105", 105, "config_change", map[string]any{"upid": upid("qmconfig", 5)})
 	task(observedCluster, upid("qmconfig", 5), 105, at.Add(-3*time.Hour), at.Add(-2*time.Minute))
@@ -187,15 +189,24 @@ func TestObservedChanges(t *testing.T) {
 	// hour and more apart.
 	bySid := seed(observedCluster, "ha_resource", "vm:110", 0, "changed", "", []string{"state"}, at)
 	audit(observedCluster, in, "proxmox_task", "110", 110, "hastart", map[string]any{"upid": upid("hastart", 7)})
+	besideSid := seed(observedCluster, "ha_resource", "vm:113", 0, "changed", "", []string{"state"}, at)
 	byClusterTask := seed(observedCluster, "pool", "web", 0, "changed", "", []string{"vms"}, at)
 	audit(observedCluster, in, "vm", "111", 111, "destroy", map[string]any{"upid": upid("qmdestroy", 8)})
 	byDetails := seed(observedCluster, "pool", "db", 0, "changed", "", []string{"vms"}, ago(200))
 	audit(observedCluster, ago(201), "vm", uuid.NewString(), 112, "set_pool", map[string]any{"new_pool": "db"})
+	besideDetails := seed(observedCluster, "pool", "app", 0, "changed", "", []string{"vms"}, ago(200))
 	byNode := seed(observedCluster, "network", "pve-01/vmbr1", 0, "removed", "pve-01", nil, at)
 	audit(observedCluster, in, "network", "pve-01", 0, "network_reverted", nil)
+	besideNode := seed(observedCluster, "network", "pve-02/vmbr1", 0, "removed", "pve-02", nil, at)
 	addedByTask := seed(observedCluster, "storage", "store04", 0, "added", "", nil, ago(300))
-	audit(observedCluster, ago(301), "node", "pve-01", 0, "create_directory", map[string]any{"upid": upid("dircreate", 9)})
+	audit(observedCluster, ago(301), "node", "pve-01", 0, "create_directory",
+		map[string]any{"upid": "UPID:pve-01:00000009:00000001:00000001:dircreate:store04:root@pam:"})
+	addedBesideTask := seed(observedCluster, "storage", "store11", 0, "added", "", nil, ago(300))
 	addedUnexplained := seed(observedCluster, "storage", "store05", 0, "added", "", nil, ago(400))
+	renamedAway := seed(observedCluster, "firewall_alias", "web", 0, "removed", "", nil, at)
+	audit(observedCluster, in, "firewall_alias", "web", 0, "updated", map[string]any{"rename": "web2"})
+	removedBesideUpdate := seed(observedCluster, "firewall_alias", "db", 0, "removed", "", nil, at)
+	audit(observedCluster, in, "firewall_alias", "db", 0, "updated", map[string]any{"name": "db"})
 
 	// The look-back: a change first seen after an outage opens its window an
 	// hour before it was seen at the most, however long the gap.
@@ -215,12 +226,15 @@ func TestObservedChanges(t *testing.T) {
 
 	rule := func(kind, change, auditType, key string, untasked bool, actionRe, exceptRe, workerRe, fieldRe string) map[string]any {
 		return map[string]any{"kind": kind, "change": change, "audit_type": auditType, "match_key": key,
-			"untasked": untasked, "action_re": actionRe, "except_re": exceptRe, "worker_re": workerRe, "field_re": fieldRe}
+			"untasked": untasked, "action_re": actionRe, "except_re": exceptRe, "worker_re": workerRe, "field_re": fieldRe,
+			"detail_key": "", "upid_object": ""}
 	}
+	with := func(r map[string]any, key, value string) map[string]any { r[key] = value; return r }
 	rules := jsonOf([]map[string]any{
 		rule("storage", "", "storage", "id", false, "", "", "", ""),
 		rule("backup", "", "backup", "id", false, "", "^run$", "", ""),
-		rule("storage", "added", "", "cluster", false, "", "", "^dircreate$", ""),
+		with(rule("storage", "added", "", "cluster", false, "", "", "^dircreate$", ""), "upid_object", "%s"),
+		with(rule("firewall_alias", "removed", "firewall_alias", "id", false, "^updated$", "", "", ""), "detail_key", "rename"),
 		rule("vm", "changed", "", "vmid", false, "", "", "^qmmove$", "^scsi[0-9]+$"),
 		rule("vm", "changed", "", "vmid", false, "", "", "^qmconfig$", ""),
 		rule("vm", "changed", "vm", "vmid", true, "^config_update$", "", "", ""),
@@ -275,13 +289,20 @@ func TestObservedChanges(t *testing.T) {
 		{"a disk move and a config task, both changed", bothCovered, "explained"},
 		{"Nexara's own untasked edit", byNexaraEdit, "explained"},
 		{"an untasked row of another action", byOtherUntasked, "shown"},
+		{"an edit's row that ran a task the rule does not take", byTaskedEdit, "shown"},
 		{"a task started long before, running into the window", byLongTask, "explained"},
 		{"a task that ended long before", byFinishedTask, "shown"},
 		{"an HA start of the sid's guest", bySid, "explained"},
+		{"an HA start of another guest", besideSid, "shown"},
 		{"a guest destroyed anywhere in the cluster", byClusterTask, "explained"},
 		{"a guest moved into the pool from its page", byDetails, "explained"},
+		{"a guest moved into another pool", besideDetails, "shown"},
 		{"a revert of the node's pending network", byNode, "explained"},
+		{"a revert on another node", besideNode, "shown"},
 		{"added by a disk task", addedByTask, "explained"},
+		{"added beside a disk task that named another", addedBesideTask, "shown"},
+		{"renamed away by an update", renamedAway, "explained"},
+		{"removed beside an update that renamed nothing", removedBesideUpdate, "shown"},
 		{"added, nothing on record", addedUnexplained, "shown"},
 		{"after an outage, by a row from the gap's start", afterOutage, "shown"},
 		{"after an outage, by a row within the look-back", afterOutageRecent, "explained"},
@@ -409,27 +430,30 @@ func TestObservedGlobalChanges(t *testing.T) {
 	}
 
 	// The global classification: an audit row of the server, in any cluster or
-	// none, explains a change of it; with nothing on record it shows.
+	// none, explains a change of it, the fields its rule covers; with nothing on
+	// record it shows.
 	exec("settle", `UPDATE cluster_object_changes SET observed_at = now() - interval '1 hour',
 			last_seen_at = now() - interval '70 minutes'
 		WHERE cluster_id IS NULL AND resource_id = ANY($1)`, []string{observedPBS.String(), observedPBSGone.String()})
 	exec("audit", `INSERT INTO audit_log (user_id, resource_type, resource_id, action, created_at)
 		VALUES ($1, 'pbs_server', $2, 'pbs_updated', now() - interval '65 minutes')`, systemUserID, observedPBS.String())
 	rules, _ := json.Marshal([]map[string]any{{"kind": "pbs_server", "change": "", "audit_type": "pbs_server",
-		"match_key": "id", "untasked": false, "action_re": "", "except_re": "", "worker_re": "", "field_re": ""}})
+		"match_key": "id", "untasked": false, "action_re": "", "except_re": "", "worker_re": "", "field_re": "^schedule$"}})
 	if _, err := q.ClassifyGlobalObjectChanges(ctx, gen.ClassifyGlobalObjectChangesParams{
 		Rules: rules, LookbackSeconds: 3600, SettledBefore: time.Now().Add(-5 * time.Minute),
 	}); err != nil {
 		t.Fatalf("classify: %v", err)
 	}
-	var explained, shown int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE explained AND resource_id = $1),
-			count(*) FILTER (WHERE NOT explained AND resource_id = $2)
-		FROM cluster_object_changes WHERE cluster_id IS NULL`, observedPBS.String(), observedPBSGone.String()).
-		Scan(&explained, &shown); err != nil {
+	var explained, shown []string
+	if err := pool.QueryRow(ctx, `SELECT
+			coalesce(array_agg(change ORDER BY change) FILTER (WHERE explained AND resource_id = $1), '{}'),
+			coalesce(array_agg(change ORDER BY change) FILTER (WHERE NOT explained), '{}')
+		FROM cluster_object_changes WHERE cluster_id IS NULL AND resource_id = ANY($2)`,
+		observedPBS.String(), []string{observedPBS.String(), observedPBSGone.String()}).Scan(&explained, &shown); err != nil {
 		t.Fatal(err)
 	}
-	if explained != 3 || shown != 1 {
-		t.Fatalf("explained %d of the server's 3, shown %d of the other's 1", explained, shown)
+	// The changed job names remote-store too, which the rule does not cover.
+	if fmt.Sprint(explained) != "[added removed]" || fmt.Sprint(shown) != "[added changed]" {
+		t.Fatalf("explained %v of the server's changes, shown %v of both servers'", explained, shown)
 	}
 }
