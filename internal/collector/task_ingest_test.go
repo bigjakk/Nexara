@@ -216,6 +216,10 @@ func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 		{"a pool with no name", "cephdestroypool", "", "proxmox_task", "pve-01", "cephdestroypool", "cephdestroypool"},
 		{"a pool name with a control character", "cephcreatepool", "pool\n01", "proxmox_task", "pve-01", "cephcreatepool", "cephcreatepool pool?01"},
 		{"a pool name past the bound", "cephcreatepool", strings.Repeat("p", auditkey.MaxIDLen+1), "proxmox_task", "pve-01", "cephcreatepool", ""},
+		{"a pool name Proxmox would not let be created", "cephcreatepool", "pool/01", "proxmox_task", "pool/01", "cephcreatepool", "cephcreatepool pool/01"},
+		{"a manager id outside Proxmox's pattern", "cephcreatemgr", "mgr.pve_01", "proxmox_task", "mgr.pve_01", "cephcreatemgr", "cephcreatemgr mgr.pve_01"},
+		{"a pool name with a format character", "cephcreatepool", "pool\u200b01", "proxmox_task", "pve-01", "cephcreatepool", ""},
+		{"an OSD made on a device under a directory", "cephcreateosd", "cciss/c0d0", "ceph_osd", "cciss/c0d0", "osd_create", "Create Ceph OSD cciss/c0d0"},
 		{"a daemon service task with no daemon", "srvrestart", "osd.", "proxmox_task", "osd.", "srvrestart", "srvrestart osd."},
 		{"a daemon service task naming no OSD number", "srvrestart", "osd.abc", "proxmox_task", "osd.abc", "srvrestart", "srvrestart osd.abc"},
 	} {

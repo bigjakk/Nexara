@@ -163,19 +163,19 @@ SET resource_type = m.resource_type,
     details = CASE WHEN a.details ? 'rekeyed_from' THEN a.details
                    ELSE a.details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', a.resource_type, 'resource_id', a.resource_id, 'action', a.action)) END
 FROM (VALUES
-    ('cephcreateosd',   'ceph_osd',  'osd_create',  '',     '^[A-Za-z0-9/._+@-]{1,128}$'),
+    ('cephcreateosd',   'ceph_osd',  'osd_create',  '',     '^[^[:cntrl:]\u00ad\u0600\u0601-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200c-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9\ufffa-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020\U000e0021-\U000e007f]+$'),
     ('cephdestroyosd',  'ceph_osd',  'osd_destroy', 'osd.', '^[0-9]{1,9}$'),
-    ('cephcreatemon',   'ceph_mon',  'mon_create',  'mon.', '^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$'),
-    ('cephdestroymon',  'ceph_mon',  'mon_destroy', 'mon.', '^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$'),
-    ('cephcreatemgr',   'ceph_mgr',  'mgr_create',  'mgr.', '^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$'),
-    ('cephdestroymgr',  'ceph_mgr',  'mgr_destroy', 'mgr.', '^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$'),
-    ('cephcreatemds',   'ceph_mds',  'mds_create',  'mds.', '^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$'),
-    ('cephdestroymds',  'ceph_mds',  'mds_destroy', 'mds.', '^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$'),
-    ('cephfscreate',    'ceph_fs',   'fs_create',   '',     '^[^[:cntrl:]]+$'),
-    ('cephdestroyfs',   'ceph_fs',   'fs_destroy',  '',     '^[^[:cntrl:]]+$'),
-    ('cephcreatepool',  'ceph_pool', 'create',      '',     '^[^[:cntrl:]]+$'),
-    ('cephdestroypool', 'ceph_pool', 'delete',      '',     '^[^[:cntrl:]]+$'),
-    ('cephsetpool',     'ceph_pool', 'update',      '',     '^[^[:cntrl:]]+$')
+    ('cephcreatemon',   'ceph_mon',  'mon_create',  'mon.', '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$'),
+    ('cephdestroymon',  'ceph_mon',  'mon_destroy', 'mon.', '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$'),
+    ('cephcreatemgr',   'ceph_mgr',  'mgr_create',  'mgr.', '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$'),
+    ('cephdestroymgr',  'ceph_mgr',  'mgr_destroy', 'mgr.', '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$'),
+    ('cephcreatemds',   'ceph_mds',  'mds_create',  'mds.', '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$'),
+    ('cephdestroymds',  'ceph_mds',  'mds_destroy', 'mds.', '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$'),
+    ('cephfscreate',    'ceph_fs',   'fs_create',   '',     '^[^:/[:space:][:cntrl:]\u00ad\u0600\u0601-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200c-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9\ufffa-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020\U000e0021-\U000e007f]+$'),
+    ('cephdestroyfs',   'ceph_fs',   'fs_destroy',  '',     '^[^:/[:space:][:cntrl:]\u00ad\u0600\u0601-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200c-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9\ufffa-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020\U000e0021-\U000e007f]+$'),
+    ('cephcreatepool',  'ceph_pool', 'create',      '',     '^[^:/[:space:][:cntrl:]\u00ad\u0600\u0601-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200c-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9\ufffa-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020\U000e0021-\U000e007f]+$'),
+    ('cephdestroypool', 'ceph_pool', 'delete',      '',     '^[^:/[:space:][:cntrl:]\u00ad\u0600\u0601-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200c-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9\ufffa-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020\U000e0021-\U000e007f]+$'),
+    ('cephsetpool',     'ceph_pool', 'update',      '',     '^[^:/[:space:][:cntrl:]\u00ad\u0600\u0601-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200c-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9\ufffa-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020\U000e0021-\U000e007f]+$')
 ) AS m(task_type, resource_type, action, strip, id_re)
 WHERE a.resource_type = 'proxmox_task'
   AND a.source = 'proxmox'
@@ -199,7 +199,7 @@ WHERE resource_type = 'proxmox_task'
   AND action IN ('srvstart', 'srvstop', 'srvrestart')
   AND details->>'resource_id' = resource_id
   AND (resource_id ~ '^osd\.[0-9]{1,9}$'
-       OR resource_id ~ '^(mon|mgr|mds)\.[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$')
+       OR resource_id ~ '^(mon|mgr|mds)\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$')
   AND (details->>'upid' IS NULL OR split_part(details->>'upid', ':', 6) = action);
 
 -- Certificates are the node's.

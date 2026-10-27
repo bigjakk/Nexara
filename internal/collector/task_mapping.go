@@ -35,13 +35,16 @@ type taskMapping struct {
 	IDPattern *regexp.Regexp
 }
 
-// The shapes Proxmox gives the ids of the Ceph objects a task names: an OSD's
-// number, the device a new OSD is made on, and the name of a monitor, manager or
-// metadata server (a node name or a name chosen on create).
+// The shapes Proxmox gives the ids of the Ceph objects a task names, transcribed
+// from its own checks and no stricter: an OSD's number (an integer), a monitor,
+// manager or metadata server id (PVE::Ceph::Services SERVICE_REGEX, the pattern of
+// monid, id and name), and a pool or CephFS name (the pattern Pool.pm and FS.pm give
+// name on create, qr|^[^:/\s]+$|). A new OSD's id is the device name, with "/dev/"
+// taken off whatever path was given, so it has no shape beyond auditkey.ValidID.
 var (
-	cephOSDNumber = regexp.MustCompile(`^\d{1,9}$`)
-	cephOSDDevice = regexp.MustCompile(`^[A-Za-z0-9/._+@-]{1,128}$`)
-	cephDaemonID  = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$`)
+	cephOSDNumber  = regexp.MustCompile(`^\d{1,9}$`)
+	cephDaemonID   = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
+	cephObjectName = regexp.MustCompile(`^[^:/\s]+$`)
 )
 
 // idOK reports whether id may be filed as this mapping's object.
@@ -112,7 +115,7 @@ var proxmoxTaskMap = map[string]taskMapping{
 	// Proxmox GUI lands in the same History. A new OSD's id is not known until
 	// the task has run (its UPID names the device), so a create can only be
 	// filed under that.
-	"cephcreateosd":   {ResourceType: "ceph_osd", Action: "osd_create", Object: true, Describe: "Create Ceph OSD", IDPattern: cephOSDDevice},
+	"cephcreateosd":   {ResourceType: "ceph_osd", Action: "osd_create", Object: true, Describe: "Create Ceph OSD"},
 	"cephdestroyosd":  {ResourceType: "ceph_osd", Action: "osd_destroy", StripPrefix: "osd.", Object: true, Describe: "Destroy Ceph OSD", IDPattern: cephOSDNumber},
 	"cephcreatemon":   {ResourceType: "ceph_mon", Action: "mon_create", StripPrefix: "mon.", Object: true, Describe: "Create Ceph monitor", IDPattern: cephDaemonID},
 	"cephdestroymon":  {ResourceType: "ceph_mon", Action: "mon_destroy", StripPrefix: "mon.", Object: true, Describe: "Destroy Ceph monitor", IDPattern: cephDaemonID},
@@ -120,11 +123,11 @@ var proxmoxTaskMap = map[string]taskMapping{
 	"cephdestroymgr":  {ResourceType: "ceph_mgr", Action: "mgr_destroy", StripPrefix: "mgr.", Object: true, Describe: "Destroy Ceph manager", IDPattern: cephDaemonID},
 	"cephcreatemds":   {ResourceType: "ceph_mds", Action: "mds_create", StripPrefix: "mds.", Object: true, Describe: "Create Ceph metadata server", IDPattern: cephDaemonID},
 	"cephdestroymds":  {ResourceType: "ceph_mds", Action: "mds_destroy", StripPrefix: "mds.", Object: true, Describe: "Destroy Ceph metadata server", IDPattern: cephDaemonID},
-	"cephfscreate":    {ResourceType: "ceph_fs", Action: "fs_create", Object: true, Describe: "Create CephFS"},
-	"cephdestroyfs":   {ResourceType: "ceph_fs", Action: "fs_destroy", Object: true, Describe: "Destroy CephFS"},
-	"cephcreatepool":  {ResourceType: "ceph_pool", Action: "create", Object: true, Describe: "Create Ceph pool"},
-	"cephdestroypool": {ResourceType: "ceph_pool", Action: "delete", Object: true, Describe: "Destroy Ceph pool"},
-	"cephsetpool":     {ResourceType: "ceph_pool", Action: "update", Object: true, Describe: "Update Ceph pool"},
+	"cephfscreate":    {ResourceType: "ceph_fs", Action: "fs_create", Object: true, IDPattern: cephObjectName, Describe: "Create CephFS"},
+	"cephdestroyfs":   {ResourceType: "ceph_fs", Action: "fs_destroy", Object: true, IDPattern: cephObjectName, Describe: "Destroy CephFS"},
+	"cephcreatepool":  {ResourceType: "ceph_pool", Action: "create", Object: true, IDPattern: cephObjectName, Describe: "Create Ceph pool"},
+	"cephdestroypool": {ResourceType: "ceph_pool", Action: "delete", Object: true, IDPattern: cephObjectName, Describe: "Destroy Ceph pool"},
+	"cephsetpool":     {ResourceType: "ceph_pool", Action: "update", Object: true, IDPattern: cephObjectName, Describe: "Update Ceph pool"},
 }
 
 // cephDaemonKinds maps the prefix of a Ceph daemon's service name to the audit
