@@ -12,8 +12,8 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"slices"
 	"strings"
@@ -344,8 +344,10 @@ func historyScope(can func(action, resource string) (bool, error)) (includeTasks
 
 // ListParams builds ListHistory's arguments for one selection of this kind:
 // the selectors and the rules. The caller adds the scope, filters and page,
-// as List does. A guest named twice is refused: ListHistory looks each one's
-// cutoff up by VMID, and would hold it to the first only.
+// as List does. A guest named twice is one guest — a folder's memberships can
+// name a VMID twice — unless its two cutoffs differ: ListHistory looks each
+// one's cutoff up by VMID, and would hold it to the first only, so that is
+// refused.
 func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.ListHistoryParams, error) {
 	params := db.ListHistoryParams{
 		DefaultCategory: k.Default,
@@ -358,15 +360,18 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		ObjectValues:    make([]string, 0, len(sel.Objects)),
 	}
 	for _, g := range sel.Guests {
-		if slices.Contains(params.Vmids, g.VMID) {
-			return db.ListHistoryParams{}, errors.New("history selection names a guest twice")
-		}
-		params.Vmids = append(params.Vmids, g.VMID)
 		// The zero time is ListHistory's "no cutoff": everything is after it.
 		after := time.Time{}
 		if g.After.Valid {
 			after = g.After.Time
 		}
+		if i := slices.Index(params.Vmids, g.VMID); i >= 0 {
+			if !params.CutoffAfter[i].Equal(after) || params.CutoffInclusive[i] != g.Inclusive {
+				return db.ListHistoryParams{}, fmt.Errorf("history selection names guest %d twice, with different cutoffs", g.VMID)
+			}
+			continue
+		}
+		params.Vmids = append(params.Vmids, g.VMID)
 		params.CutoffAfter = append(params.CutoffAfter, after)
 		params.CutoffInclusive = append(params.CutoffInclusive, g.Inclusive)
 	}
@@ -428,6 +433,7 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	}
 	params, err := r.kind.ListParams(clusterID, sel)
 	if err != nil {
+		slog.Error("history selection refused", "kind", r.kind.Name, "cluster_id", clusterID, "error", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
 	}
 	params.IncludeTasks = includeTasks

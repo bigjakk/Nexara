@@ -172,8 +172,8 @@ func TestHistoryKindSQLRules(t *testing.T) {
 	}
 }
 
-// The zero time is ListHistory's "no cutoff"; a guest named twice would be
-// looked up by the first of its cutoffs only, so it is refused.
+// The zero time is ListHistory's "no cutoff". A guest named twice is one,
+// unless its cutoffs differ: ListHistory would hold it to the first only.
 func TestHistoryKindListParams(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -186,8 +186,14 @@ func TestHistoryKindListParams(t *testing.T) {
 		!slices.Equal(p.ObjectKeys, []string{"", "folder_id"}) {
 		t.Errorf("ListParams = %+v, %v", p, err)
 	}
-	if _, err := GuestHistory().ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{{VMID: 100}, {VMID: 100}}}); err == nil {
-		t.Error("a guest named twice was accepted")
+	// The same guest twice is one; twice with different cutoffs is refused.
+	if p, err := GuestHistory().ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{{VMID: 100}, {VMID: 100}}}); err != nil ||
+		!slices.Equal(p.Vmids, []int32{100}) {
+		t.Errorf("the same guest twice: vmids %v, err %v; want one guest", p.Vmids, err)
+	}
+	if _, err := GuestHistory().ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{
+		{VMID: 100}, {VMID: 100, After: pgtype.Timestamptz{Time: at, Valid: true}}}}); err == nil {
+		t.Error("one guest with two cutoffs was accepted")
 	}
 }
 
