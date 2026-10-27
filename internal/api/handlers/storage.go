@@ -37,7 +37,9 @@ import (
 // has been unseen for the grace window), so the UUID an audit row recorded
 // resolves until it doesn't — the vms.id trap again — while the storage id is
 // what Proxmox calls the storage on every node. audit_identity_guard_test.go
-// fails a storage row keyed any other way.
+// fails a row written with the literal type "storage" and keyed any other way;
+// it reads literals only, so the virtio-win config save (its type is computed)
+// and the collector's insert are outside it, held by their own tests.
 type StorageHandler struct {
 	queries       *db.Queries
 	encryptionKey string

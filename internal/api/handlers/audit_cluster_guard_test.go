@@ -9,12 +9,13 @@ import (
 	"testing"
 )
 
-// The cluster argument's position differs between the two audit entry points:
-// AuditLog(c, queries, pub, clusterID, ...) and
-// AuditLogAs(c, queries, pub, actor, clusterID, ...).
-var auditClusterArgIndex = map[string]int{
-	"AuditLog":   3,
-	"AuditLogAs": 4,
+// auditCallArgs are the argument positions of the two audit entry points, which
+// the cluster guard and the identity guard both read:
+// AuditLog(c, queries, pub, clusterID, type, id, action, ...) and
+// AuditLogAs(c, queries, pub, actor, clusterID, type, id, action, ...).
+var auditCallArgs = map[string]struct{ cluster, typ, id, action int }{
+	"AuditLog":   {3, 4, 5, 6},
+	"AuditLogAs": {4, 5, 6, 7},
 }
 
 // auditClusterExempt names every audit call site that deliberately records a NULL cluster, keyed
@@ -255,11 +256,11 @@ func TestGuard_AuditCallsCarryResourceCluster(t *testing.T) {
 					if !ok {
 						return true
 					}
-					idx, audits := auditClusterArgIndex[ident.Name]
-					if !audits || len(node.Args) <= idx {
+					args, audits := auditCallArgs[ident.Name]
+					if !audits || len(node.Args) <= args.cluster {
 						return true
 					}
-					if !nullClusterArg(node.Args[idx]) {
+					if !nullClusterArg(node.Args[args.cluster]) {
 						return true
 					}
 					pos = node.Pos()

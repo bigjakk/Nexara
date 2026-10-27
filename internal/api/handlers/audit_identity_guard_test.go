@@ -29,10 +29,6 @@ type auditSite struct {
 	call        bool   // an AuditLog/AuditLogAs call, rather than a composite literal
 }
 
-// auditEntryArgs are the positions of (resource type, resource id, action) in
-// the two audit entry points.
-var auditEntryArgs = map[string][3]int{"AuditLog": {4, 5, 6}, "AuditLogAs": {5, 6, 7}}
-
 func auditSites(file *ast.File) []auditSite {
 	str := func(e ast.Expr) string { s, _ := stringLiteral(e); return s }
 	isLit := func(e ast.Expr) bool { _, ok := e.(*ast.BasicLit); return ok }
@@ -45,10 +41,10 @@ func auditSites(file *ast.File) []auditSite {
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.CallExpr:
-				if at, ok := auditEntryArgs[callName(node)]; ok && len(node.Args) > at[2] {
+				if at, ok := auditCallArgs[callName(node)]; ok && len(node.Args) > at.action {
 					sites = append(sites, auditSite{
-						pos: node.Pos(), fn: fn.Name.Name, typ: str(node.Args[at[0]]), action: str(node.Args[at[2]]),
-						id: types.ExprString(node.Args[at[1]]), literal: isLit(node.Args[at[1]]), call: true,
+						pos: node.Pos(), fn: fn.Name.Name, typ: str(node.Args[at.typ]), action: str(node.Args[at.action]),
+						id: types.ExprString(node.Args[at.id]), literal: isLit(node.Args[at.id]), call: true,
 					})
 				}
 			case *ast.CompositeLit:
