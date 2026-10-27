@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -262,7 +263,10 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			e := declaredEndpoint(t, tc.method, tc.path)
-			dbtx := &haCreateDBTX{vm: tc.vm}
+			dbtx := &haCreateDBTX{}
+			if tc.vm != nil {
+				dbtx.models = map[string]any{"GetVMByClusterAndVmid": *tc.vm}
+			}
 			e.Handler = tc.bind(db.New(dbtx))
 			pve := &haCreatePVE{replies: tc.replies}
 			app := newHAStandInApp(t, e, pve, dbtx, map[string]bool{
@@ -337,6 +341,48 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			}
 			if tc.forbidden != "" && bytes.Contains(raw, []byte(tc.forbidden)) {
 				t.Errorf("the row carries %q: %s", tc.forbidden, raw)
+			}
+		})
+	}
+}
+
+// Applying a template writes rules into the cluster's firewall, so the apply is
+// filed under the template and, when it made any rule, under the cluster's rules
+// too — where the cluster's firewall History reads them.
+func TestApplyingATemplateFilesTheClusterRulesToo(t *testing.T) {
+	t.Parallel()
+	tmpl := db.FirewallTemplate{
+		ID: uuid.New(), Name: "base",
+		Rules: []byte(`[{"type":"in","action":"ACCEPT"},{"type":"in","action":"DROP"}]`),
+	}
+	for _, tc := range []struct {
+		name     string
+		refuse   bool // Proxmox refuses every rule
+		wantRows [][2]string
+	}{
+		{"rules made", false, [][2]string{{"firewall_template", tmpl.ID.String()}, {"firewall_rule", "cluster"}}},
+		{"every rule refused", true, [][2]string{{"firewall_template", tmpl.ID.String()}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := declaredEndpoint(t, fiber.MethodPost, clusterScope+"/firewall-templates/:id/apply")
+			dbtx := &haCreateDBTX{models: map[string]any{"GetFirewallTemplate": tmpl}}
+			e.Handler = handlers.NewNetworkHandler(db.New(dbtx), haCreateEncKey, nil).ApplyTemplate
+			pve := &haCreatePVE{refuse: tc.refuse}
+			app := newHAStandInApp(t, e, pve, dbtx, map[string]bool{"manage:network": true})
+			req := jsonRequest(fiber.MethodPost, strings.Replace(clusterScope, ":cluster_id", testClusterID, 1)+"/firewall-templates/"+tmpl.ID.String()+"/apply", "")
+			req.Header.Set("X-Test-User", "yes")
+			if status, env := send(t, app, req); status != 200 {
+				t.Fatalf("status = %d (%q), want 200", status, env.Message)
+			}
+			var got [][2]string
+			for _, args := range dbtx.audits {
+				rt, _ := args[2].(string)
+				rid, _ := args[3].(string)
+				got = append(got, [2]string{rt, rid})
+			}
+			if !reflect.DeepEqual(got, tc.wantRows) {
+				t.Errorf("audit rows = %v, want %v", got, tc.wantRows)
 			}
 		})
 	}

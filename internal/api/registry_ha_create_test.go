@@ -55,6 +55,7 @@ type haCreatePVE struct {
 	mu      sync.Mutex
 	seen    []haCreatePVERequest
 	replies map[string]string
+	refuse  bool // answer every request with a refusal
 }
 
 func (p *haCreatePVE) serve(t *testing.T) string {
@@ -67,6 +68,11 @@ func (p *haCreatePVE) serve(t *testing.T) string {
 		p.seen = append(p.seen, haCreatePVERequest{method: r.Method, path: r.URL.Path, form: r.PostForm})
 		p.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+		if p.refuse {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"data":null,"message":"refused\n"}`))
+			return
+		}
 		data, ok := p.replies[r.Method+" "+r.URL.Path]
 		if !ok {
 			data = "null"
@@ -123,7 +129,9 @@ type haCreateDBTX struct {
 	mu     sync.Mutex
 	audits [][]any
 	rows   []string // the SQL of every QueryRow
-	vm     *db.Vm   // the guest the inventory lookup finds; nil finds none
+	// models answers a QueryRow whose SQL names the key (as "-- name: GetVMByClusterAndVmid")
+	// with that model; any other QueryRow finds no row.
+	models map[string]any
 }
 
 func (d *haCreateDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -144,18 +152,21 @@ func (d *haCreateDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row
 	d.mu.Lock()
 	d.rows = append(d.rows, sql)
 	d.mu.Unlock()
-	if d.vm != nil && strings.Contains(sql, "-- name: GetVMByClusterAndVmid") {
-		return haCreateVMRow{*d.vm}
+	for name, model := range d.models {
+		if strings.Contains(sql, "-- name: "+name) {
+			return haCreateModelRow{model}
+		}
 	}
 	return haCreateNoRow{}
 }
 
-// haCreateVMRow is a QueryRow result holding one vms row. sqlc scans a model's
-// query into the struct's fields in declaration order, which is how this fills them.
-type haCreateVMRow struct{ vm db.Vm }
+// haCreateModelRow is a QueryRow result holding one model row. sqlc scans a
+// model's query into the struct's fields in declaration order, which is how this
+// fills them.
+type haCreateModelRow struct{ model any }
 
-func (r haCreateVMRow) Scan(dest ...any) error {
-	v := reflect.ValueOf(r.vm)
+func (r haCreateModelRow) Scan(dest ...any) error {
+	v := reflect.ValueOf(r.model)
 	if len(dest) != v.NumField() {
 		return fmt.Errorf("scanning %d columns into a model of %d fields", len(dest), v.NumField())
 	}

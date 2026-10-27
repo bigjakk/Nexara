@@ -88,7 +88,7 @@ var clusterObjectAudits = map[string][]string{
 	"NetworkHandler.DeleteSecurityGroupRule":   {"firewall_security_group_rule"},
 	"NetworkHandler.CreateTemplate":            {"firewall_template"},
 	"NetworkHandler.UpdateTemplate":            {"firewall_template"},
-	"NetworkHandler.ApplyTemplate":             {"firewall_template"},
+	"NetworkHandler.ApplyTemplate":             {"firewall_template", "firewall_rule"},
 	"NetworkHandler.DeleteTemplate":            {"firewall_template"},
 
 	"ReplicationHandler.CreateJob":   {"replication"},

@@ -229,6 +229,11 @@ func (h *NetworkHandler) ApplyTemplate(c fiber.Ctx, p *apischema.Params) error {
 		"total":         len(rules),
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_template", templateID.String(), "template_applied", details)
+	// The rules it made are the cluster's, and the cluster's firewall History
+	// reads them under its own key.
+	if applied > 0 {
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", "cluster", "template_applied", details)
+	}
 
 	return c.JSON(fiber.Map{
 		"status":  "ok",
