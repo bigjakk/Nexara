@@ -136,11 +136,13 @@ func (s DiskMoveSpec) AuditExtra() map[string]any {
 
 // VolumeStorage returns the storage id of a disk or volume config value such as
 // "local-lvm:vm-100-disk-0,size=32G" — "local-lvm" — or "" when the value names
-// none: a bind mount ("/srv/data,mp=/data"), an empty drive ("none,media=cdrom").
+// none: a bind mount ("/srv/data,mp=/data"), an empty drive ("none,media=cdrom"),
+// a device path ("/dev/disk/by-path/pci-0000:00:17.0-ata-1"), which holds a
+// colon but no storage id (an id never holds a slash).
 func VolumeStorage(val string) string {
 	first, _, _ := strings.Cut(val, ",")
 	storage, _, found := strings.Cut(first, ":")
-	if !found {
+	if !found || strings.Contains(storage, "/") {
 		return ""
 	}
 	return storage

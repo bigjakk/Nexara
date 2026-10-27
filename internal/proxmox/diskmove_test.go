@@ -123,6 +123,8 @@ func TestVolumeStorage(t *testing.T) {
 		// A colon in an option is not the storage separator.
 		{"none,media=cdrom,note=a:b", ""},
 		{"/srv/data,mp=/data", ""},
+		// A passed-through device path has a colon, and no storage before it.
+		{"/dev/disk/by-path/pci-0000:00:17.0-ata-1,backup=0", ""},
 		{"none,media=cdrom", ""},
 		{"", ""},
 	}
