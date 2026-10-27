@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	vmidFallbackCluster = uuid.MustParse("12400000-0000-4000-8000-000000000001")
-	vmidFallbackNode    = uuid.MustParse("12400000-0000-4000-8000-000000000002")
-	vmidFallbackVM      = uuid.MustParse("12400000-0000-4000-8000-000000000003")
+	vmidFallbackCluster = uuid.MustParse("118f0000-0000-4000-8000-000000000001")
+	vmidFallbackNode    = uuid.MustParse("118f0000-0000-4000-8000-000000000002")
+	vmidFallbackVM      = uuid.MustParse("118f0000-0000-4000-8000-000000000003")
 )
 
 // The audit insert stamps a vmid from the vms row whose id the row's resource_id

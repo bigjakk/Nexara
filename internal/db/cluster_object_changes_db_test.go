@@ -18,10 +18,10 @@ import (
 // Fixture ids, fixed so a run that dies before its purge leaves rows the next
 // run's up-front purge deletes.
 var (
-	objChangesCluster  = uuid.MustParse("125a0000-0000-4000-8000-00000000000a") // replication baselined
-	objChangesOther    = uuid.MustParse("125a0000-0000-4000-8000-00000000000b") // an upgrade: rows from before 000120
-	objChangesDoomed   = uuid.MustParse("125a0000-0000-4000-8000-00000000000c") // deleted with its jobs
-	objChangesUnmarked = uuid.MustParse("125a0000-0000-4000-8000-00000000000d") // never baselined
+	objChangesCluster  = uuid.MustParse("120a0000-0000-4000-8000-00000000000a") // replication baselined
+	objChangesOther    = uuid.MustParse("120a0000-0000-4000-8000-00000000000b") // an upgrade: rows from before 000120
+	objChangesDoomed   = uuid.MustParse("120a0000-0000-4000-8000-00000000000c") // deleted with its jobs
+	objChangesUnmarked = uuid.MustParse("120a0000-0000-4000-8000-00000000000d") // never baselined
 )
 
 // TestClusterObjectChanges runs the SQL behind the History of the cluster page's

@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	classifyCluster = uuid.MustParse("124c0000-0000-4000-8000-00000000000a")
-	classifyOther   = uuid.MustParse("124c0000-0000-4000-8000-00000000000b")
+	classifyCluster = uuid.MustParse("119c0000-0000-4000-8000-00000000000a")
+	classifyOther   = uuid.MustParse("119c0000-0000-4000-8000-00000000000b")
 )
 
 // classifyAudit is an audit row beside a change. rid "" is the case's own object,

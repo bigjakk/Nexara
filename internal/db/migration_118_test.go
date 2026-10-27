@@ -18,9 +18,9 @@ import (
 // Fixed ids so a run that aborts before its purge leaves rows the next run's
 // up-front purge can find.
 var (
-	m118Cluster = uuid.MustParse("12300000-0000-4000-8000-000000000001")
-	m118Node    = uuid.MustParse("12300000-0000-4000-8000-000000000002")
-	m118Other   = uuid.MustParse("12300000-0000-4000-8000-000000000003")
+	m118Cluster = uuid.MustParse("11800000-0000-4000-8000-000000000001")
+	m118Node    = uuid.MustParse("11800000-0000-4000-8000-000000000002")
+	m118Other   = uuid.MustParse("11800000-0000-4000-8000-000000000003")
 )
 
 // The back-fill that re-files old audit rows under the key objects of the cluster

@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	sdnLinkCluster = uuid.MustParse("12600000-0000-4000-8000-000000000001")
-	sdnLinkOther   = uuid.MustParse("12600000-0000-4000-8000-000000000002")
+	sdnLinkCluster = uuid.MustParse("118a0000-0000-4000-8000-000000000001")
+	sdnLinkOther   = uuid.MustParse("118a0000-0000-4000-8000-000000000002")
 )
 
 // An SDN apply reloads every node's network as a task of its own, which the
