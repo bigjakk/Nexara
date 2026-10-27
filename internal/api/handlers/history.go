@@ -102,6 +102,12 @@ type HistoryKind struct {
 	// Collapse is the (resource type, action) pairs a whole-cluster kind reads
 	// as runs: one entry per burst of them, a gap longer than Gap ending it.
 	Collapse []HistoryCollapse
+	// GuestToggle names the route's boolean parameter that brings guest
+	// activity into a node's History — the guests' tasks that ran on it,
+	// and any other row naming a guest but its arrivals and departures — left
+	// out unless it is set. The registry declares it; a kind without one shows
+	// guest rows always.
+	GuestToggle string
 	// RowCap bounds a whole-cluster kind's read when nothing is filtered out
 	// after it — no filter, and a caller who may view every guest: each source
 	// newest first up to RowCap rows, so a page of a busy cluster's History
@@ -255,6 +261,10 @@ type HistorySelection struct {
 	GuestWorkers []string
 	// Objects are the generic selector's audit rows.
 	Objects []HistoryObject
+	// Node names a node of the path's cluster whose own records are the
+	// kind's: the tasks it ran, its status changes, the guests that arrived
+	// on it or left it (ListHistory's node arms).
+	Node string
 }
 
 // HistoryGuest is one guest a History covers, from its own cutoff.
@@ -299,7 +309,10 @@ func SelectObjects(param string, objects ...HistoryObject) HistorySelector {
 	}
 }
 
-var historyKindNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+var (
+	historyKindNameRe  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	historyParamNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+)
 
 // Validate refuses a kind whose type filter could not work: a rule's category
 // the filter would refuse, a category no rule or default produces, which
@@ -315,6 +328,9 @@ func (k HistoryKind) Validate() error {
 	}
 	if k.Global && k.GuestFromPath != "" {
 		return fmt.Errorf("history kind %q is global, and a global kind has no guests", k.Name)
+	}
+	if k.GuestToggle != "" && !historyParamNameRe.MatchString(k.GuestToggle) {
+		return fmt.Errorf("history kind %q: GuestToggle %q is not a parameter name", k.Name, k.GuestToggle)
 	}
 	if k.WholeCluster && (k.Global || k.GuestFromPath != "" || len(k.ObjectTypes) > 0) {
 		return fmt.Errorf("history kind %q reads its whole cluster, so it names no guest or object and is no "+
@@ -604,9 +620,12 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		CollapseActions:     make([]string, 0, len(k.Collapse)),
 		CollapseGaps:        make([]int32, 0, len(k.Collapse)),
 	}
-	if k.WholeCluster && len(sel.Guests)+len(sel.GuestWorkers)+len(sel.Objects) > 0 {
-		return db.ListHistoryParams{}, fmt.Errorf("history kind %q reads its whole cluster and selected more", k.Name)
+	if k.WholeCluster && len(sel.Guests)+len(sel.GuestWorkers)+len(sel.Objects) > 0 || (k.WholeCluster || k.Global) && sel.Node != "" {
+		return db.ListHistoryParams{}, fmt.Errorf("history kind %q reads its whole cluster, or every cluster, and "+
+			"selected more", k.Name)
 	}
+	params.NodeName = sel.Node
+	params.IncludeGuests = k.GuestToggle == ""
 	for _, c := range k.Collapse {
 		params.CollapseTypes = append(params.CollapseTypes, c.ResourceType)
 		params.CollapseActions = append(params.CollapseActions, c.Action)
@@ -790,6 +809,9 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	}
 	if source := p.String("source"); source != "" {
 		params.Source = pgtype.Text{String: source, Valid: true}
+	}
+	if r.kind.GuestToggle != "" {
+		params.IncludeGuests = p.Bool(r.kind.GuestToggle)
 	}
 	// The cap only where nothing is filtered out after it: no filter, and a
 	// caller who sees every guest — the page drops the rest after the cap.

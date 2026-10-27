@@ -1100,6 +1100,181 @@ func TestGuestHistory(t *testing.T) {
 		}
 	}
 
+	// ── A node's History, through its own selector: the third cluster's
+	// pve-01 — whose name the other clusters' nodes share — its own rows, its
+	// parts', the tasks it ran, its status changes and its guests' moves.
+	// The two triggers first: a status write records only a change, and a
+	// move is measured against where the guest was last seen, across a row
+	// the collector deleted and inserted again.
+	otherNode := uuid.New()
+	exec("third node 2", `INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'pve-02')`, otherNode, historyThirdID)
+	// The slow pass writes status on every pass, changed or not.
+	for _, status := range []string{"online", "online", "offline"} {
+		if _, err := q.UpsertNode(ctx, gen.UpsertNodeParams{ClusterID: historyThirdID, Name: "pve-01",
+			Status: status}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var nodeChanges []string
+	if err := pool.QueryRow(ctx, `SELECT array_agg(from_status || '>' || to_status ORDER BY observed_at, from_status DESC)
+		FROM node_status_changes WHERE cluster_id = $1`, historyThirdID).Scan(&nodeChanges); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"unknown>online", "online>offline"}; !slices.Equal(nodeChanges, want) {
+		t.Errorf("node status changes recorded = %v, want %v", nodeChanges, want)
+	}
+	exec("clear node trigger rows", `DELETE FROM node_status_changes WHERE cluster_id = $1`, historyThirdID)
+	place := func(vmid int32, node uuid.UUID) {
+		t.Helper()
+		if _, err := q.UpsertVM(ctx, gen.UpsertVMParams{ClusterID: historyThirdID, NodeID: node,
+			Vmid: vmid, Name: fmt.Sprintf("linux%d", vmid), Type: "qemu", Status: "running"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	place(310, thirdNode)
+	place(310, otherNode) // a move by update
+	exec("sighting", `UPDATE vms SET last_seen_at = $2 WHERE cluster_id = $1 AND vmid = 310`, historyThirdID, minsAgo(13))
+	exec("churned row", `DELETE FROM vms WHERE cluster_id = $1 AND vmid = 310`, historyThirdID)
+	place(310, thirdNode) // a move by delete and insert, from the deleted row's last sighting
+	var churnedSince time.Time
+	if err := pool.QueryRow(ctx, `SELECT last_seen_at FROM guest_node_changes
+		WHERE cluster_id = $1 AND vmid = 310 AND from_node = 'pve-02'`, historyThirdID).Scan(&churnedSince); err != nil ||
+		!churnedSince.Equal(minsAgo(13)) {
+		t.Errorf("a move across a deleted row: last seen %v (%v), want the deleted row's %v", churnedSince, err, minsAgo(13))
+	}
+	place(311, thirdNode)
+	exec("destroyed row", `DELETE FROM vms WHERE cluster_id = $1 AND vmid = 311`, historyThirdID)
+	audit(historyThirdID, time.Now(), "proxmox", "vm", "311", "destroy",
+		map[string]any{"upid": historyUPID(50, "qmdestroy", "311"), "status": "OK"})
+	place(311, otherNode) // a new guest on the VMID, no move
+	var moves []string
+	if err := pool.QueryRow(ctx, `SELECT array_agg(vmid || ' ' || from_node || '>' || to_node ORDER BY observed_at, id)
+		FROM guest_node_changes WHERE cluster_id = $1`, historyThirdID).Scan(&moves); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"310 pve-01>pve-02", "310 pve-02>pve-01", "311 pve-01>pve-02"}; !slices.Equal(moves, want) {
+		t.Errorf("guest moves recorded = %v, want %v", moves, want)
+	}
+	// The moves at fixed times, and status changes: two through unknown —
+	// one back within two minutes, one not — and one too young to tell.
+	exec("moves dated", `UPDATE guest_node_changes SET observed_at = $2::timestamptz, last_seen_at = $2::timestamptz - interval '1 minute'
+		WHERE cluster_id = $1 AND vmid = 310 AND from_node = 'pve-01'`, historyThirdID, minsAgo(12))
+	exec("moves dated", `UPDATE guest_node_changes SET observed_at = $2::timestamptz, last_seen_at = $2::timestamptz - interval '1 minute'
+		WHERE cluster_id = $1 AND vmid = 310 AND from_node = 'pve-02'`, historyThirdID, minsAgo(11))
+	for _, st := range []struct {
+		from, to string
+		at       time.Time
+	}{
+		{"online", "unknown", minsAgo(30)}, {"unknown", "online", minsAgo(29)},
+		{"online", "unknown", minsAgo(20)}, {"unknown", "online", minsAgo(15)},
+		{"online", "offline", minsAgo(10)}, {"offline", "unknown", now.Add(-30 * time.Second)},
+	} {
+		exec("node status", `INSERT INTO node_status_changes (cluster_id, node, from_status, to_status, last_seen_at, observed_at)
+			VALUES ($1, 'pve-01', $2, $3, $4, $4)`, historyThirdID, st.from, st.to, st.at)
+	}
+	audit(historyThirdID, minsAgo(9), "nexara", "node", "pve-01", "apt_update", map[string]any{})
+	audit(historyThirdID, minsAgo(8.5), "nexara", "apt_repository", "pve-01", "enabled", map[string]any{"node": "pve-01"})
+	audit(historyThirdID, minsAgo(8), "nexara", "node", "pve-01", "reboot", map[string]any{})
+	audit(historyThirdID, minsAgo(8), "nexara", "node", "pve-02", "reboot", map[string]any{})
+	audit(historyThirdID, minsAgo(7), "nexara", "network", "pve-01/vmbr1", "interface_updated", map[string]any{"node": "pve-01"})
+	// A part's row that names a guest — a disk copied for VM 310 — is guest
+	// activity, though it carries no UPID.
+	audit(historyThirdID, minsAgo(6.5), "nexara", "storage", "store01", "image_copy", map[string]any{"node": "pve-01"})
+	exec("a part's guest", `UPDATE audit_log SET vmid = 310 WHERE cluster_id = $1 AND action = 'image_copy'`, historyThirdID)
+	audit(historyThirdID, minsAgo(6), "nexara", "firewall_rule", "node/pve-01", "firewall_rule_created", map[string]any{"pos": 0})
+	audit(historyThirdID, minsAgo(5), "nexara", "certificate", "pve-01", "renewed", map[string]any{})
+	audit(historyThirdID, minsAgo(4), "proxmox", "proxmox_task", "pve-01", "srvreload",
+		map[string]any{"upid": historyUPID(51, "srvreload", "networking"), "status": "OK"})
+	audit(historyThirdID, minsAgo(3), "proxmox", "vm", "310", "start",
+		map[string]any{"upid": historyUPID(52, "qmstart", "310"), "status": "OK"})
+	for _, tk := range []struct {
+		upid string
+		at   float64
+	}{{historyUPID(53, "aptupdate", ""), 2}, {historyUPID(54, "qmstart", "312"), 1}} {
+		exec("node task", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, vmid, started_at, source)
+			VALUES ($1, $2, $3, 'completed', 'pve-01', split_part($3, ':', 6), NULLIF(split_part($3, ':', 7), '')::int, $4, 'proxmox')`,
+			historyThirdID, systemUserID, tk.upid, minsAgo(tk.at))
+	}
+	nodeProps := apischema.Properties{"node_name": {Type: apischema.String}}
+	if err := nodeProps.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	nodeReq, err := nodeProps.Validate(map[string]any{"node_name": "pve-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeSel, err := handlers.NodeHistory().Select(ctx, handlers.HistoryRequest{Queries: q, ClusterID: historyThirdID, Params: nodeReq})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeHistory := func(f func(*gen.ListHistoryParams)) []string {
+		t.Helper()
+		p, err := handlers.NodeHistory().ListParams(historyThirdID, nodeSel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 50, true, []string{"qemu", "lxc"}
+		f(&p)
+		rows, err := q.ListHistory(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, 0, len(rows))
+		for _, r := range rows {
+			if uuid.UUID(r.ClusterID.Bytes) != historyThirdID {
+				t.Errorf("the node's History holds %s %s of cluster %s", r.Kind, r.Action, uuid.UUID(r.ClusterID.Bytes))
+			}
+			entry := r.Kind + " " + r.Action + " " + r.Category
+			switch r.Kind {
+			case "status":
+				entry += " " + r.FromStatus + ">" + r.ToStatus
+			case "move":
+				entry += fmt.Sprintf(" %d %s", r.Vmid, r.Node)
+			}
+			got = append(got, entry)
+		}
+		return got
+	}
+	// Its own, the cluster block's task and update on it among them; not the
+	// VMID 311 that a destroy made a new guest, nor a round trip through
+	// unknown shorter than two minutes, nor one too young to tell.
+	own := []string{"task aptupdate checks", "audit srvreload network", "audit renewed certificates",
+		"audit firewall_rule_created network", "audit interface_updated network", "audit reboot power",
+		"audit enabled updates", "audit apt_update checks", "status status_change status online>offline",
+		"move arrived guests 310 pve-02", "move left guests 310 pve-02", "status status_change status unknown>online",
+		"status status_change status online>unknown", "task cephcreatemgr ceph", "audit apt_update checks"}
+	for _, tt := range []struct {
+		name string
+		f    func(*gen.ListHistoryParams)
+		want []string
+	}{
+		{"its own", func(*gen.ListHistoryParams) {}, own},
+		{"with its guests' tasks", func(p *gen.ListHistoryParams) { p.IncludeGuests = true }, []string{
+			"audit destroy guests", "task qmstart guests", "task aptupdate checks", "audit start guests",
+			"audit srvreload network", "audit renewed certificates", "audit firewall_rule_created network",
+			"audit image_copy storage", "audit interface_updated network", "audit reboot power", "audit enabled updates",
+			"audit apt_update checks", "status status_change status online>offline", "move arrived guests 310 pve-02",
+			"move left guests 310 pve-02", "status status_change status unknown>online",
+			"status status_change status online>unknown", "task cephcreatemgr ceph", "audit start guests",
+			"audit apt_update checks"}},
+		// A repository change is an update, not a check, and stays.
+		{"without its routine checks", func(p *gen.ListHistoryParams) { p.ExcludeCategories = []string{"checks"} },
+			slices.DeleteFunc(slices.Clone(own), func(s string) bool { return strings.HasSuffix(s, " checks") })},
+		{"without view:vm, guests' moves and tasks go", func(p *gen.ListHistoryParams) {
+			p.IncludeGuests, p.StatusGuestTypes = true, []string{"lxc"}
+		}, slices.DeleteFunc(slices.Clone(own), func(s string) bool { return strings.HasPrefix(s, "move ") })},
+	} {
+		if got := nodeHistory(tt.f); !slices.Equal(got, tt.want) {
+			t.Errorf("%s: the node's History =\n\t%v\nwant\n\t%v", tt.name, got, tt.want)
+		}
+	}
+	// Two minutes on, a node that stopped reporting and stayed so is a change.
+	exec("settled", `UPDATE node_status_changes SET observed_at = $2, last_seen_at = $2
+		WHERE cluster_id = $1 AND from_status = 'offline'`, historyThirdID, minsAgo(3))
+	if got := nodeHistory(func(*gen.ListHistoryParams) {}); len(got) < 2 || got[1] != "status status_change status offline>unknown" {
+		t.Errorf("a node still unknown after two minutes: %v, want its change second", got)
+	}
+
 	// ── A global kind's objects are read in every cluster, and in none.
 	audit(uuid.Nil, minsAgo(5), "nexara", "firewall_template", historyTemplateID, "template_created", map[string]any{})
 	audit(historyOtherID, minsAgo(4), "nexara", "firewall_template", historyTemplateID, "template_applied", map[string]any{})

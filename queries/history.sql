@@ -13,6 +13,9 @@
 --   guest_backups        a guest's part of each backup JOB — a vzdump of
 --                        several guests, whose task names none — read from the
 --                        job's log by the collector (000116).
+--   node_status_changes  a node's status changes, by trigger (000118).
+--   guest_node_changes   a guest seen on another node than before, by
+--                        trigger (000119): a node's arrivals and departures.
 --
 -- How to add a source keyed as audit_log is — cluster_id, resource_type,
 -- resource_id, and vmid for a guest — such as a table of the changes Nexara saw
@@ -44,6 +47,18 @@
 --              a list key   the value is one element of a comma-separated
 --                           details key (an ACL's users). Read by resource
 --                           type alone, so for a type with few rows.
+--
+-- A kind may also name a node (node_name, HistorySelection.Node), whose own
+-- records are then its: the tasks that ran on it — audit rows by the node in
+-- their UPID, over the expression index built after startup, and tasks with no
+-- audit row by task_history.node — its status changes, and the guests that
+-- arrived on it or left it. A guest's task is one only with include_guests: a
+-- busy node runs thousands of guest tasks, which would bury its own. Any other
+-- row that names a guest is left out without include_guests too, but for the
+-- arrivals and departures, which are the node's own. A status change through
+-- "unknown" — pvestatd not reporting — that is back within two minutes is no
+-- change, and one younger than that is not shown yet. An arrival across a
+-- create, restore, clone or destroy of the VMID is a new guest, not a move.
 --
 -- or, alone, the whole cluster (whole_cluster, HistoryKind.WholeCluster): every
 -- row of every source filed under the path's cluster, none of them a guest's
@@ -254,8 +269,16 @@ WITH guests AS MATERIALIZED (
                     THEN split_part(a.resource_id, ':', 2)::int
            END
     FROM audit_log a
-    WHERE cardinality(sqlc.arg('object_types')::text[]) > 0
+    WHERE (cardinality(sqlc.arg('object_types')::text[]) > 0 OR sqlc.arg('node_name')::text <> '')
       AND a.id IN (
+          SELECT b.id FROM audit_log b
+          WHERE sqlc.arg('node_name')::text <> ''
+            AND b.details ? 'upid'
+            AND b.cluster_id = sqlc.arg('cluster_id')::uuid
+            AND split_part(b.details->>'upid', ':', 2) = sqlc.arg('node_name')::text
+            AND (sqlc.arg('include_guests')::bool OR NOT is_guest_upid(b.details->>'upid'))
+            AND b.created_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+          UNION ALL
           SELECT m.id
           FROM objects o
           CROSS JOIN LATERAL (
@@ -449,6 +472,70 @@ WITH guests AS MATERIALIZED (
     SELECT ('run:' || u.last_id::text)::text, 'run', u.last_id, u.cluster_id, u.last_at, u.source, u.action,
            u.resource_type, u.resource_id, 0, NULL::int, u.user_id, '', '', '', '', '', u.first_at, u.n
     FROM runs u
+    -- A node's: the tasks it ran with no audit row, its status changes, and
+    -- the guests that arrived on it or left it.
+    UNION ALL
+    SELECT ('task:' || t.upid)::text, 'task', NULL::uuid, t.cluster_id, t.started_at, t.source, t.task_type,
+           'task', '', CASE WHEN is_guest_upid(t.upid) THEN COALESCE(t.vmid, 0) ELSE 0 END, NULL::int,
+           t.user_id, t.upid, t.node, '', '', '', NULL, 0
+    FROM task_history t
+    WHERE sqlc.arg('node_name')::text <> '' AND sqlc.arg('include_tasks')::bool
+      AND t.cluster_id = sqlc.arg('cluster_id')::uuid
+      AND t.node = sqlc.arg('node_name')::text
+      AND (sqlc.arg('include_guests')::bool OR NOT is_guest_upid(t.upid))
+      AND t.started_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+      AND NOT EXISTS (SELECT 1 FROM audit_log a
+                      WHERE a.details->>'upid' = t.upid AND a.cluster_id = t.cluster_id)
+    UNION ALL
+    SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.cluster_id, r.started_at, r.source, r.task_type,
+           'task', '', r.vmid, NULL::int, r.user_id, r.upid, r.node, '', '', '', NULL, 0
+    FROM task_history_archive r
+    WHERE sqlc.arg('node_name')::text <> '' AND sqlc.arg('include_tasks')::bool
+      AND sqlc.arg('include_guests')::bool
+      AND r.cluster_id = sqlc.arg('cluster_id')::uuid
+      AND r.node = sqlc.arg('node_name')::text
+      AND r.started_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+      AND NOT EXISTS (SELECT 1 FROM audit_log a
+                      WHERE a.details->>'upid' = r.upid AND a.cluster_id = r.cluster_id)
+    UNION ALL
+    SELECT ('nodestatus:' || n.id::text)::text, 'status', n.id, n.cluster_id, n.observed_at, 'detected', 'status_change',
+           'node', n.node, 0, NULL::int, NULL::uuid, '', n.node, '', n.from_status, n.to_status, n.last_seen_at, 0
+    FROM (SELECT x.id, x.cluster_id, x.node, x.from_status, x.to_status, x.last_seen_at, x.observed_at,
+                 lead(x.observed_at) OVER w AS next_at, lead(x.to_status) OVER w AS next_to,
+                 lag(x.observed_at) OVER w AS prev_at, lag(x.from_status) OVER w AS prev_from
+          FROM node_status_changes x
+          WHERE sqlc.arg('node_name')::text <> ''
+            AND x.cluster_id = sqlc.arg('cluster_id')::uuid
+            AND x.node = sqlc.arg('node_name')::text
+            AND x.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+                                 - interval '2 minutes'
+          WINDOW w AS (ORDER BY x.observed_at, x.id)) n
+    WHERE n.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+      AND NOT (n.to_status = 'unknown'
+               AND (n.next_at IS NULL AND n.observed_at > now() - interval '2 minutes'
+                    OR COALESCE(n.next_to = n.from_status AND n.next_at < n.observed_at + interval '2 minutes', false)))
+      AND NOT COALESCE(n.from_status = 'unknown' AND n.prev_from = n.to_status
+                       AND n.observed_at < n.prev_at + interval '2 minutes', false)
+    UNION ALL
+    SELECT ('move:' || g.id::text)::text, 'move', g.id, g.cluster_id, g.observed_at, 'detected',
+           CASE WHEN g.to_node = sqlc.arg('node_name')::text THEN 'arrived' ELSE 'left' END,
+           CASE g.guest_type WHEN 'lxc' THEN 'container' ELSE 'vm' END, g.vmid::text, g.vmid, NULL::int, NULL::uuid,
+           '', CASE WHEN g.to_node = sqlc.arg('node_name')::text THEN g.from_node ELSE g.to_node END,
+           '', '', '', g.last_seen_at, 0
+    FROM guest_node_changes g
+    WHERE sqlc.arg('node_name')::text <> ''
+      AND g.cluster_id = sqlc.arg('cluster_id')::uuid
+      AND (g.from_node = sqlc.arg('node_name')::text OR g.to_node = sqlc.arg('node_name')::text)
+      AND g.guest_type = ANY(sqlc.arg('status_guest_types')::text[])
+      AND g.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+      AND NOT EXISTS (SELECT 1 FROM audit_log a
+                      WHERE a.cluster_id = g.cluster_id
+                        AND a.created_at BETWEEN g.last_seen_at AND g.observed_at
+                        AND (a.vmid = g.vmid
+                             AND split_part(a.details->>'upid', ':', 6) IN ('qmcreate', 'vzcreate', 'qmrestore',
+                                                                            'vzrestore', 'qmdestroy', 'vzdestroy')
+                             OR a.action IN ('clone', 'clone-to-template')
+                                AND a.details->>'new_id' = g.vmid::text))
 ), category_map AS MATERIALIZED (
     SELECT jsonb_object_agg(
                k.kind || ':' || k.worker || ':' || length(k.resource_type) || ':' || k.resource_type
@@ -476,6 +563,7 @@ WITH guests AS MATERIALIZED (
     FROM categorized c
     LEFT JOIN guests g ON g.vmid = c.subject
     WHERE (g.vmid IS NULL OR c.occurred_at > g.after OR (g.inclusive AND c.occurred_at = g.after))
+      AND (sqlc.arg('include_guests')::bool OR c.vmid = 0 OR c.kind = 'move')
       AND (c.vmid = 0 OR c.subject = ANY(sqlc.arg('vmids')::int[]) OR c.vmid = ANY(sqlc.arg('vmids')::int[])
            OR sqlc.arg('status_guest_types')::text[] @> '{qemu,lxc}'
            OR EXISTS (SELECT 1 FROM vms v

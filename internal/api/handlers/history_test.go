@@ -475,3 +475,51 @@ func TestHistoryListCapsOnlyAnUnfilteredReadOfEveryGuest(t *testing.T) {
 		})
 	}
 }
+
+// A kind with a guest toggle reads guest rows only when the request sets it;
+// any other kind reads them always.
+func TestHistoryListPassesTheGuestToggle(t *testing.T) {
+	t.Parallel()
+	// Where IncludeGuests sits among the query's arguments: the one true in
+	// an otherwise zero call.
+	probe := &auditRowsDBTX{}
+	if _, err := db.New(probe).ListHistory(context.Background(), db.ListHistoryParams{IncludeGuests: true}); err != nil {
+		t.Fatal(err)
+	}
+	at := slices.Index(probe.calls[0].args, any(true))
+	cluster := uuid.New()
+	for _, tt := range []struct {
+		name, toggle, query string
+		want                bool
+	}{
+		{"a toggle left unset", "include_guests", "", false},
+		{"a toggle set", "include_guests", "?include_guests=true", true},
+		{"no toggle", "", "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dbtx := &auditRowsDBTX{}
+			kind := HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", GuestToggle: tt.toggle,
+				Select: SelectObjects("cluster_id", HistoryObject{ResourceType: "node"}), ObjectTypes: []string{"node"}}
+			props := historyTestProps("cluster_id", apischema.StdOption("cluster-id"))
+			props["include_guests"] = apischema.Property{Type: apischema.Boolean, Optional: true, Default: false}
+			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+			app.Use(func(c fiber.Ctx) error {
+				c.Locals("user_id", uuid.New())
+				c.Locals("rbac_engine", &recordingEngine{actions: map[string]bool{"view": true}})
+				return c.Next()
+			})
+			app.Get("/clusters/:cluster_id/probe", withRequestParams(t, props, []string{"cluster_id"},
+				NewHistoryHandler(db.New(dbtx)).Route(kind).List))
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/probe"+tt.query, nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if len(dbtx.calls) != 1 || dbtx.calls[0].args[at] != tt.want {
+				t.Errorf("status %d, %d queries; include_guests = %v, want %v", resp.StatusCode, len(dbtx.calls),
+					dbtx.calls[0].args[at], tt.want)
+			}
+		})
+	}
+}

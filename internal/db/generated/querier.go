@@ -1732,6 +1732,9 @@ type Querier interface {
 	//   guest_backups        a guest's part of each backup JOB — a vzdump of
 	//                        several guests, whose task names none — read from the
 	//                        job's log by the collector (000116).
+	//   node_status_changes  a node's status changes, by trigger (000118).
+	//   guest_node_changes   a guest seen on another node than before, by
+	//                        trigger (000119): a node's arrivals and departures.
 	//
 	// How to add a source keyed as audit_log is — cluster_id, resource_type,
 	// resource_id, and vmid for a guest — such as a table of the changes Nexara saw
@@ -1763,6 +1766,18 @@ type Querier interface {
 	//              a list key   the value is one element of a comma-separated
 	//                           details key (an ACL's users). Read by resource
 	//                           type alone, so for a type with few rows.
+	//
+	// A kind may also name a node (node_name, HistorySelection.Node), whose own
+	// records are then its: the tasks that ran on it — audit rows by the node in
+	// their UPID, over the expression index built after startup, and tasks with no
+	// audit row by task_history.node — its status changes, and the guests that
+	// arrived on it or left it. A guest's task is one only with include_guests: a
+	// busy node runs thousands of guest tasks, which would bury its own. Any other
+	// row that names a guest is left out without include_guests too, but for the
+	// arrivals and departures, which are the node's own. A status change through
+	// "unknown" — pvestatd not reporting — that is back within two minutes is no
+	// change, and one younger than that is not shown yet. An arrival across a
+	// create, restore, clone or destroy of the VMID is a new guest, not a move.
 	//
 	// or, alone, the whole cluster (whole_cluster, HistoryKind.WholeCluster): every
 	// row of every source filed under the path's cluster, none of them a guest's

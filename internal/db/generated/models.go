@@ -424,6 +424,24 @@ type GuestBackup struct {
 	LogEnd     int32       `json:"log_end"`
 }
 
+type GuestNodeChange struct {
+	ID         uuid.UUID `json:"id"`
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	Vmid       int32     `json:"vmid"`
+	GuestType  string    `json:"guest_type"`
+	FromNode   string    `json:"from_node"`
+	ToNode     string    `json:"to_node"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+type GuestNodeState struct {
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	Vmid       int32     `json:"vmid"`
+	Node       string    `json:"node"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
 // Cache of each QEMU guest's smbios1 uuid, which is the deterministic join key between Nexara's inventory and a Veeam backup object. Populated only for clusters with a linked Veeam platform — no Veeam, no per-guest config fetch
 type GuestSmbios struct {
 	ClusterID uuid.UUID `json:"cluster_id"`
@@ -758,6 +776,16 @@ type NodePressure struct {
 	IoFull  pgtype.Float4 `json:"io_full"`
 	MemSome pgtype.Float4 `json:"mem_some"`
 	MemFull pgtype.Float4 `json:"mem_full"`
+}
+
+type NodeStatusChange struct {
+	ID         uuid.UUID `json:"id"`
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	Node       string    `json:"node"`
+	FromStatus string    `json:"from_status"`
+	ToStatus   string    `json:"to_status"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	ObservedAt time.Time `json:"observed_at"`
 }
 
 type NotificationChannel struct {

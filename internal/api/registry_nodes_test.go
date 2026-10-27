@@ -328,10 +328,11 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 // route trips the first of them, so a loop sharing that body would never run in the one
 // situation it exists for. The eight VM-dialog hardware listings share the node prefix and
 // are declared in registry_vms.go and registry_mappings.go, so they are named explicitly
-// rather than skipped by a looser prefix rule that would swallow a real omission. Four other
+// rather than skipped by a looser prefix rule that would swallow a real omission. Five other
 // domains mount routes under this prefix and keep their own tallies (registry_acme_test.go,
-// registry_rolling_update_test.go, registry_apt_repositories_test.go, registry_metrics_test.go):
-// deferring keeps every route in exactly one tally, and a copy here would be a second list.
+// registry_rolling_update_test.go, registry_apt_repositories_test.go, registry_metrics_test.go,
+// and the node's History in registry_history_test.go): deferring keeps every route in exactly
+// one tally, and a copy here would be a second list.
 func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 	vmDialogRoutes := map[string]bool{
 		"GET " + clusterScope + "/nodes/:node_name/bridges":       true,
@@ -360,12 +361,14 @@ func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 		_, inRollingTally := rollingLegacyPermissions[key]
 		_, inAptTally := aptLegacyPermissions[key]
 		_, inMetricsTally := metricsLegacyPermissions[key]
-		if inNodeTally || inACMETally || inRollingTally || inAptTally || inMetricsTally || vmDialogRoutes[key] {
+		_, inHistoryTally := historyRoutesOutsideTheClusterCheckShape[key]
+		if inNodeTally || inACMETally || inRollingTally || inAptTally || inMetricsTally || inHistoryTally ||
+			vmDialogRoutes[key] {
 			continue
 		}
 		t.Errorf("%s is declared under the node scope but is in none of nodeLegacyPermissions, "+
 			"nodeAddedPermissions, acmeLegacyPermissions, rollingLegacyPermissions, "+
-			"aptLegacyPermissions, metricsLegacyPermissions or the VM-dialog hardware set — add it "+
+			"aptLegacyPermissions, metricsLegacyPermissions, the History routes or the VM-dialog hardware set — add it "+
 			"to its domain's tally, or the tally stops being a review surface", key)
 	}
 	if seen == 0 {

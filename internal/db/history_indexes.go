@@ -15,9 +15,10 @@ import (
 // historyIndexes are the audit_log indexes the History's selectors read
 // (queries/history.sql, ListHistory): an object's own rows by (resource_type,
 // resource_id) within a time window, the rows naming it in a details key,
-// through details @> {key: value}, and a cluster's own rows newest first, for
-// its History. Without them the selectors work, reading every row of the type
-// — or of every cluster — instead.
+// through details @> {key: value}, a cluster's own rows newest first, for its
+// History, and the tasks a node ran, by the node field of their UPID — partial
+// on details ? 'upid', which the query repeats. Without them the selectors
+// work, reading every row of the type — or of every cluster — instead.
 //
 // They are built here, after startup, rather than in migration 000117: see
 // that migration's header. Infrastructure DDL like EnsureSchema's, so it is
@@ -34,6 +35,12 @@ var historyIndexes = []historyIndex{
 		method: "gin", keys: []string{"details"}, opclasses: []string{"jsonb_path_ops"}},
 	{name: "idx_audit_log_cluster_created", columns: "(cluster_id, created_at)",
 		method: "btree", keys: []string{"cluster_id", "created_at"}, opclasses: []string{"", ""}},
+	{name: "idx_audit_log_upid_node",
+		columns:   "(cluster_id, split_part(details->>'upid', ':', 2), created_at) WHERE details ? 'upid'",
+		method:    "btree",
+		keys:      []string{"cluster_id", "split_part(details ->> 'upid'::text, ':'::text, 2)", "created_at"},
+		opclasses: []string{"", "", ""},
+		predicate: "details ? 'upid'::text"},
 }
 
 // historyIndex is one of historyIndexes: columns is what CREATE INDEX builds

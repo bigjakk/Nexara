@@ -1,0 +1,62 @@
+{
+  "categories": {
+    "status": "Status",
+    "power": "Power",
+    "maintenance": "Maintenance",
+    "updates": "Updates",
+    "network": "Network",
+    "storage": "Storage",
+    "ceph": "Ceph",
+    "certificates": "Certificates",
+    "options": "Options",
+    "checks": "Checks",
+    "console": "Console",
+    "guests": "Guests",
+    "other": "Other"
+  },
+  "categoryNotes": {
+    "checks": "Reads that change nothing on the node: package-list refreshes, Proxmox's daily one among them, memory-module reads, Nexara's daily one among them, and report downloads. Left out of the History until Show routine checks is ticked.",
+    "guests": "The guests that arrived on this node or left it. Their tasks, and anything else naming a guest, show with Include guest activity.",
+    "status": "Changes of the node's status. One through Unknown — Proxmox not reporting the node — that is back within two minutes is not listed."
+  },
+  "empty": "Nothing has been recorded for this node yet.",
+  "actions": {
+    "apt_update": "Package list refresh",
+    "start_all": "Start all guests",
+    "stop_all": "Stop all guests",
+    "node_maintenance_enter": "Maintenance entered",
+    "node_maintenance_exit": "Maintenance left",
+    "evacuate": "Evacuate",
+    "read_memory_modules": "Memory modules read",
+    "download_report": "Report downloaded",
+    "set_options": "Options changed",
+    "set_dns": "DNS changed",
+    "set_timezone": "Time zone changed",
+    "console_token_mint": "Console opened"
+  },
+  "taskTypes": {
+    "aptupdate": "Package list refresh",
+    "startall": "Start all guests",
+    "stopall": "Stop all guests",
+    "migrateall": "Migrate all guests",
+    "srvreload": "Service reload",
+    "srvrestart": "Service restart"
+  },
+  "events": {
+    "statusChanged": "Went {{status}}",
+    "statusUnknown": "Stopped reporting",
+    "reportedAgain": "Reported {{status}} again",
+    "arrived": "Guest arrived",
+    "left": "Guest left"
+  },
+  "summaries": {
+    "status": "{{from}} → {{to}}",
+    "unknown": "Was {{from}}; Proxmox stopped reporting the node.",
+    "arrived": "From {{node}}",
+    "left": "To {{node}}"
+  },
+  "notes": {
+    "status": "Nexara saw this change in the node's status as Proxmox reported it. It happened between the two times shown.",
+    "move": "Nexara saw the guest on another node than before. A migration's own task shows with Include guest activity; with none, the guest was moved outside a task — an HA recovery, say."
+  }
+}

@@ -16,7 +16,7 @@ import (
 	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
-const historyRouteCount = 3
+const historyRouteCount = 4
 
 // historyRoutesOutsideTheClusterCheckShape are the History routes gated on
 // AllOf view:audit and the kind's own view permission (historyRoute.Resource).
@@ -25,13 +25,15 @@ var historyRoutesOutsideTheClusterCheckShape = map[string]string{
 		"view:vm_folder for the folder that selects them",
 	"GET /api/v1/clusters/:cluster_id/history": "AllOf: view:audit for the rows, view:cluster for the cluster " +
 		"they are all filed under",
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/history": "AllOf: view:audit for the rows, view:node " +
+		"for the node that selects them",
 }
 
 // The guest is the one kind gated on view:audit alone, and the one whose
 // guest is not filtered on view:vm/view:container (GuestFromPath); any other
 // kind on either list skips a permission its rows need. Leaving an object's
 // rows out of a guest's cutoff (ObjectsIgnoreGuestCutoff) is pinned the same
-// way: no kind does yet.
+// way: the node alone, whose tasks are its own whoever held the VMID.
 func TestHistoryAuditOnlyIsTheGuestAlone(t *testing.T) {
 	t.Parallel()
 	var auditOnly, fromPath, ignoresCutoff []string
@@ -46,9 +48,10 @@ func TestHistoryAuditOnlyIsTheGuestAlone(t *testing.T) {
 			ignoresCutoff = append(ignoresCutoff, r.Kind.Name)
 		}
 	}
-	if !slices.Equal(auditOnly, []string{"guest"}) || !slices.Equal(fromPath, []string{"guest"}) || len(ignoresCutoff) != 0 {
+	if !slices.Equal(auditOnly, []string{"guest"}) || !slices.Equal(fromPath, []string{"guest"}) ||
+		!slices.Equal(ignoresCutoff, []string{"node"}) {
 		t.Errorf("gated on view:audit alone: %v; guests unfiltered: %v; objects free of the cutoff: %v; "+
-			"want [guest], [guest], []", auditOnly, fromPath, ignoresCutoff)
+			"want [guest], [guest], [node]", auditOnly, fromPath, ignoresCutoff)
 	}
 }
 

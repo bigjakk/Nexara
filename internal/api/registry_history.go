@@ -46,6 +46,7 @@ func historyRoutes() []historyRoute {
 		guestHistoryRoute(),
 		folderHistoryRoute(),
 		clusterHistoryRoute(),
+		nodeHistoryRoute(),
 	}
 }
 
@@ -89,13 +90,25 @@ func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 	if resource != "" {
 		perms = Permissions{AllOf: []Check{audit, {Action: "view", Resource: resource, Scope: scope}}}
 	}
+	params := historyFilterParams(r.Kind)
+	if g := r.Kind.GuestToggle; g != "" {
+		params[g] = apischema.Property{
+			Type:     apischema.Boolean,
+			Optional: true,
+			Default:  false,
+			Typetext: "<bool>",
+			Description: "Include guest activity: the guests' tasks that ran here, and anything else naming a " +
+				"guest. Omitted or false leaves them out; the guests' arrivals and departures are listed " +
+				"either way.",
+		}
+	}
 	return Endpoint{
 		Method:      fiber.MethodGet,
 		Path:        r.Path,
 		Description: r.Description,
 		Group:       "Audit Log",
 		Permissions: perms,
-		Parameters:  withParams(r.Parameters, historyFilterParams(r.Kind)),
+		Parameters:  withParams(r.Parameters, params),
 		Handler:     h.Route(r.Kind).List,
 	}
 }
