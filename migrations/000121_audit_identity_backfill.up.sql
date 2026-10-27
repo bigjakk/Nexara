@@ -32,7 +32,7 @@
 -- longer do.
 UPDATE audit_log a
 SET resource_id = sp.storage,
-    details = jsonb_build_object('storage', sp.storage) || CASE WHEN a.details ? 'rekeyed_from' THEN a.details ELSE a.details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', a.resource_type, 'resource_id', a.resource_id, 'action', a.action)) END
+    details = jsonb_build_object('storage', sp.storage, 'resource_name', sp.storage) || CASE WHEN a.details ? 'rekeyed_from' THEN a.details ELSE a.details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', a.resource_type, 'resource_id', a.resource_id, 'action', a.action)) END
 FROM storage_pools sp
 WHERE a.resource_type = 'storage'
   AND a.resource_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -44,7 +44,7 @@ WHERE a.resource_type = 'storage'
 -- storage (upload, delete_content, pull_oci, download_url, download_appliance).
 UPDATE audit_log
 SET resource_id = details->>'storage',
-    details = CASE WHEN details ? 'rekeyed_from' THEN details ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = jsonb_build_object('resource_name', details->>'storage') || CASE WHEN details ? 'rekeyed_from' THEN details ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'storage'
   AND resource_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   AND jsonb_typeof(details) = 'object'
@@ -83,7 +83,7 @@ UPDATE audit_log
 SET resource_type = 'storage',
     action = CASE action WHEN 'imgdel' THEN 'delete_content' ELSE 'prune_backups' END,
     resource_id = regexp_replace(resource_id, '^.*@', ''),
-    details = jsonb_build_object('storage', regexp_replace(resource_id, '^.*@', '')) || CASE WHEN details ? 'rekeyed_from' THEN details ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = jsonb_build_object('storage', regexp_replace(resource_id, '^.*@', ''), 'resource_name', regexp_replace(resource_id, '^.*@', '')) || CASE WHEN details ? 'rekeyed_from' THEN details ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'proxmox_task'
   AND source = 'proxmox'
   AND action IN ('imgdel', 'prunebackups')
