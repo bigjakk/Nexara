@@ -29,9 +29,9 @@ type BackupHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
-	// jobListTimeout bounds each job-list read around a create; zero means
-	// backupJobListTimeout.
-	jobListTimeout time.Duration
+	// readTimeout bounds each read an action makes only to label or route
+	// itself; zero means backupReadTimeout.
+	readTimeout time.Duration
 }
 
 // NewBackupHandler creates a new backup handler.
@@ -39,23 +39,31 @@ func NewBackupHandler(queries *db.Queries, encryptionKey string, eventPub *event
 	return &BackupHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
-// backupJobListTimeout bounds each of the two job-list reads CreateBackupJob
-// makes to learn the id of the job it created. Both only decorate an audit row,
-// so neither may hold the create up: a client that times out on a slow create
-// and retries makes a duplicate job.
-const backupJobListTimeout = 5 * time.Second
+// backupReadTimeout bounds the reads a backup action makes only to label or
+// route itself. The two job-list reads CreateBackupJob makes to learn the id of
+// the job it created only decorate an audit row, so neither may hold the create
+// up: a client that times out on a slow create and retries makes a duplicate
+// job. The storage list a restore chooses its storage from is read before
+// anything is stopped or dispatched, so a node slow to answer costs the restore
+// a refusal, not a guest left half done.
+const backupReadTimeout = 5 * time.Second
 
-// SetJobListTimeout narrows the bound on those reads, so that a test can make
-// one time out without waiting for the production bound.
-func (h *BackupHandler) SetJobListTimeout(d time.Duration) { h.jobListTimeout = d }
+// SetReadTimeout narrows the bound on those reads, so that a test can make one
+// time out without waiting for the production bound.
+func (h *BackupHandler) SetReadTimeout(d time.Duration) { h.readTimeout = d }
+
+// readContext is the request's context with the read bound on it.
+func (h *BackupHandler) readContext(c fiber.Ctx) (context.Context, context.CancelFunc) {
+	d := h.readTimeout
+	if d <= 0 {
+		d = backupReadTimeout
+	}
+	return context.WithTimeout(c.Context(), d)
+}
 
 // listBackupJobsBounded reads the cluster's backup jobs within the bound.
 func (h *BackupHandler) listBackupJobsBounded(c fiber.Ctx, client *proxmox.Client) ([]proxmox.BackupJob, error) {
-	d := h.jobListTimeout
-	if d <= 0 {
-		d = backupJobListTimeout
-	}
-	ctx, cancel := context.WithTimeout(c.Context(), d)
+	ctx, cancel := h.readContext(c)
 	defer cancel()
 	return client.ListBackupJobs(ctx)
 }
@@ -1741,8 +1749,14 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 
 	// The PVE storage entry the archive is read through. Chosen before the guest
 	// is stopped, so that a request no storage can serve changes nothing.
-	cfgs, err := pveClient.ListStorageConfigs(c.Context())
+	ctx, cancel := h.readContext(c)
+	cfgs, err := pveClient.ListStorageConfigs(ctx)
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	cancel()
 	if err != nil {
+		if timedOut {
+			return fiber.NewError(fiber.StatusBadGateway, "Proxmox did not list its storages in time. Nothing was changed; try the restore again.")
+		}
 		return mapProxmoxError(err)
 	}
 	servers, err := h.queries.ListPBSServers(c.Context())

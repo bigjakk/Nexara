@@ -32,6 +32,8 @@ const (
 	// candidate ties to the requested server.
 	restoreOtherServerOnly = `[{"storage":"store01","type":"pbs","server":"pbs02.example.com","datastore":"datastore01"}]`
 	restoreAliasOnly       = `[{"storage":"store05","type":"pbs","server":"pbs-alias.example.com","datastore":"datastore01"}]`
+	// restoreHangs makes the storage list never answer.
+	restoreHangs = "hangs"
 )
 
 // A restore reads the snapshot through the Proxmox storage that points at the
@@ -68,6 +70,8 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 			[]string{storageGet, stopPost, stopPoll, restore}, "store02", "address"},
 		{"over an existing guest with no such storage: it is not stopped", both, restoreOtherServerOnly, true, 400,
 			[]string{storageGet}, "", ""},
+		{"a storage list that never answers: refused in time, and the guest is not stopped", both, restoreHangs, true, 502,
+			[]string{storageGet}, "", ""},
 		// A server the caller may not view is a missing one, and nothing is asked of Proxmox.
 		{"a caller who may manage backups here but not view the PBS server", grantsOf("manage:backup"), restoreStorages, false, 404, nil, "", ""},
 		{"a caller who may view the PBS server but not manage backups here", grantsOf("view:backup"), restoreStorages, false, 403, nil, "", ""},
@@ -77,6 +81,9 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 			t.Parallel()
 			pve := &restorePVE{storage: tt.storage}
 			base := &backupRunPVE{handle: pve.handle}
+			if tt.storage == restoreHangs {
+				base.readTimeout = 300 * time.Millisecond
+			}
 			app, dbtx := newBackupAppAs(t, base, tt.grants, fiber.MethodPost, clusterScope+"/restore",
 				(*handlers.BackupHandler).RestoreBackup)
 			clusterID, nodeID := uuid.MustParse(testClusterID), uuid.MustParse("5c4b3a29-1817-4615-9413-000000000002")
@@ -189,6 +196,10 @@ func (p *restorePVE) handle(w http.ResponseWriter, r *http.Request) bool {
 	switch {
 	case r.Method == http.MethodGet && path == "/api2/json/storage":
 		record()
+		if p.storage == restoreHangs {
+			<-r.Context().Done()
+			return true
+		}
 		reply(p.storage)
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/status/stop"):
 		record()

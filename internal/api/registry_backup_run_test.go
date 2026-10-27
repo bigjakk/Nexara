@@ -93,9 +93,9 @@ type backupRunPVE struct {
 	listBefore, listAfter string
 	listReads, creates    int
 	hangReads             map[int]bool
-	// listTimeout, when set, is the bound the harness gives the handler's list
-	// reads, so a hung read costs a moment, not the production bound.
-	listTimeout time.Duration
+	// readTimeout, when set, is the bound the harness gives the handler's reads,
+	// so a hung read costs a moment, not the production bound.
+	readTimeout time.Duration
 	// handle, when set, sees every request first and answers the ones it
 	// returns true for: the routes of a test whose handler is not a job's.
 	handle func(w http.ResponseWriter, r *http.Request) bool
@@ -452,8 +452,8 @@ func newBackupAppAs(t *testing.T, pve *backupRunPVE, grants map[string]bool, met
 	dbtx := &backupRunDBTX{}
 	e := declaredEndpoint(t, method, path)
 	backup := handlers.NewBackupHandler(db.New(dbtx), backupRunEncKey, nil)
-	if pve.listTimeout > 0 {
-		backup.SetJobListTimeout(pve.listTimeout)
+	if pve.readTimeout > 0 {
+		backup.SetReadTimeout(pve.readTimeout)
 	}
 	e.Handler = func(c fiber.Ctx, p *apischema.Params) error { return handler(backup, c, p) }
 

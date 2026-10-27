@@ -1606,8 +1606,9 @@ fingerprints rule it out), otherwise by host and port, 8007 where none is set.
 With no tie at all, a single remaining candidate that no other Nexara PBS server
 is tied to is used, and the restore's audit entry records `matched_by` as
 `only_candidate` (`fingerprint` and `address` otherwise). The answer is `400`
-when no storage can be used and `409` when more than one is tied to the server
-(remove the duplicate). With `force`, the existing guest is stopped only once the
+when no storage can be used, `409` when more than one is tied to the server
+(remove the duplicate) and `502` when Proxmox does not list its storages within
+five seconds, in which case nothing has been changed. With `force`, the existing guest is stopped only once the
 storage is found, and the stop is recorded as a task of its own. The caller needs
 `manage:backup` on the cluster (`403` without it) and `view:backup` on the PBS
 server, on the cluster it is attached to or instance-wide when it is standalone;
