@@ -57,9 +57,9 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 	purge := func() {
 		pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer pcancel()
-		// audit_log.cluster_id is ON DELETE CASCADE, as are nodes and vms, so
-		// dropping the cluster takes the guest rows and most audit rows with
-		// it. The NULL-cluster row has to go by user.
+		// Dropping the cluster takes the guest rows with it, but not the audit
+		// rows: audit_log.cluster_id is SET NULL since 000122 (CASCADE before),
+		// so every one goes by user.
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE user_id = $1`, m084User)
 		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = $1`, m084Cluster)
 		_, _ = pool.Exec(pctx, `DELETE FROM users WHERE id = $1`, m084User)

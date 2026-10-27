@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { detachedClusterEntry } from "@/test/audit-entry.fixtures";
+import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 import { AuditLogPanel } from "./AuditLogPanel";
 import {
   useEvents,
@@ -33,7 +35,7 @@ vi.mock("./SyslogConfigCard", () => ({
  * answers are worked out from `held`, so a panel that asked about the wrong
  * permission would get the wrong answer rather than a blanket yes.
  */
-function renderFor(held: string[]) {
+function renderFor(held: string[], items: AuditLogEntry[] = []) {
   const has = (action: string, resource: string) =>
     held.includes(`${action}:${resource}`);
   vi.mocked(usePermissions).mockReturnValue({
@@ -51,7 +53,7 @@ function renderFor(held: string[]) {
     data: [],
   } as unknown as ReturnType<typeof useAuditUsers>);
   vi.mocked(useEvents).mockReturnValue({
-    data: { items: [], total: 0 },
+    data: { items, total: items.length },
     isLoading: false,
     error: null,
   } as unknown as ReturnType<typeof useEvents>);
@@ -76,6 +78,13 @@ describe("AuditLogPanel", () => {
     renderFor(["view:audit", "manage:audit"]);
 
     expect(screen.getByText("syslog card")).toBeInTheDocument();
+  });
+
+  it("shows the entry of a removed cluster, which names no cluster, as a system entry", () => {
+    renderFor(["view:audit"], [detachedClusterEntry]);
+
+    expect(screen.getByText("linux01")).toBeInTheDocument();
+    expect(screen.getByText("System")).toBeInTheDocument();
   });
 
   it("leaves the syslog card out for a Viewer, whose every read of it would 403", () => {

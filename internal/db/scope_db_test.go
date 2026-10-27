@@ -61,8 +61,8 @@ func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 	purge := func() {
 		pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer pcancel()
-		// audit_log rows cascade from clusters, but the NULL-cluster row has no
-		// parent to cascade from, so it is deleted by id.
+		// Deleted by id: a removed cluster takes its audit rows with it only on
+		// the schemas before 000122, and the NULL-cluster row never had a parent.
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE id = ANY($1)`,
 			[]uuid.UUID{scopeTestRowA, scopeTestRowB, scopeTestRowGlobal})
 		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`,

@@ -51,7 +51,9 @@ func TestGuestHistory(t *testing.T) {
 	purge := func() {
 		pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		// Every fixture table cascades from clusters.
+		// Every fixture table cascades from clusters except audit_log, whose entries
+		// outlive a removed cluster (000122), so they go first, by cluster.
+		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE cluster_id = ANY($1)`, []uuid.UUID{historyClusterID, historyOtherID})
 		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{historyClusterID, historyOtherID})
 		_, _ = pool.Exec(pctx, `DELETE FROM users WHERE id = $1`, historyUserID)
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE resource_type = 'firewall_template' AND resource_id = $1`, historyTemplateID)

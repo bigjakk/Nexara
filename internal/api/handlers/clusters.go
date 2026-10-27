@@ -845,16 +845,16 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 	// actually happened — and so it can carry the revocation outcome.
 	//
 	// The row deliberately carries a NULL cluster_id, with the cluster's
-	// identity in the details body instead. audit_log.cluster_id is
-	// `REFERENCES clusters(id) ON DELETE CASCADE`, which makes a
-	// cluster_deleted row that names its own cluster impossible to keep: write
-	// it before the delete and the cascade destroys it; write it after and the
-	// insert has nothing to point at. Either way the row vanished — this action
-	// had never once been recorded in any install before this change.
+	// identity in the details body instead: written after the delete, it has no
+	// cluster left to name, and a foreign key to a deleted row is refused. (Before
+	// 000122, audit_log.cluster_id was ON DELETE CASCADE, which also destroyed a
+	// row written before the delete — so this action was never once recorded.
+	// Now such a row would be kept, detached, but this one is written afterwards
+	// to carry what the revocation did.)
 	//
-	// That matters more now than it did: this row carries the report of what
-	// revocation left behind on the Proxmox side, which is the only durable
-	// record an operator has to reconcile against.
+	// That matters: this row carries the report of what revocation left behind
+	// on the Proxmox side, which is the only durable record an operator has to
+	// reconcile against.
 	deleteDetails, _ := json.Marshal(auditFields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "cluster", id.String(), "cluster_deleted", deleteDetails)
 

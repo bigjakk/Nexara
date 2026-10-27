@@ -72,7 +72,7 @@ Changing the address also **clears the cluster's stored SSH credential and every
 
 ### Removing a Cluster
 
-From the cluster list, click the delete button. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster.
+From the cluster list, click the delete button. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster. The audit entries recorded against it are kept, as system-wide entries: they leave the cluster-scoped views and are read by anyone who can view the audit log across all clusters.
 
 ### API Token Requirements
 

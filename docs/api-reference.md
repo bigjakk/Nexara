@@ -736,7 +736,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | GET | `/clusters` | List all clusters |
 | GET | `/clusters/:id` | Get cluster details |
 | PUT | `/clusters/:id` | Update cluster |
-| DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential) |
+| DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential). The cluster's audit entries are kept with no cluster, so only a holder of global `view:audit` reads them |
 | POST | `/clusters/fetch-fingerprint` | Fetch TLS fingerprint from a Proxmox URL |
 
 #### Onboarding a cluster without a pre-made token
