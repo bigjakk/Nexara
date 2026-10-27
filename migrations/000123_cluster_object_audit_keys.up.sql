@@ -43,31 +43,38 @@
 --     collector ingested each as a second row beside Nexara's own: filed under
 --     the new key it would show twice for ever. A copy stays where it is when
 --     Nexara has a row for the same apply within two minutes (same cluster, and
---     for a node apply the same node) and the copy was made by an API token of
---     the user the cluster is configured with: the user in the UPID, which is
---     where Proxmox keeps the token for every task (the task list moves it into a
---     field of its own once the task has finished), with the same user@realm as
---     the cluster's token_id, so that an earlier token of that user counts and
---     another tool's does not.
+--     for a node apply the same node) and an API token of the user the cluster is
+--     configured with made it. The token is in the UPID's user, where Proxmox
+--     keeps it for every task (the task list moves it into a field of its own once
+--     the task has finished). One under the cluster's configured token itself
+--     (the UPID's user is the cluster's token_id) is Nexara's beyond doubt. One
+--     under another token of that user — an earlier token, or another tool signed
+--     in as the same user — is Nexara's more likely than not: it stays where it
+--     is all the same, and the end of this file counts those in a NOTICE;
+--   - a row that already carries a rekeyed_from of another origin (another
+--     migration's, or one without a name): its trace is the first original, and
+--     recording this migration's would overwrite it, so the row stays as it is.
 --
 -- Time. A migration gets about three minutes at container start before the
 -- orchestrator replaces the task and the transaction rolls back. No statement
 -- reads audit_log whole: each is bounded by its indexes on resource_type or
 -- action, and the one lookup per row (the parent of a reload) by a time range.
 -- Measured on a synthetic audit_log of 1,001,000 rows, 94,589 of them to re-file
--- (far more than an install holds of these kinds): 9.5 s with the table cached,
--- 12.8 s from empty shared buffers, the commit 23 ms; the down takes 6.7 s. The
--- time is mostly the writing of the re-filed rows, about 0.1 ms each.
+-- (far more than an install holds of these kinds): 10 to 12 s with the table
+-- cached, 12 s from empty shared buffers, the commit a few milliseconds; the down
+-- takes 6 s. The time is mostly the writing of the re-filed rows, about 0.1 ms
+-- each.
 
 -- SDN: the six kinds all filed under "sdn", the kind only in the action
 -- (sdn_zone_created ...). A zone and a VNet may share an id, so the History of
 -- one must not read the other's rows. The apply stays "sdn", id "cluster".
 UPDATE audit_log
 SET resource_type = regexp_replace(action, '^(sdn_[a-z]+)_(created|updated|deleted)$', '\1'),
-    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+    details = CASE WHEN details ? 'rekeyed_from' THEN details
                    ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'sdn'
-  AND action ~ '^sdn_(zone|vnet|subnet|controller|ipam|dns)_(created|updated|deleted)$';
+  AND action ~ '^sdn_(zone|vnet|subnet|controller|ipam|dns)_(created|updated|deleted)$'
+  AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
 -- The kinds just written are new values of resource_type, which the table's
 -- statistics do not know. Without them the next statement is planned as if its
@@ -88,6 +95,7 @@ WITH creates AS MATERIALIZED (
     WHERE c.resource_type = 'sdn_subnet'
       AND c.action = 'sdn_subnet_created'
       AND c.resource_id ~ '^[^/]+/[^/]+/[0-9]+$'
+      AND (NOT c.details ? 'rekeyed_from' OR c.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys')
 ), edits AS MATERIALIZED (
     SELECT u.cluster_id, split_part(u.resource_id, '/', 1) AS vnet, u.resource_id, u.created_at
     FROM audit_log u
@@ -121,7 +129,7 @@ WITH creates AS MATERIALIZED (
 )
 UPDATE audit_log c
 SET resource_id = split_part(c.resource_id, '/', 1) || '/' || r.subnet_id,
-    details = CASE WHEN c.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN c.details
+    details = CASE WHEN c.details ? 'rekeyed_from' THEN c.details
                    ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END
 FROM resolved r
 WHERE c.id = r.id;
@@ -135,49 +143,54 @@ WHERE c.id = r.id;
 UPDATE audit_log
 SET resource_type = 'firewall_rule',
     resource_id = regexp_replace(resource_id, '/rule/[0-9]+$', ''),
-    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+    details = CASE WHEN details ? 'rekeyed_from' THEN details
                    ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type IN ('network', 'firewall')
   AND action IN ('firewall_rule_created', 'firewall_rule_updated', 'firewall_rule_deleted')
-  AND resource_id ~ '^(cluster|vm/[0-9]+)(/rule/[0-9]+)?$';
+  AND resource_id ~ '^(cluster|vm/[0-9]+)(/rule/[0-9]+)?$'
+  AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
 -- The cluster options only: a guest's options (vm/100/options) are not the
 -- cluster's.
 UPDATE audit_log
 SET resource_type = 'firewall_options',
     resource_id = 'cluster',
-    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+    details = CASE WHEN details ? 'rekeyed_from' THEN details
                    ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type IN ('network', 'firewall')
   AND action = 'firewall_options_updated'
-  AND resource_id = 'cluster/options';
+  AND resource_id = 'cluster/options'
+  AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
 -- Firewall aliases, IP sets and security groups: Proxmox folds the name to lower
 -- case ("MyNet" and "mynet" are one alias; a [group ...] and [ipset ...] header
 -- is lc()'d when the config is parsed).
 UPDATE audit_log
 SET resource_id = lower(resource_id),
-    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+    details = CASE WHEN details ? 'rekeyed_from' THEN details
                    ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type IN ('firewall_alias', 'firewall_ipset', 'firewall_security_group', 'firewall_security_group_rule')
-  AND resource_id <> lower(resource_id);
+  AND resource_id <> lower(resource_id)
+  AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
 -- An IP set entry is <set>/<entry>: only the set is a name.
 UPDATE audit_log
 SET resource_id = lower(split_part(resource_id, '/', 1)) || substr(resource_id, length(split_part(resource_id, '/', 1)) + 1),
-    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+    details = CASE WHEN details ? 'rekeyed_from' THEN details
                    ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'firewall_ipset_entry'
-  AND split_part(resource_id, '/', 1) <> lower(split_part(resource_id, '/', 1));
+  AND split_part(resource_id, '/', 1) <> lower(split_part(resource_id, '/', 1))
+  AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
 -- ACL paths: Proxmox collapses repeated slashes and drops a trailing one
 -- (PVE::AccessControl::normalize_path).
 UPDATE audit_log
 SET resource_id = regexp_replace(regexp_replace(resource_id, '/{2,}', '/', 'g'), '(.)/$', '\1'),
-    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+    details = CASE WHEN details ? 'rekeyed_from' THEN details
                    ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'pve_acl'
-  AND resource_id <> regexp_replace(regexp_replace(resource_id, '/{2,}', '/', 'g'), '(.)/$', '\1');
+  AND resource_id <> regexp_replace(regexp_replace(resource_id, '/{2,}', '/', 'g'), '(.)/$', '\1')
+  AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
 -- Tasks the collector ingested from Proxmox, now filed under the object they
 -- changed: the identity Nexara's own handlers record for the same work. A Ceph
@@ -190,7 +203,7 @@ UPDATE audit_log a
 SET resource_type = m.resource_type,
     action = m.action,
     resource_id = substr(a.resource_id, length(m.strip) + 1),
-    details = CASE WHEN a.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN a.details
+    details = CASE WHEN a.details ? 'rekeyed_from' THEN a.details
                    ELSE a.details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', a.resource_type, 'resource_id', a.resource_id, 'action', a.action)) END
 FROM (VALUES
     ('cephcreateosd',   'ceph_osd',  'osd_create',  '',     '^[^[:cntrl:]\u00ad\u0600\u0601-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200c-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9\ufffa-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020\U000e0021-\U000e007f]+$'),
@@ -214,7 +227,8 @@ WHERE a.resource_type = 'proxmox_task'
   AND starts_with(a.resource_id, m.strip)
   AND length(a.resource_id) - length(m.strip) <= 256
   AND substr(a.resource_id, length(m.strip) + 1) ~ m.id_re
-  AND (a.details->>'upid' IS NULL OR split_part(a.details->>'upid', ':', 6) = m.task_type);
+  AND (a.details->>'upid' IS NULL OR split_part(a.details->>'upid', ':', 6) = m.task_type)
+  AND (NOT a.details ? 'rekeyed_from' OR a.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
 -- A Ceph daemon started, stopped or restarted in the Proxmox GUI (srvstart,
 -- srvstop, srvrestart on "osd.3", "mon.pve-01" ...).
@@ -222,7 +236,7 @@ UPDATE audit_log
 SET resource_type = 'ceph_' || split_part(resource_id, '.', 1),
     action = split_part(resource_id, '.', 1) || '_' || substr(action, 4),
     resource_id = substr(resource_id, strpos(resource_id, '.') + 1),
-    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+    details = CASE WHEN details ? 'rekeyed_from' THEN details
                    ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'proxmox_task'
   AND source = 'proxmox'
@@ -230,7 +244,8 @@ WHERE resource_type = 'proxmox_task'
   AND details->>'resource_id' = resource_id
   AND (resource_id ~ '^osd\.[0-9]{1,9}$'
        OR resource_id ~ '^(mon|mgr|mds)\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$')
-  AND (details->>'upid' IS NULL OR split_part(details->>'upid', ':', 6) = action);
+  AND (details->>'upid' IS NULL OR split_part(details->>'upid', ':', 6) = action)
+  AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
 -- Certificates are the node's.
 UPDATE audit_log
@@ -241,12 +256,13 @@ SET resource_type = 'certificate',
         WHEN 'acmerenew'   THEN 'renewed'
         ELSE 'revoked'
     END,
-    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+    details = CASE WHEN details ? 'rekeyed_from' THEN details
                    ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE source = 'proxmox'
   AND action IN ('acme_new_cert', 'acmerenew', 'acmerevoke')
   AND resource_type IN ('node', 'proxmox_task')
-  AND details->>'task_type' IN ('acmenewcert', 'acmerenew', 'acmerevoke');
+  AND details->>'task_type' IN ('acmenewcert', 'acmerenew', 'acmerevoke')
+  AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
 -- The SDN apply (reloadnetworkall), ingested before the collector knew the
 -- cluster as its object — unless Nexara made the apply itself, which has its own
@@ -255,12 +271,13 @@ UPDATE audit_log c
 SET resource_type = 'sdn',
     resource_id = 'cluster',
     action = 'sdn_applied',
-    details = CASE WHEN c.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN c.details
+    details = CASE WHEN c.details ? 'rekeyed_from' THEN c.details
                    ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END
 WHERE c.source = 'proxmox'
   AND c.resource_type = 'network'
   AND c.action = 'reload'
   AND c.details->>'task_type' = 'reloadnetworkall'
+  AND (NOT c.details ? 'rekeyed_from' OR c.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys')
   AND NOT (EXISTS (SELECT 1 FROM clusters cl
                    WHERE cl.id = c.cluster_id
                      AND split_part(c.details->>'upid', ':', 8) LIKE '%!%'
@@ -287,7 +304,7 @@ UPDATE audit_log c
 SET resource_type = 'network',
     resource_id = c.details->>'node',
     action = 'network_applied',
-    details = (CASE WHEN c.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN c.details
+    details = (CASE WHEN c.details ? 'rekeyed_from' THEN c.details
                     ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END)
               || COALESCE(
                   (SELECT jsonb_build_object('parent_upid', p.details->>'upid')
@@ -310,6 +327,7 @@ WHERE c.source = 'proxmox'
   AND c.resource_id = 'networking'
   AND c.details->>'task_type' = 'srvreload'
   AND COALESCE(c.details->>'node', '') <> ''
+  AND (NOT c.details ? 'rekeyed_from' OR c.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys')
   AND NOT (EXISTS (SELECT 1 FROM clusters cl
                    WHERE cl.id = c.cluster_id
                      AND split_part(c.details->>'upid', ':', 8) LIKE '%!%'
@@ -321,3 +339,46 @@ WHERE c.source = 'proxmox'
                          AND n.resource_id = c.details->>'node'
                          AND n.action = 'network_applied'
                          AND n.created_at BETWEEN c.created_at - interval '2 minutes' AND c.created_at + interval '2 minutes'));
+
+-- The copies it left unmoved on the strength of the user alone: the cluster's
+-- user made them under a token other than the one it is configured with. They
+-- are most likely Nexara's own, but another tool using the same user would look
+-- the same, so say how many there are.
+DO $$
+DECLARE
+    ambiguous bigint;
+BEGIN
+    SELECT count(*) INTO ambiguous
+    FROM audit_log c
+    JOIN clusters cl ON cl.id = c.cluster_id
+    WHERE c.source = 'proxmox'
+      AND c.action IN ('reload', 'service_reload')
+      AND split_part(c.details->>'upid', ':', 8) LIKE '%!%'
+      AND split_part(c.details->>'upid', ':', 8) <> cl.token_id
+      AND split_part(split_part(c.details->>'upid', ':', 8), '!', 1) = split_part(cl.token_id, '!', 1)
+      AND ((c.resource_type = 'network'
+            AND c.action = 'reload'
+            AND c.details->>'task_type' = 'reloadnetworkall'
+            AND EXISTS (SELECT 1 FROM audit_log n
+                        WHERE n.cluster_id = c.cluster_id
+                          AND n.source = 'nexara'
+                          AND n.resource_type = 'sdn'
+                          AND n.resource_id = 'cluster'
+                          AND n.action = 'sdn_applied'
+                          AND n.created_at BETWEEN c.created_at - interval '2 minutes' AND c.created_at + interval '2 minutes'))
+           OR (c.resource_type = 'node'
+               AND c.action = 'service_reload'
+               AND c.resource_id = 'networking'
+               AND c.details->>'task_type' = 'srvreload'
+               AND COALESCE(c.details->>'node', '') <> ''
+               AND EXISTS (SELECT 1 FROM audit_log n
+                           WHERE n.cluster_id = c.cluster_id
+                             AND n.source = 'nexara'
+                             AND n.resource_type = 'network'
+                             AND n.resource_id = c.details->>'node'
+                             AND n.action = 'network_applied'
+                             AND n.created_at BETWEEN c.created_at - interval '2 minutes' AND c.created_at + interval '2 minutes')));
+    IF ambiguous > 0 THEN
+        RAISE NOTICE 'cluster_object_audit_keys: % Proxmox-sourced applies were left under their old key as copies of Nexara''s own, on the strength of a token of the cluster''s user other than the one it is configured with', ambiguous;
+    END IF;
+END $$;

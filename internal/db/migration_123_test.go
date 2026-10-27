@@ -4,10 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"io/fs"
+	"reflect"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/bigjakk/nexara/migrations"
 )
@@ -19,6 +25,13 @@ var (
 	m123Node    = uuid.MustParse("12300000-0000-4000-8000-000000000002")
 	m123Other   = uuid.MustParse("12300000-0000-4000-8000-000000000003")
 )
+
+func firstNotice(notices []string) string {
+	if len(notices) == 0 {
+		return ""
+	}
+	return notices[0]
+}
 
 // The back-fill that re-files old audit rows under the key objects of the cluster
 // page now file under. Each row is an old shape that must move or one that must
@@ -43,6 +56,12 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		return string(script)
 	}
 	up, down := read("*_cluster_object_audit_keys.up.sql"), read("*_cluster_object_audit_keys.down.sql")
+
+	// Each statement that re-files rows leaves one that carries a trace of another origin alone.
+	guard := regexp.MustCompile(`\(NOT (\w\.)?details \? 'rekeyed_from' OR (\w\.)?details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys'\)`)
+	if updates, guards := strings.Count(up, "UPDATE audit_log"), len(guard.FindAllString(up, -1)); guards != updates {
+		t.Errorf("%d update statements and %d guards for a row that carries another origin's rekeyed_from", updates, guards)
+	}
 
 	purge := func() {
 		pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -234,6 +253,9 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		{name: "its copy, by a token of the cluster's user, stays", source: px, offset: 3*time.Hour + time.Minute,
 			details: taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!token01"),
 			old:     shape{"network", "pve-01", "reload"}},
+		{name: "its copy, by the configured token itself, stays", source: px, offset: 3*time.Hour + 10*time.Second,
+			details: taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!test"),
+			old:     shape{"network", "pve-01", "reload"}},
 		{name: "a copy by an earlier token of that user stays too", source: px, offset: 3*time.Hour + 90*time.Second,
 			details: taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!earlier"),
 			old:     shape{"network", "pve-01", "reload"}},
@@ -253,6 +275,9 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		{name: "its copy, by a token of the cluster's user, stays too", source: px, offset: 4*time.Hour + 30*time.Second,
 			details: taskDetails("srvreload", "networking", "pve-04", "user@pam", "user@pam!token01"),
 			old:     shape{"node", "networking", "service_reload"}},
+		{name: "its copy, by the configured token itself, stays as well", source: px, offset: 4*time.Hour + 10*time.Second,
+			details: taskDetails("srvreload", "networking", "pve-04", "user@pam", "user@pam!test"),
+			old:     shape{"node", "networking", "service_reload"}},
 		{name: "a node apply by a person moves", source: px, offset: 4*time.Hour + 30*time.Second,
 			details: taskDetails("srvreload", "networking", "pve-04", "root@pam", "root@pam"),
 			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-04", "network_applied"}},
@@ -265,11 +290,22 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 			details: taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!token01"),
 			old:     shape{"network", "pve-01", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
 
-		// Another migration's trace on a row this one leaves alone is not this one's.
-		{name: "another migration's trace on a row this one re-files is replaced by this one's",
+		// A trace of another origin is the row's first original: the row stays as it is, trace and all.
+		{name: "a row another migration's trace is on is not re-filed",
 			details: `{"rekeyed_from":{"by":"another_migration","resource_type":"x","resource_id":"y","action":"z"}}`,
-			old:     shape{"sdn", "dmz02", "sdn_zone_created"}, want: shape{"sdn_zone", "dmz02", "sdn_zone_created"}},
-		{name: "a row carrying another migration's trace is left alone",
+			old:     shape{"sdn", "dmz02", "sdn_zone_created"}},
+		{name: "nor is one with a trace that names no migration",
+			details: `{"rekeyed_from":{"resource_type":"x","resource_id":"y","action":"z"}}`,
+			old:     shape{"sdn", "dmz03", "sdn_zone_created"}},
+		{name: "an apply's copy with another origin's trace and no twin stays, and is not counted", source: px, offset: 6 * time.Hour,
+			details: strings.TrimSuffix(taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!token01"), "}") +
+				`,"rekeyed_from":{"by":"another_migration","resource_type":"x","resource_id":"y","action":"z"}}`,
+			old: shape{"network", "pve-01", "reload"}},
+		{name: "an apply's copy by another tool with another origin's trace stays, and is not counted", source: px, offset: 3*time.Hour + 15*time.Second,
+			details: strings.TrimSuffix(taskDetails("reloadnetworkall", "", "pve-02", "other@pam", "other@pam!tool"), "}") +
+				`,"rekeyed_from":{"by":"another_migration","resource_type":"x","resource_id":"y","action":"z"}}`,
+			old: shape{"network", "pve-02", "reload"}},
+		{name: "a row this one has no business with keeps its trace",
 			details: `{"rekeyed_from":{"by":"another_migration","resource_type":"x","resource_id":"y","action":"z"}}`,
 			old:     shape{"vm", "100", "start"}},
 	}
@@ -319,15 +355,34 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		}
 		return s
 	}
+	// The migration counts what it left unmoved on the user's word alone in a NOTICE.
+	var notices []string
+	connCfg := pool.Config().ConnConfig.Copy()
+	connCfg.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) { notices = append(notices, n.Message) }
+	conn, err := pgx.ConnectConfig(ctx, connCfg)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
 	run := func(what, script string) {
 		t.Helper()
-		if _, err := pool.Exec(ctx, script); err != nil {
+		if _, err := conn.Exec(ctx, script); err != nil {
 			t.Fatalf("%s: %v", what, err)
 		}
 	}
 
+	// A trace a row came with is the row's first original: it survives the up and the down as it was.
+	seededTrace := func(tc testRow) any {
+		var seeded map[string]any
+		_ = json.Unmarshal([]byte(tc.details), &seeded)
+		return seeded["rekeyed_from"]
+	}
+	var firstPassNotices []string
 	for pass := 1; pass <= 2; pass++ {
 		run("up", up)
+		if pass == 1 {
+			firstPassNotices = append(firstPassNotices, notices...)
+		}
 		for i, tc := range rows {
 			got, moved := load(i), tc.want != (shape{})
 			want := tc.old
@@ -346,6 +401,9 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 			case !moved && ours:
 				t.Errorf("pass %d, %s: a row that stayed carries this migration's rekeyed_from %v", pass, tc.name, got.rekeyed)
 			}
+			if seeded := seededTrace(tc); seeded != nil && !reflect.DeepEqual(got.details["rekeyed_from"], seeded) {
+				t.Errorf("pass %d, %s: rekeyed_from = %v, want the one the row came with, %v", pass, tc.name, got.details["rekeyed_from"], seeded)
+			}
 			for k, v := range tc.wantDetail {
 				if got.details[k] != v {
 					t.Errorf("pass %d, %s: details.%s = %v, want %q", pass, tc.name, k, got.details[k], v)
@@ -359,14 +417,20 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		}
 	}
 
+	// Two copies of an SDN apply and one of a node's stay on the user's word alone (a token of
+	// the cluster's user that is not the configured one); the configured token's do not count.
+	if m := regexp.MustCompile(`^cluster_object_audit_keys: (\d+) `).FindStringSubmatch(firstNotice(firstPassNotices)); m == nil {
+		t.Errorf("notices = %q, want one counting the copies left on the user's word alone", firstPassNotices)
+	} else if n, _ := strconv.Atoi(m[1]); len(firstPassNotices) != 1 || n != 3 {
+		t.Errorf("notices = %q, want one counting 3 copies", firstPassNotices)
+	}
+
 	// The down puts every moved row back, and takes its marks out.
 	run("down", down)
 	for i, tc := range rows {
 		got := load(i)
-		foreign := got.rekeyed["by"] == "another_migration"
-		if got.shape != tc.old || got.rekeyed["by"] == "cluster_object_audit_keys" || got.details["parent_upid"] != nil ||
-			(tc.name == "a row carrying another migration's trace is left alone") != foreign {
-			t.Errorf("after the down, %s: %+v (rekeyed %v, parent %v), want %+v with no mark of this migration and another's kept", tc.name, got.shape, got.rekeyed, got.details["parent_upid"], tc.old)
+		if got.shape != tc.old || got.details["parent_upid"] != nil || !reflect.DeepEqual(got.details["rekeyed_from"], seededTrace(tc)) {
+			t.Errorf("after the down, %s: %+v (rekeyed %v, parent %v), want %+v with no mark of this migration and a trace the row came with kept", tc.name, got.shape, got.details["rekeyed_from"], got.details["parent_upid"], tc.old)
 		}
 	}
 }
