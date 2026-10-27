@@ -1955,6 +1955,7 @@ Nexara happens to hold for it:
 |--------|-----------------|---------------|--------------|
 | Storage | `storage` | the storage's name, as Proxmox calls it on every node | `storage`; `node` when the action ran on one node |
 | An upload, copy or URL download run outside Nexara | `node` | the node's name: Proxmox's task names no storage | `node`, `task_type` |
+| An LVM, LVM-thin or directory create that adds a storage | `node` | the node's name | `storage`: the storage added, which Proxmox names after the volume |
 | PBS server and its datastores | `pbs_server` | the PBS server's id | `datastore` on a datastore action, and on a sync or verify job trigger when the collector has synced that job; `job_id` on a job trigger; `pbs_upid` on the garbage collection or job it started |
 | Veeam server | `veeam_server` | the Veeam server's id | |
 | Veeam job, Veeam session | `veeam_job`, `veeam_session` | Veeam's own id for it | `veeam_server_id`; a session also `veeam_job_id` |

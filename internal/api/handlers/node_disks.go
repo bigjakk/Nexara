@@ -175,13 +175,23 @@ func (h *NodeHandler) ListLVM(c fiber.Ctx, p *apischema.Params) error {
 	return RespondItems(c, vgs)
 }
 
+// createdStorage adds to a disk create's audit details the storage it made
+// beside the volume. Proxmox names that storage after the volume (add_storage),
+// and a History of the storage looks for it by that name.
+func createdStorage(extra map[string]any, addStorage bool, name string) map[string]any {
+	if addStorage {
+		extra["storage"] = name
+	}
+	return extra
+}
+
 // CreateLVM handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm.
 func (h *NodeHandler) CreateLVM(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	name, device := p.String("name"), p.String("device")
+	name, device, addStorage := p.String("name"), p.String("device"), p.Bool("add_storage")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -189,7 +199,7 @@ func (h *NodeHandler) CreateLVM(c fiber.Ctx, p *apischema.Params) error {
 	upid, err := pxClient.CreateNodeLVM(c.Context(), nodeName, proxmox.CreateLVMParams{
 		Name:       name,
 		Device:     device,
-		AddStorage: p.Bool("add_storage"),
+		AddStorage: addStorage,
 	})
 	if err != nil {
 		return mapDuplicateNameError("A volume group or storage entry with that name already exists on this node", err)
@@ -202,7 +212,7 @@ func (h *NodeHandler) CreateLVM(c fiber.Ctx, p *apischema.Params) error {
 		Action:       "create_lvm",
 		UPID:         upid,
 		Description:  "Create LVM " + name,
-		Extra:        map[string]any{"name": name, "device": device},
+		Extra:        createdStorage(map[string]any{"name": name, "device": device}, addStorage, name),
 	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
@@ -261,7 +271,7 @@ func (h *NodeHandler) CreateLVMThin(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	name, device := p.String("name"), p.String("device")
+	name, device, addStorage := p.String("name"), p.String("device"), p.Bool("add_storage")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -269,7 +279,7 @@ func (h *NodeHandler) CreateLVMThin(c fiber.Ctx, p *apischema.Params) error {
 	upid, err := pxClient.CreateNodeLVMThin(c.Context(), nodeName, proxmox.CreateLVMThinParams{
 		Name:       name,
 		Device:     device,
-		AddStorage: p.Bool("add_storage"),
+		AddStorage: addStorage,
 	})
 	if err != nil {
 		return mapDuplicateNameError("A thin pool or storage entry with that name already exists on this node", err)
@@ -282,7 +292,7 @@ func (h *NodeHandler) CreateLVMThin(c fiber.Ctx, p *apischema.Params) error {
 		Action:       "create_lvmthin",
 		UPID:         upid,
 		Description:  "Create LVM-thin " + name,
-		Extra:        map[string]any{"name": name, "device": device},
+		Extra:        createdStorage(map[string]any{"name": name, "device": device}, addStorage, name),
 	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
@@ -341,7 +351,7 @@ func (h *NodeHandler) CreateDirectory(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	name, device, filesystem := p.String("name"), p.String("device"), p.String("filesystem")
+	name, device, filesystem, addStorage := p.String("name"), p.String("device"), p.String("filesystem"), p.Bool("add_storage")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -350,7 +360,7 @@ func (h *NodeHandler) CreateDirectory(c fiber.Ctx, p *apischema.Params) error {
 		Name:       name,
 		Device:     device,
 		Filesystem: filesystem,
-		AddStorage: p.Bool("add_storage"),
+		AddStorage: addStorage,
 	})
 	if err != nil {
 		return mapDuplicateNameError("A directory, mount unit, or storage entry with that name already exists on this node", err)
@@ -363,7 +373,7 @@ func (h *NodeHandler) CreateDirectory(c fiber.Ctx, p *apischema.Params) error {
 		Action:       "create_directory",
 		UPID:         upid,
 		Description:  "Create directory " + name,
-		Extra:        map[string]any{"name": name, "device": device, "filesystem": filesystem},
+		Extra:        createdStorage(map[string]any{"name": name, "device": device, "filesystem": filesystem}, addStorage, name),
 	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
