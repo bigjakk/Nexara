@@ -261,16 +261,24 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 		return
 	}
 
-	clusterSig := observeSignature("cluster", o.tags.keyID, observeStateVersion, clusterVersions(nodes))
-	// A new privilege can open a kind skipped as refused, so the skips go when
-	// the privileges move too.
-	o.noticeSignature(cluster.ID, observeSignature(clusterSig, p.privFP))
 	p.observeTokenPrivileges(ctx)
-	p.observeHA(ctx, clusterSig)
-	for _, k := range observeClusterKinds {
-		p.observeClusterKind(ctx, k, p.gated(k.kind, clusterSig))
+	if versions, known := p.nodeVersions(ctx, nodes); known {
+		clusterSig := observeSignature("cluster", o.tags.keyID, observeStateVersion, versions)
+		// A new privilege can open a kind skipped as refused, so the skips go
+		// when the privileges move too.
+		o.noticeSignature(cluster.ID, observeSignature(clusterSig, p.privFP))
+		p.observeHA(ctx, clusterSig)
+		for _, k := range observeClusterKinds {
+			p.observeClusterKind(ctx, k, p.gated(k.kind, clusterSig))
+		}
+	} else {
+		o.logger.Debug("object observer: a node's Proxmox version is not known yet; the cluster's objects wait",
+			"cluster_id", cluster.ID)
 	}
 	for _, n := range online {
+		if n.PveVersion == "" || n.KernelVersion == "" {
+			continue // the inventory has not read this node since it came back
+		}
 		nodeSig := observeSignature("node", o.tags.keyID, observeStateVersion, n.PveVersion, n.KernelVersion)
 		for _, k := range observeNodeKinds {
 			p.observeNodeKind(ctx, k, n, nodeSig)
@@ -1225,12 +1233,37 @@ func sumCounts(held, next map[string]any) map[string]any {
 	return out
 }
 
-// clusterVersions is the Proxmox versions a cluster's nodes run, as one string.
-func clusterVersions(nodes []db.Node) string {
+// nodeVersions is the Proxmox versions the cluster's nodes run, for its
+// signature, and whether every node's is known. The collector writes a node it
+// cannot reach with no versions, so such a node counts with the versions it
+// last had, kept with the kinds' marks (cluster_object_baselines, kind
+// node_versions) to outlast a restart: a node going down or coming back is no
+// upgrade, and never re-baselines. A node never seen with versions holds the
+// cluster's objects back until it has.
+func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (string, bool) {
+	const kind = "node_versions"
+	last := map[string]string{}
+	stored := p.baselines[kind].signature
+	_ = json.Unmarshal([]byte(stored), &last)
+	known := true
 	vs := make([]string, 0, len(nodes))
 	for _, n := range nodes {
-		vs = append(vs, n.PveVersion)
+		if n.PveVersion != "" {
+			last[n.Name] = n.PveVersion
+		}
+		v, ok := last[n.Name]
+		if !ok {
+			known = false
+			continue
+		}
+		vs = append(vs, v)
+	}
+	if b, err := json.Marshal(last); err == nil && string(b) != stored && len(last) > 0 {
+		readAt := time.Now()
+		if p.write(ctx, kind, recordBatch{}, readAt, string(b)) {
+			p.baselines[kind] = storedBaseline{signature: string(b), lastRead: readAt}
+		}
 	}
 	slices.Sort(vs)
-	return strings.Join(slices.Compact(vs), " ")
+	return strings.Join(slices.Compact(vs), " "), known
 }

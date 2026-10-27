@@ -584,6 +584,23 @@ func TestObserverOutcomes(t *testing.T) {
 		plugins("Q0RF")
 		e.expect("then an edit", "changed acme_plugin/dns01 [data]")
 	})
+	t.Run("a node down, or back and not read yet, re-baselines nothing", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.mq.nodesByCluster = append(e.mq.nodesByCluster, db.Node{ID: uuid.New(), ClusterID: e.cluster.ID,
+			Name: "pve-02", Status: "online", PveVersion: "pve-manager/9.2.21/0000bbbb", KernelVersion: "6.14.8-2-pve"})
+		e.expect("baseline")
+		down := &e.mq.nodesByCluster[1]
+		down.Status, down.PveVersion, down.KernelVersion = "offline", "", ""
+		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","path":"/srv/store01","content":"images,iso","nodes":"pve-01"}]`)
+		e.expect("a node down", "changed storage/store01 [nodes]")
+		back := &e.mq.nodesByCluster[0]
+		back.PveVersion, back.KernelVersion = "", ""
+		e.client.set("/nodes/pve-01/dns", `{"search":"example.com","dns1":"192.0.2.55"}`)
+		e.expect("a node back, its versions not read yet")
+		back.PveVersion, back.KernelVersion = "pve-manager/9.2.20/0000aaaa", "6.14.8-2-pve"
+		e.expect("and read", "changed node/pve-01 [dns1]")
+	})
 	t.Run("a guest is only ever changed", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
