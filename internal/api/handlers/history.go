@@ -62,11 +62,16 @@ type HistoryKind struct {
 	// validated parameters. An error it returns is the response.
 	Select HistorySelector
 	// ObjectTypes are the resource types Select may name in Objects, declared
-	// so that what a kind reads is checked at startup: a global kind's against
-	// globalHistoryResourceTypes (Validate), and every kind's observed types
-	// against its route's own view permission (ObservedTypePermission, which
-	// the registry checks). ListParams refuses an object of any other type.
+	// so that what a kind reads is checked at startup — a global kind's
+	// against globalHistoryResourceTypes (Validate). ListParams refuses an
+	// object of any other type.
 	ObjectTypes []string
+	// ObservedTypes are those of ObjectTypes whose changes seen in Proxmox
+	// (cluster_object_changes) the kind shows beside their audit rows, each
+	// mapped in observedTypePermission (Validate). A request reads only those
+	// of them its caller may view under the type's own permission — a pool's
+	// under view:pool whatever the kind's — and no type undeclared or unmapped.
+	ObservedTypes []string
 	// GuestFromPath says the selection's one guest is the one the path's
 	// "vmid" names — List refuses any other selection — and the caller asked
 	// for it by VMID, so listing it discloses nothing. Every
@@ -268,6 +273,12 @@ func (k HistoryKind) Validate() error {
 	for _, t := range k.ObjectTypes {
 		if k.Global && !slices.Contains(globalHistoryResourceTypes, t) {
 			return fmt.Errorf("history kind %q is global and reads %q, whose ids are unique only within a cluster", k.Name, t)
+		}
+	}
+	for _, t := range k.ObservedTypes {
+		if _, mapped := observedTypePermission[t]; !mapped || !slices.Contains(k.ObjectTypes, t) {
+			return fmt.Errorf("history kind %q shows the observed changes of %q, which is not one of its ObjectTypes "+
+				"or has no view permission in observedTypePermission", k.Name, t)
 		}
 	}
 	if !slices.Contains(k.Categories, k.Default) {

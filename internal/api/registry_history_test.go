@@ -82,8 +82,7 @@ func TestHistoryGateScope(t *testing.T) {
 // A route's gate is decided at registration: neither or both of Resource and
 // AuditOnly is refused, so no kind can fall back to view:audit alone; so is a
 // global kind on view:audit alone, or at a cluster's path, where its gate
-// would be one cluster's; and a kind that reads a type's observed changes
-// under any view but that type's own.
+// would be one cluster's.
 func TestHistoryEndpointRefusesAnUndecidedGate(t *testing.T) {
 	t.Parallel()
 	global := handlers.HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true,
@@ -94,8 +93,6 @@ func TestHistoryEndpointRefusesAnUndecidedGate(t *testing.T) {
 		"global on audit alone":  {Kind: global, Path: pathPrefix + "probes/:vmid/history", AuditOnly: "because"},
 		"global at a cluster's":  {Kind: global, Resource: "pbs"},
 		"a cluster's kind above": {Kind: handlers.GuestHistory(), Path: pathPrefix + "probes/:vmid/history", Resource: "vm"},
-		"an observed type under another view": {Kind: handlers.HistoryKind{Name: "probe", Categories: []string{"other"},
-			Default: "other", Select: handlers.SelectObjects("vmid"), ObjectTypes: []string{"replication"}}, Resource: "node"},
 	} {
 		if r.Path == "" {
 			r.Path = clusterScope + "/probe/:vmid/history"

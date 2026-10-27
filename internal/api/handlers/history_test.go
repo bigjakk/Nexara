@@ -155,6 +155,10 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"a default the filter refuses", func(k *HistoryKind) { k.Default = "misc" }, "Default"},
 		{"a global kind with a guest", func(k *HistoryKind) { k.Global, k.GuestFromPath = true, true }, "global"},
 		{"a global kind reading a cluster's type", func(k *HistoryKind) { k.Global = true }, "unique only within a cluster"},
+		{"an observed type it does not read", func(k *HistoryKind) { k.ObservedTypes = []string{"replication"} }, "observed changes"},
+		{"an observed type with no view", func(k *HistoryKind) {
+			k.ObjectTypes, k.ObservedTypes = []string{"pool", "probe"}, []string{"probe"}
+		}, "observed changes"},
 	} {
 		k := valid()
 		tt.mutate(&k)
