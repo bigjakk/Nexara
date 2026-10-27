@@ -126,24 +126,44 @@ func (h *ReplicationHandler) UpdateJob(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	// The job as it stands, to tell what the edit changes from what the dialog sends
+	// along. A job that cannot be read is no reason to refuse the edit, which Proxmox
+	// then answers for itself.
+	before, _ := pxClient.GetReplicationJob(c.Context(), jobID)
 	if err := pxClient.UpdateReplicationJob(c.Context(), jobID, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	// The fields the edit set, by name: the job's History explains a change seen in
-	// Proxmox by an update that names the field (ClassifyClusterObjectChanges).
-	fields := make([]string, 0, 4)
-	for _, set := range []struct {
-		name string
-		is   bool
-	}{{"schedule", req.Schedule != ""}, {"rate", req.Rate != ""}, {"comment", req.Comment != ""}, {"disable", req.Disable != nil}} {
-		if set.is {
-			fields = append(fields, set.name)
-		}
-	}
-	details, _ := json.Marshal(map[string]any{"id": jobID, "fields": fields})
+	details, _ := json.Marshal(map[string]any{"id": jobID, "fields": changedReplicationFields(before, req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "replication", jobID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindReplicationChange, "replication", jobID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// changedReplicationFields names the fields an edit sets to something other than
+// the job has. The job's History explains a change seen in Proxmox by an update
+// that names the field (ClassifyClusterObjectChanges), and the edit dialog sends
+// schedule and comment whatever was touched: naming those would let this edit stand
+// for a later change to either made in Proxmox. A job that could not be read before
+// the edit names nothing, so what Proxmox then reports is shown, not assumed.
+func changedReplicationFields(before *proxmox.ReplicationJob, req proxmox.UpdateReplicationJobParams) []string {
+	fields := make([]string, 0, 4)
+	if before == nil {
+		return fields
+	}
+	for _, f := range []struct {
+		name    string
+		changed bool
+	}{
+		{"schedule", req.Schedule != "" && req.Schedule != before.Schedule},
+		{"rate", req.Rate != "" && req.Rate != before.Rate.String()},
+		{"comment", req.Comment != "" && req.Comment != before.Comment},
+		{"disable", req.Disable != nil && *req.Disable != before.Disable},
+	} {
+		if f.changed {
+			fields = append(fields, f.name)
+		}
+	}
+	return fields
 }
 
 // DeleteJob handles DELETE /clusters/:cluster_id/replication/:job_id.

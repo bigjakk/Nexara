@@ -258,14 +258,16 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			forbidden:   "secret",
 		},
 		{
-			// A change seen in Proxmox is explained by an update that names its field.
-			name: "a replication update names the fields it set", method: fiber.MethodPut, path: replicationScope + "/:job_id",
-			target: "/replication/100-0", body: `{"schedule":"*/5","disable":1}`,
+			// A change seen in Proxmox is explained by an update that names its field,
+			// and the edit dialog sends the comment (and here the disable flag) as it was.
+			name: "a replication update names the fields it changed, not the ones it sent as they were", method: fiber.MethodPut, path: replicationScope + "/:job_id",
+			target: "/replication/100-0", body: `{"schedule":"*/5","rate":"10","comment":"nightly","disable":0}`,
 			bind: func(q *db.Queries) Handler {
 				return handlers.NewReplicationHandler(q, haCreateEncKey, nil).UpdateJob
 			},
+			replies:  map[string]string{"GET /api2/json/cluster/replication/100-0": `{"id":"100-0","schedule":"*/15","comment":"nightly","disable":0}`},
 			wantType: "replication", wantID: "100-0", wantAction: "updated",
-			wantDetails: map[string]any{"fields": []any{"schedule", "disable"}},
+			wantDetails: map[string]any{"fields": []any{"schedule", "rate"}},
 		},
 		{
 			// schedule_now spawns no task and answers with nothing; tracking that
