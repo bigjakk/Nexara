@@ -95,7 +95,8 @@ WITH rules AS MATERIALIZED (
            e.value->>'object'              AS object,
            e.value->>'member'              AS member,
            e.value->>'member_of'           AS member_of,
-           e.value->>'counts'              AS counts
+           e.value->>'counts'              AS counts,
+           e.value->>'fields_from'         AS fields_from
     FROM jsonb_array_elements($1::jsonb) AS e
 ), pending AS MATERIALIZED (
     SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.fields, c.detail, c.node,
@@ -113,7 +114,7 @@ WITH rules AS MATERIALIZED (
     -- One arm per match_key, so each reads audit_log through the index its key
     -- can use.
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
            a.created_at
     FROM pending p
@@ -123,7 +124,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
@@ -132,7 +133,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
@@ -141,7 +142,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
@@ -151,7 +152,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
@@ -160,7 +161,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 hour' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
@@ -168,7 +169,8 @@ WITH rules AS MATERIALIZED (
                     AND a.details->>substr(r.match_key, 9) = p.resource_id
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
 ), hits AS (
-    SELECT k.id, k.field_re, k.member, n.member_names, k.counts, k.audit_id, k.created_at
+    SELECT k.id, k.field_re, k.member, n.member_names, k.counts, k.fields_from, n.fields_named, k.audit_id,
+           k.created_at
     FROM candidates k
     CROSS JOIN LATERAL (
         -- What the row names, in the form the rule's object and member_of give.
@@ -192,7 +194,26 @@ WITH rules AS MATERIALIZED (
                                       COALESCE(k.details->>substr(split_part(k.member_of, ':', 1), 14), ''), '[,; ]+'), '')
                               WHEN k.member_of LIKE 'details.%'
                                   THEN ARRAY[k.details->>substr(split_part(k.member_of, ':', 1), 9)]
-                          END) AS v) AS member_names
+                          END) AS v) AS member_names,
+               -- The fields a row says it set, when the rule takes them from it:
+               -- a guest config edit's keys, those it deleted or reverted, and
+               -- what deleting a disk moves (unused<n>, boot); the datacenter
+               -- options' settings and cleared.
+               CASE k.fields_from
+                   WHEN 'config' THEN ARRAY(
+                       SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
+                                                            THEN k.details->'fields' ELSE '{}' END) AS f
+                       UNION
+                       SELECT f FROM regexp_split_to_table(
+                           COALESCE(k.details->'fields'->>'delete', '') || ',' || COALESCE(k.details->'fields'->>'revert', ''),
+                           '[,; ]+') AS f WHERE f <> '')
+                   WHEN 'settings' THEN ARRAY(
+                       SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'settings') = 'array'
+                                                                    THEN k.details->'settings' ELSE '[]' END) AS f
+                       UNION
+                       SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'cleared') = 'array'
+                                                                    THEN k.details->'cleared' ELSE '[]' END) AS f)
+               END AS fields_named
     ) n
     LEFT JOIN task_history th ON th.cluster_id = k.cluster_id AND th.upid = k.details->>'upid'
     WHERE (NOT k.untasked OR k.details->>'upid' IS NULL)
@@ -232,6 +253,8 @@ WITH rules AS MATERIALIZED (
         FROM hits h
         WHERE h.id = n.id
           AND (n.field = '' OR h.field_re = '' OR n.field ~ h.field_re)
+          AND (h.fields_from = '' OR n.field = ANY(h.fields_named)
+               OR (h.fields_from = 'config' AND n.field ~ '^(unused[0-9]+|boot)$'))
           AND CASE h.member
                   WHEN ''       THEN true
                   -- A member joining or leaving a list: the one the row names.
@@ -281,6 +304,7 @@ WITH rules AS MATERIALIZED (
                max(h.created_at)                            AS created_at
         FROM hits h
         WHERE h.id = n.id AND h.member = '' AND (h.field_re = '' OR n.field ~ h.field_re)
+          AND (h.fields_from = '' OR n.field = ANY(h.fields_named))
     ) agg
     WHERE n.kind = 'list'
 ), verdict AS (
@@ -332,7 +356,8 @@ type ClassifyObservedChangesParams struct {
 // source a comma list); a member rule with no member_of covers any member
 // going its way. A name with a * matches any that
 // begins and ends as it does around it (a realm's users, *@realm). counts
-// says what the row does to a list's items (listed, below).
+// says what the row does to a list's items (listed, below); fields_from keeps
+// it to the fields its details say it set (fields_named, below).
 //
 // A change is explained when everything it changed is: each member that joined
 // or left a list of ids (members_joined, members_left), each other field in

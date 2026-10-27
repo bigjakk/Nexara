@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -389,11 +390,14 @@ func parseObjectTags(raw json.RawMessage) (objectTags, error) {
 }
 
 // listCount is how an ordered list changed: the items that are new, and the
-// ones that are gone, counted as multisets. A rule edited in place is one of
-// each; a list only reordered is neither, and still a change.
+// ones that are gone, counted as multisets, and of those kept how many are out
+// of their old order. A rule edited in place is one in and one out; a rule
+// moved is one moved — firewall rules apply in order, so a move is a change a
+// create elsewhere must not explain.
 type listCount struct {
 	Added   int `json:"added"`
 	Removed int `json:"removed"`
+	Moved   int `json:"moved,omitempty"`
 }
 
 // tagDiff is how two readings of one object differ: the fields, sorted; for
@@ -509,9 +513,11 @@ func multisetDiff(prev, cur []string) listCount {
 		left[t]++
 	}
 	var c listCount
+	inCur := make(map[string]int, len(cur))
 	for _, t := range cur {
 		if left[t] > 0 {
 			left[t]--
+			inCur[t]++
 			continue
 		}
 		c.Added++
@@ -519,5 +525,40 @@ func multisetDiff(prev, cur []string) listCount {
 	for _, n := range left {
 		c.Removed += n
 	}
+	// The kept items in their two orders: those not on the longest common
+	// subsequence moved.
+	var prevKept, curKept []string
+	kept := maps.Clone(inCur)
+	for _, t := range prev {
+		if kept[t] > 0 {
+			kept[t]--
+			prevKept = append(prevKept, t)
+		}
+	}
+	for _, t := range cur {
+		if inCur[t] > 0 {
+			inCur[t]--
+			curKept = append(curKept, t)
+		}
+	}
+	c.Moved = len(curKept) - lcsLen(prevKept, curKept)
 	return c
+}
+
+// lcsLen is the length of the longest common subsequence of a and b.
+func lcsLen(a, b []string) int {
+	row := make([]int, len(b)+1)
+	for i := range a {
+		prevDiag := 0
+		for j := range b {
+			saved := row[j+1]
+			if a[i] == b[j] {
+				row[j+1] = prevDiag + 1
+			} else {
+				row[j+1] = max(row[j+1], row[j])
+			}
+			prevDiag = saved
+		}
+	}
+	return row[len(b)]
 }

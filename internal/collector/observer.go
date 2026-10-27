@@ -1203,7 +1203,7 @@ func sumCounts(held, next map[string]any) map[string]any {
 	}
 	for k, c := range nc {
 		s := sum[k]
-		sum[k] = listCount{Added: s.Added + c.Added, Removed: s.Removed + c.Removed}
+		sum[k] = listCount{Added: s.Added + c.Added, Removed: s.Removed + c.Removed, Moved: s.Moved + c.Moved}
 	}
 	out := make(map[string]any, len(held))
 	for k, v := range held {

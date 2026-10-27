@@ -53,6 +53,11 @@ type explainRule struct {
 	// how many came and went: add1 one in, del1 one out, edit1 one in and one
 	// out or one moved, adds any number in, dels any number out; "" anything.
 	Counts string `json:"counts"`
+	// FieldsFrom keeps a row to the fields its details name: config, a guest
+	// config edit's keys and the keys it deleted or reverted (and the
+	// unused<n> and boot a disk's removal moves); settings, the datacenter
+	// options' settings and cleared.
+	FieldsFrom string `json:"fields_from"`
 }
 
 // byAction is the rules a kind's own audit rows give: an audit row for the same
@@ -122,11 +127,14 @@ const (
 // guestConfigActions are Nexara's own edits of a guest's configuration that run
 // no task, so no worker type says what they are. Every action Nexara files for
 // a guest with no task is either here or in guestOtherActions, which
-// TestObservedActionVocabulary holds to the handlers.
-var guestConfigActions = []string{
-	"config_update", "disk_attach", "disk_detach", "disk_resize", "media_mount", "media_eject",
-	"guest_tools_stage", "guest_tools_update", "guest_tools_cancel", "guest_tools_auto_cancel",
-}
+// TestObservedActionVocabulary holds to the handlers. A config edit names the
+// keys it set (vms.go SetVMConfig, containers.go SetContainerConfig); the rest
+// write a disk or a CD-ROM drive and nothing else (guesttools engine.go).
+var (
+	guestConfigActions = slices.Concat([]string{"config_update"}, guestDiskActions)
+	guestDiskActions   = []string{"disk_attach", "disk_detach", "disk_resize", "media_mount", "media_eject",
+		"guest_tools_stage", "guest_tools_update", "guest_tools_cancel", "guest_tools_auto_cancel"}
+)
 
 // guestOtherActions are Nexara's guest rows with no task that write nothing in
 // the guest's configuration: the pool is user.cfg, the policy Nexara's own, the
@@ -145,20 +153,29 @@ func anyOf(words ...string) string { return "^(" + strings.Join(words, "|") + ")
 // an observed kind to this table or to observedActionsExplainingNothing.
 var observedChangeRules = slices.Concat(
 	// A VM's configuration: tasks that rewrite it, tasks that rewrite its
-	// disks, and Nexara's own untasked edits.
+	// disks, and Nexara's own untasked edits, each only the fields it names.
+	// qmconfig is the asynchronous config API, which can write any key, and
+	// its task names none: a GUI edit through it explains every field. A
+	// snapshot's delete drops the disks it alone held into unused<n>.
 	[]explainRule{
 		{Kind: "vm", Change: "changed", MatchKey: "vmid",
 			WorkerRe: anyOf("qmconfig", "qmrollback", "qmtemplate", "qmcreate", "qmrestore", "qmdestroy")},
 		{Kind: "vm", Change: "changed", MatchKey: "vmid",
 			WorkerRe: anyOf("qmmove", "resize", "qmigrate"), FieldRe: qemuDiskFields},
+		{Kind: "vm", Change: "changed", MatchKey: "vmid", WorkerRe: `^qmdelsnapshot$`, FieldRe: `^unused[0-9]+$`},
 		{Kind: "vm", Change: "changed", AuditType: "vm", MatchKey: "vmid", Untasked: true,
-			ActionRe: anyOf(guestConfigActions...)},
+			ActionRe: `^config_update$`, FieldsFrom: "config"},
+		{Kind: "vm", Change: "changed", AuditType: "vm", MatchKey: "vmid", Untasked: true,
+			ActionRe: anyOf(guestDiskActions...), FieldRe: qemuDiskFields},
 		{Kind: "container", Change: "changed", MatchKey: "vmid",
 			WorkerRe: anyOf("vzrollback", "vztemplate", "vzcreate", "vzrestore", "vzdestroy")},
 		{Kind: "container", Change: "changed", MatchKey: "vmid",
 			WorkerRe: anyOf("move_volume", "resize", "vzmigrate"), FieldRe: lxcDiskFields},
+		{Kind: "container", Change: "changed", MatchKey: "vmid", WorkerRe: `^vzdelsnapshot$`, FieldRe: `^unused[0-9]+$`},
 		{Kind: "container", Change: "changed", AuditType: "container", MatchKey: "vmid", Untasked: true,
-			ActionRe: anyOf(guestConfigActions...)},
+			ActionRe: `^config_update$`, FieldsFrom: "config"},
+		{Kind: "container", Change: "changed", AuditType: "container", MatchKey: "vmid", Untasked: true,
+			ActionRe: anyOf(guestDiskActions...), FieldRe: lxcDiskFields},
 	},
 
 	// A pool's members move when a guest is created or restored into it,
@@ -224,8 +241,9 @@ var observedChangeRules = slices.Concat(
 	// The datacenter options, which the rolling update also edits (it pauses
 	// and restores the CRS option). The notes and the tag settings have routes
 	// of their own, which write nothing else.
-	byAction("cluster_options", nil, []string{"updated"}, nil),
 	[]explainRule{
+		{Kind: "cluster_options", Change: "changed", AuditType: "cluster_options", MatchKey: "id",
+			ActionRe: `^updated$`, FieldsFrom: "settings"},
 		{Kind: "cluster_options", Change: "changed", AuditType: "cluster_options", MatchKey: "id",
 			ActionRe: `^description_updated$`, FieldRe: `^description$`},
 		{Kind: "cluster_options", Change: "changed", AuditType: "cluster_options", MatchKey: "id",
@@ -250,7 +268,11 @@ var observedChangeRules = slices.Concat(
 		{Kind: "node", Change: "changed", AuditType: "node", MatchKey: "id",
 			ActionRe: `^set_options$`, FieldRe: `^(description|wakeonlan|startall-onboot-delay|ballooning-target)$`},
 		{Kind: "node", Change: "changed", AuditType: "node", MatchKey: "id",
-			ActionRe: `^(create|update|delete)_firewall_rule$`, FieldRe: `^firewall_rules$`},
+			ActionRe: `^create_firewall_rule$`, FieldRe: `^firewall_rules$`, Counts: "add1"},
+		{Kind: "node", Change: "changed", AuditType: "node", MatchKey: "id",
+			ActionRe: `^update_firewall_rule$`, FieldRe: `^firewall_rules$`, Counts: "edit1"},
+		{Kind: "node", Change: "changed", AuditType: "node", MatchKey: "id",
+			ActionRe: `^delete_firewall_rule$`, FieldRe: `^firewall_rules$`, Counts: "del1"},
 	},
 
 	// HA: a start or stop of an HA guest sets its resource's requested state,
@@ -294,8 +316,12 @@ var observedChangeRules = slices.Concat(
 	// details.rename: the old name's removal and the new one's addition are
 	// both that update, and an update that renamed nothing removes nothing.
 	byAction("firewall_options", nil, []string{"firewall_options_updated"}, nil),
-	byAction("firewall_rule", nil,
-		[]string{"firewall_rule_created", "firewall_rule_updated", "firewall_rule_deleted", "template_applied"}, nil),
+	ruleSetRules("firewall_rule", "firewall_rule", "^rules$",
+		"firewall_rule_created", "firewall_rule_updated", "firewall_rule_deleted"),
+	[]explainRule{
+		{Kind: "firewall_rule", Change: "changed", AuditType: "firewall_rule", MatchKey: "id",
+			ActionRe: `^template_applied$`, FieldRe: `^rules$`, Counts: "adds"},
+	},
 	byAction("firewall_alias", []string{"created"}, []string{"updated"}, []string{"deleted"}),
 	[]explainRule{
 		{Kind: "firewall_alias", Change: "added", AuditType: "firewall_alias", MatchKey: "details:rename", ActionRe: `^updated$`},
@@ -305,7 +331,8 @@ var observedChangeRules = slices.Concat(
 	byAction("firewall_ipset", []string{"created"}, nil, []string{"deleted"}),
 	byAction("firewall_ipset_entry", []string{"created"}, nil, []string{"deleted"}),
 	byAction("firewall_security_group", []string{"created"}, nil, []string{"deleted"}),
-	byAction("firewall_security_group_rule", nil, []string{"rule_created", "rule_updated", "rule_deleted"}, nil),
+	ruleSetRules("firewall_security_group_rule", "firewall_security_group_rule", "^rules$",
+		"rule_created", "rule_updated", "rule_deleted"),
 
 	// Access. A user's own row explains the fields it says it set (enable,
 	// expire, groups_changed: accessUserUpdateDetails) and the ones it never
@@ -387,6 +414,18 @@ var observedChangeRules = slices.Concat(
 	},
 	crud("acme_plugin"),
 )
+
+// ruleSetRules is what a rule set's own rows explain, by count: a rule created
+// one in, one updated one in and one out or one moved (an edit, or a move),
+// one deleted one out (ClassifyObservedChanges' listed). Firewall rules apply
+// in order, so a create elsewhere never explains a rule moved.
+func ruleSetRules(kind, auditType, fieldRe, created, updated, deleted string) []explainRule {
+	rule := func(action, counts string) explainRule {
+		return explainRule{Kind: kind, Change: "changed", AuditType: auditType, MatchKey: "id",
+			ActionRe: "^" + action + "$", FieldRe: fieldRe, Counts: counts}
+	}
+	return []explainRule{rule(created, "add1"), rule(updated, "edit1"), rule(deleted, "del1")}
+}
 
 // accessUserUpdates is what a user's update explains: the fields its row says
 // it set, and those it never records, which any update may have set.

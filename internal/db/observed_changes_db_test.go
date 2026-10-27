@@ -172,7 +172,8 @@ func TestObservedChanges(t *testing.T) {
 	audit(observedCluster, in, "proxmox_task", "102", 102, "qmmove", map[string]any{"upid": upid("qmmove", 3)})
 	audit(observedCluster, in, "vm", "102", 102, "config_change", map[string]any{"upid": upid("qmconfig", 4)})
 	byNexaraEdit := seed(observedCluster, "vm", "103", 103, "changed", "pve-01", []string{"memory"}, at)
-	audit(observedCluster, in, "vm", uuid.NewString(), 103, "config_update", nil)
+	audit(observedCluster, in, "vm", uuid.NewString(), 103, "config_update",
+		map[string]any{"fields": map[string]any{"memory": "4096"}})
 	byOtherUntasked := seed(observedCluster, "vm", "104", 104, "changed", "pve-01", []string{"memory"}, at)
 	audit(observedCluster, in, "vm", uuid.NewString(), 104, "drs_migrate", nil)
 	byTaskedEdit := seed(observedCluster, "vm", "107", 107, "changed", "pve-01", []string{"memory"}, at)
@@ -208,6 +209,36 @@ func TestObservedChanges(t *testing.T) {
 	byResourceDelete := seed(observedCluster, "ha_rule", "apart", 0, "changed", "", []string{"resources"}, at)
 	members(byResourceDelete, []string{}, []string{"resources:vm:160"})
 	audit(observedCluster, in, "ha_resource", "vm:160", 160, "deleted", nil)
+
+	// A config edit explains the keys it set or deleted (and the unused<n> a
+	// disk's removal leaves), not another key; the options' edit its settings.
+	configOther := seed(observedCluster, "vm", "180", 180, "changed", "pve-01", []string{"description", "hookscript"}, at)
+	configUnused := seed(observedCluster, "vm", "181", 181, "changed", "pve-01", []string{"description", "unused0"}, at)
+	configDeleted := seed(observedCluster, "vm", "182", 182, "changed", "pve-01", []string{"net1"}, at)
+	for vmid, fields := range map[int32]map[string]any{180: {"description": "x"}, 181: {"description": "x"},
+		182: {"delete": "net1"}} {
+		audit(observedCluster, in, "vm", uuid.NewString(), vmid, "config_update", map[string]any{"fields": fields})
+	}
+	optionsSet := seed(observedCluster, "cluster_options", observedCluster.String(), 0, "changed", "", []string{"crs"}, at)
+	optionsOther := seed(observedCluster, "cluster_options", observedCluster.String(), 0, "changed", "", []string{"migration"}, at)
+	audit(observedCluster, in, "cluster_options", observedCluster.String(), 0, "updated",
+		map[string]any{"settings": []string{"crs"}, "cleared": []string{}})
+	// A rule set's own rows by count: an update one in and one out, a create
+	// one in and never a rule moved.
+	counted := func(id uuid.UUID, counts map[string]int) {
+		exec("counts", `UPDATE cluster_object_changes SET detail = $2 WHERE id = $1`, id,
+			jsonOf(map[string]any{"counts": map[string]any{"rules": counts}}))
+	}
+	ruleEdited := seed(observedCluster, "firewall_rule", "cluster", 0, "changed", "", []string{"rules"}, at)
+	counted(ruleEdited, map[string]int{"added": 1, "removed": 1})
+	ruleEditedAndAdded := seed(observedCluster, "firewall_rule", "cluster", 0, "changed", "", []string{"rules"}, at)
+	counted(ruleEditedAndAdded, map[string]int{"added": 2, "removed": 1})
+	audit(observedCluster, in, "firewall_rule", "cluster", 0, "firewall_rule_updated", nil)
+	groupRuleAdded := seed(observedCluster, "firewall_security_group_rule", "web", 0, "changed", "", []string{"rules"}, at)
+	counted(groupRuleAdded, map[string]int{"added": 1, "removed": 0})
+	groupRuleMoved := seed(observedCluster, "firewall_security_group_rule", "web", 0, "changed", "", []string{"rules"}, at)
+	counted(groupRuleMoved, map[string]int{"added": 1, "removed": 0, "moved": 1})
+	audit(observedCluster, in, "firewall_security_group_rule", "web", 0, "rule_created", nil)
 
 	// Access: a user's delete explains its own grants going, never another's
 	// arriving; Nexara's grant only the grantees its row names; a realm's sync
@@ -273,7 +304,7 @@ func TestObservedChanges(t *testing.T) {
 	rule := func(kind, change, auditType, key string, untasked bool, actionRe, exceptRe, workerRe, fieldRe string) map[string]any {
 		return map[string]any{"kind": kind, "change": change, "audit_type": auditType, "match_key": key,
 			"untasked": untasked, "action_re": actionRe, "except_re": exceptRe, "worker_re": workerRe, "field_re": fieldRe,
-			"detail_key": "", "object": "", "member": "", "member_of": ""}
+			"detail_key": "", "object": "", "member": "", "member_of": "", "counts": "", "fields_from": ""}
 	}
 	with := func(r map[string]any, key, value string) map[string]any { r[key] = value; return r }
 	rules := jsonOf([]map[string]any{
@@ -283,7 +314,13 @@ func TestObservedChanges(t *testing.T) {
 		with(rule("firewall_alias", "removed", "firewall_alias", "id", false, "^updated$", "", "", ""), "detail_key", "rename"),
 		rule("vm", "changed", "", "vmid", false, "", "", "^qmmove$", "^scsi[0-9]+$"),
 		rule("vm", "changed", "", "vmid", false, "", "", "^qmconfig$", ""),
-		rule("vm", "changed", "vm", "vmid", true, "^config_update$", "", "", ""),
+		with(rule("vm", "changed", "vm", "vmid", true, "^config_update$", "", "", ""), "fields_from", "config"),
+		with(rule("cluster_options", "changed", "cluster_options", "id", false, "^updated$", "", "", ""),
+			"fields_from", "settings"),
+		with(rule("firewall_rule", "changed", "firewall_rule", "id", false, "^firewall_rule_updated$", "", "", "^rules$"),
+			"counts", "edit1"),
+		with(rule("firewall_security_group_rule", "changed", "firewall_security_group_rule", "id", false,
+			"^rule_created$", "", "", "^rules$"), "counts", "add1"),
 		rule("ha_resource", "changed", "", "sid", false, "", "", "^hastart$", "^state$"),
 		with(with(rule("pool", "changed", "", "cluster", false, "", "", "^qmdestroy$", "^vms$"), "member", "left"),
 			"member_of", "upid:vms:%s"),
@@ -360,6 +397,15 @@ func TestObservedChanges(t *testing.T) {
 		{"a job removed with its last guest's destroy", jobEmptied, "explained"},
 		{"a job removed that held another guest too", jobNotEmptied, "shown"},
 		{"an HA resource deleted, its sid leaving a rule", byResourceDelete, "explained"},
+		{"a config edit, another key changed too", configOther, "shown"},
+		{"a config edit, the disk it left unused", configUnused, "explained"},
+		{"a config edit that deleted the key", configDeleted, "explained"},
+		{"an options edit of that setting", optionsSet, "explained"},
+		{"an options edit, another setting", optionsOther, "shown"},
+		{"a rule updated, one in and one out", ruleEdited, "explained"},
+		{"a rule updated, and another added", ruleEditedAndAdded, "shown"},
+		{"a rule created, one in", groupRuleAdded, "explained"},
+		{"a rule created, and one moved", groupRuleMoved, "shown"},
 		{"a user's delete, its grants going", aclByDelete, "explained"},
 		{"a user's delete, and another's grant arriving", aclEscalated, "shown"},
 		{"Nexara's grant to the users its row names", aclByGrant, "explained"},

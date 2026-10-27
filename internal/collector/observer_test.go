@@ -749,8 +749,16 @@ func TestObserveCanonicalForms(t *testing.T) {
 	}
 	d := diffTags(objectTags{members: map[string][]string{"vmid": {"100", "101"}}},
 		objectTags{members: map[string][]string{"vmid": {"101", "102"}}})
-	if fmt.Sprint(d.fields, d.joined, d.left, d.counts) != "[vmid] [vmid:102] [vmid:100] map[vmid:{1 1}]" {
+	if fmt.Sprint(d.fields, d.joined, d.left, d.counts) != "[vmid] [vmid:102] [vmid:100] map[vmid:{1 1 0}]" {
 		t.Errorf("member diff: %+v", d)
+	}
+	// A rule set counts what came, went, and of the rest what moved.
+	for _, tc := range []struct{ prev, cur, want string }{
+		{"a b c", "b a c", "{0 0 1}"}, {"a b c", "c a b", "{0 0 1}"}, {"a b c", "a x c", "{1 1 0}"}, {"a a b", "a b a", "{0 0 1}"},
+	} {
+		if got := fmt.Sprint(multisetDiff(strings.Fields(tc.prev), strings.Fields(tc.cur))); got != tc.want {
+			t.Errorf("%s -> %s: %s, want %s", tc.prev, tc.cur, got, tc.want)
+		}
 	}
 }
 
