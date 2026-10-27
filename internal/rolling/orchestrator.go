@@ -386,16 +386,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			o.failNode(ctx, job, node, fmt.Sprintf("record HA rules before disabling: %v", err))
 			return
 		}
-		for _, rule := range toDisable {
-			o.logger.Info("disabling HA rule before drain",
-				"rule", rule.Rule, "type", rule.Type, "node", node.NodeName)
-			if err := client.SetHARuleDisabled(ctx, rule.Rule, rule.Type, true); err != nil {
-				o.logger.Warn("failed to disable HA rule",
-					"rule", rule.Rule, "error", err)
-			}
-		}
-		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_ha_rules_disabled",
-			map[string]string{"rules": ruleNames(toDisable), "node": node.NodeName})
+		o.disableHARules(ctx, client, job, node.NodeName, toDisable)
 
 		// A cancel racing the disable loop may have run its cleanup against
 		// the pre-disable state (its re-enable was a no-op and it may have
@@ -1754,24 +1745,8 @@ func (o *Orchestrator) releaseJobState(ctx context.Context, jobID uuid.UUID, aud
 		}
 
 		// 2. Native CRS auto-rebalance.
-		if job.NativeCrsPaused {
-			saved := job.SavedCrsConfig
-			if err := client.SetClusterOptions(ctx, proxmox.UpdateClusterOptionsParams{CRS: &saved}); err != nil {
-				o.logger.Error("rolling: failed to restore native CRS auto-rebalance; will retry via cleanup sweep",
-					"job_id", job.ID, "saved_crs", saved, "error", err)
-				if auditFailures {
-					o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restore_failed",
-						map[string]string{"saved_crs": saved, "error": err.Error()})
-				}
-				released = false
-			} else if err := o.queries.ClearJobNativeCRSPaused(ctx, job.ID); err != nil {
-				released = false
-			} else {
-				o.logger.Info("restored native CRS auto-rebalance after rolling update",
-					"job_id", job.ID, "cluster_id", job.ClusterID, "crs", saved)
-				o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restored",
-					map[string]string{"crs": saved})
-			}
+		if job.NativeCrsPaused && !o.restoreNativeCRS(ctx, client, job, auditFailures) {
+			released = false
 		}
 
 		// 3. HA rules — the job-level record, plus legacy per-node records
@@ -1932,6 +1907,40 @@ func (o *Orchestrator) pauseNativeCRSIfActive(ctx context.Context, client *proxm
 		"job_id", job.ID, "cluster_id", job.ClusterID, "saved_crs", saved, "paused_crs", paused)
 	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_paused",
 		map[string]string{"saved_crs": saved, "paused_crs": paused})
+	o.auditCRSChange(ctx, job)
+}
+
+// restoreNativeCRS puts the cluster's CRS setting back as pauseNativeCRSIfActive
+// found it, and clears the job's marker once Proxmox has it. False means the
+// pause is still held, for the cleanup sweep to retry.
+func (o *Orchestrator) restoreNativeCRS(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, auditFailures bool) bool {
+	saved := job.SavedCrsConfig
+	if err := client.SetClusterOptions(ctx, proxmox.UpdateClusterOptionsParams{CRS: &saved}); err != nil {
+		o.logger.Error("rolling: failed to restore native CRS auto-rebalance; will retry via cleanup sweep",
+			"job_id", job.ID, "saved_crs", saved, "error", err)
+		if auditFailures {
+			o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restore_failed",
+				map[string]string{"saved_crs": saved, "error": err.Error()})
+		}
+		return false
+	}
+	if err := o.queries.ClearJobNativeCRSPaused(ctx, job.ID); err != nil {
+		return false
+	}
+	o.logger.Info("restored native CRS auto-rebalance after rolling update",
+		"job_id", job.ID, "cluster_id", job.ClusterID, "crs", saved)
+	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restored",
+		map[string]string{"crs": saved})
+	o.auditCRSChange(ctx, job)
+	return true
+}
+
+// auditCRSChange files the cluster-options row for a CRS pause or restore, in
+// the shape the options handler files its own: the NAME of the option, never its
+// value, which the job's row beside it already carries.
+func (o *Orchestrator) auditCRSChange(ctx context.Context, job db.RollingUpdateJob) {
+	o.auditObject(ctx, job.ClusterID, job.ID, "cluster_options", job.ClusterID.String(), "updated",
+		map[string]any{"action": "update_options", "settings": []string{"crs"}, "cleared": []string{}})
 }
 
 // parseDisabledRules decodes a disabled-HA-rules record; nil, "null" and
@@ -2025,6 +2034,27 @@ func (o *Orchestrator) persistJobDisabledRules(ctx context.Context, jobID uuid.U
 	return true
 }
 
+// disableHARules turns off each rule before nodeName is drained and records it:
+// once under the job for the node (rolling_update_ha_rules_disabled), and under
+// each rule that went off as the update with disable=1 that it was — the row the
+// rule's own History reads, which would otherwise show a rule that turned itself
+// off. A rule Proxmox refused is logged and left out of the second.
+func (o *Orchestrator) disableHARules(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, nodeName string, toDisable []DisabledHARule) {
+	for _, rule := range toDisable {
+		o.logger.Info("disabling HA rule before drain",
+			"rule", rule.Rule, "type", rule.Type, "node", nodeName)
+		if err := client.SetHARuleDisabled(ctx, rule.Rule, rule.Type, true); err != nil {
+			o.logger.Warn("failed to disable HA rule",
+				"rule", rule.Rule, "error", err)
+			continue
+		}
+		o.auditObject(ctx, job.ClusterID, job.ID, "ha_rule", rule.Rule, "updated",
+			map[string]any{"rule": rule.Rule, "type": rule.Type, "disable": 1, "node": nodeName})
+	}
+	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_ha_rules_disabled",
+		map[string]string{"rules": ruleNames(toDisable), "node": nodeName})
+}
+
 // releaseRuleRecord re-enables one disabled-HA-rules record (job-level, or a
 // legacy per-node one when nodeName is set) and persists whatever failed for
 // a later retry. Returns true only when the record fully released: every
@@ -2038,7 +2068,14 @@ func (o *Orchestrator) releaseRuleRecord(ctx context.Context, client *proxmox.Cl
 		return d
 	}
 
-	remaining := o.reenableHARules(ctx, client, rules)
+	enabled, remaining := o.reenableHARulesDetailed(ctx, client, rules)
+	for _, rule := range enabled {
+		extra := map[string]any{"rule": rule.Rule, "type": rule.Type, "disable": 0}
+		if nodeName != "" {
+			extra["node"] = nodeName
+		}
+		o.auditObject(ctx, job.ClusterID, job.ID, "ha_rule", rule.Rule, "updated", extra)
+	}
 	persisted := persist(remaining)
 	if len(remaining) > 0 {
 		if auditFailures {
@@ -2059,13 +2096,22 @@ func (o *Orchestrator) releaseRuleRecord(ctx context.Context, client *proxmox.Cl
 // longer exist on the cluster are dropped — they can never be re-enabled and
 // would otherwise keep the cleanup sweep retrying forever.
 func (o *Orchestrator) reenableHARules(ctx context.Context, client *proxmox.Client, rules []DisabledHARule) []DisabledHARule {
-	var remaining []DisabledHARule
+	_, remaining := o.reenableHARulesDetailed(ctx, client, rules)
+	return remaining
+}
+
+// reenableHARulesDetailed is reenableHARules that also returns the rules
+// Proxmox accepted, which are the ones to record: a rule dropped for no longer
+// existing, or kept for a retry, was not re-enabled.
+func (o *Orchestrator) reenableHARulesDetailed(ctx context.Context, client *proxmox.Client, rules []DisabledHARule) (enabled, remaining []DisabledHARule) {
 	for _, rule := range rules {
 		o.logger.Info("re-enabling HA rule after rolling update", "rule", rule.Rule, "type", rule.Type)
 		if err := client.SetHARuleDisabled(ctx, rule.Rule, rule.Type, false); err != nil {
 			o.logger.Warn("failed to re-enable HA rule", "rule", rule.Rule, "type", rule.Type, "error", err)
 			remaining = append(remaining, rule)
+			continue
 		}
+		enabled = append(enabled, rule)
 	}
 	if len(remaining) > 0 {
 		if current, err := client.GetHARules(ctx); err == nil {
@@ -2084,7 +2130,7 @@ func (o *Orchestrator) reenableHARules(ctx context.Context, client *proxmox.Clie
 			remaining = kept
 		}
 	}
-	return remaining
+	return enabled, remaining
 }
 
 // sendJobNotification dispatches a notification to the configured channel when a job completes or fails.
@@ -3069,5 +3115,30 @@ func (o *Orchestrator) auditLog(ctx context.Context, clusterID uuid.UUID, jobID 
 	})
 	if err != nil {
 		o.logger.Warn("failed to insert rolling update audit log", "action", action, "error", err)
+	}
+}
+
+// auditObject files a row for an object of the cluster page the engine changed —
+// an HA rule, the cluster options — under the object's own key, the one the
+// HTTP handlers file the same change under, beside the job's rolling_update
+// row. The object's History reads its rows by that key. The actor is the system
+// user, as for auditLog; "by" and job_id say whose doing it was.
+func (o *Orchestrator) auditObject(ctx context.Context, clusterID, jobID uuid.UUID, resourceType, resourceID, action string, extra map[string]any) {
+	details := map[string]any{"by": "rolling_update", "job_id": jobID.String()}
+	for k, v := range extra {
+		details[k] = v
+	}
+	raw, _ := json.Marshal(details)
+	err := o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      raw,
+	})
+	if err != nil {
+		o.logger.Warn("failed to insert rolling update object audit log",
+			"resource_type", resourceType, "action", action, "error", err)
 	}
 }
