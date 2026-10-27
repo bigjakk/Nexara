@@ -286,7 +286,6 @@ export function HistoryTimeline({
   const layout = useColumnLayout(kind.layoutKey, HISTORY_COLUMNS);
 
   const { data, isLoading, error } = useHistory({
-    kind: kind.name,
     target,
     page,
     category,
@@ -312,9 +311,7 @@ export function HistoryTimeline({
     })),
   ];
   const categoryNote =
-    category === ""
-      ? ""
-      : t(`categoryNotes.${category}`, { defaultValue: "" });
+    category === "" ? "" : t(`categoryNotes.${category}`, { defaultValue: "" });
 
   function filterSelect<T extends string>(
     label: string,
@@ -396,7 +393,7 @@ export function HistoryTimeline({
                       kind={kind}
                       t={t}
                       entry={entry}
-                      clusterId={target.clusterId}
+                      clusterId={entry.cluster_id ?? target.clusterId ?? ""}
                       layout={layout}
                       expanded={expandedId === entry.id}
                       onToggle={() => {

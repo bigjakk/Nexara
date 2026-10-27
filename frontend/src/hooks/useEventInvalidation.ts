@@ -108,6 +108,10 @@ export function useEventInvalidation(clusterIds: string[]): void {
           if (cid) {
             scheduleInvalidation(["history", cid]);
           }
+          // A global kind's History (a PBS server's, a firewall template's)
+          // reads every cluster, and rows that name none: any entry may be
+          // one of its own. Its rows are all audit rows, so not on a task.
+          scheduleInvalidation(["history", "global"]);
           break;
 
         case "vm_state_change":

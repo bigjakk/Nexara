@@ -12,6 +12,20 @@ import { useEventInvalidation } from "./useEventInvalidation";
 
 const CLUSTER = "c0000000-0000-4000-8000-00000000000a";
 const OTHER_CLUSTER = "c0000000-0000-4000-8000-00000000000b";
+
+/** A guest's History page in useHistory's key: cluster, route, then filters. */
+function guestHistoryKey(cluster: string) {
+  return [
+    "history",
+    cluster,
+    `/api/v1/clusters/${cluster}/guests/100/history`,
+    0,
+    "",
+    "",
+    "",
+  ];
+}
+
 const UPID =
   "UPID:pve-01:0000A1B2:0001C3D4:66F4E3C0:qmsnapshot:100:nexara@pve!api:";
 
@@ -66,20 +80,11 @@ describe("useEventInvalidation — task events and the schedule list", () => {
       vi.useFakeTimers();
       const stale = {
         "the cluster's schedules": ["clusters", CLUSTER, "schedules"],
-        "a guest's History": ["history", CLUSTER, "guest", "100", 0, "", "", ""],
+        "a guest's History": guestHistoryKey(CLUSTER),
       };
       const fresh = {
         "another cluster's schedules": ["clusters", OTHER_CLUSTER, "schedules"],
-        "another cluster's guest History": [
-          "history",
-          OTHER_CLUSTER,
-          "guest",
-          "100",
-          0,
-          "",
-          "",
-          "",
-        ],
+        "another cluster's guest History": guestHistoryKey(OTHER_CLUSTER),
         // Narrow on purpose: a task event is not an inventory change, and
         // prefix-invalidating the cluster would refetch every query under it.
         "the cluster's VM list": ["clusters", CLUSTER, "vms"],
@@ -141,9 +146,10 @@ describe("useEventInvalidation — task events and the schedule list", () => {
 describe("useEventInvalidation — audit_entry and guest History", () => {
   it("marks the event's cluster's guest histories stale, and no other cluster's", () => {
     vi.useFakeTimers();
-    const history = ["history", CLUSTER, "guest", "100", 0, "", "", ""];
-    const otherHistory = ["history", OTHER_CLUSTER, "guest", "100", 0, "", "", ""];
-    const client = mount([history, otherHistory]);
+    const history = guestHistoryKey(CLUSTER);
+    const otherHistory = guestHistoryKey(OTHER_CLUSTER);
+    const globalHistory = ["history", "global", "/api/v1/pbs/s1/history", 0];
+    const client = mount([history, otherHistory, globalHistory]);
 
     act(() => {
       deliver(`cluster:${CLUSTER}:events`, {
@@ -158,6 +164,8 @@ describe("useEventInvalidation — audit_entry and guest History", () => {
 
     expect(client.getQueryState(history)?.isInvalidated).toBe(true);
     expect(client.getQueryState(otherHistory)?.isInvalidated).toBe(false);
+    // A global kind's History reads every cluster's rows.
+    expect(client.getQueryState(globalHistory)?.isInvalidated).toBe(true);
   });
 });
 

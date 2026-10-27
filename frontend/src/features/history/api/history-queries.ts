@@ -18,7 +18,6 @@ const WINDOW_MS: Record<Exclude<HistoryWindow, "">, number> = {
 export const HISTORY_PAGE_SIZE = 50;
 
 interface HistoryParams {
-  kind: string;
   target: HistoryTarget;
   page: number;
   category: string;
@@ -28,19 +27,32 @@ interface HistoryParams {
 }
 
 /**
+ * The route a target reads, without its query: the rest of the cache key.
+ * apiPath refuses a value it cannot send; the queryFn then throws the same
+ * error into the query's error state, so the key only has to differ.
+ */
+function routeKey(target: HistoryTarget): string {
+  try {
+    return String(target.path(new URLSearchParams()));
+  } catch (err) {
+    return `unsendable: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+/**
  * One page of an object's History, newest first. Keyed under
- * ["history", cluster] so the WS events that add to it (task_created,
- * task_update, audit_entry) can invalidate every page of the cluster's
- * Histories at once (useEventInvalidation). A status change no task explains
- * is shown only once the collector has classified it, minutes after it
- * happened, so the 60s poll is what brings it in.
+ * ["history", cluster] — "global" for a global kind's — so the WS events that
+ * add to it (task_created, task_update, audit_entry) can invalidate every page
+ * of the cluster's Histories at once (useEventInvalidation), and then on the
+ * route itself. A status change no task explains is shown only once the
+ * collector has classified it, minutes after it happened, so the 60s poll is
+ * what brings it in.
  *
  * The key holds the window, not the timestamp it resolves to: the timestamp is
  * taken when the request is sent, so a refetch looks back from then rather
  * than from when the filter was picked.
  */
 export function useHistory({
-  kind,
   target,
   page,
   category,
@@ -51,9 +63,8 @@ export function useHistory({
   return useQuery({
     queryKey: [
       "history",
-      target.clusterId,
-      kind,
-      target.objectKey,
+      target.clusterId ?? "global",
+      routeKey(target),
       page,
       category,
       source,
@@ -73,7 +84,7 @@ export function useHistory({
       }
       return apiClient.page<HistoryEntry>(target.path(params));
     },
-    enabled: enabled && target.clusterId.length > 0,
+    enabled: enabled && target.clusterId !== "",
     // Keep the previous page (and its total) while the next one loads, as the
     // task tables do, so the pager does not collapse on every page turn.
     placeholderData: (prev) => prev,

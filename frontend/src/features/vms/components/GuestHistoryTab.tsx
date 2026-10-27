@@ -35,7 +35,6 @@ export function GuestHistoryTab({
   const target = useMemo<HistoryTarget>(
     () => ({
       clusterId,
-      objectKey: String(vmid),
       path: (query) =>
         apiPath`/api/v1/clusters/${clusterId}/guests/${String(vmid)}/history?${query}`,
     }),

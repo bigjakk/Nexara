@@ -18,7 +18,6 @@ const mockedPage = vi.mocked(apiClient.page);
 
 const target: HistoryTarget = {
   clusterId: "c1",
-  objectKey: "rule01",
   path: (query) =>
     apiPath`/api/v1/clusters/c1/ha/rules/rule01/history?${query}`,
 };

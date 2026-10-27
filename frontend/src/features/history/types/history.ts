@@ -23,6 +23,9 @@ export type HistoryOutcome = "" | "running" | "ok" | "failed";
 /** One entry of a History route (internal/api/handlers/history.go). */
 export interface HistoryEntry {
   id: string;
+  /** The entry's own cluster: the target's, or — on a global kind's History —
+   *  the row's, or none. */
+  cluster_id?: string;
   /**
    * An audit row, a task with no audit row, a status change no task explains,
    * or a guest's part of a backup job — a vzdump of several guests, whose
@@ -94,10 +97,12 @@ export interface HistoryKind {
 
 /** Which object's History to read, and where. */
 export interface HistoryTarget {
-  /** The cluster it is read in: the WS events invalidate it by cluster. */
-  clusterId: string;
-  /** The object, as its route names it — the rest of the query key. */
-  objectKey: string;
-  /** The route, with the page's query string: GET path?limit&offset&…. */
+  /** The cluster it is read in, which the WS events invalidate it by: "" while
+   *  it is not known yet, which reads nothing; null for a global kind's
+   *  History (HistoryKind.Global on the server), read across clusters. */
+  clusterId: string | null;
+  /** The route, with the page's query string: GET path?limit&offset&…. The
+   *  cache is keyed on it, so it must name the object: two targets with one
+   *  path share their pages. */
   path: (query: URLSearchParams) => ApiPath;
 }
