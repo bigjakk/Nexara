@@ -9,6 +9,7 @@ import {
   historyDisplayStatus,
   historyEventLabel,
   historyKind,
+  historySourceLabel,
   historySummary,
 } from "./history";
 
@@ -107,6 +108,14 @@ describe("an observed change", () => {
     ],
   ])("%o reads %s", (over, want) => {
     expect(historyEventLabel(kind, observed(over), t)).toBe(want);
+  });
+
+  it.each<[Partial<HistoryEntry>, string]>([
+    [{ kind: "observed", source: "detected" }, "Detected in Proxmox"],
+    [{ kind: "status", source: "detected" }, "No task"],
+    [{ source: "proxmox" }, "Proxmox"],
+  ])("comes from %o: %s", (over, want) => {
+    expect(historySourceLabel(entry(over), t)).toBe(want);
   });
 
   it("is placed between the sighting before and the one that saw it", () => {

@@ -252,6 +252,14 @@ export function historyNote(
   return entry.kind === "observed" ? t("history:observed.note") : undefined;
 }
 
+/** Where an entry comes from, in the shared namespace: a change Nexara saw in
+ *  Proxmox reads "Detected in Proxmox", the rest by their source. */
+export function historySourceLabel(entry: HistoryEntry, t: TFunction): string {
+  return entry.kind === "observed"
+    ? t("history:observed.source")
+    : t(`history:sources.${entry.source}`);
+}
+
 /** Who did it — see deriveActor; "Proxmox" for an ingested task naming nobody.
  *  Nobody, for what Nexara only saw. */
 export function historyActor(entry: HistoryEntry): string {

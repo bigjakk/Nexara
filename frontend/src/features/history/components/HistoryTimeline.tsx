@@ -24,6 +24,7 @@ import {
   historyEventLabel,
   historyNamespace,
   historyNote,
+  historySourceLabel,
   historySummary,
   upidWorkerType,
   type HistoryCellCtx,
@@ -179,7 +180,7 @@ function HistoryRow({
                 {shared("row.source")}
               </span>
               <span>
-                {shared(`sources.${entry.source}`)}
+                {historySourceLabel(entry, shared)}
                 {actor !== "" && ` · ${actor}`}
               </span>
 
