@@ -108,15 +108,15 @@ func (f FlexString) String() string {
 }
 
 // optionalUPID reads the data of a request that starts a task: the task's UPID,
-// a JSON string. Anything else (null, an object, a number) is "no UPID" and not
-// an error: by the time the reply is read the change has been made, so failing
+// a JSON string starting "UPID:". Anything else (null, an object, a number, any
+// other text) is "no UPID" and not an error: by the time the reply is read the change has been made, so failing
 // the call would report a failure for work that was done and leave it unaudited.
 type optionalUPID string
 
 // UnmarshalJSON implements json.Unmarshaler for optionalUPID.
 func (u *optionalUPID) UnmarshalJSON(data []byte) error {
 	var s string
-	if err := json.Unmarshal(data, &s); err != nil {
+	if err := json.Unmarshal(data, &s); err != nil || !strings.HasPrefix(s, "UPID:") {
 		s = ""
 	}
 	*u = optionalUPID(s)
@@ -2094,7 +2094,11 @@ type NodeTask struct {
 	Type      string `json:"type"`
 	ID        string `json:"id"`
 	User      string `json:"user"`
-	Status    string `json:"status"`
+	// TokenID is the API token a task ran under, when Proxmox splits it off the
+	// user: the node task list (Tasks.pm, convert_token_task) reports user and
+	// tokenid apart, so User is the bare user@realm there.
+	TokenID string `json:"tokenid,omitempty"`
+	Status  string `json:"status"`
 }
 
 // AptUpdate represents a pending package update from GET /nodes/{node}/apt/update.

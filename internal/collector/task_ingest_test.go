@@ -256,6 +256,40 @@ func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 	}
 }
 
+// A task run by an API token is recorded under user@realm!tokenid whether the
+// node list reported it whole (a running task) or with the token apart (a finished
+// one, where Proxmox splits it off the user): one task, one spelling.
+func TestIngestTask_RecordsTheTokenATaskRanUnder(t *testing.T) {
+	t.Parallel()
+	cluster := db.Cluster{ID: uuid.New()}
+	for _, tc := range []struct{ name, user, tokenID, want string }{
+		{"a finished task, the token apart", "user@pam", "token01", "user@pam!token01"},
+		{"a running task, whole", "user@pam!token01", "", "user@pam!token01"},
+		{"whole, and the token apart as well", "user@pam!token01", "token01", "user@pam!token01"},
+		{"a person", "user@pam", "", "user@pam"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := newMockQueries()
+			s := &Syncer{queries: q, logger: testLogger()}
+			task := proxmox.NodeTask{
+				UPID: "UPID:pve-01:srvstart:pveproxy", Type: "srvstart", ID: "pveproxy", User: tc.user, TokenID: tc.tokenID,
+				Status: "OK", StartTime: time.Now().Add(-time.Minute).Unix(),
+			}
+			if err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil); err != nil {
+				t.Fatalf("ingestTask: %v", err)
+			}
+			var details map[string]any
+			if err := json.Unmarshal(q.auditWithSourceCalls[0].Details, &details); err != nil {
+				t.Fatalf("details: %v", err)
+			}
+			if details["proxmox_user"] != tc.want {
+				t.Errorf("proxmox_user = %v, want %q", details["proxmox_user"], tc.want)
+			}
+		})
+	}
+}
+
 // TestIngestTask_FlagsATaskDisagreeingWithItsUPID: a task whose type or id is not
 // the one its UPID carries is still recorded — a slip of ours must never drop a
 // real task — as the generic task it would be had nothing mapped it, with the type

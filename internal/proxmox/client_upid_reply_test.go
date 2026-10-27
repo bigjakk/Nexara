@@ -29,6 +29,7 @@ func TestTaskStartingCallsTolerateAReplyWithoutAUPID(t *testing.T) {
 		{"null", `null`, ""},
 		{"an object", `{"status":"ok"}`, ""},
 		{"a number", `0`, ""},
+		{"text that is not a UPID", `"ok"`, ""},
 	} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

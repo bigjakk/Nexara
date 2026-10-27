@@ -306,7 +306,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 	// Build details JSON.
 	detailMap := map[string]interface{}{
 		"upid":         task.UPID,
-		"proxmox_user": task.User,
+		"proxmox_user": proxmoxUser(task),
 		"node":         nodeName,
 		"status":       task.Status,
 		"task_type":    task.Type,
@@ -413,4 +413,15 @@ func (s *Syncer) linkSDNApplyTasks(ctx context.Context, cluster db.Cluster) {
 	}); err != nil {
 		s.logger.Warn("task sync: failed to mark the node reloads of an SDN apply", "cluster_id", cluster.ID, "error", err)
 	}
+}
+
+// proxmoxUser is the user a task ran as, token included: user@realm!tokenid for a
+// task run by an API token. The node task list reports the token apart from the
+// user (NodeTask.TokenID), so a finished task would record the bare user while a
+// running one, listed whole, records the token — one task, two spellings.
+func proxmoxUser(task proxmox.NodeTask) string {
+	if task.TokenID != "" && !strings.Contains(task.User, "!") {
+		return task.User + "!" + task.TokenID
+	}
+	return task.User
 }
