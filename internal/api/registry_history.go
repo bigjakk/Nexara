@@ -129,8 +129,8 @@ func historyFilterParams(kind handlers.HistoryKind) apischema.Properties {
 			Optional: true,
 			Enum:     []string{"", "nexara", "proxmox", "detected"},
 			Typetext: "<nexara|proxmox|detected>",
-			Description: "Narrow to what was done in Nexara, what was done in Proxmox, or the status " +
-				"changes no task explains (detected). Empty or omitted returns every source.",
+			Description: "Narrow to what was done in Nexara, what was done in Proxmox, or what Nexara saw " +
+				"change that no task explains (detected). Empty or omitted returns every source.",
 		},
 		// Named as the audit listing names it, and parsed the same way.
 		"start_time": {

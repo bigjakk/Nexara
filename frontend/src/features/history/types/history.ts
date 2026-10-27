@@ -28,10 +28,12 @@ export interface HistoryEntry {
   cluster_id?: string;
   /**
    * An audit row, a task with no audit row, a status change no task explains,
-   * or a guest's part of a backup job — a vzdump of several guests, whose
-   * Proxmox task names none of them.
+   * a guest's part of a backup job — a vzdump of several guests, whose
+   * Proxmox task names none of them — or an observed change: one Nexara saw
+   * in Proxmox that nothing on record explains (action added, removed or
+   * changed).
    */
-  kind: "audit" | "task" | "status" | "backup";
+  kind: "audit" | "task" | "status" | "backup" | "observed";
   occurred_at: string;
   /** One of the kind's categories, derived on the server before the page is
    *  cut so the type filter applies to the whole history. */
@@ -60,10 +62,13 @@ export interface HistoryEntry {
   finished_at: string | null;
   from_status?: string;
   to_status?: string;
-  /** A status change: when the guest was last seen in from_status. The change
-   *  happened after this and by occurred_at — minutes apart, unless Nexara or
-   *  the node was unreachable in between. */
+  /** A status change: when the guest was last seen in from_status; an observed
+   *  change: when the object was last seen as it was. The change happened
+   *  after this and by occurred_at — minutes apart, unless Nexara or the node
+   *  was unreachable in between. */
   last_seen_at?: string;
+  /** An observed change: the names of the fields that changed. */
+  fields?: string[];
   /** A backup entry: the lines of the job's task log that are this guest's
    *  part, by Proxmox's line numbers. */
   log_start?: number;

@@ -267,6 +267,7 @@ SELECT p.entry_id, p.kind, p.cluster_id, p.occurred_at, p.source, p.action, p.re
        p.user_id, p.upid, p.node, p.recorded_status, p.from_status, p.to_status, p.last_seen_at,
        p.category, p.total,
        COALESCE(ad.details, '{}'::jsonb)                      AS details,
+       '{}'::text[]                                           AS fields,
        COALESCE(u.email, '')::text                            AS user_email,
        COALESCE(u.display_name, '')::text                     AS user_display_name,
        COALESCE(gb.status, th.status, ar.status, '')::text               AS task_status,
@@ -340,6 +341,7 @@ type ListHistoryRow struct {
 	Category         string             `json:"category"`
 	Total            int64              `json:"total"`
 	Details          json.RawMessage    `json:"details"`
+	Fields           []string           `json:"fields"`
 	UserEmail        string             `json:"user_email"`
 	UserDisplayName  string             `json:"user_display_name"`
 	TaskStatus       string             `json:"task_status"`
@@ -369,6 +371,18 @@ type ListHistoryRow struct {
 //	guest_backups        a guest's part of each backup JOB — a vzdump of
 //	                     several guests, whose task names none — read from the
 //	                     job's log by the collector (000116).
+//
+// How to add a source keyed as audit_log is — cluster_id, resource_type,
+// resource_id, and vmid for a guest — such as a table of the changes Nexara saw
+// in Proxmox: one arm in entries per family, under its own entry kind, and its
+// row joined in the final SELECT for what the page shows of it (fields is that
+// column's place). The guests' arm reads cluster_id = cluster_id AND vmid =
+// ANY(vmids) with the floor, since and guest_workers (no UPID:
+// history_worker_ok(NULL, ...)), subject the vmid; the objects' arm reads
+// (global OR cluster_id = cluster_id) AND (resource_type, resource_id) IN the
+// objects with no details key, with since, minus the rows the guests' arm keeps,
+// subject as the audit object arm's. TestGuestHistory's other-cluster block
+// then gets a row of it for each arm.
 //
 // A kind names its rows through two families of selector, either or both:
 //
@@ -539,6 +553,7 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 			&i.Category,
 			&i.Total,
 			&i.Details,
+			&i.Fields,
 			&i.UserEmail,
 			&i.UserDisplayName,
 			&i.TaskStatus,

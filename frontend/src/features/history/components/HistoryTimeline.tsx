@@ -23,6 +23,7 @@ import {
   historyDisplayStatus,
   historyEventLabel,
   historyNamespace,
+  historyNote,
   historySummary,
   upidWorkerType,
   type HistoryCellCtx,
@@ -82,7 +83,7 @@ function HistoryRow({
   const label = historyEventLabel(kind, entry, t);
   const summary = historySummary(kind, entry, t);
   const actor = historyActor(entry);
-  const note = expanded ? kind.note?.(entry, t) : undefined;
+  const note = expanded ? historyNote(kind, entry, t) : undefined;
 
   // A backup entry's task is the whole job: read from where the guest's part
   // begins, and show it to where it ends.
@@ -147,7 +148,7 @@ function HistoryRow({
                 {shared(
                   hasTask
                     ? "row.started"
-                    : entry.kind === "status"
+                    : entry.kind === "status" || entry.kind === "observed"
                       ? "row.seen"
                       : "row.when",
                 )}
@@ -157,7 +158,9 @@ function HistoryRow({
               {entry.last_seen_at && (
                 <>
                   <span className="text-muted-foreground">
-                    {shared("row.lastSeen", { status: entry.from_status })}
+                    {entry.kind === "observed"
+                      ? shared("observed.lastSeen")
+                      : shared("row.lastSeen", { status: entry.from_status })}
                   </span>
                   <span>{formatDateTime(entry.last_seen_at)}</span>
                 </>

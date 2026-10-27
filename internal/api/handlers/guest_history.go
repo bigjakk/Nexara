@@ -39,6 +39,7 @@ func GuestHistory() HistoryKind {
 // action name.
 var guestHistoryRules = []HistoryRule{
 	{Category: "power", Field: HistoryFieldEntry, Equals: []string{"status"}},
+	{Category: "config", Field: HistoryFieldEntry, Equals: []string{"observed"}},
 	{Category: "console", Field: HistoryFieldAction, Like: []string{"console%"}},
 	{Category: "migration", Field: HistoryFieldAction, Like: []string{`drs\_%`, "%migrat%"}},
 	{Category: "migration", Field: HistoryFieldWorker, Equals: []string{"qmigrate", "vzmigrate", "hamigrate", "harelocate"}},

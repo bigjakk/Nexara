@@ -88,7 +88,9 @@ type HistoryField string
 // The fields a rule can match. They are the only four ListHistory derives a
 // category from.
 const (
-	// HistoryFieldEntry is the entry's kind: audit, task, status or backup.
+	// HistoryFieldEntry is the entry's kind: audit, task, status or backup —
+	// and observed, a change Nexara saw in Proxmox that nothing on record
+	// explains, once its source is read (queries/history.sql says how).
 	HistoryFieldEntry HistoryField = "entry"
 	// HistoryFieldAction is the audit row's action; a task's type for a task
 	// with no audit row.
@@ -303,8 +305,12 @@ type historyEntry struct {
 	FromStatus      string   `json:"from_status,omitempty"`
 	ToStatus        string   `json:"to_status,omitempty"`
 	// LastSeenAt is, for a status change, when the guest was last seen in
-	// FromStatus: the change happened after it and by OccurredAt.
+	// FromStatus, and for an observed change when the object was last seen as
+	// it was: the change happened after it and by OccurredAt.
 	LastSeenAt *string `json:"last_seen_at,omitempty"`
+	// Fields is, for an observed change, the names of the fields that
+	// changed.
+	Fields []string `json:"fields,omitempty"`
 	// LogStart and LogEnd are, for a backup entry, the lines of the job's
 	// task log that are this guest's part, by Proxmox's line numbers.
 	LogStart int32 `json:"log_start,omitempty"`
@@ -619,6 +625,7 @@ func toHistoryEntry(r db.ListHistoryRow, visible map[string]bool, showExitText b
 		// selects names a reserved setting today; the rule belongs to the
 		// read, not to what the rows happen to hold.
 		Details:     auditDetailsFor(r.ResourceType, r.ResourceID, string(r.Details), visible),
+		Fields:      r.Fields,
 		UPID:        r.Upid,
 		Node:        r.Node,
 		Description: r.TaskDescription,

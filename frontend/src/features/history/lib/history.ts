@@ -9,6 +9,7 @@ import {
   deriveActor,
   formatAction,
 } from "@/components/layout/activity-columns";
+import { formatTimestampLong, formatTimestampShort } from "@/lib/format";
 import {
   isOkExit,
   parseDetails,
@@ -97,11 +98,65 @@ function lookup(t: TFunction, group: string, key: string): string | undefined {
   return label === "" ? undefined : label;
 }
 
+/** A list field's counts in an observed change's detail: the entries it
+ *  gained and lost, as a rule set's rules. */
+function listCounts(v: unknown): { added: number; removed: number } | null {
+  if (v === null || typeof v !== "object") return null;
+  const { added, removed } = v as Record<string, unknown>;
+  return typeof added === "number" && typeof removed === "number"
+    ? { added, removed }
+    : null;
+}
+
+/**
+ * An observed change, every kind alike: "Created in Proxmox", "Removed in
+ * Proxmox", or "Changed in Proxmox: " and what changed — a rule set by the
+ * rules it gained and lost, when its detail counts them (at its top level, or
+ * under the list's own field), any other field by name.
+ */
+function observedLabel(entry: HistoryEntry, t: TFunction): string {
+  if (entry.action === "added") return t("history:observed.added");
+  if (entry.action === "removed") return t("history:observed.removed");
+  const detail = parseDetails(entry.details);
+  const ruleCounts = (c: { added: number; removed: number }) =>
+    t("history:observed.ruleCounts", { count: c.added, removed: c.removed });
+  const top = listCounts(detail);
+  const parts = top
+    ? [ruleCounts(top)]
+    : (entry.fields ?? []).map((field) => {
+        const c = listCounts(detail[field]);
+        if (c === null) return field;
+        return field === "rules" || field.endsWith("_rules")
+          ? ruleCounts(c)
+          : t("history:observed.listCounts", { field, ...c });
+      });
+  return parts.length > 0
+    ? t("history:observed.changed", { fields: parts.join(", ") })
+    : t("history:observed.changedUnnamed");
+}
+
+/** When an observed change was made: between the last sighting of the object
+ *  as it was and the one that saw it changed — times alone on one day. */
+function observedWindow(entry: HistoryEntry, t: TFunction): string {
+  if (!entry.last_seen_at) return "";
+  const from = new Date(entry.last_seen_at);
+  const to = new Date(entry.occurred_at);
+  const format =
+    from.toDateString() === to.toDateString()
+      ? formatTimestampShort
+      : formatTimestampLong;
+  return t("history:observed.window", {
+    from: format(from.getTime()),
+    to: format(to.getTime()),
+  });
+}
+
 /**
  * The Event column. A Nexara row is named by Nexara's action, which says more
  * than the Proxmox task behind it ("DRS migration", not "Migrate (HA)"); a
  * Proxmox row by the task Proxmox ran. Both names come from the kind's
- * namespace (`actions`, `taskTypes`), else the action, title-cased.
+ * namespace (`actions`, `taskTypes`), else the action, title-cased. An
+ * observed change reads the same in every kind (the shared `observed`).
  */
 export function historyEventLabel(
   kind: HistoryKind,
@@ -110,6 +165,7 @@ export function historyEventLabel(
 ): string {
   const own = kind.eventLabel?.(entry, t);
   if (own !== undefined) return own;
+  if (entry.kind === "observed") return observedLabel(entry, t);
   if (entry.kind === "audit" && entry.source === "nexara") {
     return lookup(t, "actions", entry.action) ?? formatAction(entry.action);
   }
@@ -140,6 +196,7 @@ export function historySummary(
 ): string {
   const own = kind.summary?.(entry, t);
   if (own !== undefined) return own;
+  if (entry.kind === "observed") return observedWindow(entry, t);
   const d = parseDetails(entry.details);
   const parts: string[] = [];
   const from = str(d, "source_node");
@@ -183,9 +240,22 @@ export function historySummary(
   return parts.join(" · ");
 }
 
-/** Who did it — see deriveActor; "Proxmox" for an ingested task naming nobody. */
+/** The note under an expanded entry: the kind's, else the shared one for an
+ *  observed change. */
+export function historyNote(
+  kind: HistoryKind,
+  entry: HistoryEntry,
+  t: TFunction,
+): string | undefined {
+  const own = kind.note?.(entry, t);
+  if (own !== undefined) return own;
+  return entry.kind === "observed" ? t("history:observed.note") : undefined;
+}
+
+/** Who did it — see deriveActor; "Proxmox" for an ingested task naming nobody.
+ *  Nobody, for what Nexara only saw. */
 export function historyActor(entry: HistoryEntry): string {
-  if (entry.kind === "status") return "";
+  if (entry.kind === "status" || entry.kind === "observed") return "";
   const actor = deriveActor(entry, parseDetails(entry.details));
   if (actor === "System" && entry.source === "proxmox") return "Proxmox";
   return actor;
