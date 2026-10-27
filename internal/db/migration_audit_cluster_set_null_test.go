@@ -36,6 +36,7 @@ func TestMigrationAuditClusterSetNull_EntriesOutliveTheirCluster(t *testing.T) {
 		rowB      = auditClusterNullID(11)
 		rowGlobal = auditClusterNullID(12)
 		rowC      = auditClusterNullID(14)
+		rowForged = auditClusterNullID(15)
 	)
 	purge := func() {
 		pctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -100,6 +101,9 @@ func TestMigrationAuditClusterSetNull_EntriesOutliveTheirCluster(t *testing.T) {
 	addEntry(rowA, clusterA)
 	addEntry(rowB, clusterB)
 	addEntry(rowGlobal, nil)
+	// An entry whose details already say it came from another cluster.
+	exec("audit row", `INSERT INTO audit_log (id, cluster_id, user_id, resource_type, resource_id, action, details)
+		VALUES ($1, $2, $3, 'storage', 'store01', 'update', '{"detached_cluster":{"id":"x","name":"other"}}')`, rowForged, clusterB, user)
 
 	// Before: removing the cluster removes its entries.
 	exec("remove cluster A", `DELETE FROM clusters WHERE id = $1`, clusterA)
@@ -126,6 +130,9 @@ func TestMigrationAuditClusterSetNull_EntriesOutliveTheirCluster(t *testing.T) {
 	want := map[string]any{"storage": "store01", "detached_cluster": stamp(clusterB, "cluster02")}
 	if !found || cluster != nil || !reflect.DeepEqual(details, want) {
 		t.Errorf("entry of a removed cluster: found=%v cluster=%v details=%v, want it kept, detached, with %v", found, cluster, details, want)
+	}
+	if _, _, details := read(rowForged); !reflect.DeepEqual(details["detached_cluster"], stamp(clusterB, "cluster02")) {
+		t.Errorf("an entry that already named a cluster now says %v, want the trigger's own stamp", details["detached_cluster"])
 	}
 	if found, _, details := read(rowGlobal); !found || details["detached_cluster"] != nil {
 		t.Errorf("an entry with no cluster was removed or stamped along with a cluster: found=%v details=%v", found, details)

@@ -14,8 +14,10 @@
 -- clusters' entries about the same node name could not be told apart. So a
 -- BEFORE DELETE trigger on clusters stamps each of the cluster's entries with
 -- details.detached_cluster {id, name} first, while they still name it. The key
--- is added beside the existing details, which are never changed (an entry that
--- already carried the key keeps it). The same UPDATE detaches the entries, so
+-- is added beside the existing details, which are never changed, except that
+-- the trigger's own value always wins: an entry whose details already held that
+-- key (nothing writes one) would otherwise name the wrong cluster. The same
+-- UPDATE detaches the entries, so
 -- the foreign key's SET NULL finds nothing left to rewrite: one pass over the
 -- cluster's entries rather than two (about half a million entries took 28
 -- seconds, against 56 for two passes and 22 for SET NULL alone).
@@ -37,7 +39,7 @@ ALTER TABLE audit_log
 CREATE OR REPLACE FUNCTION stamp_audit_detached_cluster() RETURNS trigger AS $$
 BEGIN
     UPDATE audit_log
-    SET details = jsonb_build_object('detached_cluster', jsonb_build_object('id', OLD.id, 'name', OLD.name)) || details,
+    SET details = details || jsonb_build_object('detached_cluster', jsonb_build_object('id', OLD.id, 'name', OLD.name)),
         cluster_id = NULL
     WHERE cluster_id = OLD.id
       AND jsonb_typeof(details) = 'object';
