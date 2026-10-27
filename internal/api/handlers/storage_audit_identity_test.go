@@ -10,12 +10,9 @@ import (
 )
 
 // A storage's audit rows name the storage, not the storage_pools row the request
-// addressed. That row is one node's view of the storage and the collector
-// prunes and re-inserts it, so an audit row keyed by its id stops resolving —
-// it is how the update, upload and OCI-pull rows on a dev install came to
-// match no row at all. The pool the harness serves has a UUID of its own, so
-// a handler still keying on it fails here.
-//
+// addressed: the collector prunes and re-inserts that row, so an id recorded
+// from it stops resolving. The harness's pool has a UUID of its own, so a
+// handler still keying on it fails here.
 // Sequential: the harness redirects the process-wide default logger.
 func TestStorageAuditRowsNameTheirStorageNotThePoolRow(t *testing.T) {
 	h := newStorageKeyHarness(t)

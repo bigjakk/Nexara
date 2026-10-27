@@ -3,7 +3,6 @@ package proxmox
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -117,6 +116,8 @@ func TestDiskMoveSpecAuditExtra(t *testing.T) {
 // VolumeStorage reads the storage id off a disk or volume config value; a value
 // that names none (a bind mount, an empty drive) has none.
 func TestVolumeStorage(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct{ in, want string }{
 		{"local-lvm:vm-100-disk-0,size=32G", "local-lvm"},
 		{"store01:vm-101-disk-0", "store01"},
@@ -138,6 +139,8 @@ func TestVolumeStorage(t *testing.T) {
 // VMDiskStorage and CTVolumeStorage read the guest's config for the audit row of
 // a move; whatever they cannot tell, they leave empty rather than fail the move.
 func TestDiskStorageLookup(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	vmSrv, vmSeen := newCaptureServer(t, `{"data":{"scsi0":"store01:vm-100-disk-0,size=32G"}}`)
@@ -163,9 +166,9 @@ func TestDiskStorageLookup(t *testing.T) {
 		t.Errorf("a container's volume was looked up at %s, want %s", (*ctSeen)[0], want)
 	}
 
-	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	failing := newTestServer(t, map[string]http.HandlerFunc{"/": func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"data":null}`, http.StatusInternalServerError)
-	}))
+	}})
 	t.Cleanup(failing.Close)
 	if got := newTestClient(t, failing.URL).VMDiskStorage(ctx, "pve-01", 100, "scsi0"); got != "" {
 		t.Errorf("a config that cannot be read gave %q, want none", got)
