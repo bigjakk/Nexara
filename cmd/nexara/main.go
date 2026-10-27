@@ -92,11 +92,7 @@ func main() {
 
 	// The History's audit indexes are built after startup, not by a migration:
 	// on a large install they outlast the healthcheck (migrations/000117).
-	go func() {
-		if err := db.EnsureHistoryIndexes(ctx, pool, logger); err != nil {
-			logger.Error("history indexes not built; the History reads without them", "error", err)
-		}
-	}()
+	go db.BuildHistoryIndexes(ctx, pool, logger)
 
 	// Construct the Redis client without blocking on connectivity. We probe
 	// the connection in a background goroutine so the HTTP listener (and

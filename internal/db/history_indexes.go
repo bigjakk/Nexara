@@ -33,6 +33,40 @@ var historyIndexes = []struct{ name, columns, def string }{
 // builds them; the others find it taken and leave the build to it.
 const historyIndexLock int64 = 0x4E58484953544958 // ASCII "NXHISTIX"
 
+// historyIndexLockTimeout bounds each wait a concurrent build makes for older
+// transactions: behind one left idle in a transaction it would otherwise hold
+// its lock on audit_log indefinitely. The build fails instead, and is retried.
+const historyIndexLockTimeout = "1min"
+
+// BuildHistoryIndexes runs EnsureHistoryIndexes until it succeeds, waiting
+// historyIndexBackoff between failures — a restart of the database mid-build,
+// a lock timeout — because the INVALID index a failed build leaves is
+// maintained on every audit write until it is rebuilt. Each attempt runs to its
+// end even when ctx is done, so a shutdown does not cancel a build and leave
+// that index behind; ctx only stops the retries.
+func BuildHistoryIndexes(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) {
+	for attempt := 0; ; attempt++ {
+		err := EnsureHistoryIndexes(context.WithoutCancel(ctx), pool, logger)
+		if err == nil {
+			return
+		}
+		wait := historyIndexBackoff(attempt)
+		logger.Error("history indexes not built; the History reads without them, slower", "error", err, "retry_in", wait)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
+}
+
+// historyIndexBackoff is the wait after the attempt'th failure: a minute,
+// doubling to half an hour.
+func historyIndexBackoff(attempt int) time.Duration {
+	wait := time.Minute << min(attempt, 5)
+	return min(wait, 30*time.Minute)
+}
+
 // EnsureHistoryIndexes builds whichever of historyIndexes is missing, once, on
 // one replica: the one that takes historyIndexLock. CREATE INDEX CONCURRENTLY
 // blocks no audit write, and an INVALID index — what a concurrent build that
@@ -41,9 +75,9 @@ const historyIndexLock int64 = 0x4E58484953544958 // ASCII "NXHISTIX"
 // public.audit_log, is refused rather than skipped: the History would read
 // without the index it was promised.
 //
-// Run it in a goroutine after EnsureSchema. It uses a connection of its own,
-// closed at the end, so the lock and the session's settings — a fixed
-// search_path, no statement timeout — leave with it.
+// It uses a connection of its own, closed at the end, so the lock and the
+// session's settings — a fixed search_path, no statement timeout, a lock
+// timeout — leave with it.
 func EnsureHistoryIndexes(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
 	pooled, err := pool.Acquire(ctx)
 	if err != nil {
@@ -63,6 +97,7 @@ func EnsureHistoryIndexes(ctx context.Context, pool *pgxpool.Pool, logger *slog.
 	for _, set := range []string{
 		"SET search_path = pg_catalog, public",
 		"SET statement_timeout = 0",
+		"SET lock_timeout = '" + historyIndexLockTimeout + "'",
 	} {
 		if _, err := conn.Exec(ctx, set, pgx.QueryExecModeSimpleProtocol); err != nil {
 			return fmt.Errorf("%s: %w", set, err)

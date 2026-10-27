@@ -1,10 +1,12 @@
 package db
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -71,13 +73,27 @@ func TestEnsureHistoryIndexes(t *testing.T) {
 	}
 	holder.Release()
 
-	if err := EnsureHistoryIndexes(ctx, pool, logger); err != nil {
-		t.Fatal(err)
-	}
+	// A shutdown does not cancel a build, which would leave it INVALID: even
+	// begun after one, it runs to its end.
+	stopped, stop := context.WithCancel(ctx)
+	stop()
+	BuildHistoryIndexes(stopped, pool, logger)
 	for _, ix := range historyIndexes {
 		def, valid := indexDef(ix.name)
 		if !valid || !strings.Contains(def, strings.Trim(ix.columns, "()")) {
 			t.Errorf("%s: %q (valid %v), want a valid index on %s", ix.name, def, valid, ix.columns)
+		}
+	}
+}
+
+// After a failed build — a database restart mid-build, a lock timeout — the
+// next attempt waits a minute, doubling to half an hour.
+func TestHistoryIndexBackoff(t *testing.T) {
+	t.Parallel()
+	for attempt, want := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute,
+		16 * time.Minute, 30 * time.Minute, 30 * time.Minute} {
+		if got := historyIndexBackoff(attempt); got != want {
+			t.Errorf("attempt %d: %v, want %v", attempt, got, want)
 		}
 	}
 }
