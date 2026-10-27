@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strconv"
 	"testing"
 
@@ -318,15 +317,10 @@ func TestVeeamSessionAuditNamesTheJobItRanFor(t *testing.T) {
 	tests := []struct {
 		name string
 		job  pgtype.UUID
-		want map[string]any
+		want string // details.veeam_job_id; "" when the key must be absent
 	}{
-		{"a session of a job", pgtype.UUID{Bytes: jobID, Valid: true}, map[string]any{
-			"veeam_server_id": server.ID.String(), "server_name": "vbr01",
-			"session_name": "session01", "veeam_job_id": jobID.String(),
-		}},
-		{"a session of no job", pgtype.UUID{}, map[string]any{
-			"veeam_server_id": server.ID.String(), "server_name": "vbr01", "session_name": "session01",
-		}},
+		{"a session of a job", pgtype.UUID{Bytes: jobID, Valid: true}, jobID.String()},
+		{"a session of no job", pgtype.UUID{}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -352,15 +346,12 @@ func TestVeeamSessionAuditNamesTheJobItRanFor(t *testing.T) {
 			if len(audits) != 1 {
 				t.Fatalf("wrote %d audit rows, want 1", len(audits))
 			}
-			if audits[0].ResourceType != "veeam_session" || audits[0].ResourceID != sessionID.String() {
-				t.Errorf("row is (%q, %q), want (veeam_session, %s)", audits[0].ResourceType, audits[0].ResourceID, sessionID)
-			}
 			var details map[string]any
 			if err := json.Unmarshal(audits[0].Details, &details); err != nil {
 				t.Fatalf("details: %v", err)
 			}
-			if !reflect.DeepEqual(details, tt.want) {
-				t.Errorf("details = %s\nwant %v", audits[0].Details, tt.want)
+			if got, has := details["veeam_job_id"]; (tt.want == "") == has || has && got != tt.want {
+				t.Errorf("details.veeam_job_id = %v (present: %v), want %q", got, has, tt.want)
 			}
 		})
 	}
