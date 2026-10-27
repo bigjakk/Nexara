@@ -561,6 +561,9 @@ func (m *mockQueries) ClassifyGlobalObjectChanges(_ context.Context, _ db.Classi
 }
 
 func (m *mockQueries) ShowUnclassifiedObservedChanges(context.Context, time.Time) (int64, error) {
+	m.observed.mu.Lock()
+	defer m.observed.mu.Unlock()
+	m.observed.shown++
 	return 0, nil
 }
 

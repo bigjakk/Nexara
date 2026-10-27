@@ -33,6 +33,7 @@ type observeStore struct {
 	state   map[string]db.ListClusterObjectStateRow // "cluster/kind/id"
 	marks   map[string]db.ListClusterObjectBaselinesRow
 	changes []observedChangeRow
+	shown   int // ShowUnclassifiedObservedChanges calls
 }
 
 func (m *mockQueries) ListClusterObjectState(_ context.Context, cluster uuid.UUID) ([]db.ListClusterObjectStateRow, error) {
@@ -552,6 +553,9 @@ func TestObserverOutcomes(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
 		e.expect("baseline")
+		if e.mq.observed.shown == 0 {
+			t.Fatal("a pass did not show what nothing classified")
+		}
 		before := time.Now()
 		e.client.fail(pathStorage, errors.New("proxmox API error 500"))
 		e.expect("failed read")
@@ -1043,7 +1047,7 @@ func TestObservedActionVocabulary(t *testing.T) {
 		})
 	}
 	guestClassified := slices.Concat(guestConfigActions, guestOtherActions)
-	checked := 0
+	checked, rolling := 0, 0
 	for _, dir := range []string{"../api/handlers", "../guesttools", "../scheduler", "../migration", "../drs", "../rolling",
 		"../collector"} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
@@ -1071,6 +1075,9 @@ func TestObservedActionVocabulary(t *testing.T) {
 						}
 					case observed[site.kind]:
 						checked++
+						if strings.HasPrefix(path, "../rolling") {
+							rolling++
+						}
 						if !explains(site.kind, site.action) {
 							t.Errorf("%s: %s action %q is in no rule and not in observedActionsExplainingNothing",
 								path, site.kind, site.action)
@@ -1081,8 +1088,8 @@ func TestObservedActionVocabulary(t *testing.T) {
 			})
 		}
 	}
-	if checked < 60 {
-		t.Fatalf("checked %d call sites; the scan is not reading them", checked)
+	if checked < 60 || rolling == 0 {
+		t.Fatalf("checked %d call sites, %d of the rolling update's; the scan is not reading them", checked, rolling)
 	}
 }
 

@@ -384,10 +384,10 @@ func TestObservedChanges(t *testing.T) {
 		return "shown"
 	}
 
-	// A node's task list unread: only what has waited past the give-up is
-	// decided, at most max_rows a call.
-	if n := classify(false, 1); n != 1 {
-		t.Fatalf("one call decided %d, want its one", n)
+	// One call decides at most max_rows, the oldest first; with a node's task
+	// list unread, only what has waited past the give-up.
+	if n := classify(true, 2); n != 2 {
+		t.Fatalf("one call decided %d, want 2", n)
 	}
 	classify(false, 1000)
 	for name, id := range map[string]uuid.UUID{"recent, nodes unlisted": byOwnRow, "past the give-up": gaveUp} {
@@ -465,13 +465,15 @@ func TestObservedChanges(t *testing.T) {
 	// What nothing could classify in a day and an hour is shown; another
 	// writer's rows and what is merely recent are left alone.
 	stuck := seed(observedCluster, "storage", "store12", 0, "changed", "", []string{"nodes"}, now.Add(-30*time.Hour))
+	notMineOld := seed(observedCluster, "replication", "100-1", 0, "changed", "", []string{"schedule"}, now.Add(-30*time.Hour))
+	exec("a trigger's row", `UPDATE cluster_object_changes SET observed_by = 'trigger' WHERE id = $1`, notMineOld)
 	if _, err := q.ShowUnclassifiedObservedChanges(ctx, now.Add(-25*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	for name, tc := range map[string]struct {
 		id   uuid.UUID
 		want string
-	}{"stuck": {stuck, "shown"}, "recent": {fresh, "waiting"}, "another writer's": {notMine, "waiting"}} {
+	}{"stuck": {stuck, "shown"}, "recent": {fresh, "waiting"}, "another writer's": {notMineOld, "waiting"}} {
 		if got := explained(tc.id); got != tc.want {
 			t.Errorf("%s: %s, want %s", name, got, tc.want)
 		}
