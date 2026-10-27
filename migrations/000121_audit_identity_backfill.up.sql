@@ -21,9 +21,9 @@
 -- What it does NOT touch, because the old row does not say enough:
 --   - a storage update or delete row keyed by an inventory row that no longer
 --     exists and naming no storage in its details;
---   - a PBS row when the cluster and the datastore (or job) name do not pick
---     exactly one PBS server: none known to hold it, or several, or the row is
---     older than the server;
+--   - a PBS row whose datastore (or job) name is not held by exactly one PBS
+--     server of all of them: none known to hold it, or several, or the one
+--     holder is newer than the row;
 --   - backup_job_created rows keyed "backup-job" (the id Proxmox gave the job
 --     was never recorded), and everything already keyed by what it names.
 
@@ -93,9 +93,11 @@ WHERE resource_type = 'proxmox_task'
 
 -- A PBS datastore action (garbage collection, prune, snapshot delete, protect,
 -- notes), filed as "backup" under the datastore's name or the snapshot's
--- "store/type/id", with no server. The server is the one PBS server of that
--- cluster scope (a standalone server has a NULL cluster) that is known to hold
--- the datastore and already existed when the row was written; any other count
+-- "store/type/id", with no server. The server is the one PBS server, of ALL of
+-- them, known to hold a datastore of that name (the row's cluster is not
+-- compared: a server moves between clusters and becomes standalone when its
+-- cluster is removed, so the cluster it has now says nothing about the one it
+-- had), provided it already existed when the row was written; any other count
 -- leaves the row as it is. The old resource_id was exactly the label the
 -- activity feed showed, so it becomes resource_name.
 WITH known AS (
@@ -103,8 +105,11 @@ WITH known AS (
     UNION SELECT pbs_server_id, datastore FROM pbs_datastore_metrics GROUP BY 1, 2
     UNION SELECT pbs_server_id, store FROM pbs_sync_jobs
     UNION SELECT pbs_server_id, store FROM pbs_verify_jobs
+), holders AS (
+    SELECT datastore, count(*) AS servers, (array_agg(pbs_server_id))[1] AS server_id
+    FROM known GROUP BY datastore
 ), legacy AS (
-    SELECT a.id, a.cluster_id, a.created_at, a.resource_id AS label,
+    SELECT a.id, a.created_at, a.resource_id AS label,
            CASE WHEN a.action IN ('gc_triggered', 'datastore_pruned')
                 THEN COALESCE(NULLIF(a.details->>'store', ''), a.resource_id)
                 ELSE COALESCE(NULLIF(a.details->>'store', ''), split_part(a.resource_id, '/', 1))
@@ -115,12 +120,10 @@ WITH known AS (
                        'snapshot_unprotected', 'snapshot_notes_updated')
       AND jsonb_typeof(a.details) = 'object'
 ), owned AS (
-    SELECT l.id, l.label, l.datastore, (array_agg(s.id))[1] AS server_id
+    SELECT l.id, l.label, l.datastore, h.server_id
     FROM legacy l
-    JOIN pbs_servers s ON s.cluster_id IS NOT DISTINCT FROM l.cluster_id AND s.created_at <= l.created_at
-    JOIN known k ON k.pbs_server_id = s.id AND k.datastore = l.datastore
-    GROUP BY l.id, l.label, l.datastore
-    HAVING count(*) = 1
+    JOIN holders h ON h.datastore = l.datastore AND h.servers = 1
+    JOIN pbs_servers s ON s.id = h.server_id AND s.created_at <= l.created_at
 )
 UPDATE audit_log a
 SET resource_type = 'pbs_server',
@@ -130,22 +133,25 @@ FROM owned o
 WHERE a.id = o.id;
 
 -- A PBS sync or verify job triggered, filed as "backup" under the job's id. The
--- job is looked up among the jobs the collector synced, of the matching kind;
--- the server it belongs to and the datastore it works on come with it.
+-- server is the one PBS server, of ALL of them, that has a job of that id and
+-- kind among the jobs the collector synced (same reasoning as above: no cluster
+-- comparison), provided it already existed when the row was written; the
+-- datastore the job works on comes with it.
 WITH jobs AS (
     SELECT 'sync_job_triggered' AS action, pbs_server_id, job_id, store FROM pbs_sync_jobs
     UNION ALL
     SELECT 'verify_job_triggered', pbs_server_id, job_id, store FROM pbs_verify_jobs
+), holders AS (
+    SELECT action, job_id, count(*) AS servers, (array_agg(pbs_server_id))[1] AS server_id, (array_agg(store))[1] AS datastore
+    FROM jobs GROUP BY action, job_id
 ), owned AS (
-    SELECT a.id, a.resource_id AS job_id, (array_agg(s.id))[1] AS server_id, (array_agg(j.store))[1] AS datastore
+    SELECT a.id, a.resource_id AS job_id, h.server_id, h.datastore
     FROM audit_log a
-    JOIN pbs_servers s ON s.cluster_id IS NOT DISTINCT FROM a.cluster_id AND s.created_at <= a.created_at
-    JOIN jobs j ON j.pbs_server_id = s.id AND j.job_id = a.resource_id AND j.action = a.action
+    JOIN holders h ON h.action = a.action AND h.job_id = a.resource_id AND h.servers = 1
+    JOIN pbs_servers s ON s.id = h.server_id AND s.created_at <= a.created_at
     WHERE a.resource_type = 'backup'
       AND a.action IN ('sync_job_triggered', 'verify_job_triggered')
       AND jsonb_typeof(a.details) = 'object'
-    GROUP BY a.id, a.resource_id
-    HAVING count(*) = 1
 )
 UPDATE audit_log a
 SET resource_type = 'pbs_server',

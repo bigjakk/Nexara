@@ -1998,10 +1998,11 @@ the `details` keys a new entry carries (`storage`, `datastore`, `resource_name`,
   `imgdel` or `prunebackups` (now the storage's, as `delete_content` or
   `prune_backups`);
 - a PBS datastore action or job trigger, which was a `backup` entry keyed by the
-  datastore, the snapshot (`datastore/type/id`) or the job, whose cluster and
-  datastore (or job) picked exactly one PBS server that already existed. A
-  snapshot or prune entry named its datastore in `details.store`; the re-filed
-  entry also has `datastore`, and keeps `store`.
+  datastore, the snapshot (`datastore/type/id`) or the job, whose datastore (or
+  job) name is held by exactly one PBS server of all of them, a server that
+  already existed. The entry's cluster is not compared, since a server moves
+  between clusters. A snapshot or prune entry named its datastore in
+  `details.store`; the re-filed entry also has `datastore`, and keeps `store`.
 
 What stays unresolved keeps the identity it was written with: a storage's
 `update` or `delete` entry whose inventory row id no longer exists and whose

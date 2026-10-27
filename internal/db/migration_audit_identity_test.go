@@ -73,10 +73,11 @@ func TestMigrationAuditIdentityBackfill_RefilesWhatItCanResolve(t *testing.T) {
 		poolLive     = auditIdentityID(6)
 		poolOther    = auditIdentityID(7)
 		deadPool     = auditIdentityID(8)
-		srv1         = auditIdentityID(21) // cluster A: holds datastore01 and datastore02, verify job verify01
+		srv1         = auditIdentityID(21) // cluster A: holds datastore01, datastore02 and datastore05, sync job sync01, verify job verify01
 		srv2         = auditIdentityID(22) // cluster A: holds datastore02 too, so that name is ambiguous
 		srvStandAlon = auditIdentityID(23) // no cluster: holds datastore03
 		srvNew       = auditIdentityID(24) // cluster A: created after the row that names its datastore
+		srvOther     = auditIdentityID(25) // cluster B: holds datastore05 and sync job sync01 as well, so those names are ambiguous
 	)
 
 	purge := func() {
@@ -127,6 +128,7 @@ func TestMigrationAuditIdentityBackfill_RefilesWhatItCanResolve(t *testing.T) {
 	}{
 		{srv1, "pbs01", clusterA, old}, {srv2, "pbs02", clusterA, old},
 		{srvStandAlon, "pbs03", nil, old}, {srvNew, "pbs04", clusterA, time.Now()},
+		{srvOther, "pbs05", clusterB, old},
 	} {
 		exec("pbs server", `INSERT INTO pbs_servers (id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at)
 			VALUES ($1, $2, 'https://pbs.invalid:8007', 'test@pbs!t', 'x', $3, $4)`, s.id, s.name, s.cluster, s.created)
@@ -134,11 +136,18 @@ func TestMigrationAuditIdentityBackfill_RefilesWhatItCanResolve(t *testing.T) {
 	for _, h := range []struct {
 		server    uuid.UUID
 		datastore string
-	}{{srv1, "datastore01"}, {srv1, "datastore02"}, {srv2, "datastore02"}, {srvStandAlon, "datastore03"}, {srvNew, "datastore04"}} {
+	}{{srv1, "datastore01"}, {srv1, "datastore02"}, {srv2, "datastore02"}, {srvStandAlon, "datastore03"}, {srvNew, "datastore04"},
+		{srv1, "datastore05"}, {srvOther, "datastore05"}} {
 		exec("snapshot", `INSERT INTO pbs_snapshots (pbs_server_id, datastore, backup_type, backup_id, backup_time)
 			VALUES ($1, $2, 'vm', '101', 1700000000)`, h.server, h.datastore)
 	}
-	exec("verify job", `INSERT INTO pbs_verify_jobs (pbs_server_id, job_id, store) VALUES ($1, 'verify01', 'datastore01')`, srv1)
+	exec("verify job", `INSERT INTO pbs_verify_jobs (pbs_server_id, job_id, store) VALUES ($1, 'verify01', 'datastore01'), ($2, 'verify09', 'datastore04')`, srv1, srvNew)
+	for _, j := range []struct {
+		server    uuid.UUID
+		datastore string
+	}{{srv1, "datastore01"}, {srvOther, "datastore05"}} {
+		exec("sync job", `INSERT INTO pbs_sync_jobs (pbs_server_id, job_id, store) VALUES ($1, 'sync01', $2)`, j.server, j.datastore)
+	}
 
 	upid := func(typ, id string) string {
 		return fmt.Sprintf("UPID:pve-01:0000A1B2:00000001:6A8CE407:%s:%s:root@pam:", typ, id)
@@ -205,12 +214,18 @@ func TestMigrationAuditIdentityBackfill_RefilesWhatItCanResolve(t *testing.T) {
 		{name: "gc on a datastore no server holds", cluster: &clusterA, typ: "backup", id: "datastore09", action: "gc_triggered", details: `{}`},
 		{name: "gc on a standalone server's datastore", typ: "backup", id: "datastore03", action: "gc_triggered", details: `{}`,
 			wantTyp: "pbs_server", wantID: srvStandAlon.String(), wantAct: "gc_triggered", wantDetails: `{"datastore":"datastore03","resource_name":"datastore03"}`},
-		{name: "gc in a cluster whose servers do not hold it", cluster: &clusterA, typ: "backup", id: "datastore03", action: "gc_triggered", details: `{}`},
+		{name: "gc in a cluster the standalone holder is not in: servers move between clusters", cluster: &clusterA, typ: "backup", id: "datastore03", action: "gc_triggered", details: `{}`,
+			wantTyp: "pbs_server", wantID: srvStandAlon.String(), wantAct: "gc_triggered", wantDetails: `{"datastore":"datastore03","resource_name":"datastore03"}`},
+		{name: "gc on a datastore the servers of two clusters both hold", cluster: &clusterA, typ: "backup", id: "datastore05", action: "gc_triggered", details: `{}`},
+		{name: "gc with no cluster, on a datastore only a clustered server holds", typ: "backup", id: "datastore01", action: "gc_triggered", details: `{}`,
+			wantTyp: "pbs_server", wantID: srv1.String(), wantAct: "gc_triggered", wantDetails: `{"datastore":"datastore01","resource_name":"datastore01"}`},
 		{name: "gc that predates the server", cluster: &clusterA, at: old, typ: "backup", id: "datastore04", action: "gc_triggered", details: `{}`},
 		{name: "verify job one server has", cluster: &clusterA, typ: "backup", id: "verify01", action: "verify_job_triggered", details: `{}`,
 			wantTyp: "pbs_server", wantID: srv1.String(), wantAct: "verify_job_triggered",
 			wantDetails: `{"job_id":"verify01","resource_name":"verify01","datastore":"datastore01"}`},
+		{name: "verify job that predates the server that has it", cluster: &clusterA, at: old, typ: "backup", id: "verify09", action: "verify_job_triggered", details: `{}`},
 		{name: "sync job id that is only a verify job", cluster: &clusterA, typ: "backup", id: "verify01", action: "sync_job_triggered", details: `{}`},
+		{name: "sync job id that two servers have", cluster: &clusterA, typ: "backup", id: "sync01", action: "sync_job_triggered", details: `{}`},
 		{name: "a restore is a guest's row", cluster: &clusterA, typ: "backup", id: "100/vm", action: "backup_restored", details: `{"pbs_server_id":"x","datastore":"datastore01"}`},
 		{name: "a created backup job", cluster: &clusterA, typ: "backup", id: "backup-job", action: "backup_job_created", details: `{"storage":"store01"}`},
 	}
