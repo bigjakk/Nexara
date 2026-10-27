@@ -484,7 +484,8 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 			"metrics_interval", cfg.MetricsCollectInterval,
 			"pbs_interval", pbsInterval,
 			"resource_sync_interval", cfg.ResourceSyncInterval,
-			"snapshot_sync_interval", cfg.SnapshotSyncInterval)
+			"snapshot_sync_interval", cfg.SnapshotSyncInterval,
+			"object_observe_interval", cfg.ObjectObserveInterval)
 
 		ticker := cfg.NewMetricsTicker()
 		defer ticker.Stop()
@@ -656,6 +657,38 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 					}
 				}
 			}()
+		}
+
+		// Object observer loop: records the edits made directly in Proxmox that
+		// ran no task (collector/observer.go). Leader-gated like the loops
+		// above. Each tick starts a pass for every cluster whose previous pass
+		// has finished, so one slow cluster never holds up another, nor gets a
+		// second pass stacked on its first. Floored at 60s; 0 disables.
+		if cfg.ObjectObserveInterval > 0 {
+			observer, err := collector.NewObserver(queries, cfg.EncryptionKey,
+				collector.CachedObserverClients(application.ProxmoxCache), cfg.ObjectObserveInterval, logger)
+			if err != nil {
+				logger.Warn("object observer disabled", "error", err)
+			} else {
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.Error("object observer loop panicked", "panic", r)
+						}
+					}()
+					observer.ObserveAll(ctx)
+					observeTicker := time.NewTicker(observer.Interval())
+					defer observeTicker.Stop()
+					for {
+						select {
+						case <-observeTicker.C:
+							observer.ObserveAll(ctx)
+						case <-ctx.Done():
+							return
+						}
+					}
+				}()
+			}
 		}
 
 		// Veeam inventory + session loops. Leader-gated on the same ctx as the

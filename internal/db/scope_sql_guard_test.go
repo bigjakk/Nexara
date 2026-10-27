@@ -70,6 +70,8 @@ var auditReadsExemptFromScope = map[string]string{
 	// reads audit_log only to decide whether something on record explains a
 	// change, joined on the change's own cluster, and returns nothing to a caller.
 	"cluster_object_changes.sql.ClassifyClusterObjectChanges": "collector-internal; audit rows of the change's own cluster, a verdict returned to no user",
+	// The same, for the changes the observer files (internal/collector/observer.go).
+	"cluster_object_state.sql.ClassifyObservedChanges": "collector-internal; audit rows of the change's own cluster, a verdict returned to no user",
 
 	// The collector marking the per-node reloads of an SDN apply: it reads and
 	// rewrites one cluster's own rows, named by a required argument, and returns

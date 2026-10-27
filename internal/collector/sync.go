@@ -178,6 +178,8 @@ type SyncQueries interface {
 	GetClusterObjectReading(ctx context.Context, arg db.GetClusterObjectReadingParams) (db.GetClusterObjectReadingRow, error)
 	SaveClusterObjectReading(ctx context.Context, arg db.SaveClusterObjectReadingParams) error
 	ClassifyClusterObjectChanges(ctx context.Context, arg db.ClassifyClusterObjectChangesParams) (int64, error)
+	// Edits made directly in Proxmox, which the observer files (observer.go)
+	ClassifyObservedChanges(ctx context.Context, arg db.ClassifyObservedChangesParams) (int64, error)
 	// Guest status changes and backup job logs (the History tab)
 	ClassifyGuestStatusChanges(ctx context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error)
 	AbandonUnreadBackupJobs(ctx context.Context, arg db.AbandonUnreadBackupJobsParams) (int64, error)
@@ -806,6 +808,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// too long for theirs. Every pass, even one that listed no node.
 	s.classifyStatusChanges(ctx, cluster, listedNodes, offlineNodes)
 	s.classifyObjectChanges(ctx, cluster, listedNodes)
+	s.classifyObservedChanges(ctx, cluster, everyOnlineNodeListed(nodes, listedNodes))
 
 	// Only notify the frontend when inventory data actually changed
 	// (VM status transitions, VMs added/removed). This avoids triggering

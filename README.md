@@ -235,6 +235,7 @@ All settings are environment variables. `docker-compose.yml` injects a curated s
 | `SNAPSHOT_SYNC_INTERVAL` | `5m` | How often the guest snapshot inventory (central Snapshots page + snapshot-age alerts) refreshes. One Proxmox call per guest per pass; floored at `60s`, `0` disables |
 | `NODE_MEMORY_READ_INTERVAL` | `24h` | How often each node's memory DIMM layout is re-read with `dmidecode` over the cluster's SSH credentials (as root). Clusters without SSH credentials are never dialed; `0` disables the background read |
 | `NODE_PRESSURE_SYNC_INTERVAL` | `5m` | How often each online node's pressure stall history (Proxmox VE 9) is copied from its RRD. Floored at `1m`; `0` disables it |
+| `OBJECT_OBSERVE_INTERVAL` | `5m` | How often Nexara looks for edits made directly in Proxmox that ran no task — a guest's options, a pool, a storage definition, a node's settings — and records the names of the fields that changed in the object's History. One Proxmox call per guest per pass, at most ten a second per cluster. Floored at `1m`; `0` disables it |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `PUID` / `PGID` | `1000` | Container user/group ID |
 | `DATA_DIR` | Docker volume | Custom data path (e.g. NFS mount) |

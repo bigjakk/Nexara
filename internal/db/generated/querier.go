@@ -208,6 +208,35 @@ type Querier interface {
 	// finished_at) serves on both: everything in the archive is older than the
 	// retention, so a recent change reads none of it.
 	ClassifyGuestStatusChanges(ctx context.Context, arg ClassifyGuestStatusChangesParams) (int64, error)
+	// ClassifyObservedChanges decides, once, whether something already on record
+	// explains each settled change the observer filed for a cluster. The window is
+	// ClassifyGuestStatusChanges' and ClassifyClusterObjectChanges': an audit row
+	// counts when it was made (its task started) no later than the change was seen,
+	// plus 30 seconds of clock skew, and not before the object was last seen as it
+	// was, less 2 minutes — a task while it runs, until it finishes. Rows the
+	// collector ingests from Proxmox tasks are audit rows too, so they count.
+	//
+	// What counts is the caller's rules (observer_explain.go), one JSON object
+	// each: the kind of change it applies to, the audit rows it reads — by
+	// resource_type ('' any), and by match_key: 'id' the change's own resource_id,
+	// 'node' its node, 'vmid' its guest, 'sid' the guest an HA sid names, 'cluster'
+	// any row of the cluster, 'details:<k>' a row whose details-><k> is the
+	// change's resource_id — and which of those rows: by action and UPID worker
+	// type (anchored patterns, '' any), never an action matching except_re, only a
+	// row with no task when untasked. field_re says which fields such a row can
+	// explain ('' any): a disk move explains the disk it moved, not the memory
+	// someone changed in the GUI meanwhile. A change is explained when every field
+	// it names is covered by some rule's row; an added or removed object, when any
+	// rule's row is found.
+	//
+	// The lookback for a row's start is bounded to a day before the window, so a
+	// change is never weighed against the cluster's whole audit log.
+	//
+	// A change waits for the pass whose ingest listed every node the cluster calls
+	// online (all_nodes_listed), since the task that explains it may have run on
+	// any of them — a migration on its source, a destroy on the guest's node — or
+	// until give_up_before. Until then, and until it settles, it is not shown.
+	ClassifyObservedChanges(ctx context.Context, arg ClassifyObservedChangesParams) (int64, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
 	// Forget that Nexara minted this cluster's credential.
@@ -477,6 +506,10 @@ type Querier interface {
 	// caller can clear those users' cached permissions, which would otherwise keep the
 	// grant for up to five minutes after the rows are gone.
 	DeleteClusterAndScopedRoles(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error)
+	// DeleteClusterObjectState drops what the observer holds of a kind's objects —
+	// a guest that left the inventory, the HA groups Proxmox VE 9 migrated to
+	// rules. Nothing is recorded for them.
+	DeleteClusterObjectState(ctx context.Context, arg DeleteClusterObjectStateParams) error
 	DeleteClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) error
 	// DeleteCompletedTasks removes terminal task_history rows whose finish (or
 	// start, if never finalized) predates the caller-supplied cutoff. Never deletes
@@ -1391,11 +1424,23 @@ type Querier interface {
 	ListCVEScanVulnsKEV(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]CveScan, error)
 	ListCleanupPendingJobsForCluster(ctx context.Context, clusterID uuid.UUID) ([]RollingUpdateJob, error)
+	// ListClusterObjectBaselines is the signature each kind of a cluster was last
+	// read whole under, and when (000124, 000128). The replication trigger's own
+	// mark has neither.
+	ListClusterObjectBaselines(ctx context.Context, clusterID uuid.UUID) ([]ListClusterObjectBaselinesRow, error)
 	// ListClusterObjectChanges is the unexplained changes of one cluster's objects of
 	// the given kinds, newest first — all of a kind, or one object's when
 	// resource_id is set. total is count(*) OVER the filtered set, computed before
 	// LIMIT, so the page and its count come from one query.
 	ListClusterObjectChanges(ctx context.Context, arg ListClusterObjectChangesParams) ([]ListClusterObjectChangesRow, error)
+	// The observer's readings (migrations/000128) and the classification of what it
+	// records (internal/collector/observer.go, observer_explain.go). It files edits
+	// made directly in Proxmox into cluster_object_changes (000124) with
+	// observed_by 'observer'; ClassifyClusterObjectChanges decides the other
+	// writers' rows, ClassifyObservedChanges below decides these.
+	// ListClusterObjectState is everything the observer last read of one cluster:
+	// one row per object, its fields as tags, never values.
+	ListClusterObjectState(ctx context.Context, clusterID uuid.UUID) ([]ListClusterObjectStateRow, error)
 	// Feeds the "TLS certificate changed" health issue.
 	//
 	// Pairs each active cluster's pinned fingerprint (clusters.tls_fingerprint,
@@ -2294,6 +2339,21 @@ type Querier interface {
 	RecordBackupJobLog(ctx context.Context, arg RecordBackupJobLogParams) error
 	// A failed read records why and when, and keeps the last good read.
 	RecordNodeMemoryFailure(ctx context.Context, arg RecordNodeMemoryFailureParams) error
+	// RecordObservedObjects writes one reading of one kind of a cluster — or one
+	// batch of its guests — in a single statement, so a change is never recorded
+	// without the reading it came from replacing the stored one, nor a reading
+	// stored without its change:
+	//
+	//   changes  the rows for cluster_object_changes, each with its window;
+	//   states   the objects new or changed, or taken as a baseline, to store;
+	//   removed  the objects gone, whose stored reading is dropped;
+	//   touched  the objects read unchanged: only their last_seen_at moves;
+	//   baseline the signature the kind was read whole under, at seen_at, or ''
+	//            for a reading that marks nothing (a guest batch, a node's objects).
+	//
+	// The sets are disjoint by construction. cluster_id is never NULL here: only a
+	// global kind's trigger writes a row with none (000129).
+	RecordObservedObjects(ctx context.Context, arg RecordObservedObjectsParams) error
 	RemoveFavorite(ctx context.Context, arg RemoveFavoriteParams) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)

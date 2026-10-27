@@ -198,6 +198,7 @@ type ClusterObjectBaseline struct {
 	BaselinedAt  time.Time `json:"baselined_at"`
 	LastReadAt   time.Time `json:"last_read_at"`
 	Reading      []byte    `json:"reading"`
+	Signature    string    `json:"signature"`
 }
 
 type ClusterObjectChange struct {
@@ -215,6 +216,17 @@ type ClusterObjectChange struct {
 	ObservedAt   time.Time       `json:"observed_at"`
 	Explained    pgtype.Bool     `json:"explained"`
 	ExplainedBy  pgtype.UUID     `json:"explained_by"`
+}
+
+type ClusterObjectState struct {
+	ClusterID   uuid.UUID       `json:"cluster_id"`
+	Kind        string          `json:"kind"`
+	ObjectID    string          `json:"object_id"`
+	Fields      json.RawMessage `json:"fields"`
+	Node        string          `json:"node"`
+	Signature   string          `json:"signature"`
+	FirstSeenAt time.Time       `json:"first_seen_at"`
+	LastSeenAt  time.Time       `json:"last_seen_at"`
 }
 
 type ClusterSshCredential struct {

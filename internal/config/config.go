@@ -75,6 +75,14 @@ type Config struct {
 	// one-minute steps): one read per node per pass, of the last hour, or the
 	// day after a gap. Floored at 60s in the collector; 0 turns it off.
 	NodePressureSyncInterval time.Duration `envconfig:"NODE_PRESSURE_SYNC_INTERVAL" default:"5m"`
+	// ObjectObserveInterval drives the pass that records edits made directly in
+	// Proxmox, which run no task and so reach no audit row: each pass reads every
+	// cluster's guest configurations and the objects Nexara shows (pools,
+	// storage, backup jobs, mappings, metric servers, options, nodes' settings)
+	// and files what changed since the last, field names only. One read per
+	// guest per pass, spread over the interval and never more than ten a second
+	// per cluster. Floored at 60s in the collector; 0 turns it off.
+	ObjectObserveInterval time.Duration `envconfig:"OBJECT_OBSERVE_INTERVAL" default:"5m"`
 	// VeeamSyncInterval drives the Veeam inventory pass — repositories and
 	// their capacity sample, job states, backup objects and the restore
 	// points of any object whose point count moved. Floored at 60s in the

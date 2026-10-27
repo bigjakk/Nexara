@@ -110,6 +110,11 @@ type mockQueries struct {
 	pbsSyncJobUpsertErr error
 	pbsSyncJobPrunes    int
 	pbsVerifyJobPrunes  int
+
+	// The observer's readings and what it filed (observer_test.go), and the
+	// classifications of its changes asked for.
+	observed         observeStore
+	classifyObserved []db.ClassifyObservedChangesParams
 }
 
 func newMockQueries() *mockQueries {
@@ -535,6 +540,11 @@ func (m *mockQueries) ClassifyClusterObjectChanges(_ context.Context, arg db.Cla
 	return 0, nil
 }
 
+func (m *mockQueries) ClassifyObservedChanges(_ context.Context, arg db.ClassifyObservedChangesParams) (int64, error) {
+	m.classifyObserved = append(m.classifyObserved, arg)
+	return 0, nil
+}
+
 func (m *mockQueries) ClassifyGuestStatusChanges(_ context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error) {
 	m.classifyCalls = append(m.classifyCalls, arg)
 	return 0, nil
@@ -876,6 +886,11 @@ func TestSyncCluster_Success(t *testing.T) {
 		!slices.Equal(mq.classifyObjectCalls[0].ListedNodes, []string{"pve1", "pve2"}) {
 		t.Errorf("object change classification calls = %+v, want one for cluster %s, nodes pve1 and pve2",
 			mq.classifyObjectCalls, cluster.ID)
+	}
+	// And the edits the observer found, both online nodes having listed.
+	if len(mq.classifyObserved) != 1 || mq.classifyObserved[0].ClusterID != cluster.ID || !mq.classifyObserved[0].AllNodesListed {
+		t.Errorf("observed change classification calls = %+v, want one for cluster %s with every node listed",
+			mq.classifyObserved, cluster.ID)
 	}
 }
 
