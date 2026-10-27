@@ -74,6 +74,8 @@ Changing the address also **clears the cluster's stored SSH credential and every
 
 From the cluster list, click the delete button. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster. The audit entries recorded against it are kept, as system-wide entries: they leave the cluster-scoped views and are read by anyone who can view the audit log across all clusters. Each carries `details.detached_cluster`, the removed cluster's `id` and `name`, so the entries of two removed clusters can still be told apart.
 
+Keeping the entries means rewriting each of them, in the one database transaction that removes the cluster, and the request stays open until that commits. On a test database holding a million audit entries, about half of them this cluster's, the removal took 22 to 29 seconds (it varies with load); deleting the entries, as earlier releases did, took about a second. The time grows with the number of the cluster's entries, roughly 50 seconds per million. While it runs, the cluster's collector and anything else that records against the cluster wait, and fail once it is gone. If a reverse proxy in front of Nexara gives up first (60 seconds is a common limit, reached at around a million entries), you see the proxy's gateway-timeout error instead of Nexara's answer, but the removal is not cancelled and commits when it is done: reload the cluster list instead of retrying.
+
 ### API Token Requirements
 
 A token Nexara minted itself already holds everything it needs — onboarding grants its user the `Administrator` role on `/` — so this section only applies to tokens you create by hand. The cluster row records which route its token came from, so you can tell later which clusters Nexara onboarded itself.
