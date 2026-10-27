@@ -364,6 +364,8 @@ func TestIngestTask_AuditRowIdentity(t *testing.T) {
 		{"imgdel of a volume with an owner", "imgdel", "105@store02", "storage", "store02", "store02", "delete_content"},
 		{"imgdel of a volume without one", "imgdel", "store02", "storage", "store02", "store02", "delete_content"},
 		{"prunebackups of one guest's backups", "prunebackups", "105@store02", "storage", "store02", "store02", "prune_backups"},
+		{"a prune whose id names no storage is the node's", "prunebackups", "105@", "node", "pve-01", "", "prune_backups"},
+		{"a storage name Proxmox could not have minted is not filed as one", "imgdel", "105@store\n02", "proxmox_task", "pve-01", "", "imgdel"},
 		{"imgcopy has no id", "imgcopy", "", "node", "pve-01", "", "image_copy"},
 		{"download's id is a file name", "download", "linux01\\x2diso", "node", "pve-01", "", "download"},
 		{"an unmapped task keeps its id", "srvstart", "pveproxy", "proxmox_task", "pveproxy", "", "srvstart"},
