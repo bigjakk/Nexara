@@ -3,6 +3,8 @@ package proxmox
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -157,7 +159,7 @@ const diskStorageLookupTimeout = 5 * time.Second
 func (c *Client) VMDiskStorage(ctx context.Context, node string, vmid int, disk string) string {
 	ctx, cancel := context.WithTimeout(ctx, diskStorageLookupTimeout)
 	defer cancel()
-	config, err := c.GetVMConfig(ctx, node, vmid)
+	config, err := c.currentGuestConfig(ctx, "qemu", node, vmid)
 	if err != nil {
 		return ""
 	}
@@ -168,11 +170,30 @@ func (c *Client) VMDiskStorage(ctx context.Context, node string, vmid int, disk 
 func (c *Client) CTVolumeStorage(ctx context.Context, node string, vmid int, volume string) string {
 	ctx, cancel := context.WithTimeout(ctx, diskStorageLookupTimeout)
 	defer cancel()
-	config, err := c.GetCTConfig(ctx, node, vmid)
+	config, err := c.currentGuestConfig(ctx, "lxc", node, vmid)
 	if err != nil {
 		return ""
 	}
 	return configVolumeStorage(config, volume)
+}
+
+// currentGuestConfig reads a guest's config as it is now (kind is the API's
+// "qemu" or "lxc"). Without current=1 Proxmox merges the changes still pending
+// on a running guest into the answer, and a pending change to a disk would name
+// a storage the disk is not on yet.
+func (c *Client) currentGuestConfig(ctx context.Context, kind, node string, vmid int) (VMConfig, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/" + kind + "/" + strconv.Itoa(vmid) + "/config?current=1"
+	var config VMConfig
+	if err := c.do(ctx, path, &config); err != nil {
+		return nil, fmt.Errorf("get %s %d current config on %s: %w", kind, vmid, node, err)
+	}
+	return config, nil
 }
 
 func configVolumeStorage(config VMConfig, key string) string {

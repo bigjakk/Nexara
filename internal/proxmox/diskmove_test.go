@@ -148,7 +148,8 @@ func TestDiskStorageLookup(t *testing.T) {
 			t.Errorf("%s: VMDiskStorage = %q, want %q", tt.name, got, tt.want)
 		}
 	}
-	if want := "/api2/json/nodes/pve-01/qemu/100/config"; (*vmSeen)[0] != want {
+	// current=1: the config without the changes still pending on it.
+	if want := "/api2/json/nodes/pve-01/qemu/100/config?current=1"; (*vmSeen)[0] != want {
 		t.Errorf("a VM's disk was looked up at %s, want %s", (*vmSeen)[0], want)
 	}
 
@@ -156,7 +157,7 @@ func TestDiskStorageLookup(t *testing.T) {
 	if got := newTestClient(t, ctSrv.URL).CTVolumeStorage(ctx, "pve-01", 101, "rootfs"); got != "store01" {
 		t.Errorf("CTVolumeStorage = %q, want store01", got)
 	}
-	if want := "/api2/json/nodes/pve-01/lxc/101/config"; (*ctSeen)[0] != want {
+	if want := "/api2/json/nodes/pve-01/lxc/101/config?current=1"; (*ctSeen)[0] != want {
 		t.Errorf("a container's volume was looked up at %s, want %s", (*ctSeen)[0], want)
 	}
 
