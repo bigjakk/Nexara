@@ -55,6 +55,8 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 	purge := func() {
 		pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		// The audit rows go first: a cluster's delete may only detach them (audit_log.cluster_id is SET NULL).
+		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE cluster_id = ANY($1)`, []uuid.UUID{classifyCluster, classifyOther})
 		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{classifyCluster, classifyOther})
 	}
 	purge()
