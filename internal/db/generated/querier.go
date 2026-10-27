@@ -1465,10 +1465,12 @@ type Querier interface {
 	//            ListGuestLifecycleEvents); or an HA resource row, which names the
 	//            guest only by its HA sid ("vm:100", "ct:100") and so carries no
 	//            vmid. For an object: by its resource identity. A Proxmox-ingested
-	//            row is dropped when a Nexara row of the selection's guests or
-	//            resource types carries the same UPID: the collector's dedupe can
-	//            lose a race with a handler's own insert, and the two rows are one
-	//            task, the Nexara one the one that says who asked.
+	//            row is dropped when a Nexara row of the selection carries the same
+	//            UPID: the collector's dedupe can lose a race with a handler's own
+	//            insert, and the two rows are one task, the Nexara one the one that
+	//            says who asked. A twin outside the selection drops nothing — a
+	//            node's History keeps a guest task it selects by details.node even
+	//            when the Nexara row of it, filed under the guest, is not its own.
 	//   task     a guest task with NO audit row, from task_history or its archive
 	//            — only when include_tasks, which the handler sets from view:task.
 	//            Every task path writes an audit row too, so this is the rare row
@@ -1495,10 +1497,10 @@ type Querier interface {
 	// whole cluster's rows. Each later arm excludes the rows an earlier one takes,
 	// so no row is read twice. "vmid IS NOT NULL" lets the vmid arms use their
 	// partial indexes whatever the plan: a generic plan cannot prove it from
-	// "= ANY(<parameter>)". The Proxmox-duplicate probes are scoped to the
-	// selection by parameter, not by correlation: correlated on the UPID alone,
-	// the planner hashes every Nexara row the install has ever written, on every
-	// request.
+	// "= ANY(<parameter>)". The Proxmox-duplicate probe reads the selection
+	// itself, never audit_log: probed there by UPID, a generic plan — pgx's
+	// statement cache lets Postgres switch to one after five executions — scans
+	// the whole cluster's rows on every request.
 	//
 	// subject is the guest an entry is filed under — the clone's target, the HA
 	// sid's guest — and picks the cutoff it is held to: cutoff_after and

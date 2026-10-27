@@ -558,6 +558,22 @@ func TestGuestHistory(t *testing.T) {
 	if got, total := list(nodeParams); !slices.Equal(got, []string{"audit interface_updated other ", "audit apt_update updates "}) || total != 2 {
 		t.Errorf("node timeline = %v (total %d), want its network change, then its one apt update", got, total)
 	}
+
+	// A twin outside the selection drops nothing: the node selects a guest's
+	// task by details.node, and the Nexara row of the same task, filed under
+	// the guest's inventory id with no node, is not the node's.
+	twinUPID := historyUPID(34, "qmstart", "106")
+	audit(historyClusterID, minsAgo(1), "nexara", "vm", uuid.NewString(), "start", map[string]any{"upid": twinUPID})
+	audit(historyClusterID, minsAgo(1), "proxmox", "vm", "106", "start", map[string]any{"upid": twinUPID, "node": "pve-01", "status": "OK"})
+	twinParams, err := node.ListParams(historyClusterID, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+		{ResourceType: "vm", DetailKey: "node", Value: "pve-01"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	twinParams.RowLimit = 50
+	if got, _ := list(twinParams); !slices.Equal(got, []string{"audit start other "}) {
+		t.Errorf("a node's guest task whose Nexara twin is the guest's: %v, want the Proxmox row kept", got)
+	}
 }
 
 func withFilter(p gen.ListHistoryParams, f func(*gen.ListHistoryParams)) gen.ListHistoryParams {
