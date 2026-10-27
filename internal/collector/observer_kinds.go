@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"regexp"
 	"strconv"
 	"strings"
@@ -538,9 +539,17 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 			if stringField(e, "subnet") == "" || !auditkey.ValidID(id) {
 				continue
 			}
-			subnets.objects = append(subnets.objects, observedObject{
-				id: id, resourceType: "sdn_subnet", resourceID: id, fields: sdnSpec.canonicalFields(e),
-			})
+			obj := observedObject{id: id, resourceType: "sdn_subnet", resourceID: id}
+			// The subnet's CIDR, as Nexara files a create whose id it could
+			// not read back (<vnet>/<cidr>), so that row can name it.
+			if cidr := vnet + "/" + stringField(e, "cidr"); stringField(e, "cidr") != "" && memberID.MatchString(cidr) {
+				rest := maps.Clone(e)
+				delete(rest, "cidr")
+				obj.fields, obj.members = sdnSpec.canonicalFields(rest), map[string][]string{"cidr": {cidr}}
+			} else {
+				obj.fields = sdnSpec.canonicalFields(e)
+			}
+			subnets.objects = append(subnets.objects, obj)
 		}
 	}
 	p.forgetOrphans(subnets.forget, "sdn_subnet", listed)

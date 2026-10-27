@@ -240,6 +240,19 @@ func TestObservedChanges(t *testing.T) {
 	counted(groupRuleMoved, map[string]int{"added": 1, "removed": 0, "moved": 1})
 	audit(observedCluster, in, "firewall_security_group_rule", "web", 0, "rule_created", nil)
 
+	// What Nexara filed with no id of the object explains only what it can:
+	// a job created with its id unknown, a job added anywhere; a subnet filed
+	// under its CIDR, the subnet with that CIDR.
+	jobAddedUnknown := seed(observedCluster, "backup", "backup-11", 0, "added", "", nil, ago(250))
+	audit(observedCluster, ago(251), "backup", "backup-job", 0, "backup_job_created", nil)
+	jobAddedBeside := seed(observedCluster, "backup", "backup-13", 0, "added", "", nil, ago(350))
+	audit(observedCluster, ago(351), "backup", "backup-12", 0, "backup_job_created", nil)
+	subnetByCIDR := seed(observedCluster, "sdn_subnet", "vnet01/zone01-192.0.2.0-24", 0, "added", "", nil, at)
+	members(subnetByCIDR, []string{"cidr:vnet01/192.0.2.0/24"}, []string{})
+	subnetOther := seed(observedCluster, "sdn_subnet", "vnet01/zone01-198.51.100.0-24", 0, "added", "", nil, at)
+	members(subnetOther, []string{"cidr:vnet01/198.51.100.0/24"}, []string{})
+	audit(observedCluster, in, "sdn_subnet", "vnet01/192.0.2.0/24", 0, "sdn_subnet_created", nil)
+
 	// Access: a user's delete explains its own grants going, never another's
 	// arriving; Nexara's grant only the grantees its row names; a realm's sync
 	// only that realm's users.
@@ -304,7 +317,8 @@ func TestObservedChanges(t *testing.T) {
 	rule := func(kind, change, auditType, key string, untasked bool, actionRe, exceptRe, workerRe, fieldRe string) map[string]any {
 		return map[string]any{"kind": kind, "change": change, "audit_type": auditType, "match_key": key,
 			"untasked": untasked, "action_re": actionRe, "except_re": exceptRe, "worker_re": workerRe, "field_re": fieldRe,
-			"detail_key": "", "object": "", "member": "", "member_of": "", "counts": "", "fields_from": ""}
+			"detail_key": "", "object": "", "member": "", "member_of": "", "counts": "", "fields_from": "",
+			"audit_id_is": ""}
 	}
 	with := func(r map[string]any, key, value string) map[string]any { r[key] = value; return r }
 	rules := jsonOf([]map[string]any{
@@ -335,6 +349,9 @@ func TestObservedChanges(t *testing.T) {
 		with(with(rule("pve_acl", "changed", "pve_acl", "id", false, "^granted$", "", "", "^(users|user_grants)$"),
 			"member", "joined"), "member_of", "details-list.users:users:%s|user_grants:*:%s"),
 		with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", ""), "object", "upid:*@%s"),
+		with(rule("backup", "added", "backup", "cluster", false, "^backup_job_created$", "", "", ""), "audit_id_is", "backup-job"),
+		with(with(rule("sdn_subnet", "added", "sdn_subnet", "cluster", false, "^sdn_subnet_created$", "", "", ""),
+			"member", "joined"), "member_of", "audit:cidr:%s"),
 		with(with(rule("pool", "changed", "vm", "details:new_pool", false, "^set_pool$", "", "", "^vms$"), "member", "joined"),
 			"member_of", "vmid:vms:%s"),
 		with(with(rule("pool", "changed", "vm", "cluster", false, "^clone$", "", "", "^vms$"), "member", "joined"),
@@ -406,6 +423,10 @@ func TestObservedChanges(t *testing.T) {
 		{"a rule updated, and another added", ruleEditedAndAdded, "shown"},
 		{"a rule created, one in", groupRuleAdded, "explained"},
 		{"a rule created, and one moved", groupRuleMoved, "shown"},
+		{"a job created with its id unknown", jobAddedUnknown, "explained"},
+		{"a job added beside another's create", jobAddedBeside, "shown"},
+		{"a subnet created, filed under its CIDR", subnetByCIDR, "explained"},
+		{"a subnet added beside another CIDR's create", subnetOther, "shown"},
 		{"a user's delete, its grants going", aclByDelete, "explained"},
 		{"a user's delete, and another's grant arriving", aclEscalated, "shown"},
 		{"Nexara's grant to the users its row names", aclByGrant, "explained"},

@@ -111,7 +111,8 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- going its way. A name with a * matches any that
 -- begins and ends as it does around it (a realm's users, *@realm). counts
 -- says what the row does to a list's items (listed, below); fields_from keeps
--- it to the fields its details say it set (fields_named, below).
+-- it to the fields its details say it set (fields_named, below); audit_id_is
+-- to rows filed under that marker id.
 --
 -- A change is explained when everything it changed is: each member that joined
 -- or left a list of ids (members_joined, members_left), each other field in
@@ -149,7 +150,8 @@ WITH rules AS MATERIALIZED (
            e.value->>'member'              AS member,
            e.value->>'member_of'           AS member_of,
            e.value->>'counts'              AS counts,
-           e.value->>'fields_from'         AS fields_from
+           e.value->>'fields_from'         AS fields_from,
+           e.value->>'audit_id_is'         AS audit_id_is
     FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
 ), pending AS MATERIALIZED (
     SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.fields, c.detail, c.node,
@@ -168,6 +170,7 @@ WITH rules AS MATERIALIZED (
     -- can use.
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
+           r.audit_id_is,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
            a.created_at
     FROM pending p
@@ -178,6 +181,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
+           r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
@@ -187,6 +191,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
+           r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
@@ -196,6 +201,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
+           r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
@@ -206,6 +212,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
+           r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
@@ -215,6 +222,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
+           r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
@@ -274,6 +282,7 @@ WITH rules AS MATERIALIZED (
       AND (k.except_re = '' OR k.action !~ k.except_re)
       AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
       AND (k.detail_key = '' OR COALESCE(k.details->>k.detail_key, '') <> '')
+      AND (k.audit_id_is = '' OR k.audit_resource_id = k.audit_id_is)
       AND (k.object = '' OR COALESCE(CASE WHEN strpos(n.object_named, '*') = 0 THEN k.resource_id = n.object_named ELSE starts_with(k.resource_id, split_part(n.object_named, '*', 1)) AND right(k.resource_id, length(split_part(n.object_named, '*', 2))) = split_part(n.object_named, '*', 2) AND length(k.resource_id) >= length(n.object_named) END, false))
       AND COALESCE(th.started_at, k.created_at) <= k.win_to
       AND CASE WHEN th.upid IS NULL THEN k.created_at ELSE COALESCE(th.finished_at, now()) END >= k.win_from

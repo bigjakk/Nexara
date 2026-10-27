@@ -49,6 +49,9 @@ type explainRule struct {
 	Object   string `json:"object"`
 	Member   string `json:"member"`
 	MemberOf string `json:"member_of"`
+	// AuditIDIs keeps a rule to audit rows with this resource_id: the marker a
+	// row carries when its object's id could not be found ("" any).
+	AuditIDIs string `json:"audit_id_is"`
 	// Counts says what a row does to a list's items, for a change that says
 	// how many came and went: add1 one in, del1 one out, edit1 one in and one
 	// out or one moved, adds any number in, dels any number out; "" anything.
@@ -229,6 +232,11 @@ var observedChangeRules = slices.Concat(
 	// leaving, and the removal of a job it was the only guest of.
 	byAction("backup", []string{"backup_job_created"}, []string{"backup_job_updated"}, []string{"backup_job_deleted"}),
 	[]explainRule{
+		// A job created through Nexara whose id Proxmox did not give back is
+		// filed as backup / backup-job (history-backup's backupJobIDUnknown):
+		// nothing names the job, so it explains a job added anywhere.
+		{Kind: "backup", Change: "added", AuditType: "backup", MatchKey: "cluster",
+			ActionRe: `^backup_job_created$`, AuditIDIs: "backup-job"},
 		{Kind: "backup", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`,
 			FieldRe: `^vmid$`, Member: "left", MemberOf: "upid:vmid:%s"},
 		{Kind: "backup", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`,
@@ -315,6 +323,12 @@ var observedChangeRules = slices.Concat(
 	sdnCRUD("sdn_zone"),
 	sdnCRUD("sdn_vnet"),
 	sdnCRUD("sdn_subnet"),
+	[]explainRule{
+		// A subnet created through Nexara whose id could not be read back is
+		// filed under its CIDR (sdn.go sdnSubnetKey), which the subnet lists.
+		{Kind: "sdn_subnet", Change: "added", AuditType: "sdn_subnet", MatchKey: "cluster",
+			ActionRe: `^sdn_subnet_created$`, Member: "joined", MemberOf: "audit:cidr:%s"},
+	},
 	sdnCRUD("sdn_controller"),
 	sdnCRUD("sdn_ipam"),
 	sdnCRUD("sdn_dns"),
