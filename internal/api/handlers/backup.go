@@ -1641,7 +1641,7 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	_, err = h.queries.GetPBSServer(c.Context(), pbsID)
+	server, err := h.queries.GetPBSServer(c.Context(), pbsID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusNotFound, "PBS server not found")
@@ -1658,35 +1658,17 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
 	}
 
-	// Find a PVE storage entry of type "pbs" on this cluster to build the archive string.
-	storagePools, err := h.queries.ListStoragePoolsByCluster(c.Context(), clusterID)
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list cluster storage")
-	}
-	var pveStorageName string
-	for _, sp := range storagePools {
-		if sp.Type == "pbs" {
-			pveStorageName = sp.Storage
-			break
-		}
-	}
-	if pveStorageName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "No PBS storage configured on this PVE cluster. Add the PBS server as storage in PVE first (Datacenter > Storage > Add > Proxmox Backup Server).")
-	}
-
-	// Build the archive path: <pve-storage>:backup/<type>/<id>/<ISO-timestamp>
-	backupTime := time.Unix(req.BackupTime, 0).UTC()
-	archive := pveStorageName + ":backup/" + req.BackupType + "/" + req.BackupID + "/" + backupTime.Format(time.RFC3339Nano)
-
 	pveClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 60*time.Second)
 	if err != nil {
 		return err
 	}
 
-	// When overwriting an existing VM, PVE requires the VM to be on the same
-	// node and stopped. Validate this and stop it before restoring.
+	// When overwriting an existing VM, PVE requires the restore to run on the
+	// node the VM lives on: find it now, before anything below is decided on the
+	// node or changed on the cluster.
+	var existingVM *db.Vm
 	if req.Force {
-		existingVM, vmErr := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
+		vm, vmErr := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
 			ClusterID: clusterID,
 			Vmid:      safeconv.Int32(req.VMID),
 		})
@@ -1695,35 +1677,68 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 		}
 		if vmErr == nil {
 			// VM exists — force restore must target the node where the VM lives.
-			existingNode, nodeErr := h.queries.GetNode(c.Context(), existingVM.NodeID)
+			existingNode, nodeErr := h.queries.GetNode(c.Context(), vm.NodeID)
 			if nodeErr != nil {
 				return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up VM node")
 			}
 			// Auto-correct to the correct node.
 			req.TargetNode = existingNode.Name
+			existingVM = &vm
+		}
+	}
 
-			// Stop the VM before overwriting.
-			var stopUpid string
-			var stopErr error
-			switch req.BackupType {
-			case "vm":
-				stopUpid, stopErr = pveClient.StopVM(c.Context(), req.TargetNode, req.VMID)
-			case "ct":
-				stopUpid, stopErr = pveClient.StopCT(c.Context(), req.TargetNode, req.VMID)
-			}
-			if stopErr != nil {
-				// VM might already be stopped.
-				slog.Debug("stop before force restore failed (may already be stopped)", "vmid", req.VMID, "error", stopErr)
-			} else if stopUpid != "" {
-				for i := 0; i < 60; i++ {
-					time.Sleep(1 * time.Second)
-					ts, tsErr := pveClient.GetTaskStatus(c.Context(), req.TargetNode, stopUpid)
-					if tsErr != nil {
-						break
-					}
-					if ts.Status == "stopped" {
-						break
-					}
+	// The PVE storage entry the archive is read through. Chosen before the guest
+	// is stopped, so that a request no storage can serve changes nothing.
+	cfgs, err := pveClient.ListStorageConfigs(c.Context())
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	pveStorageName, err := restoreStorage(cfgs, server, req.Datastore, req.TargetNode)
+	if err != nil {
+		return err
+	}
+
+	// Build the archive path: <pve-storage>:backup/<type>/<id>/<ISO-timestamp>
+	backupTime := time.Unix(req.BackupTime, 0).UTC()
+	archive := pveStorageName + ":backup/" + req.BackupType + "/" + req.BackupID + "/" + backupTime.Format(time.RFC3339Nano)
+
+	// Stop the VM before overwriting.
+	if existingVM != nil {
+		var stopUpid string
+		var stopErr error
+		resourceType := "vm"
+		switch req.BackupType {
+		case "vm":
+			stopUpid, stopErr = pveClient.StopVM(c.Context(), req.TargetNode, req.VMID)
+		case "ct":
+			resourceType = "container"
+			stopUpid, stopErr = pveClient.StopCT(c.Context(), req.TargetNode, req.VMID)
+		}
+		if stopErr != nil {
+			// VM might already be stopped.
+			slog.Debug("stop before force restore failed (may already be stopped)", "vmid", req.VMID, "error", stopErr)
+		} else if stopUpid != "" {
+			// A task like any other the guest is stopped by, recorded as the
+			// stop it is, beside the restore that asked for it.
+			TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+				ClusterID:    clusterID,
+				Node:         req.TargetNode,
+				ResourceType: resourceType,
+				ResourceID:   existingVM.ID.String(),
+				ResourceName: existingVM.Name,
+				Action:       "stop",
+				UPID:         stopUpid,
+				Description:  guestActionDesc("stop", *existingVM),
+				Extra:        map[string]any{"vmid": existingVM.Vmid, "reason": "force restore"},
+			})
+			for i := 0; i < 60; i++ {
+				time.Sleep(1 * time.Second)
+				ts, tsErr := pveClient.GetTaskStatus(c.Context(), req.TargetNode, stopUpid)
+				if tsErr != nil {
+					break
+				}
+				if ts.Status == "stopped" {
+					break
 				}
 			}
 		}

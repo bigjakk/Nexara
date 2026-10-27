@@ -869,6 +869,8 @@ The jobs table shows the schedule in plain English with the raw calendar event u
 5. Optionally change the VMID
 6. Click **Restore**
 
+The restore reads the snapshot through the Proxmox storage on the target cluster that is set up for the snapshot's PBS server and datastore (Datacenter > Storage > Proxmox Backup Server). Nexara recognises the server by the address or the certificate fingerprint it knows it by, and uses a storage that is enabled, available on the node the guest is restored onto, and has no namespace. If no storage fits, or two do, the restore is refused and names the PBS storages it found, rather than reading from a PBS nobody picked. **Overwrite existing VM** stops the guest first, once that storage is found, and the stop is a task of its own in the guest's History.
+
 ---
 
 ## Veeam Backup & Replication

@@ -1598,6 +1598,14 @@ Rules are addressed by position, so every rule listing returns a `digest` on eac
 | DELETE | `/clusters/:id/backup-jobs/:job_id` | Delete backup job |
 | POST | `/clusters/:id/backup-jobs/:job_id/run` | Run backup job |
 
+A restore reads the snapshot through the cluster's Proxmox storage for the
+requested PBS server and `datastore`: the enabled `pbs` storage, with no
+namespace and usable on the target node, that shares the server's address or
+certificate fingerprint. The answer is `400` when none fits and `409` when more
+than one does (name the `datastore`, or remove the duplicate). With `force`, the
+existing guest is stopped only once the storage is found, and the stop is
+recorded as a task of its own.
+
 A backup job carries exactly one guest selection, set on create and update:
 
 | Field | Meaning |

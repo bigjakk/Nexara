@@ -96,6 +96,9 @@ type backupRunPVE struct {
 	// listTimeout, when set, is the bound the harness gives the handler's list
 	// reads, so a hung read costs a moment, not the production bound.
 	listTimeout time.Duration
+	// handle, when set, sees every request first and answers the ones it
+	// returns true for: the routes of a test whose handler is not a job's.
+	handle func(w http.ResponseWriter, r *http.Request) bool
 
 	srv    *httptest.Server
 	mu     sync.Mutex
@@ -113,6 +116,9 @@ func (p *backupRunPVE) serve(t *testing.T) string {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(body))
+		}
+		if p.handle != nil && p.handle(w, r) {
+			return
 		}
 		switch path := r.URL.Path; {
 		case r.Method == http.MethodGet && path == "/api2/json/cluster/backup/"+backupRunJobID:
@@ -251,6 +257,9 @@ type backupRunDBTX struct {
 	audits [][]any
 	tasks  [][]any
 	other  []string
+	// lookups answers a :one query by its sqlc name with the row struct to
+	// replay, for a handler that reads before it writes. Set before any request.
+	lookups map[string]any
 }
 
 func (d *backupRunDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -274,6 +283,11 @@ func (d *backupRunDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows
 func (d *backupRunDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	for name, row := range d.lookups {
+		if strings.Contains(sql, "-- name: "+name+" :one") {
+			return structRow{row}
+		}
+	}
 	if strings.Contains(sql, "INTO task_history") {
 		d.tasks = append(d.tasks, args)
 	} else {
@@ -343,15 +357,10 @@ func (d *backupRunDBTX) decodedAudits(t *testing.T) []backupRunAuditRow {
 	return rows
 }
 
-// rows returns the task_history rows, and the audit rows split by action:
-// TrackTask's per-task backup_job_run rows, and the run's summary rows.
-func (d *backupRunDBTX) rows(t *testing.T) (tasks []backupRunTaskRow, taskAudits, summaries []backupRunAuditRow) {
+// decodedTasks is every task_history insert, in the order it was made.
+func (d *backupRunDBTX) decodedTasks(t *testing.T) []backupRunTaskRow {
 	t.Helper()
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if len(d.other) != 0 {
-		t.Fatalf("the handler sent statements it has no reason to: %q", d.other)
-	}
+	rows := make([]backupRunTaskRow, 0, len(d.tasks))
 	for _, args := range d.tasks {
 		if len(args) != 7 {
 			t.Fatalf("task_history insert took %d arguments, want InsertTaskHistory's 7", len(args))
@@ -363,8 +372,21 @@ func (d *backupRunDBTX) rows(t *testing.T) (tasks []backupRunTaskRow, taskAudits
 		row.status, _ = args[4].(string)
 		row.node, _ = args[5].(string)
 		row.kind, _ = args[6].(string)
-		tasks = append(tasks, row)
+		rows = append(rows, row)
 	}
+	return rows
+}
+
+// rows returns the task_history rows, and the audit rows split by action:
+// TrackTask's per-task backup_job_run rows, and the run's summary rows.
+func (d *backupRunDBTX) rows(t *testing.T) (tasks []backupRunTaskRow, taskAudits, summaries []backupRunAuditRow) {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.other) != 0 {
+		t.Fatalf("the handler sent statements it has no reason to: %q", d.other)
+	}
+	tasks = d.decodedTasks(t)
 	for _, row := range d.decodedAudits(t) {
 		switch row.action {
 		case "backup_job_run":

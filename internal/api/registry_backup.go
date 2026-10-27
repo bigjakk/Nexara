@@ -784,11 +784,13 @@ func restoreBackupParams() apischema.Properties {
 			Description: "VMID to restore the guest as.",
 		},
 		"datastore": optString(64, "<datastore>",
-			"PBS datastore the snapshot lives in. Recorded on the task; the archive path is built from "+
-				"the cluster's own PBS storage entry."),
+			"PBS datastore the snapshot lives in. With the PBS server it picks the cluster's Proxmox storage "+
+				"the archive is read through; leave it out only when the server has one such storage, or the "+
+				"restore is refused as ambiguous."),
 		"storage": optString(100, "<storage>",
 			"Storage to restore the disks onto. Omitted lets Proxmox use the archive's own."),
-		"force":  optFlag("Overwrite an existing guest with this VMID. The guest is stopped first."),
+		"force": optFlag("Overwrite an existing guest with this VMID. The guest is stopped first, as a task of its own, " +
+			"once the storage the archive is read through has been found."),
 		"unique": optFlag("Assign fresh MAC addresses to the restored guest's network devices."),
 		"start_after_restore": optFlag(
 			"Start the guest once the restore finishes. Watched in the background; the response returns " +
