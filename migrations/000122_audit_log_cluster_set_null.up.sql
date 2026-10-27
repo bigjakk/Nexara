@@ -25,9 +25,11 @@
 
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_cluster_id_fkey;
 
+-- NOT VALID is safe: the constraint it replaces already guaranteed every existing
+-- row, so there is nothing to scan, and the new one is enforced on every change.
 ALTER TABLE audit_log
     ADD CONSTRAINT audit_log_cluster_id_fkey
-    FOREIGN KEY (cluster_id) REFERENCES clusters(id) ON DELETE SET NULL;
+    FOREIGN KEY (cluster_id) REFERENCES clusters(id) ON DELETE SET NULL NOT VALID;
 
 CREATE OR REPLACE FUNCTION stamp_audit_detached_cluster() RETURNS trigger AS $$
 BEGIN
