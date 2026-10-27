@@ -107,7 +107,7 @@ var ipv6ZeroRun = regexp.MustCompile(`(?:^|:)0(?::0)+(?::|$)`)
 // is how clean_cidr writes the address of a network back: lower-case hex groups
 // without leading zeros, the longest run of zero groups (by its length as text,
 // the first of equals) replaced by "::". An IPv4-mapped address is written as
-// hex groups, not with a dotted tail ("::ffff:102:304").
+// hex groups, not with a dotted tail ("::ffff:c000:204").
 func netIPv6(a [16]byte) string {
 	groups := make([]string, 8)
 	for i := range groups {
