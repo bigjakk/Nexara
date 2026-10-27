@@ -27,7 +27,10 @@ import (
 // observeFieldName is the shape every Proxmox configuration key has. A key of
 // any other shape — nothing Proxmox returns today — is folded into one field
 // named "other", so a value can never reach the changes table dressed as a field
-// name.
+// name. Names are shape-checked, not held to a list: reading raw JSON exists to
+// catch the fields Nexara does not model. That is safe because every endpoint
+// read validates its keys against its JSON schema (PVE::JSONSchema), so a key
+// is a property name Proxmox defines, never text a user typed.
 var observeFieldName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 // observeOtherField is where keys of an unexpected shape are compared, together.
