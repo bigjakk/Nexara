@@ -147,7 +147,8 @@ var historyKindNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 // Validate refuses a kind whose type filter could not work: a rule's category
 // the filter would refuse, a category no rule or default produces, which
 // would be a filter that always comes back empty, a field ListHistory cannot
-// match on. The registry calls it at startup.
+// match on, or a pattern Postgres refuses — one ending in a lone backslash
+// fails every request for the kind. The registry calls it at startup.
 func (k HistoryKind) Validate() error {
 	if !historyKindNameRe.MatchString(k.Name) {
 		return fmt.Errorf("history kind %q: Name must be lower-case letters, digits and hyphens", k.Name)
@@ -168,6 +169,11 @@ func (k HistoryKind) Validate() error {
 		if len(r.Equals)+len(r.Like) == 0 {
 			return fmt.Errorf("history kind %q rule %d matches nothing", k.Name, i)
 		}
+		for _, pattern := range r.Like {
+			if !likePatternOK(pattern) {
+				return fmt.Errorf("history kind %q rule %d: the LIKE pattern %q ends in a lone backslash", k.Name, i, pattern)
+			}
+		}
 		if !slices.Contains(k.Categories, r.Category) {
 			return fmt.Errorf("history kind %q rule %d produces %q, which is not one of its Categories",
 				k.Name, i, r.Category)
@@ -183,6 +189,13 @@ func (k HistoryKind) Validate() error {
 		}
 	}
 	return nil
+}
+
+// likePatternOK reports whether Postgres takes p as a LIKE pattern under the
+// default escape, the backslash: it refuses one that ends in an escape with
+// nothing after it.
+func likePatternOK(p string) bool {
+	return (len(p)-len(strings.TrimRight(p, `\`)))%2 == 0
 }
 
 // likeEscaper makes a literal match itself under LIKE's default escape.

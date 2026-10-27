@@ -143,6 +143,7 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"no selector", func(k *HistoryKind) { k.Select = nil }, "no Select"},
 		{"an unknown field", func(k *HistoryKind) { k.Rules[0].Field = "node" }, "unknown field"},
 		{"a rule matching nothing", func(k *HistoryKind) { k.Rules[0].Equals = nil }, "matches nothing"},
+		{"a pattern ending in a lone backslash", func(k *HistoryKind) { k.Rules[0].Like = []string{`drs\`} }, "lone backslash"},
 		{"a category the filter refuses", func(k *HistoryKind) { k.Rules[0].Category = "pools" }, "not one of its Categories"},
 		{"a category nothing produces", func(k *HistoryKind) { k.Categories = append(k.Categories, "ha") }, "no rule produces"},
 		{"a category twice", func(k *HistoryKind) { k.Categories = append(k.Categories, "other") }, "twice"},
