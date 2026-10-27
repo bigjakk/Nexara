@@ -13,3 +13,8 @@ SET resource_type = details->'rekeyed_from'->>'resource_type',
     action = details->'rekeyed_from'->>'action',
     details = details - 'rekeyed_from' - 'parent_upid'
 WHERE details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys';
+
+-- The row the up leaves when it kept copies of Nexara's applies on the user's word alone.
+DELETE FROM audit_log
+WHERE resource_type = 'system' AND action = 'migration_notice'
+  AND details->>'migration' = 'cluster_object_audit_keys';

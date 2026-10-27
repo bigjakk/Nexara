@@ -6,14 +6,11 @@ import (
 	"io/fs"
 	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/bigjakk/nexara/migrations"
 )
@@ -25,13 +22,6 @@ var (
 	m118Node    = uuid.MustParse("12300000-0000-4000-8000-000000000002")
 	m118Other   = uuid.MustParse("12300000-0000-4000-8000-000000000003")
 )
-
-func firstNotice(notices []string) string {
-	if len(notices) == 0 {
-		return ""
-	}
-	return notices[0]
-}
 
 // The back-fill that re-files old audit rows under the key objects of the cluster
 // page now file under. Each row is an old shape that must move or one that must
@@ -69,6 +59,7 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		// The audit rows go first: a cluster's delete may only detach them (audit_log.cluster_id is SET NULL);
 		// nodes and vms cascade from the cluster.
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE cluster_id = ANY($1)`, []uuid.UUID{m118Cluster, m118Other})
+		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE resource_type = 'system' AND action = 'migration_notice' AND details->>'migration' = 'cluster_object_audit_keys'`)
 		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{m118Cluster, m118Other})
 	}
 	purge()
@@ -357,20 +348,22 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		}
 		return s
 	}
-	// The migration counts what it left unmoved on the user's word alone in a NOTICE.
-	var notices []string
-	connCfg := pool.Config().ConnConfig.Copy()
-	connCfg.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) { notices = append(notices, n.Message) }
-	conn, err := pgx.ConnectConfig(ctx, connCfg)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = conn.Close(context.Background()) }()
 	run := func(what, script string) {
 		t.Helper()
-		if _, err := conn.Exec(ctx, script); err != nil {
+		if _, err := pool.Exec(ctx, script); err != nil {
 			t.Fatalf("%s: %v", what, err)
 		}
+	}
+	// What the migration left unmoved on the user's word alone it counts in one audit row, for
+	// global auditors: no cluster, no user. The count is -1 when there is no such row.
+	noticeRows := func() (rows, copies int) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT count(*), COALESCE(max((details->>'copies')::int), -1)
+			FROM audit_log WHERE resource_type = 'system' AND action = 'migration_notice' AND cluster_id IS NULL AND user_id IS NULL
+			AND details->>'migration' = 'cluster_object_audit_keys'`).Scan(&rows, &copies); err != nil {
+			t.Fatalf("read the migration's notice: %v", err)
+		}
+		return rows, copies
 	}
 
 	// A trace a row came with is the row's first original: it survives the up and the down as it was.
@@ -379,11 +372,13 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		_ = json.Unmarshal([]byte(tc.details), &seeded)
 		return seeded["rekeyed_from"]
 	}
-	var firstPassNotices []string
 	for pass := 1; pass <= 2; pass++ {
 		run("up", up)
-		if pass == 1 {
-			firstPassNotices = append(firstPassNotices, notices...)
+		// Two copies of an SDN apply and one of a node's stay on the user's word alone (a token of
+		// the cluster's user that is not the configured one); the configured token's do not count.
+		// A second run adds no second row.
+		if rows, copies := noticeRows(); rows != 1 || copies != 3 {
+			t.Errorf("pass %d: %d notice rows counting %d copies, want one counting 3", pass, rows, copies)
 		}
 		for i, tc := range rows {
 			got, moved := load(i), tc.want != (shape{})
@@ -419,16 +414,11 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		}
 	}
 
-	// Two copies of an SDN apply and one of a node's stay on the user's word alone (a token of
-	// the cluster's user that is not the configured one); the configured token's do not count.
-	if m := regexp.MustCompile(`^cluster_object_audit_keys: (\d+) `).FindStringSubmatch(firstNotice(firstPassNotices)); m == nil {
-		t.Errorf("notices = %q, want one counting the copies left on the user's word alone", firstPassNotices)
-	} else if n, _ := strconv.Atoi(m[1]); len(firstPassNotices) != 1 || n != 3 {
-		t.Errorf("notices = %q, want one counting 3 copies", firstPassNotices)
-	}
-
 	// The down puts every moved row back, and takes its marks out.
 	run("down", down)
+	if rows, _ := noticeRows(); rows != 0 {
+		t.Errorf("%d notice rows after the down, want none", rows)
+	}
 	for i, tc := range rows {
 		got := load(i)
 		if got.shape != tc.old || got.details["parent_upid"] != nil || !reflect.DeepEqual(got.details["rekeyed_from"], seededTrace(tc)) {

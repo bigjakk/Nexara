@@ -50,7 +50,10 @@
 --     (the UPID's user is the cluster's token_id) is Nexara's beyond doubt. One
 --     under another token of that user — an earlier token, or another tool signed
 --     in as the same user — is Nexara's more likely than not: it stays where it
---     is all the same, and the end of this file counts those in a NOTICE;
+--     is all the same, and the end of this file counts those: in a NOTICE, which
+--     the runner that applies this at start-up does not show, and in one audit
+--     row (type system, action migration_notice, no cluster, no user), which a
+--     holder of global view:audit reads on the Events page;
 --   - a row that already carries a rekeyed_from of another origin (another
 --     migration's, or one without a name): its trace is the first original, and
 --     recording this migration's would overwrite it, so the row stays as it is.
@@ -380,5 +383,16 @@ BEGIN
                              AND n.created_at BETWEEN c.created_at - interval '2 minutes' AND c.created_at + interval '2 minutes')));
     IF ambiguous > 0 THEN
         RAISE NOTICE 'cluster_object_audit_keys: % Proxmox-sourced applies were left under their old key as copies of Nexara''s own, on the strength of a token of the cluster''s user other than the one it is configured with', ambiguous;
+        -- Once: a second run finds the row there.
+        INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details, source)
+        SELECT NULL, NULL, 'system', 'migration', 'migration_notice',
+               jsonb_build_object(
+                   'migration', 'cluster_object_audit_keys',
+                   'copies', ambiguous,
+                   'meaning', 'SDN and node network applies recorded from Proxmox were left under their old key as copies of Nexara''s own applies, because a token of the cluster''s user other than the configured one made them. Another tool signed in as the same user would look the same: if that is so, these are its applies, not Nexara''s.'),
+               'nexara'
+        WHERE NOT EXISTS (SELECT 1 FROM audit_log
+                          WHERE resource_type = 'system' AND action = 'migration_notice'
+                            AND details->>'migration' = 'cluster_object_audit_keys');
     END IF;
 END $$;
