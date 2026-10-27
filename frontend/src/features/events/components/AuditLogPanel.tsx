@@ -65,7 +65,6 @@ const resourceTypes = [
   { value: "sdn_ipam", label: "SDN IPAM" },
   { value: "sdn_dns", label: "SDN DNS" },
   { value: "schedule", label: "Schedule" },
-  { value: "pbs", label: "PBS" },
   { value: "pbs_server", label: "PBS Server" },
   { value: "backup", label: "Backup" },
   { value: "veeam_server", label: "Veeam Server" },
