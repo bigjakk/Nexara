@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -118,6 +119,21 @@ func (d *clusterDeleteDB) state() (deleted bool, audits int) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.deleted, len(d.audits)
+}
+
+// auditCluster is the cluster the one audit row the delete wrote names.
+func (d *clusterDeleteDB) auditCluster(t *testing.T) uuid.UUID {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.audits) != 1 {
+		t.Fatalf("%d audit rows, want 1", len(d.audits))
+	}
+	cluster, ok := d.audits[0][0].(pgtype.UUID)
+	if !ok || !cluster.Valid {
+		return uuid.Nil
+	}
+	return uuid.UUID(cluster.Bytes)
 }
 
 // auditDetails is the details of the one audit row the delete wrote.
@@ -247,6 +263,9 @@ func TestClusterDeleteRequiresTheClusterName(t *testing.T) {
 				}
 				if got := pve.lines(); !slices.Equal(got, tt.wantPVE) {
 					t.Errorf("Proxmox received %q, want %q", got, tt.wantPVE)
+				}
+				if got := store.auditCluster(t); got != uuid.MustParse(testClusterID) {
+					t.Errorf("the delete's audit row names cluster %s, want the removed one", got)
 				}
 				return
 			}

@@ -816,8 +816,8 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 	// Record what leaks so the audit trail explains the cluster-side residue
 	// (paused CRS, disabled HA rules) if the cluster is ever re-added.
 	auditFields := map[string]any{
-		// Carried in the body because the row itself names no cluster — see the
-		// AuditLog call at the end of this function.
+		// Also in the body, where the rows written before 000122 keep it: they
+		// could not name a cluster that was gone, so one reader handles both.
 		"cluster_id": id.String(),
 		"name":       cluster.Name,
 		"api_url":    cluster.ApiUrl,
@@ -857,17 +857,15 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 	// Audited after the delete succeeds, so the row records something that
 	// actually happened — and so it can carry the revocation outcome.
 	//
-	// The row deliberately carries a NULL cluster_id, with the cluster's
-	// identity in the details body instead. It could name the cluster now that
-	// audit_log keeps the ids of clusters that are gone (000122), but this row
-	// is the instance's record of the removal rather than an entry of the
-	// cluster's own trail, and it carries the report of what revocation left
-	// behind on the Proxmox side, the only durable record an operator has to
-	// reconcile against. As a NULL-cluster row it is read with global view:audit
-	// only. (Before 000122 the cascade destroyed a row written before the delete,
-	// so this action was never once recorded.)
+	// The row names the removed cluster: audit_log keeps the ids of clusters that
+	// are gone (000122), so it reads "<name> (removed)" among the entries the
+	// cluster collected, and, like them, only a holder of global view:audit reads
+	// it. It carries the report of what revocation left behind on the Proxmox
+	// side, the only durable record an operator has to reconcile against. (Before
+	// 000122 a row could not name a cluster that was gone, and one written before
+	// the delete went with the cascade, so this action was never once recorded.)
 	deleteDetails, _ := json.Marshal(auditFields)
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "cluster", id.String(), "cluster_deleted", deleteDetails)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_deleted", deleteDetails)
 
 	if cache := proxmoxCacheFromCtx(c); cache != nil {
 		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPVE, id)
