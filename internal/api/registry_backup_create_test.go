@@ -35,8 +35,11 @@ func TestCreateBackupJobAuditsTheIDProxmoxGaveIt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			// A bound far above a loopback read, so only the hung read expires.
-			pve := &backupRunPVE{listBefore: tt.before, listAfter: tt.after, hangReads: tt.hang, readTimeout: 500 * time.Millisecond}
+			pve := &backupRunPVE{listBefore: tt.before, listAfter: tt.after, hangReads: tt.hang}
+			if tt.hang != nil {
+				// Only a hung read needs a short bound; far above a loopback read.
+				pve.readTimeout = 500 * time.Millisecond
+			}
 			app, dbtx := newBackupJobApp(t, pve, fiber.MethodPost, clusterScope+"/backup-jobs",
 				(*handlers.BackupHandler).CreateBackupJob)
 
