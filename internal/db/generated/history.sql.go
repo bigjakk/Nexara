@@ -120,7 +120,7 @@ WITH objects AS (
       AND s.explained = false
       AND s.guest_type = ANY($10::text[])
     UNION ALL
-    SELECT ('backup:' || b.upid)::text, 'backup', NULL::uuid, b.started_at, b.source, 'vzdump',
+    SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.started_at, b.source, 'vzdump',
            'backup', '', b.vmid, b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL
     FROM guest_backups b
     WHERE $9::bool

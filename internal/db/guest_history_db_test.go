@@ -532,6 +532,19 @@ func TestGuestHistory(t *testing.T) {
 		if total != tt.wantTotal || (tt.wantFirst != "" && (len(got) == 0 || got[0] != tt.wantFirst)) {
 			t.Errorf("%s: total %d, rows %v; want total %d, first %q", tt.name, total, got, tt.wantTotal, tt.wantFirst)
 		}
+		// One job's part for each of two guests is two entries: their ids
+		// are the page's keys and its last sort tie-break.
+		rows, err := q.ListHistory(ctx, tt.p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]bool{}
+		for _, r := range rows {
+			if seen[r.EntryID] {
+				t.Errorf("%s: entry id %s twice", tt.name, r.EntryID)
+			}
+			seen[r.EntryID] = true
+		}
 	}
 
 	// ── The generic selector: one node's own audit rows, and its parts' by a
