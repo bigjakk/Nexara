@@ -76,7 +76,9 @@ WHERE migration_type = 'cross-cluster'
 -- node), with 2 seconds' slack. The audit row's own time is not it: Nexara files
 -- its row after Proxmox has answered, and the first node's reload is dated from
 -- the node's clock to the second, so it can come before the row. A UPID that does
--- not carry a starttime falls back to the audit row's time.
+-- not carry a starttime falls back to the audit row's time. pstart, the field
+-- before it, is nine digits once the node has been up some 497 days (pve-common
+-- writes it with %08X from the process start in clock ticks).
 --
 -- When. Only once the apply's end is known (its task row is finished) or a
 -- quarter of an hour has passed since it started, when the end is taken to be
@@ -94,7 +96,7 @@ WITH applies AS (
     FROM (
         SELECT a.cluster_id, a.details->>'upid' AS upid,
                COALESCE(
-                   CASE WHEN a.details->>'upid' ~ '^UPID:[^:]*:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:'
+                   CASE WHEN a.details->>'upid' ~ '^UPID:[^:]*:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8,9}:[0-9A-Fa-f]{8}:'
                         THEN to_timestamp(('x' || split_part(a.details->>'upid', ':', 5))::bit(32)::bigint) END,
                    a.created_at) AS started_at
         FROM audit_log a

@@ -1275,7 +1275,9 @@ type Querier interface {
 	// node), with 2 seconds' slack. The audit row's own time is not it: Nexara files
 	// its row after Proxmox has answered, and the first node's reload is dated from
 	// the node's clock to the second, so it can come before the row. A UPID that does
-	// not carry a starttime falls back to the audit row's time.
+	// not carry a starttime falls back to the audit row's time. pstart, the field
+	// before it, is nine digits once the node has been up some 497 days (pve-common
+	// writes it with %08X from the process start in clock ticks).
 	//
 	// When. Only once the apply's end is known (its task row is finished) or a
 	// quarter of an hour has passed since it started, when the end is taken to be

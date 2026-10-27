@@ -102,6 +102,13 @@ func TestLinkSDNApplyNodeTasks(t *testing.T) {
 	noStart := "UPID:pve-01:0000A1B2:00000008:zzzzzzzz:reloadnetworkall::root@pam:"
 	apply(sdnLinkCluster, "proxmox", noStart, ago(35*time.Minute))
 
+	// An apply on a node that has been up for over 497 days, whose pstart has nine digits, started
+	// a second before its audit row was filed.
+	long := ago(45 * time.Minute)
+	upLong := upid(1<<32, "reloadnetworkall", "", "root@pam", long)
+	apply(sdnLinkCluster, "proxmox", upLong, long.Add(2*time.Second))
+	task(sdnLinkCluster, upLong, long, &long)
+
 	// An apply from before the window, and another cluster's during it.
 	apply(sdnLinkCluster, "proxmox", upid(5, "reloadnetworkall", "", "root@pam", ago(65*time.Minute)), ago(65*time.Minute))
 	otherEnd := ago(49 * time.Minute)
@@ -126,6 +133,7 @@ func TestLinkSDNApplyNodeTasks(t *testing.T) {
 		{"during an apply that is still running", reload(sdnLinkCluster, "proxmox", "root@pam", ago(time.Minute)), ""},
 		{"during an apply whose row is gone, past a quarter of an hour", reload(sdnLinkCluster, "proxmox", "root@pam", ago(38*time.Minute)), up3},
 		{"an apply whose UPID has no starttime is dated by its row", reload(sdnLinkCluster, "proxmox", "root@pam", ago(34*time.Minute)), noStart},
+		{"a reload within the slack before an apply whose pstart has nine digits", reload(sdnLinkCluster, "proxmox", "root@pam", long.Add(-1500*time.Millisecond)), upLong},
 		{"a reload in two overlapping applies", reload(sdnLinkCluster, "proxmox", "root@pam", ago(20*time.Minute)), inner},
 		{"a reload from before the window, though an apply covers it", reload(sdnLinkCluster, "proxmox", "root@pam", ago(61*time.Minute)), ""},
 		{"another cluster's reload during this cluster's apply", reload(sdnLinkOther, "proxmox", "root@pam", ago(10*time.Minute-30*time.Second)), ""},
@@ -139,8 +147,8 @@ func TestLinkSDNApplyNodeTasks(t *testing.T) {
 		}
 		return n
 	}
-	if n := link(); n != 7 {
-		t.Errorf("first pass annotated %d rows, want 7", n)
+	if n := link(); n != 8 {
+		t.Errorf("first pass annotated %d rows, want 8", n)
 	}
 	for _, tc := range cases {
 		var action string
