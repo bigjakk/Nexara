@@ -259,6 +259,29 @@ func (q *Queries) ClassifyClusterObjectChanges(ctx context.Context, arg Classify
 	return result.RowsAffected(), nil
 }
 
+const getClusterObjectReading = `-- name: GetClusterObjectReading :one
+SELECT reading, last_read_at
+FROM cluster_object_baselines
+WHERE cluster_id = $1 AND resource_type = $2 AND reading IS NOT NULL
+`
+
+type GetClusterObjectReadingParams struct {
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	ResourceType string    `json:"resource_type"`
+}
+
+type GetClusterObjectReadingRow struct {
+	Reading    []byte    `json:"reading"`
+	LastReadAt time.Time `json:"last_read_at"`
+}
+
+func (q *Queries) GetClusterObjectReading(ctx context.Context, arg GetClusterObjectReadingParams) (GetClusterObjectReadingRow, error) {
+	row := q.db.QueryRow(ctx, getClusterObjectReading, arg.ClusterID, arg.ResourceType)
+	var i GetClusterObjectReadingRow
+	err := row.Scan(&i.Reading, &i.LastReadAt)
+	return i, err
+}
+
 const insertClusterObjectChange = `-- name: InsertClusterObjectChange :exec
 INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, vmid, change, fields, detail, node, observed_by, last_seen_at)
 VALUES ($1, $2, $3, $4::int,
@@ -409,5 +432,32 @@ type MarkClusterObjectBaselineParams struct {
 // the last. Called at the end of every pass that wrote them all.
 func (q *Queries) MarkClusterObjectBaseline(ctx context.Context, arg MarkClusterObjectBaselineParams) error {
 	_, err := q.db.Exec(ctx, markClusterObjectBaseline, arg.ClusterID, arg.ResourceType)
+	return err
+}
+
+const saveClusterObjectReading = `-- name: SaveClusterObjectReading :exec
+INSERT INTO cluster_object_baselines (cluster_id, resource_type, reading, last_read_at)
+VALUES ($1, $2, $3::jsonb, $4)
+ON CONFLICT (cluster_id, resource_type) DO UPDATE SET reading = EXCLUDED.reading, last_read_at = EXCLUDED.last_read_at
+`
+
+type SaveClusterObjectReadingParams struct {
+	ClusterID    uuid.UUID       `json:"cluster_id"`
+	ResourceType string          `json:"resource_type"`
+	Reading      json.RawMessage `json:"reading"`
+	ReadAt       time.Time       `json:"read_at"`
+}
+
+// SaveClusterObjectReading keeps the last reading of a cluster's objects of one
+// kind (the Ceph pass: OSDs, pools) and when it was taken, for the next pass to
+// diff against, a restart included. GetClusterObjectReading hands it back; no row
+// is a kind never read.
+func (q *Queries) SaveClusterObjectReading(ctx context.Context, arg SaveClusterObjectReadingParams) error {
+	_, err := q.db.Exec(ctx, saveClusterObjectReading,
+		arg.ClusterID,
+		arg.ResourceType,
+		arg.Reading,
+		arg.ReadAt,
+	)
 	return err
 }

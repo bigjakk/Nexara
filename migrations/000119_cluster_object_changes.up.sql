@@ -101,14 +101,21 @@ CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_unclassified
 -- cluster_object_baselines says that a cluster's objects of one kind have been
 -- read at least once. A trigger records an object appearing only after that:
 -- the first read of a cluster just added lists everything that was always
--- there, and none of it is a change. (The Ceph pass keeps its baseline in
--- memory instead, because the previous sample is what it diffs against.)
+-- there, and none of it is a change.
 -- last_read_at is when the last pass finished reading them: an object that
 -- appears now was absent then, so it is the change's last_seen_at.
+-- reading is the last reading itself, for a kind whose objects are not rows of a
+-- table of their own (a cluster's Ceph OSDs and pools): the previous reading is
+-- what the next pass diffs against, so it is kept here and a restart of Nexara
+-- compares against it instead of starting over — what changed while it was down is
+-- recorded, and so is a change the hourly cap was still holding back (its field
+-- stays at the reading it was last recorded at). NULL for a kind that has its own
+-- table (replication).
 CREATE TABLE IF NOT EXISTS cluster_object_baselines (
     cluster_id    UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
     resource_type TEXT NOT NULL,
     baselined_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_read_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reading       JSONB,
     PRIMARY KEY (cluster_id, resource_type)
 );

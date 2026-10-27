@@ -3,11 +3,13 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
@@ -285,6 +287,32 @@ func TestClusterObjectChanges(t *testing.T) {
 	if err != nil || len(guests) != 1 || !guests[0].Vmid.Valid || guests[0].Vmid.Int32 != 100 ||
 		guests[0].ObservedBy != "observer" || !reflect.DeepEqual(guests[0].Fields, []string{"memory", "net0"}) {
 		t.Errorf("list of a guest's changes = %+v (err %v), want the observer's row with its vmid and field names", guests, err)
+	}
+
+	// A kind's last reading (the Ceph pass) is kept with its baseline: the latest save is what is
+	// handed back with its time, a kind never saved has none, and the replication baseline, which
+	// has a table of its own, holds no reading.
+	save := func(kind, reading string, at time.Time) {
+		t.Helper()
+		if err := q.SaveClusterObjectReading(ctx, gen.SaveClusterObjectReadingParams{
+			ClusterID: objChangesCluster, ResourceType: kind, Reading: []byte(reading), ReadAt: at,
+		}); err != nil {
+			t.Fatalf("save the %s reading: %v", kind, err)
+		}
+	}
+	save("ceph_osd", `{"v":1,"osds":{"1":{}}}`, now.Add(-time.Minute))
+	save("ceph_osd", `{"v":1,"osds":{"2":{}}}`, now)
+	save("ceph_pool", `{"v":1}`, now)
+	osdReading, err := q.GetClusterObjectReading(ctx, gen.GetClusterObjectReadingParams{ClusterID: objChangesCluster, ResourceType: "ceph_osd"})
+	var decoded any
+	_ = json.Unmarshal(osdReading.Reading, &decoded)
+	if err != nil || !jsonEq(decoded, map[string]any{"v": 1, "osds": map[string]any{"2": map[string]any{}}}) || !osdReading.LastReadAt.Equal(now) {
+		t.Errorf("the OSD reading is %s read at %v (err %v), want the latest save", osdReading.Reading, osdReading.LastReadAt, err)
+	}
+	for _, kind := range []string{"replication", "sdn"} {
+		if _, err := q.GetClusterObjectReading(ctx, gen.GetClusterObjectReadingParams{ClusterID: objChangesCluster, ResourceType: kind}); !errors.Is(err, pgx.ErrNoRows) {
+			t.Errorf("a %s reading came back (err %v), want none: no row for it, or a baseline row with no reading", kind, err)
+		}
 	}
 
 	// The task-history sweep leaves every change alone, explained or not: an

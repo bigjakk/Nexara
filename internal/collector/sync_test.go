@@ -59,6 +59,9 @@ type mockQueries struct {
 	// and the classification passes asked for.
 	baselineMarks       []db.MarkClusterObjectBaselineParams
 	objectChanges       []db.InsertClusterObjectChangeParams
+	readings            map[string]db.SaveClusterObjectReadingParams // by cluster and kind
+	readingLoadErr      error
+	readingSaveErr      error
 	classifyObjectCalls []db.ClassifyClusterObjectChangesParams
 
 	// Backup job logs: the jobs ListUnreadBackupJobs answers, and what was
@@ -488,6 +491,28 @@ func (m *mockQueries) ReconcileTaskHistory(_ context.Context, arg db.ReconcileTa
 
 func (m *mockQueries) MarkClusterObjectBaseline(_ context.Context, arg db.MarkClusterObjectBaselineParams) error {
 	m.baselineMarks = append(m.baselineMarks, arg)
+	return nil
+}
+
+func (m *mockQueries) GetClusterObjectReading(_ context.Context, arg db.GetClusterObjectReadingParams) (db.GetClusterObjectReadingRow, error) {
+	if m.readingLoadErr != nil {
+		return db.GetClusterObjectReadingRow{}, m.readingLoadErr
+	}
+	saved, ok := m.readings[arg.ClusterID.String()+"/"+arg.ResourceType]
+	if !ok {
+		return db.GetClusterObjectReadingRow{}, pgx.ErrNoRows
+	}
+	return db.GetClusterObjectReadingRow{Reading: saved.Reading, LastReadAt: saved.ReadAt}, nil
+}
+
+func (m *mockQueries) SaveClusterObjectReading(_ context.Context, arg db.SaveClusterObjectReadingParams) error {
+	if m.readingSaveErr != nil {
+		return m.readingSaveErr
+	}
+	if m.readings == nil {
+		m.readings = map[string]db.SaveClusterObjectReadingParams{}
+	}
+	m.readings[arg.ClusterID.String()+"/"+arg.ResourceType] = arg
 	return nil
 }
 

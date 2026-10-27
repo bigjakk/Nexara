@@ -175,6 +175,8 @@ type SyncQueries interface {
 	// Changes to the cluster page's objects (replication jobs, Ceph OSDs and pools)
 	MarkClusterObjectBaseline(ctx context.Context, arg db.MarkClusterObjectBaselineParams) error
 	InsertClusterObjectChange(ctx context.Context, arg db.InsertClusterObjectChangeParams) error
+	GetClusterObjectReading(ctx context.Context, arg db.GetClusterObjectReadingParams) (db.GetClusterObjectReadingRow, error)
+	SaveClusterObjectReading(ctx context.Context, arg db.SaveClusterObjectReadingParams) error
 	ClassifyClusterObjectChanges(ctx context.Context, arg db.ClassifyClusterObjectChangesParams) (int64, error)
 	// Guest status changes and backup job logs (the History tab)
 	ClassifyGuestStatusChanges(ctx context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error)

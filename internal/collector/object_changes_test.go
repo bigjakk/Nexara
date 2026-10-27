@@ -463,3 +463,120 @@ func TestObjectChangeCapIsPerFieldAndHoldsBackNothingForGood(t *testing.T) {
 		}
 	})
 }
+
+// The last Ceph reading is saved with each pass and restored by the first pass after a
+// start, so a restart compares against what Nexara last saw: what changed while it was
+// down is recorded, a change the hourly cap was holding back is still owed, and a
+// reading that could not be loaded is not replaced by a baseline taken now.
+func TestCephReadingsSurviveARestart(t *testing.T) {
+	t.Parallel()
+	start := time.Now().Truncate(time.Second)
+	minute := func(n int) time.Time { return start.Add(time.Duration(n) * time.Minute) }
+	osd := func(id int, up, in bool) cephOSDMetricSnapshot {
+		return cephOSDMetricSnapshot{OSDID: id, OSDName: "osd." + strconv.Itoa(id), Host: "pve-01", StatusUp: up, StatusIn: in, CrushWeight: 1.8}
+	}
+	ctx := context.Background()
+	// restart is a Syncer that has never run, over the database the last one used.
+	restart := func(mq *mockQueries) *Syncer { return &Syncer{queries: mq, logger: testLogger()} }
+	rows := func(mq *mockQueries) []string {
+		out := make([]string, 0, len(mq.objectChanges))
+		for _, ch := range mq.objectChanges {
+			out = append(out, ch.ResourceType+"/"+ch.ResourceID+" "+ch.Change+" "+strings.Join(ch.Fields, ","))
+		}
+		return out
+	}
+
+	t.Run("what changed while Nexara was down is recorded, from when it was last seen", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		before := restart(mq)
+		before.observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, true, true), osd(2, true, true)}, false, minute(0))
+		before.observeCephOSDsAt(ctx, cluster, nil, false, minute(1)) // a read that came back empty is not saved
+		after := restart(mq)
+		after.observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, false, true), osd(2, true, true)}, false, minute(30))
+		if got := rows(mq); !reflect.DeepEqual(got, []string{"ceph_osd/1 changed up"}) {
+			t.Fatalf("recorded %v after the restart, want osd.1 going down: nothing else differs from the saved reading", got)
+		}
+		if got := mq.objectChanges[0]; !got.LastSeenAt.Equal(minute(0)) || got.Node != "pve-01" {
+			t.Errorf("seen as it was at %v on node %q, want minute 0 on pve-01: the saved reading's time and host", got.LastSeenAt.Sub(start), got.Node)
+		}
+	})
+
+	t.Run("a change the cap was holding back is still owed", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		before := restart(mq)
+		before.observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, true, true)}, false, minute(0))
+		for i := 1; i <= 25; i++ { // up flaps; the 21st on is held, the baseline kept at up
+			before.observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, i%2 == 0, true)}, false, minute(i))
+		}
+		if n := len(mq.objectChanges); n != maxObjectChangesPerHour {
+			t.Fatalf("%d rows before the restart, want the %d the cap allowed", n, maxObjectChangesPerHour)
+		}
+		after := restart(mq)
+		after.observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, false, true)}, false, minute(30))
+		if len(mq.objectChanges) != maxObjectChangesPerHour+1 {
+			t.Fatalf("%d rows after the restart, want the one net change", len(mq.objectChanges)-maxObjectChangesPerHour)
+		}
+		if got := mq.objectChanges[maxObjectChangesPerHour]; !reflect.DeepEqual(got.Fields, []string{"up"}) || !got.LastSeenAt.Equal(minute(20)) {
+			t.Errorf("net row %v seen as it was at %v, want up, minute 20: when the held field was last at its saved reading", got.Fields, got.LastSeenAt.Sub(start))
+		}
+	})
+
+	t.Run("the flag at the saved reading counts for an out seen after the restart", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		restart(mq).observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, true, true)}, true, minute(0))
+		restart(mq).observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, true, false)}, false, minute(30))
+		var detail map[string]map[string]any
+		if len(mq.objectChanges) != 1 || json.Unmarshal(mq.objectChanges[0].Detail, &detail) != nil || detail["in"]["noout"] != true {
+			t.Errorf("rows %+v, want one out carrying noout = true from the saved reading", mq.objectChanges)
+		}
+	})
+
+	t.Run("pools are kept too", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		pool := func(size int) cephPoolMetricSnapshot {
+			return cephPoolMetricSnapshot{PoolID: 1, PoolName: "pool01", Size: size, MinSize: 2, PGNum: 32, PGNumMin: 8, PGAutoscale: "warn"}
+		}
+		restart(mq).observeCephPoolsAt(ctx, cluster, []cephPoolMetricSnapshot{pool(3)}, minute(0))
+		restart(mq).observeCephPoolsAt(ctx, cluster, []cephPoolMetricSnapshot{pool(2)}, minute(30))
+		if got := rows(mq); !reflect.DeepEqual(got, []string{"ceph_pool/pool01 changed size"}) {
+			t.Fatalf("recorded %v, want the size alone: nothing else differs from the saved pool", got)
+		}
+		if got := string(mq.objectChanges[0].Detail); got != `{"size":{"from":3,"to":2}}` {
+			t.Errorf("detail %s, want the size from the saved 3 to 2", got)
+		}
+	})
+
+	t.Run("a reading that could not be loaded skips the pass", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		restart(mq).observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, true, true)}, false, minute(0))
+		mq.readingLoadErr = errors.New("database down")
+		after := restart(mq)
+		after.observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, false, true)}, false, minute(30))
+		if len(mq.objectChanges) != 0 || mq.readings[cluster.String()+"/ceph_osd"].ReadAt.Equal(minute(30)) {
+			t.Fatalf("a pass that could not look recorded %d rows or replaced the saved reading", len(mq.objectChanges))
+		}
+		mq.readingLoadErr = nil
+		after.observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, false, true)}, false, minute(31))
+		if got := rows(mq); !reflect.DeepEqual(got, []string{"ceph_osd/1 changed up"}) {
+			t.Errorf("recorded %v once it could, want the change that happened while it could not look", got)
+		}
+	})
+
+	t.Run("a saved reading this version does not read is a baseline", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		mq.readings = map[string]db.SaveClusterObjectReadingParams{
+			cluster.String() + "/ceph_osd": {Reading: []byte(`{"v":99,"osds":{"1":{"up":true}}}`), ReadAt: minute(0)},
+		}
+		restart(mq).observeCephOSDsAt(ctx, cluster, []cephOSDMetricSnapshot{osd(1, false, true)}, false, minute(30))
+		if len(mq.objectChanges) != 0 || !mq.readings[cluster.String()+"/ceph_osd"].ReadAt.Equal(minute(30)) {
+			t.Errorf("%d rows recorded and the saved reading read at %v: want none, and the pass saved as the new baseline",
+				len(mq.objectChanges), mq.readings[cluster.String()+"/ceph_osd"].ReadAt.Sub(start))
+		}
+	})
+}

@@ -822,6 +822,7 @@ type Querier interface {
 	// counters across nodes first dips whenever one node's sample is missing or
 	// unreported.
 	GetClusterNodeMetricsRaw(ctx context.Context, arg GetClusterNodeMetricsRawParams) ([]GetClusterNodeMetricsRawRow, error)
+	GetClusterObjectReading(ctx context.Context, arg GetClusterObjectReadingParams) (GetClusterObjectReadingRow, error)
 	GetClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (ClusterSshCredential, error)
 	GetClusterSecuritySummary(ctx context.Context, clusterID uuid.UUID) (GetClusterSecuritySummaryRow, error)
 	// GetClusterSnapshotAgeStats backs the snapshot_age_days alert metric for
@@ -2381,6 +2382,11 @@ type Querier interface {
 	// and Refresh's role-rotation guard accepts an empty role only until this fills
 	// it in.
 	RotateSessionToken(ctx context.Context, arg RotateSessionTokenParams) (int64, error)
+	// SaveClusterObjectReading keeps the last reading of a cluster's objects of one
+	// kind (the Ceph pass: OSDs, pools) and when it was taken, for the next pass to
+	// diff against, a restart included. GetClusterObjectReading hands it back; no row
+	// is a kind never read.
+	SaveClusterObjectReading(ctx context.Context, arg SaveClusterObjectReadingParams) error
 	SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error
 	// SetGuestToolsStage moves the staging state machine and records what the
 	// guest's CD-ROM looked like before we borrowed it.

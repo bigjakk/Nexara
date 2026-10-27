@@ -12,6 +12,20 @@ INSERT INTO cluster_object_baselines (cluster_id, resource_type)
 VALUES ($1, $2)
 ON CONFLICT (cluster_id, resource_type) DO UPDATE SET last_read_at = now();
 
+-- SaveClusterObjectReading keeps the last reading of a cluster's objects of one
+-- kind (the Ceph pass: OSDs, pools) and when it was taken, for the next pass to
+-- diff against, a restart included. GetClusterObjectReading hands it back; no row
+-- is a kind never read.
+-- name: SaveClusterObjectReading :exec
+INSERT INTO cluster_object_baselines (cluster_id, resource_type, reading, last_read_at)
+VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('reading')::jsonb, sqlc.arg('read_at'))
+ON CONFLICT (cluster_id, resource_type) DO UPDATE SET reading = EXCLUDED.reading, last_read_at = EXCLUDED.last_read_at;
+
+-- name: GetClusterObjectReading :one
+SELECT reading, last_read_at
+FROM cluster_object_baselines
+WHERE cluster_id = $1 AND resource_type = $2 AND reading IS NOT NULL;
+
 -- InsertClusterObjectChange records one change a writer saw — the Ceph pass diffing
 -- two readings, the observer diffing Proxmox's configuration against Nexara's;
 -- the replication trigger writes its own rows. last_seen_at is when the object

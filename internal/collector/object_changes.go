@@ -3,11 +3,14 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/auditkey"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -178,11 +181,15 @@ func (s *Syncer) capObjectChanges(st *cephSeen, clusterID uuid.UUID, resourceTyp
 }
 
 // readings is the last successful reading of one kind of object. A nil map is
-// "not read yet": the first reading after a start, or of a cluster just added or
-// whose Ceph was just set up, is the baseline and records nothing.
+// "not read yet": the first reading of a cluster just added or whose Ceph was just
+// set up is the baseline and records nothing. After a start the last reading is the
+// one saved with the cluster (loadReading), so what changed while Nexara was down is
+// recorded.
 type readings[K comparable, V any] struct {
-	last map[K]V
-	at   time.Time
+	last   map[K]V
+	at     time.Time
+	loaded bool // the saved reading has been looked for since the start
+	took   bool // the last advance took its reading
 }
 
 // advance makes cur the latest reading and returns the one before it and when it
@@ -192,10 +199,11 @@ type readings[K comparable, V any] struct {
 // nothing — the earlier reading stays the baseline.
 func (r *readings[K, V]) advance(cur map[K]V, now time.Time) (prev map[K]V, prevAt time.Time, ok bool) {
 	prev, prevAt = r.last, r.at
+	r.took = false
 	if prev != nil && len(cur) == 0 && len(prev) > 0 {
 		return nil, time.Time{}, false
 	}
-	r.last, r.at = cur, now
+	r.last, r.at, r.took = cur, now, true
 	return prev, prevAt, prev != nil
 }
 
@@ -224,6 +232,9 @@ func (s *Syncer) observeCephOSDsAt(ctx context.Context, clusterID uuid.UUID, osd
 	for _, o := range osds {
 		cur[o.OSDID] = o
 	}
+	if !s.loadReading(ctx, clusterID, "ceph_osd") {
+		return
+	}
 	s.cephMu.Lock()
 	st := s.cephState(clusterID)
 	prev, prevAt, ok := st.osds.advance(cur, now)
@@ -236,8 +247,13 @@ func (s *Syncer) observeCephOSDsAt(ctx context.Context, clusterID uuid.UUID, osd
 		freezeOSDs(cur, prev, frozen)
 	}
 	st.noout = noout
+	var saved *storedReading
+	if st.osds.took {
+		saved = st.osdReading()
+	}
 	s.cephMu.Unlock()
 	s.recordObjectChanges(ctx, clusterID, "ceph_osd", kept, prevAt)
+	s.saveReading(ctx, clusterID, "ceph_osd", saved, now)
 }
 
 // observeCephPools is observeCephOSDs for the cluster's pools.
@@ -252,6 +268,9 @@ func (s *Syncer) observeCephPoolsAt(ctx context.Context, clusterID uuid.UUID, po
 			cur[p.PoolName] = p
 		}
 	}
+	if !s.loadReading(ctx, clusterID, "ceph_pool") {
+		return
+	}
 	s.cephMu.Lock()
 	st := s.cephState(clusterID)
 	prev, prevAt, ok := st.pools.advance(cur, now)
@@ -261,8 +280,169 @@ func (s *Syncer) observeCephPoolsAt(ctx context.Context, clusterID uuid.UUID, po
 		kept, frozen = s.capObjectChanges(st, clusterID, "ceph_pool", diffCephPools(prev, cur), prevAt, now)
 		freezePools(cur, prev, frozen)
 	}
+	var saved *storedReading
+	if st.pools.took {
+		saved = st.poolReading()
+	}
 	s.cephMu.Unlock()
 	s.recordObjectChanges(ctx, clusterID, "ceph_pool", kept, prevAt)
+	s.saveReading(ctx, clusterID, "ceph_pool", saved, now)
+}
+
+// The last Ceph reading of a cluster is kept with its baselines
+// (cluster_object_baselines.reading), so that a restart of Nexara compares against
+// it. It holds what the diff compares of each object, and the fields the hourly cap is
+// holding back are in it at the reading they were last recorded at (freezeOSDs).
+const storedReadingVersion = 1
+
+type storedOSD struct {
+	Name        string  `json:"name"`
+	Host        string  `json:"host"`
+	Up          bool    `json:"up"`
+	In          bool    `json:"in"`
+	CrushWeight float64 `json:"crush_weight"`
+}
+
+type storedPool struct {
+	ID        int    `json:"id"`
+	Size      int    `json:"size"`
+	MinSize   int    `json:"min_size"`
+	PGNum     int    `json:"pg_num"`
+	PGNumMin  int    `json:"pg_num_min"`
+	Autoscale string `json:"autoscale"`
+}
+
+type storedReading struct {
+	Version int                   `json:"v"`
+	OSDs    map[string]storedOSD  `json:"osds,omitempty"`
+	Pools   map[string]storedPool `json:"pools,omitempty"`
+	Noout   bool                  `json:"noout,omitempty"` // the cluster's flag at that reading (OSDs)
+	// Frozen has, for each "<id>/<field>" the cap is holding back, when the object was last
+	// seen at the reading kept for it.
+	Frozen map[string]time.Time `json:"frozen,omitempty"`
+}
+
+// osdReading and poolReading render the state for saving; the caller holds s.cephMu.
+func (st *cephSeen) osdReading() *storedReading {
+	r := &storedReading{Version: storedReadingVersion, OSDs: make(map[string]storedOSD, len(st.osds.last)),
+		Noout: st.noout, Frozen: st.frozenOf("ceph_osd")}
+	for id, o := range st.osds.last {
+		r.OSDs[strconv.Itoa(id)] = storedOSD{Name: o.OSDName, Host: o.Host, Up: o.StatusUp, In: o.StatusIn, CrushWeight: o.CrushWeight}
+	}
+	return r
+}
+
+func (st *cephSeen) poolReading() *storedReading {
+	r := &storedReading{Version: storedReadingVersion, Pools: make(map[string]storedPool, len(st.pools.last)),
+		Frozen: st.frozenOf("ceph_pool")}
+	for name, p := range st.pools.last {
+		r.Pools[name] = storedPool{ID: p.PoolID, Size: p.Size, MinSize: p.MinSize, PGNum: p.PGNum, PGNumMin: p.PGNumMin, Autoscale: p.PGAutoscale}
+	}
+	return r
+}
+
+// frozenOf is when each field of a kind's objects that the cap is holding back was
+// last seen at the baseline.
+func (st *cephSeen) frozenOf(kind string) map[string]time.Time {
+	var out map[string]time.Time
+	prefix := kind + "/"
+	for key, w := range st.rows {
+		if strings.HasPrefix(key, prefix) && !w.frozen.IsZero() {
+			if out == nil {
+				out = map[string]time.Time{}
+			}
+			out[strings.TrimPrefix(key, prefix)] = w.frozen
+		}
+	}
+	return out
+}
+
+// loadReading restores a kind's last saved reading the first time a pass reads it
+// after a start, so that the pass diffs against what Nexara last saw and not against
+// nothing. No saved reading is a kind never read: the pass's is the baseline. It
+// answers false when the database could not say; the pass is then skipped, since a
+// baseline taken now would hide what changed while Nexara was down.
+func (s *Syncer) loadReading(ctx context.Context, clusterID uuid.UUID, kind string) bool {
+	s.cephMu.Lock()
+	st := s.cephState(clusterID)
+	loaded := st.osds.loaded
+	if kind == "ceph_pool" {
+		loaded = st.pools.loaded
+	}
+	s.cephMu.Unlock()
+	if loaded {
+		return true
+	}
+	row, err := s.queries.GetClusterObjectReading(ctx, db.GetClusterObjectReadingParams{ClusterID: clusterID, ResourceType: kind})
+	var stored *storedReading
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		s.logger.Warn("ceph: could not load the last saved reading; this pass is skipped",
+			"cluster_id", clusterID, "resource_type", kind, "error", err)
+		return false
+	default:
+		var r storedReading
+		if err := json.Unmarshal(row.Reading, &r); err != nil || r.Version != storedReadingVersion {
+			s.logger.Warn("ceph: the saved reading is not one this version reads; this pass is the baseline",
+				"cluster_id", clusterID, "resource_type", kind, "error", err)
+		} else {
+			stored = &r
+		}
+	}
+	s.cephMu.Lock()
+	defer s.cephMu.Unlock()
+	if stored != nil {
+		if st.rows == nil {
+			st.rows = map[string]*changeWindow{}
+		}
+		for key, at := range stored.Frozen {
+			st.rows[kind+"/"+key] = &changeWindow{frozen: at} // a window that has ended, whose hold is remembered
+		}
+		switch kind {
+		case "ceph_osd":
+			last := make(map[int]cephOSDMetricSnapshot, len(stored.OSDs))
+			for idText, o := range stored.OSDs {
+				if id, err := strconv.Atoi(idText); err == nil {
+					last[id] = cephOSDMetricSnapshot{ClusterID: clusterID, OSDID: id, OSDName: o.Name, Host: o.Host,
+						StatusUp: o.Up, StatusIn: o.In, CrushWeight: o.CrushWeight}
+				}
+			}
+			st.osds.last, st.osds.at, st.noout = last, row.LastReadAt, stored.Noout
+		case "ceph_pool":
+			last := make(map[string]cephPoolMetricSnapshot, len(stored.Pools))
+			for name, p := range stored.Pools {
+				last[name] = cephPoolMetricSnapshot{ClusterID: clusterID, PoolID: p.ID, PoolName: name, Size: p.Size, MinSize: p.MinSize,
+					PGNum: p.PGNum, PGNumMin: p.PGNumMin, PGAutoscale: p.Autoscale}
+			}
+			st.pools.last, st.pools.at = last, row.LastReadAt
+		}
+	}
+	if kind == "ceph_pool" {
+		st.pools.loaded = true
+	} else {
+		st.osds.loaded = true
+	}
+	return true
+}
+
+// saveReading keeps a pass's reading, if it took one, with the time it was taken. A
+// failure is logged: the pass's changes are recorded either way, and the next pass
+// saves again.
+func (s *Syncer) saveReading(ctx context.Context, clusterID uuid.UUID, kind string, r *storedReading, at time.Time) {
+	if r == nil {
+		return
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return
+	}
+	if err := s.queries.SaveClusterObjectReading(ctx, db.SaveClusterObjectReadingParams{
+		ClusterID: clusterID, ResourceType: kind, Reading: raw, ReadAt: at,
+	}); err != nil {
+		s.logger.Warn("ceph: failed to save the reading",
+			"cluster_id", clusterID, "resource_type", kind, "error", err)
+	}
 }
 
 // markNoout says, on each OSD that went out, whether the cluster had the noout flag
