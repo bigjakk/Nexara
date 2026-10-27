@@ -29,7 +29,9 @@ frontend/src/locales/
 │   ├── audit.json           ← Audit log
 │   ├── ceph.json            ← Ceph storage
 │   ├── networks.json        ← Network management
-│   └── snapshots.json       ← Central guest snapshots page
+│   ├── snapshots.json       ← Central guest snapshots page
+│   ├── history.json         ← The History timeline every object shares
+│   └── history-<kind>.json  ← One kind of object's History (history-guest: a VM's or container's)
 ```
 
 ## Adding a New Language

@@ -3,9 +3,12 @@
  *  1. The server side first: a HistoryKind and its route (internal/api/handlers/history.go says how).
  *  2. Its strings: locales/en/history-<name>.json, with `categories` in the server's order (Go's
  *     TestHistoryCategoryVocabulary holds the two together) and `empty`; register it in lib/i18n.ts.
+ *     What every kind shares (filters, observed changes) is history.json's.
  *  3. A HistoryKind below, in your feature's lib/, built with historyKind(); override eventLabel,
  *     summary or note only where the shared naming (lib/history.ts) reads wrong for your rows.
- *  4. Show it: <HistoryTimeline> for a tab, <HistoryDrawer> from a list row.
+ *  4. Show it: <HistoryTimeline> for a tab, or <HistoryButton> in a list row — shown with view:audit
+ *     and view:task, its drawer keeps its own clicks from the row. The target's path must name the
+ *     object: the cache is keyed on it. A global kind's target has clusterId null.
  */
 import type { TFunction } from "i18next";
 import type { LucideIcon } from "lucide-react";
