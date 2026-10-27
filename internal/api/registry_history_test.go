@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -29,6 +30,18 @@ func TestHistoryAuditOnlyIsTheGuestAlone(t *testing.T) {
 	}
 	if !slices.Equal(auditOnly, []string{"guest"}) {
 		t.Errorf("kinds gated on view:audit alone: %v, want [guest]", auditOnly)
+	}
+}
+
+// A start_time that does not parse is the caller's 400 before any query
+// runs: this handler has no database, so reading one would panic.
+func TestHistoryRefusesABadStartTimeFirst(t *testing.T) {
+	t.Parallel()
+	app := newRegistryApp(t, stubAuth(map[string]bool{"view:audit": true}),
+		historyEndpoint(&handlers.HistoryHandler{}, guestHistoryRoute()))
+	if status, env := send(t, app, authedRequest(http.MethodGet,
+		"/api/v1/clusters/"+testClusterID+"/guests/100/history?start_time=yesterday")); status != fiber.StatusBadRequest {
+		t.Errorf("status = %d (%q), want 400", status, env.Message)
 	}
 }
 

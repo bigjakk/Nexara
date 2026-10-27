@@ -425,6 +425,17 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// The caller's own mistake is a 400 before anything is read. An empty
+	// filter is no filter, as on the audit and task listings.
+	var since pgtype.Timestamptz
+	if v := p.String("start_time"); v != "" {
+		t, parseErr := time.Parse(time.RFC3339, v)
+		if parseErr != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid start_time (use RFC3339)")
+		}
+		since = pgtype.Timestamptz{Time: t, Valid: true}
+	}
+
 	ctx, cancel := context.WithTimeout(c.Context(), historyQueryTimeout)
 	defer cancel()
 	sel, err := r.kind.Select(ctx, HistoryRequest{Queries: r.h.queries, ClusterID: clusterID, Params: p})
@@ -440,14 +451,7 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	params.StatusGuestTypes = statusTypes
 	params.RowLimit = safeconv.Int32(int(p.Int("limit")))
 	params.RowOffset = safeconv.Int32(int(p.Int("offset")))
-	// An empty filter is no filter, as on the audit and task listings.
-	if since := p.String("start_time"); since != "" {
-		t, parseErr := time.Parse(time.RFC3339, since)
-		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid start_time (use RFC3339)")
-		}
-		params.Since = pgtype.Timestamptz{Time: t, Valid: true}
-	}
+	params.Since = since
 	if category := p.String("category"); category != "" {
 		params.Category = pgtype.Text{String: category, Valid: true}
 	}
