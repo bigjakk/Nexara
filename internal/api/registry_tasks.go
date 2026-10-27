@@ -271,11 +271,11 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 			// ruled on 2026-09-23 is applied to query parameters only, as
 			// TestEmptyTextDefaultsAreRefused pins it.
 			"status": {
-				Type:        apischema.String,
-				Optional:    true,
-				Default:     "running",
-				Enum:        []string{"", "running"},
-				Typetext:    "<running>",
+				Type:     apischema.String,
+				Optional: true,
+				Default:  "running",
+				Enum:     []string{"", "running"},
+				Typetext: "<running>",
 				Description: "Initial state: running, the only one, which is what a just-dispatched task is; how " +
 					"it ends is the collector's, read from Proxmox. Empty or omitted is running too.",
 			},
