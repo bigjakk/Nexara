@@ -58,6 +58,13 @@ func TestGuestHistory(t *testing.T) {
 	}
 	purge()
 	defer purge()
+	// The selector reads without the audit indexes built after startup
+	// (EnsureHistoryIndexes), only slower: the timeline runs with them absent.
+	for _, ix := range historyIndexes {
+		if _, err := pool.Exec(ctx, "DROP INDEX IF EXISTS "+ix.name); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	exec := func(what, sql string, args ...any) {
 		t.Helper()

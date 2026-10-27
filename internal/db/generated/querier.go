@@ -1524,8 +1524,9 @@ type Querier interface {
 	//
 	// The audit branches are four rather than one OR, so each reads its own index
 	// — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA arm
-	// the resource_type index, the object arm 000117's — instead of the planner
-	// settling on the whole cluster's rows. Each later arm excludes the rows an
+	// the resource_type index, the object arm the two built after startup
+	// (db.EnsureHistoryIndexes; it works without them, slower) — instead of the
+	// planner settling on the whole cluster's rows. Each later arm excludes the rows an
 	// earlier one keeps, so no row is read twice; a guest's row guest_workers turns
 	// away is still an object's to take. The object arm reads each object on its
 	// own: (resource_type, resource_id) for its own rows, GIN details @> {key:
