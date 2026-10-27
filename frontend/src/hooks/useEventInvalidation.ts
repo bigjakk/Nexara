@@ -7,6 +7,14 @@ import type { NexaraEvent } from "@/types/ws";
 const DEBOUNCE_MS = 300;
 
 /**
+ * Histories are re-read at most this often: every audit entry or task event of
+ * the cluster marks each of its Histories stale, a re-read costs what the
+ * object's history costs, and the server finishes a superseded read anyway. A
+ * burst of events is one re-read, at its end.
+ */
+export const HISTORY_THROTTLE_MS = 5_000;
+
+/**
  * Subscribes to WS event channels and invalidates TanStack Query caches
  * when backend state changes. Replaces aggressive polling with push-driven
  * updates while keeping long-interval polling as a safety fallback.
@@ -24,6 +32,8 @@ export function useEventInvalidation(clusterIds: string[]): void {
   const pendingPrefixKeys = useRef<Set<string>>(new Set());
   const pendingExactKeys = useRef<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingHistoryKeys = useRef<Set<string>>(new Set());
+  const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(() => {
     const prefixKeys = Array.from(pendingPrefixKeys.current);
@@ -56,6 +66,24 @@ export function useEventInvalidation(clusterIds: string[]): void {
       armFlush();
     },
     [armFlush],
+  );
+
+  const scheduleHistoryInvalidation = useCallback(
+    (key: string[]) => {
+      pendingHistoryKeys.current.add(JSON.stringify(key));
+      if (historyTimerRef.current !== null) return;
+      historyTimerRef.current = setTimeout(() => {
+        const keys = Array.from(pendingHistoryKeys.current);
+        pendingHistoryKeys.current.clear();
+        historyTimerRef.current = null;
+        for (const serialized of keys) {
+          void queryClient.invalidateQueries({
+            queryKey: JSON.parse(serialized) as string[],
+          });
+        }
+      }, HISTORY_THROTTLE_MS);
+    },
+    [queryClient],
   );
 
   const scheduleExactInvalidation = useCallback(
@@ -94,10 +122,8 @@ export function useEventInvalidation(clusterIds: string[]): void {
           // it ended. Scoped to the event's cluster: a History is per object,
           // and an event names its cluster but not always its object.
           if (cid) {
-            scheduleInvalidation(
-              ["clusters", cid, "schedules"],
-              ["history", cid],
-            );
+            scheduleInvalidation(["clusters", cid, "schedules"]);
+            scheduleHistoryInvalidation(["history", cid]);
           }
           break;
 
@@ -106,12 +132,12 @@ export function useEventInvalidation(clusterIds: string[]): void {
           // A change with no task (a config edit, an HA resource) reaches a
           // History only as its audit entry.
           if (cid) {
-            scheduleInvalidation(["history", cid]);
+            scheduleHistoryInvalidation(["history", cid]);
           }
           // A global kind's History (a PBS server's, a firewall template's)
           // reads every cluster, and rows that name none: any entry may be
           // one of its own. Its rows are all audit rows, so not on a task.
-          scheduleInvalidation(["history", "global"]);
+          scheduleHistoryInvalidation(["history", "global"]);
           break;
 
         case "vm_state_change":
@@ -254,7 +280,11 @@ export function useEventInvalidation(clusterIds: string[]): void {
           break;
       }
     },
-    [scheduleInvalidation, scheduleExactInvalidation],
+    [
+      scheduleInvalidation,
+      scheduleExactInvalidation,
+      scheduleHistoryInvalidation,
+    ],
   );
 
   useEffect(() => {
@@ -286,6 +316,10 @@ export function useEventInvalidation(clusterIds: string[]): void {
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
+      }
+      if (historyTimerRef.current !== null) {
+        clearTimeout(historyTimerRef.current);
+        historyTimerRef.current = null;
       }
     };
   }, [clusterIds, canViewAudit, subscribe, unsubscribe, handleEvent]);

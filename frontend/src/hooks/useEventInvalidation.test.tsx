@@ -2,7 +2,10 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { createTestQueryClient, createWrapper } from "@/test/test-utils";
 import { useWebSocketStore } from "@/stores/websocket-store";
-import { useEventInvalidation } from "./useEventInvalidation";
+import {
+  HISTORY_THROTTLE_MS,
+  useEventInvalidation,
+} from "./useEventInvalidation";
 
 // Events are delivered through the REAL websocket store, the way its onmessage
 // does it — each listener on the channel gets the message's payload — so the
@@ -55,10 +58,10 @@ function mount(keys: (string | number)[][]) {
   return client;
 }
 
-/** Runs the hook's debounced flush (300 ms). */
+/** Runs the hook's debounced flushes: 300 ms, and the Histories' throttle. */
 function flush() {
   act(() => {
-    vi.advanceTimersByTime(1_000);
+    vi.advanceTimersByTime(HISTORY_THROTTLE_MS);
   });
 }
 
@@ -166,6 +169,31 @@ describe("useEventInvalidation — audit_entry and guest History", () => {
     expect(client.getQueryState(otherHistory)?.isInvalidated).toBe(false);
     // A global kind's History reads every cluster's rows.
     expect(client.getQueryState(globalHistory)?.isInvalidated).toBe(true);
+  });
+
+  // A burst of entries is one re-read, at its end, not one each.
+  it("re-reads a History at most once per throttle window", () => {
+    vi.useFakeTimers();
+    const history = guestHistoryKey(CLUSTER);
+    const client = mount([history]);
+    const entry = {
+      kind: "audit_entry",
+      cluster_id: CLUSTER,
+      resource_type: "vm",
+      resource_id: "x",
+      action: "config_update",
+    };
+    act(() => {
+      deliver(`cluster:${CLUSTER}:events`, entry);
+    });
+    act(() => {
+      vi.advanceTimersByTime(HISTORY_THROTTLE_MS - 1);
+    });
+    expect(client.getQueryState(history)?.isInvalidated).toBe(false);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(client.getQueryState(history)?.isInvalidated).toBe(true);
   });
 });
 
