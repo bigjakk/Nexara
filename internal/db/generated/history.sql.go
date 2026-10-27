@@ -113,7 +113,8 @@ WITH guests AS MATERIALIZED (
     UNION ALL
     SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
-           CASE WHEN a.vmid = ANY($1::int[]) THEN a.vmid
+           CASE WHEN $16::bool THEN NULL::int
+                WHEN a.vmid = ANY($1::int[]) THEN a.vmid
                 WHEN a.action IN ('clone', 'clone-to-template')
                      AND a.details->>'new_id' = ANY($1::int[]::text[])
                     THEN (a.details->>'new_id')::int
@@ -131,7 +132,7 @@ WITH guests AS MATERIALIZED (
               SELECT b.id FROM audit_log b
               WHERE o.detail_key = ''
                 AND b.resource_type = o.resource_type AND b.resource_id = o.value
-                AND ($16::bool OR b.cluster_id = $12::uuid)
+                AND ($17::bool OR b.cluster_id = $12::uuid)
                 AND b.created_at >= COALESCE($15::timestamptz, '-infinity'::timestamptz)
               UNION ALL
               SELECT b.id FROM audit_log b
@@ -142,7 +143,7 @@ WITH guests AS MATERIALIZED (
                 AND b.details->>o.detail_key = o.value
                 AND b.resource_type = o.resource_type
                 AND (o.resource_id = '' OR b.resource_id = o.resource_id)
-                AND ($16::bool OR b.cluster_id = $12::uuid)
+                AND ($17::bool OR b.cluster_id = $12::uuid)
                 AND b.created_at >= COALESCE($15::timestamptz, '-infinity'::timestamptz)
               UNION ALL
               SELECT b.id FROM audit_log b
@@ -150,7 +151,7 @@ WITH guests AS MATERIALIZED (
                 AND b.resource_type = o.resource_type
                 AND (o.resource_id = '' OR b.resource_id = o.resource_id)
                 AND o.value = ANY(regexp_split_to_array(btrim(b.details->>o.detail_key), '\s*,\s*'))
-                AND ($16::bool OR b.cluster_id = $12::uuid)
+                AND ($17::bool OR b.cluster_id = $12::uuid)
                 AND b.created_at >= COALESCE($15::timestamptz, '-infinity'::timestamptz)
           ) m)
       AND NOT COALESCE(a.vmid = ANY($1::int[])
@@ -188,7 +189,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('task:' || t.upid)::text, 'task', NULL::uuid, t.cluster_id, t.started_at, t.source, t.task_type,
            'task', '', t.vmid, t.vmid, t.user_id, t.upid, t.node, '', '', '', NULL
     FROM task_history t
-    WHERE $17::bool
+    WHERE $18::bool
       AND t.cluster_id = $12::uuid
       AND t.vmid IS NOT NULL
       AND t.vmid = ANY($1::int[])
@@ -202,7 +203,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.cluster_id, r.started_at, r.source, r.task_type,
            'task', '', r.vmid, r.vmid, r.user_id, r.upid, r.node, '', '', '', NULL
     FROM task_history_archive r
-    WHERE $17::bool
+    WHERE $18::bool
       AND r.cluster_id = $12::uuid
       AND r.vmid = ANY($1::int[])
       AND history_worker_ok(r.upid, $13::text[])
@@ -217,7 +218,7 @@ WITH guests AS MATERIALIZED (
     WHERE s.cluster_id = $12::uuid
       AND s.vmid = ANY($1::int[])
       AND s.explained = false
-      AND s.guest_type = ANY($18::text[])
+      AND s.guest_type = ANY($19::text[])
       AND history_worker_ok(NULL, $13::text[])
       AND ($14::timestamptz IS NULL OR s.observed_at >= $14::timestamptz)
       AND ($15::timestamptz IS NULL OR s.observed_at >= $15::timestamptz)
@@ -225,7 +226,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.cluster_id, b.started_at, b.source, 'vzdump',
            'backup', '', b.vmid, b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL
     FROM guest_backups b
-    WHERE $17::bool
+    WHERE $18::bool
       AND b.cluster_id = $12::uuid
       AND b.vmid = ANY($1::int[])
       AND history_worker_ok(b.upid, $13::text[])
@@ -244,7 +245,7 @@ WITH guests AS MATERIALIZED (
                                    WHEN 'worker' THEN k.worker
                                END LIKE r.pattern
                          ORDER BY r.ord
-                         LIMIT 1), $19::text)) AS categories
+                         LIMIT 1), $20::text)) AS categories
     FROM (SELECT DISTINCT e.kind, e.action, e.resource_type, split_part(e.upid, ':', 6) AS worker
           FROM entries e) k
 ), categorized AS (
@@ -259,10 +260,10 @@ WITH guests AS MATERIALIZED (
     LEFT JOIN guests g ON g.vmid = c.subject
     WHERE (g.vmid IS NULL OR c.occurred_at > g.after OR (g.inclusive AND c.occurred_at = g.after))
       AND ($15::timestamptz IS NULL OR c.occurred_at >= $15::timestamptz)
-      AND ($20::text IS NULL OR c.category = $20::text)
-      AND ($21::text IS NULL OR c.source = $21::text)
+      AND ($21::text IS NULL OR c.category = $21::text)
+      AND ($22::text IS NULL OR c.source = $22::text)
     ORDER BY c.occurred_at DESC, c.entry_id DESC
-    LIMIT $23::int OFFSET $22::int
+    LIMIT $24::int OFFSET $23::int
 )
 SELECT p.entry_id, p.kind, p.cluster_id, p.occurred_at, p.source, p.action, p.resource_type, p.resource_id, p.vmid,
        COALESCE(p.subject, 0)::int AS subject_vmid,
@@ -297,29 +298,30 @@ ORDER BY p.occurred_at DESC, p.entry_id DESC
 `
 
 type ListHistoryParams struct {
-	Vmids             []int32            `json:"vmids"`
-	CutoffAfter       []time.Time        `json:"cutoff_after"`
-	CutoffInclusive   []bool             `json:"cutoff_inclusive"`
-	ObjectTypes       []string           `json:"object_types"`
-	ObjectResourceIds []string           `json:"object_resource_ids"`
-	ObjectKeys        []string           `json:"object_keys"`
-	ObjectValues      []string           `json:"object_values"`
-	ObjectInList      []bool             `json:"object_in_list"`
-	RuleCategories    []string           `json:"rule_categories"`
-	RuleFields        []string           `json:"rule_fields"`
-	RulePatterns      []string           `json:"rule_patterns"`
-	ClusterID         uuid.UUID          `json:"cluster_id"`
-	GuestWorkers      []string           `json:"guest_workers"`
-	CutoffFloor       pgtype.Timestamptz `json:"cutoff_floor"`
-	Since             pgtype.Timestamptz `json:"since"`
-	Global            bool               `json:"global"`
-	IncludeTasks      bool               `json:"include_tasks"`
-	StatusGuestTypes  []string           `json:"status_guest_types"`
-	DefaultCategory   string             `json:"default_category"`
-	Category          pgtype.Text        `json:"category"`
-	Source            pgtype.Text        `json:"source"`
-	RowOffset         int32              `json:"row_offset"`
-	RowLimit          int32              `json:"row_limit"`
+	Vmids               []int32            `json:"vmids"`
+	CutoffAfter         []time.Time        `json:"cutoff_after"`
+	CutoffInclusive     []bool             `json:"cutoff_inclusive"`
+	ObjectTypes         []string           `json:"object_types"`
+	ObjectResourceIds   []string           `json:"object_resource_ids"`
+	ObjectKeys          []string           `json:"object_keys"`
+	ObjectValues        []string           `json:"object_values"`
+	ObjectInList        []bool             `json:"object_in_list"`
+	RuleCategories      []string           `json:"rule_categories"`
+	RuleFields          []string           `json:"rule_fields"`
+	RulePatterns        []string           `json:"rule_patterns"`
+	ClusterID           uuid.UUID          `json:"cluster_id"`
+	GuestWorkers        []string           `json:"guest_workers"`
+	CutoffFloor         pgtype.Timestamptz `json:"cutoff_floor"`
+	Since               pgtype.Timestamptz `json:"since"`
+	ObjectsIgnoreCutoff bool               `json:"objects_ignore_cutoff"`
+	Global              bool               `json:"global"`
+	IncludeTasks        bool               `json:"include_tasks"`
+	StatusGuestTypes    []string           `json:"status_guest_types"`
+	DefaultCategory     string             `json:"default_category"`
+	Category            pgtype.Text        `json:"category"`
+	Source              pgtype.Text        `json:"source"`
+	RowOffset           int32              `json:"row_offset"`
+	RowLimit            int32              `json:"row_limit"`
 }
 
 type ListHistoryRow struct {
@@ -470,8 +472,12 @@ type ListHistoryRow struct {
 // destroy, so the previous guest's last act is not this one's first. The zero
 // time is no cutoff. An object's row has no subject and no cutoff, unless it
 // names one of the guests — a row of the guest's that guest_workers turned
-// away and an object took — which is still that guest's and held to its
-// cutoff: a previous holder of the VMID is not the object's either.
+// away and an object took — which is then that guest's and held to its cutoff,
+// so a previous holder of the VMID is not the object's either. That is the
+// kind's choice (objects_ignore_cutoff, HistoryKind.ObjectsIgnoreGuestCutoff):
+// right where the object is the guest's — its HA resource — and wrong where a
+// row stands on its own, as a task that ran on a node did, whoever held the
+// VMID then.
 //
 // since, and cutoff_floor — the earliest of the guests' cutoffs, which no
 // guest's row comes before; NULL when a guest has none — are repeated in every
@@ -523,6 +529,7 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 		arg.GuestWorkers,
 		arg.CutoffFloor,
 		arg.Since,
+		arg.ObjectsIgnoreCutoff,
 		arg.Global,
 		arg.IncludeTasks,
 		arg.StatusGuestTypes,

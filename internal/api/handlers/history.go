@@ -74,6 +74,13 @@ type HistoryKind struct {
 	// global kind to — since audit keys are unique only within a cluster.
 	// A global kind has no guests.
 	Global bool
+	// ObjectsIgnoreGuestCutoff leaves an object's row that names one of the
+	// selection's guests out of that guest's cutoff. Unset, such a row — one
+	// of the guest's that GuestWorkers turned away and an object took — is
+	// held to it, so a previous holder of the VMID is not the object's either:
+	// right for an object that is the guest's, as its HA resource is. Set it
+	// where an object's rows stand on their own, as a node's tasks do.
+	ObjectsIgnoreGuestCutoff bool
 }
 
 // globalHistoryResourceTypes are the audit resource types whose ids are unique
@@ -442,18 +449,19 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		clusterID = uuid.Nil
 	}
 	params := db.ListHistoryParams{
-		DefaultCategory:   k.Default,
-		ClusterID:         clusterID,
-		Global:            k.Global,
-		Vmids:             make([]int32, 0, len(sel.Guests)),
-		CutoffAfter:       make([]time.Time, 0, len(sel.Guests)),
-		CutoffInclusive:   make([]bool, 0, len(sel.Guests)),
-		GuestWorkers:      make([]string, 0, len(sel.GuestWorkers)),
-		ObjectTypes:       make([]string, 0, len(sel.Objects)),
-		ObjectResourceIds: make([]string, 0, len(sel.Objects)),
-		ObjectKeys:        make([]string, 0, len(sel.Objects)),
-		ObjectValues:      make([]string, 0, len(sel.Objects)),
-		ObjectInList:      make([]bool, 0, len(sel.Objects)),
+		DefaultCategory:     k.Default,
+		ClusterID:           clusterID,
+		Global:              k.Global,
+		ObjectsIgnoreCutoff: k.ObjectsIgnoreGuestCutoff,
+		Vmids:               make([]int32, 0, len(sel.Guests)),
+		CutoffAfter:         make([]time.Time, 0, len(sel.Guests)),
+		CutoffInclusive:     make([]bool, 0, len(sel.Guests)),
+		GuestWorkers:        make([]string, 0, len(sel.GuestWorkers)),
+		ObjectTypes:         make([]string, 0, len(sel.Objects)),
+		ObjectResourceIds:   make([]string, 0, len(sel.Objects)),
+		ObjectKeys:          make([]string, 0, len(sel.Objects)),
+		ObjectValues:        make([]string, 0, len(sel.Objects)),
+		ObjectInList:        make([]bool, 0, len(sel.Objects)),
 	}
 	for _, w := range sel.GuestWorkers {
 		if w == "" || !likePatternOK(w) {

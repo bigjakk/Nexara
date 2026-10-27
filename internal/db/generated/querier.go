@@ -1545,8 +1545,12 @@ type Querier interface {
 	// destroy, so the previous guest's last act is not this one's first. The zero
 	// time is no cutoff. An object's row has no subject and no cutoff, unless it
 	// names one of the guests — a row of the guest's that guest_workers turned
-	// away and an object took — which is still that guest's and held to its
-	// cutoff: a previous holder of the VMID is not the object's either.
+	// away and an object took — which is then that guest's and held to its cutoff,
+	// so a previous holder of the VMID is not the object's either. That is the
+	// kind's choice (objects_ignore_cutoff, HistoryKind.ObjectsIgnoreGuestCutoff):
+	// right where the object is the guest's — its HA resource — and wrong where a
+	// row stands on its own, as a task that ran on a node did, whoever held the
+	// VMID then.
 	//
 	// since, and cutoff_floor — the earliest of the guests' cutoffs, which no
 	// guest's row comes before; NULL when a guest has none — are repeated in every

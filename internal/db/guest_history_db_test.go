@@ -688,6 +688,21 @@ func TestGuestHistory(t *testing.T) {
 		}
 	}
 
+	// …unless the kind's objects stand on their own (ObjectsIgnoreGuestCutoff):
+	// then the previous guest's create, start and destroy are the object's too.
+	standalone := handlers.GuestHistory()
+	standalone.ObjectsIgnoreGuestCutoff = true
+	sp, err := standalone.ListParams(historyClusterID, handlers.HistorySelection{
+		Guests:       []handlers.HistoryGuest{{VMID: 100, After: pgtype.Timestamptz{Time: hoursAgo(7), Valid: true}, Inclusive: true}},
+		GuestWorkers: []string{"ha%"}, Objects: []handlers.HistoryObject{{ResourceType: "vm", Value: "100"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp.RowLimit = 50
+	if got, _ := list(sp); !slices.Contains(got, "audit destroy lifecycle ") || !slices.Contains(got, "audit create lifecycle ") {
+		t.Errorf("a kind whose objects ignore the guest's cutoff: %v, want the previous guest's create and destroy", got)
+	}
+
 	// ── Every arm reads the route's cluster alone: audit keys are unique only
 	// within one. The other cluster holds, for each arm, a row its selector
 	// would take but for that — none may come back here, and each must in the
