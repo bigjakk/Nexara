@@ -63,6 +63,15 @@ describe("AuditLogPanel", () => {
     vi.clearAllMocks();
   });
 
+  it.each(["PBS Server", "Veeam Server", "Veeam Job", "Veeam Session"])(
+    "offers %s in the Resource Type filter, as the rows filed under it need",
+    (label) => {
+      renderFor(["view:audit"]);
+
+      expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
+    },
+  );
+
   it("shows the syslog card to a user who can manage the audit log", () => {
     renderFor(["view:audit", "manage:audit"]);
 
