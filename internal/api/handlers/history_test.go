@@ -308,11 +308,14 @@ func TestHistoryListDropsGuestsTheCallerCannotOpen(t *testing.T) {
 			continue
 		}
 		for _, arg := range call.args {
-			if vmids, ok := arg.([]int32); ok && !slices.Equal(vmids, []int32{100}) {
-				t.Errorf("ListHistory was asked for guests %v, want only the VM [100]", vmids)
+			if vmids, ok := arg.([]int32); ok {
+				if !slices.Equal(vmids, []int32{100}) {
+					t.Errorf("ListHistory was asked for guests %v, want only the VM [100]", vmids)
+				}
+				return
 			}
 		}
-		return
+		t.Fatalf("ListHistory ran with no guest list among %d arguments", len(call.args))
 	}
 	t.Fatalf("ListHistory never ran: %d queries", len(dbtx.calls))
 }
