@@ -1,7 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
+	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -126,44 +130,80 @@ func (h *ReplicationHandler) UpdateJob(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	// The job as it stands, to tell what the edit changes from what the dialog sends
-	// along. A job that cannot be read is no reason to refuse the edit, which Proxmox
-	// then answers for itself.
-	before, _ := pxClient.GetReplicationJob(c.Context(), jobID)
+	// The job as it stood and as Proxmox stored it, to name what the edit changed and
+	// not what the dialog sent along or how it was spelled. A job that cannot be read
+	// is no reason to refuse the edit, which Proxmox answers for itself, nor to wait
+	// on it; the row then names no field.
+	before := readReplicationJob(c.Context(), replicationReadTimeout, slog.Default(), pxClient, clusterID, jobID, "before")
 	if err := pxClient.UpdateReplicationJob(c.Context(), jobID, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"id": jobID, "fields": changedReplicationFields(before, req)})
+	var after *proxmox.ReplicationJob
+	if before != nil {
+		after = readReplicationJob(c.Context(), replicationReadTimeout, slog.Default(), pxClient, clusterID, jobID, "after")
+	}
+	details, _ := json.Marshal(map[string]any{"id": jobID, "fields": changedReplicationFields(before, after, req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "replication", jobID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindReplicationChange, "replication", jobID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// changedReplicationFields names the fields an edit sets to something other than
-// the job has. The job's History explains a change seen in Proxmox by an update
-// that names the field (ClassifyClusterObjectChanges), and the edit dialog sends
-// schedule and comment whatever was touched: naming those would let this edit stand
-// for a later change to either made in Proxmox. A job that could not be read before
-// the edit names nothing, so what Proxmox then reports is shown, not assumed.
-func changedReplicationFields(before *proxmox.ReplicationJob, req proxmox.UpdateReplicationJobParams) []string {
+// replicationReadTimeout bounds each read of a job around an edit: the audit row is
+// owed whether or not they answer.
+const replicationReadTimeout = 5 * time.Second
+
+// readReplicationJob reads a job within timeout. A read that fails, or runs out of
+// time, is logged as a warning and answers nil.
+func readReplicationJob(ctx context.Context, timeout time.Duration, logger *slog.Logger, pxClient *proxmox.Client, clusterID uuid.UUID, jobID, when string) *proxmox.ReplicationJob {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	job, err := pxClient.GetReplicationJob(ctx, jobID)
+	if err != nil {
+		logger.Warn("replication update: could not read the job "+when+" the edit; its audit row names no field",
+			"cluster_id", clusterID, "job_id", jobID, "error", err)
+		return nil
+	}
+	return job
+}
+
+// changedReplicationFields names the fields an edit changed: those it sent that
+// differ between the job before the edit and after it, as Proxmox stored them. The
+// job's History explains a change seen in Proxmox by an update that names the field
+// (ClassifyClusterObjectChanges), and the edit dialog sends schedule and comment
+// whatever was touched: naming those, or a rate by how it was typed ("10.0" for the
+// 10 Proxmox keeps), would let this edit stand for a later change to the field made
+// in Proxmox. A field the edit did not send is not its, whatever happened to it
+// meanwhile. A job that could not be read on either side names nothing.
+func changedReplicationFields(before, after *proxmox.ReplicationJob, req proxmox.UpdateReplicationJobParams) []string {
 	fields := make([]string, 0, 4)
-	if before == nil {
+	if before == nil || after == nil {
 		return fields
 	}
 	for _, f := range []struct {
 		name    string
 		changed bool
 	}{
-		{"schedule", req.Schedule != "" && req.Schedule != before.Schedule},
-		{"rate", req.Rate != "" && req.Rate != before.Rate.String()},
-		{"comment", req.Comment != "" && req.Comment != before.Comment},
-		{"disable", req.Disable != nil && *req.Disable != before.Disable},
+		{"schedule", req.Schedule != "" && before.Schedule != after.Schedule},
+		{"rate", req.Rate != "" && !sameNumber(before.Rate.String(), after.Rate.String())},
+		{"comment", req.Comment != "" && before.Comment != after.Comment},
+		{"disable", req.Disable != nil && before.Disable != after.Disable},
 	} {
 		if f.changed {
 			fields = append(fields, f.name)
 		}
 	}
 	return fields
+}
+
+// sameNumber reports whether two spellings of a setting are the same number, or the
+// same text when either is not one.
+func sameNumber(a, b string) bool {
+	x, errA := strconv.ParseFloat(a, 64)
+	y, errB := strconv.ParseFloat(b, 64)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return x == y
 }
 
 // DeleteJob handles DELETE /clusters/:cluster_id/replication/:job_id.

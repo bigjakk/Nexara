@@ -51,11 +51,14 @@ type haCreatePVERequest struct {
 // haCreatePVE stands in for the cluster's Proxmox API: it records every
 // request and answers each with an empty success envelope — or, for a request
 // named in replies ("METHOD /api2/json/path"), with that JSON as its data.
+// sequence answers the same request differently each time it comes, in order, before
+// replies does; the word "refuse" in it refuses that one request.
 type haCreatePVE struct {
-	mu      sync.Mutex
-	seen    []haCreatePVERequest
-	replies map[string]string
-	refuse  bool // answer every request with a refusal
+	mu       sync.Mutex
+	seen     []haCreatePVERequest
+	replies  map[string]string
+	sequence map[string][]string
+	refuse   bool // answer every request with a refusal
 }
 
 func (p *haCreatePVE) serve(t *testing.T) string {
@@ -73,9 +76,20 @@ func (p *haCreatePVE) serve(t *testing.T) string {
 			_, _ = w.Write([]byte(`{"data":null,"message":"refused\n"}`))
 			return
 		}
-		data, ok := p.replies[r.Method+" "+r.URL.Path]
+		key := r.Method + " " + r.URL.Path
+		data, ok := p.replies[key]
 		if !ok {
 			data = "null"
+		}
+		p.mu.Lock()
+		if queue := p.sequence[key]; len(queue) > 0 {
+			data, p.sequence[key] = queue[0], queue[1:]
+		}
+		p.mu.Unlock()
+		if data == "refuse" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"data":null,"message":"refused\n"}`))
+			return
 		}
 		_, _ = w.Write([]byte(`{"data":` + data + `}`))
 	}))

@@ -39,6 +39,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 		target, body string // the request
 		bind         func(*db.Queries) Handler
 		replies      map[string]string
+		sequence     map[string][]string // successive answers to one request
 		wantType     string
 		wantID       string
 		wantAction   string
@@ -258,16 +259,40 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			forbidden:   "secret",
 		},
 		{
-			// A change seen in Proxmox is explained by an update that names its field,
-			// and the edit dialog sends the comment (and here the disable flag) as it was.
-			name: "a replication update names the fields it changed, not the ones it sent as they were", method: fiber.MethodPut, path: replicationScope + "/:job_id",
-			target: "/replication/100-0", body: `{"schedule":"*/5","rate":"10","comment":"nightly","disable":0}`,
+			// A change seen in Proxmox is explained by an update that names its field. The
+			// edit dialog sends the comment and the disable flag as they were; the rate is
+			// typed 10.0 and kept as 10.
+			name: "a replication update names the fields Proxmox stored differently, not the ones it sent as they were", method: fiber.MethodPut, path: replicationScope + "/:job_id",
+			target: "/replication/100-0", body: `{"schedule":"*/5","rate":"20.0","comment":"nightly","disable":0}`,
 			bind: func(q *db.Queries) Handler {
 				return handlers.NewReplicationHandler(q, haCreateEncKey, nil).UpdateJob
 			},
-			replies:  map[string]string{"GET /api2/json/cluster/replication/100-0": `{"id":"100-0","schedule":"*/15","comment":"nightly","disable":0}`},
+			sequence: map[string][]string{"GET /api2/json/cluster/replication/100-0": {
+				`{"id":"100-0","schedule":"*/15","rate":10,"comment":"nightly","disable":0}`,
+				`{"id":"100-0","schedule":"*/5","rate":20,"comment":"nightly","disable":0}`,
+			}},
 			wantType: "replication", wantID: "100-0", wantAction: "updated",
 			wantDetails: map[string]any{"fields": []any{"schedule", "rate"}},
+		},
+		{
+			name: "a replication update whose job cannot be read first names no field", method: fiber.MethodPut, path: replicationScope + "/:job_id",
+			target: "/replication/100-0", body: `{"schedule":"*/5"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewReplicationHandler(q, haCreateEncKey, nil).UpdateJob
+			},
+			sequence: map[string][]string{"GET /api2/json/cluster/replication/100-0": {"refuse"}},
+			wantType: "replication", wantID: "100-0", wantAction: "updated",
+			wantDetails: map[string]any{"fields": []any{}},
+		},
+		{
+			name: "nor does one that cannot be read after the edit", method: fiber.MethodPut, path: replicationScope + "/:job_id",
+			target: "/replication/100-0", body: `{"schedule":"*/5"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewReplicationHandler(q, haCreateEncKey, nil).UpdateJob
+			},
+			sequence: map[string][]string{"GET /api2/json/cluster/replication/100-0": {`{"id":"100-0","schedule":"*/15"}`, "refuse"}},
+			wantType: "replication", wantID: "100-0", wantAction: "updated",
+			wantDetails: map[string]any{"fields": []any{}},
 		},
 		{
 			// schedule_now spawns no task and answers with nothing; tracking that
@@ -289,7 +314,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 				dbtx.models = map[string]any{"GetVMByClusterAndVmid": *tc.vm}
 			}
 			e.Handler = tc.bind(db.New(dbtx))
-			pve := &haCreatePVE{replies: tc.replies}
+			pve := &haCreatePVE{replies: tc.replies, sequence: tc.sequence}
 			app := newHAStandInApp(t, e, pve, dbtx, map[string]bool{
 				e.Permissions.Check.Action + ":" + e.Permissions.Check.Resource: true,
 			})
