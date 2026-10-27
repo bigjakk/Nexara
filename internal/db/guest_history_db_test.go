@@ -435,10 +435,19 @@ func TestGuestHistory(t *testing.T) {
 		}
 	}
 
-	// ── Where the timeline starts. A finished task's outcome is the
-	// collector's, and PUT /api/v1/tasks/:upid cannot rewrite it after the fact.
-	if n, err := q.UpdateTaskHistory(ctx, gen.UpdateTaskHistoryParams{Upid: startUPID, Status: "failed"}); err != nil || n != 0 {
-		t.Errorf("rewriting a finished task: %d rows (%v), want none", n, err)
+	// ── Where the timeline starts, which a finished task's outcome decides:
+	// that is the collector's, and PUT /api/v1/tasks/:upid (UpdateTaskHistory)
+	// writes only a running task Nexara recorded.
+	for i, tt := range []struct {
+		status, source string
+		want           int64
+	}{{"completed", "nexara", 0}, {"running", "proxmox", 0}, {"running", "nexara", 1}} {
+		upid := historyUPID(40+i, "qmcreate", "190")
+		exec("rewritable "+upid, `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, source)
+			VALUES ($1, $2, $3, $4, 'pve-01', 'qmcreate', $5)`, historyClusterID, historyUserID, upid, tt.status, tt.source)
+		if n, err := q.UpdateTaskHistory(ctx, gen.UpdateTaskHistoryParams{Upid: upid, Status: "failed"}); err != nil || n != tt.want {
+			t.Errorf("rewriting a %s %s task: %d rows (%v), want %d", tt.status, tt.source, n, err, tt.want)
+		}
 	}
 	events, err := q.ListGuestLifecycleEvents(ctx, gen.ListGuestLifecycleEventsParams{
 		ClusterID: pgtype.UUID{Bytes: historyClusterID, Valid: true}, Vmid: 100,
