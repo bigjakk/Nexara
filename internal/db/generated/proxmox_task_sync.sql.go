@@ -165,11 +165,22 @@ func (q *Queries) ListCrossClusterMigrationUPIDs(ctx context.Context, upids []st
 }
 
 const listExistingAuditLogUPIDs = `-- name: ListExistingAuditLogUPIDs :many
-SELECT (details->>'upid')::text AS upid FROM audit_log WHERE details->>'upid' = ANY($1::text[])
+
+SELECT (details->>'upid')::text AS upid FROM audit_log
+WHERE cluster_id = $1::uuid AND details->>'upid' = ANY($2::text[])
 `
 
-func (q *Queries) ListExistingAuditLogUPIDs(ctx context.Context, upids []string) ([]string, error) {
-	rows, err := q.db.Query(ctx, listExistingAuditLogUPIDs, upids)
+type ListExistingAuditLogUPIDsParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Upids     []string  `json:"upids"`
+}
+
+// ListExistingAuditLogUPIDs asks about ONE cluster's entries. Audit entries
+// outlive a removed cluster (detached, no cluster, since 000122), and a cluster
+// added again has the same nodes and so the same UPIDs: matching the UPID alone
+// would call every task it ever ran "already recorded" and skip them for good.
+func (q *Queries) ListExistingAuditLogUPIDs(ctx context.Context, arg ListExistingAuditLogUPIDsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listExistingAuditLogUPIDs, arg.ClusterID, arg.Upids)
 	if err != nil {
 		return nil, err
 	}

@@ -1440,7 +1440,11 @@ type Querier interface {
 	ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error)
 	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
-	ListExistingAuditLogUPIDs(ctx context.Context, upids []string) ([]string, error)
+	// ListExistingAuditLogUPIDs asks about ONE cluster's entries. Audit entries
+	// outlive a removed cluster (detached, no cluster, since 000122), and a cluster
+	// added again has the same nodes and so the same UPIDs: matching the UPID alone
+	// would call every task it ever ran "already recorded" and skip them for good.
+	ListExistingAuditLogUPIDs(ctx context.Context, arg ListExistingAuditLogUPIDsParams) ([]string, error)
 	// ListExistingTaskHistoryUPIDs and ListExistingAuditLogUPIDs are the batch
 	// dedup the collector ingest uses: given a node's candidate UPIDs, return the
 	// subset already recorded, so ingestTask skips them without a per-task SELECT

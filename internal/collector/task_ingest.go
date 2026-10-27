@@ -133,7 +133,7 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 
 // seenTaskUPIDs returns the subset of the candidate UPIDs ingestTask must skip:
 // those already recorded — in task_history (Nexara-dispatched or a prior
-// external ingest) or audit_log (any source) — plus those belonging to a
+// external ingest) or in this cluster's audit_log entries (any source) — plus those belonging to a
 // cross-cluster migration, which this collector must never record at all.
 // Three indexed batch lookups replace the old per-task point SELECTs. Returns
 // an error if any lookup fails so the caller can skip ingestion rather than
@@ -163,7 +163,7 @@ func (s *Syncer) seenTaskUPIDs(ctx context.Context, cluster db.Cluster, upids []
 	for _, u := range thUPIDs {
 		seen[u] = true
 	}
-	alUPIDs, err := s.queries.ListExistingAuditLogUPIDs(ctx, upids)
+	alUPIDs, err := s.queries.ListExistingAuditLogUPIDs(ctx, db.ListExistingAuditLogUPIDsParams{ClusterID: cluster.ID, Upids: upids})
 	if err != nil {
 		s.logger.Warn("task sync: batch audit_log UPID check failed",
 			"cluster_id", cluster.ID, "error", err)

@@ -398,6 +398,22 @@ func TestIngestTask_AuditRowIdentity(t *testing.T) {
 	}
 }
 
+// The dedup asks about this cluster's audit entries only: an entry outlives a
+// removed cluster and a cluster added again runs the same UPIDs.
+func TestSeenTaskUPIDs_AsksAboutThisClustersAuditEntries(t *testing.T) {
+	t.Parallel()
+
+	q := newMockQueries()
+	s := &Syncer{queries: q, logger: testLogger()}
+	cluster := db.Cluster{ID: uuid.New()}
+	if _, err := s.seenTaskUPIDs(context.Background(), cluster, []string{"UPID:pve-01:00000001:00000001:66000001:qmstart:100:root@pam:"}); err != nil {
+		t.Fatalf("seenTaskUPIDs: %v", err)
+	}
+	if len(q.auditUPIDClusters) != 1 || q.auditUPIDClusters[0] != cluster.ID {
+		t.Errorf("the audit lookup was made for %v, want only %s", q.auditUPIDClusters, cluster.ID)
+	}
+}
+
 // ingestSyncFakeClient implements just the two ProxmoxClient methods syncTasks
 // touches (GetNodes, GetNodeTasks); the embedded interface stubs the rest.
 type ingestSyncFakeClient struct {

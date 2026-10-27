@@ -74,6 +74,7 @@ type mockQueries struct {
 
 	existingTaskUPIDs   map[string]bool // ListExistingTaskHistoryUPIDs echoes these back
 	existingAuditUPIDs  map[string]bool // ListExistingAuditLogUPIDs echoes these back
+	auditUPIDClusters   []uuid.UUID     // the cluster each ListExistingAuditLogUPIDs call asked about
 	crossClusterUPIDs   map[string]bool // ListCrossClusterMigrationUPIDs echoes these back
 	sdnApplyLinks       []db.LinkSDNApplyNodeTasksParams
 	externalTaskCalls   []db.InsertExternalTaskHistoryParams
@@ -447,9 +448,10 @@ func (m *mockQueries) ListExistingTaskHistoryUPIDs(_ context.Context, upids []st
 	return out, nil
 }
 
-func (m *mockQueries) ListExistingAuditLogUPIDs(_ context.Context, upids []string) ([]string, error) {
+func (m *mockQueries) ListExistingAuditLogUPIDs(_ context.Context, arg db.ListExistingAuditLogUPIDsParams) ([]string, error) {
+	m.auditUPIDClusters = append(m.auditUPIDClusters, arg.ClusterID)
 	var out []string
-	for _, u := range upids {
+	for _, u := range arg.Upids {
 		if m.existingAuditUPIDs[u] {
 			out = append(out, u)
 		}
