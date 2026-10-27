@@ -247,7 +247,7 @@ func (h *ACMEHandler) UpdateAccount(c fiber.Ctx, p *apischema.Params) error {
 		Extra:        map[string]any{"name": name},
 	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_account", name, "updated")
-	return c.JSON(fiber.Map{"status": "ok"})
+	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
 // DeleteAccount handles DELETE /clusters/:cluster_id/acme/accounts/:name.
@@ -276,7 +276,7 @@ func (h *ACMEHandler) DeleteAccount(c fiber.Ctx, p *apischema.Params) error {
 		Extra:        map[string]any{"name": name},
 	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_account", name, "deleted")
-	return c.JSON(fiber.Map{"status": "ok"})
+	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
 // --- ACME Plugins ---

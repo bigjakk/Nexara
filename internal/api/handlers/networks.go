@@ -320,7 +320,7 @@ func (h *NetworkHandler) ApplyNetworkConfig(c fiber.Ctx, p *apischema.Params) er
 		Description:  "Apply network configuration on " + nodeName,
 	})
 
-	return c.JSON(fiber.Map{"status": "ok"})
+	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
 // RevertNetworkConfig handles POST /api/v1/clusters/:cluster_id/networks/:node_name/revert.

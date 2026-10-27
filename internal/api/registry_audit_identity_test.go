@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"reflect"
 	"strconv"
 	"strings"
@@ -235,8 +236,14 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			target := strings.Replace(clusterScope, ":cluster_id", testClusterID, 1) + tc.target
 			req := jsonRequest(tc.method, target, tc.body)
 			req.Header.Set("X-Test-User", "yes")
-			if status, env := send(t, app, req); status < 200 || status > 299 {
-				t.Fatalf("status = %d (%q), want 2xx", status, env.Message)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("app.Test: %v", err)
+			}
+			reply, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode > 299 {
+				t.Fatalf("status = %d (%s), want 2xx", resp.StatusCode, reply)
 			}
 
 			if len(dbtx.audits) != 1 {
@@ -260,6 +267,15 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			for key, want := range tc.wantDetails {
 				if !reflect.DeepEqual(details[key], want) {
 					t.Errorf("detail %s = %v, want %v", key, details[key], want)
+				}
+			}
+			if tc.wantTask {
+				// The UI follows the task by the UPID in the reply.
+				var body struct {
+					UPID string `json:"upid"`
+				}
+				if err := json.Unmarshal(reply, &body); err != nil || body.UPID != tc.wantDetails["upid"] {
+					t.Errorf("the reply is %s, want the task's UPID %v", reply, tc.wantDetails["upid"])
 				}
 			}
 			tasked := false

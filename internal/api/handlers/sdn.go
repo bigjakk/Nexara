@@ -486,7 +486,7 @@ func (h *NetworkHandler) ApplySDN(c fiber.Ctx, p *apischema.Params) error {
 		Description:  "Apply SDN configuration",
 	})
 
-	return c.JSON(fiber.Map{"status": "ok"})
+	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
 // --- SDN Controllers ---
