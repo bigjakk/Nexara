@@ -1937,6 +1937,38 @@ export, so a SIEM decoder can key a rule on the guest without re-parsing the
 `details` JSON. They are appended after `details`, so params an existing decoder
 already matches keep their position.
 
+#### Storage and backup identity on an audit entry
+
+An entry about a storage, a Proxmox Backup Server or a backup job names it in
+`resource_type` and `resource_id` by an identity that outlives the inventory row
+Nexara happens to hold for it:
+
+| Object | `resource_type` | `resource_id` | In `details` |
+|--------|-----------------|---------------|--------------|
+| Storage | `storage` | the storage's name, as Proxmox calls it on every node | `storage`; `node` when the action ran on one node |
+| An upload, copy or URL download run outside Nexara | `node` | the node's name: Proxmox's task names no storage | `node`, `task_type` |
+| PBS server and its datastores | `pbs_server` | the PBS server's id | `datastore` on a datastore action; `pbs_upid` on the garbage collection or job it started |
+| Veeam server | `veeam_server` | the Veeam server's id | |
+| Veeam job, Veeam session | `veeam_job`, `veeam_session` | Veeam's own id for it | `veeam_server_id`; a session also `veeam_job_id` |
+| Proxmox backup job | `backup` | the id Proxmox gave the job | |
+
+A disk move records the storage it left as `from_storage` beside the one it
+wrote to (`storage`, or `target_storage` when a migration job made the move),
+and a restore records the storage the archive was read from as `from_storage`.
+Nexara keeps one inventory row per node for a shared storage and drops and
+re-creates it when a node is unseen for a few minutes, so an entry that
+recorded that row's id stopped resolving at an arbitrary later time.
+
+Entries written before v1.17.0 keep the identity they were written with, since
+an audit entry is never rewritten: a storage's `update`, `delete`, `upload`,
+`delete_content`, `pull_oci`, `download_url` and `download_appliance` entries are
+keyed by an inventory row id that may no longer resolve (`details.storage` names
+the storage on all but `update` and `delete`); a PBS datastore action is
+`resource_type` `backup`, keyed by the datastore's name, a snapshot's
+`store/type/id` or a job's id, with no server; and a backup job's
+`backup_job_created` entry is keyed `backup-job`; an upload, copy or download
+run outside Nexara is `storage`, keyed by the node's name or the file's.
+
 #### Export
 
 `GET /audit-log/export?format=json|csv|syslog` returns a downloadable file,
