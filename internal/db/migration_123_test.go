@@ -74,7 +74,7 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 	const px, nx = "proxmox", "nexara"
 	const (
 		upidSDN  = "UPID:pve-01:0000A1B2:00000001:6A8CE407:reloadnetworkall::root@pam:"
-		upidSDN2 = "UPID:pve-01:0000A1B3:00000002:6A8CE408:reloadnetworkall::root@pam!nexara:"
+		upidSDN2 = "UPID:pve-01:0000A1B3:00000002:6A8CE408:reloadnetworkall::root@pam!token01:"
 	)
 	base := time.Now().UTC().Truncate(time.Second).Add(-24 * time.Hour)
 	at := func(d time.Duration) time.Time { return base.Add(d) }
@@ -173,28 +173,28 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		// Nexara's own applies, and the copies the collector made of them.
 		{name: "Nexara's SDN apply", offset: 3 * time.Hour, old: shape{"sdn", "cluster", "sdn_applied"}},
 		{name: "its copy, made by Nexara's token, stays", source: px, offset: 3*time.Hour + time.Minute,
-			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam!nexara","node":"pve-01","upid":"` + upidSDN2 + `"}`,
+			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam!token01","node":"pve-01","upid":"` + upidSDN2 + `"}`,
 			old:     shape{"network", "pve-01", "reload"}},
 		{name: "a copy made by a person is theirs and moves", source: px, offset: 3*time.Hour + 30*time.Second,
 			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam","node":"pve-02"}`,
 			old:     shape{"network", "pve-02", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
 		{name: "a copy five minutes from Nexara's apply moves", source: px, offset: 3*time.Hour + 5*time.Minute,
-			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam!nexara","node":"pve-01"}`,
+			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam!token01","node":"pve-01"}`,
 			old:     shape{"network", "pve-01", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
 		{name: "Nexara's network apply of a node", offset: 4 * time.Hour, old: shape{"network", "pve-04", "network_applied"}},
 		{name: "its copy, made by Nexara's token, stays too", source: px, offset: 4*time.Hour + 30*time.Second,
-			details: `{"task_type":"srvreload","proxmox_user":"root@pam!nexara","node":"pve-04"}`,
+			details: `{"task_type":"srvreload","proxmox_user":"root@pam!token01","node":"pve-04"}`,
 			old:     shape{"node", "networking", "service_reload"}},
 		{name: "a node apply by a person moves", source: px, offset: 4*time.Hour + 30*time.Second,
 			details: `{"task_type":"srvreload","proxmox_user":"root@pam","node":"pve-04"}`,
 			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-04", "network_applied"}},
 		{name: "a copy of another node's apply moves", source: px, offset: 4*time.Hour + 30*time.Second,
-			details: `{"task_type":"srvreload","proxmox_user":"root@pam!nexara","node":"pve-05"}`,
+			details: `{"task_type":"srvreload","proxmox_user":"root@pam!token01","node":"pve-05"}`,
 			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-05", "network_applied"}},
 		// An apply of Nexara's on ANOTHER cluster is nobody's twin here.
 		{name: "another cluster's apply", cluster: m123Other, offset: 5 * time.Hour, old: shape{"sdn", "cluster", "sdn_applied"}},
 		{name: "a copy whose only twin is on another cluster moves", source: px, offset: 5*time.Hour + 10*time.Second,
-			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam!nexara","node":"pve-01"}`,
+			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam!token01","node":"pve-01"}`,
 			old:     shape{"network", "pve-01", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
 	}
 
