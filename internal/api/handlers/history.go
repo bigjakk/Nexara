@@ -432,6 +432,12 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 				return db.ListHistoryParams{}, fmt.Errorf("history kind %q is global and selected %q, "+
 					"whose ids are unique only within a cluster", k.Name, o.ResourceType)
 			}
+			// A details value — a datastore's name — repeats on every server:
+			// only its parent's id is unique across Nexara.
+			if o.DetailKey != "" && o.ResourceID == "" {
+				return db.ListHistoryParams{}, fmt.Errorf("history kind %q is global and selected %+v by a "+
+					"details key with no resource id", k.Name, o)
+			}
 		}
 		clusterID = uuid.Nil
 	}

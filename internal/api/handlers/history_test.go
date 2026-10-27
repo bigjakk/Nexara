@@ -227,6 +227,7 @@ func TestHistoryKindListParams(t *testing.T) {
 		"a guest":           {Guests: []HistoryGuest{{VMID: 100}}},
 		"a node, by name":   {Objects: []HistoryObject{{ResourceType: "node", Value: "pve-01"}}},
 		"a guest's workers": {GuestWorkers: []string{"ha%"}},
+		"a key, no parent":  {Objects: []HistoryObject{{ResourceType: "pbs_server", DetailKey: "datastore", Value: "datastore01"}}},
 	} {
 		if _, err := global.ListParams([16]byte{1}, sel); err == nil {
 			t.Errorf("a global kind selecting %s was accepted", name)
