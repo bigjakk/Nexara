@@ -72,10 +72,15 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 
 	type shape struct{ rtype, rid, action string }
 	const px, nx = "proxmox", "nexara"
-	const (
-		upidSDN  = "UPID:pve-01:0000A1B2:00000001:6A8CE407:reloadnetworkall::root@pam:"
-		upidSDN2 = "UPID:pve-01:0000A1B3:00000002:6A8CE408:reloadnetworkall::root@pam!token01:"
-	)
+	// A UPID carries the user a task ran as, token included; the task list
+	// reports a finished task's user bare, so a row's proxmox_user is bare here.
+	upidOf := func(taskType, id, user string) string {
+		return "UPID:pve-01:0000A1B2:00000001:6A8CE407:" + taskType + ":" + id + ":" + user + ":"
+	}
+	taskDetails := func(taskType, id, node, bareUser, upidUser string) string {
+		return `{"task_type":"` + taskType + `","proxmox_user":"` + bareUser + `","node":"` + node + `","upid":"` + upidOf(taskType, id, upidUser) + `"}`
+	}
+	upidSDN := upidOf("reloadnetworkall", "", "root@pam")
 	base := time.Now().UTC().Truncate(time.Second).Add(-24 * time.Hour)
 	at := func(d time.Duration) time.Time { return base.Add(d) }
 
@@ -87,6 +92,7 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 		offset     time.Duration // created_at, from the start of the scenario
 		old, want  shape         // want is zero for a row that must stay
 		wantDetail map[string]string
+		noDetail   []string // details the row must not carry once re-filed
 	}
 	rows := []testRow{
 		// SDN: a kind per type, and the subnet create filed under the id Proxmox gave.
@@ -100,8 +106,37 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 			old: shape{"sdn", "vnet02", "sdn_vnet_created"}, want: shape{"sdn_vnet", "vnet02", "sdn_vnet_created"}},
 		{name: "subnet create, from its VNet's zone", offset: time.Minute, details: `{"vnet":"vnet02","subnet":"198.51.100.0/24"}`,
 			old: shape{"sdn", "vnet02/198.51.100.0/24", "sdn_subnet_created"}, want: shape{"sdn_subnet", "vnet02/zone02-198.51.100.0-24", "sdn_subnet_created"}},
+		{name: "a VNet's create from after the subnet's is not its zone", offset: 2 * time.Hour, details: `{"vnet":"vnet04","zone":"zone04"}`,
+			old: shape{"sdn", "vnet04", "sdn_vnet_created"}, want: shape{"sdn_vnet", "vnet04", "sdn_vnet_created"}},
+		{name: "subnet create before its VNet's row stays unresolved", details: `{"vnet":"vnet04","subnet":"198.51.100.0/24"}`,
+			old: shape{"sdn", "vnet04/198.51.100.0/24", "sdn_subnet_created"}, want: shape{"sdn_subnet", "vnet04/198.51.100.0/24", "sdn_subnet_created"}},
 		{name: "subnet create it cannot resolve", details: `{"vnet":"vnet03","subnet":"203.0.113.0/24"}`,
 			old: shape{"sdn", "vnet03/203.0.113.0/24", "sdn_subnet_created"}, want: shape{"sdn_subnet", "vnet03/203.0.113.0/24", "sdn_subnet_created"}},
+		// A subnet's id is its own edit's, else the zone of its VNet's latest create before it; this cluster's rows only.
+		{name: "an edit of another subnet of the VNet is not this one's id", details: `{"vnet":"vnet05","subnet":"192.0.2.0/24"}`,
+			old: shape{"sdn", "vnet05/192.0.2.0/24", "sdn_subnet_created"}, want: shape{"sdn_subnet", "vnet05/192.0.2.0/24", "sdn_subnet_created"}},
+		{name: "that other subnet's edit", offset: time.Minute,
+			old: shape{"sdn", "vnet05/zone05-198.51.100.0-24", "sdn_subnet_updated"}, want: shape{"sdn_subnet", "vnet05/zone05-198.51.100.0-24", "sdn_subnet_updated"}},
+		{name: "another cluster's subnet create has neither this cluster's edit nor its VNet", cluster: m123Other, offset: 2 * time.Minute, details: `{"vnet":"vnet06","subnet":"192.0.2.0/24"}`,
+			old: shape{"sdn", "vnet06/192.0.2.0/24", "sdn_subnet_created"}, want: shape{"sdn_subnet", "vnet06/192.0.2.0/24", "sdn_subnet_created"}},
+		{name: "this cluster's VNet of that name", details: `{"vnet":"vnet06","zone":"zone06"}`,
+			old: shape{"sdn", "vnet06", "sdn_vnet_created"}, want: shape{"sdn_vnet", "vnet06", "sdn_vnet_created"}},
+		{name: "this cluster's edit of that subnet", offset: time.Minute,
+			old: shape{"sdn", "vnet06/zone06-192.0.2.0-24", "sdn_subnet_updated"}, want: shape{"sdn_subnet", "vnet06/zone06-192.0.2.0-24", "sdn_subnet_updated"}},
+		{name: "a VNet's first create", offset: 10 * time.Minute, details: `{"vnet":"vnet07","zone":"zone07a"}`,
+			old: shape{"sdn", "vnet07", "sdn_vnet_created"}, want: shape{"sdn_vnet", "vnet07", "sdn_vnet_created"}},
+		{name: "its create in another zone", offset: 11 * time.Minute, details: `{"vnet":"vnet07","zone":"zone07b"}`,
+			old: shape{"sdn", "vnet07", "sdn_vnet_created"}, want: shape{"sdn_vnet", "vnet07", "sdn_vnet_created"}},
+		{name: "its latest create names no zone", offset: 11*time.Minute + 30*time.Second, details: `{"vnet":"vnet07"}`,
+			old: shape{"sdn", "vnet07", "sdn_vnet_created"}, want: shape{"sdn_vnet", "vnet07", "sdn_vnet_created"}},
+		{name: "a subnet after all three takes the latest zone named", offset: 12 * time.Minute, details: `{"vnet":"vnet07","subnet":"192.0.2.0/24"}`,
+			old: shape{"sdn", "vnet07/192.0.2.0/24", "sdn_subnet_created"}, want: shape{"sdn_subnet", "vnet07/zone07b-192.0.2.0-24", "sdn_subnet_created"}},
+		{name: "a VNet whose subnet was later edited under another zone", offset: 10 * time.Minute, details: `{"vnet":"vnet08","zone":"zone08a"}`,
+			old: shape{"sdn", "vnet08", "sdn_vnet_created"}, want: shape{"sdn_vnet", "vnet08", "sdn_vnet_created"}},
+		{name: "its subnet takes the id the edit carries, not the VNet's zone", offset: 12 * time.Minute, details: `{"vnet":"vnet08","subnet":"192.0.2.0/24"}`,
+			old: shape{"sdn", "vnet08/192.0.2.0/24", "sdn_subnet_created"}, want: shape{"sdn_subnet", "vnet08/zone08b-192.0.2.0-24", "sdn_subnet_created"}},
+		{name: "the edit", offset: 13 * time.Minute,
+			old: shape{"sdn", "vnet08/zone08b-192.0.2.0-24", "sdn_subnet_updated"}, want: shape{"sdn_subnet", "vnet08/zone08b-192.0.2.0-24", "sdn_subnet_updated"}},
 
 		// Firewall: rules by their set, the cluster's options, names folded to lower case.
 		{name: "cluster rule create", old: shape{"network", "cluster", "firewall_rule_created"}, want: shape{"firewall_rule", "cluster", "firewall_rule_created"}},
@@ -163,45 +198,80 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 			old: shape{"node", "pve-01", "acme_new_cert"}, want: shape{"certificate", "pve-01", "ordered"}},
 		{name: "a certificate row Nexara files today stays", old: shape{"certificate", "pve-01", "renewed"}},
 
-		// The SDN apply as the collector ingested it, and Nexara's own beside it.
-		{name: "an SDN apply made in Proxmox", source: px, offset: 1 * time.Hour,
-			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam","node":"pve-01","upid":"` + upidSDN + `"}`,
+		// The SDN apply as the collector ingested it, and the nodes' reloads of it.
+		{name: "an SDN apply made in Proxmox", source: px, offset: time.Hour,
+			details: taskDetails("reloadnetworkall", "", "pve-01", "root@pam", "root@pam"),
 			old:     shape{"network", "pve-01", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
-		{name: "the nodes' reloads of that apply are parts of it", source: px, offset: 1*time.Hour + 20*time.Second,
-			details: `{"task_type":"srvreload","proxmox_user":"root@pam","node":"pve-02"}`,
-			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-02", "network_reloaded_by_sdn"},
+		{name: "a reload by root@pam during it is annotated with it", source: px, offset: time.Hour + 20*time.Second,
+			details: taskDetails("srvreload", "networking", "pve-02", "root@pam", "root@pam"),
+			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-02", "network_applied"},
 			wantDetail: map[string]string{"parent_upid": upidSDN}},
-		{name: "a reload an hour after it is a network apply", source: px, offset: 2*time.Hour + 20*time.Second,
-			details: `{"task_type":"srvreload","proxmox_user":"root@pam","node":"pve-03"}`,
-			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-03", "network_applied"}},
+		{name: "a person's reload in the same minute is not", source: px, offset: time.Hour + 30*time.Second,
+			details: taskDetails("srvreload", "networking", "pve-03", "admin@pam", "admin@pam"),
+			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-03", "network_applied"}, noDetail: []string{"parent_upid"}},
+		{name: "a token's reload in the same minute is not", source: px, offset: time.Hour + 40*time.Second,
+			details: taskDetails("srvreload", "networking", "pve-03", "root@pam", "root@pam!tool"),
+			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-03", "network_applied"}, noDetail: []string{"parent_upid"}},
+		{name: "a reload just before the apply started is not", source: px, offset: time.Hour - 5*time.Second,
+			details: taskDetails("srvreload", "networking", "pve-03", "root@pam", "root@pam"),
+			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-03", "network_applied"}, noDetail: []string{"parent_upid"}},
+		{name: "a reload just inside the apply's assumed end is annotated", source: px, offset: time.Hour + 15*time.Minute + 5*time.Second,
+			details: taskDetails("srvreload", "networking", "pve-02", "root@pam", "root@pam"),
+			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-02", "network_applied"},
+			wantDetail: map[string]string{"parent_upid": upidSDN}},
+		{name: "a reload just past it is not", source: px, offset: time.Hour + 15*time.Minute + 30*time.Second,
+			details: taskDetails("srvreload", "networking", "pve-03", "root@pam", "root@pam"),
+			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-03", "network_applied"}, noDetail: []string{"parent_upid"}},
+		{name: "a reload an hour after it is not", source: px, offset: 2*time.Hour + 20*time.Second,
+			details: taskDetails("srvreload", "networking", "pve-03", "root@pam", "root@pam"),
+			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-03", "network_applied"}, noDetail: []string{"parent_upid"}},
 		{name: "another service reload stays", source: px, details: `{"task_type":"srvreload","node":"pve-01"}`, old: shape{"node", "pveproxy", "service_reload"}},
 
-		// Nexara's own applies, and the copies the collector made of them.
+		// Nexara's own applies, and the copies the collector made of them: a copy by a
+		// token of the user the cluster is configured with (user@pam!test), whose user
+		// is in the UPID and bare in the row.
 		{name: "Nexara's SDN apply", offset: 3 * time.Hour, old: shape{"sdn", "cluster", "sdn_applied"}},
-		{name: "its copy, made by Nexara's token, stays", source: px, offset: 3*time.Hour + time.Minute,
-			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam!token01","node":"pve-01","upid":"` + upidSDN2 + `"}`,
+		{name: "its copy, by a token of the cluster's user, stays", source: px, offset: 3*time.Hour + time.Minute,
+			details: taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!token01"),
 			old:     shape{"network", "pve-01", "reload"}},
-		{name: "a copy made by a person is theirs and moves", source: px, offset: 3*time.Hour + 30*time.Second,
-			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam","node":"pve-02"}`,
+		{name: "a copy by an earlier token of that user stays too", source: px, offset: 3*time.Hour + 90*time.Second,
+			details: taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!earlier"),
+			old:     shape{"network", "pve-01", "reload"}},
+		{name: "a copy by a person is theirs and moves", source: px, offset: 3*time.Hour + 30*time.Second,
+			details: taskDetails("reloadnetworkall", "", "pve-02", "root@pam", "root@pam"),
+			old:     shape{"network", "pve-02", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
+		{name: "a copy by the cluster's user without a token moves", source: px, offset: 3*time.Hour + 40*time.Second,
+			details: taskDetails("reloadnetworkall", "", "pve-02", "user@pam", "user@pam"),
+			old:     shape{"network", "pve-02", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
+		{name: "a copy by another tool's token moves", source: px, offset: 3*time.Hour + 20*time.Second,
+			details: taskDetails("reloadnetworkall", "", "pve-02", "other@pam", "other@pam!tool"),
 			old:     shape{"network", "pve-02", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
 		{name: "a copy five minutes from Nexara's apply moves", source: px, offset: 3*time.Hour + 5*time.Minute,
-			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam!token01","node":"pve-01"}`,
+			details: taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!token01"),
 			old:     shape{"network", "pve-01", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
 		{name: "Nexara's network apply of a node", offset: 4 * time.Hour, old: shape{"network", "pve-04", "network_applied"}},
-		{name: "its copy, made by Nexara's token, stays too", source: px, offset: 4*time.Hour + 30*time.Second,
-			details: `{"task_type":"srvreload","proxmox_user":"root@pam!token01","node":"pve-04"}`,
+		{name: "its copy, by a token of the cluster's user, stays too", source: px, offset: 4*time.Hour + 30*time.Second,
+			details: taskDetails("srvreload", "networking", "pve-04", "user@pam", "user@pam!token01"),
 			old:     shape{"node", "networking", "service_reload"}},
 		{name: "a node apply by a person moves", source: px, offset: 4*time.Hour + 30*time.Second,
-			details: `{"task_type":"srvreload","proxmox_user":"root@pam","node":"pve-04"}`,
+			details: taskDetails("srvreload", "networking", "pve-04", "root@pam", "root@pam"),
 			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-04", "network_applied"}},
 		{name: "a copy of another node's apply moves", source: px, offset: 4*time.Hour + 30*time.Second,
-			details: `{"task_type":"srvreload","proxmox_user":"root@pam!token01","node":"pve-05"}`,
+			details: taskDetails("srvreload", "networking", "pve-05", "user@pam", "user@pam!token01"),
 			old:     shape{"node", "networking", "service_reload"}, want: shape{"network", "pve-05", "network_applied"}},
 		// An apply of Nexara's on ANOTHER cluster is nobody's twin here.
 		{name: "another cluster's apply", cluster: m123Other, offset: 5 * time.Hour, old: shape{"sdn", "cluster", "sdn_applied"}},
 		{name: "a copy whose only twin is on another cluster moves", source: px, offset: 5*time.Hour + 10*time.Second,
-			details: `{"task_type":"reloadnetworkall","proxmox_user":"root@pam!token01","node":"pve-01"}`,
+			details: taskDetails("reloadnetworkall", "", "pve-01", "user@pam", "user@pam!token01"),
 			old:     shape{"network", "pve-01", "reload"}, want: shape{"sdn", "cluster", "sdn_applied"}},
+
+		// Another migration's trace on a row this one leaves alone is not this one's.
+		{name: "another migration's trace on a row this one re-files is replaced by this one's",
+			details: `{"rekeyed_from":{"by":"another_migration","resource_type":"x","resource_id":"y","action":"z"}}`,
+			old:     shape{"sdn", "dmz02", "sdn_zone_created"}, want: shape{"sdn_zone", "dmz02", "sdn_zone_created"}},
+		{name: "a row carrying another migration's trace is left alone",
+			details: `{"rekeyed_from":{"by":"another_migration","resource_type":"x","resource_id":"y","action":"z"}}`,
+			old:     shape{"vm", "100", "start"}},
 	}
 
 	ids := make([]uuid.UUID, len(rows))
@@ -268,15 +338,22 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 				t.Errorf("pass %d, %s: row is %+v, want %+v", pass, tc.name, got.shape, want)
 			}
 			// A row that moved says what it was, from its first filing; one that did not carries no mark.
+			// Tagged with this migration's name; one that stayed carries none of ours.
+			ours := got.rekeyed["by"] == "cluster_object_audit_keys"
 			switch {
-			case moved && (got.rekeyed["resource_type"] != tc.old.rtype || got.rekeyed["resource_id"] != tc.old.rid || got.rekeyed["action"] != tc.old.action):
-				t.Errorf("pass %d, %s: rekeyed_from = %v, want the original %+v", pass, tc.name, got.rekeyed, tc.old)
-			case !moved && got.rekeyed != nil:
-				t.Errorf("pass %d, %s: a row that stayed carries rekeyed_from %v", pass, tc.name, got.rekeyed)
+			case moved && (!ours || got.rekeyed["resource_type"] != tc.old.rtype || got.rekeyed["resource_id"] != tc.old.rid || got.rekeyed["action"] != tc.old.action):
+				t.Errorf("pass %d, %s: rekeyed_from = %v, want the original %+v tagged by the migration", pass, tc.name, got.rekeyed, tc.old)
+			case !moved && ours:
+				t.Errorf("pass %d, %s: a row that stayed carries this migration's rekeyed_from %v", pass, tc.name, got.rekeyed)
 			}
 			for k, v := range tc.wantDetail {
 				if got.details[k] != v {
 					t.Errorf("pass %d, %s: details.%s = %v, want %q", pass, tc.name, k, got.details[k], v)
+				}
+			}
+			for _, k := range tc.noDetail {
+				if _, has := got.details[k]; has {
+					t.Errorf("pass %d, %s: details carries %s, which this row must not", pass, tc.name, k)
 				}
 			}
 		}
@@ -286,8 +363,10 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 	run("down", down)
 	for i, tc := range rows {
 		got := load(i)
-		if got.shape != tc.old || got.rekeyed != nil || got.details["parent_upid"] != nil {
-			t.Errorf("after the down, %s: %+v (rekeyed %v, parent %v), want %+v with no marks", tc.name, got.shape, got.rekeyed, got.details["parent_upid"], tc.old)
+		foreign := got.rekeyed["by"] == "another_migration"
+		if got.shape != tc.old || got.rekeyed["by"] == "cluster_object_audit_keys" || got.details["parent_upid"] != nil ||
+			(tc.name == "a row carrying another migration's trace is left alone") != foreign {
+			t.Errorf("after the down, %s: %+v (rekeyed %v, parent %v), want %+v with no mark of this migration and another's kept", tc.name, got.shape, got.rekeyed, got.details["parent_upid"], tc.old)
 		}
 	}
 }

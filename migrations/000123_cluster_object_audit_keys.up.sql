@@ -14,10 +14,12 @@
 --
 -- What it leaves a trace of. audit_log is a security record, so every statement
 -- that changes a row records the originals, in the same UPDATE, as
--- details.rekeyed_from = {resource_type, resource_id, action}. A row two
+-- details.rekeyed_from = {by, resource_type, resource_id, action}, where `by` is
+-- this migration's NAME (numbers change when branches merge). A row two of its
 -- statements touch keeps its FIRST original. The rest of the old shape also
 -- survives in details (name, path, sid, position, task_type), and the down
--- migration restores the originals from rekeyed_from.
+-- migration restores the originals of the rows tagged with this name, and only
+-- those.
 --
 -- What it can run twice over. Each statement's WHERE matches only the OLD shape
 -- of a row, so a second run changes nothing and the rows it leaves are the same
@@ -39,62 +41,90 @@
 --   - a Proxmox-sourced copy of an apply Nexara made itself. Until now the SDN
 --     apply and the node network apply did not keep the task's UPID, so the
 --     collector ingested each as a second row beside Nexara's own: filed under
---     the new key it would show twice for ever. A copy with a Nexara row for the
---     same apply within two minutes, made by an API token, stays where it is.
+--     the new key it would show twice for ever. A copy stays where it is when
+--     Nexara has a row for the same apply within two minutes (same cluster, and
+--     for a node apply the same node) and the copy was made by an API token of
+--     the user the cluster is configured with: the user in the UPID, which is
+--     where Proxmox keeps the token for every task (the task list moves it into a
+--     field of its own once the task has finished), with the same user@realm as
+--     the cluster's token_id, so that an earlier token of that user counts and
+--     another tool's does not.
+--
+-- Time. A migration gets about three minutes at container start before the
+-- orchestrator replaces the task and the transaction rolls back. No statement
+-- reads audit_log whole: each is bounded by its indexes on resource_type or
+-- action, and the one lookup per row (the parent of a reload) by a time range.
+-- Measured on a synthetic audit_log of 1,001,000 rows, 94,589 of them to re-file
+-- (far more than an install holds of these kinds): 9.5 s with the table cached,
+-- 12.8 s from empty shared buffers, the commit 23 ms; the down takes 6.7 s. The
+-- time is mostly the writing of the re-filed rows, about 0.1 ms each.
 
 -- SDN: the six kinds all filed under "sdn", the kind only in the action
 -- (sdn_zone_created ...). A zone and a VNet may share an id, so the History of
 -- one must not read the other's rows. The apply stays "sdn", id "cluster".
 UPDATE audit_log
 SET resource_type = regexp_replace(action, '^(sdn_[a-z]+)_(created|updated|deleted)$', '\1'),
-    details = CASE WHEN details ? 'rekeyed_from' THEN details
-                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'sdn'
   AND action ~ '^sdn_(zone|vnet|subnet|controller|ipam|dns)_(created|updated|deleted)$';
 
+-- The kinds just written are new values of resource_type, which the table's
+-- statistics do not know. Without them the next statement is planned as if its
+-- three sets were a row each and compares every one with every other.
+ANALYZE audit_log (resource_type);
+
 -- An SDN subnet is addressed by the id Proxmox derives from its zone and CIDR
 -- ("zone01-192.0.2.0-24"). The create was filed under the CIDR it took
--- ("vnet01/192.0.2.0/24"); where a later update or delete of the same subnet
--- carries the id, or the VNet's create row says its zone, the create row moves
--- to it.
-WITH creates AS (
-    SELECT c.id, c.cluster_id,
+-- ("vnet01/192.0.2.0/24"); where an update or delete of the same subnet carries
+-- the id, or the VNet's create row (the latest before the subnet's) says its
+-- zone, the create row moves to it. The candidates come from joins of three
+-- sets, each read once, so the cost is not that of a lookup per create.
+WITH creates AS MATERIALIZED (
+    SELECT c.id, c.cluster_id, c.created_at,
            split_part(c.resource_id, '/', 1) AS vnet,
            replace(substr(c.resource_id, strpos(c.resource_id, '/') + 1), '/', '-') AS dashed
     FROM audit_log c
     WHERE c.resource_type = 'sdn_subnet'
       AND c.action = 'sdn_subnet_created'
       AND c.resource_id ~ '^[^/]+/[^/]+/[0-9]+$'
+), edits AS MATERIALIZED (
+    SELECT u.cluster_id, split_part(u.resource_id, '/', 1) AS vnet, u.resource_id, u.created_at
+    FROM audit_log u
+    WHERE u.resource_type = 'sdn_subnet'
+      AND u.action IN ('sdn_subnet_updated', 'sdn_subnet_deleted')
+), vnets AS MATERIALIZED (
+    SELECT z.cluster_id, z.resource_id AS vnet, z.created_at, z.details->>'zone' AS zone
+    FROM audit_log z
+    WHERE z.resource_type = 'sdn_vnet'
+      AND z.action = 'sdn_vnet_created'
+      AND COALESCE(z.details->>'zone', '') <> ''
 ), resolved AS (
-    SELECT cr.id,
-           COALESCE(
-               (SELECT substr(u.resource_id, length(cr.vnet) + 2)
-                FROM audit_log u
-                WHERE u.cluster_id = cr.cluster_id
-                  AND u.resource_type = 'sdn_subnet'
-                  AND u.action IN ('sdn_subnet_updated', 'sdn_subnet_deleted')
-                  AND starts_with(u.resource_id, cr.vnet || '/')
-                  AND right(u.resource_id, length(cr.dashed) + 1) = '-' || cr.dashed
-                ORDER BY u.created_at
-                LIMIT 1),
-               (SELECT z.details->>'zone' || '-' || cr.dashed
-                FROM audit_log z
-                WHERE z.cluster_id = cr.cluster_id
-                  AND z.resource_type = 'sdn_vnet'
-                  AND z.action = 'sdn_vnet_created'
-                  AND z.resource_id = cr.vnet
-                  AND COALESCE(z.details->>'zone', '') <> ''
-                ORDER BY z.created_at DESC
-                LIMIT 1)
-           ) AS subnet_id
-    FROM creates cr
+    -- An edit's id first (the earliest), else the zone of the latest VNet row before the create.
+    SELECT DISTINCT ON (id) id, subnet_id
+    FROM (
+        SELECT cr.id, 0 AS pref, u.created_at AS earliest, NULL::timestamptz AS latest,
+               substr(u.resource_id, length(cr.vnet) + 2) AS subnet_id
+        FROM creates cr
+        JOIN edits u ON u.cluster_id = cr.cluster_id
+                    AND u.vnet = cr.vnet
+                    AND starts_with(u.resource_id, cr.vnet || '/')
+                    AND right(u.resource_id, length(cr.dashed) + 1) = '-' || cr.dashed
+        UNION ALL
+        SELECT cr.id, 1, NULL, z.created_at, z.zone || '-' || cr.dashed
+        FROM creates cr
+        JOIN vnets z ON z.cluster_id = cr.cluster_id
+                    AND z.vnet = cr.vnet
+                    AND z.created_at <= cr.created_at
+    ) candidates
+    ORDER BY id, pref, earliest, latest DESC
 )
 UPDATE audit_log c
 SET resource_id = split_part(c.resource_id, '/', 1) || '/' || r.subnet_id,
-    details = CASE WHEN c.details ? 'rekeyed_from' THEN c.details
-                   ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END
+    details = CASE WHEN c.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN c.details
+                   ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END
 FROM resolved r
-WHERE c.id = r.id AND r.subnet_id IS NOT NULL;
+WHERE c.id = r.id;
 
 -- Firewall: rules and the cluster options filed under "network" (and, in the
 -- first releases, under "firewall"), beside the interface events. A rule is
@@ -105,8 +135,8 @@ WHERE c.id = r.id AND r.subnet_id IS NOT NULL;
 UPDATE audit_log
 SET resource_type = 'firewall_rule',
     resource_id = regexp_replace(resource_id, '/rule/[0-9]+$', ''),
-    details = CASE WHEN details ? 'rekeyed_from' THEN details
-                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type IN ('network', 'firewall')
   AND action IN ('firewall_rule_created', 'firewall_rule_updated', 'firewall_rule_deleted')
   AND resource_id ~ '^(cluster|vm/[0-9]+)(/rule/[0-9]+)?$';
@@ -116,8 +146,8 @@ WHERE resource_type IN ('network', 'firewall')
 UPDATE audit_log
 SET resource_type = 'firewall_options',
     resource_id = 'cluster',
-    details = CASE WHEN details ? 'rekeyed_from' THEN details
-                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type IN ('network', 'firewall')
   AND action = 'firewall_options_updated'
   AND resource_id = 'cluster/options';
@@ -127,16 +157,16 @@ WHERE resource_type IN ('network', 'firewall')
 -- is lc()'d when the config is parsed).
 UPDATE audit_log
 SET resource_id = lower(resource_id),
-    details = CASE WHEN details ? 'rekeyed_from' THEN details
-                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type IN ('firewall_alias', 'firewall_ipset', 'firewall_security_group', 'firewall_security_group_rule')
   AND resource_id <> lower(resource_id);
 
 -- An IP set entry is <set>/<entry>: only the set is a name.
 UPDATE audit_log
 SET resource_id = lower(split_part(resource_id, '/', 1)) || substr(resource_id, length(split_part(resource_id, '/', 1)) + 1),
-    details = CASE WHEN details ? 'rekeyed_from' THEN details
-                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'firewall_ipset_entry'
   AND split_part(resource_id, '/', 1) <> lower(split_part(resource_id, '/', 1));
 
@@ -144,8 +174,8 @@ WHERE resource_type = 'firewall_ipset_entry'
 -- (PVE::AccessControl::normalize_path).
 UPDATE audit_log
 SET resource_id = regexp_replace(regexp_replace(resource_id, '/{2,}', '/', 'g'), '(.)/$', '\1'),
-    details = CASE WHEN details ? 'rekeyed_from' THEN details
-                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'pve_acl'
   AND resource_id <> regexp_replace(regexp_replace(resource_id, '/{2,}', '/', 'g'), '(.)/$', '\1');
 
@@ -160,8 +190,8 @@ UPDATE audit_log a
 SET resource_type = m.resource_type,
     action = m.action,
     resource_id = substr(a.resource_id, length(m.strip) + 1),
-    details = CASE WHEN a.details ? 'rekeyed_from' THEN a.details
-                   ELSE a.details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', a.resource_type, 'resource_id', a.resource_id, 'action', a.action)) END
+    details = CASE WHEN a.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN a.details
+                   ELSE a.details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', a.resource_type, 'resource_id', a.resource_id, 'action', a.action)) END
 FROM (VALUES
     ('cephcreateosd',   'ceph_osd',  'osd_create',  '',     '^[^[:cntrl:]\u00ad\u0600\u0601-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200c-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9\ufffa-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020\U000e0021-\U000e007f]+$'),
     ('cephdestroyosd',  'ceph_osd',  'osd_destroy', 'osd.', '^[0-9]{1,9}$'),
@@ -192,8 +222,8 @@ UPDATE audit_log
 SET resource_type = 'ceph_' || split_part(resource_id, '.', 1),
     action = split_part(resource_id, '.', 1) || '_' || substr(action, 4),
     resource_id = substr(resource_id, strpos(resource_id, '.') + 1),
-    details = CASE WHEN details ? 'rekeyed_from' THEN details
-                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'proxmox_task'
   AND source = 'proxmox'
   AND action IN ('srvstart', 'srvstop', 'srvrestart')
@@ -211,8 +241,8 @@ SET resource_type = 'certificate',
         WHEN 'acmerenew'   THEN 'renewed'
         ELSE 'revoked'
     END,
-    details = CASE WHEN details ? 'rekeyed_from' THEN details
-                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+    details = CASE WHEN details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN details
+                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE source = 'proxmox'
   AND action IN ('acme_new_cert', 'acmerenew', 'acmerevoke')
   AND resource_type IN ('node', 'proxmox_task')
@@ -220,18 +250,21 @@ WHERE source = 'proxmox'
 
 -- The SDN apply (reloadnetworkall), ingested before the collector knew the
 -- cluster as its object — unless Nexara made the apply itself, which has its own
--- row.
+-- row (see the end of the header for what makes a copy).
 UPDATE audit_log c
 SET resource_type = 'sdn',
     resource_id = 'cluster',
     action = 'sdn_applied',
-    details = CASE WHEN c.details ? 'rekeyed_from' THEN c.details
-                   ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END
+    details = CASE WHEN c.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN c.details
+                   ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END
 WHERE c.source = 'proxmox'
   AND c.resource_type = 'network'
   AND c.action = 'reload'
   AND c.details->>'task_type' = 'reloadnetworkall'
-  AND NOT (COALESCE(c.details->>'proxmox_user', '') LIKE '%!%'
+  AND NOT (EXISTS (SELECT 1 FROM clusters cl
+                   WHERE cl.id = c.cluster_id
+                     AND split_part(c.details->>'upid', ':', 8) LIKE '%!%'
+                     AND split_part(split_part(c.details->>'upid', ':', 8), '!', 1) = split_part(cl.token_id, '!', 1))
            AND EXISTS (SELECT 1 FROM audit_log n
                        WHERE n.cluster_id = c.cluster_id
                          AND n.source = 'nexara'
@@ -240,57 +273,47 @@ WHERE c.source = 'proxmox'
                          AND n.action = 'sdn_applied'
                          AND n.created_at BETWEEN c.created_at - interval '2 minutes' AND c.created_at + interval '2 minutes'));
 
--- An SDN apply reloads every node's network as a task of its own (srvreload,
--- service "networking"). Those that fall within an apply — an ingested
--- reloadnetworkall, from its start to its end in task_history (a quarter of an
--- hour when that is gone), with ten seconds' slack — are parts of it, not
--- network applies: the action says so and details.parent_upid names the apply.
-WITH reloads AS (
-    SELECT c.id,
-           (SELECT p.details->>'upid'
-            FROM audit_log p
-            LEFT JOIN task_history th ON th.cluster_id = p.cluster_id AND th.upid = p.details->>'upid'
-            WHERE p.cluster_id = c.cluster_id
-              AND p.source = 'proxmox'
-              AND p.details->>'task_type' = 'reloadnetworkall'
-              AND p.details->>'upid' IS NOT NULL
-              AND c.created_at BETWEEN p.created_at - interval '10 seconds'
-                  AND COALESCE(th.finished_at, p.created_at + interval '15 minutes') + interval '10 seconds'
-            ORDER BY p.created_at DESC
-            LIMIT 1) AS parent_upid
-    FROM audit_log c
-    WHERE c.source = 'proxmox'
-      AND c.resource_type = 'node'
-      AND c.action = 'service_reload'
-      AND c.resource_id = 'networking'
-      AND c.details->>'task_type' = 'srvreload'
-      AND COALESCE(c.details->>'node', '') <> ''
-)
-UPDATE audit_log c
-SET resource_type = 'network',
-    resource_id = c.details->>'node',
-    action = 'network_reloaded_by_sdn',
-    details = CASE WHEN c.details ? 'rekeyed_from' THEN c.details
-                   ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END
-              || jsonb_build_object('parent_upid', r.parent_upid)
-FROM reloads r
-WHERE c.id = r.id AND r.parent_upid IS NOT NULL;
-
--- The rest are node network applies, ingested as a reload of the service
--- "networking" — unless Nexara made the apply itself, which has its own row.
+-- The node network applies, ingested as a reload of the service "networking" —
+-- unless Nexara made the apply itself, which has its own row. A reload that ran as
+-- root@pam during an SDN apply, from its start to its end, is a part of that apply
+-- (pve-network walks the node list and runs `pvesh set /nodes/<node>/network` for
+-- each, as root, one after another): the row is annotated with the apply's UPID in
+-- details.parent_upid, as the collector does for new ones, and filed as any other
+-- network apply. The apply is an ingested reloadnetworkall started in the hour
+-- before the reload, over by then (the end in task_history; a quarter of an hour
+-- when that is gone), with 10 seconds' slack. The lookup is bounded by action and
+-- time, so it is a range probe on audit_log's action index per reload.
 UPDATE audit_log c
 SET resource_type = 'network',
     resource_id = c.details->>'node',
     action = 'network_applied',
-    details = CASE WHEN c.details ? 'rekeyed_from' THEN c.details
-                   ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END
+    details = (CASE WHEN c.details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys' THEN c.details
+                    ELSE c.details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', c.resource_type, 'resource_id', c.resource_id, 'action', c.action)) END)
+              || COALESCE(
+                  (SELECT jsonb_build_object('parent_upid', p.details->>'upid')
+                   FROM audit_log p
+                   LEFT JOIN task_history th ON th.cluster_id = p.cluster_id AND th.upid = p.details->>'upid'
+                   WHERE split_part(c.details->>'upid', ':', 8) = 'root@pam'
+                     AND p.action IN ('reload', 'sdn_applied')
+                     AND p.created_at BETWEEN c.created_at - interval '1 hour' AND c.created_at
+                     AND p.cluster_id = c.cluster_id
+                     AND p.source = 'proxmox'
+                     AND p.details->>'task_type' = 'reloadnetworkall'
+                     AND p.details->>'upid' IS NOT NULL
+                     AND c.created_at <= COALESCE(th.finished_at, p.created_at + interval '15 minutes') + interval '10 seconds'
+                   ORDER BY p.created_at DESC
+                   LIMIT 1),
+                  '{}'::jsonb)
 WHERE c.source = 'proxmox'
   AND c.resource_type = 'node'
   AND c.action = 'service_reload'
   AND c.resource_id = 'networking'
   AND c.details->>'task_type' = 'srvreload'
   AND COALESCE(c.details->>'node', '') <> ''
-  AND NOT (COALESCE(c.details->>'proxmox_user', '') LIKE '%!%'
+  AND NOT (EXISTS (SELECT 1 FROM clusters cl
+                   WHERE cl.id = c.cluster_id
+                     AND split_part(c.details->>'upid', ':', 8) LIKE '%!%'
+                     AND split_part(split_part(c.details->>'upid', ':', 8), '!', 1) = split_part(cl.token_id, '!', 1))
            AND EXISTS (SELECT 1 FROM audit_log n
                        WHERE n.cluster_id = c.cluster_id
                          AND n.source = 'nexara'
