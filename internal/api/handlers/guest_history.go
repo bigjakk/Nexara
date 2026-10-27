@@ -23,6 +23,9 @@ func GuestHistory() HistoryKind {
 		Default:    "other",
 		Rules:      guestHistoryRules,
 		Select:     selectGuest,
+		// The path names the guest; a status change, the inventory's part, is
+		// filtered on its type instead (historyScope).
+		GuestFromPath: true,
 	}
 }
 

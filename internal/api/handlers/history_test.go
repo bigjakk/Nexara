@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -220,4 +224,74 @@ func TestSelectObjects(t *testing.T) {
 	if err != nil || len(sel.Guests) != 0 || !slices.Equal(sel.Objects, want) {
 		t.Errorf("SelectObjects = %+v, %v; want objects %+v", sel, err, want)
 	}
+}
+
+// A kind's guests are kept only where the caller may open them; one the
+// inventory no longer holds needs both guest permissions.
+func TestViewableGuests(t *testing.T) {
+	t.Parallel()
+	guests := []HistoryGuest{{VMID: 100}, {VMID: 101}, {VMID: 102}}
+	types := []db.ListGuestTypesRow{{Vmid: 100, Type: "qemu"}, {Vmid: 101, Type: "lxc"}}
+	for _, tt := range []struct {
+		viewable []string
+		want     []int32
+	}{
+		{[]string{}, []int32{}},
+		{[]string{"qemu"}, []int32{100}},
+		{[]string{"lxc"}, []int32{101}},
+		{[]string{"qemu", "lxc"}, []int32{100, 101, 102}},
+	} {
+		got := []int32{}
+		for _, g := range viewableGuests(guests, types, tt.viewable) {
+			got = append(got, g.VMID)
+		}
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("viewable %v: kept %v, want %v", tt.viewable, got, tt.want)
+		}
+	}
+}
+
+// List drops them before the query: a caller with view:vm alone sees the
+// folder's VM and not its container — not even that the folder holds one.
+func TestHistoryListDropsGuestsTheCallerCannotOpen(t *testing.T) {
+	t.Parallel()
+	cluster := uuid.New()
+	dbtx := &auditRowsDBTX{rows: []any{db.ListGuestTypesRow{Vmid: 100, Type: "qemu"}, db.ListGuestTypesRow{Vmid: 101, Type: "lxc"}}}
+	kind := HistoryKind{Name: "folder", Categories: []string{"other"}, Default: "other",
+		Select: func(context.Context, HistoryRequest) (HistorySelection, error) {
+			return HistorySelection{Guests: []HistoryGuest{{VMID: 100}, {VMID: 101}}}, nil
+		}}
+	props := apischema.Properties{
+		"cluster_id": apischema.StdOption("cluster-id"),
+		"limit":      {Type: apischema.Integer, Optional: true, Default: 50},
+		"offset":     {Type: apischema.Integer, Optional: true, Default: 0},
+		"start_time": {Type: apischema.String, Optional: true},
+		"category":   {Type: apischema.String, Optional: true},
+		"source":     {Type: apischema.String, Optional: true},
+	}
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", clusterGrantEngine{action: "view", resource: "vm", cluster: cluster})
+		return c.Next()
+	})
+	app.Get("/clusters/:cluster_id/probe", withRequestParams(t, props, []string{"cluster_id"},
+		NewHistoryHandler(db.New(dbtx)).Route(kind).List))
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/probe", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	for _, call := range dbtx.calls {
+		if !strings.Contains(call.sql, "name: ListHistory ") {
+			continue
+		}
+		for _, arg := range call.args {
+			if vmids, ok := arg.([]int32); ok && !slices.Equal(vmids, []int32{100}) {
+				t.Errorf("ListHistory was asked for guests %v, want only the VM [100]", vmids)
+			}
+		}
+		return
+	}
+	t.Fatalf("ListHistory never ran: %d queries", len(dbtx.calls))
 }

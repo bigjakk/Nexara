@@ -1426,6 +1426,11 @@ type Querier interface {
 	// the ISO on the guest permanently.
 	ListGuestToolsPendingCDROMRestore(ctx context.Context) ([]GuestToolsState, error)
 	ListGuestToolsPolicies(ctx context.Context, clusterID uuid.UUID) ([]GuestToolsPolicy, error)
+	// ListGuestTypes is the type of each of a History's guests the inventory
+	// holds, for the handler to keep only the guests the caller may open — a VM
+	// with view:vm, a container with view:container — when the guests are the
+	// kind's own choice rather than the one the path names (viewableGuests).
+	ListGuestTypes(ctx context.Context, arg ListGuestTypesParams) ([]ListGuestTypesRow, error)
 	// Guests whose HA resource state is "error" (needs manual intervention).
 	ListHAErrorGuests(ctx context.Context) ([]ListHAErrorGuestsRow, error)
 	// The History timeline every kind of object shares: one page of an object's

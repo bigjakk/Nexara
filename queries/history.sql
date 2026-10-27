@@ -302,3 +302,13 @@ LEFT JOIN guest_backups gb
           AND gb.cluster_id = sqlc.arg('cluster_id')
 LEFT JOIN users u ON u.id = p.user_id
 ORDER BY p.occurred_at DESC, p.entry_id DESC;
+
+-- ListGuestTypes is the type of each of a History's guests the inventory
+-- holds, for the handler to keep only the guests the caller may open — a VM
+-- with view:vm, a container with view:container — when the guests are the
+-- kind's own choice rather than the one the path names (viewableGuests).
+-- name: ListGuestTypes :many
+SELECT vmid, type
+FROM vms
+WHERE cluster_id = sqlc.arg('cluster_id')
+  AND vmid = ANY(sqlc.arg('vmids')::int[]);

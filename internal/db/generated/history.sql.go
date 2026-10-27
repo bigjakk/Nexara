@@ -14,6 +14,47 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const listGuestTypes = `-- name: ListGuestTypes :many
+SELECT vmid, type
+FROM vms
+WHERE cluster_id = $1
+  AND vmid = ANY($2::int[])
+`
+
+type ListGuestTypesParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmids     []int32   `json:"vmids"`
+}
+
+type ListGuestTypesRow struct {
+	Vmid int32  `json:"vmid"`
+	Type string `json:"type"`
+}
+
+// ListGuestTypes is the type of each of a History's guests the inventory
+// holds, for the handler to keep only the guests the caller may open — a VM
+// with view:vm, a container with view:container — when the guests are the
+// kind's own choice rather than the one the path names (viewableGuests).
+func (q *Queries) ListGuestTypes(ctx context.Context, arg ListGuestTypesParams) ([]ListGuestTypesRow, error) {
+	rows, err := q.db.Query(ctx, listGuestTypes, arg.ClusterID, arg.Vmids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGuestTypesRow{}
+	for rows.Next() {
+		var i ListGuestTypesRow
+		if err := rows.Scan(&i.Vmid, &i.Type); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHistory = `-- name: ListHistory :many
 
 WITH guests AS MATERIALIZED (

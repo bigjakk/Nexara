@@ -59,6 +59,11 @@ type HistoryKind struct {
 	// Select names the rows that are the object's, from the request's
 	// validated parameters. An error it returns is the response.
 	Select HistorySelector
+	// GuestFromPath says the selection's one guest is the one the path names:
+	// the caller asked for it by VMID, so listing it discloses nothing. Every
+	// other kind's guests — a folder's members, a node's guests — are kept
+	// only where the caller may open them (viewableGuests).
+	GuestFromPath bool
 }
 
 // HistoryField is what a HistoryRule matches on.
@@ -342,6 +347,27 @@ func historyScope(can func(action, resource string) (bool, error)) (includeTasks
 	return includeTasks, statusTypes, nil
 }
 
+// viewableGuests keeps the guests the caller may open, at the scope the
+// guest's own pages use: a VM (qemu) with view:vm, a container (lxc) with
+// view:container on the cluster — viewable is historyScope's statusTypes. The
+// rest are dropped whole, rows and membership alike: subject_vmid would
+// otherwise tell the caller which guests a folder holds or a node runs. A
+// guest the inventory no longer holds, whose type is unknown, needs both.
+func viewableGuests(guests []HistoryGuest, types []db.ListGuestTypesRow, viewable []string) []HistoryGuest {
+	typeOf := make(map[int32]string, len(types))
+	for _, t := range types {
+		typeOf[t.Vmid] = t.Type
+	}
+	kept := make([]HistoryGuest, 0, len(guests))
+	for _, g := range guests {
+		if t, known := typeOf[g.VMID]; known && slices.Contains(viewable, t) ||
+			!known && slices.Contains(viewable, "qemu") && slices.Contains(viewable, "lxc") {
+			kept = append(kept, g)
+		}
+	}
+	return kept
+}
+
 // ListParams builds ListHistory's arguments for one selection of this kind:
 // the selectors and the rules. The caller adds the scope, filters and page,
 // as List does. A guest named twice is one guest — a folder's memberships can
@@ -453,6 +479,17 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	sel, err := r.kind.Select(ctx, HistoryRequest{Queries: r.h.queries, ClusterID: clusterID, Params: p})
 	if err != nil {
 		return err
+	}
+	if !r.kind.GuestFromPath && len(sel.Guests) > 0 {
+		vmids := make([]int32, 0, len(sel.Guests))
+		for _, g := range sel.Guests {
+			vmids = append(vmids, g.VMID)
+		}
+		types, typesErr := r.h.queries.ListGuestTypes(ctx, db.ListGuestTypesParams{ClusterID: clusterID, Vmids: vmids})
+		if typesErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
+		}
+		sel.Guests = viewableGuests(sel.Guests, types, statusTypes)
 	}
 	params, err := r.kind.ListParams(clusterID, sel)
 	if err != nil {

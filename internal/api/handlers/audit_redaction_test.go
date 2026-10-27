@@ -107,16 +107,20 @@ func (*structRows) Values() ([]any, error)                       { return nil, e
 func (*structRows) RawValues() [][]byte                          { return nil }
 func (*structRows) Conn() *pgx.Conn                              { return nil }
 
-// auditRowsDBTX replays a fixed result set to any Query. The read-side
-// counterpart to captureDBTX, which records arguments but cannot hand a handler
-// rows to filter.
-type auditRowsDBTX struct{ rows []any }
+// auditRowsDBTX replays a fixed result set to any Query, and records every
+// Query it was sent. The read-side counterpart to captureDBTX, which records
+// arguments but cannot hand a handler rows to filter.
+type auditRowsDBTX struct {
+	rows  []any
+	calls []capturedQuery
+}
 
 func (*auditRowsDBTX) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, errCaptured
 }
 
-func (d *auditRowsDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (d *auditRowsDBTX) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	d.calls = append(d.calls, capturedQuery{sql: sql, args: args})
 	return &structRows{rows: d.rows}, nil
 }
 

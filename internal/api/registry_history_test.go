@@ -18,18 +18,22 @@ import (
 
 const historyRouteCount = 1
 
-// The guest is the one kind gated on view:audit alone; any other kind that
-// reaches this list forgot its own view permission.
+// The guest is the one kind gated on view:audit alone, and the one whose
+// guest is not filtered on view:vm/view:container (GuestFromPath); any other
+// kind on either list skips a permission its rows need.
 func TestHistoryAuditOnlyIsTheGuestAlone(t *testing.T) {
 	t.Parallel()
-	var auditOnly []string
+	var auditOnly, fromPath []string
 	for _, r := range historyRoutes() {
 		if r.AuditOnly != "" {
 			auditOnly = append(auditOnly, r.Kind.Name)
 		}
+		if r.Kind.GuestFromPath {
+			fromPath = append(fromPath, r.Kind.Name)
+		}
 	}
-	if !slices.Equal(auditOnly, []string{"guest"}) {
-		t.Errorf("kinds gated on view:audit alone: %v, want [guest]", auditOnly)
+	if !slices.Equal(auditOnly, []string{"guest"}) || !slices.Equal(fromPath, []string{"guest"}) {
+		t.Errorf("gated on view:audit alone: %v; guests unfiltered: %v; want [guest] for both", auditOnly, fromPath)
 	}
 }
 
