@@ -208,6 +208,24 @@ func TestObservedChanges(t *testing.T) {
 	byResourceDelete := seed(observedCluster, "ha_rule", "apart", 0, "changed", "", []string{"resources"}, at)
 	members(byResourceDelete, []string{}, []string{"resources:vm:160"})
 	audit(observedCluster, in, "ha_resource", "vm:160", 160, "deleted", nil)
+
+	// Access: a user's delete explains its own grants going, never another's
+	// arriving; Nexara's grant only the grantees its row names; a realm's sync
+	// only that realm's users.
+	aclByDelete := seed(observedCluster, "pve_acl", "/vms/170", 0, "changed", "", []string{"user_grants", "users"}, at)
+	members(aclByDelete, []string{}, []string{"user_grants:T1:user01@pve", "users:user01@pve"})
+	aclEscalated := seed(observedCluster, "pve_acl", "/vms/171", 0, "changed", "", []string{"user_grants", "users"}, at)
+	members(aclEscalated, []string{"user_grants:T2:user09@pve"}, []string{"user_grants:T1:user01@pve", "users:user01@pve"})
+	audit(observedCluster, in, "pve_user", "user01@pve", 0, "deleted", nil)
+	aclByGrant := seed(observedCluster, "pve_acl", "/", 0, "changed", "", []string{"user_grants", "users"}, at)
+	members(aclByGrant, []string{"user_grants:T3:user02@pve", "users:user02@pve"}, []string{})
+	aclBesideGrant := seed(observedCluster, "pve_acl", "/", 0, "changed", "", []string{"user_grants"}, at)
+	members(aclBesideGrant, []string{"user_grants:T4:user09@pve"}, []string{})
+	audit(observedCluster, in, "pve_acl", "/", 0, "granted", map[string]any{"users": "user02@pve,user03@pve"})
+	byRealmSync := seed(observedCluster, "pve_user", "user04@ldap01", 0, "changed", "", []string{"email"}, at)
+	besideRealmSync := seed(observedCluster, "pve_user", "user05@pve", 0, "changed", "", []string{"email"}, at)
+	audit(observedCluster, in, "proxmox_task", "ldap01", 0, "auth-realm-sync",
+		map[string]any{"upid": "UPID:pve-01:0000000D:00000001:00000001:auth-realm-sync:ldap01:root@pam:"})
 	// A task reaching another object counts from an hour before the window,
 	// not the day a task on the object itself does.
 	byLongRestore := seed(observedCluster, "pool", "db2", 0, "changed", "", []string{"vms"}, ago(600))
@@ -275,6 +293,11 @@ func TestObservedChanges(t *testing.T) {
 			"member_of", "upid:vms:%s"),
 		with(with(rule("ha_rule", "changed", "ha_resource", "cluster", false, "^deleted$", "", "", "^resources$"),
 			"member", "left"), "member_of", "audit:resources:%s"),
+		with(with(rule("pve_acl", "changed", "pve_user", "cluster", false, "^deleted$", "", "", "^(users|user_grants)$"),
+			"member", "left"), "member_of", "audit:users:%s|user_grants:*:%s"),
+		with(with(rule("pve_acl", "changed", "pve_acl", "id", false, "^granted$", "", "", "^(users|user_grants)$"),
+			"member", "joined"), "member_of", "details-list.users:users:%s|user_grants:*:%s"),
+		with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", ""), "object", "upid:*@%s"),
 		with(with(rule("pool", "changed", "vm", "details:new_pool", false, "^set_pool$", "", "", "^vms$"), "member", "joined"),
 			"member_of", "vmid:vms:%s"),
 		with(with(rule("pool", "changed", "vm", "cluster", false, "^clone$", "", "", "^vms$"), "member", "joined"),
@@ -337,6 +360,12 @@ func TestObservedChanges(t *testing.T) {
 		{"a job removed with its last guest's destroy", jobEmptied, "explained"},
 		{"a job removed that held another guest too", jobNotEmptied, "shown"},
 		{"an HA resource deleted, its sid leaving a rule", byResourceDelete, "explained"},
+		{"a user's delete, its grants going", aclByDelete, "explained"},
+		{"a user's delete, and another's grant arriving", aclEscalated, "shown"},
+		{"Nexara's grant to the users its row names", aclByGrant, "explained"},
+		{"Nexara's grant, and another user's arriving", aclBesideGrant, "shown"},
+		{"a realm's sync, a user of that realm", byRealmSync, "explained"},
+		{"a realm's sync, a user of another", besideRealmSync, "shown"},
 		{"a restore started more than an hour before", byLongRestore, "shown"},
 		{"a guest moved into the pool from its page", byDetails, "explained"},
 		{"a guest cloned into the pool through Nexara", byClone, "explained"},

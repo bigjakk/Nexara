@@ -169,10 +169,12 @@ var (
 	firewallPlainSpec = newFieldSpec(nil, nil)
 	// pve-access-control API2/User.pm index: realm-type is derived from
 	// domains.cfg, totp-locked and tfa-locked-until are TFA lockout state
-	// (priv/tfa.cfg), and tokens are their own objects. groups is a list.
-	accessUserSpec  = newFieldSpec([]string{"realm-type", "totp-locked", "tfa-locked-until", "tokens"}, []string{"groups"})
+	// (priv/tfa.cfg), and tokens are their own objects. A user's groups, and
+	// a group's users, are kept as members: a group deleted leaves its users,
+	// and only that group's delete explains it.
+	accessUserSpec  = newFieldSpec([]string{"realm-type", "totp-locked", "tfa-locked-until", "tokens"}, nil).withMembers("groups")
 	accessTokenSpec = newFieldSpec(nil, nil)
-	accessGroupSpec = newFieldSpec(nil, []string{"users"})
+	accessGroupSpec = newFieldSpec(nil, nil).withMembers("users")
 	// API2/Role.pm index: special is derived (a built-in role).
 	accessRoleSpec  = newFieldSpec([]string{"special"}, []string{"privs"})
 	acmeAccountSpec = newFieldSpec(nil, nil)
@@ -693,8 +695,9 @@ func readAccessUsers(ctx context.Context, p *observePass) ([]kindReading, readOu
 		if !auditkey.ValidID(userid) {
 			continue
 		}
+		fields, members := accessUserSpec.split(item)
 		users.objects = append(users.objects, observedObject{
-			id: userid, resourceType: "pve_user", resourceID: userid, fields: accessUserSpec.canonicalFields(item),
+			id: userid, resourceType: "pve_user", resourceID: userid, fields: fields, members: members,
 		})
 		var list []map[string]json.RawMessage
 		_ = json.Unmarshal(item["tokens"], &list)
@@ -720,36 +723,57 @@ func accessKind(kind, part, idField string, spec fieldSpec) func(context.Context
 	return listKind(kind, target, idField, spec)
 }
 
+// aclGrantee is the field an ACL entry's grantee is listed in, by its type,
+// and the list its grants are compared in.
+var aclGrantee = map[string][2]string{
+	"user": {"users", "user_grants"}, "group": {"groups", "group_grants"}, "token": {"tokens", "token_grants"},
+}
+
 // readAccessACL reads the ACL as one object per path, pve_acl / <path as
-// Proxmox normalises it> (auditkey.ACLPath): its users, groups and tokens are
-// each the set of (who, role, propagate) granted there. Never compared by who:
-// the field names are the three kinds of grantee.
+// Proxmox normalises it> (auditkey.ACLPath). Each kind of grantee is two member
+// fields: who is granted something there (users, groups, tokens), and each
+// grant (user_grants ...) as "<tag of role and propagate>:<grantee>", so a
+// change says which grantee came, went or had a grant changed — a user
+// deleted explains only that user's grants going — and never which role.
 func readAccessACL(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
 	target, _ := proxmox.ObserveAccess("acl")
 	items, out := p.readList(ctx, target)
 	if out != readOK {
 		return nil, out
 	}
-	grants := map[string]map[string][]json.RawMessage{}
+	paths := map[string]map[string][]json.RawMessage{}
 	for _, item := range items {
 		path := auditkey.ACLPath(stringField(item, "path"))
-		field := map[string]string{"user": "users", "group": "groups", "token": "tokens"}[stringField(item, "type")]
-		if !auditkey.ValidID(path) || field == "" {
+		fields, ok := aclGrantee[stringField(item, "type")]
+		ugid := stringField(item, "ugid")
+		if !auditkey.ValidID(path) || !ok || ugid == "" {
 			continue
 		}
-		if grants[path] == nil {
-			grants[path] = map[string][]json.RawMessage{}
+		if paths[path] == nil {
+			paths[path] = map[string][]json.RawMessage{}
 		}
-		grant, _ := json.Marshal(stringField(item, "ugid") + ":" + stringField(item, "roleid") + ":" + stringField(item, "propagate"))
-		grants[path][field] = append(grants[path][field], grant)
+		role, _ := canonicalValue(jsonArray([]json.RawMessage{item["roleid"], item["propagate"]}))
+		tag, err := p.o.tags.tag(p.cluster.ID, "pve_acl", path, fields[1], role)
+		if err != nil {
+			continue
+		}
+		who, _ := json.Marshal(ugid)
+		grant, _ := json.Marshal(strings.NewReplacer("+", "-", "/", "_").Replace(tag) + ":" + ugid)
+		paths[path][fields[0]] = append(paths[path][fields[0]], who)
+		paths[path][fields[1]] = append(paths[path][fields[1]], grant)
 	}
 	rd := kindReading{kind: "pve_acl"}
-	for path, byField := range grants {
-		fields := map[string]string{}
+	for path, byField := range paths {
+		obj := observedObject{id: path, resourceType: "pve_acl", resourceID: path,
+			fields: map[string]string{}, members: map[string][]string{}}
 		for f, list := range byField {
-			fields[f], _ = canonicalSet(jsonArray(list))
+			if ids, ok := memberIDs(jsonArray(list)); ok {
+				obj.members[f] = ids
+			} else {
+				obj.fields[f], _ = canonicalSet(jsonArray(list))
+			}
 		}
-		rd.objects = append(rd.objects, observedObject{id: path, resourceType: "pve_acl", resourceID: path, fields: fields})
+		rd.objects = append(rd.objects, obj)
 	}
 	return []kindReading{rd}, readOK
 }

@@ -103,10 +103,14 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- row's guest) or details.<k> (its details-><k>): with object set, the
 -- change's resource_id must be that name (a disk task's storage, the ACL path
 -- of the guest a destroy took); with member set, the row explains only that
--- member joining (joined) or leaving (left) a list — of an object added or
--- removed, only if it is among the members that came or went with it — or the
--- removal of an object whose last member it was (sole). A member rule with no
--- member_of covers any member going its way.
+-- member joining (joined) or leaving (left) a list — an object added or
+-- removed, only if every member that came or went with it is one the row
+-- names — or the removal of an object whose last members it names (sole).
+-- member_of may name several (alternatives joined by |, a details-list.<k>
+-- source a comma list); a member rule with no member_of covers any member
+-- going its way. A name with a * matches any that
+-- begins and ends as it does around it (a realm's users, *@realm). counts
+-- says what the row does to a list's items (listed, below).
 --
 -- A change is explained when everything it changed is: each member that joined
 -- or left a list of ids (members_joined, members_left), each other field in
@@ -142,10 +146,11 @@ WITH rules AS MATERIALIZED (
            e.value->>'detail_key'          AS detail_key,
            e.value->>'object'              AS object,
            e.value->>'member'              AS member,
-           e.value->>'member_of'           AS member_of
+           e.value->>'member_of'           AS member_of,
+           e.value->>'counts'              AS counts
     FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
 ), pending AS MATERIALIZED (
-    SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.fields, c.node,
+    SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.fields, c.detail, c.node,
            c.members_joined, c.members_left,
            GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
                     c.observed_at - make_interval(secs => sqlc.arg('lookback_seconds')::int)) AS win_from,
@@ -160,7 +165,7 @@ WITH rules AS MATERIALIZED (
     -- One arm per match_key, so each reads audit_log through the index its key
     -- can use.
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
            a.created_at
     FROM pending p
@@ -170,7 +175,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
@@ -179,7 +184,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
@@ -188,7 +193,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
@@ -198,7 +203,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
@@ -207,7 +212,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 hour' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
@@ -215,7 +220,7 @@ WITH rules AS MATERIALIZED (
                     AND a.details->>substr(r.match_key, 9) = p.resource_id
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
 ), hits AS (
-    SELECT k.id, k.field_re, k.member, n.member_named, k.audit_id, k.created_at
+    SELECT k.id, k.field_re, k.member, n.member_names, k.counts, k.audit_id, k.created_at
     FROM candidates k
     CROSS JOIN LATERAL (
         -- What the row names, in the form the rule's object and member_of give.
@@ -227,14 +232,19 @@ WITH rules AS MATERIALIZED (
                        THEN format(substr(k.object, strpos(k.object, ':') + 1),
                                    k.details->>substr(split_part(k.object, ':', 1), 9))
                END AS object_named,
-               CASE
-                   WHEN k.member_of LIKE 'upid:%'  THEN format(substr(k.member_of, 6), split_part(k.details->>'upid', ':', 7))
-                   WHEN k.member_of LIKE 'audit:%' THEN format(substr(k.member_of, 7), k.audit_resource_id)
-                   WHEN k.member_of LIKE 'vmid:%'  THEN format(substr(k.member_of, 6), k.audit_vmid::text)
-                   WHEN k.member_of LIKE 'details.%'
-                       THEN format(substr(k.member_of, strpos(k.member_of, ':') + 1),
-                                   k.details->>substr(split_part(k.member_of, ':', 1), 9))
-               END AS member_named
+               ARRAY(SELECT format(alt, v)
+                     FROM unnest(string_to_array(substr(k.member_of, strpos(k.member_of, ':') + 1), '|')) AS alt,
+                          unnest(CASE
+                              WHEN k.member_of = '' THEN ARRAY[]::text[]
+                              WHEN k.member_of LIKE 'upid:%'  THEN ARRAY[split_part(k.details->>'upid', ':', 7)]
+                              WHEN k.member_of LIKE 'audit:%' THEN ARRAY[k.audit_resource_id]
+                              WHEN k.member_of LIKE 'vmid:%'  THEN ARRAY[k.audit_vmid::text]
+                              WHEN k.member_of LIKE 'details-list.%'
+                                  THEN array_remove(regexp_split_to_array(
+                                      COALESCE(k.details->>substr(split_part(k.member_of, ':', 1), 14), ''), '[,; ]+'), '')
+                              WHEN k.member_of LIKE 'details.%'
+                                  THEN ARRAY[k.details->>substr(split_part(k.member_of, ':', 1), 9)]
+                          END) AS v) AS member_names
     ) n
     LEFT JOIN task_history th ON th.cluster_id = k.cluster_id AND th.upid = k.details->>'upid'
     WHERE (NOT k.untasked OR k.details->>'upid' IS NULL)
@@ -242,30 +252,31 @@ WITH rules AS MATERIALIZED (
       AND (k.except_re = '' OR k.action !~ k.except_re)
       AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
       AND (k.detail_key = '' OR COALESCE(k.details->>k.detail_key, '') <> '')
-      AND (k.object = '' OR COALESCE(n.object_named = k.resource_id, false))
+      AND (k.object = '' OR COALESCE(CASE WHEN strpos(n.object_named, '*') = 0 THEN k.resource_id = n.object_named ELSE starts_with(k.resource_id, split_part(n.object_named, '*', 1)) AND right(k.resource_id, length(split_part(n.object_named, '*', 2))) = split_part(n.object_named, '*', 2) AND length(k.resource_id) >= length(n.object_named) END, false))
       AND COALESCE(th.started_at, k.created_at) <= k.win_to
       AND CASE WHEN th.upid IS NULL THEN k.created_at ELSE COALESCE(th.finished_at, now()) END >= k.win_from
 ), needs AS (
     -- What each change needs explained: each member that joined or left a list
     -- of ids, each other field it names, or, added or removed, itself.
-    SELECT p.id, u.field, u.member, u.dir
+    SELECT p.id, u.field, u.member, u.dir, u.kind
     FROM pending p
     CROSS JOIN LATERAL (
-        SELECT split_part(m, ':', 1) AS field, m AS member, 'joined' AS dir
+        SELECT split_part(m, ':', 1) AS field, m AS member, 'joined' AS dir, 'member' AS kind
         FROM unnest(p.members_joined) AS m WHERE p.change = 'changed'
         UNION ALL
-        SELECT split_part(m, ':', 1), m, 'left' FROM unnest(p.members_left) AS m WHERE p.change = 'changed'
+        SELECT split_part(m, ':', 1), m, 'left', 'member' FROM unnest(p.members_left) AS m WHERE p.change = 'changed'
         UNION ALL
-        SELECT f, '', '' FROM unnest(p.fields) AS f
+        SELECT f, '', '', CASE WHEN p.detail->'counts' ? f THEN 'list' ELSE 'field' END
+        FROM unnest(p.fields) AS f
         WHERE p.change = 'changed'
           AND NOT EXISTS (SELECT 1 FROM unnest(p.members_joined || p.members_left) AS m
                           WHERE split_part(m, ':', 1) = f)
         UNION ALL
-        SELECT '', '', '' WHERE p.change <> 'changed' OR cardinality(p.fields) = 0
+        SELECT '', '', '', 'whole' WHERE p.change <> 'changed' OR cardinality(p.fields) = 0
     ) u
 ), covered AS (
-    -- For each, the latest row that explains it.
-    SELECT n.id, x.audit_id, x.created_at
+    -- For each but a list, the latest row that explains it.
+    SELECT n.id, x.audit_id IS NOT NULL AS ok, x.audit_id, x.created_at
     FROM needs n
     JOIN pending p ON p.id = n.id
     LEFT JOIN LATERAL (
@@ -275,20 +286,59 @@ WITH rules AS MATERIALIZED (
           AND (n.field = '' OR h.field_re = '' OR n.field ~ h.field_re)
           AND CASE h.member
                   WHEN ''       THEN true
-                  WHEN 'joined' THEN (n.dir = 'joined' AND (h.member_named IS NULL OR n.member = h.member_named))
-                                  OR (n.dir = '' AND h.member_named = ANY(p.members_joined))
-                  WHEN 'left'   THEN (n.dir = 'left' AND (h.member_named IS NULL OR n.member = h.member_named))
-                                  OR (n.dir = '' AND h.member_named = ANY(p.members_left))
-                  WHEN 'sole'   THEN n.dir = '' AND p.members_left = ARRAY[h.member_named]
+                  -- A member joining or leaving a list: the one the row names.
+                  WHEN 'joined' THEN n.dir = 'joined' AND (cardinality(h.member_names) = 0 OR EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END))
+                                  OR n.dir = '' AND p.change = 'added' AND (cardinality(h.member_names) = 0 OR
+                                     NOT EXISTS (SELECT 1 FROM unnest(p.members_joined) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END)))
+                  WHEN 'left'   THEN n.dir = 'left' AND (cardinality(h.member_names) = 0 OR EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END))
+                                  OR n.dir = '' AND p.change = 'removed' AND (cardinality(h.member_names) = 0 OR
+                                     NOT EXISTS (SELECT 1 FROM unnest(p.members_left) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END)))
+                  -- An object removed with its last members: every one is named.
+                  WHEN 'sole'   THEN n.dir = '' AND p.change = 'removed' AND cardinality(p.members_left) > 0
+                                 AND NOT EXISTS (SELECT 1 FROM unnest(p.members_left) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END))
                   ELSE false
               END
         ORDER BY h.created_at DESC, h.audit_id
         LIMIT 1
     ) x ON true
+    WHERE n.kind <> 'list'
+), listed AS (
+    -- A list's items by what the rows did to it (counts): each create one item
+    -- in, each delete one out, each update one in and one out or one moved, a
+    -- template any number in, a removal any number out; a rule with no count
+    -- covers any change of the list. Every item that came, went or moved needs
+    -- a row that did it.
+    SELECT n.id,
+           COALESCE(agg.free, false) OR (agg.hits > 0 AND
+               GREATEST(0,
+                        CASE WHEN agg.adds THEN 0 ELSE l.added - agg.creates END,
+                        CASE WHEN agg.dels THEN 0 ELSE l.removed - agg.deletes END) + l.moved <= agg.updates) AS ok,
+           agg.audit_id, agg.created_at
+    FROM needs n
+    JOIN pending p ON p.id = n.id
+    CROSS JOIN LATERAL (
+        SELECT COALESCE((p.detail->'counts'->n.field->>'added')::int, 0)   AS added,
+               COALESCE((p.detail->'counts'->n.field->>'removed')::int, 0) AS removed,
+               COALESCE((p.detail->'counts'->n.field->>'moved')::int, 0)   AS moved
+    ) l
+    CROSS JOIN LATERAL (
+        SELECT bool_or(h.counts = '')                       AS free,
+               count(DISTINCT h.audit_id) FILTER (WHERE h.counts = 'add1')  AS creates,
+               count(DISTINCT h.audit_id) FILTER (WHERE h.counts = 'del1')  AS deletes,
+               count(DISTINCT h.audit_id) FILTER (WHERE h.counts = 'edit1') AS updates,
+               COALESCE(bool_or(h.counts = 'adds'), false)  AS adds,
+               COALESCE(bool_or(h.counts = 'dels'), false)  AS dels,
+               count(*)                                     AS hits,
+               (array_agg(h.audit_id ORDER BY h.created_at DESC, h.audit_id))[1] AS audit_id,
+               max(h.created_at)                            AS created_at
+        FROM hits h
+        WHERE h.id = n.id AND h.member = '' AND (h.field_re = '' OR n.field ~ h.field_re)
+    ) agg
+    WHERE n.kind = 'list'
 ), verdict AS (
-    SELECT c.id, bool_and(c.audit_id IS NOT NULL) AS explained
-    FROM covered c
-    GROUP BY c.id
+    SELECT u.id, bool_and(u.ok) AS explained
+    FROM (SELECT id, ok FROM covered UNION ALL SELECT id, ok FROM listed) u
+    GROUP BY u.id
 )
 UPDATE cluster_object_changes c
 SET explained = v.explained

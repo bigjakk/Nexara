@@ -49,6 +49,10 @@ type explainRule struct {
 	Object   string `json:"object"`
 	Member   string `json:"member"`
 	MemberOf string `json:"member_of"`
+	// Counts says what a row does to a list's items, for a change that says
+	// how many came and went: add1 one in, del1 one out, edit1 one in and one
+	// out or one moved, adds any number in, dels any number out; "" anything.
+	Counts string `json:"counts"`
 }
 
 // byAction is the rules a kind's own audit rows give: an audit row for the same
@@ -303,37 +307,76 @@ var observedChangeRules = slices.Concat(
 	byAction("firewall_security_group", []string{"created"}, nil, []string{"deleted"}),
 	byAction("firewall_security_group_rule", nil, []string{"rule_created", "rule_updated", "rule_deleted"}, nil),
 
-	// Access: a user's groups move when a group's members are edited, and a
-	// group's members when a user's groups are; a user deleted takes its
-	// tokens, and anything deleted takes its ACL entries with it
-	// (AccessControl.pm delete_user_acl and the like), as a guest or a storage
-	// removed takes its own path (remove_vm_access, remove_storage_access). An
-	// ACL path is added by its first grant and removed with its last.
-	crud("pve_user"),
-	byAction("pve_token", []string{"created"}, []string{"updated", "regenerated"}, []string{"deleted"}),
-	crud("pve_group"),
+	// Access. A user's own row explains the fields it says it set (enable,
+	// expire, groups_changed: accessUserUpdateDetails) and the ones it never
+	// records (names, e-mail, comment, keys); a token's likewise. A group's
+	// update takes only its comment (pve-access-control API2/Group.pm). A user
+	// joins or leaves a group by a user edit that set its groups, and leaves
+	// with its own delete or the group's.
+	byAction("pve_user", []string{"created"}, nil, []string{"deleted"}),
+	byAction("pve_token", []string{"created"}, nil, []string{"deleted"}),
+	byAction("pve_group", []string{"created"}, nil, []string{"deleted"}),
 	crud("pve_role"),
-	byAction("pve_acl", []string{"granted"}, []string{"granted", "revoked"}, []string{"revoked"}),
 	[]explainRule{
+		{Kind: "pve_token", Change: "changed", AuditType: "pve_token", MatchKey: "id",
+			ActionRe: anyOf("updated", "regenerated"), FieldRe: `^comment$`},
+		{Kind: "pve_token", Change: "changed", AuditType: "pve_token", MatchKey: "id",
+			ActionRe: anyOf("updated", "regenerated"), DetailKey: "expire", FieldRe: `^expire$`},
+		{Kind: "pve_token", Change: "changed", AuditType: "pve_token", MatchKey: "id",
+			ActionRe: anyOf("updated", "regenerated"), DetailKey: "privsep", FieldRe: `^privsep$`},
+		{Kind: "pve_group", Change: "changed", AuditType: "pve_group", MatchKey: "id",
+			ActionRe: `^updated$`, FieldRe: `^comment$`},
 		{Kind: "pve_user", Change: "changed", AuditType: "pve_group", MatchKey: "cluster",
-			ActionRe: anyOf("created", "updated", "deleted"), FieldRe: `^groups$`},
-		{Kind: "pve_group", Change: "changed", AuditType: "pve_user", MatchKey: "cluster",
-			ActionRe: anyOf("created", "updated", "deleted"), FieldRe: `^users$`},
-		{Kind: "pve_token", Change: "removed", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^deleted$`},
+			ActionRe: `^deleted$`, FieldRe: `^groups$`, Member: "left", MemberOf: "audit:groups:%s"},
+		{Kind: "pve_group", Change: "changed", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^created$`,
+			DetailKey: "groups_set", FieldRe: `^users$`, Member: "joined", MemberOf: "audit:users:%s"},
+		{Kind: "pve_group", Change: "changed", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^updated$`,
+			DetailKey: "groups_changed", FieldRe: `^users$`, Member: "joined", MemberOf: "audit:users:%s"},
+		{Kind: "pve_group", Change: "changed", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^updated$`,
+			DetailKey: "groups_changed", FieldRe: `^users$`, Member: "left", MemberOf: "audit:users:%s"},
+		{Kind: "pve_group", Change: "changed", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^deleted$`,
+			FieldRe: `^users$`, Member: "left", MemberOf: "audit:users:%s"},
+		// A user deleted takes its tokens (user@realm!tokenid).
+		{Kind: "pve_token", Change: "removed", AuditType: "pve_user", MatchKey: "cluster",
+			ActionRe: `^deleted$`, Object: "audit:%s!*"},
+	},
+	accessUserUpdates,
+
+	// The ACL. Nexara's grant and revoke on a path explain only the kind of
+	// grantee the row names (its users, groups or tokens): a grant brings
+	// grantees in and changes their grants any way (a propagate flag is one
+	// grant out and one in), a revoke only takes out. A path is added by its
+	// first grant and removed with its last.
+	byAction("pve_acl", []string{"granted"}, nil, []string{"revoked"}),
+	aclGrantRules,
+	// Anything deleted takes its ACL entries with it (AccessControl.pm
+	// delete_user_acl, delete_group_acl and the like): only that grantee
+	// leaving, and grants only going, never one arriving — a deletion never
+	// hides a grant made meanwhile. A path goes with the grantee only if it
+	// held no one else. A role's delete names no grantee, so any may leave.
+	aclDeleteRules("pve_user", "users", "user_grants"),
+	aclDeleteRules("pve_group", "groups", "group_grants"),
+	aclDeleteRules("pve_token", "tokens", "token_grants"),
+	[]explainRule{
+		{Kind: "pve_acl", Change: "changed", AuditType: "pve_role", MatchKey: "cluster", ActionRe: `^deleted$`,
+			FieldRe: `^(users|groups|tokens)$`, Member: "left"},
+		{Kind: "pve_acl", Change: "changed", AuditType: "pve_role", MatchKey: "cluster", ActionRe: `^deleted$`,
+			FieldRe: `^(user|group|token)_grants$`, Counts: "dels"},
+		// A guest, a storage or a pool removed takes its own path
+		// (remove_vm_access, remove_storage_access, delete_pool_acl).
 		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`, Object: "upid:/vms/%s"},
 		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: anyOf(storageRemovals...),
 			Object: "upid:/storage/%s"},
 		{Kind: "pve_acl", Change: "removed", AuditType: "storage", MatchKey: "cluster",
 			ActionRe: `^(delete|delete_import_source)$`, Object: "audit:/storage/%s"},
+		{Kind: "pve_acl", Change: "removed", AuditType: "pool", MatchKey: "cluster", ActionRe: `^deleted$`,
+			Object: "audit:/pool/%s"},
+		{Kind: "pve_acl", Change: "removed", AuditType: "pool", MatchKey: "cluster", ActionRe: `^deleted$`,
+			Object: "audit:/pool/%s/*"},
+		{Kind: "pve_acl", Change: "changed", AuditType: "pool", MatchKey: "cluster", ActionRe: `^deleted$`,
+			Object: "audit:/pool/%s"},
 	},
-	inDirections(explainRule{Kind: "pve_acl", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^deleted$`},
-		"changed", "removed"),
-	inDirections(explainRule{Kind: "pve_acl", AuditType: "pve_group", MatchKey: "cluster", ActionRe: `^deleted$`},
-		"changed", "removed"),
-	inDirections(explainRule{Kind: "pve_acl", AuditType: "pve_token", MatchKey: "cluster", ActionRe: `^deleted$`},
-		"changed", "removed"),
-	inDirections(explainRule{Kind: "pve_acl", AuditType: "pve_role", MatchKey: "cluster", ActionRe: `^deleted$`},
-		"changed", "removed"),
+	realmSyncRules,
 
 	// ACME. An account registered or deactivated in the Proxmox GUI is a task
 	// whose UPID names no account.
@@ -343,6 +386,78 @@ var observedChangeRules = slices.Concat(
 		{Kind: "acme_account", Change: "removed", MatchKey: "cluster", WorkerRe: `^acmedeactivate$`},
 	},
 	crud("acme_plugin"),
+)
+
+// accessUserUpdates is what a user's update explains: the fields its row says
+// it set, and those it never records, which any update may have set.
+var accessUserUpdates = []explainRule{
+	{Kind: "pve_user", Change: "changed", AuditType: "pve_user", MatchKey: "id", ActionRe: `^updated$`,
+		FieldRe: `^(firstname|lastname|email|comment|keys)$`},
+	{Kind: "pve_user", Change: "changed", AuditType: "pve_user", MatchKey: "id", ActionRe: `^updated$`,
+		DetailKey: "enable", FieldRe: `^enable$`},
+	{Kind: "pve_user", Change: "changed", AuditType: "pve_user", MatchKey: "id", ActionRe: `^updated$`,
+		DetailKey: "expire", FieldRe: `^expire$`},
+	{Kind: "pve_user", Change: "changed", AuditType: "pve_user", MatchKey: "id", ActionRe: `^updated$`,
+		DetailKey: "groups_changed", FieldRe: `^groups$`},
+}
+
+// aclGrantees are the three kinds of grantee: the key a Nexara ACL row names
+// them under (UpdateACL's details), and the two fields of an ACL path
+// (readAccessACL).
+var aclGrantees = []struct{ key, who, grants string }{
+	{"users", "users", "user_grants"}, {"groups", "groups", "group_grants"}, {"tokens", "tokens", "token_grants"},
+}
+
+// aclGrantRules is Nexara's own grant and revoke on a path, for the grantees
+// its row names: a grant brings them in and changes their grants any way, a
+// revoke only takes out.
+var aclGrantRules = func() []explainRule {
+	rules := make([]explainRule, 0, 3*len(aclGrantees))
+	for _, g := range aclGrantees {
+		who := "details-list." + g.key + ":" + g.who + ":%s|" + g.grants + ":*:%s"
+		fields := "^(" + g.who + "|" + g.grants + ")$"
+		rules = append(rules,
+			explainRule{Kind: "pve_acl", Change: "changed", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^granted$`,
+				FieldRe: fields, Member: "joined", MemberOf: who},
+			explainRule{Kind: "pve_acl", Change: "changed", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^granted$`,
+				FieldRe: "^" + g.grants + "$", Member: "left", MemberOf: who},
+			explainRule{Kind: "pve_acl", Change: "changed", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^revoked$`,
+				FieldRe: fields, Member: "left", MemberOf: who},
+		)
+	}
+	return rules
+}()
+
+// aclDeleteRules is what a deleted grantee (a user, a group, a token) does to
+// the ACL: it leaves every path, with its grants, and a path it alone was
+// granted on goes.
+func aclDeleteRules(auditType, who, grants string) []explainRule {
+	named := "audit:" + who + ":%s|" + grants + ":*:%s"
+	return []explainRule{
+		{Kind: "pve_acl", Change: "changed", AuditType: auditType, MatchKey: "cluster", ActionRe: `^deleted$`,
+			FieldRe: "^(" + who + "|" + grants + ")$", Member: "left", MemberOf: named},
+		{Kind: "pve_acl", Change: "removed", AuditType: auditType, MatchKey: "cluster", ActionRe: `^deleted$`,
+			Member: "sole", MemberOf: named},
+	}
+}
+
+// realmSyncRules is a realm sync (pve-access-control API2/Domains.pm sync,
+// worker auth-realm-sync and the scheduled job's, both naming the realm): it
+// creates, edits and removes that realm's users (user@realm) and the groups it
+// syncs (name-realm, as Domains.pm names them), and with remove-vanished takes
+// their ACL entries out. A dry run (auth-realm-sync-test) writes nothing.
+var realmSyncRules = slices.Concat(
+	inDirections(explainRule{Kind: "pve_user", MatchKey: "cluster", WorkerRe: `^auth-realm-sync$`,
+		Object: "upid:*@%s"}, "added", "changed", "removed"),
+	inDirections(explainRule{Kind: "pve_group", MatchKey: "cluster", WorkerRe: `^auth-realm-sync$`,
+		Object: "upid:*-%s"}, "added", "changed", "removed"),
+	[]explainRule{
+		{Kind: "pve_acl", Change: "changed", MatchKey: "cluster", WorkerRe: `^auth-realm-sync$`,
+			FieldRe: `^(users|user_grants|groups|group_grants)$`, Member: "left",
+			MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s"},
+		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: `^auth-realm-sync$`,
+			Member: "sole", MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s"},
+	},
 )
 
 // observedActionsExplainingNothing are the actions handlers file under an

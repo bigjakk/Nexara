@@ -194,9 +194,10 @@ func (spec fieldSpec) split(item map[string]json.RawMessage) (fields map[string]
 }
 
 // memberID is the shape a member must have to be kept as it is: a guest's
-// VMID, a storage, group or user id, an HA resource id — no separator, no
-// space, nothing a value could hide in at length.
-var memberID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9@._:!-]{0,127}$`)
+// VMID, a storage, group or user id, an HA resource id, an SDN subnet's CIDR,
+// an ACL grant (a tag, then its grantee) — no separator, no space, nothing a
+// value could hide in at length.
+var memberID = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9@.:!/_-]{0,191}$`)
 
 // memberIDs is a member list's ids, sorted and once each: a JSON array, or a
 // list separated as Proxmox separates them (PVE::Tools::split_list).

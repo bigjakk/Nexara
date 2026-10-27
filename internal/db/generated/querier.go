@@ -236,10 +236,14 @@ type Querier interface {
 	// row's guest) or details.<k> (its details-><k>): with object set, the
 	// change's resource_id must be that name (a disk task's storage, the ACL path
 	// of the guest a destroy took); with member set, the row explains only that
-	// member joining (joined) or leaving (left) a list — of an object added or
-	// removed, only if it is among the members that came or went with it — or the
-	// removal of an object whose last member it was (sole). A member rule with no
-	// member_of covers any member going its way.
+	// member joining (joined) or leaving (left) a list — an object added or
+	// removed, only if every member that came or went with it is one the row
+	// names — or the removal of an object whose last members it names (sole).
+	// member_of may name several (alternatives joined by |, a details-list.<k>
+	// source a comma list); a member rule with no member_of covers any member
+	// going its way. A name with a * matches any that
+	// begins and ends as it does around it (a realm's users, *@realm). counts
+	// says what the row does to a list's items (listed, below).
 	//
 	// A change is explained when everything it changed is: each member that joined
 	// or left a list of ids (members_joined, members_left), each other field in

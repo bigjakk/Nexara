@@ -423,7 +423,7 @@ func TestObserverKinds(t *testing.T) {
 			base: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1}]`},
 			edit: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1},` +
 				`{"path":"/vms/100","type":"group","ugid":"ops","roleid":"PVEAuditor","propagate":0}]`},
-			want: "changed pve_acl//vms/100 [groups]", value: "PVEAuditor"},
+			want: "changed pve_acl//vms/100 [group_grants groups]", value: "PVEAuditor"},
 		{kind: "acme_plugin",
 			base: answers{"/cluster/acme/plugins": `[{"plugin":"dns01","type":"dns","api":"cf","data":"QUJDREVG","digest":"p1"}]`},
 			edit: answers{"/cluster/acme/plugins": `[{"plugin":"dns01","type":"dns","api":"cf","data":"WllYV1ZV","digest":"p2"}]`},
@@ -461,8 +461,12 @@ func TestObserverKinds(t *testing.T) {
 			if got := e.mq.observed.takeChanges(); !slices.Equal(got, []string{want}) {
 				t.Fatalf("edit: filed %q, want %q", got, want)
 			}
-			if got := fmt.Sprint(rows[0].MembersJoined, rows[0].MembersLeft); tc.members != "" && got != tc.members {
+			got := fmt.Sprint(rows[0].MembersJoined, rows[0].MembersLeft)
+			if tc.members != "" && got != tc.members {
 				t.Fatalf("members %s, want %s", got, tc.members)
+			}
+			if tc.members == "" && strings.Contains(got, tc.value) {
+				t.Fatalf("the members carry the value %q: %s", tc.value, got)
 			}
 			for i := range rows {
 				rows[i].MembersJoined, rows[i].MembersLeft = nil, nil // ids, in columns no reader selects
@@ -803,12 +807,25 @@ func TestObservedChangeRules(t *testing.T) {
 		if !slices.Contains([]string{"added", "changed", "removed"}, r.Change) {
 			t.Errorf("rule %+v names no direction", r)
 		}
-		named := regexp.MustCompile(`^(upid|audit|vmid|details\.[a-z_]+):[^%]*%s[^%]*$`)
+		named := func(s string) bool {
+			source, format, ok := strings.Cut(s, ":")
+			if !ok || !regexp.MustCompile(`^(upid|audit|vmid|details\.[a-z_]+|details-list\.[a-z_]+)$`).MatchString(source) {
+				return false
+			}
+			for _, alt := range strings.Split(format, "|") {
+				if strings.Count(alt, "%") != 1 || !strings.Contains(alt, "%s") || strings.Count(alt, "*") > 1 {
+					return false
+				}
+			}
+			return true
+		}
 		memberOK := (r.Member == "" && r.MemberOf == "") || r.Member == "joined" || r.Member == "left" ||
 			(r.Member == "sole" && r.MemberOf != "")
-		if (r.Object != "" && !named.MatchString(r.Object)) || (r.MemberOf != "" && !named.MatchString(r.MemberOf)) ||
-			!memberOK || !regexp.MustCompile(`^[a-z_]*$`).MatchString(r.DetailKey) {
-			t.Errorf("rule %+v: object, member or detail_key", r)
+		if (r.Object != "" && (!named(r.Object) || strings.Contains(r.Object, "|"))) ||
+			(r.MemberOf != "" && !named(r.MemberOf)) || !memberOK ||
+			!slices.Contains([]string{"", "add1", "del1", "edit1", "adds", "dels"}, r.Counts) ||
+			!regexp.MustCompile(`^[a-z_]*$`).MatchString(r.DetailKey) {
+			t.Errorf("rule %+v: object, member, counts or detail_key", r)
 		}
 		for _, re := range []string{r.ActionRe, r.ExceptRe, r.WorkerRe, r.FieldRe} {
 			if _, err := regexp.Compile(re); err != nil || (re != "" && !strings.HasPrefix(re, "^")) {
