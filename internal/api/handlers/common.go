@@ -303,10 +303,11 @@ func taskTypeFromUPID(upid string) string {
 // defined in migrations/000084 — keep the two in step.
 //
 // A numeric id is NOT sufficient on its own, which is the whole reason this
-// list exists: the field is a plain integer for other task types too, and
-// cephdestroyosd's is the OSD number. ceph_osd.go dispatches exactly that
-// through TrackTask, so an ungated read would record "destroy OSD 113" as an
-// action on VM 113 and forward it to a SIEM under that guest's identity.
+// list exists: nothing promises that a worker type outside these families keeps
+// a VMID in that field, and an audit row naming the wrong guest is worse than
+// one naming none. A Ceph daemon's tasks carry the daemon's name — "osd.12",
+// not 12 (cephdestroyosd's id is "osd.<n>" in pve-manager's OSD.pm) — and are
+// filed under that daemon instead (collector/task_mapping.go).
 //
 // Prefix-matched for the three guest families (qm* QEMU, vz* LXC including
 // vzdump, ha* HA manager), plus the two observed outliers that carry a VMID

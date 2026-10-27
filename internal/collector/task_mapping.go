@@ -166,9 +166,10 @@ var skipTaskTypes = map[string]bool{
 // (Go request path, Go collector, and SQL backfill/insert) with no shared
 // vocabulary between them.
 //
-// Deliberately not "any numeric id": cephdestroyosd's worker id is the OSD
-// number, so an ungated read attributes a Ceph action to the guest holding that
-// VMID.
+// Deliberately an allow-list, not "any numeric id": a worker type not known to
+// carry a VMID yields none, since a row naming the wrong guest is worse than
+// one naming none. A Ceph daemon's tasks carry its name ("osd.12", never 12;
+// OSD.pm) and are mapped to the daemon below.
 var (
 	guestTaskPrefixes = []string{"qm", "vz", "ha"}
 	guestTaskExact    = map[string]bool{"resize": true, "move_volume": true}
