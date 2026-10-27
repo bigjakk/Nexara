@@ -212,6 +212,7 @@ type ClusterObjectChange struct {
 	LastSeenAt   time.Time       `json:"last_seen_at"`
 	ObservedAt   time.Time       `json:"observed_at"`
 	Explained    pgtype.Bool     `json:"explained"`
+	ExplainedBy  pgtype.UUID     `json:"explained_by"`
 }
 
 type ClusterSshCredential struct {

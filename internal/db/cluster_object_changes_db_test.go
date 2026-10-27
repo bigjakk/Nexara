@@ -194,56 +194,27 @@ func TestClusterObjectChanges(t *testing.T) {
 		t.Errorf("%d changes left for a deleted cluster (err %v)", left, err)
 	}
 
-	// ── Classification. Each change is in or out for the reason named.
+	// ── The read, and what the sweep leaves. The classification has its own test.
 	now := time.Now().UTC().Truncate(time.Second)
 	ago := func(m float64) time.Time { return now.Add(-time.Duration(m * float64(time.Minute))) }
-	seed := func(cluster uuid.UUID, rtype, rid, change, node string, observed, lastSeen time.Time) uuid.UUID {
+	seed := func(rtype, rid string, explained pgtype.Bool, observed time.Time) uuid.UUID {
 		t.Helper()
 		id := uuid.New()
 		exec("change "+rtype+"/"+rid, `INSERT INTO cluster_object_changes
-			(id, cluster_id, resource_type, resource_id, change, node, observed_by, last_seen_at, observed_at)
-			VALUES ($1, $2, $3, $4, $5, $6, 'ceph', $7, $8)`, id, cluster, rtype, rid, change, node, lastSeen, observed)
+			(id, cluster_id, resource_type, resource_id, change, observed_by, last_seen_at, observed_at, explained)
+			VALUES ($1, $2, $3, $4, 'changed', 'ceph', $5, $5, $6)`, id, objChangesCluster, rtype, rid, observed, explained)
 		return id
 	}
-	audit := func(cluster uuid.UUID, at time.Time, rtype, rid, action string, details map[string]any) {
-		t.Helper()
-		raw, _ := json.Marshal(details)
-		if err := q.InsertAuditLogWithSource(ctx, gen.InsertAuditLogWithSourceParams{
-			ClusterID: pgtype.UUID{Bytes: cluster, Valid: true}, UserID: pgtype.UUID{Bytes: systemUserID, Valid: true},
-			ResourceType: rtype, ResourceID: rid, Action: action, Details: raw, Source: "proxmox", CreatedAt: at,
-		}); err != nil {
-			t.Fatalf("audit %s: %v", action, err)
-		}
+	shownFalse, shownTrue, undecided := pgtype.Bool{Bool: false, Valid: true}, pgtype.Bool{Bool: true, Valid: true}, pgtype.Bool{}
+	for _, rid := range []string{"111-0", "112-0", "113-0", "115-0"} {
+		seed("replication", rid, shownFalse, ago(10))
 	}
-	pruneBefore := now.Add(-time.Hour)
-
-	byAudit := seed(objChangesCluster, "replication", "110-0", "changed", "", ago(10), ago(10.5))
-	audit(objChangesCluster, ago(10.2), "replication", "110-0", "updated", nil)
-	unexplained := seed(objChangesCluster, "replication", "111-0", "added", "", ago(10), ago(10.5))
-	tooEarly := seed(objChangesCluster, "replication", "112-0", "changed", "", ago(10), ago(10.5))
-	audit(objChangesCluster, ago(60), "replication", "112-0", "updated", nil) // long before the window
-	tooLate := seed(objChangesCluster, "replication", "113-0", "changed", "", ago(10), ago(10.5))
-	audit(objChangesCluster, ago(5), "replication", "113-0", "updated", nil) // after it
-	fresh := seed(objChangesCluster, "replication", "114-0", "changed", "", ago(1), ago(1.5))
-	audit(objChangesCluster, ago(1.2), "replication", "114-0", "updated", nil)
-	byStop := seed(objChangesCluster, "ceph_osd", "7", "changed", "pve-01", ago(10), ago(10.5))
-	audit(objChangesCluster, ago(10.3), "ceph_osd", "7", "osd_stop", nil)
-	byCreate := seed(objChangesCluster, "ceph_osd", "9", "added", "pve-01", ago(10), ago(10.5))
-	audit(objChangesCluster, ago(14), "ceph_osd", "sdb", "osd_create", map[string]any{"node": "pve-01", "upid": "UPID:pve-01:1"})
-	exec("create task", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, started_at, source)
-		VALUES ($1, $2, 'UPID:pve-01:1', 'running', 'pve-01', 'cephcreateosd', $3, 'proxmox')`,
-		objChangesCluster, systemUserID, ago(14))
-	otherNodesCreate := seed(objChangesCluster, "ceph_osd", "12", "added", "pve-02", ago(10), ago(10.5))
-	otherKind := seed(objChangesCluster, "replication", "115-0", "changed", "", ago(10), ago(10.5))
-	audit(objChangesCluster, ago(10.2), "ha_resource", "115-0", "updated", nil) // the same id, another kind of object
-	elsewhere := seed(objChangesCluster, "ceph_osd", "10", "changed", "pve-01", ago(10), ago(10.5))
-	audit(objChangesOther, ago(10.3), "ceph_osd", "10", "osd_stop", nil) // another cluster's
-	unlisted := seed(objChangesCluster, "ceph_osd", "8", "changed", "pve-03", ago(10), ago(10.5))
-	audit(objChangesCluster, ago(10.3), "ceph_osd", "8", "osd_stop", nil)
-	gaveUp := seed(objChangesCluster, "ceph_osd", "13", "changed", "pve-03", now.Add(-26*time.Hour), now.Add(-26*time.Hour))
+	explainedRow := seed("replication", "110-0", shownTrue, ago(10))
+	seed("replication", "114-0", undecided, ago(1))
+	seed("ceph_osd", "10", shownFalse, ago(10))
 
 	// The observer's path: a guest's configuration edited in Proxmox, named by
-	// field, with the vmid beside the audit identity.
+	// field, with the vmid beside the audit identity. The observer decides its own.
 	if err := q.InsertClusterObjectChange(ctx, gen.InsertClusterObjectChangeParams{
 		ClusterID: objChangesCluster, ResourceType: "vm", ResourceID: "100",
 		Vmid: pgtype.Int4{Int32: 100, Valid: true}, Change: "changed", Fields: []string{"memory", "net0"},
@@ -251,75 +222,11 @@ func TestClusterObjectChanges(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("insert a guest change: %v", err)
 	}
-	exec("age the guest change", `UPDATE cluster_object_changes SET observed_at = $2
-		WHERE cluster_id = $1 AND resource_type = 'vm'`, objChangesCluster, ago(10))
-	guestChange := func() string {
-		var e pgtype.Bool
-		if err := pool.QueryRow(ctx, `SELECT explained FROM cluster_object_changes
-			WHERE cluster_id = $1 AND resource_type = 'vm'`, objChangesCluster).Scan(&e); err != nil {
-			t.Fatalf("read the guest change: %v", err)
-		}
-		if !e.Valid {
-			return "undecided"
-		}
-		return "decided"
-	}
+	exec("the observer decides", `UPDATE cluster_object_changes SET explained = false
+		WHERE cluster_id = $1 AND resource_type = 'vm'`, objChangesCluster)
 
-	classify := func(settledBefore time.Time) int64 {
-		t.Helper()
-		n, err := q.ClassifyClusterObjectChanges(ctx, gen.ClassifyClusterObjectChangesParams{
-			ClusterID: objChangesCluster, SettledBefore: settledBefore, ListedNodes: []string{"pve-01", "pve-02"},
-			GiveUpBefore: now.Add(-24 * time.Hour),
-		})
-		if err != nil {
-			t.Fatalf("classify: %v", err)
-		}
-		return n
-	}
-	classify(ago(5))
-	explained := func(id uuid.UUID) string {
-		t.Helper()
-		var e pgtype.Bool
-		if err := pool.QueryRow(ctx, `SELECT explained FROM cluster_object_changes WHERE id = $1`, id).Scan(&e); err != nil {
-			t.Fatalf("read explained: %v", err)
-		}
-		switch {
-		case !e.Valid:
-			return "waiting"
-		case e.Bool:
-			return "explained"
-		}
-		return "shown"
-	}
-	for _, tc := range []struct {
-		name string
-		id   uuid.UUID
-		want string
-	}{
-		{"an audit row for the same object in the window", byAudit, "explained"},
-		{"nothing on record", unexplained, "shown"},
-		{"an audit row from long before", tooEarly, "shown"},
-		{"an audit row from after it was seen", tooLate, "shown"},
-		{"seen too recently to decide", fresh, "waiting"},
-		{"an OSD stopped through Nexara", byStop, "explained"},
-		{"a new OSD, by the create on its host (keyed by the device); the task still runs", byCreate, "explained"},
-		{"a new OSD while the create ran on another node", otherNodesCreate, "shown"},
-		{"the same id under another kind of object", otherKind, "shown"},
-		{"another cluster's audit row", elsewhere, "shown"},
-		{"a node whose task list was not read", unlisted, "waiting"},
-		{"a node whose list stayed unread past the give-up", gaveUp, "shown"},
-	} {
-		if got := explained(tc.id); got != tc.want {
-			t.Errorf("%s: %s, want %s", tc.name, got, tc.want)
-		}
-	}
-
-	// A later pass decides what has settled since, and touches nothing decided.
-	if n := classify(ago(0.5)); n != 1 || explained(fresh) != "explained" {
-		t.Errorf("a later pass decided %d changes (the recent one: %s), want just that one, explained", n, explained(fresh))
-	}
-
-	// ── The read shows only what nothing explained, of the kinds asked for.
+	// The read shows only what nothing explained, of the kinds asked for. (The
+	// changes the triggers recorded just now are not classified and are not shown.)
 	rows, err := q.ListClusterObjectChanges(ctx, gen.ListClusterObjectChangesParams{
 		ClusterID: objChangesCluster, ResourceTypes: []string{"replication"}, RowLimit: 50,
 	})
@@ -330,8 +237,6 @@ func TestClusterObjectChanges(t *testing.T) {
 	for _, r := range rows {
 		shown = append(shown, r.ResourceID)
 	}
-	// The changes the triggers recorded just now were not settled and are not
-	// classified; of the seeded ones, 111, 112, 113 and 115 were decided false.
 	if len(rows) != 4 || rows[0].Total != 4 {
 		t.Errorf("list shows %v (total %d), want the four decided unexplained", shown, rows[0].Total)
 	}
@@ -359,14 +264,6 @@ func TestClusterObjectChanges(t *testing.T) {
 	if err != nil || len(one) != 1 || one[0].ResourceType != "ceph_osd" {
 		t.Errorf("list for one object = %+v (err %v), want OSD 10 alone", one, err)
 	}
-
-	// The observer decides its own rows: the classification leaves this one
-	// undecided, and the read shows it once the observer has said false.
-	if got := guestChange(); got != "undecided" {
-		t.Errorf("the observer's row after the classification passes is %s, want undecided", got)
-	}
-	exec("the observer decides", `UPDATE cluster_object_changes SET explained = false
-		WHERE cluster_id = $1 AND resource_type = 'vm'`, objChangesCluster)
 	guests, err := q.ListClusterObjectChanges(ctx, gen.ListClusterObjectChangesParams{
 		ClusterID: objChangesCluster, ResourceTypes: []string{"vm"}, RowLimit: 50,
 	})
@@ -375,28 +272,21 @@ func TestClusterObjectChanges(t *testing.T) {
 		t.Errorf("list of a guest's changes = %+v (err %v), want the observer's row with its vmid and field names", guests, err)
 	}
 
-	// ── The sweep drops the explained ones past the cutoff, and only those.
-	exec("age explained", `UPDATE cluster_object_changes SET observed_at = now() - interval '3 hours' WHERE id = $1`, byAudit)
-	exec("age shown", `UPDATE cluster_object_changes SET observed_at = now() - interval '3 hours' WHERE id = $1`, unexplained)
-	if err := q.DeleteCompletedTasks(ctx, pruneBefore); err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	for _, tc := range []struct {
-		name string
-		id   uuid.UUID
-		gone bool
-	}{
-		{"an explained change past the cutoff", byAudit, true},
-		{"an unexplained change past the cutoff", unexplained, false},
-		{"an explained change inside it", byStop, false},
-	} {
-		var n int
-		if err := pool.QueryRow(ctx, `SELECT count(*) FROM cluster_object_changes WHERE id = $1`, tc.id).Scan(&n); err != nil {
+	// The task-history sweep leaves every change alone, explained or not: an
+	// explained one stays hidden, with the id of the audit row that explained it.
+	exec("age", `UPDATE cluster_object_changes SET observed_at = now() - interval '3 hours' WHERE cluster_id = $1`, objChangesCluster)
+	count := func() (n int) {
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM cluster_object_changes WHERE cluster_id = $1`, objChangesCluster).Scan(&n); err != nil {
 			t.Fatalf("count: %v", err)
 		}
-		if (n == 0) != tc.gone {
-			t.Errorf("%s: %d rows left, gone should be %v", tc.name, n, tc.gone)
-		}
+		return n
+	}
+	before := count()
+	if err := q.DeleteCompletedTasks(ctx, now.Add(-time.Hour)); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if after := count(); after != before || before < 10 {
+		t.Errorf("%d changes after the sweep, %d before: want every one kept, the explained one (%s) among them", after, before, explainedRow)
 	}
 }
 

@@ -93,9 +93,6 @@ const deleteCompletedTasks = `-- name: DeleteCompletedTasks :exec
 WITH explained_changes AS (
     DELETE FROM guest_status_changes
     WHERE explained AND observed_at < $1::timestamptz
-), explained_object_changes AS (
-    DELETE FROM cluster_object_changes
-    WHERE explained AND observed_at < $1::timestamptz
 ), pruned AS (
     DELETE FROM task_history
     WHERE status != 'running' AND COALESCE(finished_at, started_at) < $1::timestamptz
@@ -145,9 +142,10 @@ ON CONFLICT (upid) DO NOTHING
 // The same sweep drops the guest status changes a task explained
 // (ClassifyGuestStatusChanges): nothing reads them once classified — the task
 // itself is the History entry — and they are as old as the tasks it prunes.
-// The changes no task explained are a guest's own record, and stay. So do the
-// changes to the cluster page's objects (ClassifyClusterObjectChanges), by the
-// same rule.
+// The changes no task explained are a guest's own record, and stay. The changes
+// to the cluster page's objects (ClassifyClusterObjectChanges) are not swept
+// here at all: an explained one is kept, hidden, with the id of the audit row
+// that explained it, as long as an unexplained one is.
 func (q *Queries) DeleteCompletedTasks(ctx context.Context, cutoff time.Time) error {
 	_, err := q.db.Exec(ctx, deleteCompletedTasks, cutoff)
 	return err

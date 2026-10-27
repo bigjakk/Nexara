@@ -63,18 +63,35 @@ type Querier interface {
 	// The claim clears last_error and last_upid, which belong to the previous run:
 	// without that, a run being started would show beside the last run's error.
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
-	// ClassifyClusterObjectChanges decides, once, whether something already on
-	// record explains each settled change: an audit row for the same object —
-	// Nexara's, or a Proxmox task the collector ingested, which files under the same
-	// key — made after the object was last seen as it was (less 2 minutes for how
-	// stale that sighting can be) and no later than the change was seen (plus 30
-	// seconds of clock skew between Nexara and the node). A task counts while it
-	// runs: its audit row is made at the start, and a Ceph OSD takes minutes to
-	// appear. Only a change classified false is shown.
+	// ClassifyClusterObjectChanges decides, once, whether something on record
+	// explains each settled change, and which audit row does (explained_by). A change
+	// is explained only by an audit row whose action does what changed, for each
+	// thing that changed (the rules below, as ClassifyGuestStatusChanges does with its
+	// direction-dependent task lists): an OSD that went down by osd_stop, osd_restart
+	// or osd_destroy, or by a reboot or shutdown of its host; one that came up by
+	// osd_start, osd_restart or osd_create; in and out by osd_in, osd_out,
+	// osd_create, osd_destroy; a pool's settings by an update; an object appearing or
+	// going by its create or delete; a replication job's field by an update whose
+	// details name that field. An unrelated row (osd_in beside an OSD that crashed,
+	// a trigger beside an edit made in the GUI) explains nothing. A change that
+	// changed several things needs every one of them explained.
 	//
-	// A new OSD cannot be keyed by its number in the task that made it (the
-	// cephcreateosd UPID names the device), so an OSD that appeared is also
-	// explained by an osd_create on its host.
+	// A task in Proxmox that Nexara ingested files under the same key and counts
+	// while it runs: its audit row is made at the start, and an OSD takes minutes to
+	// appear. A new OSD cannot be keyed by its number in the task that made it (the
+	// cephcreateosd UPID names the device), so osd_create is matched by the host it
+	// ran on ("device"). An OSD going down or coming up is also explained by a
+	// rolling update that was working on its host (the job's own audit row is then
+	// explained_by).
+	//
+	// The window: the row was made no earlier than the object was last seen as it was
+	// (less 2 minutes for how stale that sighting can be) and no later than the
+	// change was seen (plus 30 seconds of clock skew) — and never more than 30
+	// minutes before it was seen. After an outage the first part spans the whole gap,
+	// and an action hours old is not what a change seen now was; 30 minutes covers
+	// what a real one takes (a replication job gone is noticed up to 15 minutes late,
+	// an OSD appears minutes after its create). A change the cap leaves unexplained
+	// is shown: the side to err on.
 	//
 	// The observer's rows (observed_by = 'observer') are not classified here: it
 	// decides them itself, with rules per kind of object.
@@ -452,9 +469,10 @@ type Querier interface {
 	// The same sweep drops the guest status changes a task explained
 	// (ClassifyGuestStatusChanges): nothing reads them once classified — the task
 	// itself is the History entry — and they are as old as the tasks it prunes.
-	// The changes no task explained are a guest's own record, and stay. So do the
-	// changes to the cluster page's objects (ClassifyClusterObjectChanges), by the
-	// same rule.
+	// The changes no task explained are a guest's own record, and stay. The changes
+	// to the cluster page's objects (ClassifyClusterObjectChanges) are not swept
+	// here at all: an explained one is kept, hidden, with the id of the audit row
+	// that explained it, as long as an unexplained one is.
 	DeleteCompletedTasks(ctx context.Context, cutoff time.Time) error
 	DeleteDRSRule(ctx context.Context, arg DeleteDRSRuleParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) error

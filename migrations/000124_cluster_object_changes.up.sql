@@ -24,11 +24,12 @@
 -- The facts are never updated. `explained` is NULL until the collector has had
 -- time to ingest the task that may explain the change, then true or false, once
 -- (ClassifyClusterObjectChanges, queries/cluster_object_changes.sql): a change is
--- explained when an audit row for the same (cluster, resource_type, resource_id)
--- lies in its window; the observer's rows are decided by the observer, with
--- rules per kind of object. Only a row classified false is shown; the explained
--- ones are dropped by the task-history sweep (DeleteCompletedTasks), the others
--- stay.
+-- explained when an audit row for the same object, of an action that does what
+-- changed (an OSD that went down by osd_stop, a pool's size by update ...), lies
+-- in its window, and `explained_by` is that audit row's id. The observer's rows
+-- are decided by the observer, with rules per kind of object. Only a row
+-- classified false is shown; an explained one stays hidden and is KEPT, with the
+-- id of the row that explained it, for as long as an unexplained one is.
 CREATE TABLE IF NOT EXISTS cluster_object_changes (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     cluster_id    UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
@@ -57,7 +58,11 @@ CREATE TABLE IF NOT EXISTS cluster_object_changes (
     -- was unreachable, the whole gap.
     last_seen_at  TIMESTAMPTZ NOT NULL,
     observed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    explained     BOOLEAN
+    explained     BOOLEAN,
+    -- The audit row that explained the change; NULL until then, and for a row
+    -- explained by an observer that names none. No foreign key: the pointer must
+    -- never hold an audit row (or its cluster) back.
+    explained_by  UUID
 );
 
 -- One object's History, and a kind's.

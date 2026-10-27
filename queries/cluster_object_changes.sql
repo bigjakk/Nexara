@@ -21,18 +21,35 @@ VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('resource_id
         sqlc.arg('change'), sqlc.arg('fields')::text[], sqlc.arg('detail')::jsonb, sqlc.arg('node'),
         sqlc.arg('observed_by'), sqlc.arg('last_seen_at'));
 
--- ClassifyClusterObjectChanges decides, once, whether something already on
--- record explains each settled change: an audit row for the same object —
--- Nexara's, or a Proxmox task the collector ingested, which files under the same
--- key — made after the object was last seen as it was (less 2 minutes for how
--- stale that sighting can be) and no later than the change was seen (plus 30
--- seconds of clock skew between Nexara and the node). A task counts while it
--- runs: its audit row is made at the start, and a Ceph OSD takes minutes to
--- appear. Only a change classified false is shown.
+-- ClassifyClusterObjectChanges decides, once, whether something on record
+-- explains each settled change, and which audit row does (explained_by). A change
+-- is explained only by an audit row whose action does what changed, for each
+-- thing that changed (the rules below, as ClassifyGuestStatusChanges does with its
+-- direction-dependent task lists): an OSD that went down by osd_stop, osd_restart
+-- or osd_destroy, or by a reboot or shutdown of its host; one that came up by
+-- osd_start, osd_restart or osd_create; in and out by osd_in, osd_out,
+-- osd_create, osd_destroy; a pool's settings by an update; an object appearing or
+-- going by its create or delete; a replication job's field by an update whose
+-- details name that field. An unrelated row (osd_in beside an OSD that crashed,
+-- a trigger beside an edit made in the GUI) explains nothing. A change that
+-- changed several things needs every one of them explained.
 --
--- A new OSD cannot be keyed by its number in the task that made it (the
--- cephcreateosd UPID names the device), so an OSD that appeared is also
--- explained by an osd_create on its host.
+-- A task in Proxmox that Nexara ingested files under the same key and counts
+-- while it runs: its audit row is made at the start, and an OSD takes minutes to
+-- appear. A new OSD cannot be keyed by its number in the task that made it (the
+-- cephcreateosd UPID names the device), so osd_create is matched by the host it
+-- ran on ("device"). An OSD going down or coming up is also explained by a
+-- rolling update that was working on its host (the job's own audit row is then
+-- explained_by).
+--
+-- The window: the row was made no earlier than the object was last seen as it was
+-- (less 2 minutes for how stale that sighting can be) and no later than the
+-- change was seen (plus 30 seconds of clock skew) — and never more than 30
+-- minutes before it was seen. After an outage the first part spans the whole gap,
+-- and an action hours old is not what a change seen now was; 30 minutes covers
+-- what a real one takes (a replication job gone is noticed up to 15 minutes late,
+-- an OSD appears minutes after its create). A change the cap leaves unexplained
+-- is shown: the side to err on.
 --
 -- The observer's rows (observed_by = 'observer') are not classified here: it
 -- decides them itself, with rules per kind of object.
@@ -43,27 +60,112 @@ VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('resource_id
 -- task list (listed_nodes) until give_up_before; an object no node owns has no
 -- list to wait for.
 -- name: ClassifyClusterObjectChanges :execrows
-UPDATE cluster_object_changes c
-SET explained = EXISTS (
-    SELECT 1
-    FROM audit_log a
-    LEFT JOIN task_history th ON th.cluster_id = a.cluster_id AND th.upid = a.details->>'upid'
-    WHERE a.cluster_id = c.cluster_id
-      AND a.resource_type = c.resource_type
-      AND (a.resource_id = c.resource_id
-           OR (c.resource_type = 'ceph_osd' AND c.change = 'added'
-               AND a.action = 'osd_create' AND c.node <> '' AND a.details->>'node' = c.node))
-      AND COALESCE(th.started_at, a.created_at) <= c.observed_at + interval '30 seconds'
-      AND CASE WHEN th.upid IS NULL THEN a.created_at ELSE COALESCE(th.finished_at, now()) END
-          >= LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes'
+WITH rules(resource_type, change, field, direction, audit_type, action, match, names_field) AS (VALUES
+    ('ceph_osd',    'changed', 'up',       'false', 'ceph_osd',    'osd_stop',     'object', false),
+    ('ceph_osd',    'changed', 'up',       'false', 'ceph_osd',    'osd_restart',  'object', false),
+    ('ceph_osd',    'changed', 'up',       'false', 'ceph_osd',    'osd_destroy',  'object', false),
+    ('ceph_osd',    'changed', 'up',       'false', 'node',        'reboot',       'host',   false),
+    ('ceph_osd',    'changed', 'up',       'false', 'node',        'shutdown',     'host',   false),
+    ('ceph_osd',    'changed', 'up',       'true',  'ceph_osd',    'osd_start',    'object', false),
+    ('ceph_osd',    'changed', 'up',       'true',  'ceph_osd',    'osd_restart',  'object', false),
+    ('ceph_osd',    'changed', 'up',       'true',  'ceph_osd',    'osd_create',   'device', false),
+    ('ceph_osd',    'changed', 'up',       'true',  'node',        'reboot',       'host',   false),
+    ('ceph_osd',    'changed', 'in',       'false', 'ceph_osd',    'osd_out',      'object', false),
+    ('ceph_osd',    'changed', 'in',       'false', 'ceph_osd',    'osd_destroy',  'object', false),
+    ('ceph_osd',    'changed', 'in',       'true',  'ceph_osd',    'osd_in',       'object', false),
+    ('ceph_osd',    'changed', 'in',       'true',  'ceph_osd',    'osd_create',   'device', false),
+    ('ceph_osd',    'added',   '',         '',      'ceph_osd',    'osd_create',   'device', false),
+    ('ceph_osd',    'removed', '',         '',      'ceph_osd',    'osd_destroy',  'object', false),
+    ('ceph_pool',   'changed', 'size',              '', 'ceph_pool', 'update', 'object', false),
+    ('ceph_pool',   'changed', 'min_size',          '', 'ceph_pool', 'update', 'object', false),
+    ('ceph_pool',   'changed', 'pg_num',            '', 'ceph_pool', 'update', 'object', false),
+    ('ceph_pool',   'changed', 'pg_num_min',        '', 'ceph_pool', 'update', 'object', false),
+    ('ceph_pool',   'changed', 'pg_autoscale_mode', '', 'ceph_pool', 'update', 'object', false),
+    ('ceph_pool',   'added',   '',         '',      'ceph_pool',   'create',       'object', false),
+    ('ceph_pool',   'removed', '',         '',      'ceph_pool',   'delete',       'object', false),
+    ('replication', 'added',   '',         '',      'replication', 'created',      'object', false),
+    ('replication', 'removed', '',         '',      'replication', 'deleted',      'object', false),
+    ('replication', 'changed', 'schedule', '',      'replication', 'updated',      'object', true),
+    ('replication', 'changed', 'rate',     '',      'replication', 'updated',      'object', true),
+    ('replication', 'changed', 'disable',  '',      'replication', 'updated',      'object', true),
+    ('replication', 'changed', 'comment',  '',      'replication', 'updated',      'object', true)
+), todo AS (
+    -- What each pending change needs explained: each field that changed, or the
+    -- change itself; an up or in field also by the way it went.
+    SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.change, c.node, c.observed_at,
+           GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
+                    c.observed_at - interval '30 minutes') AS since,
+           p.field,
+           CASE WHEN p.field IN ('up', 'in') THEN c.detail->p.field->>'to' ELSE '' END AS direction
+    FROM cluster_object_changes c
+    CROSS JOIN LATERAL (
+        SELECT f AS field FROM unnest(c.fields) AS f WHERE c.change = 'changed'
+        UNION ALL
+        SELECT '' WHERE c.change <> 'changed' OR cardinality(c.fields) = 0
+    ) p
+    WHERE c.cluster_id = sqlc.arg('cluster_id')::uuid
+      AND c.explained IS NULL
+      AND c.observed_by <> 'observer'
+      AND c.observed_at < sqlc.arg('settled_before')::timestamptz
+      AND (c.node = ''
+           OR c.node = ANY(sqlc.arg('listed_nodes')::text[])
+           OR c.observed_at < sqlc.arg('give_up_before')::timestamptz)
+), found AS (
+    SELECT t.id, COALESCE(e.audit_id, ru.audit_id) AS audit_id, COALESCE(e.at, ru.at) AS at
+    FROM todo t
+    LEFT JOIN LATERAL (
+        SELECT a.id AS audit_id, a.created_at AS at
+        FROM rules r
+        JOIN audit_log a ON a.cluster_id = t.cluster_id
+                        AND a.resource_type = r.audit_type
+                        AND a.action = r.action
+        LEFT JOIN task_history th ON th.cluster_id = a.cluster_id AND th.upid = a.details->>'upid'
+        WHERE r.resource_type = t.resource_type
+          AND r.change = t.change
+          AND r.field = t.field
+          AND r.direction = t.direction
+          AND (CASE r.match
+                   WHEN 'object' THEN a.resource_id = t.resource_id
+                   WHEN 'host'   THEN t.node <> '' AND a.resource_id = t.node
+                   WHEN 'device' THEN t.node <> '' AND a.details->>'node' = t.node
+               END)
+          AND (NOT r.names_field OR a.details->'fields' ? t.field)
+          AND COALESCE(th.started_at, a.created_at)
+              BETWEEN t.observed_at - interval '30 minutes' AND t.observed_at + interval '30 seconds'
+          AND CASE WHEN th.upid IS NULL THEN a.created_at ELSE COALESCE(th.finished_at, now()) END >= t.since
+        ORDER BY a.created_at DESC
+        LIMIT 1
+    ) e ON true
+    LEFT JOIN LATERAL (
+        SELECT a2.id AS audit_id, a2.created_at AS at
+        FROM rolling_update_nodes n
+        JOIN rolling_update_jobs j ON j.id = n.job_id
+        JOIN audit_log a2 ON a2.cluster_id = j.cluster_id
+                         AND a2.resource_type = 'rolling_update'
+                         AND a2.resource_id = j.id::text
+        WHERE j.cluster_id = t.cluster_id
+          AND t.node <> ''
+          AND n.node_name = t.node
+          AND t.resource_type = 'ceph_osd'
+          AND t.change = 'changed'
+          AND t.field IN ('up', 'in')
+          AND COALESCE(n.drain_started_at, n.reboot_started_at) <= t.observed_at + interval '30 seconds'
+          AND COALESCE(n.restore_completed_at, n.health_check_at, n.reboot_completed_at, now()) >= t.since
+        ORDER BY a2.created_at
+        LIMIT 1
+    ) ru ON true
+), verdict AS (
+    SELECT f.id,
+           bool_and(f.audit_id IS NOT NULL) AS explained,
+           (array_agg(f.audit_id ORDER BY f.at DESC) FILTER (WHERE f.audit_id IS NOT NULL))[1] AS explained_by
+    FROM found f
+    GROUP BY f.id
 )
-WHERE c.cluster_id = sqlc.arg('cluster_id')
-  AND c.explained IS NULL
-  AND c.observed_by <> 'observer'
-  AND c.observed_at < sqlc.arg('settled_before')::timestamptz
-  AND (c.node = ''
-       OR c.node = ANY(sqlc.arg('listed_nodes')::text[])
-       OR c.observed_at < sqlc.arg('give_up_before')::timestamptz);
+UPDATE cluster_object_changes c
+SET explained = v.explained,
+    explained_by = CASE WHEN v.explained THEN v.explained_by END
+FROM verdict v
+WHERE c.id = v.id;
 
 -- ListClusterObjectChanges is the unexplained changes of one cluster's objects of
 -- the given kinds, newest first — all of a kind, or one object's when
