@@ -428,6 +428,13 @@ func newBackupRunApp(t *testing.T, pve *backupRunPVE) (*fiber.App, *backupRunDBT
 func newBackupJobApp(t *testing.T, pve *backupRunPVE, method, path string,
 	handler func(*handlers.BackupHandler, fiber.Ctx, *apischema.Params) error) (*fiber.App, *backupRunDBTX) {
 	t.Helper()
+	return newBackupAppAs(t, pve, grantsOf("manage:backup"), method, path, handler)
+}
+
+// newBackupAppAs is newBackupJobApp for a caller holding exactly grants.
+func newBackupAppAs(t *testing.T, pve *backupRunPVE, grants map[string]bool, method, path string,
+	handler func(*handlers.BackupHandler, fiber.Ctx, *apischema.Params) error) (*fiber.App, *backupRunDBTX) {
+	t.Helper()
 	baseURL := pve.serve(t)
 	encrypted, err := crypto.Encrypt("token-secret-value", backupRunEncKey)
 	if err != nil {
@@ -453,7 +460,7 @@ func newBackupJobApp(t *testing.T, pve *backupRunPVE, method, path string,
 	// stubAuth sets the user TrackTask and AuditLog need — without one they
 	// record nothing, and every "no rows" assertion below would pass for that
 	// reason alone.
-	authed := stubAuth(map[string]bool{"manage:backup": true})
+	authed := stubAuth(grants)
 	auth := func(c fiber.Ctx) error {
 		handlers.SetProxmoxCacheLocal(c, cache)
 		return authed(c)

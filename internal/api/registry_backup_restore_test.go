@@ -1,6 +1,7 @@
 package api
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -46,8 +47,10 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 		stopPoll   = "GET /api2/json/nodes/pve-02/tasks/" + restoreStopUPID + "/status"
 		restore    = "POST /api2/json/nodes/pve-02/qemu"
 	)
+	both := grantsOf("manage:backup", "view:backup")
 	tests := []struct {
 		name    string
+		grants  map[string]bool
 		storage string
 		force   bool
 		status  int
@@ -55,23 +58,26 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 		from    string // the storage the archive is read through; empty when refused
 		by      string // how it was tied to the server
 	}{
-		{"the storage of the requested server and datastore, on the node asked for", restoreStorages, false, 200,
+		{"the storage of the requested server and datastore, on the node asked for", both, restoreStorages, false, 200,
 			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address"},
-		{"another Nexara PBS server owns the only pbs storage: nothing is dispatched", restoreOtherServerOnly, false, 400,
+		{"another Nexara PBS server owns the only pbs storage: nothing is dispatched", both, restoreOtherServerOnly, false, 400,
 			[]string{storageGet}, "", ""},
-		{"the only candidate is used, and recorded as such", restoreAliasOnly, false, 200,
+		{"the only candidate is used, and recorded as such", both, restoreAliasOnly, false, 200,
 			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store05", "only_candidate"},
-		{"over an existing guest: the storage is chosen on the guest's node, then the stop, then the restore", restoreStorages, true, 200,
+		{"over an existing guest: the storage is chosen on the guest's node, then the stop, then the restore", both, restoreStorages, true, 200,
 			[]string{storageGet, stopPost, stopPoll, restore}, "store02", "address"},
-		{"over an existing guest with no such storage: it is not stopped", restoreOtherServerOnly, true, 400,
+		{"over an existing guest with no such storage: it is not stopped", both, restoreOtherServerOnly, true, 400,
 			[]string{storageGet}, "", ""},
+		// A server the caller may not view is a missing one, and nothing is asked of Proxmox.
+		{"a caller who may manage backups here but not view the PBS server", grantsOf("manage:backup"), restoreStorages, false, 404, nil, "", ""},
+		{"a caller who may view the PBS server but not manage backups here", grantsOf("view:backup"), restoreStorages, false, 403, nil, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pve := &restorePVE{storage: tt.storage}
 			base := &backupRunPVE{handle: pve.handle}
-			app, dbtx := newBackupJobApp(t, base, fiber.MethodPost, clusterScope+"/restore",
+			app, dbtx := newBackupAppAs(t, base, tt.grants, fiber.MethodPost, clusterScope+"/restore",
 				(*handlers.BackupHandler).RestoreBackup)
 			clusterID, nodeID := uuid.MustParse(testClusterID), uuid.MustParse("5c4b3a29-1817-4615-9413-000000000002")
 			pbs01 := db.PbsServer{ID: uuid.MustParse(testPBSServerID), Name: "pbs01", ApiUrl: "https://pbs01.example.com:8007"}
@@ -83,6 +89,8 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 				// The guest lives on pve-02; the request names pve-01.
 				"GetVMByClusterAndVmid": db.Vm{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000003"), ClusterID: clusterID, NodeID: nodeID, Vmid: 101, Name: "linux01", Type: "qemu"},
 				"GetNode":               db.Node{ID: nodeID, ClusterID: clusterID, Name: "pve-02"},
+				// The node the request names is a member; the handler checks it itself.
+				"GetNodeByClusterAndName": db.Node{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000004"), ClusterID: clusterID, Name: "pve-01"},
 			}
 
 			body := `{"pbs_server_id":"` + testPBSServerID + `","backup_type":"vm","backup_id":"101","backup_time":1700000000,` +
@@ -94,10 +102,14 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("app.Test: %v", err)
 			}
+			answer, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 
 			if resp.StatusCode != tt.status {
 				t.Errorf("status = %d, want %d", resp.StatusCode, tt.status)
+			}
+			if tt.status == 404 && !strings.Contains(string(answer), "PBS server not found") {
+				t.Errorf("answer %q, want the missing-server message", answer)
 			}
 			if got := pve.requests(); !slices.Equal(got, tt.calls) {
 				t.Errorf("requests to Proxmox = %q, want %q", got, tt.calls)

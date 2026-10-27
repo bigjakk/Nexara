@@ -1641,10 +1641,41 @@ type restoreBackupRequest struct {
 	StartAfterRestore bool
 }
 
+// requirePBSServerVisible is requirePBSPerm for "view", with the refusal a
+// caller who may not see the server gets worded as a missing server: a server
+// the caller cannot view is no different, to them, from one that does not exist.
+func (h *BackupHandler) requirePBSServerVisible(c fiber.Ctx, pbsID uuid.UUID) error {
+	_, err := h.requirePBSPerm(c, pbsID, "view")
+	var fe *fiber.Error
+	if errors.As(err, &fe) && fe.Code == fiber.StatusForbidden {
+		return fiber.NewError(fiber.StatusNotFound, "PBS server not found")
+	}
+	return err
+}
+
 // RestoreBackup handles POST /api/v1/clusters/:cluster_id/restore
+//
+// Its permission is Deferred (restoreDeferredReason): manage:backup on the
+// cluster in the path, then view:backup on the PBS server the body names, then
+// the target node. In that order, so a caller refused at one step learns nothing
+// about the next: not that a server exists, nor which nodes a cluster holds.
 func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
+		return err
+	}
+	// The uuid format on the declaration has already refused anything unparseable.
+	pbsID, err := parseParamUUID(p.String("pbs_server_id"))
+	if err != nil {
+		return err
+	}
+	if err := h.requirePBSServerVisible(c, pbsID); err != nil {
+		return err
+	}
+	if err := requireNodeInCluster(c, lookupOf(h.queries), clusterID, p.String("target_node")); err != nil {
 		return err
 	}
 
@@ -1660,13 +1691,6 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 		Force:             p.Bool("force"),
 		Unique:            p.Bool("unique"),
 		StartAfterRestore: p.Bool("start_after_restore"),
-	}
-
-	// Look up PBS server to validate it exists. The uuid format on the
-	// declaration has already refused anything unparseable.
-	pbsID, err := parseParamUUID(req.PBSServerID)
-	if err != nil {
-		return err
 	}
 
 	server, err := h.queries.GetPBSServer(c.Context(), pbsID)

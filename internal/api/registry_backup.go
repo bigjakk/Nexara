@@ -166,6 +166,13 @@ const backupDeferredReason = "the scope depends on a DB lookup: requirePBSPerm l
 	"and gates on the cluster it is attached to when there is one, and on the instance-wide grant when " +
 	"the server is standalone — the same split PBSHandler makes inline for the /pbs-servers routes"
 
+// restoreDeferredReason is the restore's Deferred justification: the second of
+// its two checks is on something only the body names.
+const restoreDeferredReason = "two checks, the second on something only the body names: manage:backup on the " +
+	"cluster in the path, then view:backup on the PBS server the body's pbs_server_id picks — requirePBSPerm " +
+	"loads its row and gates on its cluster, or instance-wide when it is standalone — refused as a 404, so " +
+	"a server the caller cannot view looks like one that does not exist"
+
 // snapshotRefParams is the (type, id, time) triple that names one PBS
 // snapshot, shared by the delete, protect and notes routes.
 //
@@ -549,13 +556,20 @@ func registerBackupEndpoints(reg *Registry, h *handlers.BackupHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   clusterScope + "/restore",
+		// The permission requirement is stated in the DESCRIPTION because a
+		// Deferred route renders as the bare word "deferred".
 		Description: "Restore a PBS snapshot onto this cluster as a guest. The archive is addressed " +
-			"through the cluster's own PBS storage entry, so one must be configured in Proxmox first. " +
-			"Runs as a background task.",
+			"through the cluster's Proxmox storage for the snapshot's PBS server and datastore, so one " +
+			"must be configured in Proxmox first. Requires manage:backup on this cluster and view:backup " +
+			"on the PBS server (on the cluster it is attached to, or instance-wide when it is standalone); " +
+			"a server the caller cannot view answers 404. Runs as a background task.",
 		Group:       "Backup",
-		Permissions: clusterCheck("manage", "backup"),
+		Permissions: Permissions{Deferred: restoreDeferredReason},
 		Parameters:  clusterParams(restoreBackupParams()),
 		Handler:     h.RestoreBackup,
+		NodesCheckedByHandler: map[string]string{
+			"target_node": "checked against the path's cluster after both permission checks, since the permission is Deferred",
+		},
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodPost,

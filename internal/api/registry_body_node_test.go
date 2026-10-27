@@ -38,8 +38,8 @@ import (
 // derived, so that a declaration that stops being recognised moves a number somebody
 // has to update deliberately.
 const (
-	bodyNodeServeRouteCount   = 28
-	bodyNodeHandlerRouteCount = 4
+	bodyNodeServeRouteCount   = 27
+	bodyNodeHandlerRouteCount = 5
 )
 
 // bodyNodeExempt lists the body parameters spelled like a node that nothing checks
@@ -316,6 +316,15 @@ var handlerNodeChecks = map[string]handlerNodeCheck{
 		},
 		grants:    []string{"manage:vm"},
 		clusterOf: map[string]string{"target": "cluster_id"},
+	},
+	"POST " + clusterScope + "/restore": {
+		handler: func(q *db.Queries) Handler {
+			return handlers.NewBackupHandler(q, "", nil).RestoreBackup
+		},
+		grants:    []string{"manage:backup", "view:backup"},
+		clusterOf: map[string]string{"target_node": "cluster_id"},
+		// The PBS server is read, and must be visible, before the node is checked.
+		rows: map[string]any{"GetPBSServer": db.PbsServer{ID: uuid.MustParse(testPBSServerID)}},
 	},
 }
 

@@ -36,11 +36,12 @@ func backupRoute(path string) string {
 }
 
 // backupRoutesOutsideTheClusterCheckShape is this domain's half of the registry-wide exception list in
-// registry_vms_test.go. TWENTY-ONE of the 28 are here, the highest proportion of any domain and its own
+// registry_vms_test.go. TWENTY-TWO of the 28 are here, the highest proportion of any domain and its own
 // shape: a PBS server may belong to a cluster or to none, which decides whether the grant is cluster-scoped
-// or instance-wide, a DB read on every one of the 19 routes nested under /pbs-servers/:pbs_id; the other
-// two span every cluster and filter instead of gating. The map is built rather than written out because the
-// 19 share one reason verbatim, and nineteen copies of one sentence is a list nobody re-reads.
+// or instance-wide, a DB read on every one of the 19 routes nested under /pbs-servers/:pbs_id; two more
+// span every cluster and filter instead of gating, and the restore checks the PBS server its body names
+// after the cluster in its path. The map is built rather than written out because the 19 share one reason
+// verbatim, and nineteen copies of one sentence is a list nobody re-reads.
 var backupRoutesOutsideTheClusterCheckShape = func() map[string]string {
 	const deferred = "Deferred: requirePBSPerm loads the PBS server row and gates on its cluster, or " +
 		"instance-wide when the server is standalone"
@@ -49,6 +50,8 @@ var backupRoutesOutsideTheClusterCheckShape = func() map[string]string {
 			"it per PBS server; the snapshots span every server, so there is no single cluster to gate on",
 		"GET /api/v1/backup-coverage": "Advisory: two accessibleClusters reads (view:backup and view:veeam) " +
 			"become per-cluster predicates handed to backupcoverage.Compute; the report spans every cluster",
+		"POST /api/v1/clusters/:cluster_id/restore": "Deferred: manage:backup on the cluster in the path, then " +
+			"view:backup on the PBS server the body names (requirePBSPerm), both in the handler",
 	}
 	for _, r := range []string{
 		"GET /api/v1/pbs-servers/:pbs_id/datastores",
@@ -110,7 +113,7 @@ var backupLegacyPermissions = map[string]struct {
 	"GET /api/v1/pbs-servers/:pbs_id/tasks/:upid/log":                     {"view:backup", "Deferred", 2},
 	"GET /api/v1/pbs-servers/:pbs_id/metrics":                             {"view:backup", "Deferred", 2},
 
-	"POST /api/v1/clusters/:cluster_id/restore":                 {"manage:backup", "Check", 1},
+	"POST /api/v1/clusters/:cluster_id/restore":                 {"manage:backup", "Deferred", 2},
 	"POST /api/v1/clusters/:cluster_id/backup":                  {"manage:backup", "Check", 1},
 	"GET /api/v1/clusters/:cluster_id/backup-jobs":              {"view:backup", "Check", 1},
 	"POST /api/v1/clusters/:cluster_id/backup-jobs":             {"manage:backup", "Check", 1},
@@ -138,12 +141,14 @@ func declaredBackupEndpoints(t *testing.T) map[string]Endpoint {
 // TestBackupRoutesDeclareTheSamePermissionTheyEnforced is the tally that
 // makes this migration a refactor rather than a change.
 //
-// Seven of the 48 hand-placed calls move into middleware and 41 stay, which
+// Six of the 49 hand-placed calls move into middleware and 43 stay, which
 // is the lowest hoist rate of any domain migrated so far. The tally says so
-// out loud rather than leaving a reader to infer it from 21 reason strings.
-// The 48 counts per ROUTE rather than per source line, the way
+// out loud rather than leaving a reader to infer it from 22 reason strings.
+// The 49 counts per ROUTE rather than per source line, the way
 // pbsLegacyPermissions does: the 19 Deferred routes share one requirePBSPerm
-// whose two branches are the two calls each of them makes.
+// whose two branches are the two calls each of them makes. The restore was
+// the seventh hoisted one until it gained a second, body-dependent check
+// (requireClusterPerm, then requirePBSPerm) and went back into its handler.
 func TestBackupRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	declared := declaredBackupEndpoints(t)
 	if len(declared) != backupRouteCount {
@@ -215,8 +220,8 @@ func TestBackupRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 			t.Fatalf("%s: unknown shape %q in the tally", key, want.shape)
 		}
 	}
-	if hoisted != 7 || kept != 41 {
-		t.Errorf("the tally moves %d permission call(s) into middleware and keeps %d in handlers, want 7 / 41",
+	if hoisted != 6 || kept != 43 {
+		t.Errorf("the tally moves %d permission call(s) into middleware and keeps %d in handlers, want 6 / 43",
 			hoisted, kept)
 	}
 
