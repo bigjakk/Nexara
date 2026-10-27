@@ -10,9 +10,10 @@ import (
 )
 
 // The History's audit indexes are built once, after startup: a replica that
-// finds the lock taken builds nothing, and an INVALID leftover of an
-// interrupted build is dropped and built again. Not parallel: it builds
-// indexes on the schema the package's DB tests share.
+// finds the lock taken builds nothing, an INVALID leftover of an interrupted
+// build is dropped and built again, and an index of their name that is not
+// theirs is refused. Not parallel: it builds indexes on the schema the
+// package's DB tests share.
 func TestEnsureHistoryIndexes(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -34,18 +35,23 @@ func TestEnsureHistoryIndexes(t *testing.T) {
 		}
 		return def, valid
 	}
-	defer run(`DELETE FROM audit_log WHERE resource_type = 'history-index-probe'`)
 	for _, ix := range historyIndexes {
 		run("DROP INDEX IF EXISTS " + ix.name)
 	}
-	// What an interrupted concurrent build leaves: the name, INVALID — here a
-	// unique build that duplicates refused.
-	run(`INSERT INTO audit_log (resource_type, resource_id, action, details)
-		VALUES ('history-index-probe', 'a', 'dup', '{}'), ('history-index-probe', 'b', 'dup', '{}')`)
-	if _, err := pool.Exec(ctx, `CREATE UNIQUE INDEX CONCURRENTLY idx_audit_log_details ON audit_log (action)`,
-		pgx.QueryExecModeSimpleProtocol); err == nil {
-		t.Fatal("the unique build over duplicates succeeded; no invalid index to recover from")
+	// Not the History's index, under one of its names: refused, and left.
+	run(`CREATE INDEX idx_audit_log_resource_created ON audit_log (action)`)
+	if err := EnsureHistoryIndexes(ctx, pool, logger); err == nil || !strings.Contains(err.Error(), "leaving it alone") {
+		t.Fatalf("a look-alike index: %v, want it refused", err)
 	}
+	if def, _ := indexDef("idx_audit_log_resource_created"); !strings.Contains(def, "(action)") {
+		t.Fatalf("the look-alike was replaced: %q", def)
+	}
+	run("DROP INDEX idx_audit_log_resource_created")
+	// What an interrupted concurrent build leaves: the History's index,
+	// INVALID. Marking it so takes a superuser, which the test database's
+	// owner is (as POSTGRES_USER is in CI).
+	run(`CREATE INDEX idx_audit_log_details ON audit_log USING gin (details jsonb_path_ops)`)
+	run(`UPDATE pg_index SET indisvalid = false WHERE indexrelid = 'public.idx_audit_log_details'::regclass`)
 
 	holder, err := pool.Acquire(ctx)
 	if err != nil {
