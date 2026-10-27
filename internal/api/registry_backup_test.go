@@ -538,6 +538,25 @@ func TestRestoreRequiresWhatTheHandlerDid(t *testing.T) {
 	}
 }
 
+// The restore's datastore is a PBS datastore name, held to the shape the other
+// datastore parameters are: a value no datastore can have is refused before it
+// reaches a lookup, a log line or an audit row.
+func TestRestoreDatastoreIsHeldToTheDatastoreNameShape(t *testing.T) {
+	const path = clusterScope + "/restore"
+	for _, tt := range []struct {
+		datastore string
+		want      int
+	}{{"datastore01", fiber.StatusNoContent}, {"../etc", fiber.StatusBadRequest}, {"data store", fiber.StatusBadRequest}} {
+		cap := &capture{}
+		app := newRegistryApp(t, noAuth(), probeBackupEndpoint(t, fiber.MethodPost, path, cap))
+		body := `{"pbs_server_id":"` + testPBSServerID + `","backup_type":"vm","backup_id":"101","backup_time":1700000000,` +
+			`"target_node":"pve-01","vmid":101,"datastore":"` + tt.datastore + `"}`
+		if status, env := send(t, app, jsonRequest(http.MethodPost, backupRoute(path), body)); status != tt.want {
+			t.Errorf("datastore %q: status %d (%q), want %d", tt.datastore, status, env.Message, tt.want)
+		}
+	}
+}
+
 // TestPBSMetricsTimeframesCoverTheTable holds the declared enum and the
 // window table together, the way TestCephMetricsTimeframesCoverTheTable does
 // for Ceph: the enum is what validates a request and the table is what maps a

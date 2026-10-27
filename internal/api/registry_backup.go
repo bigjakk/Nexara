@@ -759,6 +759,10 @@ func pruneDatastoreParams() apischema.Properties {
 // stopped no guest — but it is four reads and a Proxmox client for a request
 // that was never going to work.
 func restoreBackupParams() apischema.Properties {
+	// The datastore name has the shape every other datastore parameter has.
+	datastore := pbsDatastoreParam
+	datastore.Description = "PBS datastore the snapshot lives in. With the PBS server it picks the cluster's " +
+		"Proxmox storage the archive is read through."
 	return apischema.Properties{
 		"pbs_server_id": {
 			Type:        apischema.String,
@@ -799,14 +803,7 @@ func restoreBackupParams() apischema.Properties {
 			Typetext:    "<integer>",
 			Description: "VMID to restore the guest as.",
 		},
-		"datastore": {
-			Type:      apischema.String,
-			MinLength: apischema.Ptr(1),
-			MaxLength: apischema.Ptr(64),
-			Typetext:  "<datastore>",
-			Description: "PBS datastore the snapshot lives in. With the PBS server it picks the cluster's " +
-				"Proxmox storage the archive is read through.",
-		},
+		"datastore": datastore,
 		"storage": optString(100, "<storage>",
 			"Storage to restore the disks onto. Omitted lets Proxmox use the archive's own."),
 		"force": optFlag("Overwrite an existing guest with this VMID. The guest is stopped first, as a task of its own, " +
