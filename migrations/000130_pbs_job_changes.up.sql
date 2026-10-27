@@ -19,7 +19,10 @@
 -- The rows are global: no cluster_id (000129), resource_type pbs_server and
 -- resource_id the server's id, as the audit rows for a PBS server are filed;
 -- the job and its datastore are in detail, the changed names (PBS's own
--- spelling) in fields. Never a value.
+-- spelling) in fields. Never a configuration value: detail holds the job's
+-- identity — its id, its type, the datastore it is on, and, when it moved to
+-- another, the one it was on (from_datastore) — which the PBS's History needs
+-- to say which job changed, and which Nexara lists beside the job anyway.
 --
 -- The collector prunes a server's jobs only after a listing that succeeded and
 -- was written whole, so a PBS that cannot be reached removes nothing.
@@ -64,7 +67,9 @@ BEGIN
             INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, change, fields, detail,
                                                 observed_by, last_seen_at)
             VALUES (NULL, 'pbs_server', NEW.pbs_server_id::text, 'changed', v_fields,
-                    jsonb_build_object('job_type', v_type, 'job', NEW.job_id, 'datastore', NEW.store),
+                    jsonb_build_object('job_type', v_type, 'job', NEW.job_id, 'datastore', NEW.store)
+                        || CASE WHEN OLD.store IS DISTINCT FROM NEW.store
+                                THEN jsonb_build_object('from_datastore', OLD.store) ELSE '{}' END,
                     'trigger', OLD.last_seen_at);
         END IF;
         RETURN NULL;

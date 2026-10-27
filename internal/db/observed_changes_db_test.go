@@ -580,6 +580,12 @@ func TestObservedGlobalChanges(t *testing.T) {
 		got[1].Change != "added" || got[2].Change != "removed" {
 		t.Fatalf("recorded %+v, want s-01 changed (remote-store, schedule), s-02 added and removed", got)
 	}
+	// A job moved to another datastore says which it left: both are its identity.
+	exec("move", `UPDATE pbs_sync_jobs SET store = 'datastore04' WHERE pbs_server_id = $1 AND job_id = 's-01'`, observedPBS)
+	if got := changes(observedPBS); len(got) != 4 || fmt.Sprint(got[3].Fields) != "[store]" ||
+		got[3].Detail["datastore"] != "datastore04" || got[3].Detail["from_datastore"] != "datastore01" {
+		t.Fatalf("a job moved: recorded %+v", got)
+	}
 
 	// A server removed takes its jobs with it, and that is no job's removal.
 	if err := q.MarkPBSJobBaseline(ctx, gen.MarkPBSJobBaselineParams{PbsServerID: observedPBSGone, JobType: "sync"}); err != nil {
@@ -614,8 +620,9 @@ func TestObservedGlobalChanges(t *testing.T) {
 		observedPBS.String(), []string{observedPBS.String(), observedPBSGone.String()}).Scan(&explained, &shown); err != nil {
 		t.Fatal(err)
 	}
-	// The changed job names remote-store too, which the rule does not cover.
-	if fmt.Sprint(explained) != "[added removed]" || fmt.Sprint(shown) != "[added changed]" {
+	// The changed job names remote-store too, and the moved one store, which
+	// the rule does not cover.
+	if fmt.Sprint(explained) != "[added removed]" || fmt.Sprint(shown) != "[added changed changed]" {
 		t.Fatalf("explained %v of the server's changes, shown %v of both servers'", explained, shown)
 	}
 }
