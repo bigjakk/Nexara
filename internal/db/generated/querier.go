@@ -649,14 +649,19 @@ type Querier interface {
 	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
 	// a momentary non-observation no longer churns PBS inventory rows, and the
 	// cutoff is driven from now() so the app and DB clocks aren't mixed. The
-	// caller runs it only after the server's datastores were listed, and names the
-	// datastores whose snapshots were not listed and written whole (unwritten):
-	// they keep their rows, which nothing refreshed. A datastore the PBS no longer
-	// lists loses its snapshots. No unwritten datastore, NULL included, spares none.
+	// caller runs it only after the server's datastores were listed. A snapshot
+	// a listing showed but failed to write is kept (kept: its datastore, type, id
+	// and time), so in a datastore that was listed only what the listing lacked
+	// goes, whatever failed to write; a datastore whose snapshots could not be
+	// listed (unlistable) keeps its rows, which nothing refreshed, for a day past
+	// the last listing that refreshed them, not for ever. A datastore the PBS no
+	// longer lists loses its snapshots. NULL lists spare nothing.
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
-	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
+	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql),
+	// run after a listing that succeeded: the jobs it showed but failed to write
+	// (kept) stay, so only what the listing lacked goes, whatever failed to write.
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
-	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
+	// DeleteStalePBSSyncJobs for the verify jobs.
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
 	// DeleteStaleReplicationJobs prunes jobs no longer reported by Proxmox (their
 	// last_seen_at falls behind once they stop being upserted each sync).

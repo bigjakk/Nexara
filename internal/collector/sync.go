@@ -279,6 +279,15 @@ type PBSProxmoxClient interface {
 	GetVerifyJobs(ctx context.Context) ([]proxmox.PBSVerifyJob, error)
 }
 
+// pbsSnapshotKey names a snapshot a listing showed but failed to write, for the
+// prune to keep (DeleteStalePBSSnapshots).
+type pbsSnapshotKey struct {
+	Datastore  string `json:"datastore"`
+	BackupType string `json:"backup_type"`
+	BackupID   string `json:"backup_id"`
+	BackupTime int64  `json:"backup_time"`
+}
+
 // PBSClientFactory creates a PBSProxmoxClient from server credentials.
 type PBSClientFactory func(apiURL, tokenID, tokenSecret, tlsFingerprint string) (PBSProxmoxClient, error)
 
@@ -1465,13 +1474,16 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 	}
 
 	// Sync snapshots per datastore. They are pruned below only after the
-	// datastores were listed, and a datastore whose snapshots were not listed
-	// and written whole keeps its rows: a listing that failed refreshed none, so
-	// pruning then deleted every snapshot of a PBS unreachable for longer than
-	// the grace, and every snapshot of a datastore that did not answer.
+	// datastores were listed, and only what a listing lacked: a snapshot a
+	// listing showed but failed to write is kept, and a datastore whose
+	// snapshots could not be listed keeps its rows for a day past the last
+	// listing that refreshed them (DeleteStalePBSSnapshots). Before this, a PBS
+	// unreachable for longer than the grace lost every snapshot row, and a
+	// datastore that did not answer lost its own.
 	datastores, err := client.GetDatastores(ctx)
 	datastoresListed := err == nil
-	var unwrittenDatastores []string
+	var unlistable []string
+	kept := []pbsSnapshotKey{}
 	if err != nil {
 		s.logger.Warn("failed to get PBS datastores", "pbs_id", server.ID, "error", err)
 	} else {
@@ -1484,11 +1496,10 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 					"datastore", ds.Name,
 					"error", err,
 				)
-				unwrittenDatastores = append(unwrittenDatastores, ds.Name)
+				unlistable = append(unlistable, ds.Name)
 				continue
 			}
 			s.logger.Debug("PBS snapshots", "pbs_id", server.ID, "datastore", ds.Name, "count", len(snaps))
-			written := true
 			for _, snap := range snaps {
 				verified := false
 				if snap.Verification != nil && snap.Verification.State == "ok" {
@@ -1511,22 +1522,22 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 						"pbs_id", server.ID,
 						"error", uErr,
 					)
-					written = false
+					kept = append(kept, pbsSnapshotKey{Datastore: ds.Name, BackupType: snap.BackupType,
+						BackupID: snap.BackupID, BackupTime: snap.BackupTime})
 				}
-			}
-			if !written {
-				unwrittenDatastores = append(unwrittenDatastores, ds.Name)
 			}
 		}
 	}
 
-	// Sync sync jobs. A server's jobs are pruned below only when they were
-	// listed AND every one was written: a job left unwritten keeps its old
-	// last_seen_at and would otherwise be pruned while the PBS still holds it,
-	// and a listing that failed refreshed nothing at all — without this, a PBS
+	// Sync sync jobs. After a listing that succeeded, the jobs it lacked are
+	// pruned below — a job it showed but failed to write is kept — and the
+	// server's jobs are marked read whole (migrations/000130) only when every
+	// one was written, since a job left unwritten would read as added when it
+	// is written. A listing that failed prunes nothing: without that, a PBS
 	// unreachable for longer than the grace lost every job row.
 	syncJobs, err := client.GetSyncJobs(ctx)
-	syncJobsWritten := err == nil
+	syncListed := err == nil
+	syncKept := []string{}
 	if err != nil {
 		s.logger.Warn("failed to get PBS sync jobs", "pbs_id", server.ID, "error", err)
 	} else {
@@ -1545,14 +1556,15 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 			})
 			if uErr != nil {
 				s.logger.Warn("failed to upsert PBS sync job", "pbs_id", server.ID, "error", uErr)
-				syncJobsWritten = false
+				syncKept = append(syncKept, job.ID)
 			}
 		}
 	}
 
-	// Sync verify jobs, pruned on the same condition.
+	// Sync verify jobs, pruned and marked on the same conditions.
 	verifyJobs, err := client.GetVerifyJobs(ctx)
-	verifyJobsWritten := err == nil
+	verifyListed := err == nil
+	verifyKept := []string{}
 	if err != nil {
 		s.logger.Warn("failed to get PBS verify jobs", "pbs_id", server.ID, "error", err)
 	} else {
@@ -1568,7 +1580,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 			})
 			if uErr != nil {
 				s.logger.Warn("failed to upsert PBS verify job", "pbs_id", server.ID, "error", uErr)
-				verifyJobsWritten = false
+				verifyKept = append(verifyKept, job.ID)
 			}
 		}
 	}
@@ -1583,31 +1595,39 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 
 	// Prune stale inventory.
 	if datastoresListed {
+		keptJSON, _ := json.Marshal(kept)
 		if err := s.queries.DeleteStalePBSSnapshots(ctx, db.DeleteStalePBSSnapshotsParams{
 			PbsServerID:  server.ID,
-			Unwritten:    unwrittenDatastores,
 			GraceSeconds: int32(staleInventoryGrace.Seconds()),
+			Kept:         keptJSON,
+			Unlistable:   unlistable,
 		}); err != nil {
 			s.logger.Warn("failed to prune stale PBS snapshots", "pbs_id", server.ID, "error", err)
 		}
 	}
-	if syncJobsWritten {
+	if syncListed {
 		if err := s.queries.DeleteStalePBSSyncJobs(ctx, db.DeleteStalePBSSyncJobsParams{
 			PbsServerID:  server.ID,
+			Kept:         syncKept,
 			GraceSeconds: int32(staleInventoryGrace.Seconds()),
 		}); err != nil {
 			s.logger.Warn("failed to prune stale PBS sync jobs", "pbs_id", server.ID, "error", err)
 		}
-		s.markPBSJobBaseline(ctx, server, "sync")
+		if len(syncKept) == 0 {
+			s.markPBSJobBaseline(ctx, server, "sync")
+		}
 	}
-	if verifyJobsWritten {
+	if verifyListed {
 		if err := s.queries.DeleteStalePBSVerifyJobs(ctx, db.DeleteStalePBSVerifyJobsParams{
 			PbsServerID:  server.ID,
+			Kept:         verifyKept,
 			GraceSeconds: int32(staleInventoryGrace.Seconds()),
 		}); err != nil {
 			s.logger.Warn("failed to prune stale PBS verify jobs", "pbs_id", server.ID, "error", err)
 		}
-		s.markPBSJobBaseline(ctx, server, "verify")
+		if len(verifyKept) == 0 {
+			s.markPBSJobBaseline(ctx, server, "verify")
+		}
 	}
 
 	// Emit pbs_change event so frontend caches auto-refresh.

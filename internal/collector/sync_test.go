@@ -110,8 +110,9 @@ type mockQueries struct {
 	pbsSyncJobUpsertErr     error
 	pbsSyncJobPrunes        int
 	pbsVerifyJobPrunes      int
-	pbsSnapshotUpsertErrFor string     // the datastore whose snapshots fail to write
-	pbsSnapshotPrunes       [][]string // the datastores each snapshot prune spared
+	pbsSnapshotUpsertErrFor string   // the datastore whose snapshots fail to write
+	pbsSnapshotPrunes       []string // what each snapshot prune spared
+	pbsSyncJobKept          []string // the jobs the sync job prune kept
 
 	// The observer's readings and what it filed (observer_test.go), and the
 	// classifications of its changes asked for.
@@ -422,12 +423,13 @@ func (m *mockQueries) UpsertPBSVerifyJob(_ context.Context, _ db.UpsertPBSVerify
 }
 
 func (m *mockQueries) DeleteStalePBSSnapshots(_ context.Context, arg db.DeleteStalePBSSnapshotsParams) error {
-	m.pbsSnapshotPrunes = append(m.pbsSnapshotPrunes, arg.Unwritten)
+	m.pbsSnapshotPrunes = append(m.pbsSnapshotPrunes, fmt.Sprintf("unlistable %v kept %s", arg.Unlistable, arg.Kept))
 	return nil
 }
 
-func (m *mockQueries) DeleteStalePBSSyncJobs(_ context.Context, _ db.DeleteStalePBSSyncJobsParams) error {
+func (m *mockQueries) DeleteStalePBSSyncJobs(_ context.Context, arg db.DeleteStalePBSSyncJobsParams) error {
 	m.pbsSyncJobPrunes++
+	m.pbsSyncJobKept = arg.Kept
 	return nil
 }
 

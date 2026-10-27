@@ -7,67 +7,90 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 const deleteStalePBSSnapshots = `-- name: DeleteStalePBSSnapshots :exec
-DELETE FROM pbs_snapshots
-WHERE pbs_server_id = $1
-  AND datastore <> ALL(COALESCE($2::text[], '{}'))
-  AND last_seen_at < now() - make_interval(secs => $3::int)
+DELETE FROM pbs_snapshots s
+WHERE s.pbs_server_id = $1
+  AND s.last_seen_at < now() - make_interval(secs => $2::int)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_to_recordset(COALESCE($3::jsonb, '[]'))
+           AS k(datastore text, backup_type text, backup_id text, backup_time bigint)
+      WHERE k.datastore = s.datastore AND k.backup_type = s.backup_type
+        AND k.backup_id = s.backup_id AND k.backup_time = s.backup_time)
+  AND (s.datastore <> ALL(COALESCE($4::text[], '{}'))
+       OR s.last_seen_at < now() - interval '24 hours')
 `
 
 type DeleteStalePBSSnapshotsParams struct {
-	PbsServerID  uuid.UUID `json:"pbs_server_id"`
-	Unwritten    []string  `json:"unwritten"`
-	GraceSeconds int32     `json:"grace_seconds"`
+	PbsServerID  uuid.UUID       `json:"pbs_server_id"`
+	GraceSeconds int32           `json:"grace_seconds"`
+	Kept         json.RawMessage `json:"kept"`
+	Unlistable   []string        `json:"unlistable"`
 }
 
 // Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
 // a momentary non-observation no longer churns PBS inventory rows, and the
 // cutoff is driven from now() so the app and DB clocks aren't mixed. The
-// caller runs it only after the server's datastores were listed, and names the
-// datastores whose snapshots were not listed and written whole (unwritten):
-// they keep their rows, which nothing refreshed. A datastore the PBS no longer
-// lists loses its snapshots. No unwritten datastore, NULL included, spares none.
+// caller runs it only after the server's datastores were listed. A snapshot
+// a listing showed but failed to write is kept (kept: its datastore, type, id
+// and time), so in a datastore that was listed only what the listing lacked
+// goes, whatever failed to write; a datastore whose snapshots could not be
+// listed (unlistable) keeps its rows, which nothing refreshed, for a day past
+// the last listing that refreshed them, not for ever. A datastore the PBS no
+// longer lists loses its snapshots. NULL lists spare nothing.
 func (q *Queries) DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error {
-	_, err := q.db.Exec(ctx, deleteStalePBSSnapshots, arg.PbsServerID, arg.Unwritten, arg.GraceSeconds)
+	_, err := q.db.Exec(ctx, deleteStalePBSSnapshots,
+		arg.PbsServerID,
+		arg.GraceSeconds,
+		arg.Kept,
+		arg.Unlistable,
+	)
 	return err
 }
 
 const deleteStalePBSSyncJobs = `-- name: DeleteStalePBSSyncJobs :exec
 DELETE FROM pbs_sync_jobs
 WHERE pbs_server_id = $1
-  AND last_seen_at < now() - make_interval(secs => $2::int)
+  AND job_id <> ALL(COALESCE($2::text[], '{}'))
+  AND last_seen_at < now() - make_interval(secs => $3::int)
 `
 
 type DeleteStalePBSSyncJobsParams struct {
 	PbsServerID  uuid.UUID `json:"pbs_server_id"`
+	Kept         []string  `json:"kept"`
 	GraceSeconds int32     `json:"grace_seconds"`
 }
 
-// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
+// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql),
+// run after a listing that succeeded: the jobs it showed but failed to write
+// (kept) stay, so only what the listing lacked goes, whatever failed to write.
 func (q *Queries) DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error {
-	_, err := q.db.Exec(ctx, deleteStalePBSSyncJobs, arg.PbsServerID, arg.GraceSeconds)
+	_, err := q.db.Exec(ctx, deleteStalePBSSyncJobs, arg.PbsServerID, arg.Kept, arg.GraceSeconds)
 	return err
 }
 
 const deleteStalePBSVerifyJobs = `-- name: DeleteStalePBSVerifyJobs :exec
 DELETE FROM pbs_verify_jobs
 WHERE pbs_server_id = $1
-  AND last_seen_at < now() - make_interval(secs => $2::int)
+  AND job_id <> ALL(COALESCE($2::text[], '{}'))
+  AND last_seen_at < now() - make_interval(secs => $3::int)
 `
 
 type DeleteStalePBSVerifyJobsParams struct {
 	PbsServerID  uuid.UUID `json:"pbs_server_id"`
+	Kept         []string  `json:"kept"`
 	GraceSeconds int32     `json:"grace_seconds"`
 }
 
-// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
+// DeleteStalePBSSyncJobs for the verify jobs.
 func (q *Queries) DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error {
-	_, err := q.db.Exec(ctx, deleteStalePBSVerifyJobs, arg.PbsServerID, arg.GraceSeconds)
+	_, err := q.db.Exec(ctx, deleteStalePBSVerifyJobs, arg.PbsServerID, arg.Kept, arg.GraceSeconds)
 	return err
 }
 
