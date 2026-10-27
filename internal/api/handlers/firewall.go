@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/auditkey"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/safeconv"
@@ -449,15 +449,6 @@ func (h *NetworkHandler) SetFirewallOptions(c fiber.Ctx, p *apischema.Params) er
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// firewallAliasKey is the name an alias is stored and listed under. Proxmox
-// folds alias names to lower case on every route (pve-firewall,
-// PVE/API2/Firewall/Aliases.pm: lc($param->{name}), and lc($rename)), so "MyNet"
-// is created, updated and deleted as "mynet". Audited as typed, the same alias
-// would file under as many keys as the spellings its callers used.
-func firewallAliasKey(name string) string {
-	return strings.ToLower(name)
-}
-
 // --- Firewall Aliases ---
 
 // ListFirewallAliases handles GET /api/v1/clusters/:cluster_id/firewall/aliases.
@@ -499,7 +490,7 @@ func (h *NetworkHandler) CreateFirewallAlias(c fiber.Ctx, p *apischema.Params) e
 		return mapDuplicateNameError("A firewall alias with that name already exists", err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "cidr": req.CIDR})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", firewallAliasKey(req.Name), "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", auditkey.FirewallName(req.Name), "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -530,10 +521,10 @@ func (h *NetworkHandler) UpdateFirewallAlias(c fiber.Ctx, p *apischema.Params) e
 	// with no link between them.
 	detailMap := map[string]string{"name": name}
 	if req.Rename != "" {
-		detailMap["rename"] = firewallAliasKey(req.Rename)
+		detailMap["rename"] = auditkey.FirewallName(req.Rename)
 	}
 	details, _ := json.Marshal(detailMap)
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", firewallAliasKey(name), "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", auditkey.FirewallName(name), "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -552,7 +543,7 @@ func (h *NetworkHandler) DeleteFirewallAlias(c fiber.Ctx, p *apischema.Params) e
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", firewallAliasKey(name), "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", auditkey.FirewallName(name), "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

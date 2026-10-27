@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auditkey"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -224,7 +225,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 			Action:       task.Type,
 		}
 		resourceID = task.ID
-		if !objectIDOK(resourceID) {
+		if !auditkey.ValidID(resourceID) {
 			resourceID = nodeName
 		}
 	}
@@ -368,8 +369,8 @@ func unescapeUPIDText(s string) string {
 // description: capped, and control characters made visible.
 func cleanTaskText(s string) string {
 	r := []rune(s)
-	if len(r) > maxObjectIDLen {
-		r = r[:maxObjectIDLen]
+	if len(r) > auditkey.MaxIDLen {
+		r = r[:auditkey.MaxIDLen]
 	}
 	for i, c := range r {
 		if unicode.IsControl(c) {

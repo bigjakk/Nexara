@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/auditkey"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -217,7 +218,7 @@ func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 		{"an id that is only the prefix", "cephdestroymon", "mon.", "proxmox_task", "mon.", "cephdestroymon", "cephdestroymon mon."},
 		{"a pool with no name", "cephdestroypool", "", "proxmox_task", "pve-01", "cephdestroypool", "cephdestroypool"},
 		{"a pool name with a control character", "cephcreatepool", "pool\n01", "proxmox_task", "pve-01", "cephcreatepool", "cephcreatepool pool?01"},
-		{"a pool name past the bound", "cephcreatepool", strings.Repeat("p", maxObjectIDLen+1), "proxmox_task", "pve-01", "cephcreatepool", ""},
+		{"a pool name past the bound", "cephcreatepool", strings.Repeat("p", auditkey.MaxIDLen+1), "proxmox_task", "pve-01", "cephcreatepool", ""},
 		{"a daemon service task with no daemon", "srvrestart", "osd.", "proxmox_task", "osd.", "srvrestart", "srvrestart osd."},
 		{"a daemon service task naming no OSD number", "srvrestart", "osd.abc", "proxmox_task", "osd.abc", "srvrestart", "srvrestart osd.abc"},
 	} {
@@ -246,7 +247,7 @@ func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 			if tc.wantDescription != "" && desc != tc.wantDescription {
 				t.Errorf("described as %q, want %q", desc, tc.wantDescription)
 			}
-			if len([]rune(desc)) > maxObjectIDLen+64 {
+			if len([]rune(desc)) > auditkey.MaxIDLen+64 {
 				t.Errorf("the description is %d characters; text taken from a task must be bounded", len([]rune(desc)))
 			}
 		})

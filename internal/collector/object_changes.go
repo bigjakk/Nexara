@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strconv"
 	"time"
-	"unicode"
 
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/auditkey"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -30,24 +30,6 @@ type objectChange struct {
 	fields     []string // the names of what differs, for changed; sorted
 	detail     map[string]any
 	node       string // the OSD's host, for classification; empty when no node owns the object
-}
-
-// maxObjectIDLen bounds an object id taken from Proxmox before it is filed.
-const maxObjectIDLen = 256
-
-// objectIDOK reports whether id can be filed as an audit resource_id: not
-// empty, not long, no control character. The id comes from the cluster's own
-// lists, but a pool's name is whatever an operator typed.
-func objectIDOK(id string) bool {
-	if id == "" || len(id) > maxObjectIDLen {
-		return false
-	}
-	for _, r := range id {
-		if unicode.IsControl(r) {
-			return false
-		}
-	}
-	return true
 }
 
 // classifyObjectChanges decides, for the cluster's settled changes on the nodes
@@ -149,7 +131,7 @@ func (s *Syncer) observeCephOSDs(ctx context.Context, clusterID uuid.UUID, osds 
 func (s *Syncer) observeCephPools(ctx context.Context, clusterID uuid.UUID, pools []cephPoolMetricSnapshot) {
 	cur := make(map[string]cephPoolMetricSnapshot, len(pools))
 	for _, p := range pools {
-		if objectIDOK(p.PoolName) {
+		if auditkey.ValidID(p.PoolName) {
 			cur[p.PoolName] = p
 		}
 	}

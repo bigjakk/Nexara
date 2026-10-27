@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/auditkey"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -104,14 +105,10 @@ func haSIDKey(ctx context.Context, timeout time.Duration, sid string,
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	// Only the canonical spelling of a VMID names a guest: "0109" is not 109.
-	if vmid, err := strconv.ParseInt(sid, 10, 32); err == nil && strconv.FormatInt(vmid, 10) == sid {
-		if kind, err := guestType(ctx, int32(vmid)); err == nil {
-			switch kind {
-			case "qemu":
-				return "vm:" + sid, nil
-			case "lxc":
-				return "ct:" + sid, nil
+	if vmid, ok := auditkey.BareVMID(sid); ok {
+		if kind, err := guestType(ctx, vmid); err == nil {
+			if typed, ok := auditkey.HASID(sid, kind); ok {
+				return typed, nil
 			}
 		}
 	}
@@ -119,8 +116,8 @@ func haSIDKey(ctx context.Context, timeout time.Duration, sid string,
 	if err != nil {
 		return sid, err
 	}
-	if got == "vm:"+sid || got == "ct:"+sid {
-		return got, nil
+	if typed, ok := auditkey.ReportedHASID(sid, got); ok {
+		return typed, nil
 	}
 	return sid, errors.New("the sid Proxmox reported is not this VMID's")
 }

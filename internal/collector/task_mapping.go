@@ -3,6 +3,8 @@ package collector
 import (
 	"regexp"
 	"strings"
+
+	"github.com/bigjakk/nexara/internal/auditkey"
 )
 
 type taskMapping struct {
@@ -26,7 +28,7 @@ type taskMapping struct {
 	// Object marks a mapping onto an object of the cluster page keyed by the
 	// UPID's id. That id arrives from a node, so it has to look like one
 	// Proxmox mints for the kind: not empty, not long, no control characters
-	// (objectIDOK), and matching IDPattern where the kind has one. A task whose
+	// (auditkey.ValidID), and matching IDPattern where the kind has one. A task whose
 	// id does not is not mapped, and is filed as the generic proxmox_task it
 	// would be had nothing mapped it — never under an empty or invented id.
 	Object    bool
@@ -44,7 +46,7 @@ var (
 
 // idOK reports whether id may be filed as this mapping's object.
 func (m taskMapping) idOK(id string) bool {
-	return objectIDOK(id) && (m.IDPattern == nil || m.IDPattern.MatchString(id))
+	return auditkey.ValidID(id) && (m.IDPattern == nil || m.IDPattern.MatchString(id))
 }
 
 var proxmoxTaskMap = map[string]taskMapping{
@@ -158,7 +160,7 @@ var serviceTaskVerbs = map[string]string{
 func mapTask(taskType, taskID, node string) (mapping taskMapping, resourceID string, ok bool) {
 	if verb, isService := serviceTaskVerbs[taskType]; isService {
 		for prefix, kind := range cephDaemonKinds {
-			if rest, found := strings.CutPrefix(taskID, prefix); found && objectIDOK(rest) && kind.idPattern.MatchString(rest) {
+			if rest, found := strings.CutPrefix(taskID, prefix); found && auditkey.ValidID(rest) && kind.idPattern.MatchString(rest) {
 				name := strings.TrimSuffix(prefix, ".")
 				describe := strings.ToUpper(verb[:1]) + verb[1:] + " Ceph " + strings.ToUpper(name)
 				return taskMapping{ResourceType: kind.resourceType, Action: name + "_" + verb, Describe: describe}, rest, true

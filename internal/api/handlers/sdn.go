@@ -3,14 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/auditkey"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -354,11 +353,12 @@ func sdnSubnetKeyWithin(ctx context.Context, timeout time.Duration,
 	defer cancel()
 	subnets, err := list(ctx, vnet)
 	if err == nil {
-		dashed := "-" + strings.ReplaceAll(cidr, "/", "-")
+		ids := make([]string, 0, len(subnets))
 		for _, s := range subnets {
-			if strings.HasSuffix(s.Subnet, dashed) {
-				return s.Subnet
-			}
+			ids = append(ids, s.Subnet)
+		}
+		if id, ok := auditkey.SDNSubnetID(cidr, ids); ok {
+			return id
 		}
 	}
 	slog.Warn("SDN subnet audit: could not find the id Proxmox gave the subnet; filing it under the CIDR as sent",
@@ -404,7 +404,7 @@ func (h *NetworkHandler) CreateSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": req.Subnet})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet",
-		fmt.Sprintf("%s/%s", vnet, sdnSubnetKey(c.Context(), pxClient, vnet, req.Subnet)), "sdn_subnet_created", details)
+		auditkey.SDNSubnet(vnet, sdnSubnetKey(c.Context(), pxClient, vnet, req.Subnet)), "sdn_subnet_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -428,7 +428,7 @@ func (h *NetworkHandler) UpdateSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet", auditkey.SDNSubnet(vnet, subnet), "sdn_subnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -451,7 +451,7 @@ func (h *NetworkHandler) DeleteSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet", auditkey.SDNSubnet(vnet, subnet), "sdn_subnet_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

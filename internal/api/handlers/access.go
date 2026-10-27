@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"regexp"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -15,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/auditkey"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -1126,22 +1126,6 @@ func (h *AccessHandler) ListACL(c fiber.Ctx, p *apischema.Params) error {
 	return RespondItems(c, entries)
 }
 
-// aclRepeatedSlashes is what PVE::AccessControl::normalize_path collapses.
-var aclRepeatedSlashes = regexp.MustCompile(`/{2,}`)
-
-// aclPathKey is the path an ACL is listed under. Proxmox normalises it on the way
-// in (normalize_path in pve-access-control: repeated slashes collapse, a trailing
-// one goes, the root stays "/"), so "/vms/100/" and "/vms//100" both write the ACL
-// at "/vms/100". Audited as sent, one path would file under every spelling its
-// callers used.
-func aclPathKey(path string) string {
-	key := aclRepeatedSlashes.ReplaceAllString(path, "/")
-	if len(key) > 1 {
-		key = strings.TrimSuffix(key, "/")
-	}
-	return key
-}
-
 // UpdateACL handles PUT /clusters/:cluster_id/access/acl.
 //
 // Proxmox uses one endpoint for grant and revoke; the request's delete flag
@@ -1185,8 +1169,8 @@ func (h *AccessHandler) UpdateACL(c fiber.Ctx, p *apischema.Params) error {
 		"groups": req.Groups,
 		"tokens": req.Tokens,
 	})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_acl", aclPathKey(req.Path), action, details)
-	h.publishAccessChange(c.Context(), clusterID, "pve_acl", aclPathKey(req.Path), action)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_acl", auditkey.ACLPath(req.Path), action, details)
+	h.publishAccessChange(c.Context(), clusterID, "pve_acl", auditkey.ACLPath(req.Path), action)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
