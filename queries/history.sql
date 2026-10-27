@@ -218,6 +218,7 @@ WITH guests AS MATERIALIZED (
               WHERE o.detail_key = ''
                 AND b.resource_type = o.resource_type AND b.resource_id = o.value
                 AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
+                AND (sqlc.narg('since')::timestamptz IS NULL OR b.created_at >= sqlc.narg('since')::timestamptz)
               UNION ALL
               SELECT b.id FROM audit_log b
               WHERE o.detail_key <> '' AND NOT o.in_list
@@ -228,6 +229,7 @@ WITH guests AS MATERIALIZED (
                 AND b.resource_type = o.resource_type
                 AND (o.resource_id = '' OR b.resource_id = o.resource_id)
                 AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
+                AND (sqlc.narg('since')::timestamptz IS NULL OR b.created_at >= sqlc.narg('since')::timestamptz)
               UNION ALL
               SELECT b.id FROM audit_log b
               WHERE o.in_list
@@ -235,6 +237,7 @@ WITH guests AS MATERIALIZED (
                 AND (o.resource_id = '' OR b.resource_id = o.resource_id)
                 AND o.value = ANY(regexp_split_to_array(btrim(b.details->>o.detail_key), '\s*,\s*'))
                 AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
+                AND (sqlc.narg('since')::timestamptz IS NULL OR b.created_at >= sqlc.narg('since')::timestamptz)
           ) m)
       AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[])
                        AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[]), false)
@@ -245,7 +248,6 @@ WITH guests AS MATERIALIZED (
                        AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest(sqlc.arg('vmids')::int[]) AS v,
                                                                       unnest('{vm:,ct:}'::text[]) AS p))
                        AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[]), false)
-      AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
 ), entries AS (
     SELECT ('audit:' || s.id::text)::text           AS entry_id,
            'audit'::text                            AS kind,

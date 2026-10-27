@@ -132,6 +132,7 @@ WITH guests AS MATERIALIZED (
               WHERE o.detail_key = ''
                 AND b.resource_type = o.resource_type AND b.resource_id = o.value
                 AND ($16::bool OR b.cluster_id = $12::uuid)
+                AND ($15::timestamptz IS NULL OR b.created_at >= $15::timestamptz)
               UNION ALL
               SELECT b.id FROM audit_log b
               WHERE o.detail_key <> '' AND NOT o.in_list
@@ -142,6 +143,7 @@ WITH guests AS MATERIALIZED (
                 AND b.resource_type = o.resource_type
                 AND (o.resource_id = '' OR b.resource_id = o.resource_id)
                 AND ($16::bool OR b.cluster_id = $12::uuid)
+                AND ($15::timestamptz IS NULL OR b.created_at >= $15::timestamptz)
               UNION ALL
               SELECT b.id FROM audit_log b
               WHERE o.in_list
@@ -149,6 +151,7 @@ WITH guests AS MATERIALIZED (
                 AND (o.resource_id = '' OR b.resource_id = o.resource_id)
                 AND o.value = ANY(regexp_split_to_array(btrim(b.details->>o.detail_key), '\s*,\s*'))
                 AND ($16::bool OR b.cluster_id = $12::uuid)
+                AND ($15::timestamptz IS NULL OR b.created_at >= $15::timestamptz)
           ) m)
       AND NOT COALESCE(a.vmid = ANY($1::int[])
                        AND history_worker_ok(a.details->>'upid', $13::text[]), false)
@@ -159,7 +162,6 @@ WITH guests AS MATERIALIZED (
                        AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest($1::int[]) AS v,
                                                                       unnest('{vm:,ct:}'::text[]) AS p))
                        AND history_worker_ok(a.details->>'upid', $13::text[]), false)
-      AND ($15::timestamptz IS NULL OR a.created_at >= $15::timestamptz)
 ), entries AS (
     SELECT ('audit:' || s.id::text)::text           AS entry_id,
            'audit'::text                            AS kind,
