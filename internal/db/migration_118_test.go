@@ -56,8 +56,8 @@ func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 	purge := func() {
 		pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		// The audit rows go first: a cluster's delete may only detach them (audit_log.cluster_id is SET NULL);
-		// nodes and vms cascade from the cluster.
+		// The audit rows go first: a cluster's delete leaves them (000122); nodes and vms cascade from the
+		// cluster.
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE cluster_id = ANY($1)`, []uuid.UUID{m118Cluster, m118Other})
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE resource_type = 'system' AND action = 'migration_notice' AND details->>'migration' = 'cluster_object_audit_keys'`)
 		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{m118Cluster, m118Other})
