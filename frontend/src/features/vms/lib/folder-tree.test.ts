@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectSubtreeFolderIds } from "./folder-tree";
+import { collectSubtreeFolderIds, folderPageTab } from "./folder-tree";
 import type { VMFolder } from "@/types/api";
 
 function folder(id: string, parent_id: string | null): VMFolder {
@@ -35,5 +35,16 @@ describe("collectSubtreeFolderIds", () => {
   it("does not loop on a corrupt parent cycle", () => {
     const cyclic: VMFolder[] = [folder("x", "y"), folder("y", "x")];
     expect(collectSubtreeFolderIds(cyclic, "x")).toEqual(new Set(["x", "y"]));
+  });
+});
+
+describe("folderPageTab", () => {
+  it.each([
+    ["tasks", ["summary", "vms", "history"], "history"],
+    ["tasks", ["summary", "vms"], "summary"],
+    ["alerts", ["summary", "alerts"], "alerts"],
+    ["bogus", ["summary", "history"], "summary"],
+  ])("?tab=%s among %j opens %s", (requested, available, want) => {
+    expect(folderPageTab(requested, available)).toBe(want);
   });
 });

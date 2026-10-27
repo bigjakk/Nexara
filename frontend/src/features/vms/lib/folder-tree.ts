@@ -5,6 +5,17 @@ import type { VMFolder } from "@/types/api";
  * folder id — those are UUIDs. */
 export const UNASSIGNED_FOLDER_SEGMENT = "unassigned";
 
+/** The folder page's tab a ?tab= deep link opens: one the caller sees, else
+ * Summary. "tasks" is what the History tab was before it held more than
+ * tasks. */
+export function folderPageTab(
+  requested: string,
+  available: readonly string[],
+): string {
+  const tab = requested === "tasks" ? "history" : requested;
+  return available.includes(tab) ? tab : "summary";
+}
+
 export interface FolderNode {
   folder: VMFolder;
   children: FolderNode[];

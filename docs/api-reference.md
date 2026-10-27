@@ -1083,6 +1083,7 @@ Organize guests into folders in the Nexara inventory tree (Nexara-side only — 
 | PATCH | `/clusters/:id/vm-folders/:folder_id` | Update folder (PATCH, not PUT) |
 | DELETE | `/clusters/:id/vm-folders/:folder_id` | Delete folder |
 | PUT | `/clusters/:id/vms/:vm_id/folder` | Assign a VM to a folder |
+| GET | `/clusters/:id/vm-folders/:folder_id/history` | A folder's History: its guests', each from its own create, clone or restore, and its folders' own rows, newest first. `unassigned` as the folder lists the guests in no folder. Needs `view:audit` and `view:vm_folder`; a guest is listed only with `view:vm` or `view:container` by its type |
 
 ### Containers (LXC)
 

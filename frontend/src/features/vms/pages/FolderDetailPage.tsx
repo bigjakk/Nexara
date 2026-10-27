@@ -29,6 +29,7 @@ import {
 import {
   UNASSIGNED_FOLDER_SEGMENT,
   collectSubtreeFolderIds,
+  folderPageTab,
 } from "@/features/vms/lib/folder-tree";
 import { CreateFolderDialog } from "@/features/vms/components/CreateFolderDialog";
 import { RenameFolderDialog } from "@/features/vms/components/RenameFolderDialog";
@@ -36,11 +37,9 @@ import {
   FolderSummaryTab,
   type ChildFolderSummary,
 } from "@/features/vms/components/FolderSummaryTab";
-import {
-  FolderTasksTab,
-  type FolderVMLink,
-} from "@/features/vms/components/FolderTasksTab";
+import { FolderHistoryTab } from "@/features/vms/components/FolderHistoryTab";
 import { FolderAlertsTab } from "@/features/vms/components/FolderAlertsTab";
+import type { HistoryGuestLink } from "@/features/history/types/history";
 
 export function FolderDetailPage() {
   const { clusterId = "", folderId = "" } = useParams();
@@ -110,16 +109,23 @@ export function FolderDetailPage() {
     [folderVMs],
   );
 
-  const vmLinkByVmid = useMemo(() => {
-    const map = new Map<number, FolderVMLink>();
-    for (const vm of folderVMs) {
+  // Every guest of the cluster, not only the folder's: its History also names
+  // the guests that have left it.
+  const guestLinks = useMemo(() => {
+    const map = new Map<number, HistoryGuestLink>();
+    for (const vm of vms ?? []) {
       map.set(vm.vmid, {
         name: vm.name,
         path: `/inventory/${vm.type === "lxc" ? "lxc" : "qemu"}/${clusterId}/${vm.id}`,
       });
     }
     return map;
-  }, [folderVMs, clusterId]);
+  }, [vms, clusterId]);
+
+  const folderNames = useMemo(
+    () => new Map((folderData?.folders ?? []).map((f) => [f.id, f.name])),
+    [folderData],
+  );
 
   const tableRows = useMemo(
     () =>
@@ -153,7 +159,10 @@ export function FolderDetailPage() {
   const guestCount = folderVMs.filter((vm) => !vm.template).length;
   const templateCount = folderVMs.length - guestCount;
   const canManage = hasPermission("manage", "vm_folder");
-  const canViewTasks = hasPermission("view", "task");
+  // History is read from the audit log, and its rows open Proxmox task logs:
+  // without both grants the tab would be a table of refusals.
+  const canHistory =
+    hasPermission("view", "audit") && hasPermission("view", "task");
   const canViewAlerts = hasPermission("view", "alert");
   const backPath = parent
     ? `/clusters/${clusterId}/folders/${parent.id}`
@@ -305,21 +314,17 @@ export function FolderDetailPage() {
           permission-hidden ?tab value falls back to Summary instead of
           leaving Radix with a blank panel. */}
       <Tabs
-        defaultValue={
-          [
-            "summary",
-            "vms",
-            ...(canViewTasks ? ["tasks"] : []),
-            ...(canViewAlerts ? ["alerts"] : []),
-          ].includes(tabParam)
-            ? tabParam
-            : "summary"
-        }
+        defaultValue={folderPageTab(tabParam, [
+          "summary",
+          "vms",
+          ...(canHistory ? ["history"] : []),
+          ...(canViewAlerts ? ["alerts"] : []),
+        ])}
       >
         <TabsList>
           <TabsTrigger value="summary">Summary</TabsTrigger>
           <TabsTrigger value="vms">VMs ({folderVMs.length})</TabsTrigger>
-          {canViewTasks && <TabsTrigger value="tasks">Tasks</TabsTrigger>}
+          {canHistory && <TabsTrigger value="history">History</TabsTrigger>}
           {canViewAlerts && <TabsTrigger value="alerts">Alerts</TabsTrigger>}
         </TabsList>
 
@@ -337,13 +342,13 @@ export function FolderDetailPage() {
           <ResourceTable data={tableRows} />
         </TabsContent>
 
-        {canViewTasks && (
-          <TabsContent value="tasks" className="mt-4">
-            <FolderTasksTab
+        {canHistory && (
+          <TabsContent value="history" className="mt-4">
+            <FolderHistoryTab
               clusterId={clusterId}
-              clusterName={cluster?.name ?? clusterId.slice(0, 8)}
-              vmids={vmids}
-              vmLinkByVmid={vmLinkByVmid}
+              folderId={folderId}
+              folderNames={folderNames}
+              guestLinks={guestLinks}
             />
           </TabsContent>
         )}

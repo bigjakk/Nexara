@@ -26,6 +26,7 @@ import snapshotsEN from "@/locales/en/snapshots.json";
 // its own in history-<kind> (features/history/types/history.ts says how).
 import historyEN from "@/locales/en/history.json";
 import historyGuestEN from "@/locales/en/history-guest.json";
+import historyFolderEN from "@/locales/en/history-folder.json";
 
 export const defaultNS = "common";
 
@@ -53,6 +54,7 @@ export const resources = {
     snapshots: snapshotsEN,
     history: historyEN,
     "history-guest": historyGuestEN,
+    "history-folder": historyFolderEN,
   },
 } as const;
 

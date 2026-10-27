@@ -109,6 +109,12 @@ export interface HistoryKind {
   routine?: readonly string[];
 }
 
+/** A guest an entry names, as the page showing the History links it. */
+export interface HistoryGuestLink {
+  name: string;
+  path: string;
+}
+
 /** Which object's History to read, and where. */
 export interface HistoryTarget {
   /** The cluster it is read in, which the WS events invalidate it by: "" while

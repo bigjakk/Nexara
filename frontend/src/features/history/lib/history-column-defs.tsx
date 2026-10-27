@@ -2,6 +2,7 @@
  * How each History column renders. Split from history.ts so that module
  * stays JSX-free, as task-column-defs.tsx is split from task-columns.ts.
  */
+import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -131,3 +132,36 @@ export const HISTORY_COLUMNS: ColumnDef<
     },
   },
 ];
+
+/** The guest column of a History of many guests: a link where the page has
+ *  one, else the VMID. */
+const GUEST_COLUMN: ColumnDef<HistoryEntry, HistoryColumnKey, HistoryCellCtx> =
+  {
+    key: "guest",
+    label: "Guest",
+    width: 160,
+    cell: (_entry, ctx) => {
+      if (ctx.guest === null) {
+        return <span className="text-muted-foreground">—</span>;
+      }
+      const { vmid, link } = ctx.guest;
+      if (!link) {
+        return <span className="text-muted-foreground">#{vmid}</span>;
+      }
+      return (
+        <Link
+          to={link.path}
+          className="truncate hover:underline"
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+        >
+          {link.name}
+        </Link>
+      );
+    },
+  };
+
+export const HISTORY_COLUMNS_WITH_GUEST = HISTORY_COLUMNS.flatMap((column) =>
+  column.key === "event" ? [column, GUEST_COLUMN] : [column],
+);

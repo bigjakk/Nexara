@@ -23,6 +23,7 @@ import {
   historyDisplayStatus,
   historyEventLabel,
   historyExclusions,
+  historyGuestVmid,
   historyNamespace,
   historyNote,
   historySourceLabel,
@@ -31,9 +32,13 @@ import {
   type HistoryCellCtx,
   type HistoryColumnKey,
 } from "../lib/history";
-import { HISTORY_COLUMNS } from "../lib/history-column-defs";
+import {
+  HISTORY_COLUMNS,
+  HISTORY_COLUMNS_WITH_GUEST,
+} from "../lib/history-column-defs";
 import type {
   HistoryEntry,
+  HistoryGuestLink,
   HistoryKind,
   HistorySource,
   HistoryTarget,
@@ -56,6 +61,7 @@ function HistoryRow({
   entry,
   clusterId,
   layout,
+  guestLink,
   expanded,
   onToggle,
 }: {
@@ -64,6 +70,7 @@ function HistoryRow({
   entry: HistoryEntry;
   clusterId: string;
   layout: HistoryLayout;
+  guestLink: ((vmid: number) => HistoryGuestLink | undefined) | undefined;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -86,6 +93,9 @@ function HistoryRow({
   const summary = historySummary(kind, entry, t);
   const actor = historyActor(entry);
   const note = expanded ? historyNote(kind, entry, t) : undefined;
+  const guestVmid = historyGuestVmid(entry);
+  const guest =
+    guestVmid > 0 ? { vmid: guestVmid, link: guestLink?.(guestVmid) } : null;
 
   // A backup entry's task is the whole job: read from where the guest's part
   // begins, and show it to where it ends.
@@ -125,6 +135,7 @@ function HistoryRow({
             progress,
             expanded,
             icon: kind.icons[entry.category],
+            guest,
           }}
         />
       </tr>
@@ -292,6 +303,7 @@ export function HistoryTimeline({
   target,
   enabled = true,
   rowsAbove,
+  guestLink,
 }: {
   kind: HistoryKind;
   target: HistoryTarget;
@@ -299,6 +311,9 @@ export function HistoryTimeline({
   /** Live rows above the first page — a running VM's block jobs — spanning
    *  the table's colSpan columns. A failed read keeps them. */
   rowsAbove?: ((colSpan: number) => ReactNode) | undefined;
+  /** A History of many guests (a folder's): adds a Guest column, each guest
+   *  linked where this returns its page. */
+  guestLink?: ((vmid: number) => HistoryGuestLink | undefined) | undefined;
 }) {
   const { t } = useTranslation(historyNamespace(kind));
   const { t: shared } = useTranslation("history");
@@ -310,7 +325,10 @@ export function HistoryTimeline({
   );
   const [showRoutine, setShowRoutine] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const layout = useColumnLayout(kind.layoutKey, HISTORY_COLUMNS);
+  const layout = useColumnLayout(
+    kind.layoutKey,
+    guestLink ? HISTORY_COLUMNS_WITH_GUEST : HISTORY_COLUMNS,
+  );
 
   const { data, isLoading, error } = useHistory({
     target,
@@ -457,6 +475,7 @@ export function HistoryTimeline({
                       entry={entry}
                       clusterId={entry.cluster_id ?? target.clusterId ?? ""}
                       layout={layout}
+                      guestLink={guestLink}
                       expanded={expandedId === entry.id}
                       onToggle={() => {
                         setExpandedId(

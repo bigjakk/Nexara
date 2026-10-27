@@ -1,10 +1,7 @@
 /**
- * Column definitions, sort state and the display derivations shared by the
- * Events-page TasksPanel and the folder-scoped FolderTasksTab.
- *
- * Both tables render the same rows through the same TaskRow, so the column
- * list, the sort keys and the rules for what a cell shows live here once
- * rather than being restated (and drifting) in each panel.
+ * Column definitions, sort state and the display derivations of the
+ * Events-page TasksPanel's task table — the column list, the sort keys and the
+ * rules for what a cell shows, kept apart from the panel that renders them.
  */
 import type { ReactNode } from "react";
 import {

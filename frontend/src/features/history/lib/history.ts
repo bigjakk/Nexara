@@ -17,6 +17,7 @@ import {
 } from "@/components/layout/task-status";
 import type {
   HistoryEntry,
+  HistoryGuestLink,
   HistoryKind,
   HistorySource,
   HistoryWindow,
@@ -77,9 +78,10 @@ export function historyExclusions(
   return (kind.routine ?? []).filter((c) => c !== category);
 }
 
-/** The History table's columns. None sorts: the timeline is newest first. */
+/** The History table's columns. None sorts: the timeline is newest first. A
+ *  History of many guests (a folder's) has a guest column too. */
 export type HistoryColumnKey =
-  "time" | "event" | "summary" | "who" | "node" | "outcome";
+  "time" | "event" | "guest" | "summary" | "who" | "node" | "outcome";
 
 /**
  * What a History cell needs beyond the entry, resolved once per row so the
@@ -95,6 +97,14 @@ export interface HistoryCellCtx {
   expanded: boolean;
   /** The kind's icon for the entry's category. */
   icon: HistoryKind["icons"][string] | undefined;
+  /** The guest the entry is filed under or names, with its link when the
+   *  page has one; null for an entry naming no guest. */
+  guest: { vmid: number; link: HistoryGuestLink | undefined } | null;
+}
+
+/** The guest an entry is filed under, else the one it names; 0 for none. */
+export function historyGuestVmid(entry: HistoryEntry): number {
+  return entry.subject_vmid || entry.vmid;
 }
 
 /** The Proxmox worker type a UPID names (field 5), or "". */
