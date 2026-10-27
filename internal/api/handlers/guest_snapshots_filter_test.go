@@ -25,7 +25,7 @@ import (
 // database; a non-empty filter, by contrast, is parsed and refused (403),
 // which is the control that shows the filter is read at all.
 func TestGuestSnapshotListTreatsAnEmptyClusterFilterAsNone(t *testing.T) {
-	handler := NewGuestSnapshotHandler(db.New(pbsUPIDDBTX{}), "", nil)
+	handler := NewGuestSnapshotHandler(db.New(&pbsUPIDDBTX{}), "", nil)
 	mirror := compiledMirror(t, apischema.Properties{
 		"filter_cluster_id": {
 			Type:     apischema.String,

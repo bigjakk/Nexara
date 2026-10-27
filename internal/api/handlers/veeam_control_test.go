@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"testing"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/veeam"
 )
 
@@ -298,6 +302,65 @@ func TestSameVeeamPlatform(t *testing.T) {
 			if got := sameVeeamPlatform(tc.upstream, tc.authorized); got != tc.want {
 				t.Errorf("sameVeeamPlatform(%q, valid=%v) = %v, want %v",
 					tc.upstream, tc.authorized.Valid, got, tc.want)
+			}
+		})
+	}
+}
+
+// A session's audit row names the job it ran for, so that the job's History
+// finds it: veeam_sessions could say so too, but its rows are pruned with the
+// retention sweep and the audit row stays. A session with no job names none.
+func TestVeeamSessionAuditNamesTheJobItRanFor(t *testing.T) {
+	t.Parallel()
+
+	server := db.VeeamServer{ID: uuid.New(), Name: "vbr01"}
+	sessionID, jobID := uuid.New(), uuid.New()
+	tests := []struct {
+		name string
+		job  pgtype.UUID
+		want map[string]any
+	}{
+		{"a session of a job", pgtype.UUID{Bytes: jobID, Valid: true}, map[string]any{
+			"veeam_server_id": server.ID.String(), "server_name": "vbr01",
+			"session_name": "session01", "veeam_job_id": jobID.String(),
+		}},
+		{"a session of no job", pgtype.UUID{}, map[string]any{
+			"veeam_server_id": server.ID.String(), "server_name": "vbr01", "session_name": "session01",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dbtx := &captureDBTX{}
+			h := NewVeeamHandler(db.New(dbtx), testEncryptionKey, nil)
+			app := fiber.New()
+			app.Get("/", func(c fiber.Ctx) error {
+				c.Locals("user_id", uuid.New())
+				h.auditSession(c, veeamSessionTarget{
+					server:  server,
+					session: db.VeeamSession{VeeamID: sessionID, Name: "session01", JobVeeamID: tt.job},
+				}, "veeam_session_stopped", nil)
+				return nil
+			})
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
+			if err != nil {
+				t.Fatalf("app.Test: %v", err)
+			}
+			_ = resp.Body.Close()
+
+			audits := dbtx.auditInserts(t)
+			if len(audits) != 1 {
+				t.Fatalf("wrote %d audit rows, want 1", len(audits))
+			}
+			if audits[0].ResourceType != "veeam_session" || audits[0].ResourceID != sessionID.String() {
+				t.Errorf("row is (%q, %q), want (veeam_session, %s)", audits[0].ResourceType, audits[0].ResourceID, sessionID)
+			}
+			var details map[string]any
+			if err := json.Unmarshal(audits[0].Details, &details); err != nil {
+				t.Fatalf("details: %v", err)
+			}
+			if !reflect.DeepEqual(details, tt.want) {
+				t.Errorf("details = %s\nwant %v", audits[0].Details, tt.want)
 			}
 		})
 	}

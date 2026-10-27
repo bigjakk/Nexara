@@ -105,6 +105,11 @@ func newPBSUPIDCaptureServer(t *testing.T) (string, *pbsUPIDCapture) {
 		// Split on "?" rather than reading r.URL.Path: the log call carries a
 		// query string, and Path is the decoded form this suite never trusts.
 		target, _, _ := strings.Cut(r.RequestURI, "?")
+		if r.Method == http.MethodPost {
+			// A job or a garbage collection answers with the task it started.
+			_, _ = w.Write([]byte(`{"data":"` + pbsUPIDSample + `"}`))
+			return
+		}
 		if strings.HasSuffix(target, "/log") {
 			_, _ = w.Write([]byte(`{"data":[{"n":1,"t":"starting garbage collection"}]}`))
 			return
@@ -116,27 +121,47 @@ func newPBSUPIDCaptureServer(t *testing.T) (string, *pbsUPIDCapture) {
 }
 
 // errPBSUPIDUnexpectedQuery is what the stand-in DBTX answers for anything
-// other than the PBS server read. Nothing else should run: these two routes are
-// reads, so neither audits nor publishes.
+// other than the PBS server read and the audit insert. Nothing else should run:
+// the task routes are reads, so neither audits nor publishes, and a datastore
+// action writes its audit row and nothing more.
 var errPBSUPIDUnexpectedQuery = errors.New("unexpected query")
 
-// pbsUPIDDBTX answers GetPBSServer with one standalone server row and fails
-// everything else, so a handler that starts reading something else fails loudly
-// here rather than being handed a row that happens to satisfy it.
+// pbsUPIDDBTX answers GetPBSServer with one standalone server row, records the
+// audit inserts, and fails everything else, so a handler that starts reading
+// something else fails loudly here rather than being handed a row that happens
+// to satisfy it.
 // The field name differs from pbsServerRow's deliberately: with both
 // spelled "server" the two structs are convertible, and staticcheck reads
 // the literal below as a conversion waiting to happen (S1016).
-type pbsUPIDDBTX struct{ row db.PbsServer }
-
-func (pbsUPIDDBTX) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
-	return pgconn.CommandTag{}, errPBSUPIDUnexpectedQuery
+type pbsUPIDDBTX struct {
+	row    db.PbsServer
+	mu     sync.Mutex
+	audits []capturedQuery
 }
 
-func (pbsUPIDDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (d *pbsUPIDDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if !strings.Contains(sql, "INSERT INTO audit_log") {
+		return pgconn.CommandTag{}, errPBSUPIDUnexpectedQuery
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.audits = append(d.audits, capturedQuery{sql: sql, args: args})
+	return pgconn.NewCommandTag("INSERT 0 1"), nil
+}
+
+func (*pbsUPIDDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, errPBSUPIDUnexpectedQuery
 }
 
-func (d pbsUPIDDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+// auditInserts decodes the audit rows the handler wrote.
+func (d *pbsUPIDDBTX) auditInserts(t *testing.T) []db.InsertAuditLogParams {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return (&captureDBTX{calls: d.audits}).auditInserts(t)
+}
+
+func (d *pbsUPIDDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
 	if !strings.Contains(sql, "FROM pbs_servers") {
 		return failRow{err: errPBSUPIDUnexpectedQuery}
 	}
@@ -175,6 +200,7 @@ type pbsUPIDHarness struct {
 	app     *fiber.App
 	pbsID   uuid.UUID
 	capture *pbsUPIDCapture
+	dbtx    *pbsUPIDDBTX
 }
 
 // pbsTaskUPIDMirror mirrors the :pbs_id and :upid parameters the two task
@@ -227,14 +253,14 @@ func newPBSUPIDHarness(t *testing.T) *pbsUPIDHarness {
 
 	// ClusterID left invalid on purpose: a standalone PBS server takes
 	// requirePBSPerm's instance-wide branch, so the harness needs no cluster row.
-	queries := db.New(pbsUPIDDBTX{row: db.PbsServer{
+	dbtx := &pbsUPIDDBTX{row: db.PbsServer{
 		ID:                   pbsID,
 		Name:                 "pbs01",
 		ApiUrl:               baseURL,
 		TokenID:              "user@pam!test",
 		TokenSecretEncrypted: encrypted,
-	}})
-	handler := NewBackupHandler(queries, pbsUPIDEncKey, nil)
+	}}
+	handler := NewBackupHandler(db.New(dbtx), pbsUPIDEncKey, nil)
 
 	mirror := pbsTaskUPIDMirror(t)
 	app.Get("/api/v1/pbs-servers/:pbs_id/tasks/:upid",
@@ -242,7 +268,9 @@ func newPBSUPIDHarness(t *testing.T) *pbsUPIDHarness {
 	app.Get("/api/v1/pbs-servers/:pbs_id/tasks/:upid/log",
 		withRequestParams(t, mirror, []string{"pbs_id", "upid"}, handler.GetTaskLog))
 
-	return &pbsUPIDHarness{app: app, pbsID: pbsID, capture: capture}
+	mountPBSAuditRoutes(t, app, handler)
+
+	return &pbsUPIDHarness{app: app, pbsID: pbsID, capture: capture, dbtx: dbtx}
 }
 
 // send drives one request and returns the raw target the PBS side saw.

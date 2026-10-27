@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -150,6 +151,42 @@ func (h *BackupHandler) requirePBSPerm(c fiber.Ctx, pbsID uuid.UUID, action stri
 	return pgtype.UUID{}, requirePerm(c, action, "backup")
 }
 
+// auditPBS records an action on one of a PBS server's datastores.
+//
+// The row is filed under the SERVER — resource_type pbs_server and the server's
+// id, the same as its own create, update and delete rows — and names the
+// datastore in details.datastore. A datastore has no id of its own and its name
+// is unique only within one server (two servers can each have a "datastore01"),
+// so the pair is its identity, and the server's id alone selects the server's
+// whole History, configuration changes and datastore actions together. These
+// rows used to be filed as "backup" under the datastore's name (or a job's),
+// which named no server at all, and a standalone server has no cluster to tell
+// them apart by either.
+//
+// resource_name is what the activity feed and the audit page label the row by,
+// now that its resource_id is a server's UUID: the datastore, unless extra
+// names something more specific — a snapshot, a job. extra is merged over both
+// keys. Every handler that resolves a :pbs_id audits through here:
+// TestGuard_PBSHandlersAuditThroughAuditPBS.
+func (h *BackupHandler) auditPBS(c fiber.Ctx, cluster pgtype.UUID, pbsID uuid.UUID, store, action string, extra map[string]any) {
+	details := make(map[string]any, len(extra)+2)
+	if store != "" {
+		details["datastore"] = store
+		details["resource_name"] = store
+	}
+	maps.Copy(details, extra)
+	if name, ok := details["resource_name"].(string); ok {
+		details["resource_name"] = auditTruncate(name, maxAuditResourceNameLen)
+	}
+	// Marshalling strings, numbers and booleans cannot fail; the fallback keeps
+	// the row rather than dropping it, as pbsAuditName does.
+	raw, err := json.Marshal(details)
+	if err != nil {
+		raw = json.RawMessage(`{}`)
+	}
+	AuditLog(c, h.queries, h.eventPub, cluster, "pbs_server", pbsID.String(), action, raw)
+}
+
 // --- Live proxy endpoints ---
 
 // ListDatastores handles GET /api/v1/pbs-servers/:pbs_id/datastores
@@ -222,7 +259,10 @@ func (h *BackupHandler) TriggerGC(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, cluster, "backup", store, "gc_triggered", nil)
+	// pbs_upid, not upid: details.upid is how the activity feed finds a PVE task
+	// to open, and this one is PBS's. It is the key the PBS task, read live, is
+	// matched to this row by.
+	h.auditPBS(c, cluster, pbsID, store, "gc_triggered", map[string]any{"pbs_upid": upid})
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "gc_triggered")
 
 	return c.JSON(fiber.Map{"upid": upid})
@@ -238,6 +278,17 @@ type snapshotRef struct {
 	BackupType string
 	BackupID   string
 	BackupTime int64
+}
+
+// auditDetails is what a snapshot's audit rows record about it, labelled the
+// way the Backup page names a snapshot's group.
+func (r snapshotRef) auditDetails(store string) map[string]any {
+	return map[string]any{
+		"resource_name": store + "/" + r.BackupType + "/" + r.BackupID,
+		"backup_type":   r.BackupType,
+		"backup_id":     r.BackupID,
+		"backup_time":   r.BackupTime,
+	}
 }
 
 func snapshotRefFromParams(p *apischema.Params) snapshotRef {
@@ -271,13 +322,7 @@ func (h *BackupHandler) DeleteSnapshot(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{
-		"store":       store,
-		"backup_type": req.BackupType,
-		"backup_id":   req.BackupID,
-		"backup_time": req.BackupTime,
-	})
-	AuditLog(c, h.queries, h.eventPub, cluster, "backup", store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_deleted", details)
+	h.auditPBS(c, cluster, pbsID, store, "snapshot_deleted", req.auditDetails(store))
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "snapshot_deleted")
 
 	return c.JSON(fiber.Map{"status": "deleted"})
@@ -315,14 +360,9 @@ func (h *BackupHandler) ProtectSnapshot(c fiber.Ctx, p *apischema.Params) error 
 	if !req.Protected {
 		action = "snapshot_unprotected"
 	}
-	details, _ := json.Marshal(map[string]interface{}{
-		"store":       store,
-		"backup_type": req.BackupType,
-		"backup_id":   req.BackupID,
-		"backup_time": req.BackupTime,
-		"protected":   req.Protected,
-	})
-	AuditLog(c, h.queries, h.eventPub, cluster, "backup", store+"/"+req.BackupType+"/"+req.BackupID, action, details)
+	details := req.auditDetails(store)
+	details["protected"] = req.Protected
+	h.auditPBS(c, cluster, pbsID, store, action, details)
 
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, action)
 
@@ -357,7 +397,8 @@ func (h *BackupHandler) UpdateSnapshotNotes(c fiber.Ctx, p *apischema.Params) er
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, cluster, "backup", store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_notes_updated", nil)
+	// The comment itself is not recorded: a note is free text.
+	h.auditPBS(c, cluster, pbsID, store, "snapshot_notes_updated", req.auditDetails(store))
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -444,8 +485,7 @@ func (h *BackupHandler) PruneDatastore(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	if !req.DryRun {
-		details, _ := json.Marshal(map[string]interface{}{
-			"store":        store,
+		h.auditPBS(c, cluster, pbsID, store, "datastore_pruned", map[string]any{
 			"backup_type":  req.BackupType,
 			"backup_id":    req.BackupID,
 			"keep_last":    req.KeepLast,
@@ -454,7 +494,6 @@ func (h *BackupHandler) PruneDatastore(c fiber.Ctx, p *apischema.Params) error {
 			"keep_monthly": req.KeepMonthly,
 			"keep_yearly":  req.KeepYearly,
 		})
-		AuditLog(c, h.queries, h.eventPub, cluster, "backup", store, "datastore_pruned", details)
 		h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "datastore_pruned")
 	}
 
@@ -509,7 +548,10 @@ func (h *BackupHandler) RunSyncJob(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, cluster, "backup", jobID, "sync_job_triggered", nil)
+	// No datastore: a job names it, the request does not, and the job's own
+	// task (pbs_upid) carries it for whoever reads that.
+	h.auditPBS(c, cluster, pbsID, "", "sync_job_triggered",
+		map[string]any{"job_id": jobID, "resource_name": jobID, "pbs_upid": upid})
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "sync_job_triggered")
 
 	return c.JSON(fiber.Map{"upid": upid})
@@ -538,7 +580,8 @@ func (h *BackupHandler) RunVerifyJob(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, cluster, "backup", jobID, "verify_job_triggered", nil)
+	h.auditPBS(c, cluster, pbsID, "", "verify_job_triggered",
+		map[string]any{"job_id": jobID, "resource_name": jobID, "pbs_upid": upid})
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "verify_job_triggered")
 
 	return c.JSON(fiber.Map{"upid": upid})
@@ -1186,13 +1229,54 @@ func (h *BackupHandler) CreateBackupJob(c fiber.Ctx, p *apischema.Params) error 
 		return err
 	}
 
+	// POST /cluster/backup answers null, not the id it gave the job, so the id
+	// is found by what the job list gained. A list that cannot be read costs
+	// the row its id, never the create.
+	before, beforeErr := client.ListBackupJobs(c.Context())
+
 	if err := client.CreateBackupJob(c.Context(), req.toParams()); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", "backup-job", "backup_job_created", req.auditDetails())
+	jobID := backupJobIDUnknown
+	if beforeErr == nil {
+		if after, err := client.ListBackupJobs(c.Context()); err == nil {
+			jobID = soleNewBackupJobID(before, after)
+		}
+	}
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_created", req.auditDetails())
 
 	return c.JSON(fiber.Map{"status": "created"})
+}
+
+// backupJobIDUnknown is the resource id a backup_job_created row carries when
+// the id Proxmox gave the job could not be found. It is the literal every such
+// row carried before the id was looked for, so "no id" stays one marker.
+const backupJobIDUnknown = "backup-job"
+
+// soleNewBackupJobID is the id of the one job in after that is not in before,
+// or backupJobIDUnknown when there is not exactly one. Two new jobs mean
+// another administrator created one in the same moment, and neither can be
+// told from the other: no id is recorded rather than a guess at one.
+func soleNewBackupJobID(before, after []proxmox.BackupJob) string {
+	known := make(map[string]bool, len(before))
+	for _, j := range before {
+		known[j.ID] = true
+	}
+	id := ""
+	for _, j := range after {
+		if j.ID == "" || known[j.ID] {
+			continue
+		}
+		if id != "" {
+			return backupJobIDUnknown
+		}
+		id = j.ID
+	}
+	if id == "" {
+		return backupJobIDUnknown
+	}
+	return id
 }
 
 // UpdateBackupJob handles PUT /api/v1/clusters/:cluster_id/backup-jobs/:job_id

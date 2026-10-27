@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/api/handlers"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -85,6 +86,12 @@ type backupRunPVE struct {
 	// answered, and that connection with it, so no vzdump POST can connect.
 	stopListeningAfterNodes bool
 
+	// listBefore and listAfter are what the job list answers to its first read
+	// and to every later one, around a create; listReads counts the reads. An
+	// empty one makes that read fail with a 500.
+	listBefore, listAfter string
+	listReads             int
+
 	srv    *httptest.Server
 	mu     sync.Mutex
 	posted []string
@@ -105,6 +112,22 @@ func (p *backupRunPVE) serve(t *testing.T) string {
 		switch path := r.URL.Path; {
 		case r.Method == http.MethodGet && path == "/api2/json/cluster/backup/"+backupRunJobID:
 			write(http.StatusOK, `{"data":`+p.job+`}`)
+		case r.Method == http.MethodGet && path == "/api2/json/cluster/backup":
+			p.mu.Lock()
+			list := p.listAfter
+			if p.listReads == 0 {
+				list = p.listBefore
+			}
+			p.listReads++
+			p.mu.Unlock()
+			if list == "" {
+				write(http.StatusInternalServerError, `{"data":null,"message":"fixture: the job list is unreadable\n"}`)
+				return
+			}
+			write(http.StatusOK, `{"data":`+list+`}`)
+		case r.Method == http.MethodPost && path == "/api2/json/cluster/backup":
+			// A create answers null, not the id it gave the job.
+			write(http.StatusOK, `{"data":null}`)
 		case r.Method == http.MethodGet && path == "/api2/json/nodes":
 			if p.stopListeningAfterNodes {
 				w.Header().Set("Connection", "close")
@@ -282,6 +305,31 @@ func decodeBackupRunDetails(t *testing.T, raw []byte) map[string]any {
 	return out
 }
 
+// decodedAudits is every audit insert, read positionally from InsertAuditLog's
+// arguments.
+func (d *backupRunDBTX) decodedAudits(t *testing.T) []backupRunAuditRow {
+	t.Helper()
+	rows := make([]backupRunAuditRow, 0, len(d.audits))
+	for _, args := range d.audits {
+		if len(args) != 6 {
+			t.Fatalf("audit insert took %d arguments, want InsertAuditLog's 6", len(args))
+		}
+		row := backupRunAuditRow{}
+		row.cluster, _ = args[0].(pgtype.UUID)
+		row.resourceType, _ = args[2].(string)
+		row.resourceID, _ = args[3].(string)
+		row.action, _ = args[4].(string)
+		raw, ok := args[5].(json.RawMessage)
+		if !ok {
+			t.Fatalf("audit details argument is %T, want json.RawMessage", args[5])
+		}
+		row.raw = string(raw)
+		row.details = decodeBackupRunDetails(t, raw)
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 // rows returns the task_history rows, and the audit rows split by action:
 // TrackTask's per-task backup_job_run rows, and the run's summary rows.
 func (d *backupRunDBTX) rows(t *testing.T) (tasks []backupRunTaskRow, taskAudits, summaries []backupRunAuditRow) {
@@ -304,21 +352,7 @@ func (d *backupRunDBTX) rows(t *testing.T) (tasks []backupRunTaskRow, taskAudits
 		row.kind, _ = args[6].(string)
 		tasks = append(tasks, row)
 	}
-	for _, args := range d.audits {
-		if len(args) != 6 {
-			t.Fatalf("audit insert took %d arguments, want InsertAuditLog's 6", len(args))
-		}
-		row := backupRunAuditRow{}
-		row.cluster, _ = args[0].(pgtype.UUID)
-		row.resourceType, _ = args[2].(string)
-		row.resourceID, _ = args[3].(string)
-		row.action, _ = args[4].(string)
-		raw, ok := args[5].(json.RawMessage)
-		if !ok {
-			t.Fatalf("audit details argument is %T, want json.RawMessage", args[5])
-		}
-		row.raw = string(raw)
-		row.details = decodeBackupRunDetails(t, raw)
+	for _, row := range d.decodedAudits(t) {
 		switch row.action {
 		case "backup_job_run":
 			taskAudits = append(taskAudits, row)
@@ -343,6 +377,15 @@ func (d *backupRunDBTX) rows(t *testing.T) (tasks []backupRunTaskRow, taskAudits
 // permission, carrying the real handler wired to both stand-ins.
 func newBackupRunApp(t *testing.T, pve *backupRunPVE) (*fiber.App, *backupRunDBTX) {
 	t.Helper()
+	return newBackupJobApp(t, pve, fiber.MethodPost, clusterScope+"/backup-jobs/:job_id/run",
+		(*handlers.BackupHandler).RunBackupJob)
+}
+
+// newBackupJobApp is newBackupRunApp for any one backup-job declaration and
+// its handler method.
+func newBackupJobApp(t *testing.T, pve *backupRunPVE, method, path string,
+	handler func(*handlers.BackupHandler, fiber.Ctx, *apischema.Params) error) (*fiber.App, *backupRunDBTX) {
+	t.Helper()
 	baseURL := pve.serve(t)
 	encrypted, err := crypto.Encrypt("token-secret-value", backupRunEncKey)
 	if err != nil {
@@ -358,8 +401,9 @@ func newBackupRunApp(t *testing.T, pve *backupRunPVE) (*fiber.App, *backupRunDBT
 	}}, backupRunEncKey, nil, nil)
 
 	dbtx := &backupRunDBTX{}
-	e := declaredEndpoint(t, fiber.MethodPost, clusterScope+"/backup-jobs/:job_id/run")
-	e.Handler = handlers.NewBackupHandler(db.New(dbtx), backupRunEncKey, nil).RunBackupJob
+	e := declaredEndpoint(t, method, path)
+	backup := handlers.NewBackupHandler(db.New(dbtx), backupRunEncKey, nil)
+	e.Handler = func(c fiber.Ctx, p *apischema.Params) error { return handler(backup, c, p) }
 
 	// stubAuth sets the user TrackTask and AuditLog need — without one they
 	// record nothing, and every "no rows" assertion below would pass for that

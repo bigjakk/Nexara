@@ -785,6 +785,12 @@ func (h *VeeamHandler) auditSession(c fiber.Ctx, target veeamSessionTarget, acti
 		"server_name":     auditSafe(target.server.Name),
 		"session_name":    auditSafe(target.session.Name),
 	}
+	// The job the session ran for, so the job's History finds this row by it.
+	// veeam_sessions could say so, but its rows are pruned with the retention
+	// sweep and this one stays.
+	if target.session.JobVeeamID.Valid {
+		details["veeam_job_id"] = uuid.UUID(target.session.JobVeeamID.Bytes).String()
+	}
 	for k, v := range extra {
 		details[k] = v
 	}
