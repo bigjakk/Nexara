@@ -1489,8 +1489,13 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 		}
 	}
 
-	// Sync sync jobs.
+	// Sync sync jobs. A server's jobs are pruned below only when they were
+	// listed AND every one was written: a job left unwritten keeps its old
+	// last_seen_at and would otherwise be pruned while the PBS still holds it,
+	// and a listing that failed refreshed nothing at all — without this, a PBS
+	// unreachable for longer than the grace lost every job row.
 	syncJobs, err := client.GetSyncJobs(ctx)
+	syncJobsWritten := err == nil
 	if err != nil {
 		s.logger.Warn("failed to get PBS sync jobs", "pbs_id", server.ID, "error", err)
 	} else {
@@ -1509,12 +1514,14 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 			})
 			if uErr != nil {
 				s.logger.Warn("failed to upsert PBS sync job", "pbs_id", server.ID, "error", uErr)
+				syncJobsWritten = false
 			}
 		}
 	}
 
-	// Sync verify jobs.
+	// Sync verify jobs, pruned on the same condition.
 	verifyJobs, err := client.GetVerifyJobs(ctx)
+	verifyJobsWritten := err == nil
 	if err != nil {
 		s.logger.Warn("failed to get PBS verify jobs", "pbs_id", server.ID, "error", err)
 	} else {
@@ -1530,6 +1537,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 			})
 			if uErr != nil {
 				s.logger.Warn("failed to upsert PBS verify job", "pbs_id", server.ID, "error", uErr)
+				verifyJobsWritten = false
 			}
 		}
 	}
@@ -1549,17 +1557,21 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 	}); err != nil {
 		s.logger.Warn("failed to prune stale PBS snapshots", "pbs_id", server.ID, "error", err)
 	}
-	if err := s.queries.DeleteStalePBSSyncJobs(ctx, db.DeleteStalePBSSyncJobsParams{
-		PbsServerID:  server.ID,
-		GraceSeconds: int32(staleInventoryGrace.Seconds()),
-	}); err != nil {
-		s.logger.Warn("failed to prune stale PBS sync jobs", "pbs_id", server.ID, "error", err)
+	if syncJobsWritten {
+		if err := s.queries.DeleteStalePBSSyncJobs(ctx, db.DeleteStalePBSSyncJobsParams{
+			PbsServerID:  server.ID,
+			GraceSeconds: int32(staleInventoryGrace.Seconds()),
+		}); err != nil {
+			s.logger.Warn("failed to prune stale PBS sync jobs", "pbs_id", server.ID, "error", err)
+		}
 	}
-	if err := s.queries.DeleteStalePBSVerifyJobs(ctx, db.DeleteStalePBSVerifyJobsParams{
-		PbsServerID:  server.ID,
-		GraceSeconds: int32(staleInventoryGrace.Seconds()),
-	}); err != nil {
-		s.logger.Warn("failed to prune stale PBS verify jobs", "pbs_id", server.ID, "error", err)
+	if verifyJobsWritten {
+		if err := s.queries.DeleteStalePBSVerifyJobs(ctx, db.DeleteStalePBSVerifyJobsParams{
+			PbsServerID:  server.ID,
+			GraceSeconds: int32(staleInventoryGrace.Seconds()),
+		}); err != nil {
+			s.logger.Warn("failed to prune stale PBS verify jobs", "pbs_id", server.ID, "error", err)
+		}
 	}
 
 	// Emit pbs_change event so frontend caches auto-refresh.

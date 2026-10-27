@@ -105,6 +105,11 @@ type mockQueries struct {
 	// steps inserted.
 	nodePressureNewest  map[uuid.UUID]time.Time
 	nodePressureInserts []db.InsertNodePressureParams
+
+	// PBS jobs: a sync job upsert's answer, and the prunes asked for.
+	pbsSyncJobUpsertErr error
+	pbsSyncJobPrunes    int
+	pbsVerifyJobPrunes  int
 }
 
 func newMockQueries() *mockQueries {
@@ -397,7 +402,7 @@ func (m *mockQueries) UpsertPBSSnapshot(_ context.Context, _ db.UpsertPBSSnapsho
 }
 
 func (m *mockQueries) UpsertPBSSyncJob(_ context.Context, _ db.UpsertPBSSyncJobParams) (db.PbsSyncJob, error) {
-	return db.PbsSyncJob{}, nil
+	return db.PbsSyncJob{}, m.pbsSyncJobUpsertErr
 }
 
 func (m *mockQueries) UpsertPBSVerifyJob(_ context.Context, _ db.UpsertPBSVerifyJobParams) (db.PbsVerifyJob, error) {
@@ -409,10 +414,12 @@ func (m *mockQueries) DeleteStalePBSSnapshots(_ context.Context, _ db.DeleteStal
 }
 
 func (m *mockQueries) DeleteStalePBSSyncJobs(_ context.Context, _ db.DeleteStalePBSSyncJobsParams) error {
+	m.pbsSyncJobPrunes++
 	return nil
 }
 
 func (m *mockQueries) DeleteStalePBSVerifyJobs(_ context.Context, _ db.DeleteStalePBSVerifyJobsParams) error {
+	m.pbsVerifyJobPrunes++
 	return nil
 }
 
