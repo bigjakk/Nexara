@@ -350,22 +350,23 @@ func TestIngestTask_FlagsATaskDisagreeingWithItsUPID(t *testing.T) {
 }
 
 // An ingested task's audit row is filed under what its UPID's id field names,
-// so that a storage's History can find it. imgdel's id ends in the storage;
-// imgcopy (an upload or a volume copy) has none, and download's is an encoded
-// file name, so those are the node's — keyed on either, a storage row would
-// name a node or a file for a storage.
+// so that a storage's History can find it. imgdel's and prunebackups' ids end
+// in the storage; imgcopy (an upload or a volume copy) has none, and download's
+// is an encoded file name, so those are the node's — keyed on either, a storage
+// row would name a node or a file for a storage.
 func TestIngestTask_AuditRowIdentity(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name, taskType, id            string
-		wantType, wantID, wantStorage string
+		name, taskType, id                        string
+		wantType, wantID, wantStorage, wantAction string
 	}{
-		{"imgdel of a volume with an owner", "imgdel", "105@store02", "storage", "store02", "store02"},
-		{"imgdel of a volume without one", "imgdel", "store02", "storage", "store02", "store02"},
-		{"imgcopy has no id", "imgcopy", "", "node", "pve-01", ""},
-		{"download's id is a file name", "download", "linux01\\x2diso", "node", "pve-01", ""},
-		{"an unmapped task keeps its id", "srvstart", "pveproxy", "proxmox_task", "pveproxy", ""},
+		{"imgdel of a volume with an owner", "imgdel", "105@store02", "storage", "store02", "store02", "delete_content"},
+		{"imgdel of a volume without one", "imgdel", "store02", "storage", "store02", "store02", "delete_content"},
+		{"prunebackups of one guest's backups", "prunebackups", "105@store02", "storage", "store02", "store02", "prune_backups"},
+		{"imgcopy has no id", "imgcopy", "", "node", "pve-01", "", "image_copy"},
+		{"download's id is a file name", "download", "linux01\\x2diso", "node", "pve-01", "", "download"},
+		{"an unmapped task keeps its id", "srvstart", "pveproxy", "proxmox_task", "pveproxy", "", "srvstart"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -383,8 +384,8 @@ func TestIngestTask_AuditRowIdentity(t *testing.T) {
 				t.Fatalf("wrote %d audit rows, want 1", len(q.auditWithSourceCalls))
 			}
 			got := q.auditWithSourceCalls[0]
-			if got.ResourceType != tt.wantType || got.ResourceID != tt.wantID {
-				t.Errorf("row is filed under (%s, %q), want (%s, %q)", got.ResourceType, got.ResourceID, tt.wantType, tt.wantID)
+			if got.ResourceType != tt.wantType || got.ResourceID != tt.wantID || got.Action != tt.wantAction {
+				t.Errorf("row is (%s, %q, %s), want (%s, %q, %s)", got.ResourceType, got.ResourceID, got.Action, tt.wantType, tt.wantID, tt.wantAction)
 			}
 			var details map[string]any
 			if err := json.Unmarshal(got.Details, &details); err != nil {

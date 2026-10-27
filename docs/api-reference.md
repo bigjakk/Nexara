@@ -1969,17 +1969,18 @@ recorded that row's id stopped resolving at an arbitrary later time.
 
 Nexara never changes who did something, when, or what an entry records. The
 v1.17.0 upgrade did re-file the entries it could resolve under the identity
-above: a new `resource_type` and `resource_id` (and, for a volume deleted outside
-Nexara, the action `delete_content`). An entry so re-filed keeps the type, id and
-action it was written with in `details.rekeyed_from`; where the object's name
-left `resource_id` it also gains the `details` keys a new entry carries
-(`storage`, `datastore`, `resource_name`, `job_id`). These were re-filed:
+above: a new `resource_type` and `resource_id` (and, for a volume deleted or
+backups pruned outside Nexara, the action `delete_content` or `prune_backups`).
+An entry so re-filed keeps the type, id and action it was written with in
+`details.rekeyed_from`; where the object's name left `resource_id` it also gains
+the `details` keys a new entry carries (`storage`, `datastore`, `resource_name`,
+`job_id`). These were re-filed:
 
 - a storage entry keyed by an inventory row id that still existed, or whose
   `details.storage` named the storage;
 - a virtio-win config saved with no storage chosen;
 - an upload, copy or download run outside Nexara (to the node), and a volume
-  deleted outside it (to the storage);
+  deleted or backups pruned outside it (to the storage);
 - a PBS datastore action or job trigger whose cluster and datastore (or job)
   picked exactly one PBS server that already existed.
 

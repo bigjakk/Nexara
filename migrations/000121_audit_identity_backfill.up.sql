@@ -5,11 +5,12 @@
 -- place rather than from three spellings of the key (see "Storage and backup
 -- identity on an audit entry" in docs/api-reference.md).
 --
--- Rewrites resource_type and resource_id and, for an ingested imgdel, action
--- (to the name Nexara's own delete records). Who did it, when, and what the
--- details say are untouched: where it moves resource_id off the value that named
--- the object it adds the details keys a new row carries (storage, datastore,
--- resource_name, job_id) beside the existing ones, which are never changed.
+-- Rewrites resource_type and resource_id and, for an ingested imgdel or
+-- prunebackups, action (to the names the storage rows written from now on use).
+-- Who did it, when, and what the details say are untouched: where it moves
+-- resource_id off the value that named the object it adds the details keys a
+-- new row carries (storage, datastore, resource_name, job_id) beside the
+-- existing ones, which are never changed.
 --
 -- Every statement that changes a row records the originals in the same UPDATE,
 -- as details.rekeyed_from {resource_type, resource_id, action}; a row that
@@ -74,18 +75,18 @@ WHERE resource_type = 'storage'
   AND details->>'task_type' IN ('imgcopy', 'download')
   AND COALESCE(details->>'node', '') <> '';
 
--- A volume deleted outside Nexara (imgdel): filed as the storage content delete
--- Nexara's own handler records. The storage is the end of the UPID's worker id,
--- "[<owner vmid>@]<storage>"; a row whose UPID disagrees with its resource_id is
--- left alone.
+-- A volume deleted (imgdel) or backups pruned (prunebackups) outside Nexara,
+-- filed as the storage actions delete_content and prune_backups. The storage is
+-- the end of the UPID's worker id, "[<owner vmid>@]<storage>" for both; a row
+-- whose UPID disagrees with its resource_id is left alone.
 UPDATE audit_log
 SET resource_type = 'storage',
-    action = 'delete_content',
+    action = CASE action WHEN 'imgdel' THEN 'delete_content' ELSE 'prune_backups' END,
     resource_id = regexp_replace(resource_id, '^.*@', ''),
     details = jsonb_build_object('storage', regexp_replace(resource_id, '^.*@', '')) || CASE WHEN details ? 'rekeyed_from' THEN details ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
 WHERE resource_type = 'proxmox_task'
   AND source = 'proxmox'
-  AND action = 'imgdel'
+  AND action IN ('imgdel', 'prunebackups')
   AND jsonb_typeof(details) = 'object'
   AND split_part(details->>'upid', ':', 7) = resource_id
   AND regexp_replace(resource_id, '^.*@', '') <> '';

@@ -35,7 +35,8 @@ type taskMapping struct {
 	IDPattern *regexp.Regexp
 	// StorageID files the task under the storage its UPID's id ends in:
 	// "<owner vmid>@<storage>" for a volume that had an owner, "<storage>" for
-	// one that had none (pve-storage API2/Storage/Content.pm, imgdel). A task
+	// one that had none (pve-storage API2/Storage/Content.pm, imgdel), and
+	// "[<vmid>@]<storage>" for a prune (API2/Storage/PruneBackups.pm). A task
 	// without a name there is the node's. Used with Object, so the name is held
 	// to the hygiene of every id read from a node.
 	StorageID bool
@@ -96,14 +97,15 @@ var proxmoxTaskMap = map[string]taskMapping{
 	"stopall":   {ResourceType: "node", Action: "stop_all"},
 	"aptupdate": {ResourceType: "node", Action: "apt_update"},
 
-	// Storage. Only imgdel names its storage. imgcopy is the worker Proxmox runs
-	// for an upload and for a volume copy alike, and has no id at all; download's
-	// is the encoded file name. Neither says which storage, so both are the
-	// node's: keyed on either, a storage row would carry a node's name or a
-	// file's for a storage's.
-	"imgdel":   {ResourceType: "storage", Action: "delete_content", StorageID: true, Object: true},
-	"download": {ResourceType: "node", Action: "download", OnNode: true},
-	"imgcopy":  {ResourceType: "node", Action: "image_copy", OnNode: true},
+	// Storage. Only imgdel and prunebackups name their storage. imgcopy is the
+	// worker Proxmox runs for an upload and for a volume copy alike, and has no id
+	// at all; download's is the encoded file name. Neither says which storage, so
+	// both are the node's: keyed on either, a storage row would carry a node's
+	// name or a file's for a storage's.
+	"imgdel":       {ResourceType: "storage", Action: "delete_content", StorageID: true, Object: true},
+	"prunebackups": {ResourceType: "storage", Action: "prune_backups", StorageID: true, Object: true},
+	"download":     {ResourceType: "node", Action: "download", OnNode: true},
+	"imgcopy":      {ResourceType: "node", Action: "image_copy", OnNode: true},
 
 	// Network / service management
 	"srvreload": {ResourceType: "node", Action: "service_reload"},
