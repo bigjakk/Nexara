@@ -135,15 +135,16 @@ func decodeArray(raw json.RawMessage) ([]json.RawMessage, bool) {
 }
 
 // fieldSpec says how one kind's fields are compared: which are dropped — run
-// state, derived values, and Proxmox's digest of the whole file — and which are
-// unordered lists.
+// state, derived values, and Proxmox's digest of the whole file — which are
+// unordered lists, and which are lists of other objects' ids (members).
 type fieldSpec struct {
-	ignore map[string]bool
-	sets   map[string]bool
+	ignore  map[string]bool
+	sets    map[string]bool
+	members map[string]bool
 }
 
 func newFieldSpec(ignore, sets []string) fieldSpec {
-	spec := fieldSpec{ignore: map[string]bool{"digest": true}, sets: map[string]bool{}}
+	spec := fieldSpec{ignore: map[string]bool{"digest": true}, sets: map[string]bool{}, members: map[string]bool{}}
 	for _, f := range ignore {
 		spec.ignore[f] = true
 	}
@@ -151,6 +152,74 @@ func newFieldSpec(ignore, sets []string) fieldSpec {
 		spec.sets[f] = true
 	}
 	return spec
+}
+
+// withMembers is spec with fields that list other objects — a backup job's
+// guests, an HA rule's resources, a user's groups — kept as the ids
+// (observedObject.members) rather than as one tag, so a change can say which
+// joined and which left.
+func (spec fieldSpec) withMembers(fields ...string) fieldSpec {
+	out := fieldSpec{ignore: spec.ignore, sets: spec.sets, members: map[string]bool{}}
+	for _, f := range fields {
+		out.members[f] = true
+	}
+	return out
+}
+
+// split is one object's compared fields, by name, in canonical form, and its
+// member lists. A member list holding something that is no id is compared as a
+// plain set instead, so nothing but ids is ever kept as it is.
+func (spec fieldSpec) split(item map[string]json.RawMessage) (fields map[string]string, members map[string][]string) {
+	rest := item
+	for f := range spec.members {
+		raw, ok := item[f]
+		if !ok {
+			continue
+		}
+		ids, ok := memberIDs(raw)
+		if !ok {
+			continue
+		}
+		if members == nil {
+			members = map[string][]string{}
+			rest = make(map[string]json.RawMessage, len(item))
+			for k, v := range item {
+				rest[k] = v
+			}
+		}
+		members[f] = ids
+		delete(rest, f)
+	}
+	return spec.canonicalFields(rest), members
+}
+
+// memberID is the shape a member must have to be kept as it is: a guest's
+// VMID, a storage, group or user id, an HA resource id — no separator, no
+// space, nothing a value could hide in at length.
+var memberID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9@._:!-]{0,127}$`)
+
+// memberIDs is a member list's ids, sorted and once each: a JSON array, or a
+// list separated as Proxmox separates them (PVE::Tools::split_list).
+func memberIDs(raw json.RawMessage) ([]string, bool) {
+	s, ok := canonicalSet(raw)
+	if !ok {
+		return nil, false
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(s), &ids); err != nil {
+		return nil, false
+	}
+	out := []string{}
+	for _, id := range ids {
+		for _, part := range strings.FieldsFunc(id, func(r rune) bool { return r == ';' || r == ' ' }) {
+			if !memberID.MatchString(part) {
+				return nil, false
+			}
+			out = append(out, part)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out), true
 }
 
 // canonicalFields is one object's compared fields, by name, in canonical form.
@@ -252,20 +321,32 @@ func observeSignature(parts ...string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// objectTags is one object's stored reading: each scalar field's tag, and each
-// ordered list's tags in order (a rule set, whose rules have no id of their own).
+// objectTags is one object's stored reading: each scalar field's tag, each
+// ordered list's tags in order (a rule set, whose rules have no id of their
+// own), and each member list's ids, which are other objects' names, not values
+// (fieldSpec.withMembers).
 type objectTags struct {
-	scalar map[string]string
-	lists  map[string][]string
+	scalar  map[string]string
+	lists   map[string][]string
+	members map[string][]string
+}
+
+// storedMembers is how a member list is stored: {"members": [ids]}, which no
+// tag or tag list can be mistaken for.
+type storedMembers struct {
+	Members []string `json:"members"`
 }
 
 func (o objectTags) MarshalJSON() ([]byte, error) {
-	m := make(map[string]any, len(o.scalar)+len(o.lists))
+	m := make(map[string]any, len(o.scalar)+len(o.lists)+len(o.members))
 	for k, v := range o.scalar {
 		m[k] = v
 	}
 	for k, v := range o.lists {
 		m[k] = v
+	}
+	for k, v := range o.members {
+		m[k] = storedMembers{Members: v}
 	}
 	return json.Marshal(m)
 }
@@ -275,8 +356,16 @@ func parseObjectTags(raw json.RawMessage) (objectTags, error) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return objectTags{}, err
 	}
-	out := objectTags{scalar: map[string]string{}, lists: map[string][]string{}}
+	out := objectTags{scalar: map[string]string{}, lists: map[string][]string{}, members: map[string][]string{}}
 	for k, v := range m {
+		if t := bytes.TrimSpace(v); len(t) > 0 && t[0] == '{' {
+			var sm storedMembers
+			if err := json.Unmarshal(t, &sm); err != nil {
+				return objectTags{}, err
+			}
+			out.members[k] = sm.Members
+			continue
+		}
 		if arr, ok := decodeArray(v); ok {
 			list := make([]string, 0, len(arr))
 			for _, item := range arr {
@@ -306,31 +395,98 @@ type listCount struct {
 	Removed int `json:"removed"`
 }
 
-// diffTags names the fields that differ between two readings of one object,
-// sorted: added, removed or changed alike. Lists are counted as well.
-func diffTags(prev, cur objectTags) (fields []string, counts map[string]listCount) {
+// tagDiff is how two readings of one object differ: the fields, sorted; for
+// each list, how many items came and went; and the members that joined or
+// left, as "<field>:<id>", which say who — a guest destroyed leaves its pool,
+// and only that guest's destroy may explain it.
+type tagDiff struct {
+	fields       []string
+	counts       map[string]listCount
+	joined, left []string
+}
+
+// diffTags compares two readings of one object: added, removed or changed
+// fields alike. Lists are counted; member lists are counted and named.
+func diffTags(prev, cur objectTags) tagDiff {
+	var d tagDiff
 	for k, v := range cur.scalar {
 		if old, ok := prev.scalar[k]; !ok || old != v {
-			fields = append(fields, k)
+			d.fields = append(d.fields, k)
 		}
 	}
 	for k := range prev.scalar {
 		if _, ok := cur.scalar[k]; !ok {
-			fields = append(fields, k)
+			d.fields = append(d.fields, k)
 		}
 	}
 	for _, k := range unionKeys(prev.lists, cur.lists) {
 		if slices.Equal(prev.lists[k], cur.lists[k]) {
 			continue
 		}
-		fields = append(fields, k)
-		if counts == nil {
-			counts = map[string]listCount{}
-		}
-		counts[k] = multisetDiff(prev.lists[k], cur.lists[k])
+		d.fields = append(d.fields, k)
+		d.count(k, multisetDiff(prev.lists[k], cur.lists[k]))
 	}
-	slices.Sort(fields)
-	return slices.Compact(fields), counts
+	for _, k := range unionKeys(prev.members, cur.members) {
+		joined, left := setDiff(prev.members[k], cur.members[k])
+		if len(joined) == 0 && len(left) == 0 {
+			continue
+		}
+		d.fields = append(d.fields, k)
+		d.count(k, listCount{Added: len(joined), Removed: len(left)})
+		d.joined = append(d.joined, prefixed(k, joined)...)
+		d.left = append(d.left, prefixed(k, left)...)
+	}
+	slices.Sort(d.fields)
+	d.fields = slices.Compact(d.fields)
+	slices.Sort(d.joined)
+	slices.Sort(d.left)
+	return d
+}
+
+func (d *tagDiff) count(field string, c listCount) {
+	if d.counts == nil {
+		d.counts = map[string]listCount{}
+	}
+	d.counts[field] = c
+}
+
+// allMembers is every member of a reading, as "<field>:<id>": what joins with
+// an object added, and what leaves with one removed.
+func allMembers(members map[string][]string) []string {
+	n := 0
+	for _, ids := range members {
+		n += len(ids)
+	}
+	out := make([]string, 0, n)
+	for k, ids := range members {
+		out = append(out, prefixed(k, ids)...)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func prefixed(field string, ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, field+":"+id)
+	}
+	return out
+}
+
+// setDiff is what is in cur and not in prev, and what is in prev and not in
+// cur; both are sorted sets.
+func setDiff(prev, cur []string) (joined, left []string) {
+	for _, id := range cur {
+		if _, found := slices.BinarySearch(prev, id); !found {
+			joined = append(joined, id)
+		}
+	}
+	for _, id := range prev {
+		if _, found := slices.BinarySearch(cur, id); !found {
+			left = append(left, id)
+		}
+	}
+	return joined, left
 }
 
 func unionKeys(a, b map[string][]string) []string {

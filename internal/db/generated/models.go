@@ -202,20 +202,22 @@ type ClusterObjectBaseline struct {
 }
 
 type ClusterObjectChange struct {
-	ID           uuid.UUID       `json:"id"`
-	ClusterID    uuid.UUID       `json:"cluster_id"`
-	ResourceType string          `json:"resource_type"`
-	ResourceID   string          `json:"resource_id"`
-	Vmid         pgtype.Int4     `json:"vmid"`
-	Change       string          `json:"change"`
-	Fields       []string        `json:"fields"`
-	Detail       json.RawMessage `json:"detail"`
-	Node         string          `json:"node"`
-	ObservedBy   string          `json:"observed_by"`
-	LastSeenAt   time.Time       `json:"last_seen_at"`
-	ObservedAt   time.Time       `json:"observed_at"`
-	Explained    pgtype.Bool     `json:"explained"`
-	ExplainedBy  pgtype.UUID     `json:"explained_by"`
+	ID            uuid.UUID       `json:"id"`
+	ClusterID     uuid.UUID       `json:"cluster_id"`
+	ResourceType  string          `json:"resource_type"`
+	ResourceID    string          `json:"resource_id"`
+	Vmid          pgtype.Int4     `json:"vmid"`
+	Change        string          `json:"change"`
+	Fields        []string        `json:"fields"`
+	Detail        json.RawMessage `json:"detail"`
+	Node          string          `json:"node"`
+	ObservedBy    string          `json:"observed_by"`
+	LastSeenAt    time.Time       `json:"last_seen_at"`
+	ObservedAt    time.Time       `json:"observed_at"`
+	Explained     pgtype.Bool     `json:"explained"`
+	ExplainedBy   pgtype.UUID     `json:"explained_by"`
+	MembersJoined []string        `json:"members_joined"`
+	MembersLeft   []string        `json:"members_left"`
 }
 
 type ClusterObjectState struct {

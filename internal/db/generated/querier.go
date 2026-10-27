@@ -223,28 +223,39 @@ type Querier interface {
 	// collector ingests from Proxmox tasks are audit rows too, so they count.
 	//
 	// What counts is the caller's rules (observer_explain.go), one JSON object
-	// each: the kind of change it applies to, the audit rows it reads — by
-	// resource_type ('' any), and by match_key: 'id' the change's own resource_id,
-	// 'node' its node, 'vmid' its guest, 'sid' the guest an HA sid names, 'cluster'
-	// any row of the cluster, 'details:<k>' a row whose details-><k> is the
-	// change's resource_id — and which of those rows: by action and UPID worker
-	// type (anchored patterns, '' any), never an action matching except_re, only a
-	// row with no task when untasked, only a row whose details carry detail_key
-	// ('' any: an alias update that renamed it), only a task whose UPID names the
-	// object when upid_object is set (the change's resource_id is that format of
-	// the UPID's id: '%s' the storage a disk task defined, '/vms/%s' the ACL path of
-	// the guest it destroyed). field_re says which fields such a row can explain
-	// ('' any): a disk move explains the disk it moved, not the memory someone
-	// changed in the GUI meanwhile. A change is explained when every field it names
-	// is covered by some rule's row; an added or removed object, when any rule's
-	// row is found.
+	// each: the kind and direction of change it applies to, the audit rows it
+	// reads — by resource_type ('' any), and by match_key: 'id' the change's own
+	// resource_id, 'node' its node, 'vmid' its guest, 'sid' the guest of an HA
+	// sid, 'cluster' any row of the cluster, 'details:<k>' a row whose
+	// details-><k> is the change's resource_id — and which of those rows: by
+	// action and UPID worker type (anchored patterns, '' any), never an action
+	// matching except_re, only a row with no task when untasked, only a row whose
+	// details carry a non-empty detail_key ('' any: an alias update that renamed
+	// it). object and member_of name what the row is about, as "<source>:<format>"
+	// with source upid (the UPID's id), audit (the row's resource_id), vmid (the
+	// row's guest) or details.<k> (its details-><k>): with object set, the
+	// change's resource_id must be that name (a disk task's storage, the ACL path
+	// of the guest a destroy took); with member set, the row explains only that
+	// member joining (joined) or leaving (left) a list — of an object added or
+	// removed, only if it is among the members that came or went with it — or the
+	// removal of an object whose last member it was (sole). A member rule with no
+	// member_of covers any member going its way.
+	//
+	// A change is explained when everything it changed is: each member that joined
+	// or left a list of ids (members_joined, members_left), each other field in
+	// its fields — covered by a rule's field_re ('' any) and member pin — or, for
+	// an object added or removed, the change itself. A disk move explains the disk it
+	// moved, not the memory someone changed in the GUI meanwhile; a guest's
+	// destroy explains that guest leaving a pool, not another guest leaving it.
 	//
 	// The window opens no earlier than lookback_seconds before the change was seen
 	// (observedLookback says how long and why): after an outage a change's window
 	// would otherwise be the whole gap, and one row from its start would explain
-	// everything found at its end. A task's start is looked for no more than a day
-	// before the window, so a change is never weighed against the cluster's whole
-	// audit log.
+	// everything found at its end. A task on the object itself is looked for from
+	// a day before the window, since a disk move can run for hours; a row that
+	// reaches the object from elsewhere (match_key 'cluster') only from an hour
+	// before, so a long clone or restore does not cover a whole cluster while it
+	// runs.
 	//
 	// A change waits for the pass whose ingest listed every node the cluster calls
 	// online (all_nodes_listed), since the task that explains it may have run on

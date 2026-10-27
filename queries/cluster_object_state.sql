@@ -36,13 +36,14 @@ WHERE cluster_id = $1;
 -- name: RecordObservedObjects :exec
 WITH changes AS (
     INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, vmid, change, fields, detail, node,
-                                        observed_by, last_seen_at, observed_at)
+                                        members_joined, members_left, observed_by, last_seen_at, observed_at)
     SELECT sqlc.arg('cluster_id')::uuid, c.resource_type, c.resource_id, c.vmid, c.change,
-           COALESCE(c.fields, '{}'), COALESCE(c.detail, '{}'), COALESCE(c.node, ''), 'observer',
+           COALESCE(c.fields, '{}'), COALESCE(c.detail, '{}'), COALESCE(c.node, ''),
+           COALESCE(c.members_joined, '{}'), COALESCE(c.members_left, '{}'), 'observer',
            c.last_seen_at, c.observed_at
     FROM jsonb_to_recordset(sqlc.arg('changes')::jsonb) AS c(
         resource_type text, resource_id text, vmid int, change text, fields text[], detail jsonb, node text,
-        last_seen_at timestamptz, observed_at timestamptz)
+        members_joined text[], members_left text[], last_seen_at timestamptz, observed_at timestamptz)
 ), saved AS (
     INSERT INTO cluster_object_state (cluster_id, kind, object_id, fields, node, signature, last_seen_at)
     SELECT sqlc.arg('cluster_id')::uuid, sqlc.arg('kind')::text, s.object_id, s.fields, COALESCE(s.node, ''),
@@ -89,28 +90,39 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- collector ingests from Proxmox tasks are audit rows too, so they count.
 --
 -- What counts is the caller's rules (observer_explain.go), one JSON object
--- each: the kind of change it applies to, the audit rows it reads — by
--- resource_type ('' any), and by match_key: 'id' the change's own resource_id,
--- 'node' its node, 'vmid' its guest, 'sid' the guest an HA sid names, 'cluster'
--- any row of the cluster, 'details:<k>' a row whose details-><k> is the
--- change's resource_id — and which of those rows: by action and UPID worker
--- type (anchored patterns, '' any), never an action matching except_re, only a
--- row with no task when untasked, only a row whose details carry detail_key
--- ('' any: an alias update that renamed it), only a task whose UPID names the
--- object when upid_object is set (the change's resource_id is that format of
--- the UPID's id: '%s' the storage a disk task defined, '/vms/%s' the ACL path of
--- the guest it destroyed). field_re says which fields such a row can explain
--- ('' any): a disk move explains the disk it moved, not the memory someone
--- changed in the GUI meanwhile. A change is explained when every field it names
--- is covered by some rule's row; an added or removed object, when any rule's
--- row is found.
+-- each: the kind and direction of change it applies to, the audit rows it
+-- reads — by resource_type ('' any), and by match_key: 'id' the change's own
+-- resource_id, 'node' its node, 'vmid' its guest, 'sid' the guest of an HA
+-- sid, 'cluster' any row of the cluster, 'details:<k>' a row whose
+-- details-><k> is the change's resource_id — and which of those rows: by
+-- action and UPID worker type (anchored patterns, '' any), never an action
+-- matching except_re, only a row with no task when untasked, only a row whose
+-- details carry a non-empty detail_key ('' any: an alias update that renamed
+-- it). object and member_of name what the row is about, as "<source>:<format>"
+-- with source upid (the UPID's id), audit (the row's resource_id), vmid (the
+-- row's guest) or details.<k> (its details-><k>): with object set, the
+-- change's resource_id must be that name (a disk task's storage, the ACL path
+-- of the guest a destroy took); with member set, the row explains only that
+-- member joining (joined) or leaving (left) a list — of an object added or
+-- removed, only if it is among the members that came or went with it — or the
+-- removal of an object whose last member it was (sole). A member rule with no
+-- member_of covers any member going its way.
+--
+-- A change is explained when everything it changed is: each member that joined
+-- or left a list of ids (members_joined, members_left), each other field in
+-- its fields — covered by a rule's field_re ('' any) and member pin — or, for
+-- an object added or removed, the change itself. A disk move explains the disk it
+-- moved, not the memory someone changed in the GUI meanwhile; a guest's
+-- destroy explains that guest leaving a pool, not another guest leaving it.
 --
 -- The window opens no earlier than lookback_seconds before the change was seen
 -- (observedLookback says how long and why): after an outage a change's window
 -- would otherwise be the whole gap, and one row from its start would explain
--- everything found at its end. A task's start is looked for no more than a day
--- before the window, so a change is never weighed against the cluster's whole
--- audit log.
+-- everything found at its end. A task on the object itself is looked for from
+-- a day before the window, since a disk move can run for hours; a row that
+-- reaches the object from elsewhere (match_key 'cluster') only from an hour
+-- before, so a long clone or restore does not cover a whole cluster while it
+-- runs.
 --
 -- A change waits for the pass whose ingest listed every node the cluster calls
 -- online (all_nodes_listed), since the task that explains it may have run on
@@ -128,10 +140,13 @@ WITH rules AS MATERIALIZED (
            e.value->>'worker_re'           AS worker_re,
            e.value->>'field_re'            AS field_re,
            e.value->>'detail_key'          AS detail_key,
-           e.value->>'upid_object'         AS upid_object
+           e.value->>'object'              AS object,
+           e.value->>'member'              AS member,
+           e.value->>'member_of'           AS member_of
     FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
 ), pending AS MATERIALIZED (
-    SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.node,
+    SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.fields, c.node,
+           c.members_joined, c.members_left,
            GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
                     c.observed_at - make_interval(secs => sqlc.arg('lookback_seconds')::int)) AS win_from,
            c.observed_at + interval '30 seconds'                                           AS win_to
@@ -145,7 +160,9 @@ WITH rules AS MATERIALIZED (
     -- One arm per match_key, so each reads audit_log through the index its key
     -- can use.
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
+           a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
@@ -153,7 +170,8 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
@@ -161,7 +179,8 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.vmid = p.vmid
@@ -169,7 +188,8 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
     JOIN audit_log a ON a.cluster_id = p.cluster_id
@@ -178,45 +198,102 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
     JOIN audit_log a ON a.cluster_id = p.cluster_id
                     AND (r.audit_type = '' OR a.resource_type = r.audit_type)
-                    AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
+                    AND a.created_at BETWEEN p.win_from - interval '1 hour' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
-           r.worker_re, r.field_re, r.detail_key, r.upid_object, a.action, a.details, a.created_at
+           r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of,
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
                     AND a.details->>substr(r.match_key, 9) = p.resource_id
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
 ), hits AS (
-    SELECT k.id, k.field_re
+    SELECT k.id, k.field_re, k.member, n.member_named, k.audit_id, k.created_at
     FROM candidates k
+    CROSS JOIN LATERAL (
+        -- What the row names, in the form the rule's object and member_of give.
+        SELECT CASE
+                   WHEN k.object LIKE 'upid:%'  THEN format(substr(k.object, 6), split_part(k.details->>'upid', ':', 7))
+                   WHEN k.object LIKE 'audit:%' THEN format(substr(k.object, 7), k.audit_resource_id)
+                   WHEN k.object LIKE 'vmid:%'  THEN format(substr(k.object, 6), k.audit_vmid::text)
+                   WHEN k.object LIKE 'details.%'
+                       THEN format(substr(k.object, strpos(k.object, ':') + 1),
+                                   k.details->>substr(split_part(k.object, ':', 1), 9))
+               END AS object_named,
+               CASE
+                   WHEN k.member_of LIKE 'upid:%'  THEN format(substr(k.member_of, 6), split_part(k.details->>'upid', ':', 7))
+                   WHEN k.member_of LIKE 'audit:%' THEN format(substr(k.member_of, 7), k.audit_resource_id)
+                   WHEN k.member_of LIKE 'vmid:%'  THEN format(substr(k.member_of, 6), k.audit_vmid::text)
+                   WHEN k.member_of LIKE 'details.%'
+                       THEN format(substr(k.member_of, strpos(k.member_of, ':') + 1),
+                                   k.details->>substr(split_part(k.member_of, ':', 1), 9))
+               END AS member_named
+    ) n
     LEFT JOIN task_history th ON th.cluster_id = k.cluster_id AND th.upid = k.details->>'upid'
     WHERE (NOT k.untasked OR k.details->>'upid' IS NULL)
       AND (k.action_re = '' OR k.action ~ k.action_re)
       AND (k.except_re = '' OR k.action !~ k.except_re)
       AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
-      AND (k.detail_key = '' OR k.details ? k.detail_key)
-      AND (k.upid_object = '' OR (k.details->>'upid' IS NOT NULL
-           AND format(k.upid_object, split_part(k.details->>'upid', ':', 7)) = k.resource_id))
+      AND (k.detail_key = '' OR COALESCE(k.details->>k.detail_key, '') <> '')
+      AND (k.object = '' OR COALESCE(n.object_named = k.resource_id, false))
       AND COALESCE(th.started_at, k.created_at) <= k.win_to
       AND CASE WHEN th.upid IS NULL THEN k.created_at ELSE COALESCE(th.finished_at, now()) END >= k.win_from
+), needs AS (
+    -- What each change needs explained: each member that joined or left a list
+    -- of ids, each other field it names, or, added or removed, itself.
+    SELECT p.id, u.field, u.member, u.dir
+    FROM pending p
+    CROSS JOIN LATERAL (
+        SELECT split_part(m, ':', 1) AS field, m AS member, 'joined' AS dir
+        FROM unnest(p.members_joined) AS m WHERE p.change = 'changed'
+        UNION ALL
+        SELECT split_part(m, ':', 1), m, 'left' FROM unnest(p.members_left) AS m WHERE p.change = 'changed'
+        UNION ALL
+        SELECT f, '', '' FROM unnest(p.fields) AS f
+        WHERE p.change = 'changed'
+          AND NOT EXISTS (SELECT 1 FROM unnest(p.members_joined || p.members_left) AS m
+                          WHERE split_part(m, ':', 1) = f)
+        UNION ALL
+        SELECT '', '', '' WHERE p.change <> 'changed' OR cardinality(p.fields) = 0
+    ) u
+), covered AS (
+    -- For each, the latest row that explains it.
+    SELECT n.id, x.audit_id, x.created_at
+    FROM needs n
+    JOIN pending p ON p.id = n.id
+    LEFT JOIN LATERAL (
+        SELECT h.audit_id, h.created_at
+        FROM hits h
+        WHERE h.id = n.id
+          AND (n.field = '' OR h.field_re = '' OR n.field ~ h.field_re)
+          AND CASE h.member
+                  WHEN ''       THEN true
+                  WHEN 'joined' THEN (n.dir = 'joined' AND (h.member_named IS NULL OR n.member = h.member_named))
+                                  OR (n.dir = '' AND h.member_named = ANY(p.members_joined))
+                  WHEN 'left'   THEN (n.dir = 'left' AND (h.member_named IS NULL OR n.member = h.member_named))
+                                  OR (n.dir = '' AND h.member_named = ANY(p.members_left))
+                  WHEN 'sole'   THEN n.dir = '' AND p.members_left = ARRAY[h.member_named]
+                  ELSE false
+              END
+        ORDER BY h.created_at DESC, h.audit_id
+        LIMIT 1
+    ) x ON true
+), verdict AS (
+    SELECT c.id, bool_and(c.audit_id IS NOT NULL) AS explained
+    FROM covered c
+    GROUP BY c.id
 )
 UPDATE cluster_object_changes c
-SET explained = NOT EXISTS (
-    SELECT 1
-    FROM unnest(CASE WHEN c.change = 'changed' AND cardinality(c.fields) > 0 THEN c.fields ELSE ARRAY['']::text[] END)
-         AS f(name)
-    WHERE NOT EXISTS (
-        SELECT 1 FROM hits h
-        WHERE h.id = c.id
-          AND (c.change <> 'changed' OR h.field_re = '' OR f.name ~ h.field_re)))
-FROM pending p
-WHERE c.id = p.id;
+SET explained = v.explained
+FROM verdict v
+WHERE c.id = v.id;
 
 -- ClassifyGlobalObjectChanges is ClassifyObservedChanges for the rows of a
 -- global kind — a PBS server's jobs (000130), whoever recorded them — which

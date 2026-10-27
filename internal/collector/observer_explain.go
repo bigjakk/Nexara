@@ -38,10 +38,17 @@ type explainRule struct {
 	ExceptRe  string `json:"except_re"`  // an action that never explains; "" none
 	WorkerRe  string `json:"worker_re"`  // the row's UPID worker type; "" any
 	FieldRe   string `json:"field_re"`   // the fields it explains; "" any
-	DetailKey string `json:"detail_key"` // only a row whose details carry this key; "" any
-	// UPIDObject keeps a rule to the task that names the object: the change's
-	// resource_id must be this format of the UPID's id (%s); "" any.
-	UPIDObject string `json:"upid_object"`
+	DetailKey string `json:"detail_key"` // only a row whose details carry this key, not empty; "" any
+	// Object and MemberOf name what a row is about, "<source>:<format>": the
+	// UPID's id (upid), the row's resource_id (audit) or guest (vmid), or a
+	// details key (details.<k>), put into format at %s. With Object, the
+	// change's resource_id must be that name; with Member, the row explains
+	// only that member joining or leaving a list (joined, left), or an object
+	// removed with it as its last member (sole). Member with no MemberOf is any
+	// member going that way.
+	Object   string `json:"object"`
+	Member   string `json:"member"`
+	MemberOf string `json:"member_of"`
 }
 
 // byAction is the rules a kind's own audit rows give: an audit row for the same
@@ -88,19 +95,19 @@ func inDirections(r explainRule, changes ...string) []explainRule {
 // The tasks that define, extend or remove a storage (pve-storage
 // API2/Disks/*.pm, pve-manager API2/Ceph/{Pool,FS}.pm). Each names the disk
 // object it made or removed in its UPID, which is the storage's id when the
-// task defined the storage — except lvmthinremove's "<vg>-<lv>", which no
-// format of a storage id is. A disk created on another node of a storage with
-// a node list adds the node (API2/Storage/Config.pm create_or_update); a disk
-// removed with cleanup-config takes the node out, or the storage with its last
-// node (cleanup_storages_for_node), and with it the storage's ACL and its place
-// in every pool (AccessControl.pm remove_storage_access).
+// task defined the storage. lvmthinremove names "<vg>-<lv>", which no format
+// of a storage id is, so it explains nothing. A disk created on another node
+// of a storage with a node list adds the node (API2/Storage/Config.pm
+// create_or_update); a disk removed with cleanup-config takes the node out, or
+// the storage with its last node (cleanup_storages_for_node), and with it the
+// storage's ACL and its place in every pool (AccessControl.pm
+// remove_storage_access).
 var (
-	diskCreateWorkers  = []string{"dircreate", "lvmcreate", "lvmthincreate", "zfscreate"}
-	cephCreateWorkers  = []string{"cephfscreate", "cephcreatepool"}
-	diskRemoveWorkers  = []string{"dirremove", "lvmremove", "zfsremove"}
-	cephRemoveWorkers  = []string{"cephdestroyfs", "cephdestroypool"}
-	storageRemovals    = slices.Concat(diskRemoveWorkers, cephRemoveWorkers, []string{"lvmthinremove"})
-	guestDestroyWorker = `^(qmdestroy|vzdestroy)$`
+	diskCreateWorkers = []string{"dircreate", "lvmcreate", "lvmthincreate", "zfscreate"}
+	cephCreateWorkers = []string{"cephfscreate", "cephcreatepool"}
+	diskRemoveWorkers = []string{"dirremove", "lvmremove", "zfsremove"}
+	cephRemoveWorkers = []string{"cephdestroyfs", "cephdestroypool"}
+	storageRemovals   = slices.Concat(diskRemoveWorkers, cephRemoveWorkers)
 )
 
 const (
@@ -150,20 +157,30 @@ var observedChangeRules = slices.Concat(
 			ActionRe: anyOf(guestConfigActions...)},
 	},
 
-	// A pool's members move when a guest is created into it, cloned into it,
-	// restored, destroyed, or moved from a guest's page; a storage removed
-	// leaves every pool it was in (AccessControl.pm remove_storage_access).
+	// A pool's members move when a guest is created or restored into it,
+	// destroyed, cloned into it through Nexara, or moved from a guest's page;
+	// a storage removed leaves every pool it was in (AccessControl.pm
+	// remove_storage_access). Each explains only the member it names: a
+	// guest's destroy that guest leaving, never another. A clone in the
+	// Proxmox GUI names its source in its UPID, so the clone's joining shows.
 	crud("pool"),
 	[]explainRule{
-		{Kind: "pool", Change: "changed", MatchKey: "cluster",
-			WorkerRe: `^(qm|vz)(create|restore|clone|destroy)$`, FieldRe: `^vms$`},
+		{Kind: "pool", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qm|vz)(create|restore)$`,
+			FieldRe: `^vms$`, Member: "joined", MemberOf: "upid:vms:%s"},
+		{Kind: "pool", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`,
+			FieldRe: `^vms$`, Member: "left", MemberOf: "upid:vms:%s"},
+		{Kind: "pool", Change: "changed", AuditType: "vm", MatchKey: "cluster", ActionRe: `^clone$`,
+			FieldRe: `^vms$`, Member: "joined", MemberOf: "details.new_id:vms:%s"},
+		{Kind: "pool", Change: "changed", AuditType: "container", MatchKey: "cluster", ActionRe: `^clone$`,
+			FieldRe: `^vms$`, Member: "joined", MemberOf: "details.new_id:vms:%s"},
 		{Kind: "pool", Change: "changed", AuditType: "vm", MatchKey: "details:old_pool",
-			ActionRe: `^set_pool$`, FieldRe: `^vms$`},
+			ActionRe: `^set_pool$`, FieldRe: `^vms$`, Member: "left", MemberOf: "vmid:vms:%s"},
 		{Kind: "pool", Change: "changed", AuditType: "vm", MatchKey: "details:new_pool",
-			ActionRe: `^set_pool$`, FieldRe: `^vms$`},
+			ActionRe: `^set_pool$`, FieldRe: `^vms$`, Member: "joined", MemberOf: "vmid:vms:%s"},
 		{Kind: "pool", Change: "changed", AuditType: "storage", MatchKey: "cluster",
-			ActionRe: `^(delete|delete_import_source)$`, FieldRe: `^storage$`},
-		{Kind: "pool", Change: "changed", MatchKey: "cluster", WorkerRe: anyOf(storageRemovals...), FieldRe: `^storage$`},
+			ActionRe: `^(delete|delete_import_source)$`, FieldRe: `^storage$`, Member: "left", MemberOf: "audit:storage:%s"},
+		{Kind: "pool", Change: "changed", MatchKey: "cluster", WorkerRe: anyOf(storageRemovals...),
+			FieldRe: `^storage$`, Member: "left", MemberOf: "upid:storage:%s"},
 	},
 
 	// A storage, created, edited and removed through Nexara — an ESXi import
@@ -175,22 +192,24 @@ var observedChangeRules = slices.Concat(
 		{Kind: "storage", Change: "changed", AuditType: "storage", MatchKey: "id",
 			ActionRe: `^enable_import_content$`, FieldRe: `^content$`},
 		{Kind: "storage", Change: "added", MatchKey: "cluster",
-			WorkerRe: anyOf(slices.Concat(diskCreateWorkers, cephCreateWorkers)...), UPIDObject: "%s"},
+			WorkerRe: anyOf(slices.Concat(diskCreateWorkers, cephCreateWorkers)...), Object: "upid:%s"},
 		{Kind: "storage", Change: "changed", MatchKey: "cluster",
-			WorkerRe: anyOf(slices.Concat(diskCreateWorkers, diskRemoveWorkers)...), FieldRe: `^nodes$`, UPIDObject: "%s"},
-		{Kind: "storage", Change: "removed", MatchKey: "cluster",
-			WorkerRe: anyOf(slices.Concat(diskRemoveWorkers, cephRemoveWorkers)...), UPIDObject: "%s"},
-		{Kind: "storage", Change: "changed", MatchKey: "cluster", WorkerRe: `^lvmthinremove$`, FieldRe: `^nodes$`},
-		{Kind: "storage", Change: "removed", MatchKey: "cluster", WorkerRe: `^lvmthinremove$`},
+			WorkerRe: anyOf(slices.Concat(diskCreateWorkers, diskRemoveWorkers)...), FieldRe: `^nodes$`, Object: "upid:%s"},
+		{Kind: "storage", Change: "removed", MatchKey: "cluster", WorkerRe: anyOf(storageRemovals...), Object: "upid:%s"},
 	},
 
 	// A backup job; a guest destroyed with purge leaves every job it was in,
 	// and a job it was the last guest of is deleted (VZDump::Plugin
-	// remove_vmid_from_backup_jobs).
+	// remove_vmid_from_backup_jobs): that guest's destroy explains that guest
+	// leaving, and the removal of a job it was the only guest of.
 	byAction("backup", []string{"backup_job_created"}, []string{"backup_job_updated"}, []string{"backup_job_deleted"}),
 	[]explainRule{
-		{Kind: "backup", Change: "changed", MatchKey: "cluster", WorkerRe: guestDestroyWorker, FieldRe: `^(vmid|exclude)$`},
-		{Kind: "backup", Change: "removed", MatchKey: "cluster", WorkerRe: guestDestroyWorker},
+		{Kind: "backup", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`,
+			FieldRe: `^vmid$`, Member: "left", MemberOf: "upid:vmid:%s"},
+		{Kind: "backup", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`,
+			FieldRe: `^exclude$`, Member: "left", MemberOf: "upid:exclude:%s"},
+		{Kind: "backup", Change: "removed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`,
+			Member: "sole", MemberOf: "upid:vmid:%s"},
 	},
 
 	// A mapping's delete that found it already gone is a no-op, which explains
@@ -240,9 +259,15 @@ var observedChangeRules = slices.Concat(
 	crud("ha_rule"),
 	[]explainRule{
 		{Kind: "ha_resource", Change: "changed", MatchKey: "sid", WorkerRe: anyOf("hastart", "hastop"), FieldRe: `^state$`},
-		{Kind: "ha_resource", Change: "removed", MatchKey: "sid", WorkerRe: guestDestroyWorker},
-		{Kind: "ha_rule", Change: "changed", MatchKey: "cluster", WorkerRe: guestDestroyWorker, FieldRe: `^resources$`},
-		{Kind: "ha_rule", Change: "removed", MatchKey: "cluster", WorkerRe: guestDestroyWorker},
+		{Kind: "ha_resource", Change: "removed", MatchKey: "sid", WorkerRe: `^(qmdestroy|vzdestroy)$`},
+		{Kind: "ha_rule", Change: "changed", MatchKey: "cluster", WorkerRe: `^qmdestroy$`,
+			FieldRe: `^resources$`, Member: "left", MemberOf: "upid:resources:vm:%s"},
+		{Kind: "ha_rule", Change: "changed", MatchKey: "cluster", WorkerRe: `^vzdestroy$`,
+			FieldRe: `^resources$`, Member: "left", MemberOf: "upid:resources:ct:%s"},
+		{Kind: "ha_rule", Change: "removed", MatchKey: "cluster", WorkerRe: `^qmdestroy$`,
+			Member: "sole", MemberOf: "upid:resources:vm:%s"},
+		{Kind: "ha_rule", Change: "removed", MatchKey: "cluster", WorkerRe: `^vzdestroy$`,
+			Member: "sole", MemberOf: "upid:resources:ct:%s"},
 	},
 
 	sdnCRUD("sdn_zone"),
@@ -288,12 +313,11 @@ var observedChangeRules = slices.Concat(
 		{Kind: "pve_group", Change: "changed", AuditType: "pve_user", MatchKey: "cluster",
 			ActionRe: anyOf("created", "updated", "deleted"), FieldRe: `^users$`},
 		{Kind: "pve_token", Change: "removed", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^deleted$`},
-		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: guestDestroyWorker, UPIDObject: "/vms/%s"},
-		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster",
-			WorkerRe: anyOf(slices.Concat(diskRemoveWorkers, cephRemoveWorkers)...), UPIDObject: "/storage/%s"},
-		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: `^lvmthinremove$`},
+		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`, Object: "upid:/vms/%s"},
+		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: anyOf(storageRemovals...),
+			Object: "upid:/storage/%s"},
 		{Kind: "pve_acl", Change: "removed", AuditType: "storage", MatchKey: "cluster",
-			ActionRe: `^(delete|delete_import_source)$`},
+			ActionRe: `^(delete|delete_import_source)$`, Object: "audit:/storage/%s"},
 	},
 	inDirections(explainRule{Kind: "pve_acl", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^deleted$`},
 		"changed", "removed"),

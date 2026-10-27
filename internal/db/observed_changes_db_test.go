@@ -190,10 +190,35 @@ func TestObservedChanges(t *testing.T) {
 	bySid := seed(observedCluster, "ha_resource", "vm:110", 0, "changed", "", []string{"state"}, at)
 	audit(observedCluster, in, "proxmox_task", "110", 110, "hastart", map[string]any{"upid": upid("hastart", 7)})
 	besideSid := seed(observedCluster, "ha_resource", "vm:113", 0, "changed", "", []string{"state"}, at)
+	members := func(id uuid.UUID, joined, left []string) {
+		exec("members", `UPDATE cluster_object_changes SET members_joined = $2, members_left = $3 WHERE id = $1`,
+			id, joined, left)
+	}
+	// A guest's destroy explains that guest leaving a pool, not another one
+	// leaving, and a job's removal only when the guest was all it held.
 	byClusterTask := seed(observedCluster, "pool", "web", 0, "changed", "", []string{"vms"}, at)
-	audit(observedCluster, in, "vm", "111", 111, "destroy", map[string]any{"upid": upid("qmdestroy", 8)})
+	members(byClusterTask, []string{}, []string{"vms:111"})
+	audit(observedCluster, in, "vm", "111", 111, "destroy", map[string]any{"upid": "UPID:pve-01:00000008:00000001:00000001:qmdestroy:111:root@pam:"})
+	besideTask := seed(observedCluster, "pool", "ops", 0, "changed", "", []string{"vms"}, at)
+	members(besideTask, []string{}, []string{"vms:111", "vms:120"})
+	jobEmptied := seed(observedCluster, "backup", "backup-02", 0, "removed", "", nil, at)
+	members(jobEmptied, []string{}, []string{"vmid:111"})
+	jobNotEmptied := seed(observedCluster, "backup", "backup-03", 0, "removed", "", nil, at)
+	members(jobNotEmptied, []string{}, []string{"vmid:111", "vmid:121"})
+	// A task reaching another object counts from an hour before the window,
+	// not the day a task on the object itself does.
+	byLongRestore := seed(observedCluster, "pool", "db2", 0, "changed", "", []string{"vms"}, ago(600))
+	members(byLongRestore, []string{"vms:140"}, []string{})
+	audit(observedCluster, ago(600).Add(-90*time.Minute), "proxmox_task", "140", 140, "qmrestore",
+		map[string]any{"upid": "UPID:pve-01:0000000C:00000001:00000001:qmrestore:140:root@pam:"})
+	task(observedCluster, "UPID:pve-01:0000000C:00000001:00000001:qmrestore:140:root@pam:", 140,
+		ago(600).Add(-90*time.Minute), ago(600).Add(-time.Minute))
 	byDetails := seed(observedCluster, "pool", "db", 0, "changed", "", []string{"vms"}, ago(200))
 	audit(observedCluster, ago(201), "vm", uuid.NewString(), 112, "set_pool", map[string]any{"new_pool": "db"})
+	byClone := seed(observedCluster, "pool", "lab", 0, "changed", "", []string{"vms"}, ago(200))
+	audit(observedCluster, ago(201), "vm", uuid.NewString(), 113, "clone", map[string]any{"new_id": 150})
+	members(byDetails, []string{"vms:112"}, []string{})
+	members(byClone, []string{"vms:150"}, []string{})
 	besideDetails := seed(observedCluster, "pool", "app", 0, "changed", "", []string{"vms"}, ago(200))
 	byNode := seed(observedCluster, "network", "pve-01/vmbr1", 0, "removed", "pve-01", nil, at)
 	audit(observedCluster, in, "network", "pve-01", 0, "network_reverted", nil)
@@ -227,20 +252,28 @@ func TestObservedChanges(t *testing.T) {
 	rule := func(kind, change, auditType, key string, untasked bool, actionRe, exceptRe, workerRe, fieldRe string) map[string]any {
 		return map[string]any{"kind": kind, "change": change, "audit_type": auditType, "match_key": key,
 			"untasked": untasked, "action_re": actionRe, "except_re": exceptRe, "worker_re": workerRe, "field_re": fieldRe,
-			"detail_key": "", "upid_object": ""}
+			"detail_key": "", "object": "", "member": "", "member_of": ""}
 	}
 	with := func(r map[string]any, key, value string) map[string]any { r[key] = value; return r }
 	rules := jsonOf([]map[string]any{
 		rule("storage", "", "storage", "id", false, "", "", "", ""),
 		rule("backup", "", "backup", "id", false, "", "^run$", "", ""),
-		with(rule("storage", "added", "", "cluster", false, "", "", "^dircreate$", ""), "upid_object", "%s"),
+		with(rule("storage", "added", "", "cluster", false, "", "", "^dircreate$", ""), "object", "upid:%s"),
 		with(rule("firewall_alias", "removed", "firewall_alias", "id", false, "^updated$", "", "", ""), "detail_key", "rename"),
 		rule("vm", "changed", "", "vmid", false, "", "", "^qmmove$", "^scsi[0-9]+$"),
 		rule("vm", "changed", "", "vmid", false, "", "", "^qmconfig$", ""),
 		rule("vm", "changed", "vm", "vmid", true, "^config_update$", "", "", ""),
 		rule("ha_resource", "changed", "", "sid", false, "", "", "^hastart$", "^state$"),
-		rule("pool", "changed", "", "cluster", false, "", "", "^qmdestroy$", "^vms$"),
-		rule("pool", "changed", "vm", "details:new_pool", false, "^set_pool$", "", "", "^vms$"),
+		with(with(rule("pool", "changed", "", "cluster", false, "", "", "^qmdestroy$", "^vms$"), "member", "left"),
+			"member_of", "upid:vms:%s"),
+		with(with(rule("backup", "removed", "", "cluster", false, "", "", "^qmdestroy$", ""), "member", "sole"),
+			"member_of", "upid:vmid:%s"),
+		with(with(rule("pool", "changed", "", "cluster", false, "", "", "^qmrestore$", "^vms$"), "member", "joined"),
+			"member_of", "upid:vms:%s"),
+		with(with(rule("pool", "changed", "vm", "details:new_pool", false, "^set_pool$", "", "", "^vms$"), "member", "joined"),
+			"member_of", "vmid:vms:%s"),
+		with(with(rule("pool", "changed", "vm", "cluster", false, "^clone$", "", "", "^vms$"), "member", "joined"),
+			"member_of", "details.new_id:vms:%s"),
 		rule("network", "", "network", "node", false, "^network_reverted$", "", "", ""),
 	})
 	classify := func(allListed bool) {
@@ -294,8 +327,13 @@ func TestObservedChanges(t *testing.T) {
 		{"a task that ended long before", byFinishedTask, "shown"},
 		{"an HA start of the sid's guest", bySid, "explained"},
 		{"an HA start of another guest", besideSid, "shown"},
-		{"a guest destroyed anywhere in the cluster", byClusterTask, "explained"},
+		{"a guest's destroy, that guest leaving the pool", byClusterTask, "explained"},
+		{"a guest's destroy, another guest leaving too", besideTask, "shown"},
+		{"a job removed with its last guest's destroy", jobEmptied, "explained"},
+		{"a job removed that held another guest too", jobNotEmptied, "shown"},
+		{"a restore started more than an hour before", byLongRestore, "shown"},
 		{"a guest moved into the pool from its page", byDetails, "explained"},
+		{"a guest cloned into the pool through Nexara", byClone, "explained"},
 		{"a guest moved into another pool", besideDetails, "shown"},
 		{"a revert of the node's pending network", byNode, "explained"},
 		{"a revert on another node", besideNode, "shown"},

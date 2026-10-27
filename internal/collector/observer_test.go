@@ -281,8 +281,9 @@ func TestObserverKinds(t *testing.T) {
 		kind              string
 		base, noise, edit answers
 		want              string // {cluster} is the cluster's id
-		value             string // the edited value, which must appear nowhere in the row
+		value             string // the edited value, which must appear nowhere a reader selects
 		detail            string // the row's detail, when it has one
+		members           string // the members that joined and left, when it lists other objects
 	}{
 		{kind: "storage",
 			base:  answers{pathStorage: `[{"storage":"store01","type":"dir","content":"images,iso","nodes":"pve-01,pve-02","shared":0,"digest":"d1"}]`},
@@ -312,7 +313,7 @@ func TestObserverKinds(t *testing.T) {
 			noise: answers{"/pools?poolid=web": `[{"poolid":"web","members":[{"type":"qemu","vmid":"100","node":"pve-02","status":"stopped","cpu":0}]}]`},
 			edit: answers{"/pools?poolid=web": `[{"poolid":"web","members":[{"type":"qemu","vmid":100},{"type":"lxc","vmid":101},` +
 				`{"type":"storage","storage":"store01"}]}]`},
-			want: "changed pool/web [storage vms]", value: "store01"},
+			want: "changed pool/web [storage vms]", value: "store01", members: "[storage:store01 vms:101] []"},
 		{kind: "metric_server",
 			base: answers{"/cluster/metrics/server": `[{"id":"influx01","type":"influxdb","port":8089}]`,
 				"/cluster/metrics/server/influx01": `{"type":"influxdb","server":"192.0.2.30","port":8089,"bucket":"proxmox"}`},
@@ -459,6 +460,12 @@ func TestObserverKinds(t *testing.T) {
 			e.mq.observed.mu.Unlock()
 			if got := e.mq.observed.takeChanges(); !slices.Equal(got, []string{want}) {
 				t.Fatalf("edit: filed %q, want %q", got, want)
+			}
+			if got := fmt.Sprint(rows[0].MembersJoined, rows[0].MembersLeft); tc.members != "" && got != tc.members {
+				t.Fatalf("members %s, want %s", got, tc.members)
+			}
+			for i := range rows {
+				rows[i].MembersJoined, rows[i].MembersLeft = nil, nil // ids, in columns no reader selects
 			}
 			raw, _ := json.Marshal(rows)
 			if strings.Contains(string(raw), tc.value) {
@@ -719,6 +726,28 @@ func TestObserveCanonicalForms(t *testing.T) {
 	if _, ok := got["Odd Key"]; ok || got[observeOtherField] == "" || len(got) != 2 {
 		t.Errorf("unexpected keys kept as names: %v", got)
 	}
+
+	// A member list is kept as its ids, sorted and once each, and says who
+	// joined and who left; one holding anything but ids is a plain set.
+	members := newFieldSpec(nil, nil).withMembers("vmid")
+	split := func(s string) (map[string]string, map[string][]string) {
+		var item map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(s), &item); err != nil {
+			t.Fatal(err)
+		}
+		return members.split(item)
+	}
+	if f, m := split(`{"vmid":"101,100,100"}`); len(f) != 0 || fmt.Sprint(m) != "map[vmid:[100 101]]" {
+		t.Errorf("members: %v %v", f, m)
+	}
+	if f, m := split(`{"vmid":"100,<b>x</b>"}`); f["vmid"] == "" || m != nil {
+		t.Errorf("a list that is no ids: %v %v", f, m)
+	}
+	d := diffTags(objectTags{members: map[string][]string{"vmid": {"100", "101"}}},
+		objectTags{members: map[string][]string{"vmid": {"101", "102"}}})
+	if fmt.Sprint(d.fields, d.joined, d.left, d.counts) != "[vmid] [vmid:102] [vmid:100] map[vmid:{1 1}]" {
+		t.Errorf("member diff: %+v", d)
+	}
 }
 
 // A tag depends on the key, the object and the field as well as the value, so
@@ -774,9 +803,12 @@ func TestObservedChangeRules(t *testing.T) {
 		if !slices.Contains([]string{"added", "changed", "removed"}, r.Change) {
 			t.Errorf("rule %+v names no direction", r)
 		}
-		if (r.UPIDObject != "" && (strings.Count(r.UPIDObject, "%") != 1 || !strings.Contains(r.UPIDObject, "%s"))) ||
-			!regexp.MustCompile(`^[a-z_]*$`).MatchString(r.DetailKey) {
-			t.Errorf("rule %+v: upid_object or detail_key", r)
+		named := regexp.MustCompile(`^(upid|audit|vmid|details\.[a-z_]+):[^%]*%s[^%]*$`)
+		memberOK := (r.Member == "" && r.MemberOf == "") || r.Member == "joined" || r.Member == "left" ||
+			(r.Member == "sole" && r.MemberOf != "")
+		if (r.Object != "" && !named.MatchString(r.Object)) || (r.MemberOf != "" && !named.MatchString(r.MemberOf)) ||
+			!memberOK || !regexp.MustCompile(`^[a-z_]*$`).MatchString(r.DetailKey) {
+			t.Errorf("rule %+v: object, member or detail_key", r)
 		}
 		for _, re := range []string{r.ActionRe, r.ExceptRe, r.WorkerRe, r.FieldRe} {
 			if _, err := regexp.Compile(re); err != nil || (re != "" && !strings.HasPrefix(re, "^")) {

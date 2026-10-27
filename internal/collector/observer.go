@@ -70,6 +70,11 @@ const (
 	// with the hour's fields together, until a pass reads it unchanged.
 	observeNoisyStreak = 12
 	observeNoisyEvery  = time.Hour
+
+	// observeStateVersion is in every signature: a release that stores a field
+	// another way (a member list kept as ids, not one tag) re-baselines once,
+	// rather than reading the new form against the old as a change.
+	observeStateVersion = "2"
 )
 
 // ObserverClient is the one Proxmox read the observer makes; *proxmox.Client
@@ -252,7 +257,7 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 		return
 	}
 
-	clusterSig := observeSignature("cluster", o.tags.keyID, clusterVersions(nodes))
+	clusterSig := observeSignature("cluster", o.tags.keyID, observeStateVersion, clusterVersions(nodes))
 	// A new privilege can open a kind skipped as refused, so the skips go when
 	// the privileges move too.
 	o.noticeSignature(cluster.ID, observeSignature(clusterSig, p.privFP))
@@ -262,12 +267,12 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 		p.observeClusterKind(ctx, k, p.gated(k.kind, clusterSig))
 	}
 	for _, n := range online {
-		nodeSig := observeSignature("node", o.tags.keyID, n.PveVersion, n.KernelVersion)
+		nodeSig := observeSignature("node", o.tags.keyID, observeStateVersion, n.PveVersion, n.KernelVersion)
 		for _, k := range observeNodeKinds {
 			p.observeNodeKind(ctx, k, n, nodeSig)
 		}
 	}
-	p.observeGuests(ctx, online, observeSignature("guest", o.tags.keyID))
+	p.observeGuests(ctx, online, observeSignature("guest", o.tags.keyID, observeStateVersion))
 
 	o.logger.Debug("object observer pass",
 		"cluster_id", cluster.ID,
@@ -350,7 +355,7 @@ func (p *observePass) observeTokenPrivileges(ctx context.Context) {
 			"cluster_id", p.cluster.ID)
 		id := p.cluster.ID.String()
 		batch.record([]observedChangeRow{changeRow(observedObject{id: id, resourceType: "cluster", resourceID: id},
-			"changed", []string{kind}, nil, mark.lastRead, time.Now())})
+			"changed", tagDiff{fields: []string{kind}}, mark.lastRead, time.Now())})
 	}
 	readAt := time.Now()
 	if p.write(ctx, kind, batch, readAt, p.privFP) {
@@ -490,20 +495,21 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		case !existed:
 			batch.save(obj, tags, sig, readAt)
 			if baselined && !obj.hardware {
-				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "added", nil, nil, addedSince, doneAt), doneAt))
+				added := tagDiff{joined: allMembers(tags.members)}
+				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "added", added, addedSince, doneAt), doneAt))
 			}
 		case old.signature != sig:
 			batch.save(obj, tags, sig, readAt)
 		default:
-			fields, counts := diffTags(old.tags, tags)
-			if len(fields) == 0 {
+			d := diffTags(old.tags, tags)
+			if len(d.fields) == 0 {
 				batch.touched = append(batch.touched, obj.id)
 				batch.record(p.o.quiet(p.objectKey(rd.kind, obj.id)))
 				continue
 			}
 			batch.save(obj, tags, sig, readAt)
-			if !allIn(fields, rd.quiet) {
-				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", fields, counts, old.lastSeen, doneAt), doneAt))
+			if !allIn(d.fields, rd.quiet) {
+				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", d, old.lastSeen, doneAt), doneAt))
 			}
 		}
 	}
@@ -519,7 +525,8 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		batch.record(flushed)
 		if baselined && old.signature == sig && !p.wasHardware(rd.kind, id, old) {
 			obj := removedObject(rd.kind, id, old.node)
-			batch.record([]observedChangeRow{changeRow(obj, "removed", nil, nil, old.lastSeen, doneAt)})
+			removed := tagDiff{left: allMembers(old.tags.members)}
+			batch.record([]observedChangeRow{changeRow(obj, "removed", removed, old.lastSeen, doneAt)})
 		}
 	}
 
@@ -554,6 +561,9 @@ func (p *observePass) tagObject(kind string, obj observedObject) (objectTags, er
 			list = append(list, t)
 		}
 		out.lists[f] = list
+	}
+	if len(obj.members) > 0 {
+		out.members = obj.members
 	}
 	return out, nil
 }
@@ -702,13 +712,13 @@ func (p *observePass) applyGuest(batch *recordBatch, kind string, obj observedOb
 	}
 	old, existed := p.state[kind][obj.id]
 	if existed && old.signature == sig {
-		fields, counts := diffTags(old.tags, tags)
-		if len(fields) == 0 {
+		d := diffTags(old.tags, tags)
+		if len(d.fields) == 0 {
 			batch.save(obj, tags, sig, readAt)
 			batch.record(p.o.quiet(p.objectKey(kind, obj.id)))
 			return
 		}
-		batch.record(p.o.pace(p.objectKey(kind, obj.id), changeRow(obj, "changed", fields, counts, old.lastSeen, doneAt), doneAt))
+		batch.record(p.o.pace(p.objectKey(kind, obj.id), changeRow(obj, "changed", d, old.lastSeen, doneAt), doneAt))
 	}
 	batch.save(obj, tags, sig, readAt)
 }
@@ -913,18 +923,21 @@ func (l *observeLimiter) acquire(ctx context.Context, gap time.Duration) (func()
 // --- writes ---
 
 // observedChangeRow is one row for cluster_object_changes, as
-// RecordObservedObjects decodes it. Never a value: field names, and for an
-// ordered list how many items came and went.
+// RecordObservedObjects decodes it. Never a value: field names, and for a list
+// how many items came and went. The members that joined or left a list of
+// other objects' ids go in columns no reader selects, for the classification.
 type observedChangeRow struct {
-	ResourceType string         `json:"resource_type"`
-	ResourceID   string         `json:"resource_id"`
-	Vmid         *int32         `json:"vmid"`
-	Change       string         `json:"change"`
-	Fields       []string       `json:"fields"`
-	Detail       map[string]any `json:"detail"`
-	Node         string         `json:"node"`
-	LastSeenAt   time.Time      `json:"last_seen_at"`
-	ObservedAt   time.Time      `json:"observed_at"`
+	ResourceType  string         `json:"resource_type"`
+	ResourceID    string         `json:"resource_id"`
+	Vmid          *int32         `json:"vmid"`
+	Change        string         `json:"change"`
+	Fields        []string       `json:"fields"`
+	Detail        map[string]any `json:"detail"`
+	Node          string         `json:"node"`
+	MembersJoined []string       `json:"members_joined"`
+	MembersLeft   []string       `json:"members_left"`
+	LastSeenAt    time.Time      `json:"last_seen_at"`
+	ObservedAt    time.Time      `json:"observed_at"`
 }
 
 type observedStateRow struct {
@@ -948,16 +961,14 @@ func (b *recordBatch) save(obj observedObject, tags objectTags, sig string, read
 
 func (b *recordBatch) record(rows []observedChangeRow) { b.changes = append(b.changes, rows...) }
 
-func changeRow(obj observedObject, change string, fields []string, counts map[string]listCount, lastSeen, observed time.Time) observedChangeRow {
+func changeRow(obj observedObject, change string, d tagDiff, lastSeen, observed time.Time) observedChangeRow {
 	row := observedChangeRow{
-		ResourceType: obj.resourceType, ResourceID: obj.resourceID, Change: change, Fields: fields,
-		Detail: map[string]any{}, Node: obj.node, LastSeenAt: lastSeen, ObservedAt: observed,
+		ResourceType: obj.resourceType, ResourceID: obj.resourceID, Change: change, Fields: nonNil(d.fields),
+		Detail: map[string]any{}, Node: obj.node, MembersJoined: nonNil(d.joined), MembersLeft: nonNil(d.left),
+		LastSeenAt: lastSeen, ObservedAt: observed,
 	}
-	if row.Fields == nil {
-		row.Fields = []string{}
-	}
-	if len(counts) > 0 {
-		row.Detail["counts"] = counts
+	if len(d.counts) > 0 {
+		row.Detail["counts"] = d.counts
 	}
 	if obj.vmid != 0 {
 		vmid := obj.vmid
@@ -1131,6 +1142,9 @@ func (o *Observer) pace(key string, ch observedChangeRow, now time.Time) []obser
 		n.held = &held
 	} else {
 		n.held.Fields = unionSorted(n.held.Fields, ch.Fields)
+		n.held.MembersJoined = unionSorted(n.held.MembersJoined, ch.MembersJoined)
+		n.held.MembersLeft = unionSorted(n.held.MembersLeft, ch.MembersLeft)
+		n.held.Detail = sumCounts(n.held.Detail, ch.Detail)
 		n.held.ObservedAt = ch.ObservedAt
 	}
 	if now.Sub(n.lastEmit) < observeNoisyEvery {
@@ -1172,7 +1186,31 @@ func (o *Observer) forgetQuietObjects(now time.Time) {
 func unionSorted(a, b []string) []string {
 	out := slices.Concat(a, b)
 	slices.Sort(out)
-	return slices.Compact(out)
+	return slices.Compact(nonNil(out))
+}
+
+// sumCounts is a held row's detail with a later change's list counts added:
+// an hour's row says how many items came and went in the hour.
+func sumCounts(held, next map[string]any) map[string]any {
+	nc, _ := next["counts"].(map[string]listCount)
+	if len(nc) == 0 {
+		return held
+	}
+	hc, _ := held["counts"].(map[string]listCount)
+	sum := make(map[string]listCount, len(hc)+len(nc))
+	for k, c := range hc {
+		sum[k] = c
+	}
+	for k, c := range nc {
+		s := sum[k]
+		sum[k] = listCount{Added: s.Added + c.Added, Removed: s.Removed + c.Removed}
+	}
+	out := make(map[string]any, len(held))
+	for k, v := range held {
+		out[k] = v
+	}
+	out["counts"] = sum
+	return out
 }
 
 // clusterVersions is the Proxmox versions a cluster's nodes run, as one string.

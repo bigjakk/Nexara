@@ -1,8 +1,9 @@
 -- Automatic in-place upgrade — no manual steps, no operator action required.
--- Purely additive: one new table, and a column with a default on
--- cluster_object_baselines (000124). Nothing existing is read,
--- rewritten or backfilled, so an interrupted run leaves nothing behind — the
--- migration is one transaction.
+-- Purely additive: one new table, a column with a default on
+-- cluster_object_baselines (000124), and two with a default on
+-- cluster_object_changes (000124). Nothing existing is read, rewritten or
+-- backfilled, so an interrupted run leaves nothing behind — the migration is
+-- one transaction.
 --
 -- The observer (internal/collector/observer.go) records edits made directly in
 -- Proxmox that reach no audit row: a guest's configuration, a pool, a storage
@@ -55,3 +56,14 @@ CREATE TABLE IF NOT EXISTS cluster_object_state (
 -- have no signature, which matches no reading.
 ALTER TABLE cluster_object_baselines
     ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT '';
+
+-- The members that joined or left a list of other objects' ids in a change the
+-- observer filed, as "<field>:<id>": a pool's guests and storage, a backup
+-- job's guests, an HA rule's resources, a user's groups, a group's users. For
+-- an object added every member joined, for one removed every member left. They
+-- are ids, not values, and no reader selects them: the classification
+-- (ClassifyObservedChanges) needs them so that a guest's destroy explains only
+-- the jobs, pools and rules that guest left.
+ALTER TABLE cluster_object_changes
+    ADD COLUMN IF NOT EXISTS members_joined TEXT[] NOT NULL DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS members_left   TEXT[] NOT NULL DEFAULT '{}';

@@ -26,7 +26,8 @@ import (
 
 // observedObject is one object as one read reported it: its key within its
 // kind, the identity a change to it is filed under, and each compared field's
-// canonical value. Nothing here is stored as it is: observer.go tags it.
+// canonical value. Nothing here is stored as it is but members: observer.go
+// tags the rest.
 type observedObject struct {
 	id           string
 	resourceType string
@@ -35,6 +36,7 @@ type observedObject struct {
 	node         string              // the node it is on or belongs to; "" for a cluster's object
 	fields       map[string]string   // field -> canonical value
 	lists        map[string][]string // field -> canonical items of an ordered list (a rule set)
+	members      map[string][]string // field -> the other objects' ids it lists, sorted (fieldSpec.withMembers)
 	hardware     bool                // a physical NIC: it comes and goes with nobody editing
 }
 
@@ -112,8 +114,10 @@ var (
 	// content_hash_to_string and nodes via join(',', keys %$value), both unsorted.
 	storageSpec = newFieldSpec(nil, []string{"content", "nodes"})
 	// pve-manager API2/Backup.pm index: next-run is computed from now on every
-	// read. vmid and exclude are comma lists of guests.
-	backupSpec = newFieldSpec([]string{"next-run"}, []string{"vmid", "exclude"})
+	// read. vmid and exclude are comma lists of guests, kept as members: a
+	// guest destroyed with purge leaves them (VZDump::Plugin
+	// remove_vmid_from_backup_jobs), and only that guest's destroy explains it.
+	backupSpec = newFieldSpec([]string{"next-run"}, nil).withMembers("vmid", "exclude")
 	// pve-manager API2/Cluster/Mapping/{PCI,USB}.pm index: checks appear only
 	// with check-node, never sent; map is one entry per node.
 	mappingSpec = newFieldSpec([]string{"checks"}, []string{"map"})
@@ -151,7 +155,7 @@ var (
 	// API2/HA/Rules.pm index: order is the rule's place in rules.cfg, which
 	// moves when a rule above it is deleted, and errors is the feasibility
 	// check of the moment, derived from the nodes and the other rules.
-	haRuleSpec = newFieldSpec([]string{"order", "errors"}, nil)
+	haRuleSpec = newFieldSpec([]string{"order", "errors"}, nil).withMembers("resources")
 	// API2/HA/Groups.pm: nodes is re-encoded join(',', keys %$value), unsorted
 	// (HA/Groups.pm encode_value).
 	haGroupSpec = newFieldSpec([]string{"type"}, []string{"nodes"})
@@ -195,8 +199,9 @@ func listKind(kind string, target proxmox.ObserveTarget, idField string, spec fi
 			if !auditkey.ValidID(id) {
 				continue
 			}
+			fields, members := spec.split(item)
 			reading.objects = append(reading.objects, observedObject{
-				id: id, resourceType: kind, resourceID: id, fields: spec.canonicalFields(item),
+				id: id, resourceType: kind, resourceID: id, fields: fields, members: members,
 			})
 		}
 		return []kindReading{reading}, readOK
@@ -204,9 +209,10 @@ func listKind(kind string, target proxmox.ObserveTarget, idField string, spec fi
 }
 
 // readPools lists the pools, then reads each one's members: a pool's guests and
-// storage, compared as sets of ids, never the members' run state (pve-manager
-// API2/Pool.pm index, API2Tools extract_vm_stats). A pool whose own read fails
-// is unread.
+// storage, kept as the ids (members: a guest destroyed leaves its pool, and
+// only that guest's destroy explains it), never the members' run state
+// (pve-manager API2/Pool.pm index, API2Tools extract_vm_stats). A pool whose
+// own read fails is unread.
 func readPools(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
 	items, out := p.readList(ctx, proxmox.ObservePools())
 	if out != readOK {
@@ -237,10 +243,10 @@ func poolObject(id string, entry map[string]json.RawMessage) observedObject {
 	if v, ok := canonicalValue(entry["comment"]); ok {
 		fields["comment"] = v
 	}
-	var members []map[string]json.RawMessage
-	_ = json.Unmarshal(entry["members"], &members)
+	var listed []map[string]json.RawMessage
+	_ = json.Unmarshal(entry["members"], &listed)
 	var vms, storage []json.RawMessage
-	for _, m := range members {
+	for _, m := range listed {
 		switch stringField(m, "type") {
 		case "qemu", "lxc", "openvz":
 			if v := m["vmid"]; v != nil {
@@ -252,9 +258,15 @@ func poolObject(id string, entry map[string]json.RawMessage) observedObject {
 			}
 		}
 	}
-	fields["vms"], _ = canonicalSet(jsonArray(vms))
-	fields["storage"], _ = canonicalSet(jsonArray(storage))
-	return observedObject{id: id, resourceType: "pool", resourceID: id, fields: fields}
+	members := map[string][]string{}
+	for field, list := range map[string][]json.RawMessage{"vms": vms, "storage": storage} {
+		if ids, ok := memberIDs(jsonArray(list)); ok {
+			members[field] = ids
+		} else {
+			fields[field], _ = canonicalSet(jsonArray(list))
+		}
+	}
+	return observedObject{id: id, resourceType: "pool", resourceID: id, fields: fields, members: members}
 }
 
 // readMetricServers lists the servers, then reads each one whole: the list
@@ -456,8 +468,9 @@ func (p *observePass) observeHA(ctx context.Context, sig string) {
 			if !auditkey.ValidID(id) {
 				continue
 			}
+			fields, members := k.spec.split(item)
 			rd.objects = append(rd.objects, observedObject{
-				id: id, resourceType: k.kind, resourceID: id, fields: k.spec.canonicalFields(item),
+				id: id, resourceType: k.kind, resourceID: id, fields: fields, members: members,
 			})
 		}
 		readings[k.kind] = rd
