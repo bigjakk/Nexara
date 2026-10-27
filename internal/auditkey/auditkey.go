@@ -63,17 +63,19 @@ func FirewallName(name string) string {
 	return strings.ToLower(name)
 }
 
-// IPSetCIDR is the entry an IP set stores, and so lists and addresses a delete
-// by. For an address or a network, create_ip (IPSet.pm) runs clean_cidr, which
-// clears the host bits of a network ("192.0.2.5/24" is "192.0.2.0/24") and
-// compresses its address, and parse_ip_or_cidr, which drops the prefix of a
-// single host (/32, /128). An alias reference ("dc/web", "guest/db01") is stored
-// as sent, and so is anything else this cannot read as an address: Proxmox
-// refused it or never took it, and there is nothing to normalise.
+// IPSetCIDR is the entry an IP set stores for an address or a network that was
+// created, and so the key of the create. create_ip (IPSet.pm) runs clean_cidr,
+// which clears the host bits of a network ("192.0.2.5/24" is "192.0.2.0/24") and
+// writes the address back compressed, with the prefix as it was typed ("/024"
+// stays "/024"); and parse_ip_or_cidr, which drops a literal "/32" from an IPv4
+// address and a literal "/128" from an IPv6 one, and nothing else ("/032" stays).
+// An alias reference ("dc/web", "guest/db01") is stored as sent, and so is
+// anything else this cannot read as an address: Proxmox refused it or never took
+// it, and there is nothing to normalise. A bare address is not rewritten either.
 func IPSetCIDR(entry string) string {
 	ip, length, hasPrefix := strings.Cut(entry, "/")
 	// clean_cidr leaves an entry with no prefix, or a zero one, as it is.
-	if !hasPrefix || length == "" || length == "0" {
+	if !hasPrefix || length == "" || length == "0" || strings.Trim(length, "0123456789") != "" {
 		return entry
 	}
 	addr, err := netip.ParseAddr(ip)
@@ -81,23 +83,61 @@ func IPSetCIDR(entry string) string {
 		return entry
 	}
 	bits, err := strconv.Atoi(length)
-	if err != nil || bits < 0 || bits > addr.BitLen() {
+	if err != nil || bits > addr.BitLen() {
 		return entry
 	}
 	prefix, err := addr.Prefix(bits)
 	if err != nil {
 		return entry
 	}
-	if bits == addr.BitLen() {
-		return prefix.Addr().String()
+	clean := prefix.Addr().String()
+	if !addr.Is4() {
+		clean = netIPv6(prefix.Addr().As16())
 	}
-	return prefix.Addr().String() + "/" + length
+	if (addr.Is4() && length == "32") || (!addr.Is4() && length == "128") {
+		return clean
+	}
+	return clean + "/" + length
 }
 
-// IPSetEntry is the key of an IP set entry: its set, then the entry as the set
-// stores it.
+// ipv6ZeroRun is a run of two or more zero groups, with the colons around it.
+var ipv6ZeroRun = regexp.MustCompile(`(?:^|:)0(?::0)+(?::|$)`)
+
+// netIPv6 writes an IPv6 address the way Net::IP::ip_compress_address does, which
+// is how clean_cidr writes the address of a network back: lower-case hex groups
+// without leading zeros, the longest run of zero groups (by its length as text,
+// the first of equals) replaced by "::". An IPv4-mapped address is written as
+// hex groups, not with a dotted tail ("::ffff:102:304").
+func netIPv6(a [16]byte) string {
+	groups := make([]string, 8)
+	for i := range groups {
+		groups[i] = strconv.FormatUint(uint64(a[2*i])<<8|uint64(a[2*i+1]), 16)
+	}
+	ip := strings.Join(groups, ":")
+	longest := ""
+	for _, run := range ipv6ZeroRun.FindAllString(ip, -1) {
+		if len(longest) < len(run) {
+			longest = run
+		}
+	}
+	if longest != "" {
+		ip = strings.Replace(ip, longest, "::", 1)
+	}
+	return ip
+}
+
+// IPSetEntry is the key of an IP set entry created: its set, then the entry as
+// the set stores it (IPSetCIDR).
 func IPSetEntry(set, entry string) string {
 	return FirewallName(set) + "/" + IPSetCIDR(entry)
+}
+
+// IPSetListed is the key of an IP set entry addressed as the set lists it, which
+// is how a delete names it. The config parser applies parse_ip_or_cidr and not
+// clean_cidr (Firewall.pm generic_fw_config_parser), so an entry written by hand
+// keeps the host bits it was typed with, and the delete's path names exactly that.
+func IPSetListed(set, entry string) string {
+	return FirewallName(set) + "/" + entry
 }
 
 // BareVMID reports the VMID a bare HA sid names ("109"). A sid with a type

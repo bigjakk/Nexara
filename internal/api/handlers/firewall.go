@@ -674,7 +674,7 @@ func (h *NetworkHandler) DeleteFirewallIPSetEntry(c fiber.Ctx, p *apischema.Para
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"set": name, "cidr": cidr})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", auditkey.IPSetEntry(name, cidr), "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", auditkey.IPSetListed(name, cidr), "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

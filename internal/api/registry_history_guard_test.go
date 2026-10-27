@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -143,18 +144,18 @@ var clusterObjectAudits = map[string][]string{
 	"ClusterOptionsHandler.UpdateTags":        {"cluster_options"},
 }
 
-// clusterObjectIDKeys is the auditkey function each name-spelled kind's id must
+// clusterObjectIDKeys are the auditkey functions each name-spelled kind's id may
 // be built with: Proxmox spells these names its own way (lower case, a normalised
 // path, the id it derived), and a handler that audits what was typed files one
 // object under as many keys as it has spellings.
-var clusterObjectIDKeys = map[string]string{
-	"firewall_alias":               "FirewallName",
-	"firewall_ipset":               "FirewallName",
-	"firewall_ipset_entry":         "IPSetEntry",
-	"firewall_security_group":      "FirewallName",
-	"firewall_security_group_rule": "FirewallName",
-	"pve_acl":                      "ACLPath",
-	"sdn_subnet":                   "SDNSubnet",
+var clusterObjectIDKeys = map[string][]string{
+	"firewall_alias":               {"FirewallName"},
+	"firewall_ipset":               {"FirewallName"},
+	"firewall_ipset_entry":         {"IPSetEntry", "IPSetListed"},
+	"firewall_security_group":      {"FirewallName"},
+	"firewall_security_group_rule": {"FirewallName"},
+	"pve_acl":                      {"ACLPath"},
+	"sdn_subnet":                   {"SDNSubnet"},
 }
 
 // clusterObjectLegacyHandlers are the cluster page's mutating routes still wired
@@ -320,8 +321,8 @@ func TestGuard_ClusterObjectMutationsFileUnderTheirKind(t *testing.T) {
 			if c.idMissing {
 				t.Errorf("%s files an audit row with an empty resource_id", key)
 			}
-			if want, named := clusterObjectIDKeys[c.resourceType]; named && c.idFunc != want {
-				t.Errorf("%s files a %s row whose id is not built with auditkey.%s", key, c.resourceType, want)
+			if want, named := clusterObjectIDKeys[c.resourceType]; named && !slices.Contains(want, c.idFunc) {
+				t.Errorf("%s files a %s row whose id is not built with auditkey.%s", key, c.resourceType, strings.Join(want, " or auditkey."))
 			}
 			filed[c.resourceType] = true
 		}

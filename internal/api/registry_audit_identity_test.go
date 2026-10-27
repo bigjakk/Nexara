@@ -166,6 +166,13 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			wantType: "firewall_ipset_entry", wantID: "myset/192.0.2.0/24", wantAction: "created",
 		},
 		{
+			// A delete names the entry as the set lists it.
+			name: "and its delete under the entry as listed", method: fiber.MethodDelete, path: firewallScope + "/ipset/:name/entries/:cidr",
+			target:   "/firewall/ipset/MySet/entries/192.0.2.5%2F24",
+			bind:     func(q *db.Queries) Handler { return net(q).DeleteFirewallIPSetEntry },
+			wantType: "firewall_ipset_entry", wantID: "myset/192.0.2.5/24", wantAction: "deleted",
+		},
+		{
 			name: "a security group files under its lower-case name", method: fiber.MethodPost, path: firewallScope + "/groups",
 			target: "/firewall/groups", body: `{"group":"Web01"}`,
 			bind:     func(q *db.Queries) Handler { return net(q).CreateSecurityGroup },
