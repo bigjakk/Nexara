@@ -177,7 +177,8 @@ func TestObservedChanges(t *testing.T) {
 	byOtherUntasked := seed(observedCluster, "vm", "104", 104, "changed", "pve-01", []string{"memory"}, at)
 	audit(observedCluster, in, "vm", uuid.NewString(), 104, "drs_migrate", nil)
 	byTaskedEdit := seed(observedCluster, "vm", "107", 107, "changed", "pve-01", []string{"memory"}, at)
-	audit(observedCluster, in, "vm", uuid.NewString(), 107, "config_update", map[string]any{"upid": upid("resize", 10)})
+	audit(observedCluster, in, "vm", uuid.NewString(), 107, "config_update",
+		map[string]any{"upid": upid("resize", 10), "fields": map[string]any{"memory": "4096"}})
 	byLongTask := seed(observedCluster, "vm", "105", 105, "changed", "pve-01", []string{"memory"}, at)
 	audit(observedCluster, at.Add(-3*time.Hour), "vm", "105", 105, "config_change", map[string]any{"upid": upid("qmconfig", 5)})
 	task(observedCluster, upid("qmconfig", 5), 105, at.Add(-3*time.Hour), at.Add(-2*time.Minute))
@@ -284,6 +285,8 @@ func TestObservedChanges(t *testing.T) {
 	audit(observedCluster, ago(201), "vm", uuid.NewString(), 113, "clone", map[string]any{"new_id": 150})
 	members(byDetails, []string{"vms:112"}, []string{})
 	members(byClone, []string{"vms:150"}, []string{})
+	cloneMade := seed(observedCluster, "vm", "150", 150, "changed", "pve-01", []string{"memory"}, ago(200))
+	cloneBeside := seed(observedCluster, "vm", "151", 151, "changed", "pve-01", []string{"memory"}, ago(200))
 	besideDetails := seed(observedCluster, "pool", "app", 0, "changed", "", []string{"vms"}, ago(200))
 	byNode := seed(observedCluster, "network", "pve-01/vmbr1", 0, "removed", "pve-01", nil, at)
 	audit(observedCluster, in, "network", "pve-01", 0, "network_reverted", nil)
@@ -356,6 +359,7 @@ func TestObservedChanges(t *testing.T) {
 			"member_of", "vmid:vms:%s"),
 		with(with(rule("pool", "changed", "vm", "cluster", false, "^clone$", "", "", "^vms$"), "member", "joined"),
 			"member_of", "details.new_id:vms:%s"),
+		rule("vm", "changed", "vm", "details:new_id", false, "^clone$", "", "", ""),
 		rule("network", "", "network", "node", false, "^network_reverted$", "", "", ""),
 	})
 	classify := func(allListed bool, maxRows int32) int64 {
@@ -443,6 +447,8 @@ func TestObservedChanges(t *testing.T) {
 		{"a restore started more than an hour before", byLongRestore, "shown"},
 		{"a guest moved into the pool from its page", byDetails, "explained"},
 		{"a guest cloned into the pool through Nexara", byClone, "explained"},
+		{"a clone Nexara made, by its new id", cloneMade, "explained"},
+		{"a guest beside Nexara's clone", cloneBeside, "shown"},
 		{"a guest moved into another pool", besideDetails, "shown"},
 		{"a revert of the node's pending network", byNode, "explained"},
 		{"a revert on another node", besideNode, "shown"},
