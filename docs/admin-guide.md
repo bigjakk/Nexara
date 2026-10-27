@@ -72,7 +72,7 @@ Changing the address also **clears the cluster's stored SSH credential and every
 
 ### Removing a Cluster
 
-From the cluster list, click the delete button. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster. The audit entries recorded against it are kept, labelled with the cluster's name followed by `(removed)`. Earlier releases deleted them with the cluster. Like entries that belong to no cluster, they are shown only to someone who can view the audit log across all clusters: a role assignment scoped to the removed cluster no longer shows them. A cluster you add again is a new cluster, and its entries do not join the old ones.
+From the cluster list, click the delete button. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster. The audit entries recorded against it are kept, labelled with the cluster's name followed by `(removed)`. Earlier releases deleted them with the cluster. Like entries that belong to no cluster, they are shown only to someone who can view the audit log across all clusters. Role assignments scoped to the removed cluster are removed with it, so a user who held one loses it and it leaves their role list (a global role is not affected). A cluster you add again is a new cluster, and its entries do not join the old ones.
 
 Removing a cluster leaves its audit entries untouched, so it takes no longer for having many.
 

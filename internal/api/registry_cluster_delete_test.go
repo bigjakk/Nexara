@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,13 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/api/handlers"
+	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/config"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -57,7 +61,10 @@ type clusterDeleteDB struct {
 	cluster db.Cluster
 	busy    bool // an active rolling update holds the cluster
 	deleted bool
-	audits  int
+	// holders is the user of each role assignment scoped to the cluster, which the
+	// delete returns as it deletes them.
+	holders []uuid.UUID
+	audits  [][]any // the arguments of each audit insert
 }
 
 func (d *clusterDeleteDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
@@ -77,24 +84,31 @@ func (d *clusterDeleteDB) QueryRow(_ context.Context, sql string, args ...any) p
 	return fieldRow{err: errClusterDeleteUnexpected}
 }
 
-// Query serves ListCleanupPendingJobsForCluster, the handler's one multi-row read. An
-// error reads there as "no pending cleanup", which is what an idle cluster has.
+// Query serves the delete, which returns the users of the assignments it removed, and
+// ListCleanupPendingJobsForCluster, the handler's one other multi-row read. An error
+// reads there as "no pending cleanup", which is what an idle cluster has.
 func (d *clusterDeleteDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-	if !strings.Contains(sql, "-- name: ListCleanupPendingJobsForCluster :many") {
-		return nil, fmt.Errorf("%w: %.60s", errClusterDeleteUnexpected, sql)
-	}
-	return nil, errClusterDeleteUnexpected
-}
-
-func (d *clusterDeleteDB) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	switch {
-	case strings.Contains(sql, "-- name: DeleteCluster :exec"):
+	case strings.Contains(sql, "-- name: DeleteClusterAndScopedRoles :many"):
 		d.deleted = true
-		return pgconn.NewCommandTag("DELETE 1"), nil
-	case strings.Contains(sql, "INSERT INTO audit_log"):
-		d.audits++
+		rows := make([]any, len(d.holders))
+		for i, u := range d.holders {
+			rows[i] = struct{ UserID uuid.UUID }{u}
+		}
+		return &metricRows{rows: rows}, nil
+	case strings.Contains(sql, "-- name: ListCleanupPendingJobsForCluster :many"):
+		return nil, errClusterDeleteUnexpected
+	}
+	return nil, fmt.Errorf("%w: %.60s", errClusterDeleteUnexpected, sql)
+}
+
+func (d *clusterDeleteDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if strings.Contains(sql, "INSERT INTO audit_log") {
+		d.audits = append(d.audits, args)
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
 	}
 	return pgconn.CommandTag{}, errClusterDeleteUnexpected
@@ -103,7 +117,22 @@ func (d *clusterDeleteDB) Exec(_ context.Context, sql string, _ ...any) (pgconn.
 func (d *clusterDeleteDB) state() (deleted bool, audits int) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.deleted, d.audits
+	return d.deleted, len(d.audits)
+}
+
+// auditDetails is the details of the one audit row the delete wrote.
+func (d *clusterDeleteDB) auditDetails(t *testing.T) map[string]any {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.audits) != 1 {
+		t.Fatalf("%d audit rows, want 1", len(d.audits))
+	}
+	var details map[string]any
+	if err := json.Unmarshal(d.audits[0][5].(json.RawMessage), &details); err != nil {
+		t.Fatalf("details: %v", err)
+	}
+	return details
 }
 
 // clusterDeleteFixture is what newClusterDeleteApp builds.
@@ -115,6 +144,10 @@ type clusterDeleteFixture struct {
 	// routes ask for, so that no permission is what refuses anything.
 	grants map[string]bool
 	extra  []Endpoint // mounted after the cluster delete
+	// holders are the users of the role assignments scoped to the cluster, and rbac
+	// the permission cache the handler clears for them.
+	holders []uuid.UUID
+	rbac    *auth.RBACEngine
 }
 
 // newClusterDeleteApp is the production middleware stack with the real
@@ -144,10 +177,10 @@ func newClusterDeleteApp(t *testing.T, f clusterDeleteFixture) (*fiber.App, *clu
 		BootstrapUserID:      userID,
 		BootstrapTokenName:   tokenName,
 		BootstrapCreatedUser: true,
-	}, busy: f.busy}
+	}, busy: f.busy, holders: f.holders}
 
 	e := declaredEndpoint(t, fiber.MethodDelete, clusterByID)
-	e.Handler = handlers.NewClusterHandler(db.New(store), clusterDeleteEncKey, nil).Delete
+	e.Handler = handlers.NewClusterHandler(db.New(store), clusterDeleteEncKey, nil, f.rbac).Delete
 
 	cfg := &config.Config{RateLimitMax: 1_000_000, RateLimitExpiration: time.Minute}
 	s := &Server{config: cfg, app: fiber.New(buildFiberConfig(cfg))}
@@ -228,6 +261,40 @@ func TestClusterDeleteRequiresTheClusterName(t *testing.T) {
 				t.Errorf("DELETE %s was refused, but Proxmox received %q — the revocation ran", tt.query, got)
 			}
 		})
+	}
+}
+
+// Removing a cluster deletes the role assignments scoped to it, and the permission cache of
+// the users who held them is cleared with them: a cached set keeps a grant for five minutes
+// after its row is gone. A user who held two is cleared once, one who held none not at all.
+func TestClusterDeleteClearsThePermissionCacheOfTheUsersItRevoked(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	holderA, holderB, bystander := uuid.New(), uuid.New(), uuid.New()
+	key := func(u uuid.UUID) string { return "nexara:rbac:" + u.String() }
+	for _, u := range []uuid.UUID{holderA, holderB, bystander} {
+		mr.Set(key(u), `{"permissions":[]}`)
+	}
+
+	app, store, _ := newClusterDeleteApp(t, clusterDeleteFixture{
+		name: "cluster01", rbac: auth.NewRBACEngine(nil, rdb),
+		holders: []uuid.UUID{holderA, holderB, holderA},
+	})
+	status, env := send(t, app, authedRequest(http.MethodDelete, pathPrefix+"clusters/"+testClusterID+"?confirm=cluster01"))
+	if status != fiber.StatusNoContent {
+		t.Fatalf("DELETE answered %d %+v, want 204", status, env)
+	}
+	for _, u := range []uuid.UUID{holderA, holderB} {
+		if mr.Exists(key(u)) {
+			t.Errorf("user %s held an assignment on the cluster, and still has a cached permission set", u)
+		}
+	}
+	if !mr.Exists(key(bystander)) {
+		t.Error("a user who held no assignment on the cluster had their cached permission set cleared")
+	}
+	if got := store.auditDetails(t)["role_assignments_removed"]; got != float64(3) {
+		t.Errorf("the audit row says %v role assignments were removed, want 3", got)
 	}
 }
 

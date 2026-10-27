@@ -399,7 +399,7 @@ func (s *Server) registerAuth(d *serverDeps) {
 // inventory layer the SPA browses through.
 func (s *Server) registerInventory(d *serverDeps) {
 	if d.hasCrypto() {
-		s.clusterHandler = handlers.NewClusterHandler(d.queries, d.encryptionKey, d.eventPub)
+		s.clusterHandler = handlers.NewClusterHandler(d.queries, d.encryptionKey, d.eventPub, d.rbacEngine)
 		s.pbsHandler = handlers.NewPBSHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.veeamHandler = handlers.NewVeeamHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.vmHandler = handlers.NewVMHandler(d.queries, d.encryptionKey, d.eventPub)

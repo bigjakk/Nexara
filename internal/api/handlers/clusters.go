@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -44,14 +45,18 @@ type ClusterHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	// rbac holds the permission cache that removing a cluster has to clear for the
+	// users who held an assignment scoped to it.
+	rbac *auth.RBACEngine
 }
 
 // NewClusterHandler creates a new cluster handler.
-func NewClusterHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *ClusterHandler {
+func NewClusterHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher, rbac *auth.RBACEngine) *ClusterHandler {
 	return &ClusterHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
+		rbac:          rbac,
 	}
 }
 
@@ -826,7 +831,11 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 		auditFields["cleanup_pending_job_ids"] = ids
 	}
 
-	if err := h.queries.DeleteCluster(c.Context(), id); err != nil {
+	// The role assignments scoped to the cluster go with it, in the same statement
+	// (DeleteClusterAndScopedRoles): one that outlived the cluster would grant its
+	// retained audit entries to someone the removal was meant to cut off.
+	revoked, err := h.queries.DeleteClusterAndScopedRoles(c.Context(), id)
+	if err != nil {
 		// The old ordering audited before deleting, so a failed delete was the
 		// one case that DID leave a row (nothing cascaded it away). Auditing
 		// only on success would quietly lose that.
@@ -836,6 +845,10 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 		AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_deleted", failDetails)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete cluster")
 	}
+	// Before anything below can fail: a cached permission set keeps a grant for up
+	// to five minutes after its row is gone.
+	h.forgetPermissions(c.Context(), revoked)
+	auditFields["role_assignments_removed"] = len(revoked)
 
 	if revoke {
 		auditFields["revoke_pve_credentials"] = revocationOutcome(c.Context(), h.queries, cluster, h.encryptionKey)
@@ -861,6 +874,21 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// forgetPermissions clears the cached permissions of the users whose cluster-scoped
+// role assignments were deleted with their cluster, each once however many they held.
+func (h *ClusterHandler) forgetPermissions(ctx context.Context, users []uuid.UUID) {
+	if h.rbac == nil {
+		return
+	}
+	cleared := make(map[uuid.UUID]bool, len(users))
+	for _, u := range users {
+		if !cleared[u] {
+			cleared[u] = true
+			h.rbac.InvalidateUser(ctx, u)
+		}
+	}
 }
 
 // confirmSSHTrustReset is the code the cluster edit dialog keys on to turn the

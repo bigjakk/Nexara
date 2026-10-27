@@ -68,8 +68,21 @@ SET credential_source      = 'manual',
     bootstrap_created_at   = NULL
 WHERE id = $1;
 
--- name: DeleteCluster :exec
-DELETE FROM clusters WHERE id = $1;
+-- DeleteClusterAndScopedRoles removes a cluster and, in the same statement and so
+-- in the same transaction, the role assignments scoped to it. The key 000123 puts
+-- on user_roles.scope_id would cascade them anyway; deleting them here is what lets
+-- the statement say whose they were: one user id per assignment removed, so the
+-- caller can clear those users' cached permissions, which would otherwise keep the
+-- grant for up to five minutes after the rows are gone.
+-- name: DeleteClusterAndScopedRoles :many
+WITH revoked AS (
+    DELETE FROM user_roles
+    WHERE scope_type = 'cluster' AND scope_id = sqlc.arg('id')::uuid
+    RETURNING user_id
+), removed AS (
+    DELETE FROM clusters WHERE id = sqlc.arg('id')::uuid
+)
+SELECT user_id FROM revoked;
 
 -- name: ListActiveClusters :many
 SELECT * FROM clusters WHERE is_active = true ORDER BY created_at;

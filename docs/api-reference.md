@@ -737,7 +737,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | GET | `/clusters` | List all clusters |
 | GET | `/clusters/:id` | Get cluster details |
 | PUT | `/clusters/:id` | Update cluster |
-| DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential). The cluster's audit entries are kept, still carrying its id and labelled `<name> (removed)`; only a holder of global `view:audit` reads them (see [Audit Log](#audit-log)) |
+| DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential). The cluster's audit entries are kept, still carrying its id and labelled `<name> (removed)`; only a holder of global `view:audit` reads them (see [Audit Log](#audit-log)). The role assignments scoped to the cluster are deleted with it, in the same statement, and the permission cache of the users who held them is cleared |
 | POST | `/clusters/fetch-fingerprint` | Fetch TLS fingerprint from a Proxmox URL |
 
 #### Onboarding a cluster without a pre-made token
@@ -2032,9 +2032,11 @@ not kept. Two removed clusters that shared a name are told apart by
 the old ones. Earlier releases deleted the entries with the cluster.
 
 Such an entry is read like one with no cluster: only by a holder of *global*
-`view:audit`, from `/audit-log`, `/audit-log/recent` and the export. A role
-assignment scoped to the removed cluster, which is not deleted with the cluster,
-neither shows the entry nor counts it in `total`.
+`view:audit`, from `/audit-log`, `/audit-log/recent` and the export. The role
+assignments scoped to a cluster are deleted when it is removed (and a database
+key refuses one that names a cluster that does not exist), so none can reach
+these entries; the audit reads also require the cluster to exist, as a second
+guard.
 
 #### Export
 

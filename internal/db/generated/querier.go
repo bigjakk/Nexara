@@ -470,7 +470,13 @@ type Querier interface {
 	DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) error
 	DeleteCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) error
 	DeleteCVEScan(ctx context.Context, id uuid.UUID) error
-	DeleteCluster(ctx context.Context, id uuid.UUID) error
+	// DeleteClusterAndScopedRoles removes a cluster and, in the same statement and so
+	// in the same transaction, the role assignments scoped to it. The key 000123 puts
+	// on user_roles.scope_id would cascade them anyway; deleting them here is what lets
+	// the statement say whose they were: one user id per assignment removed, so the
+	// caller can clear those users' cached permissions, which would otherwise keep the
+	// grant for up to five minutes after the rows are gone.
+	DeleteClusterAndScopedRoles(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error)
 	DeleteClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) error
 	// DeleteCompletedTasks removes terminal task_history rows whose finish (or
 	// start, if never finalized) predates the caller-supplied cutoff. Never deletes

@@ -20,7 +20,7 @@ const testEncryptionKey = "0123456789abcdef0123456789abcdef0123456789abcdef01234
 func newClusterTestApp(t *testing.T) *fiber.App {
 	t.Helper()
 
-	handler := NewClusterHandler(nil, testEncryptionKey, nil)
+	handler := NewClusterHandler(nil, testEncryptionKey, nil, nil)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: testErrorHandler,

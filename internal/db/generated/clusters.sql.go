@@ -140,13 +140,41 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 	return i, err
 }
 
-const deleteCluster = `-- name: DeleteCluster :exec
-DELETE FROM clusters WHERE id = $1
+const deleteClusterAndScopedRoles = `-- name: DeleteClusterAndScopedRoles :many
+WITH revoked AS (
+    DELETE FROM user_roles
+    WHERE scope_type = 'cluster' AND scope_id = $1::uuid
+    RETURNING user_id
+), removed AS (
+    DELETE FROM clusters WHERE id = $1::uuid
+)
+SELECT user_id FROM revoked
 `
 
-func (q *Queries) DeleteCluster(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCluster, id)
-	return err
+// DeleteClusterAndScopedRoles removes a cluster and, in the same statement and so
+// in the same transaction, the role assignments scoped to it. The key 000123 puts
+// on user_roles.scope_id would cascade them anyway; deleting them here is what lets
+// the statement say whose they were: one user id per assignment removed, so the
+// caller can clear those users' cached permissions, which would otherwise keep the
+// grant for up to five minutes after the rows are gone.
+func (q *Queries) DeleteClusterAndScopedRoles(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, deleteClusterAndScopedRoles, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var user_id uuid.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getCluster = `-- name: GetCluster :one
