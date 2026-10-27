@@ -80,7 +80,7 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pve := &restorePVE{storage: tt.storage}
-			base := &backupRunPVE{handle: pve.handle}
+			base := &backupRunPVE{handle: pve.handle, stopPoll: time.Millisecond}
 			if tt.storage == restoreHangs {
 				base.readTimeout = 300 * time.Millisecond
 			}

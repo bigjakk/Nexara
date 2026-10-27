@@ -32,6 +32,9 @@ type BackupHandler struct {
 	// readTimeout bounds each read an action makes only to label or route
 	// itself; zero means backupReadTimeout.
 	readTimeout time.Duration
+	// stopPoll is how long a force restore waits between looks at the guest's
+	// stop task; zero means a second.
+	stopPoll time.Duration
 }
 
 // NewBackupHandler creates a new backup handler.
@@ -51,6 +54,10 @@ const backupReadTimeout = 5 * time.Second
 // SetReadTimeout narrows the bound on those reads, so that a test can make one
 // time out without waiting for the production bound.
 func (h *BackupHandler) SetReadTimeout(d time.Duration) { h.readTimeout = d }
+
+// SetStopPollInterval shortens the wait between looks at a force restore's stop
+// task, so that a test does not wait a second for each.
+func (h *BackupHandler) SetStopPollInterval(d time.Duration) { h.stopPoll = d }
 
 // readContext is the request's context with the read bound on it.
 func (h *BackupHandler) readContext(c fiber.Ctx) (context.Context, context.CancelFunc) {
@@ -1805,8 +1812,12 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 				Description:  guestActionDesc("stop", *existingVM),
 				Extra:        map[string]any{"vmid": existingVM.Vmid, "reason": "force restore"},
 			})
+			interval := h.stopPoll
+			if interval <= 0 {
+				interval = time.Second
+			}
 			for i := 0; i < 60; i++ {
-				time.Sleep(1 * time.Second)
+				time.Sleep(interval)
 				ts, tsErr := pveClient.GetTaskStatus(c.Context(), req.TargetNode, stopUpid)
 				if tsErr != nil {
 					break

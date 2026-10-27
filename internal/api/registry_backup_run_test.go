@@ -99,6 +99,8 @@ type backupRunPVE struct {
 	// handle, when set, sees every request first and answers the ones it
 	// returns true for: the routes of a test whose handler is not a job's.
 	handle func(w http.ResponseWriter, r *http.Request) bool
+	// stopPoll, when set, is how long a force restore waits between looks at its stop.
+	stopPoll time.Duration
 
 	srv    *httptest.Server
 	mu     sync.Mutex
@@ -454,6 +456,9 @@ func newBackupAppAs(t *testing.T, pve *backupRunPVE, grants map[string]bool, met
 	backup := handlers.NewBackupHandler(db.New(dbtx), backupRunEncKey, nil)
 	if pve.readTimeout > 0 {
 		backup.SetReadTimeout(pve.readTimeout)
+	}
+	if pve.stopPoll > 0 {
+		backup.SetStopPollInterval(pve.stopPoll)
 	}
 	e.Handler = func(c fiber.Ctx, p *apischema.Params) error { return handler(backup, c, p) }
 
