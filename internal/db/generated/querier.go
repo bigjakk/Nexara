@@ -63,6 +63,25 @@ type Querier interface {
 	// The claim clears last_error and last_upid, which belong to the previous run:
 	// without that, a run being started would show beside the last run's error.
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
+	// ClassifyClusterObjectChanges decides, once, whether something already on
+	// record explains each settled change: an audit row for the same object —
+	// Nexara's, or a Proxmox task the collector ingested, which files under the same
+	// key — made after the object was last seen as it was (less 2 minutes for how
+	// stale that sighting can be) and no later than the change was seen (plus 30
+	// seconds of clock skew between Nexara and the node). A task counts while it
+	// runs: its audit row is made at the start, and a Ceph OSD takes minutes to
+	// appear. Only a change classified false is shown.
+	//
+	// A new OSD cannot be keyed by its number in the task that made it (the
+	// cephcreateosd UPID names the device), so an OSD that appeared is also
+	// explained by an osd_create on its host.
+	//
+	// "Settled" is the caller's settled_before: a change seen more recently stays
+	// unclassified, and hidden, until the collector has had time to ingest the
+	// Proxmox task that may explain it. A change on a node waits for that node's
+	// task list (listed_nodes) until give_up_before; an object no node owns has no
+	// list to wait for.
+	ClassifyClusterObjectChanges(ctx context.Context, arg ClassifyClusterObjectChangesParams) (int64, error)
 	// The guest kind's own SQL: what only a guest's History needs beyond the
 	// shared timeline (queries/history.sql, ListHistory) — where its timeline
 	// starts (ListGuestLifecycleEvents), and the collector's two records of what
@@ -430,7 +449,9 @@ type Querier interface {
 	// The same sweep drops the guest status changes a task explained
 	// (ClassifyGuestStatusChanges): nothing reads them once classified — the task
 	// itself is the History entry — and they are as old as the tasks it prunes.
-	// The changes no task explained are a guest's own record, and stay.
+	// The changes no task explained are a guest's own record, and stay. So do the
+	// changes to the cluster page's objects (ClassifyClusterObjectChanges), by the
+	// same rule.
 	DeleteCompletedTasks(ctx context.Context, cutoff time.Time) error
 	DeleteDRSRule(ctx context.Context, arg DeleteDRSRuleParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) error
@@ -1115,6 +1136,12 @@ type Querier interface {
 	InsertCVEScan(ctx context.Context, arg InsertCVEScanParams) (CveScan, error)
 	InsertCVEScanNode(ctx context.Context, arg InsertCVEScanNodeParams) (CveScanNode, error)
 	InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnParams) (CveScanVuln, error)
+	// InsertClusterObjectChange records one change a writer saw — the Ceph pass diffing
+	// two readings, the observer diffing Proxmox's configuration against Nexara's;
+	// the replication trigger writes its own rows. last_seen_at is when the object
+	// was last seen as it was; vmid is set for a guest only; fields are the names of
+	// the fields that differ (empty for added and removed).
+	InsertClusterObjectChange(ctx context.Context, arg InsertClusterObjectChangeParams) error
 	InsertDRSHistory(ctx context.Context, arg InsertDRSHistoryParams) (DrsHistory, error)
 	InsertDRSRule(ctx context.Context, arg InsertDRSRuleParams) (DrsRule, error)
 	// InsertExternalTaskHistory records a PVE-native (non-Nexara) task discovered by
@@ -1246,6 +1273,11 @@ type Querier interface {
 	ListCVEScanVulnsKEV(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]CveScan, error)
 	ListCleanupPendingJobsForCluster(ctx context.Context, clusterID uuid.UUID) ([]RollingUpdateJob, error)
+	// ListClusterObjectChanges is the unexplained changes of one cluster's objects of
+	// the given kinds, newest first — all of a kind, or one object's when
+	// resource_id is set. total is count(*) OVER the filtered set, computed before
+	// LIMIT, so the page and its count come from one query.
+	ListClusterObjectChanges(ctx context.Context, arg ListClusterObjectChangesParams) ([]ListClusterObjectChangesRow, error)
 	// Feeds the "TLS certificate changed" health issue.
 	//
 	// Pairs each active cluster's pinned fingerprint (clusters.tls_fingerprint,
@@ -2019,6 +2051,13 @@ type Querier interface {
 	ListVirtioWinReleases(ctx context.Context) ([]VirtioWinRelease, error)
 	ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVCInScanParams) ([]ListVulnsBySSVCInScanRow, error)
 	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
+	// Changes to the cluster page's objects that reach no audit row (migrations/000124,
+	// 000125): a replication job edited in the Proxmox GUI, an OSD that went down, a
+	// pool whose size was changed there. Keyed as audit_log is — cluster_id,
+	// resource_type, resource_id — so a History reads both with one selector.
+	// MarkClusterObjectBaseline says a cluster's objects of one kind have been read
+	// at least once; the replication trigger records an object appearing only after.
+	MarkClusterObjectBaseline(ctx context.Context, arg MarkClusterObjectBaselineParams) error
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	MarkNotificationDLQResolved(ctx context.Context, id uuid.UUID) error
@@ -2567,6 +2606,11 @@ type Querier interface {
 	UpsertPBSVerifyJob(ctx context.Context, arg UpsertPBSVerifyJobParams) (PbsVerifyJob, error)
 	// Storage-replication job status, collected per cluster from /cluster/replication
 	// so failing jobs can surface in the health indicator.
+	//
+	// schedule, rate, disable and comment are the job's configuration as listed;
+	// the triggers on this table (migrations/000125) record a change to one of them,
+	// a job appearing, and a job going. Run state — fail_count, error, last_seen_at —
+	// changes on a healthy job every pass and is not watched.
 	UpsertReplicationJob(ctx context.Context, arg UpsertReplicationJobParams) error
 	UpsertSSHKnownHost(ctx context.Context, arg UpsertSSHKnownHostParams) (SshKnownHost, error)
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error)

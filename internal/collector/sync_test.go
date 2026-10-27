@@ -45,6 +45,7 @@ type mockQueries struct {
 	unreportedVMCalls             []db.UpdateUnreportedVMParams
 	upsertStorageCalls            []db.UpsertStoragePoolParams
 	replicationUpserts            []db.UpsertReplicationJobParams
+	replicationUpsertErr          error
 	deleteStaleReplicationCalls   int
 	deleteStaleVMsForNodesCalls   []db.DeleteStaleVMsForNodesParams
 	deleteStaleVMsForNodesRemoved int64
@@ -54,6 +55,11 @@ type mockQueries struct {
 	runningTasks   []db.TaskHistory
 	reconcileCalls []db.ReconcileTaskHistoryParams
 	classifyCalls  []db.ClassifyGuestStatusChangesParams
+	// The cluster page's objects: the baselines marked, the changes recorded
+	// and the classification passes asked for.
+	baselineMarks       []db.MarkClusterObjectBaselineParams
+	objectChanges       []db.InsertClusterObjectChangeParams
+	classifyObjectCalls []db.ClassifyClusterObjectChangesParams
 
 	// Backup job logs: the jobs ListUnreadBackupJobs answers, and what was
 	// asked and written.
@@ -368,7 +374,7 @@ func (m *mockQueries) UpdateClusterQuorate(_ context.Context, _ db.UpdateCluster
 
 func (m *mockQueries) UpsertReplicationJob(_ context.Context, arg db.UpsertReplicationJobParams) error {
 	m.replicationUpserts = append(m.replicationUpserts, arg)
-	return nil
+	return m.replicationUpsertErr
 }
 
 func (m *mockQueries) DeleteStaleReplicationJobs(_ context.Context, _ uuid.UUID) error {
@@ -472,6 +478,21 @@ func (m *mockQueries) ListRunningTaskHistoryByCluster(_ context.Context, _ uuid.
 func (m *mockQueries) ReconcileTaskHistory(_ context.Context, arg db.ReconcileTaskHistoryParams) (int64, error) {
 	m.reconcileCalls = append(m.reconcileCalls, arg)
 	return 1, nil
+}
+
+func (m *mockQueries) MarkClusterObjectBaseline(_ context.Context, arg db.MarkClusterObjectBaselineParams) error {
+	m.baselineMarks = append(m.baselineMarks, arg)
+	return nil
+}
+
+func (m *mockQueries) InsertClusterObjectChange(_ context.Context, arg db.InsertClusterObjectChangeParams) error {
+	m.objectChanges = append(m.objectChanges, arg)
+	return nil
+}
+
+func (m *mockQueries) ClassifyClusterObjectChanges(_ context.Context, arg db.ClassifyClusterObjectChangesParams) (int64, error) {
+	m.classifyObjectCalls = append(m.classifyObjectCalls, arg)
+	return 0, nil
 }
 
 func (m *mockQueries) ClassifyGuestStatusChanges(_ context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error) {
@@ -808,6 +829,13 @@ func TestSyncCluster_Success(t *testing.T) {
 	}
 	if age := time.Since(mq.classifyCalls[0].GiveUpBefore); age < statusChangeGiveUp || age > statusChangeGiveUp+time.Minute {
 		t.Errorf("gave up on unlisted nodes' changes after %v, want %v", age, statusChangeGiveUp)
+	}
+	// The same pass decides the changes to the cluster page's objects, on the
+	// same terms.
+	if len(mq.classifyObjectCalls) != 1 || mq.classifyObjectCalls[0].ClusterID != cluster.ID ||
+		!slices.Equal(mq.classifyObjectCalls[0].ListedNodes, []string{"pve1", "pve2"}) {
+		t.Errorf("object change classification calls = %+v, want one for cluster %s, nodes pve1 and pve2",
+			mq.classifyObjectCalls, cluster.ID)
 	}
 }
 

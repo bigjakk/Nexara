@@ -25,14 +25,18 @@ func (q *Queries) DeleteStaleReplicationJobs(ctx context.Context, clusterID uuid
 
 const upsertReplicationJob = `-- name: UpsertReplicationJob :exec
 
-INSERT INTO replication_jobs (cluster_id, job_id, guest, node, target, fail_count, error, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+INSERT INTO replication_jobs (cluster_id, job_id, guest, node, target, fail_count, error, schedule, rate, disable, comment, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text, $9::text, $10::int, $11::text, now())
 ON CONFLICT (cluster_id, job_id) DO UPDATE SET
     guest = EXCLUDED.guest,
     node = EXCLUDED.node,
     target = EXCLUDED.target,
     fail_count = EXCLUDED.fail_count,
     error = EXCLUDED.error,
+    schedule = EXCLUDED.schedule,
+    rate = EXCLUDED.rate,
+    disable = EXCLUDED.disable,
+    comment = EXCLUDED.comment,
     last_seen_at = now()
 `
 
@@ -44,10 +48,19 @@ type UpsertReplicationJobParams struct {
 	Target    string    `json:"target"`
 	FailCount int32     `json:"fail_count"`
 	Error     string    `json:"error"`
+	Schedule  string    `json:"schedule"`
+	Rate      string    `json:"rate"`
+	Disable   int32     `json:"disable"`
+	Comment   string    `json:"comment"`
 }
 
 // Storage-replication job status, collected per cluster from /cluster/replication
 // so failing jobs can surface in the health indicator.
+//
+// schedule, rate, disable and comment are the job's configuration as listed;
+// the triggers on this table (migrations/000125) record a change to one of them,
+// a job appearing, and a job going. Run state — fail_count, error, last_seen_at —
+// changes on a healthy job every pass and is not watched.
 func (q *Queries) UpsertReplicationJob(ctx context.Context, arg UpsertReplicationJobParams) error {
 	_, err := q.db.Exec(ctx, upsertReplicationJob,
 		arg.ClusterID,
@@ -57,6 +70,10 @@ func (q *Queries) UpsertReplicationJob(ctx context.Context, arg UpsertReplicatio
 		arg.Target,
 		arg.FailCount,
 		arg.Error,
+		arg.Schedule,
+		arg.Rate,
+		arg.Disable,
+		arg.Comment,
 	)
 	return err
 }

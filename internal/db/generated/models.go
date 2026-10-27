@@ -192,6 +192,28 @@ type Cluster struct {
 	BootstrapCreatedAt   pgtype.Timestamptz `json:"bootstrap_created_at"`
 }
 
+type ClusterObjectBaseline struct {
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	ResourceType string    `json:"resource_type"`
+	BaselinedAt  time.Time `json:"baselined_at"`
+}
+
+type ClusterObjectChange struct {
+	ID           uuid.UUID       `json:"id"`
+	ClusterID    uuid.UUID       `json:"cluster_id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceID   string          `json:"resource_id"`
+	Vmid         pgtype.Int4     `json:"vmid"`
+	Change       string          `json:"change"`
+	Fields       []string        `json:"fields"`
+	Detail       json.RawMessage `json:"detail"`
+	Node         string          `json:"node"`
+	ObservedBy   string          `json:"observed_by"`
+	LastSeenAt   time.Time       `json:"last_seen_at"`
+	ObservedAt   time.Time       `json:"observed_at"`
+	Explained    pgtype.Bool     `json:"explained"`
+}
+
 type ClusterSshCredential struct {
 	ID                  uuid.UUID `json:"id"`
 	ClusterID           uuid.UUID `json:"cluster_id"`
@@ -848,14 +870,18 @@ type ProxmoxTaskSyncState struct {
 }
 
 type ReplicationJob struct {
-	ClusterID  uuid.UUID `json:"cluster_id"`
-	JobID      string    `json:"job_id"`
-	Guest      int32     `json:"guest"`
-	Node       string    `json:"node"`
-	Target     string    `json:"target"`
-	FailCount  int32     `json:"fail_count"`
-	Error      string    `json:"error"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	ClusterID  uuid.UUID   `json:"cluster_id"`
+	JobID      string      `json:"job_id"`
+	Guest      int32       `json:"guest"`
+	Node       string      `json:"node"`
+	Target     string      `json:"target"`
+	FailCount  int32       `json:"fail_count"`
+	Error      string      `json:"error"`
+	LastSeenAt time.Time   `json:"last_seen_at"`
+	Schedule   pgtype.Text `json:"schedule"`
+	Rate       pgtype.Text `json:"rate"`
+	Disable    pgtype.Int4 `json:"disable"`
+	Comment    pgtype.Text `json:"comment"`
 }
 
 type ReportRun struct {

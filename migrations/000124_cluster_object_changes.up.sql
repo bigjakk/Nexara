@@ -1,0 +1,84 @@
+-- Automatic in-place upgrade — no manual steps, no operator action required.
+-- Purely additive: two new tables and their indexes. Nothing existing is read,
+-- rewritten or backfilled, so an interrupted run leaves nothing behind — the
+-- migration is one transaction.
+--
+-- cluster_object_changes records a change to an object that reaches no audit
+-- row: a replication job edited in the Proxmox GUI, an OSD that went down, a
+-- pool whose size was changed there, a guest's configuration edited there. It
+-- is guest_status_changes (000115) for objects that are not a guest's status,
+-- and keyed the way audit_log is — cluster_id, resource_type, resource_id,
+-- spelled exactly as the audit rows for the same object spell them
+-- (replication / <job id>, ceph_osd / <osd number>, ceph_pool / <name>; a guest
+-- is vm / <vms.id> with vmid beside it, as audit_log.vmid is, because vms.id
+-- changes when a guest's row is re-created) — so a History reads both with one
+-- selector.
+--
+-- Three writers file into it, told apart by observed_by: 'trigger' (the trigger
+-- on replication_jobs, 000125), 'ceph' (the collector's Ceph pass, which diffs
+-- one reading against the last) and 'observer' (the diff of what Proxmox reports
+-- against what Nexara last wrote, for the configuration of objects edited
+-- directly in Proxmox). observed_by says how a change was seen; it is not
+-- audit_log.source, which says who made the change.
+--
+-- The facts are never updated. `explained` is NULL until the collector has had
+-- time to ingest the task that may explain the change, then true or false, once
+-- (ClassifyClusterObjectChanges, queries/cluster_object_changes.sql): a change is
+-- explained when an audit row for the same (cluster, resource_type, resource_id)
+-- lies in its window. Only a row classified false is shown; the explained ones
+-- are dropped by the task-history sweep (DeleteCompletedTasks), the others stay.
+CREATE TABLE IF NOT EXISTS cluster_object_changes (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cluster_id    UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
+    resource_type TEXT NOT NULL,
+    resource_id   TEXT NOT NULL,
+    -- A guest's vmid, as audit_log.vmid (000084); NULL for every other object.
+    vmid          INTEGER,
+    change        TEXT NOT NULL CHECK (change IN ('added', 'removed', 'changed')),
+    -- changed: the names of the fields that differ. added / removed: empty.
+    -- Names only, so a writer that must not store a value (a guest's password
+    -- fields) still says what was edited.
+    fields        TEXT[] NOT NULL DEFAULT '{}',
+    -- added / removed: a snapshot of the object. changed: each field that
+    -- differs, as {"from": ..., "to": ...}. Only fields whose values the
+    -- object's own view permission already shows; may be empty.
+    detail        JSONB NOT NULL DEFAULT '{}',
+    -- The node NAME at the time (an OSD's host), copied rather than referenced:
+    -- the classification waits for that node's task list, and the record must
+    -- outlive the node. Empty for an object no node owns.
+    node          TEXT NOT NULL DEFAULT '',
+    observed_by   TEXT NOT NULL CHECK (observed_by IN ('trigger', 'ceph', 'observer')),
+    -- When the object was last seen as it was: the change happened after this
+    -- and by observed_at. Normally one slow pass apart; after Nexara or a node
+    -- was unreachable, the whole gap.
+    last_seen_at  TIMESTAMPTZ NOT NULL,
+    observed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    explained     BOOLEAN
+);
+
+-- One object's History, and a kind's.
+CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_object
+    ON cluster_object_changes (cluster_id, resource_type, resource_id, observed_at);
+
+-- A guest's History, which survives its vms row being re-created.
+CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_guest
+    ON cluster_object_changes (cluster_id, vmid, observed_at)
+    WHERE vmid IS NOT NULL;
+
+-- The classification pass's working set: small, because a row leaves it once
+-- classified.
+CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_unclassified
+    ON cluster_object_changes (cluster_id, observed_at)
+    WHERE explained IS NULL;
+
+-- cluster_object_baselines says that a cluster's objects of one kind have been
+-- read at least once. A trigger records an object appearing only after that:
+-- the first read of a cluster just added lists everything that was always
+-- there, and none of it is a change. (The Ceph pass keeps its baseline in
+-- memory instead, because the previous sample is what it diffs against.)
+CREATE TABLE IF NOT EXISTS cluster_object_baselines (
+    cluster_id    UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
+    resource_type TEXT NOT NULL,
+    baselined_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (cluster_id, resource_type)
+);

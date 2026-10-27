@@ -65,6 +65,11 @@ var auditReadsExemptFromScope = map[string]string{
 	"guest_history.sql.ListGuestLifecycleEvents": "one cluster, a required arg the route's cluster-scoped view:audit Check authorized",
 	"history.sql.ListHistory": "one cluster, a required arg the route's cluster-scoped view:audit gate authorized; " +
 		"a global kind's objects every cluster, behind an all-GLOBAL view:audit gate",
+
+	// The collector's classification of a cluster's observed object changes: it
+	// reads audit_log only to decide whether something on record explains a
+	// change, joined on the change's own cluster, and returns nothing to a caller.
+	"cluster_object_changes.sql.ClassifyClusterObjectChanges": "collector-internal; audit rows of the change's own cluster, a verdict returned to no user",
 }
 
 // readsAuditLogRe identifies a query that reads audit_log, through FROM or a

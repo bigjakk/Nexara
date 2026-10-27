@@ -76,10 +76,15 @@ LIMIT 1;
 -- The same sweep drops the guest status changes a task explained
 -- (ClassifyGuestStatusChanges): nothing reads them once classified — the task
 -- itself is the History entry — and they are as old as the tasks it prunes.
--- The changes no task explained are a guest's own record, and stay.
+-- The changes no task explained are a guest's own record, and stay. So do the
+-- changes to the cluster page's objects (ClassifyClusterObjectChanges), by the
+-- same rule.
 -- name: DeleteCompletedTasks :exec
 WITH explained_changes AS (
     DELETE FROM guest_status_changes
+    WHERE explained AND observed_at < sqlc.arg('cutoff')::timestamptz
+), explained_object_changes AS (
+    DELETE FROM cluster_object_changes
     WHERE explained AND observed_at < sqlc.arg('cutoff')::timestamptz
 ), pruned AS (
     DELETE FROM task_history

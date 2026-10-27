@@ -171,6 +171,10 @@ type SyncQueries interface {
 	// Task reconcile
 	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.TaskHistory, error)
 	ReconcileTaskHistory(ctx context.Context, arg db.ReconcileTaskHistoryParams) (int64, error)
+	// Changes to the cluster page's objects (replication jobs, Ceph OSDs and pools)
+	MarkClusterObjectBaseline(ctx context.Context, arg db.MarkClusterObjectBaselineParams) error
+	InsertClusterObjectChange(ctx context.Context, arg db.InsertClusterObjectChangeParams) error
+	ClassifyClusterObjectChanges(ctx context.Context, arg db.ClassifyClusterObjectChangesParams) (int64, error)
 	// Guest status changes and backup job logs (the History tab)
 	ClassifyGuestStatusChanges(ctx context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error)
 	AbandonUnreadBackupJobs(ctx context.Context, arg db.AbandonUnreadBackupJobsParams) (int64, error)
@@ -315,6 +319,9 @@ type Syncer struct {
 	resourceUnknownSince sync.Map                // cluster ID → map[int32]time.Time: since when each guest is listed "unknown"
 	backupLogJobBudget   time.Duration           // one backup job's log read; zero is backupLogJobBudget, which tests shorten
 	backupLogTimeouts    sync.Map                // backup job UPID → reads of its log that ran out their own time
+	objectBaselines      sync.Map                // "cluster ID/resource type" → true once cluster_object_baselines holds it
+	cephMu               sync.Mutex              // guards cephSeen
+	cephSeen             map[uuid.UUID]*cephSeen // each cluster's last Ceph reading, for the change diff
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
@@ -796,6 +803,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// on nodes that ingest listed (see syncTasks), and those that have waited
 	// too long for theirs. Every pass, even one that listed no node.
 	s.classifyStatusChanges(ctx, cluster, listedNodes, offlineNodes)
+	s.classifyObjectChanges(ctx, cluster, listedNodes)
 
 	// Only notify the frontend when inventory data actually changed
 	// (VM status transitions, VMs added/removed). This avoids triggering
@@ -1313,6 +1321,7 @@ func (s *Syncer) syncCeph(ctx context.Context, client ProxmoxClient, clusterID u
 		s.logger.Warn("failed to get ceph osds", "cluster_id", clusterID, "error", err)
 	} else {
 		result.CephOSDs = flattenOSDs(clusterID, &osdResp.Root)
+		s.observeCephOSDs(ctx, clusterID, result.CephOSDs)
 	}
 
 	// Collect pool metrics.
@@ -1336,6 +1345,7 @@ func (s *Syncer) syncCeph(ctx context.Context, client ProxmoxClient, clusterID u
 				WritBytesSec: p.WritBytesSec,
 			})
 		}
+		s.observeCephPools(ctx, clusterID, result.CephPools)
 	}
 
 	return result
@@ -1598,6 +1608,7 @@ func (s *Syncer) syncReplication(ctx context.Context, client ProxmoxClient, clus
 		s.logger.Debug("failed to get replication jobs", "cluster_id", clusterID, "error", err)
 		return
 	}
+	allWritten := true
 	for _, j := range jobs {
 		if upErr := s.queries.UpsertReplicationJob(ctx, db.UpsertReplicationJobParams{
 			ClusterID: clusterID,
@@ -1607,12 +1618,22 @@ func (s *Syncer) syncReplication(ctx context.Context, client ProxmoxClient, clus
 			Target:    j.Target,
 			FailCount: safeconv.Int32(j.FailCount),
 			Error:     j.Error,
+			Schedule:  j.Schedule,
+			Rate:      j.Rate.String(),
+			Disable:   safeconv.Int32(j.Disable),
+			Comment:   j.Comment,
 		}); upErr != nil {
 			s.logger.Debug("failed to upsert replication job",
 				"cluster_id", clusterID, "job", j.ID, "error", upErr)
+			allWritten = false
 		}
 	}
 	_ = s.queries.DeleteStaleReplicationJobs(ctx, clusterID)
+	// Only a listing that was written whole is the cluster's baseline: a job
+	// that failed to write would otherwise be recorded as new when it lands.
+	if allWritten {
+		s.markObjectBaseline(ctx, clusterID, "replication")
+	}
 }
 
 // SyncAll syncs all active clusters and returns collected metric results.

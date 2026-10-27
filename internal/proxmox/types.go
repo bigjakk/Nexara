@@ -2467,23 +2467,26 @@ type UpdatePoolParams struct {
 
 // ReplicationJob represents a replication job from GET /cluster/replication.
 type ReplicationJob struct {
-	ID        string  `json:"id"`
-	Type      string  `json:"type"`
-	Source    string  `json:"source,omitempty"`
-	Target    string  `json:"target"`
-	Guest     int     `json:"guest"`
-	JobNum    int     `json:"jobnum,omitempty"`
-	Schedule  string  `json:"schedule,omitempty"`
-	Rate      string  `json:"rate,omitempty"`
-	Comment   string  `json:"comment,omitempty"`
-	Disable   int     `json:"disable,omitempty"`
-	RemoveJob string  `json:"remove_job,omitempty"`
-	Error     string  `json:"error,omitempty"`
-	Duration  float64 `json:"duration,omitempty"`
-	FailCount int     `json:"fail_count,omitempty"`
-	LastSync  int64   `json:"last_sync,omitempty"`
-	LastTry   int64   `json:"last_try,omitempty"`
-	NextSync  int64   `json:"next_sync,omitempty"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Source   string `json:"source,omitempty"`
+	Target   string `json:"target"`
+	Guest    int    `json:"guest"`
+	JobNum   int    `json:"jobnum,omitempty"`
+	Schedule string `json:"schedule,omitempty"`
+	// Rate is a number in Proxmox's reply (its section config returns a
+	// number-typed property as a number); a string field refused the whole job
+	// list as soon as one job had a rate limit.
+	Rate      FlexString `json:"rate,omitempty"`
+	Comment   string     `json:"comment,omitempty"`
+	Disable   int        `json:"disable,omitempty"`
+	RemoveJob string     `json:"remove_job,omitempty"`
+	Error     string     `json:"error,omitempty"`
+	Duration  float64    `json:"duration,omitempty"`
+	FailCount int        `json:"fail_count,omitempty"`
+	LastSync  int64      `json:"last_sync,omitempty"`
+	LastTry   int64      `json:"last_try,omitempty"`
+	NextSync  int64      `json:"next_sync,omitempty"`
 }
 
 // CreateReplicationJobParams holds parameters for POST /cluster/replication.
