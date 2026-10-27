@@ -369,8 +369,9 @@ const historyQueryTimeout = 15 * time.Second
 //   - a status change is the inventory's run state, which is view:vm's for a
 //     VM (qemu) and view:container's for a container (lxc).
 //
-// can is hasClusterPerm on the path's cluster. Any lookup that fails fails
-// the request, rather than serving a page that silently left rows out.
+// can is hasClusterPerm on the path's cluster — hasGlobalPerm for a global
+// kind, whose rows span clusters. Any lookup that fails fails the request,
+// rather than serving a page that silently left rows out.
 func historyScope(can func(action, resource string) (bool, error)) (includeTasks bool, statusTypes []string, err error) {
 	if includeTasks, err = can("view", "task"); err != nil {
 		return false, nil, err
