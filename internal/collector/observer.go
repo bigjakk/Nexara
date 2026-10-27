@@ -269,7 +269,7 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 		o.noticeSignature(cluster.ID, observeSignature(clusterSig, p.privFP))
 		p.observeHA(ctx, clusterSig)
 		for _, k := range observeClusterKinds {
-			p.observeClusterKind(ctx, k, p.gated(k.kind, clusterSig))
+			p.observeClusterKind(ctx, k, clusterSig)
 		}
 	} else {
 		o.logger.Debug("object observer: a node's Proxmox version is not known yet; the cluster's objects wait",
@@ -332,14 +332,11 @@ var observeGates = map[string][]string{
 	"container":   {"VM.Config.Options"},
 }
 
-// gated is sig for a kind, with the privileges that gate it.
-func (p *observePass) gated(kind, sig string) string {
-	gates := observeGates[kind]
-	if len(gates) == 0 {
-		return sig
-	}
-	parts := []string{sig}
-	for _, priv := range gates {
+// kindSig is sig for one kind: with how the kind's fields are read
+// (observeKindSchemas), and the privileges that gate it.
+func (p *observePass) kindSig(kind, sig string) string {
+	parts := []string{sig, observeKindSchemas[kind]}
+	for _, priv := range observeGates[kind] {
 		v, ok := p.privs[priv]
 		if !ok {
 			v = "-"
@@ -458,6 +455,7 @@ func (p *observePass) skipKey(kind, node string) string {
 // node's reading (node set) covers that node's stored objects of the kind, a
 // cluster's reading all of them.
 func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig string, readAt, doneAt time.Time) {
+	sig = p.kindSig(rd.kind, sig)
 	prev := map[string]storedObject{}
 	for id, s := range p.state[rd.kind] {
 		if node == "" || s.node == node {
@@ -695,7 +693,7 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 		default:
 			continue
 		}
-		p.applyGuest(batches[kind], kind, guestObject(r.guest, r.node, r.config), p.gated(kind, sig), r.readAt, r.doneAt)
+		p.applyGuest(batches[kind], kind, guestObject(r.guest, r.node, r.config), p.kindSig(kind, sig), r.readAt, r.doneAt)
 		pending[kind]++
 		if pending[kind] >= observeGuestBatch {
 			p.write(ctx, kind, *batches[kind], time.Now(), "")

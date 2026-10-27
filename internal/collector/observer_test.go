@@ -789,6 +789,32 @@ func TestObserveCanonicalForms(t *testing.T) {
 	}
 }
 
+// Every kind's signature carries how its fields are read, so a release that
+// reads one another way re-baselines it once instead of filing every object
+// of the kind as changed.
+func TestObserveKindSchemas(t *testing.T) {
+	t.Parallel()
+	kinds := []string{"ha_resource", "ha_rule", "ha_group", "sdn_subnet", "firewall_ipset_entry",
+		"firewall_security_group_rule", "pve_token", "network", "node_options", "acme_config", "node_dns",
+		"node_time", "node_firewall", "vm", "container"}
+	for _, k := range observeClusterKinds {
+		kinds = append(kinds, k.kind)
+	}
+	for _, k := range kinds {
+		if observeKindSchemas[k] == "" {
+			t.Errorf("%s has no schema", k)
+		}
+	}
+	if newFieldSpec([]string{"a"}, nil).digest() == newFieldSpec([]string{"a", "b"}, nil).digest() ||
+		newFieldSpec(nil, []string{"a"}).digest() == newFieldSpec(nil, nil).withMembers("a").digest() {
+		t.Error("a spec's digest does not follow the spec")
+	}
+	p := &observePass{}
+	if p.kindSig("storage", "s") == p.kindSig("backup", "s") {
+		t.Error("a kind's signature does not carry its schema")
+	}
+}
+
 // A tag depends on the key, the object and the field as well as the value, so
 // it cannot be tested against a guess without the key, nor compared across
 // objects; and it is never the value.

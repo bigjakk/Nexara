@@ -179,11 +179,57 @@ var (
 	accessGroupSpec = newFieldSpec(nil, nil).withMembers("users")
 	// API2/Role.pm index: special is derived (a built-in role).
 	accessRoleSpec  = newFieldSpec([]string{"special"}, []string{"privs"})
-	acmeAccountSpec = newFieldSpec(nil, nil)
+	acmeAccountSpec  = newFieldSpec(nil, nil)
+	metricServerSpec = newFieldSpec(nil, nil)
+	nodeConfigSpec   = newFieldSpec(nil, nil)
 	// pve-manager API2/ACMEPlugin.pm: nodes is a list; data, the plugin's DNS
 	// API credentials, is a value like any other and is never stored.
 	acmePluginSpec = newFieldSpec(nil, []string{"nodes"})
 )
+
+// observeKindSchemas names how each kind's fields are read — its fieldSpec's
+// digest, or how a reader builds the object — for the kind's signature
+// (observePass.kindSig). TestObserveKindSchemas holds every kind to one.
+var observeKindSchemas = map[string]string{
+	"pool":                         "pool: comment; members vms, storage",
+	"storage":                      storageSpec.digest(),
+	"backup":                       backupSpec.digest(),
+	"usb_mapping":                  mappingSpec.digest(),
+	"pci_mapping":                  mappingSpec.digest(),
+	"metric_server":                metricServerSpec.digest(),
+	"cluster_options":              clusterOptionsSpec.digest(),
+	"sdn_zone":                     sdnZoneSpec.digest(),
+	"sdn_vnet":                     sdnSpec.digest(),
+	"sdn_subnet":                   "subnet: members cidr; " + sdnSpec.digest(),
+	"sdn_controller":               sdnSpec.digest(),
+	"sdn_ipam":                     sdnSpec.digest(),
+	"sdn_dns":                      sdnSpec.digest(),
+	"firewall_options":             firewallPlainSpec.digest(),
+	"firewall_rule":                "rules: list; " + firewallRuleSpec.digest(),
+	"firewall_alias":               firewallAliasSpec.digest(),
+	"firewall_ipset":               firewallPlainSpec.digest(),
+	"firewall_ipset_entry":         firewallPlainSpec.digest(),
+	"firewall_security_group":      firewallPlainSpec.digest(),
+	"firewall_security_group_rule": "rules: list; " + firewallRuleSpec.digest(),
+	"pve_user":                     accessUserSpec.digest(),
+	"pve_token":                    accessTokenSpec.digest(),
+	"pve_group":                    accessGroupSpec.digest(),
+	"pve_role":                     accessRoleSpec.digest(),
+	"pve_acl":                      "acl: members users, groups, tokens and their grants by role tag",
+	"acme_account":                 acmeAccountSpec.digest(),
+	"acme_plugin":                  acmePluginSpec.digest(),
+	"ha_resource":                  haResourceSpec.digest(),
+	"ha_rule":                      haRuleSpec.digest(),
+	"ha_group":                     haGroupSpec.digest(),
+	"network":                      networkSpec.digest(),
+	"node_options":                 nodeConfigSpec.digest(),
+	"acme_config":                  "acme: " + nodeConfigSpec.digest(),
+	"node_dns":                     nodeDNSSpec.digest(),
+	"node_time":                    nodeTimeSpec.digest(),
+	"node_firewall":                "rules: list; " + firewallRuleSpec.digest(),
+	"vm":                           qemuConfigSpec.digest(),
+	"container":                    lxcConfigSpec.digest(),
+}
 
 // acmeConfigField is a node config key that belongs to its ACME settings, filed
 // as acme_config / <node>: acme and acmedomain0..N (pve-manager NodeConfig.pm).
@@ -280,7 +326,7 @@ func readMetricServers(ctx context.Context, p *observePass) ([]kindReading, read
 	if out != readOK {
 		return nil, out
 	}
-	spec := newFieldSpec(nil, nil)
+	spec := metricServerSpec
 	reading := kindReading{kind: "metric_server", unread: map[string]bool{}}
 	for _, item := range items {
 		id := stringField(item, "id")
@@ -363,7 +409,7 @@ func readNodeConfig(ctx context.Context, p *observePass, node db.Node) ([]kindRe
 			options[k] = v
 		}
 	}
-	spec := newFieldSpec(nil, nil)
+	spec := nodeConfigSpec
 	return []kindReading{
 		{kind: "node_options", objects: []observedObject{{
 			id: node.Name, resourceType: "node", resourceID: node.Name, node: node.Name,

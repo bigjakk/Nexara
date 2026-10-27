@@ -155,6 +155,17 @@ func newFieldSpec(ignore, sets []string) fieldSpec {
 	return spec
 }
 
+// digest names the spec, for a kind's signature: a release that ignores
+// another field, or compares one another way, re-baselines that kind once
+// rather than reading the new form against the old as an edit.
+func (spec fieldSpec) digest() string {
+	part := func(tag string, set map[string]bool) string {
+		keys := slices.Sorted(maps.Keys(set))
+		return tag + "=" + strings.Join(keys, ",")
+	}
+	return observeSignature(part("ignore", spec.ignore), part("sets", spec.sets), part("members", spec.members))
+}
+
 // withMembers is spec with fields that list other objects — a backup job's
 // guests, an HA rule's resources, a user's groups — kept as the ids
 // (observedObject.members) rather than as one tag, so a change can say which
