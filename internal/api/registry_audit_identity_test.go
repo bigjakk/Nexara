@@ -377,7 +377,7 @@ func TestApplyingATemplateFilesTheClusterRulesToo(t *testing.T) {
 			if status, env := send(t, app, req); status != 200 {
 				t.Fatalf("status = %d (%q), want 200", status, env.Message)
 			}
-			var got [][2]string
+			got := make([][2]string, 0, len(dbtx.audits))
 			for _, args := range dbtx.audits {
 				rt, _ := args[2].(string)
 				rid, _ := args[3].(string)

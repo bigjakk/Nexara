@@ -39,7 +39,7 @@ type taskMapping struct {
 // number, the device a new OSD is made on, and the name of a monitor, manager or
 // metadata server (a node name or a name chosen on create).
 var (
-	cephOSDNumber = regexp.MustCompile(`^[0-9]{1,9}$`)
+	cephOSDNumber = regexp.MustCompile(`^\d{1,9}$`)
 	cephOSDDevice = regexp.MustCompile(`^[A-Za-z0-9/._+@-]{1,128}$`)
 	cephDaemonID  = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$`)
 )

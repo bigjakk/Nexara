@@ -122,21 +122,6 @@ func haSIDKey(ctx context.Context, timeout time.Duration, sid string,
 	return sid, errors.New("the sid Proxmox reported is not this VMID's")
 }
 
-// sidKey is haSIDKey for this cluster, logging the times it had to leave the
-// sid as sent.
-func (h *HAHandler) sidKey(ctx context.Context, clusterID uuid.UUID, sid string, reported func(context.Context) (string, error)) string {
-	key, err := haSIDKey(ctx, haSIDLookupTimeout, sid,
-		func(ctx context.Context, vmid int32) (string, error) {
-			vm, err := h.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{ClusterID: clusterID, Vmid: vmid})
-			return vm.Type, err
-		}, reported)
-	if err != nil {
-		slog.Warn("HA resource audit: could not tell whether a bare VMID is a VM or a container; filing it as sent",
-			"cluster_id", clusterID, "sid", sid, "error", err)
-	}
-	return key
-}
-
 // haReportedSID is the sid Proxmox gives the HA resource asked for as sid.
 func haReportedSID(pxClient *proxmox.Client, sid string) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
@@ -201,6 +186,21 @@ func NewHAHandler(queries *db.Queries, encryptionKey string, eventPub *events.Pu
 
 func (h *HAHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
+}
+
+// sidKey is haSIDKey for this cluster, logging the times it had to leave the
+// sid as sent.
+func (h *HAHandler) sidKey(ctx context.Context, clusterID uuid.UUID, sid string, reported func(context.Context) (string, error)) string {
+	key, err := haSIDKey(ctx, haSIDLookupTimeout, sid,
+		func(ctx context.Context, vmid int32) (string, error) {
+			vm, err := h.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{ClusterID: clusterID, Vmid: vmid})
+			return vm.Type, err
+		}, reported)
+	if err != nil {
+		slog.Warn("HA resource audit: could not tell whether a bare VMID is a VM or a container; filing it as sent",
+			"cluster_id", clusterID, "sid", sid, "error", err)
+	}
+	return key
 }
 
 // requireArmDisarmSupport rejects Arm/Disarm HA on clusters older than PVE 9.2.
