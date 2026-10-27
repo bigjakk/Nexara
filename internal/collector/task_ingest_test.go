@@ -183,13 +183,10 @@ func TestIngestTask_External(t *testing.T) {
 }
 
 // TestIngestTask_FilesObjectTasksUnderTheirIdentity pins the (type, id, action)
-// an external task is filed under and the description the Tasks page shows. For
-// an object of the cluster page the identity is the one the handlers record
-// when Nexara dispatches the same work, so one History holds both: a Ceph daemon
-// keyed by its number or name rather than "osd.12", a certificate by node, an
-// SDN apply by the cluster. An id that is not one Proxmox could have minted for
-// the kind is not remapped: the task is filed as the generic one it would be had
-// nothing mapped it.
+// an external task is filed under and its Tasks page description: for an object
+// of the cluster page, the identity the handlers record for the same work. An id
+// Proxmox could not have minted for the kind is not remapped: the task is filed
+// as the generic one it would be had nothing mapped it.
 func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 	t.Parallel()
 	cluster := db.Cluster{ID: uuid.New()}

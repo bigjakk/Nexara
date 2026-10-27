@@ -78,11 +78,9 @@ func (d *auditDB) rowsOf(resourceType string) []auditRow {
 }
 
 // TestRollingUpdateFilesTheObjectsItChanges: the update disables HA rules and
-// pauses the CRS option, and restores both. Each change is filed under the
-// object's own key — ha_rule/<name>, cluster_options/<cluster> — beside the
-// job's rolling_update row, in the shape the HTTP handlers file the same change
-// in, so the rule's and the options' History say who changed them and for which
-// job. A change Proxmox refused is not filed.
+// pauses the CRS option, and restores both. Each is filed under the object's own
+// key (ha_rule/<name>, cluster_options/<cluster>) beside the job's rolling_update
+// row, as the handlers file the same change; a change Proxmox refused is not.
 func TestRollingUpdateFilesTheObjectsItChanges(t *testing.T) {
 	t.Parallel()
 	clusterID, jobID := uuid.New(), uuid.New()

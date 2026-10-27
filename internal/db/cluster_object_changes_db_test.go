@@ -23,12 +23,10 @@ var (
 )
 
 // TestClusterObjectChanges runs the SQL behind the History of the cluster page's
-// objects (migrations/000124 and 000125, queries/cluster_object_changes.sql)
-// against Postgres: what the replication triggers record and what they must not,
-// when a change counts as explained, and what the prune and the read keep.
-//
-// Not parallel: it writes rows the package's other DB tests share a schema with.
-// Skipped unless NEXARA_TEST_DB_URL names a throwaway database.
+// objects (migrations 000124 and 000125, queries/cluster_object_changes.sql): what
+// the replication triggers record and must not, when a change counts as explained,
+// and what the prune and the read keep. Not parallel: it shares a schema with the
+// package's other DB tests. Skipped unless NEXARA_TEST_DB_URL names a throwaway DB.
 func TestClusterObjectChanges(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
