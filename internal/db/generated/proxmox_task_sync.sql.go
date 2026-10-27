@@ -36,22 +36,24 @@ WITH applies AS (
       AND a.action = 'sdn_applied'
       AND a.details->>'upid' IS NOT NULL
       AND a.created_at > $2::timestamptz - interval '15 minutes'
+      AND (th.finished_at IS NOT NULL OR a.created_at < now() - interval '15 minutes')
+), parents AS (
+    SELECT DISTINCT ON (c.id) c.id, p.upid
+    FROM audit_log c
+    JOIN applies p ON c.created_at >= p.started_at AND c.created_at <= p.ended_at + interval '10 seconds'
+    WHERE c.cluster_id = $1::uuid
+      AND c.resource_type = 'network'
+      AND c.action = 'network_applied'
+      AND c.source = 'proxmox'
+      AND NOT (c.details ? 'parent_upid')
+      AND split_part(c.details->>'upid', ':', 8) = 'root@pam'
+      AND c.created_at > $2::timestamptz
+    ORDER BY c.id, p.started_at DESC
 )
 UPDATE audit_log c
-SET action = 'network_reloaded_by_sdn',
-    details = c.details || jsonb_build_object('parent_upid', (
-        SELECT p.upid FROM applies p
-        WHERE c.created_at BETWEEN p.started_at - interval '10 seconds' AND p.ended_at + interval '10 seconds'
-        ORDER BY p.started_at DESC
-        LIMIT 1))
-WHERE c.cluster_id = $1::uuid
-  AND c.resource_type = 'network'
-  AND c.action = 'network_applied'
-  AND c.source = 'proxmox'
-  AND c.created_at > $2::timestamptz
-  AND EXISTS (
-      SELECT 1 FROM applies p
-      WHERE c.created_at BETWEEN p.started_at - interval '10 seconds' AND p.ended_at + interval '10 seconds')
+SET details = c.details || jsonb_build_object('parent_upid', m.upid)
+FROM parents m
+WHERE c.id = m.id
 `
 
 type LinkSDNApplyNodeTasksParams struct {
@@ -60,15 +62,31 @@ type LinkSDNApplyNodeTasksParams struct {
 }
 
 // An SDN apply (reloadnetworkall) reloads every node's network as a task of its
-// own, as root@pam (srvreload, service "networking"). The collector ingests each
-// as a node network apply made in Proxmox; they are parts of the apply, not
-// applies. This marks them: the action says so and details.parent_upid names the
-// apply that was running on the cluster at that moment — an audit row of the
-// apply (Nexara's, or one ingested) that carries its UPID, from its start to its
-// end in task_history (15 minutes when that is not known), with 10 seconds of
-// slack either way. Only the Proxmox-sourced rows are touched, and only once:
-// the action it matches is the one it replaces. Called after every ingest pass,
-// so a node listed before the node that ran the apply is linked on a later one.
+// own (srvreload, service "networking"), which the collector ingests as a node
+// network apply made in Proxmox. They are parts of the apply, not applies. This
+// annotates them — details.parent_upid names the apply — and leaves the row's key
+// and action alone; the History renders "part of the SDN apply" from the
+// annotation.
+//
+// Which reloads. pve-network's apply worker (API2/Network/SDN.pm) walks the node
+// list in order and, for each node, runs `pvesh set /nodes/<node>/network` and
+// waits for it: the reloads start one after another from the moment the apply
+// starts and all before it ends, and pvesh runs as root@pam whoever started the
+// apply. So a reload is linked only if the user in its UPID is root@pam and it
+// started within the apply's run — from its start (the apply starts them, a
+// reload cannot come first) to its end, with 10 seconds' slack for the nodes'
+// clocks. A reload by a person, or by a token, in the same minute is a network
+// apply of its own and stays one.
+//
+// When. Only once the apply's end is known (its task row is finished) or a
+// quarter of an hour has passed since it started, when the end is taken to be
+// then: the first ingest pass runs before the reconciler has finished the task,
+// and an apply still running would otherwise take reloads that are not its.
+//
+// Only the Proxmox-sourced rows, and only once: a linked row carries the
+// annotation, and a later pass is called with the same rows. Called after every
+// ingest pass, so a node listed before the node that ran the apply is linked on a
+// later one.
 func (q *Queries) LinkSDNApplyNodeTasks(ctx context.Context, arg LinkSDNApplyNodeTasksParams) (int64, error) {
 	result, err := q.db.Exec(ctx, linkSDNApplyNodeTasks, arg.ClusterID, arg.Since)
 	if err != nil {
