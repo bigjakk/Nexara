@@ -171,6 +171,10 @@ func (h *ReplicationHandler) TriggerSync(c fiber.Ctx, p *apischema.Params) error
 	if err != nil {
 		return mapProxmoxError(err)
 	}
+	// schedule_now only moves the job's next run up (pve-guest-common,
+	// ReplicationState::schedule_job_now) and spawns no task: pvesr runs the job
+	// from its timer and logs to the job's own log. So upid is normally empty,
+	// and TrackTask then records the trigger as the audit row it is.
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
 		Node:         node,

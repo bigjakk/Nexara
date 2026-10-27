@@ -302,12 +302,23 @@ func (h *NetworkHandler) ApplyNetworkConfig(c fiber.Ctx, p *apischema.Params) er
 		return err
 	}
 
-	if err := pxClient.ApplyNetworkConfig(c.Context(), nodeName); err != nil {
+	// The reload runs as a Proxmox task (srvreload, service "networking") whose
+	// UPID comes back; tracked, so the collector does not ingest it again as one
+	// Nexara never dispatched.
+	upid, err := pxClient.ApplyNetworkConfig(c.Context(), nodeName)
+	if err != nil {
 		return mapNamedOpError("apply network configuration", err)
 	}
 
-	details, _ := json.Marshal(map[string]string{"node": nodeName})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", nodeName, "network_applied", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "network",
+		ResourceID:   nodeName,
+		Action:       "network_applied",
+		UPID:         upid,
+		Description:  "Apply network configuration on " + nodeName,
+	})
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

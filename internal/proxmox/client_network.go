@@ -123,11 +123,15 @@ func (c *Client) DeleteSDNSubnet(ctx context.Context, vnet string, subnet string
 	}
 	return nil
 }
-func (c *Client) ApplySDN(ctx context.Context) error {
-	if err := c.doPut(ctx, "/cluster/sdn", nil, nil); err != nil {
-		return fmt.Errorf("apply SDN config: %w", err)
+
+// ApplySDN applies the pending SDN configuration. Proxmox does it in a
+// reloadnetworkall task and returns its UPID.
+func (c *Client) ApplySDN(ctx context.Context) (string, error) {
+	var upid string
+	if err := c.doPut(ctx, "/cluster/sdn", nil, &upid); err != nil {
+		return "", fmt.Errorf("apply SDN config: %w", err)
 	}
-	return nil
+	return upid, nil
 }
 func (c *Client) GetSDNControllers(ctx context.Context) ([]SDNController, error) {
 	var controllers []SDNController
@@ -440,15 +444,19 @@ func (c *Client) DeleteNetworkInterface(ctx context.Context, node string, iface 
 	}
 	return nil
 }
-func (c *Client) ApplyNetworkConfig(ctx context.Context, node string) error {
+
+// ApplyNetworkConfig reloads a node's pending network configuration. Proxmox
+// does it in a srvreload task (service "networking") and returns its UPID.
+func (c *Client) ApplyNetworkConfig(ctx context.Context, node string) (string, error) {
 	if err := validateNodeName(node); err != nil {
-		return err
+		return "", err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/network"
-	if err := c.doPut(ctx, path, nil, nil); err != nil {
-		return fmt.Errorf("apply network config on %s: %w", node, err)
+	var upid string
+	if err := c.doPut(ctx, path, nil, &upid); err != nil {
+		return "", fmt.Errorf("apply network config on %s: %w", node, err)
 	}
-	return nil
+	return upid, nil
 }
 func (c *Client) RevertNetworkConfig(ctx context.Context, node string) error {
 	if err := validateNodeName(node); err != nil {

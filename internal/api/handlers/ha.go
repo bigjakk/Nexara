@@ -78,6 +78,26 @@ func resolveResourceNames(ctx context.Context, queries *db.Queries, clusterID uu
 	return out
 }
 
+// haSIDKey is the sid an HA resource is known by, for the audit row.
+//
+// The API takes a bare VMID as a shortcut ("109"): Proxmox resolves it to vm:109
+// or ct:109 by the guest's type (PVE::HA::Config::parse_sid), and the listing, the
+// other routes and the guest's History all know the resource by that spelling.
+// Audited as sent, a create and a later update of one resource would file under
+// two keys. Only a bare VMID costs a read: a sid with a type is already the
+// canonical one. A read that fails leaves the sid as sent, since the row is still
+// owed and the caller's own spelling is all that is known.
+func haSIDKey(ctx context.Context, pxClient *proxmox.Client, sid string) string {
+	if strings.Contains(sid, ":") {
+		return sid
+	}
+	res, err := pxClient.GetHAResource(ctx, sid)
+	if err != nil || res.SID == "" {
+		return sid
+	}
+	return res.SID
+}
+
 // findHARule looks up the rule matching name in the cluster's rule list. Used
 // by the delete handler to snapshot a rule before removing it.
 //
@@ -250,6 +270,7 @@ func (h *HAHandler) CreateResource(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.CreateHAResource(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
+	sid = haSIDKey(c.Context(), pxClient, sid)
 	detailMap := map[string]any{"sid": sid}
 	if name := resolveSIDName(c.Context(), h.queries, clusterID, sid); name != "" {
 		detailMap["name"] = name
@@ -326,6 +347,7 @@ func (h *HAHandler) UpdateResource(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateHAResource(c.Context(), sid, req); err != nil {
 		return mapProxmoxError(err)
 	}
+	sid = haSIDKey(c.Context(), pxClient, sid)
 	detailMap := map[string]any{"sid": sid}
 	if name := resolveSIDName(c.Context(), h.queries, clusterID, sid); name != "" {
 		detailMap["name"] = name
@@ -370,6 +392,11 @@ func (h *HAHandler) DeleteResource(c fiber.Ctx, p *apischema.Params) error {
 	snapshot, snapErr := pxClient.GetHAResource(c.Context(), sid)
 	if err := pxClient.DeleteHAResource(c.Context(), sid); err != nil {
 		return mapProxmoxError(err)
+	}
+	// The snapshot is the only chance to learn which resource a bare VMID was
+	// (see haSIDKey): once deleted there is nothing left to ask.
+	if snapshot != nil && snapshot.SID != "" {
+		sid = snapshot.SID
 	}
 	detailMap := map[string]any{"sid": sid}
 	if name := resolveSIDName(c.Context(), h.queries, clusterID, sid); name != "" {

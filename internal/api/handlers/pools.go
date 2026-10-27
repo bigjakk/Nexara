@@ -20,6 +20,10 @@ import (
 // What stays here is the audit row and the cluster event each write emits, and
 // the mapping of Proxmox's own refusals onto a status code.
 
+// poolAuditTextMax bounds each free-text or list value a pool update records:
+// the schema allows far more, and an audit row is never trimmed.
+const poolAuditTextMax = 1024
+
 // PoolHandler handles resource pool endpoints.
 type PoolHandler struct {
 	queries       *db.Queries
@@ -104,7 +108,23 @@ func (h *PoolHandler) UpdatePool(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateResourcePool(c.Context(), poolID, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"poolid": poolID})
+	// What the update touched, as sent: the guests and storages named, and the
+	// delete flag that turns them from additions into removals. A pool's History
+	// is mostly its membership, and a bare "updated" says none of it.
+	detailMap := map[string]string{"poolid": poolID}
+	if req.VMs != "" {
+		detailMap["vms"] = auditTruncate(req.VMs, poolAuditTextMax)
+	}
+	if req.Storage != "" {
+		detailMap["storage"] = auditTruncate(req.Storage, poolAuditTextMax)
+	}
+	if req.Delete != "" {
+		detailMap["delete"] = req.Delete
+	}
+	if req.Comment != nil {
+		detailMap["comment"] = auditTruncate(*req.Comment, poolAuditTextMax)
+	}
+	details, _ := json.Marshal(detailMap)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pool", poolID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindPoolChange, "pool", poolID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})

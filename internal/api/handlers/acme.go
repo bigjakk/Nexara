@@ -229,11 +229,23 @@ func (h *ACMEHandler) UpdateAccount(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	if err := pxClient.UpdateACMEAccount(c.Context(), name, req); err != nil {
+	// A task in Proxmox (acmeupdate, or acmerefresh when no contact is sent), so
+	// tracked: its UPID names no account, which left to the collector would file
+	// the same work again as one Nexara never dispatched.
+	upid, err := pxClient.UpdateACMEAccount(c.Context(), name, req)
+	if err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"name": name})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_account", name, "updated", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         extractNodeFromUPID(upid),
+		ResourceType: "acme_account",
+		ResourceID:   name,
+		Action:       "updated",
+		UPID:         upid,
+		Description:  "Update ACME account " + name,
+		Extra:        map[string]any{"name": name},
+	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_account", name, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -249,11 +261,20 @@ func (h *ACMEHandler) DeleteAccount(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	if err := pxClient.DeleteACMEAccount(c.Context(), name); err != nil {
+	upid, err := pxClient.DeleteACMEAccount(c.Context(), name)
+	if err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"name": name})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_account", name, "deleted", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         extractNodeFromUPID(upid),
+		ResourceType: "acme_account",
+		ResourceID:   name,
+		Action:       "deleted",
+		UPID:         upid,
+		Description:  "Deactivate ACME account " + name,
+		Extra:        map[string]any{"name": name},
+	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_account", name, "deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }

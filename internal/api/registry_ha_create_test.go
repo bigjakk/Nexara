@@ -47,10 +47,12 @@ type haCreatePVERequest struct {
 }
 
 // haCreatePVE stands in for the cluster's Proxmox API: it records every
-// request and answers each with an empty success envelope.
+// request and answers each with an empty success envelope — or, for a request
+// named in replies ("METHOD /api2/json/path"), with that JSON as its data.
 type haCreatePVE struct {
-	mu   sync.Mutex
-	seen []haCreatePVERequest
+	mu      sync.Mutex
+	seen    []haCreatePVERequest
+	replies map[string]string
 }
 
 func (p *haCreatePVE) serve(t *testing.T) string {
@@ -63,7 +65,11 @@ func (p *haCreatePVE) serve(t *testing.T) string {
 		p.seen = append(p.seen, haCreatePVERequest{method: r.Method, path: r.URL.Path, form: r.PostForm})
 		p.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":null}`))
+		data, ok := p.replies[r.Method+" "+r.URL.Path]
+		if !ok {
+			data = "null"
+		}
+		_, _ = w.Write([]byte(`{"data":` + data + `}`))
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL
@@ -114,6 +120,7 @@ func (haCreateCacheQueries) ListNodeEndpoints(context.Context, uuid.UUID) ([]db.
 type haCreateDBTX struct {
 	mu     sync.Mutex
 	audits [][]any
+	rows   []string // the SQL of every QueryRow, answered with no row
 }
 
 func (d *haCreateDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -130,7 +137,10 @@ func (*haCreateDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, errHACreateUnexpectedQuery
 }
 
-func (*haCreateDBTX) QueryRow(context.Context, string, ...any) pgx.Row {
+func (d *haCreateDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	d.mu.Lock()
+	d.rows = append(d.rows, sql)
+	d.mu.Unlock()
 	return haCreateNoRow{}
 }
 
@@ -183,6 +193,17 @@ func (d *haCreateDBTX) onlyAudit(t *testing.T) map[string]any {
 func newHACreateApp(t *testing.T) (*fiber.App, *haCreatePVE, *haCreateDBTX) {
 	t.Helper()
 	pve := &haCreatePVE{}
+	dbtx := &haCreateDBTX{}
+	e := declaredEndpoint(t, fiber.MethodPost, haScope+"/resources")
+	e.Handler = handlers.NewHAHandler(db.New(dbtx), haCreateEncKey, nil).CreateResource
+	return newHAStandInApp(t, e, pve, dbtx, map[string]bool{"manage:ha": true}), pve, dbtx
+}
+
+// newHAStandInApp mounts one real declaration, with its real permission, on a
+// fresh app wired to the two stand-ins — the real handler in e.Handler built on
+// db.New(dbtx), Proxmox answering as pve says — for a caller holding grants.
+func newHAStandInApp(t *testing.T, e Endpoint, pve *haCreatePVE, dbtx *haCreateDBTX, grants map[string]bool) *fiber.App {
+	t.Helper()
 	baseURL := pve.serve(t)
 
 	encrypted, err := crypto.Encrypt("token-secret-value", haCreateEncKey)
@@ -198,19 +219,15 @@ func newHACreateApp(t *testing.T) (*fiber.App, *haCreatePVE, *haCreateDBTX) {
 		IsActive:             true,
 	}}, haCreateEncKey, nil, nil)
 
-	dbtx := &haCreateDBTX{}
-	e := declaredEndpoint(t, fiber.MethodPost, haScope+"/resources")
-	e.Handler = handlers.NewHAHandler(db.New(dbtx), haCreateEncKey, nil).CreateResource
-
 	// stubAuth sets the user AuditLog needs — without one it writes nothing —
-	// and grants the declared manage:ha. The cache is what CreateProxmoxClient
+	// and grants what the route declares. The cache is what CreateProxmoxClient
 	// reads the cluster through, so no database is needed for the client.
-	authed := stubAuth(map[string]bool{"manage:ha": true})
+	authed := stubAuth(grants)
 	auth := func(c fiber.Ctx) error {
 		handlers.SetProxmoxCacheLocal(c, cache)
 		return authed(c)
 	}
-	return newRegistryApp(t, auth, e), pve, dbtx
+	return newRegistryApp(t, auth, e)
 }
 
 // TestHACreateResourceKeepsAnExplicitZeroRetryCount follows max_restart and

@@ -417,6 +417,15 @@ func (h *DRSHandler) DeleteRule(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// Read before the delete, for the audit row: a rule is known by an id
+	// nobody can read, so a row that says only "deleted" says nothing about
+	// which rule it was. A snapshot that cannot be read leaves the row bare —
+	// the delete is still owed its record.
+	snapshot, snapErr := h.queries.GetDRSRule(c.Context(), db.GetDRSRuleParams{
+		ID:        ruleID,
+		ClusterID: clusterID,
+	})
+
 	deleted, err := h.queries.DeleteDRSRule(c.Context(), db.DeleteDRSRuleParams{
 		ID:        ruleID,
 		ClusterID: clusterID,
@@ -428,7 +437,16 @@ func (h *DRSHandler) DeleteRule(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusNotFound, "DRS rule not found")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs_rule", ruleID.String(), "rule_deleted", nil)
+	var details json.RawMessage
+	if snapErr == nil {
+		details, _ = json.Marshal(map[string]any{
+			"rule_type":  snapshot.RuleType,
+			"vm_ids":     snapshot.VmIds,
+			"node_names": snapshot.NodeNames,
+			"enabled":    snapshot.Enabled,
+		})
+	}
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs_rule", ruleID.String(), "rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

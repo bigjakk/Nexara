@@ -1,0 +1,257 @@
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"reflect"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/api/handlers"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+)
+
+// Each case is a way one object of the cluster page once filed under two keys,
+// or a task Proxmox ran that no row tied to the request. The requests go through
+// the real declarations and handlers, with the HA create harness's stand-ins for
+// Proxmox and the database, and read the row each one leaves.
+func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
+	// A UPID as Proxmox answers a task-starting request: the JSON string.
+	taskUPID := func(taskType, id string) string {
+		return "UPID:pve-01:00001A2B:00C0FFEE:6540A1B2:" + taskType + ":" + id + ":root@pam:"
+	}
+	reply := func(taskType, id string) string { return strconv.Quote(taskUPID(taskType, id)) }
+
+	ha := func(q *db.Queries) *handlers.HAHandler { return handlers.NewHAHandler(q, haCreateEncKey, nil) }
+	net := func(q *db.Queries) *handlers.NetworkHandler {
+		return handlers.NewNetworkHandler(q, haCreateEncKey, nil)
+	}
+
+	for _, tc := range []struct {
+		name         string
+		method, path string // the declared route
+		target, body string // the request
+		bind         func(*db.Queries) Handler
+		replies      map[string]string
+		wantType     string
+		wantID       string
+		wantAction   string
+		wantDetails  map[string]any // each must equal the row's detail of that name
+		wantAbsent   []string       // details the row must not carry
+		forbidden    string         // text that must appear nowhere in the details
+		wantTask     bool           // a task_history row was written for it
+	}{
+		{
+			// Proxmox resolves a bare VMID to vm: or ct: by the guest's type, and
+			// every other route and the guest's History know the resource by that.
+			name: "HA create with a bare VMID files under the sid Proxmox gave it", method: fiber.MethodPost, path: haScope + "/resources",
+			target: "/ha/resources", body: `{"sid":"109"}`,
+			bind:     func(q *db.Queries) Handler { return ha(q).CreateResource },
+			replies:  map[string]string{"GET /api2/json/cluster/ha/resources/109": `{"sid":"ct:109","type":"ct"}`},
+			wantType: "ha_resource", wantID: "ct:109", wantAction: "created", wantDetails: map[string]any{"sid": "ct:109"},
+		},
+		{
+			name: "HA update with a bare VMID", method: fiber.MethodPut, path: haScope + "/resources/:sid",
+			target: "/ha/resources/109", body: `{"state":"started"}`,
+			bind:     func(q *db.Queries) Handler { return ha(q).UpdateResource },
+			replies:  map[string]string{"GET /api2/json/cluster/ha/resources/109": `{"sid":"vm:109","type":"vm"}`},
+			wantType: "ha_resource", wantID: "vm:109", wantAction: "updated",
+		},
+		{
+			name: "HA delete with a bare VMID takes the sid from the snapshot", method: fiber.MethodDelete, path: haScope + "/resources/:sid",
+			target:   "/ha/resources/109",
+			bind:     func(q *db.Queries) Handler { return ha(q).DeleteResource },
+			replies:  map[string]string{"GET /api2/json/cluster/ha/resources/109": `{"sid":"vm:109","type":"vm"}`},
+			wantType: "ha_resource", wantID: "vm:109", wantAction: "deleted",
+		},
+		{
+			// A zone and a VNet are separate namespaces in Proxmox, so one id can
+			// be both: the kind is the type, not a word in the action.
+			name: "an SDN zone files under its own kind", method: fiber.MethodPost, path: sdnScope + "/zones",
+			target: "/sdn/zones", body: `{"zone":"dmz01","type":"simple"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).CreateSDNZone },
+			wantType: "sdn_zone", wantID: "dmz01", wantAction: "sdn_zone_created",
+		},
+		{
+			name: "and an SDN VNet of the same id under its own", method: fiber.MethodPost, path: sdnScope + "/vnets",
+			target: "/sdn/vnets", body: `{"vnet":"dmz01","zone":"dmz01"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).CreateSDNVNet },
+			wantType: "sdn_vnet", wantID: "dmz01", wantAction: "sdn_vnet_created",
+		},
+		{
+			// Update and delete address a subnet by the id Proxmox derived from the
+			// CIDR; the create takes the CIDR and has to be filed under that id.
+			name: "an SDN subnet create files under the subnet's id, not its CIDR", method: fiber.MethodPost, path: sdnScope + "/vnets/:vnet/subnets",
+			target: "/sdn/vnets/vnet01/subnets", body: `{"subnet":"192.0.2.0/24"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).CreateSDNSubnet },
+			replies:  map[string]string{"GET /api2/json/cluster/sdn/vnets/vnet01/subnets": `[{"subnet":"zone01-192.0.2.0-24"}]`},
+			wantType: "sdn_subnet", wantID: "vnet01/zone01-192.0.2.0-24", wantAction: "sdn_subnet_created",
+		},
+		{
+			// The apply is a task (reloadnetworkall). Untracked, the collector
+			// would ingest it again as one Nexara never dispatched.
+			name: "an SDN apply is a tracked task", method: fiber.MethodPut, path: sdnScope + "/apply",
+			target:   "/sdn/apply",
+			bind:     func(q *db.Queries) Handler { return net(q).ApplySDN },
+			replies:  map[string]string{"PUT /api2/json/cluster/sdn": reply("reloadnetworkall", "")},
+			wantType: "sdn", wantID: "cluster", wantAction: "sdn_applied",
+			wantDetails: map[string]any{"upid": taskUPID("reloadnetworkall", "")},
+			wantTask:    true,
+		},
+		{
+			name: "a node network apply is a tracked task", method: fiber.MethodPost, path: networkScope + "/:node_name/apply",
+			target:   "/networks/pve-01/apply",
+			bind:     func(q *db.Queries) Handler { return net(q).ApplyNetworkConfig },
+			replies:  map[string]string{"PUT /api2/json/nodes/pve-01/network": reply("srvreload", "networking")},
+			wantType: "network", wantID: "pve-01", wantAction: "network_applied",
+			wantDetails: map[string]any{"upid": taskUPID("srvreload", "networking")},
+			wantTask:    true,
+		},
+		{
+			// Alias names are folded to lower case by Proxmox on every route.
+			name: "a firewall alias files under its lower-case name", method: fiber.MethodPost, path: firewallScope + "/aliases",
+			target: "/firewall/aliases", body: `{"name":"MyNet","cidr":"192.0.2.0/24"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).CreateFirewallAlias },
+			wantType: "firewall_alias", wantID: "mynet", wantAction: "created",
+		},
+		{
+			name: "and a rename says where it went", method: fiber.MethodPut, path: firewallScope + "/aliases/:name",
+			target: "/firewall/aliases/MyNet", body: `{"rename":"Other"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateFirewallAlias },
+			wantType: "firewall_alias", wantID: "mynet", wantAction: "updated", wantDetails: map[string]any{"rename": "other"},
+		},
+		{
+			// A rule's position moves with every insert above it, so the row files
+			// under the rule set it belongs to and the position is a detail.
+			name: "a firewall rule files under its scope, not its position", method: fiber.MethodPut, path: firewallScope + "/rules/:pos",
+			target: "/firewall/rules/3", body: `{"type":"in","action":"ACCEPT"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateClusterFirewallRule },
+			wantType: "firewall_rule", wantID: "cluster", wantAction: "firewall_rule_updated", wantDetails: map[string]any{"position": json.Number("3")},
+		},
+		{
+			// Proxmox collapses repeated slashes and drops a trailing one.
+			name: "an ACL files under the path Proxmox normalised it to", method: fiber.MethodPut, path: accessScope + "/acl",
+			target: "/access/acl", body: `{"path":"/vms//100/","roles":"PVEVMUser","users":"alice@pve"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewAccessHandler(q, haCreateEncKey, nil).UpdateACL
+			},
+			wantType: "pve_acl", wantID: "/vms/100", wantAction: "granted",
+		},
+		{
+			// An account update or deactivation is a task too (acmeupdate,
+			// acmerefresh, acmedeactivate) whose UPID names no account.
+			name: "an ACME account update is a tracked task", method: fiber.MethodPut, path: acmeScope + "/accounts/:name",
+			target: "/acme/accounts/default", body: `{"contact":"admin@example.com"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewACMEHandler(q, haCreateEncKey, nil).UpdateAccount
+			},
+			replies:  map[string]string{"PUT /api2/json/cluster/acme/account/default": reply("acmeupdate", "")},
+			wantType: "acme_account", wantID: "default", wantAction: "updated",
+			wantDetails: map[string]any{"upid": taskUPID("acmeupdate", "")},
+			wantTask:    true,
+		},
+		{
+			name: "and so is its deactivation", method: fiber.MethodDelete, path: acmeScope + "/accounts/:name",
+			target: "/acme/accounts/default",
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewACMEHandler(q, haCreateEncKey, nil).DeleteAccount
+			},
+			replies:  map[string]string{"DELETE /api2/json/cluster/acme/account/default": reply("acmedeactivate", "")},
+			wantType: "acme_account", wantID: "default", wantAction: "deleted",
+			wantDetails: map[string]any{"upid": taskUPID("acmedeactivate", "")},
+			wantTask:    true,
+		},
+		{
+			name: "a pool update names the members it touched", method: fiber.MethodPut, path: clusterScope + "/pools/:pool_id",
+			target: "/pools/pool01", body: `{"vms":"100,101","delete":"1"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewPoolHandler(q, haCreateEncKey, nil).UpdatePool
+			},
+			wantType: "pool", wantID: "pool01", wantAction: "updated",
+			wantDetails: map[string]any{"vms": "100,101", "delete": "1"},
+		},
+		{
+			// Names only: http_proxy can carry credentials and view:audit is a
+			// default Viewer grant.
+			name: "a cluster options write names the options, never their values", method: fiber.MethodPut, path: clusterScope + "/options",
+			target: "/options", body: `{"http_proxy":"http://user:secret@proxy.example.com:3128","delete":"bwlimit"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewClusterOptionsHandler(q, haCreateEncKey, nil).UpdateOptions
+			},
+			wantType: "cluster_options", wantID: testClusterID, wantAction: "updated",
+			wantDetails: map[string]any{"settings": []any{"http_proxy"}, "cleared": []any{"bwlimit"}},
+			forbidden:   "secret",
+		},
+		{
+			// schedule_now spawns no task and answers with nothing; tracking that
+			// would leave a task row with no UPID "running" for a day.
+			name: "a replication trigger Proxmox answers with no task is an audit row only", method: fiber.MethodPost, path: replicationScope + "/:job_id/trigger",
+			target: "/replication/100-0/trigger?node=pve-01",
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewReplicationHandler(q, haCreateEncKey, nil).TriggerSync
+			},
+			wantType: "replication", wantID: "100-0", wantAction: "triggered",
+			wantAbsent: []string{"upid"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := declaredEndpoint(t, tc.method, tc.path)
+			dbtx := &haCreateDBTX{}
+			e.Handler = tc.bind(db.New(dbtx))
+			pve := &haCreatePVE{replies: tc.replies}
+			app := newHAStandInApp(t, e, pve, dbtx, map[string]bool{
+				e.Permissions.Check.Action + ":" + e.Permissions.Check.Resource: true,
+			})
+
+			target := strings.Replace(clusterScope, ":cluster_id", testClusterID, 1) + tc.target
+			req := jsonRequest(tc.method, target, tc.body)
+			req.Header.Set("X-Test-User", "yes")
+			if status, env := send(t, app, req); status < 200 || status > 299 {
+				t.Fatalf("status = %d (%q), want 2xx", status, env.Message)
+			}
+
+			if len(dbtx.audits) != 1 {
+				t.Fatalf("the request wrote %d audit rows, want exactly 1", len(dbtx.audits))
+			}
+			args := dbtx.audits[0] // InsertAuditLog: cluster, user, type, id, action, details
+			gotType, _ := args[2].(string)
+			gotID, _ := args[3].(string)
+			gotAction, _ := args[4].(string)
+			if gotType != tc.wantType || gotID != tc.wantID || gotAction != tc.wantAction {
+				t.Errorf("the row is (%q, %q, %q), want (%q, %q, %q)",
+					gotType, gotID, gotAction, tc.wantType, tc.wantID, tc.wantAction)
+			}
+			raw, _ := args[5].(json.RawMessage)
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.UseNumber()
+			var details map[string]any
+			if err := dec.Decode(&details); err != nil {
+				t.Fatalf("the details are not a JSON object (%s): %v", raw, err)
+			}
+			for key, want := range tc.wantDetails {
+				if !reflect.DeepEqual(details[key], want) {
+					t.Errorf("detail %s = %v, want %v", key, details[key], want)
+				}
+			}
+			tasked := false
+			for _, sql := range dbtx.rows {
+				tasked = tasked || strings.Contains(sql, "INSERT INTO task_history")
+			}
+			if tasked != tc.wantTask {
+				t.Errorf("a task_history row was written = %v, want %v", tasked, tc.wantTask)
+			}
+			for _, key := range tc.wantAbsent {
+				if _, ok := details[key]; ok {
+					t.Errorf("the row carries %s, which Proxmox never gave: %s", key, raw)
+				}
+			}
+			if tc.forbidden != "" && bytes.Contains(raw, []byte(tc.forbidden)) {
+				t.Errorf("the row carries %q: %s", tc.forbidden, raw)
+			}
+		})
+	}
+}

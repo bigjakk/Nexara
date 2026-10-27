@@ -40,23 +40,32 @@ func (c *Client) GetACMEAccount(ctx context.Context, name string) (*ACMEAccount,
 	}
 	return &account, nil
 }
-func (c *Client) UpdateACMEAccount(ctx context.Context, name string, params UpdateACMEAccountParams) error {
+
+// UpdateACMEAccount changes an account's contact, or refreshes it from the CA
+// when none is given. Proxmox does either in a task (acmeupdate, acmerefresh)
+// and returns its UPID.
+func (c *Client) UpdateACMEAccount(ctx context.Context, name string, params UpdateACMEAccountParams) (string, error) {
 	form := url.Values{}
 	if params.Contact != "" {
 		form.Set("contact", params.Contact)
 	}
 	path := "/cluster/acme/account/" + url.PathEscape(name)
-	if err := c.doPut(ctx, path, form, nil); err != nil {
-		return fmt.Errorf("update ACME account %s: %w", name, err)
+	var upid string
+	if err := c.doPut(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("update ACME account %s: %w", name, err)
 	}
-	return nil
+	return upid, nil
 }
-func (c *Client) DeleteACMEAccount(ctx context.Context, name string) error {
+
+// DeleteACMEAccount deactivates an account with the CA. Proxmox does it in a
+// task (acmedeactivate) and returns its UPID.
+func (c *Client) DeleteACMEAccount(ctx context.Context, name string) (string, error) {
 	path := "/cluster/acme/account/" + url.PathEscape(name)
-	if err := c.doDelete(ctx, path, nil); err != nil {
-		return fmt.Errorf("delete ACME account %s: %w", name, err)
+	var upid string
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("delete ACME account %s: %w", name, err)
 	}
-	return nil
+	return upid, nil
 }
 func (c *Client) GetACMEPlugins(ctx context.Context) ([]ACMEPlugin, error) {
 	var plugins []ACMEPlugin

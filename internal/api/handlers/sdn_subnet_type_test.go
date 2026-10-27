@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,9 +34,13 @@ func TestSDNSubnetCreateSendsSubnetForAnEmptyType(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		form, _ := url.ParseQuery(string(body))
-		mu.Lock()
-		sent = append(sent, form)
-		mu.Unlock()
+		// The create's own form; the listing the handler reads afterwards for
+		// the subnet's id (sdnSubnetKey) is not what this case is about.
+		if r.Method == http.MethodPost {
+			mu.Lock()
+			sent = append(sent, form)
+			mu.Unlock()
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":null}`))
 	}))
@@ -112,6 +117,43 @@ func TestSDNSubnetCreateSendsSubnetForAnEmptyType(t *testing.T) {
 			}
 			if got := sent[0].Get("type"); got != "subnet" {
 				t.Errorf("Proxmox was sent type=%q, want \"subnet\"", got)
+			}
+		})
+	}
+}
+
+// sdnSubnetKey files a create under the id Proxmox derived (zone, then the CIDR
+// dashed) because update and delete address the subnet by it. The listing is the
+// only place that id is reported, so a listing that cannot say leaves the CIDR.
+func TestSDNSubnetKey(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{"the entry ending in the dashed CIDR", http.StatusOK,
+			`{"data":[{"subnet":"zone01-198.51.100.0-24"},{"subnet":"zone01-192.0.2.0-24"}]}`, "zone01-192.0.2.0-24"},
+		{"no entry for it yet", http.StatusOK, `{"data":[{"subnet":"zone01-198.51.100.0-24"}]}`, "192.0.2.0/24"},
+		{"listing refused", http.StatusInternalServerError, `{"data":null}`, "192.0.2.0/24"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(srv.Close)
+			client, err := proxmox.NewClient(proxmox.ClientConfig{
+				BaseURL: srv.URL, TokenID: "user@pam!test", TokenSecret: "secret-token-value",
+			})
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			if got := sdnSubnetKey(context.Background(), client, "vnet01", "192.0.2.0/24"); got != tt.want {
+				t.Errorf("sdnSubnetKey = %q, want %q", got, tt.want)
 			}
 		})
 	}

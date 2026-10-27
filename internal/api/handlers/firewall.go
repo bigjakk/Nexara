@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -132,6 +133,13 @@ func firewallRuleAudit(rule proxmox.FirewallRuleParams) []byte {
 }
 
 // --- Cluster Firewall Endpoints ---
+//
+// A firewall rule has no id of its own: its position is its only address, and
+// it moves with every insert and delete above it. So a rule's audit row files
+// under the rule SET it belongs to — resource_type firewall_rule, resource_id
+// the scope ("cluster", or "vm/<vmid>" for a guest) — with the position in the
+// details, where it reads as of that moment. A key built on the position would
+// give one rule a different identity after each change to its neighbours.
 
 // ListClusterFirewallRules handles GET /api/v1/clusters/:cluster_id/firewall/rules.
 func (h *NetworkHandler) ListClusterFirewallRules(c fiber.Ctx, p *apischema.Params) error {
@@ -176,7 +184,7 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c fiber.Ctx, p *apischema.Par
 	}
 
 	details, _ := json.Marshal(map[string]string{"action": req.Action, "type": req.Type})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", "cluster", "firewall_rule_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", "cluster", "firewall_rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -204,7 +212,7 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c fiber.Ctx, p *apischema.Par
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"position": pos, "action": req.Action, "type": req.Type})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", "cluster", "firewall_rule_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -227,7 +235,7 @@ func (h *NetworkHandler) DeleteClusterFirewallRule(c fiber.Ctx, p *apischema.Par
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"position": pos})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", "cluster", "firewall_rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -321,7 +329,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "guest_type": guestType, "node": nodeName, "action": req.Action, "type": req.Type})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("vm/%d", vmid), "firewall_rule_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", fmt.Sprintf("vm/%d", vmid), "firewall_rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -351,7 +359,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "guest_type": guestType, "node": nodeName, "position": pos, "action": req.Action, "type": req.Type})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", fmt.Sprintf("vm/%d", vmid), "firewall_rule_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -380,7 +388,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "guest_type": guestType, "node": nodeName, "position": pos})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", fmt.Sprintf("vm/%d", vmid), "firewall_rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -436,9 +444,18 @@ func (h *NetworkHandler) SetFirewallOptions(c fiber.Ctx, p *apischema.Params) er
 	}
 
 	details, _ := json.Marshal(req)
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", "cluster/options", "firewall_options_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_options", "cluster", "firewall_options_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// firewallAliasKey is the name an alias is stored and listed under. Proxmox
+// folds alias names to lower case on every route (pve-firewall,
+// PVE/API2/Firewall/Aliases.pm: lc($param->{name}), and lc($rename)), so "MyNet"
+// is created, updated and deleted as "mynet". Audited as typed, the same alias
+// would file under as many keys as the spellings its callers used.
+func firewallAliasKey(name string) string {
+	return strings.ToLower(name)
 }
 
 // --- Firewall Aliases ---
@@ -482,7 +499,7 @@ func (h *NetworkHandler) CreateFirewallAlias(c fiber.Ctx, p *apischema.Params) e
 		return mapDuplicateNameError("A firewall alias with that name already exists", err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "cidr": req.CIDR})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", req.Name, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", firewallAliasKey(req.Name), "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -508,8 +525,15 @@ func (h *NetworkHandler) UpdateFirewallAlias(c fiber.Ctx, p *apischema.Params) e
 	if err := pxClient.UpdateFirewallAlias(c.Context(), name, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"name": name})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", name, "updated", details)
+	// A rename moves the alias to another key, so the row names where it went:
+	// without it the old name's History ends there and the new name's begins
+	// with no link between them.
+	detailMap := map[string]string{"name": name}
+	if req.Rename != "" {
+		detailMap["rename"] = firewallAliasKey(req.Rename)
+	}
+	details, _ := json.Marshal(detailMap)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", firewallAliasKey(name), "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -528,7 +552,7 @@ func (h *NetworkHandler) DeleteFirewallAlias(c fiber.Ctx, p *apischema.Params) e
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", name, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", firewallAliasKey(name), "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

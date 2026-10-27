@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -124,7 +126,7 @@ func (h *NetworkHandler) CreateSDNZone(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"zone": req.Zone, "type": req.Type})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.Zone, "sdn_zone_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_zone", req.Zone, "sdn_zone_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -148,7 +150,7 @@ func (h *NetworkHandler) UpdateSDNZone(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"zone": zone})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", zone, "sdn_zone_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_zone", zone, "sdn_zone_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -171,7 +173,7 @@ func (h *NetworkHandler) DeleteSDNZone(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"zone": zone})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", zone, "sdn_zone_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_zone", zone, "sdn_zone_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -238,7 +240,7 @@ func (h *NetworkHandler) CreateSDNVNet(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": req.VNet, "zone": req.Zone})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.VNet, "sdn_vnet_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_vnet", req.VNet, "sdn_vnet_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -266,7 +268,7 @@ func (h *NetworkHandler) UpdateSDNVNet(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", vnet, "sdn_vnet_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_vnet", vnet, "sdn_vnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -289,7 +291,7 @@ func (h *NetworkHandler) DeleteSDNVNet(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", vnet, "sdn_vnet_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_vnet", vnet, "sdn_vnet_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -326,6 +328,27 @@ func (h *NetworkHandler) ListSDNSubnets(c fiber.Ctx, p *apischema.Params) error 
 	}
 
 	return RespondItems(c, subnets)
+}
+
+// sdnSubnetKey is the id Proxmox gave a subnet just created: its zone, then the
+// CIDR with the slash dashed ("myzone-192.0.2.0-24"). Update and delete address a
+// subnet by that id, so the create's row has to file under it too — the CIDR the
+// create takes is another spelling of the same object, and a row under each would
+// split one subnet's History in two. The vnet's listing reports the id (the zone
+// is not in the request), so the entry ending in the dashed CIDR is the one just
+// made; a listing that cannot be read leaves the CIDR as sent.
+func sdnSubnetKey(ctx context.Context, pxClient *proxmox.Client, vnet, cidr string) string {
+	subnets, err := pxClient.GetSDNSubnets(ctx, vnet)
+	if err != nil {
+		return cidr
+	}
+	dashed := "-" + strings.ReplaceAll(cidr, "/", "-")
+	for _, s := range subnets {
+		if strings.HasSuffix(s.Subnet, dashed) {
+			return s.Subnet
+		}
+	}
+	return cidr
 }
 
 // CreateSDNSubnet handles POST /api/v1/clusters/:cluster_id/sdn/vnets/:vnet/subnets.
@@ -365,7 +388,8 @@ func (h *NetworkHandler) CreateSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": req.Subnet})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", fmt.Sprintf("%s/%s", vnet, req.Subnet), "sdn_subnet_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet",
+		fmt.Sprintf("%s/%s", vnet, sdnSubnetKey(c.Context(), pxClient, vnet, req.Subnet)), "sdn_subnet_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -389,7 +413,7 @@ func (h *NetworkHandler) UpdateSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -412,7 +436,7 @@ func (h *NetworkHandler) DeleteSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -429,11 +453,23 @@ func (h *NetworkHandler) ApplySDN(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	if err := pxClient.ApplySDN(c.Context()); err != nil {
+	// Proxmox applies in a background task (reloadnetworkall) and answers with
+	// its UPID. Tracked, the task is this request's: left to the collector it
+	// would be ingested a second time as one Nexara never dispatched.
+	upid, err := pxClient.ApplySDN(c.Context())
+	if err != nil {
 		return mapNamedOpError("apply SDN configuration", err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", "cluster", "sdn_applied", nil)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         extractNodeFromUPID(upid),
+		ResourceType: "sdn",
+		ResourceID:   "cluster",
+		Action:       "sdn_applied",
+		UPID:         upid,
+		Description:  "Apply SDN configuration",
+	})
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -501,7 +537,7 @@ func (h *NetworkHandler) CreateSDNController(c fiber.Ctx, p *apischema.Params) e
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"controller": req.Controller, "type": req.Type})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.Controller, "sdn_controller_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_controller", req.Controller, "sdn_controller_created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -521,7 +557,7 @@ func (h *NetworkHandler) UpdateSDNController(c fiber.Ctx, p *apischema.Params) e
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"controller": controller})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", controller, "sdn_controller_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_controller", controller, "sdn_controller_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -540,7 +576,7 @@ func (h *NetworkHandler) DeleteSDNController(c fiber.Ctx, p *apischema.Params) e
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"controller": controller})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", controller, "sdn_controller_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_controller", controller, "sdn_controller_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -620,7 +656,7 @@ func (h *NetworkHandler) CreateSDNIPAM(c fiber.Ctx, p *apischema.Params) error {
 	// Name and type only: view:audit is granted to every Viewer by default,
 	// and req.Token is a credential.
 	details, _ := json.Marshal(map[string]string{"ipam": req.IPAM, "type": req.Type})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.IPAM, "sdn_ipam_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_ipam", req.IPAM, "sdn_ipam_created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -640,7 +676,7 @@ func (h *NetworkHandler) UpdateSDNIPAM(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"ipam": ipam})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", ipam, "sdn_ipam_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_ipam", ipam, "sdn_ipam_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -659,7 +695,7 @@ func (h *NetworkHandler) DeleteSDNIPAM(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"ipam": ipam})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", ipam, "sdn_ipam_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_ipam", ipam, "sdn_ipam_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -730,7 +766,7 @@ func (h *NetworkHandler) CreateSDNDNS(c fiber.Ctx, p *apischema.Params) error {
 	}
 	// Name and type only: req.Key is a credential.
 	details, _ := json.Marshal(map[string]string{"dns": req.DNS, "type": req.Type})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.DNS, "sdn_dns_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_dns", req.DNS, "sdn_dns_created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -750,7 +786,7 @@ func (h *NetworkHandler) UpdateSDNDNS(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"dns": dns})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", dns, "sdn_dns_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_dns", dns, "sdn_dns_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -769,6 +805,6 @@ func (h *NetworkHandler) DeleteSDNDNS(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"dns": dns})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", dns, "sdn_dns_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_dns", dns, "sdn_dns_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

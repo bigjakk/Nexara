@@ -29,6 +29,27 @@ import (
 // When the request was authenticated via API key, the key's id is injected
 // into the details JSON as `api_key_id` so an action can be correlated to a
 // specific key (not just the owning user).
+//
+// resource_type is the kind of object and resource_id the key Proxmox and the UI
+// know it by, within the cluster. An object's History reads its rows by that
+// pair, so one object files under ONE pair whichever route changed it, and the
+// collector files a task done outside Nexara under the same pair (task_mapping.go).
+// For the objects of the cluster page the keys are:
+//
+//	ha_resource   the sid as Proxmox spells it, vm:100 or ct:100 — never a bare VMID
+//	ha_group, ha_rule, pool, acme_account, acme_plugin, metric_server, pve_group, pve_role,
+//	firewall_ipset, firewall_security_group, usb_mapping, pci_mapping, sdn_zone, sdn_vnet,
+//	sdn_controller, sdn_ipam, sdn_dns      the name or id
+//	firewall_alias       the name, lower case (Proxmox folds it)
+//	sdn_subnet           <vnet>/<subnet id>, the id Proxmox derives (zone-ip-mask), not the CIDR
+//	ceph_pool            the pool name;  ceph_osd, ceph_mon, ceph_mgr, ceph_mds  the number or name
+//	pve_user user@realm; pve_token user@realm!tokenid; pve_acl the normalised path
+//	certificate, acme_config   the node;  replication  the job id (100-0);  drs_rule  the rule's uuid
+//	firewall_rule, firewall_options   the scope — cluster, or vm/<vmid> — since a rule has no id
+//	                                  of its own and its position moves; the position is a detail
+//	firewall_ipset_entry <set>/<cidr>; firewall_security_group_rule the group; firewall_template its uuid
+//	network  <node>/<iface>, or the node;  cluster_options, ha  the cluster's uuid;  drs  its config's
+//	sdn  "cluster", for the apply
 func AuditLog(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {
 	uid, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
@@ -211,7 +232,10 @@ type TrackTaskParams struct {
 // the audit / InsertTaskHistory / event trio. The collector reconciler keeps the
 // task_history.status accurate from "running" to completed/failed.
 func TrackTask(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p TrackTaskParams) {
-	details := map[string]any{"upid": p.UPID, "node": p.Node}
+	details := map[string]any{"node": p.Node}
+	if p.UPID != "" {
+		details["upid"] = p.UPID
+	}
 	if p.ResourceName != "" {
 		// Bounded here rather than at each call site: VM create and CT create
 		// pass a caller-chosen req.Name/req.Hostname straight through, and this
@@ -235,6 +259,14 @@ func TrackTask(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p T
 
 	// Audit log + audit_entry event + syslog (AuditLog self-guards on user_id).
 	AuditLog(c, queries, eventPub, ClusterUUID(p.ClusterID), p.ResourceType, p.ResourceID, p.Action, raw)
+
+	// Not every request Proxmox accepts becomes a task: a replication job's
+	// "schedule now" only moves its next run up, and answers with nothing. The
+	// audit row is owed; a task_history row that no task will ever finish is
+	// not — it would stay "running" for a day before the reconciler gave up on it.
+	if p.UPID == "" {
+		return
+	}
 
 	uid, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {

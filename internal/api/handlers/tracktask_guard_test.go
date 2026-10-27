@@ -65,6 +65,10 @@ var upidMethods = map[string]bool{
 	"DownloadAppliance":    true,
 	"TriggerBackup":        true,
 	"CreateACMEAccount":    true,
+	"UpdateACMEAccount":    true,
+	"DeleteACMEAccount":    true,
+	"ApplySDN":             true,
+	"ApplyNetworkConfig":   true,
 
 	// RunBackupJob is the one entry that does not return (string, error): it
 	// starts a vzdump task on each of several nodes and returns a

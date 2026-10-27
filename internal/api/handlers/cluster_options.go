@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -26,6 +28,31 @@ func NewClusterOptionsHandler(queries *db.Queries, encryptionKey string, eventPu
 
 func (h *ClusterOptionsHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
+}
+
+// clusterOptionsAudit is the details of an options write: the NAMES of the
+// options it set and of the ones it cleared, never their values. http_proxy can
+// carry credentials and view:audit is granted to every Viewer; the names are
+// what a History row needs to say what changed. action is the key these rows
+// have always carried. Taken from the typed params rather than a list of keys,
+// so an option added to the struct is covered without anyone remembering to.
+func clusterOptionsAudit(action string, req proxmox.UpdateClusterOptionsParams) json.RawMessage {
+	settings := []string{}
+	v := reflect.ValueOf(req)
+	for i := 0; i < v.NumField(); i++ {
+		if f := v.Field(i); f.Kind() == reflect.Pointer && !f.IsNil() {
+			name, _, _ := strings.Cut(v.Type().Field(i).Tag.Get("json"), ",")
+			settings = append(settings, name)
+		}
+	}
+	cleared := []string{}
+	for _, name := range strings.Split(req.Delete, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			cleared = append(cleared, name)
+		}
+	}
+	details, _ := json.Marshal(map[string]any{"action": action, "settings": settings, "cleared": cleared})
+	return details
 }
 
 // GetOptions handles GET /clusters/:cluster_id/options.
@@ -86,8 +113,8 @@ func (h *ClusterOptionsHandler) UpdateOptions(c fiber.Ctx, p *apischema.Params) 
 	if err := pxClient.SetClusterOptions(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"action": "update_options"})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "updated",
+		clusterOptionsAudit("update_options", req))
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -125,13 +152,12 @@ func (h *ClusterOptionsHandler) UpdateDescription(c fiber.Ctx, p *apischema.Para
 	if err != nil {
 		return err
 	}
-	if err := pxClient.SetClusterOptions(c.Context(), proxmox.UpdateClusterOptionsParams{
-		Description: &description,
-	}); err != nil {
+	req := proxmox.UpdateClusterOptionsParams{Description: &description}
+	if err := pxClient.SetClusterOptions(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"action": "update_description"})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "description_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "description_updated",
+		clusterOptionsAudit("update_description", req))
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -170,15 +196,16 @@ func (h *ClusterOptionsHandler) UpdateTags(c fiber.Ctx, p *apischema.Params) err
 	if err != nil {
 		return err
 	}
-	if err := pxClient.SetClusterOptions(c.Context(), proxmox.UpdateClusterOptionsParams{
+	req := proxmox.UpdateClusterOptionsParams{
 		RegisteredTags: optStringPtr(p.OptString("registered_tags")),
 		UserTagAccess:  optStringPtr(p.OptString("user_tag_access")),
 		TagStyle:       optStringPtr(p.OptString("tag_style")),
-	}); err != nil {
+	}
+	if err := pxClient.SetClusterOptions(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"action": "update_tags"})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "tags_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "tags_updated",
+		clusterOptionsAudit("update_tags", req))
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
