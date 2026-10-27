@@ -200,6 +200,16 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			wantDetails: map[string]any{"vms": "100,101", "delete": "1"},
 		},
 		{
+			// The audit table is never trimmed, so each list a pool update records is capped.
+			name: "a pool update keeps a long member list to the audit text cap", method: fiber.MethodPut, path: clusterScope + "/pools/:pool_id",
+			target: "/pools/pool01", body: `{"delete":"` + strings.Repeat("a", 1100) + `"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewPoolHandler(q, haCreateEncKey, nil).UpdatePool
+			},
+			wantType: "pool", wantID: "pool01", wantAction: "updated",
+			wantDetails: map[string]any{"delete": strings.Repeat("a", 1024) + "…"},
+		},
+		{
 			// Names only: http_proxy can carry credentials and view:audit is a
 			// default Viewer grant.
 			name: "a cluster options write names the options, never their values", method: fiber.MethodPut, path: clusterScope + "/options",

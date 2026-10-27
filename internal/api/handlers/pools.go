@@ -119,7 +119,7 @@ func (h *PoolHandler) UpdatePool(c fiber.Ctx, p *apischema.Params) error {
 		detailMap["storage"] = auditTruncate(req.Storage, poolAuditTextMax)
 	}
 	if req.Delete != "" {
-		detailMap["delete"] = req.Delete
+		detailMap["delete"] = auditTruncate(req.Delete, poolAuditTextMax)
 	}
 	if req.Comment != nil {
 		detailMap["comment"] = auditTruncate(*req.Comment, poolAuditTextMax)
