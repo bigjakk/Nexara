@@ -1953,17 +1953,28 @@ Nexara happens to hold for it:
 
 | Object | `resource_type` | `resource_id` | In `details` |
 |--------|-----------------|---------------|--------------|
-| Storage | `storage` | the storage's name, as Proxmox calls it on every node | `storage`; `node` when the action ran on one node |
+| Storage | `storage` | the storage's name, as Proxmox calls it on every node | `storage` and `resource_name`, both the name; `node` when the action ran on one node |
+| A virtio-win config saved with no storage chosen | `cluster` | the cluster's id | `storage`, empty |
 | An upload, copy or URL download run outside Nexara | `node` | the node's name: Proxmox's task names no storage | `node`, `task_type` |
 | An LVM, LVM-thin or directory create that adds a storage | `node` | the node's name | `storage`: the storage added, which Proxmox names after the volume |
 | PBS server and its datastores | `pbs_server` | the PBS server's id | `datastore` on a datastore action, and on a sync or verify job trigger when the collector has synced that job; `job_id` on a job trigger; `pbs_upid` on the garbage collection or job it started |
 | Veeam server | `veeam_server` | the Veeam server's id | |
 | Veeam job, Veeam session | `veeam_job`, `veeam_session` | Veeam's own id for it | `veeam_server_id`; a session also `veeam_job_id` |
-| Proxmox backup job | `backup` | the id Proxmox gave the job | |
+| Proxmox backup job | `backup` | the id Proxmox gave the job; `backup-job` when Nexara could not tell which job a create made | |
+
+Proxmox answers a backup job's create without the id it gave the job, so Nexara
+lists the jobs before and after and takes the one the list gained. It records
+`backup-job` instead when the list gained none or several, or a list could not
+be read within five seconds; the create itself goes ahead either way.
 
 A disk move records the storage it left as `from_storage` beside the one it
-wrote to (`storage`, or `target_storage` when a migration job made the move),
-and a restore records the storage the archive was read from as `from_storage`.
+wrote to (`storage`, or `target_storage` when a migration job made the move).
+Nexara reads it from the guest's current configuration just before the move,
+waiting five seconds at most. When it cannot tell (the read failed or timed out,
+or the disk names no storage) a move made through the API records no
+`from_storage` and a migration job's records it empty. A restore records the
+Proxmox storage the archive was read through as `from_storage`.
+
 Nexara keeps one inventory row per node for a shared storage and drops and
 re-creates it when a node is unseen for a few minutes, so an entry that
 recorded that row's id stopped resolving at an arbitrary later time.
@@ -1979,11 +1990,18 @@ the `details` keys a new entry carries (`storage`, `datastore`, `resource_name`,
 
 - a storage entry keyed by an inventory row id that still existed, or whose
   `details.storage` named the storage;
-- a virtio-win config saved with no storage chosen;
-- an upload, copy or download run outside Nexara (to the node), and a volume
-  deleted or backups pruned outside it (to the storage);
-- a PBS datastore action or job trigger whose cluster and datastore (or job)
-  picked exactly one PBS server that already existed.
+- a virtio-win config saved with no storage chosen, which was a storage entry
+  with an empty name;
+- an upload, copy or download run outside Nexara, which was a `storage` entry
+  keyed by the node or the file name (now the node's), and a volume deleted or
+  backups pruned outside it, which was a `proxmox_task` entry with the action
+  `imgdel` or `prunebackups` (now the storage's, as `delete_content` or
+  `prune_backups`);
+- a PBS datastore action or job trigger, which was a `backup` entry keyed by the
+  datastore, the snapshot (`datastore/type/id`) or the job, whose cluster and
+  datastore (or job) picked exactly one PBS server that already existed. A
+  snapshot or prune entry named its datastore in `details.store`; the re-filed
+  entry also has `datastore`, and keeps `store`.
 
 What stays unresolved keeps the identity it was written with: a storage's
 `update` or `delete` entry whose inventory row id no longer exists and whose
