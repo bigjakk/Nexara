@@ -121,6 +121,8 @@ type cephPoolMetricSnapshot struct {
 	Size         int
 	MinSize      int
 	PGNum        int
+	PGNumMin     int
+	PGAutoscale  string
 	BytesUsed    int64
 	PercentUsed  float64
 	ReadOpsSec   int64

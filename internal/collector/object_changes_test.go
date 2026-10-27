@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -24,6 +25,10 @@ func TestDiffCephObjects(t *testing.T) {
 	}
 	pool := func(id int, name string, size, minSize, pgNum int, used int64) cephPoolMetricSnapshot {
 		return cephPoolMetricSnapshot{PoolID: id, PoolName: name, Size: size, MinSize: minSize, PGNum: pgNum, BytesUsed: used}
+	}
+	autoscale := func(p cephPoolMetricSnapshot, mode string, pgNumMin int) cephPoolMetricSnapshot {
+		p.PGAutoscale, p.PGNumMin = mode, pgNumMin
+		return p
 	}
 	type want struct{ id, change, node, detail, fields string }
 	check := func(t *testing.T, got []objectChange, wants []want) {
@@ -95,6 +100,30 @@ func TestDiffCephObjects(t *testing.T) {
 				{"pool01", "added", "", `{"min_size":2,"pg_num":32,"pool_id":7,"size":3}`, ""},
 				{"pool01", "removed", "", `{"min_size":2,"pg_num":32,"pool_id":1,"size":3}`, ""},
 			},
+		},
+		"pg_num moves under the autoscaler": {
+			prev: map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 32, 0), "on", 32)},
+			cur:  map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 64, 0), "on", 32)},
+		},
+		"pg_num edited with the autoscaler off": {
+			prev: map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 32, 0), "off", 0)},
+			cur:  map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 64, 0), "off", 0)},
+			want: []want{{"pool01", "changed", "", `{"pg_num":{"from":32,"to":64}}`, "pg_num"}},
+		},
+		"pg_num edited with the autoscaler only warning": {
+			prev: map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 32, 0), "warn", 0)},
+			cur:  map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 64, 0), "warn", 0)},
+			want: []want{{"pool01", "changed", "", `{"pg_num":{"from":32,"to":64}}`, "pg_num"}},
+		},
+		"the autoscaler turned off while it moved pg_num": {
+			prev: map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 32, 0), "on", 0)},
+			cur:  map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 64, 0), "off", 0)},
+			want: []want{{"pool01", "changed", "", `{"pg_autoscale_mode":{"from":"on","to":"off"}}`, "pg_autoscale_mode"}},
+		},
+		"the autoscaler turned on with a minimum": {
+			prev: map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 32, 0), "off", 0)},
+			cur:  map[string]cephPoolMetricSnapshot{"pool01": autoscale(pool(1, "pool01", 3, 2, 64, 0), "on", 32)},
+			want: []want{{"pool01", "changed", "", `{"pg_autoscale_mode":{"from":"off","to":"on"},"pg_num_min":{"from":0,"to":32}}`, "pg_autoscale_mode,pg_num_min"}},
 		},
 		"one is gone": {
 			prev: map[string]cephPoolMetricSnapshot{"pool01": pool(1, "pool01", 3, 2, 32, 0), "pool02": pool(2, "pool02", 3, 2, 32, 0)},
@@ -236,4 +265,49 @@ func TestSyncReplicationMarksTheBaselineOnceWritten(t *testing.T) {
 			t.Errorf("baseline marked after a failed write: %+v", mq.baselineMarks)
 		}
 	})
+}
+
+// An object adds at most maxObjectChangesPerHour rows an hour, however often it
+// changes: the count is per object and starts over an hour after its first row.
+func TestAllowObjectChangeCapsEachObjectPerHour(t *testing.T) {
+	t.Parallel()
+	s := &Syncer{logger: testLogger()}
+	cluster := uuid.New()
+	start := time.Now()
+	allowed := func(id string, at time.Time) bool {
+		ok, _ := s.allowObjectChange(cluster, "ceph_osd", id, at)
+		return ok
+	}
+	for i := 0; i < maxObjectChangesPerHour; i++ {
+		if !allowed("1", start.Add(time.Duration(i)*time.Minute)) {
+			t.Fatalf("row %d of an hour was refused, want the first %d allowed", i+1, maxObjectChangesPerHour)
+		}
+	}
+	if allowed("1", start.Add(50*time.Minute)) {
+		t.Errorf("row %d of the hour was allowed", maxObjectChangesPerHour+1)
+	}
+	if _, firstOver := s.allowObjectChange(cluster, "ceph_osd", "1", start.Add(51*time.Minute)); firstOver {
+		t.Error("the warning is wanted once an hour per object, not for every refused row")
+	}
+	if !allowed("2", start.Add(50*time.Minute)) {
+		t.Error("another object was refused for the first one's flapping")
+	}
+	if !allowed("1", start.Add(61*time.Minute)) {
+		t.Error("the first object is still refused an hour after its first row")
+	}
+}
+
+// recordObjectChanges stops filing an object's rows at the hourly cap.
+func TestRecordObjectChangesStopsAtTheCap(t *testing.T) {
+	t.Parallel()
+	mq := newMockQueries()
+	s := &Syncer{queries: mq, logger: testLogger()}
+	changes := make([]objectChange, 0, maxObjectChangesPerHour+5)
+	for i := 0; i < maxObjectChangesPerHour+5; i++ {
+		changes = append(changes, objectChange{resourceID: "7", change: "changed", fields: []string{"up"}, detail: map[string]any{}})
+	}
+	s.recordObjectChanges(context.Background(), uuid.New(), "ceph_osd", changes, time.Now())
+	if len(mq.objectChanges) != maxObjectChangesPerHour {
+		t.Errorf("%d rows filed for one object in an hour, want the cap of %d", len(mq.objectChanges), maxObjectChangesPerHour)
+	}
 }

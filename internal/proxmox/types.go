@@ -1084,6 +1084,7 @@ type CephPool struct {
 	Size         FlexInt `json:"size"`
 	MinSize      FlexInt `json:"min_size"`
 	PGNum        FlexInt `json:"pg_num"`
+	PGNumMin     FlexInt `json:"pg_num_min,omitempty"`
 	PGAutoScale  string  `json:"pg_autoscale_mode,omitempty"`
 	CrushRule    FlexInt `json:"crush_rule"`
 	Type         string  `json:"type,omitempty"`

@@ -74,6 +74,44 @@ func (s *Syncer) markObjectBaseline(ctx context.Context, clusterID uuid.UUID, re
 type cephSeen struct {
 	osds  readings[int, cephOSDMetricSnapshot]
 	pools readings[string, cephPoolMetricSnapshot]
+	rows  map[string]*changeWindow // the rows each object added this hour
+}
+
+// changeWindow counts the rows one object has added since start.
+type changeWindow struct {
+	start  time.Time
+	n      int
+	warned bool
+}
+
+// maxObjectChangesPerHour bounds the rows one object adds in an hour. An OSD that
+// flaps, or a pool whose pg_num steps down, would otherwise add one every pass;
+// twenty is several real events (a reboot is a down and an up per OSD) and cuts a
+// storm off at a row every three minutes.
+const maxObjectChangesPerHour = 20
+
+// allowObjectChange counts a row for an object and reports whether it is within
+// the object's hourly cap. The count starts over an hour after its first row.
+func (s *Syncer) allowObjectChange(clusterID uuid.UUID, resourceType, resourceID string, now time.Time) (allowed, firstOver bool) {
+	s.cephMu.Lock()
+	defer s.cephMu.Unlock()
+	st := s.cephState(clusterID)
+	if st.rows == nil {
+		st.rows = map[string]*changeWindow{}
+	}
+	key := resourceType + "/" + resourceID
+	w := st.rows[key]
+	if w == nil || now.Sub(w.start) >= time.Hour {
+		w = &changeWindow{start: now}
+		st.rows[key] = w
+	}
+	if w.n >= maxObjectChangesPerHour {
+		first := !w.warned
+		w.warned = true
+		return false, first
+	}
+	w.n++
+	return true, false
 }
 
 // readings is the last successful reading of one kind of object. A nil map is
@@ -150,6 +188,13 @@ func (s *Syncer) recordObjectChanges(ctx context.Context, clusterID uuid.UUID, r
 	for _, ch := range changes {
 		detail, err := json.Marshal(ch.detail)
 		if err != nil {
+			continue
+		}
+		if ok, firstOver := s.allowObjectChange(clusterID, resourceType, ch.resourceID, time.Now()); !ok {
+			if firstOver {
+				s.logger.Warn("ceph: an object changed more than the hourly cap allows; the rest of its changes this hour are not recorded",
+					"cluster_id", clusterID, "resource_type", resourceType, "resource_id", ch.resourceID, "cap", maxObjectChangesPerHour)
+			}
 			continue
 		}
 		fields := ch.fields
@@ -232,6 +277,11 @@ func diffCephOSDs(prev, cur map[int]cephOSDMetricSnapshot) []objectChange {
 	return out
 }
 
+// autoscaled reports whether a pool's PG autoscaler mode lets it change the pool's
+// pg_num: "on" does, "warn" only advises, "off" and an unreported mode leave it to
+// the admin.
+func autoscaled(mode string) bool { return mode == "on" }
+
 func poolSnapshot(p cephPoolMetricSnapshot) map[string]any {
 	return map[string]any{"pool_id": p.PoolID, "size": p.Size, "min_size": p.MinSize, "pg_num": p.PGNum}
 }
@@ -258,7 +308,18 @@ func diffCephPools(prev, cur map[string]cephPoolMetricSnapshot) []objectChange {
 			if old.MinSize != p.MinSize {
 				changed["min_size"] = map[string]any{"from": old.MinSize, "to": p.MinSize}
 			}
-			if old.PGNum != p.PGNum {
+			if old.PGAutoscale != p.PGAutoscale {
+				changed["pg_autoscale_mode"] = map[string]any{"from": old.PGAutoscale, "to": p.PGAutoscale}
+			}
+			if old.PGNumMin != p.PGNumMin {
+				changed["pg_num_min"] = map[string]any{"from": old.PGNumMin, "to": p.PGNumMin}
+			}
+			// pg_num is the autoscaler's to change while it is on, and moves without
+			// anyone editing it (Proxmox reports no target for it, only the live count
+			// and the autoscaler's own estimate), so it is compared only while the pool
+			// is not autoscaled. What an admin sets under the autoscaler is its mode and
+			// minimum, above.
+			if !autoscaled(old.PGAutoscale) && !autoscaled(p.PGAutoscale) && old.PGNum != p.PGNum {
 				changed["pg_num"] = map[string]any{"from": old.PGNum, "to": p.PGNum}
 			}
 			if len(changed) > 0 {

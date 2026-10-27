@@ -1338,6 +1338,8 @@ func (s *Syncer) syncCeph(ctx context.Context, client ProxmoxClient, clusterID u
 				Size:         int(p.Size),
 				MinSize:      int(p.MinSize),
 				PGNum:        int(p.PGNum),
+				PGNumMin:     int(p.PGNumMin),
+				PGAutoscale:  p.PGAutoScale,
 				BytesUsed:    p.BytesUsed,
 				PercentUsed:  p.PercentUsed,
 				ReadOpsSec:   p.ReadOpPerSec,
