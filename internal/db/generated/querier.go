@@ -94,10 +94,12 @@ type Querier interface {
 	// up while a create ran on its host is not that create's.
 	//
 	// An OSD going down or coming up is also explained by a rolling update that was
-	// working on its host (the job's own audit row is then explained_by), counted from
-	// its reboot of the host, or from its drain before one, and only if that began no
-	// more than an hour before the window: a job that has stood on a host for hours
-	// explains nothing.
+	// rebooting its host (the job's own audit row is then explained_by): from the
+	// reboot's start, which must be no more than an hour before the window, to the
+	// health check that ends it plus 5 minutes for OSDs to start. Draining and
+	// upgrading do not take an OSD down, and the restore that follows is hours of VM
+	// moves in which an OSD crash is no part of the update; neither explains one. Only
+	// up: a node that reboots does not mark its OSDs out.
 	//
 	// The window: the row was made no earlier than the object was last seen as it was
 	// (less 2 minutes for how stale that sighting can be) and no later than the

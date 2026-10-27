@@ -113,10 +113,10 @@ WITH rules(resource_type, change, field, direction, audit_type, action, match, n
           AND n.node_name = t.node
           AND t.resource_type = 'ceph_osd'
           AND t.change = 'changed'
-          AND t.field IN ('up', 'in')
-          AND COALESCE(n.drain_started_at, n.reboot_started_at) <= t.observed_at + interval '30 seconds'
-          AND COALESCE(n.reboot_started_at, n.drain_started_at) >= t.since - interval '1 hour'
-          AND COALESCE(n.restore_completed_at, n.health_check_at, n.reboot_completed_at, now()) >= t.since
+          AND t.field = 'up'
+          AND n.reboot_started_at <= t.observed_at + interval '30 seconds'
+          AND n.reboot_started_at >= t.since - interval '1 hour'
+          AND COALESCE(n.health_check_at, now()) + interval '5 minutes' >= t.since
         ORDER BY a2.created_at
         LIMIT 1
     ) ru ON true
@@ -172,10 +172,12 @@ type ClassifyClusterObjectChangesParams struct {
 // up while a create ran on its host is not that create's.
 //
 // An OSD going down or coming up is also explained by a rolling update that was
-// working on its host (the job's own audit row is then explained_by), counted from
-// its reboot of the host, or from its drain before one, and only if that began no
-// more than an hour before the window: a job that has stood on a host for hours
-// explains nothing.
+// rebooting its host (the job's own audit row is then explained_by): from the
+// reboot's start, which must be no more than an hour before the window, to the
+// health check that ends it plus 5 minutes for OSDs to start. Draining and
+// upgrading do not take an OSD down, and the restore that follows is hours of VM
+// moves in which an OSD crash is no part of the update; neither explains one. Only
+// up: a node that reboots does not mark its OSDs out.
 //
 // The window: the row was made no earlier than the object was last seen as it was
 // (less 2 minutes for how stale that sighting can be) and no later than the

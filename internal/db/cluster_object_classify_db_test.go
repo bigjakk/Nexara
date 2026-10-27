@@ -94,6 +94,8 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 		rolling    string  // a rolling update job working on the case's node ("host") or another ("other")
 		drained    float64 // minutes ago that job began draining it, default 13
 		rebooted   float64 // and rebooting it, default 12
+		noReboot   bool    // it has only drained it
+		checked    float64 // minutes ago its health check passed, if it has
 		companions []classifyCompanion
 		audits     []classifyAudit
 		want       string
@@ -126,6 +128,18 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 		{name: "down, a rolling update was working on its host", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true, rolling: "host",
 			audits: []classifyAudit{{at: 15, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: explained, wantBy: 0},
 		{name: "down, a rolling update was working on another host", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true, rolling: "other",
+			audits: []classifyAudit{{at: 15, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: shown, wantBy: -1},
+		{name: "down, a rolling update has only drained its host", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
+			rolling: "host", noReboot: true,
+			audits: []classifyAudit{{at: 15, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: shown, wantBy: -1},
+		{name: "up, just after the health check that ended the reboot", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
+			rolling: "host", drained: 30, rebooted: 25, checked: 16,
+			audits: []classifyAudit{{at: 30, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: explained, wantBy: 0},
+		{name: "up, long after the health check that ended the reboot", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
+			rolling: "host", drained: 30, rebooted: 25, checked: 20,
+			audits: []classifyAudit{{at: 30, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: shown, wantBy: -1},
+		{name: "out, a rolling update was working on its host: it is not what marks an OSD out", rtype: "ceph_osd", change: "changed", fields: []string{"in"},
+			detail: `{"in":{"from":true,"to":false}}`, node: true, rolling: "host",
 			audits: []classifyAudit{{at: 15, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: shown, wantBy: -1},
 		{name: "down, a rolling update began rebooting its host hours ago and has not finished", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
 			rolling: "host", drained: 310, rebooted: 300,
@@ -275,8 +289,15 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 			if drained == 0 {
 				drained, rebooted = 13, 12
 			}
-			exec("rolling node", `INSERT INTO rolling_update_nodes (job_id, node_name, drain_started_at, reboot_started_at) VALUES ($1, $2, $3, $4)`,
-				jobID, worked, ago(drained), ago(rebooted))
+			var rebootAt, checkedAt any // NULL until the step is reached
+			if !tc.noReboot {
+				rebootAt = ago(rebooted)
+			}
+			if tc.checked > 0 {
+				checkedAt = ago(tc.checked)
+			}
+			exec("rolling node", `INSERT INTO rolling_update_nodes (job_id, node_name, drain_started_at, reboot_started_at, health_check_at) VALUES ($1, $2, $3, $4, $5)`,
+				jobID, worked, ago(drained), rebootAt, checkedAt)
 		}
 		for _, a := range tc.audits {
 			auditID := uuid.New()
