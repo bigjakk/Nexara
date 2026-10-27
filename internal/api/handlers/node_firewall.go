@@ -1,10 +1,18 @@
 package handlers
 
 import (
+	"encoding/json"
+
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 )
+
+// A node's firewall rule has no id of its own either: its position is its only
+// address and moves with every insert above it. The audit rows file under the rule
+// set of the node's scope, "node/<node>" — firewall_rule, as the cluster's rules
+// (cluster) and a guest's (vm/<vmid>) do — with the position in the details.
+func nodeFirewallScope(node string) string { return "node/" + node }
 
 // ListNodeFirewallRules handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules.
 func (h *NodeHandler) ListNodeFirewallRules(c fiber.Ctx, p *apischema.Params) error {
@@ -42,8 +50,8 @@ func (h *NodeHandler) CreateNodeFirewallRule(c fiber.Ctx, p *apischema.Params) e
 	if err := pxClient.CreateNodeFirewallRule(c.Context(), nodeName, rule); err != nil {
 		return mapProxmoxError(err)
 	}
-	details := firewallRuleAudit(rule)
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "create_firewall_rule", details)
+	details := firewallRuleAudit(rule, nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", nodeFirewallScope(nodeName), "firewall_rule_created", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -65,8 +73,8 @@ func (h *NodeHandler) UpdateNodeFirewallRule(c fiber.Ctx, p *apischema.Params) e
 	if err := pxClient.UpdateNodeFirewallRule(c.Context(), nodeName, pos, rule, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
-	details := firewallRuleAudit(rule)
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "update_firewall_rule", details)
+	details := firewallRuleAudit(rule, &pos)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", nodeFirewallScope(nodeName), "firewall_rule_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -84,7 +92,8 @@ func (h *NodeHandler) DeleteNodeFirewallRule(c fiber.Ctx, p *apischema.Params) e
 	if err := pxClient.DeleteNodeFirewallRule(c.Context(), nodeName, pos, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "delete_firewall_rule", nil)
+	details, _ := json.Marshal(map[string]int{"position": pos})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_rule", nodeFirewallScope(nodeName), "firewall_rule_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

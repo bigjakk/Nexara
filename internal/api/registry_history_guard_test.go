@@ -73,6 +73,9 @@ var clusterObjectAudits = map[string][]string{
 	"NetworkHandler.CreateVMFirewallRule":      {"firewall_rule"},
 	"NetworkHandler.UpdateVMFirewallRule":      {"firewall_rule"},
 	"NetworkHandler.DeleteVMFirewallRule":      {"firewall_rule"},
+	"NodeHandler.CreateNodeFirewallRule":       {"firewall_rule"},
+	"NodeHandler.UpdateNodeFirewallRule":       {"firewall_rule"},
+	"NodeHandler.DeleteNodeFirewallRule":       {"firewall_rule"},
 	"NetworkHandler.SetFirewallOptions":        {"firewall_options"},
 	"NetworkHandler.CreateFirewallAlias":       {"firewall_alias"},
 	"NetworkHandler.UpdateFirewallAlias":       {"firewall_alias"},
@@ -166,13 +169,15 @@ var clusterObjectLegacyHandlers = []string{"NetworkHandler.CreateTemplate", "Net
 // clusterObjectRoute matches the routes of the objects the table covers: the
 // cluster page's tabs (HA, Ceph, pools, mappings, access control, replication,
 // networks and SDN, firewall, certificates, metric servers, DRS, options), a
-// guest's firewall rules, and the firewall templates. Node-scoped objects other
-// than the ACME ones are a node's History, not this table's.
+// guest's firewall rules and a node's, and the firewall templates. Node-scoped
+// objects other than the ACME ones and the node's firewall rules are a node's
+// History, not this table's.
 var clusterObjectRoute = regexp.MustCompile(`^/api/v1/(` +
 	`clusters/:cluster_id/(ha|ceph|pools|sdn|networks|firewall|firewall-templates|replication|usb-mappings|` +
 	`pci-mappings|access|acme|metric-servers|drs|options|description|tags)(/|$)` +
 	`|clusters/:cluster_id/vms/:vm_id/firewall/` +
 	`|clusters/:cluster_id/nodes/:node/(acme-config|certificates)` +
+	`|clusters/:cluster_id/nodes/:node_name/firewall/rules(/|$)` +
 	`|firewall-templates/)`)
 
 // auditCall is one AuditLog or TrackTask call the walk found.

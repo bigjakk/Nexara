@@ -165,6 +165,24 @@ WHERE resource_type IN ('network', 'firewall')
   AND resource_id = 'cluster/options'
   AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
 
+-- A node's firewall rules were filed under the node (type node, the node's name,
+-- create_firewall_rule and its two siblings). They file under the node's rule set
+-- as the cluster's and a guest's do — firewall_rule, node/<node>, with the actions
+-- those use — and a row written before the position was recorded has none.
+UPDATE audit_log
+SET resource_type = 'firewall_rule',
+    resource_id = 'node/' || resource_id,
+    action = CASE action
+        WHEN 'create_firewall_rule' THEN 'firewall_rule_created'
+        WHEN 'update_firewall_rule' THEN 'firewall_rule_updated'
+        ELSE 'firewall_rule_deleted'
+    END,
+    details = CASE WHEN details ? 'rekeyed_from' THEN details
+                   ELSE details || jsonb_build_object('rekeyed_from', jsonb_build_object('by', 'cluster_object_audit_keys', 'resource_type', resource_type, 'resource_id', resource_id, 'action', action)) END
+WHERE resource_type = 'node'
+  AND action IN ('create_firewall_rule', 'update_firewall_rule', 'delete_firewall_rule')
+  AND (NOT details ? 'rekeyed_from' OR details->'rekeyed_from'->>'by' = 'cluster_object_audit_keys');
+
 -- Firewall aliases, IP sets and security groups: Proxmox folds the name to lower
 -- case ("MyNet" and "mynet" are one alias; a [group ...] and [ipset ...] header
 -- is lc()'d when the config is parsed).

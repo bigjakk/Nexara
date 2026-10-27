@@ -259,6 +259,35 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			forbidden:   "secret",
 		},
 		{
+			// A node's firewall rules file under the node's rule set, as the cluster's and a
+			// guest's do, with the position where there is one.
+			name: "a node firewall rule create files under the node's rule set", method: fiber.MethodPost, path: clusterScope + "/nodes/:node_name/firewall/rules",
+			target: "/nodes/pve-01/firewall/rules", body: `{"type":"in","action":"ACCEPT"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewNodeHandler(q, haCreateEncKey, nil).CreateNodeFirewallRule
+			},
+			wantType: "firewall_rule", wantID: "node/pve-01", wantAction: "firewall_rule_created",
+			wantAbsent: []string{"position"},
+		},
+		{
+			name: "and an update", method: fiber.MethodPut, path: clusterScope + "/nodes/:node_name/firewall/rules/:pos",
+			target: "/nodes/pve-01/firewall/rules/3", body: `{"action":"DROP"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewNodeHandler(q, haCreateEncKey, nil).UpdateNodeFirewallRule
+			},
+			wantType: "firewall_rule", wantID: "node/pve-01", wantAction: "firewall_rule_updated",
+			wantDetails: map[string]any{"position": json.Number("3"), "action": "DROP"},
+		},
+		{
+			name: "and a delete", method: fiber.MethodDelete, path: clusterScope + "/nodes/:node_name/firewall/rules/:pos",
+			target: "/nodes/pve-01/firewall/rules/3",
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewNodeHandler(q, haCreateEncKey, nil).DeleteNodeFirewallRule
+			},
+			wantType: "firewall_rule", wantID: "node/pve-01", wantAction: "firewall_rule_deleted",
+			wantDetails: map[string]any{"position": json.Number("3")},
+		},
+		{
 			// A change seen in Proxmox is explained by an update that names its field. The
 			// edit dialog sends the comment and the disable flag as they were; the rate is
 			// typed 10.0 and kept as 10.

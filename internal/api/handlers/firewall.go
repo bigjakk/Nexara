@@ -114,8 +114,11 @@ func firewallRuleFromParams(p *apischema.Params) proxmox.FirewallRuleParams {
 // empty — so a row recorded after this migration would not be comparable
 // with one recorded before it, and on an UPDATE "the caller cleared dport"
 // would become indistinguishable from "the caller never sent it".
-func firewallRuleAudit(rule proxmox.FirewallRuleParams) []byte {
-	details, _ := json.Marshal(map[string]any{
+//
+// pos is the rule's position when the edit named one (an update): it is in the row
+// beside the rule, where it reads as of that moment.
+func firewallRuleAudit(rule proxmox.FirewallRuleParams, pos *int) []byte {
+	fields := map[string]any{
 		"type":    rule.Type,
 		"action":  rule.Action,
 		"source":  rule.Source,
@@ -128,7 +131,11 @@ func firewallRuleAudit(rule proxmox.FirewallRuleParams) []byte {
 		"macro":   rule.Macro,
 		"log":     rule.Log,
 		"iface":   rule.Iface,
-	})
+	}
+	if pos != nil {
+		fields["position"] = *pos
+	}
+	details, _ := json.Marshal(fields)
 	return details
 }
 

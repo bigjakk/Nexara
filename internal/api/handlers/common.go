@@ -52,8 +52,9 @@ import (
 //	ceph_pool            the pool name;  ceph_osd, ceph_mon, ceph_mgr, ceph_mds  the number or name
 //	pve_user user@realm; pve_token user@realm!tokenid; pve_acl the normalised path
 //	certificate, acme_config   the node;  replication  the job id (100-0);  drs_rule  the rule's uuid
-//	firewall_rule, firewall_options   the scope — cluster, or vm/<vmid> — since a rule has no id
-//	                                  of its own and its position moves; the position is a detail
+//	firewall_rule, firewall_options   the scope — cluster, vm/<vmid>, or (rules only) node/<node> —
+//	                                  since a rule has no id of its own and its position moves;
+//	                                  the position is a detail
 //	firewall_template    its uuid
 //	network  <node>/<iface>, or the node;  cluster_options, ha  the cluster's uuid;  drs  its config's
 //	sdn  "cluster", for the apply
