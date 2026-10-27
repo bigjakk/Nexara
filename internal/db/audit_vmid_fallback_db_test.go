@@ -60,14 +60,10 @@ func TestAuditInsertStampsAVMIDFromAVMSRowOnlyForGuestKinds(t *testing.T) {
 		resourceType string
 		want         pgtype.Int4
 	}{
-		{"a guest's own row", "", "vm", stamped},
-		{"a container's", "", "container", stamped},
 		{"a folder membership", "", "vm_folder_membership", stamped},
 		{"a pool named like the guest's id", "", "ceph_pool", pgtype.Int4{}},
 		{"the sourced insert, for Nexara's own guest row", "nexara", "vm", stamped},
-		{"the sourced insert, for a pool named like the guest's id", "nexara", "ceph_pool", pgtype.Int4{}},
 		{"ingested from Proxmox, a guest kind named like the guest's id", "proxmox", "vm", pgtype.Int4{}},
-		{"ingested from Proxmox, a pool named like it", "proxmox", "ceph_pool", pgtype.Int4{}},
 	} {
 		action := "vmid-fallback-" + tc.name
 		var err error

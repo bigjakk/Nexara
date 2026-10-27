@@ -2,6 +2,7 @@ package rolling
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -27,15 +28,23 @@ import (
 // (or with lookErr), records every write by its sqlc name, and answers
 // FailRollingUpdateNode with zero rows — "already terminal" — so failNode
 // stops there instead of failing the whole job, which is not what these tests
-// are about. Anything else fails the test.
+// are about. With audits set it also records the audit rows the engine writes
+// and accepts the two CRS markers. Anything else fails the test.
 type memberDB struct {
 	t        *testing.T
 	cluster  uuid.UUID
 	members  []string
 	lookErr  error
+	audits   bool
 	mu       sync.Mutex
 	asked    []string
-	failures []string // the reason of each FailRollingUpdateNode
+	failures []string   // the reason of each FailRollingUpdateNode
+	rows     []auditRow // each InsertAuditLog, when audits is set
+}
+
+type auditRow struct {
+	resourceType, resourceID, action string
+	details                          map[string]any
 }
 
 var sqlcQueryName = regexp.MustCompile(`-- name: (\w+)`)
@@ -48,15 +57,29 @@ func queryName(sql string) string {
 }
 
 func (d *memberDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	if name := queryName(sql); name != "FailRollingUpdateNode" {
+	switch name := queryName(sql); {
+	case name == "FailRollingUpdateNode":
+		reason, _ := args[1].(string)
+		d.mu.Lock()
+		d.failures = append(d.failures, reason)
+		d.mu.Unlock()
+		return pgconn.NewCommandTag("UPDATE 0"), nil
+	case d.audits && name == "InsertAuditLog":
+		row := auditRow{details: map[string]any{}}
+		row.resourceType, _ = args[2].(string)
+		row.resourceID, _ = args[3].(string)
+		row.action, _ = args[4].(string)
+		raw, _ := args[5].(json.RawMessage)
+		_ = json.Unmarshal(raw, &row.details)
+		d.mu.Lock()
+		d.rows = append(d.rows, row)
+		d.mu.Unlock()
+	case d.audits && (name == "SetJobNativeCRSPaused" || name == "ClearJobNativeCRSPaused"):
+	default:
 		d.t.Errorf("unexpected write %s", name)
 		return pgconn.CommandTag{}, errors.New("unexpected")
 	}
-	reason, _ := args[1].(string)
-	d.mu.Lock()
-	d.failures = append(d.failures, reason)
-	d.mu.Unlock()
-	return pgconn.NewCommandTag("UPDATE 0"), nil
+	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
 func (d *memberDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
@@ -87,6 +110,19 @@ func (d *memberDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row 
 type rowErr struct{ err error }
 
 func (r rowErr) Scan(...any) error { return r.err }
+
+// rowsOf returns the audit rows the engine wrote for resourceType.
+func (d *memberDB) rowsOf(resourceType string) []auditRow {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []auditRow
+	for _, r := range d.rows {
+		if r.resourceType == resourceType {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 
 // TestNodeSteps_ANodeTheClusterDoesNotHoldIsNeverSentToProxmox: a rolling
 // job's nodes are what the caller named at creation, and every step sends the

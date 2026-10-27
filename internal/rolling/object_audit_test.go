@@ -2,80 +2,19 @@ package rolling
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
-
-// auditDB is a db.DBTX that records the audit rows the engine writes, accepts the
-// two CRS markers, and fails the test for anything else.
-type auditDB struct {
-	t    *testing.T
-	mu   sync.Mutex
-	rows []auditRow
-}
-
-type auditRow struct {
-	resourceType, resourceID, action string
-	details                          map[string]any
-}
-
-func (d *auditDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	switch name := queryName(sql); name {
-	case "InsertAuditLog":
-		row := auditRow{details: map[string]any{}}
-		row.resourceType, _ = args[2].(string)
-		row.resourceID, _ = args[3].(string)
-		row.action, _ = args[4].(string)
-		raw, _ := args[5].(json.RawMessage)
-		_ = json.Unmarshal(raw, &row.details)
-		d.mu.Lock()
-		d.rows = append(d.rows, row)
-		d.mu.Unlock()
-	case "SetJobNativeCRSPaused", "ClearJobNativeCRSPaused":
-	default:
-		d.t.Errorf("unexpected write %s", name)
-		return pgconn.CommandTag{}, errors.New("unexpected")
-	}
-	return pgconn.NewCommandTag("UPDATE 1"), nil
-}
-
-func (d *auditDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-	d.t.Errorf("unexpected query %s", queryName(sql))
-	return nil, errors.New("unexpected")
-}
-
-func (d *auditDB) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
-	d.t.Errorf("unexpected query row %s", queryName(sql))
-	return rowErr{errors.New("unexpected")}
-}
-
-// rowsOf returns what the engine wrote for resourceType.
-func (d *auditDB) rowsOf(resourceType string) []auditRow {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	var out []auditRow
-	for _, r := range d.rows {
-		if r.resourceType == resourceType {
-			out = append(out, r)
-		}
-	}
-	return out
-}
 
 // TestRollingUpdateFilesTheObjectsItChanges: the update disables HA rules and
 // pauses the CRS option, and restores both. Each is filed under the object's own
@@ -89,7 +28,7 @@ func TestRollingUpdateFilesTheObjectsItChanges(t *testing.T) {
 	// setup stands up the engine on a stub Proxmox that refuses the rules named in
 	// refuse (and the options write, if "options" is), lists the cluster options
 	// with auto-rebalance on, and says which rules exist.
-	setup := func(t *testing.T, refuse ...string) (*Orchestrator, *proxmox.Client, *auditDB) {
+	setup := func(t *testing.T, refuse ...string) (*Orchestrator, *proxmox.Client, *memberDB) {
 		t.Helper()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -123,7 +62,7 @@ func TestRollingUpdateFilesTheObjectsItChanges(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewClient: %v", err)
 		}
-		d := &auditDB{t: t}
+		d := &memberDB{t: t, audits: true}
 		o := NewOrchestrator(context.Background(), db.New(d), "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 		return o, client, d
 	}
