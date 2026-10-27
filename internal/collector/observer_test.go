@@ -125,7 +125,8 @@ func (s *observeStore) takeChanges() []string {
 }
 
 // observeFakeClient answers each target from a table and counts the reads. A
-// target with no answer is a 501, as Proxmox answers a path it does not have.
+// target with no answer is a 501, as Proxmox answers a path it does not have; a
+// read without a deadline of its own is refused, as every read must have one.
 type observeFakeClient struct {
 	mu      sync.Mutex
 	answers map[string]observeAnswer
@@ -139,6 +140,9 @@ type observeAnswer struct {
 }
 
 func (f *observeFakeClient) ObserveRead(ctx context.Context, t proxmox.ObserveTarget) (json.RawMessage, error) {
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > observeCallTimeout {
+		return nil, errors.New("a read with no timeout of its own")
+	}
 	if f.block != nil {
 		select {
 		case <-f.block:
@@ -474,6 +478,10 @@ func TestObserverOutcomes(t *testing.T) {
 		before := time.Now()
 		e.client.fail(pathStorage, errors.New("proxmox API error 500"))
 		e.expect("failed read")
+		// An answer that is no list fails the read too, however long it lasts.
+		e.client.set(pathStorage, `null`)
+		e.expect("no list")
+		e.expect("still no list")
 		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","path":"/srv/store01","content":"images,iso","nodes":"pve-01"}]`)
 		e.obs.ObserveAll(context.Background())
 		e.obs.Wait()
