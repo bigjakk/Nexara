@@ -113,6 +113,10 @@ func (*structRows) Conn() *pgx.Conn                              { return nil }
 type auditRowsDBTX struct {
 	rows  []any
 	calls []capturedQuery
+	// missingCluster makes the cluster lookup answer that there is no such cluster;
+	// clusterLookups counts the lookups.
+	missingCluster bool
+	clusterLookups int
 }
 
 func (*auditRowsDBTX) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
@@ -124,7 +128,14 @@ func (d *auditRowsDBTX) Query(_ context.Context, sql string, args ...any) (pgx.R
 	return &structRows{rows: d.rows}, nil
 }
 
-func (*auditRowsDBTX) QueryRow(context.Context, string, ...any) pgx.Row {
+func (d *auditRowsDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if strings.Contains(sql, "-- name: GetCluster :one") {
+		d.clusterLookups++
+		if d.missingCluster {
+			return failRow{err: pgx.ErrNoRows}
+		}
+		return replayRow{row: db.Cluster{}}
+	}
 	return failRow{err: errCaptured}
 }
 

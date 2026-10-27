@@ -30,7 +30,7 @@ func guestHistoryRoute() historyRoute {
 			"it backed up, with that guest's own outcome and times, once the job has finished. Requires " +
 			"view:audit, which shows each task's outcome; a task's exit text, tasks recorded only in the " +
 			"task history and backup-job entries need view:task too, and status changes view:vm or " +
-			"view:container.",
+			"view:container. A cluster that does not exist is a 404.",
 		AuditOnly: "a guest's own permission depends on its type — view:vm or view:container — so the " +
 			"inventory's part of it, its status changes, is filtered on that instead",
 		Parameters: guestVMIDParams(apischema.Properties{}),

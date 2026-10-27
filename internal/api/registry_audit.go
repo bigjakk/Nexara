@@ -314,7 +314,8 @@ func registerAuditEndpoints(reg *Registry, h *handlers.AuditHandler) {
 		Path:   clusterScope + "/audit-log",
 		Description: "List one cluster's audit entries, under the same filters as the instance-wide " +
 			"listing. A ?cluster_id= filter is NOT accepted here: the path already names the cluster the " +
-			"gate authorized, and a second spelling could only disagree with it.",
+			"gate authorized, and a second spelling could only disagree with it. A cluster that does not " +
+			"exist is a 404; the entries of a removed cluster are read from the instance-wide listing.",
 		Group:       "Audit Log",
 		Permissions: clusterCheck("view", "audit"),
 		Parameters:  clusterParams(auditFilterParams(nil)),

@@ -558,3 +558,47 @@ func TestAuditResponses_CarryTheRemovedClusterFlag(t *testing.T) {
 		}
 	}
 }
+
+// The audit rows of a removed cluster are kept (000122), so the two routes that read the rows of
+// the path's cluster ask whether it is still there: one that is gone is a 404 before either reads
+// a row, to a holder of view:audit on every cluster as well. The same requests reach their queries
+// when the cluster exists (TestAuditReadsTreatAnEmptyFilterAsNone, TestHistoryListDropsGuestsTheCallerCannotOpen).
+func TestRoutesReadingAClustersAuditRowsAnswer404ForOneThatIsGone(t *testing.T) {
+	t.Parallel()
+	guestProps := historyTestProps("cluster_id", apischema.StdOption("cluster-id"))
+	guestProps["vmid"] = apischema.Property{Type: apischema.Integer}
+	routes := []struct {
+		name, pattern, target string
+		serve                 func(*testing.T, *db.Queries) fiber.Handler
+	}{
+		{"the guest History", "/clusters/:cluster_id/guests/:vmid/history", "/guests/100/history",
+			func(t *testing.T, q *db.Queries) fiber.Handler {
+				return withRequestParams(t, guestProps, []string{"cluster_id", "vmid"}, NewHistoryHandler(q).Route(GuestHistory()).List)
+			}},
+		{"the cluster's audit list", "/clusters/:cluster_id/audit-log", "/audit-log",
+			func(t *testing.T, q *db.Queries) fiber.Handler {
+				return withRequestParams(t, auditPerClusterMirror(t), []string{"cluster_id"}, NewAuditHandler(q, nil).ListByCluster)
+			}},
+	}
+	for _, rt := range routes {
+		t.Run(rt.name, func(t *testing.T) {
+			t.Parallel()
+			dbtx := &auditRowsDBTX{missingCluster: true}
+			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+			app.Use(func(c fiber.Ctx) error {
+				c.Locals("user_id", uuid.New())
+				c.Locals("rbac_engine", newGrantEngine("view:audit"))
+				return c.Next()
+			})
+			app.Get(rt.pattern, rt.serve(t, db.New(dbtx)))
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+uuid.NewString()+rt.target, nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusNotFound || len(dbtx.calls) != 0 {
+				t.Errorf("answered %d after %d audit queries, want 404 before any", resp.StatusCode, len(dbtx.calls))
+			}
+		})
+	}
+}

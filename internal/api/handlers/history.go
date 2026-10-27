@@ -649,6 +649,14 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 
 	ctx, cancel := context.WithTimeout(c.Context(), historyQueryTimeout)
 	defer cancel()
+	// The audit rows of a removed cluster are kept (000122), so the route has to ask
+	// whether the path's cluster is still there: after the caller's own mistakes, which
+	// answer before any query, and before the first read.
+	if !r.kind.Global {
+		if err := requireCluster(ctx, r.h.queries, clusterID); err != nil {
+			return err
+		}
+	}
 	sel, err := r.kind.Select(ctx, HistoryRequest{Queries: r.h.queries, ClusterID: clusterID, Params: p})
 	if err != nil {
 		return err

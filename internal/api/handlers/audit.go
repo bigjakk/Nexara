@@ -447,6 +447,9 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	if err := requireCluster(c.Context(), h.queries, clusterID); err != nil {
+		return err
+	}
 
 	// Scoped too, though the declared gate has already authorized this
 	// exact cluster and the ClusterID filter pins the result set to it. The

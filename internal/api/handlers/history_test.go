@@ -347,8 +347,9 @@ func TestHistoryListGlobalKindAsksNoCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || len(dbtx.calls) != 1 || len(engine.checks) != 0 {
-		t.Errorf("status %d, %d queries, cluster checks %v; want 200, ListHistory, none", resp.StatusCode, len(dbtx.calls), engine.checks)
+	if resp.StatusCode != http.StatusOK || len(dbtx.calls) != 1 || len(engine.checks) != 0 || dbtx.clusterLookups != 0 {
+		t.Errorf("status %d, %d queries, cluster checks %v, %d cluster lookups; want 200, ListHistory, none, none",
+			resp.StatusCode, len(dbtx.calls), engine.checks, dbtx.clusterLookups)
 	}
 }
 

@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -370,6 +371,21 @@ func vmidFromUPID(upid string) int {
 // ClusterUUID is a convenience helper that converts a uuid.UUID to a valid pgtype.UUID.
 func ClusterUUID(id uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: id, Valid: true}
+}
+
+// requireCluster answers 404 for a cluster that does not exist, through the
+// lookup the other cluster routes use (GetCluster). A route that reads the audit
+// rows of the path's cluster calls it: those rows outlive the cluster (000122), so
+// without it the route would answer for a cluster that is gone, to whoever holds
+// view:audit instance-wide.
+func requireCluster(ctx context.Context, queries *db.Queries, id uuid.UUID) error {
+	if _, err := queries.GetCluster(ctx, id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusNotFound, "Cluster not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
+	}
+	return nil
 }
 
 // UserUUID wraps a uuid.UUID into a non-null pgtype.UUID for audit_log.user_id.

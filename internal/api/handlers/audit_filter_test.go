@@ -224,11 +224,24 @@ func (d *auditFilterDBTX) Query(_ context.Context, sql string, args ...any) (pgx
 }
 
 func (d *auditFilterDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
-	if !strings.Contains(sql, "-- name: CountAuditLogAdvanced :one") {
-		return failRow{err: errCaptured}
+	switch {
+	case strings.Contains(sql, "-- name: GetCluster :one"):
+		return replayRow{row: db.Cluster{}}
+	case strings.Contains(sql, "-- name: CountAuditLogAdvanced :one"):
+		d.count = args
+		return replayRow{row: struct{ N int64 }{}}
 	}
-	d.count = args
-	return replayRow{row: struct{ N int64 }{}}
+	return failRow{err: errCaptured}
+}
+
+// auditPerClusterMirror is the per-cluster listing's parameters: the instance-wide
+// ones, with the cluster in the path in place of the cluster filter.
+func auditPerClusterMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	props := auditListMirror(t)
+	delete(props, "filter_cluster_id")
+	props["cluster_id"] = apischema.Property{Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}
+	return compiledMirror(t, props)
 }
 
 // auditQueryArgs is the argument lists the generated audit queries send for a
@@ -274,10 +287,7 @@ func timeArg(t *testing.T, s string) pgtype.Timestamptz {
 func TestAuditReadsTreatAnEmptyFilterAsNone(t *testing.T) {
 	clusterA, clusterB, user := uuid.New(), uuid.New(), uuid.New()
 
-	perCluster := auditListMirror(t)
-	delete(perCluster, "filter_cluster_id")
-	perCluster["cluster_id"] = apischema.Property{Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}
-	perCluster = compiledMirror(t, perCluster)
+	perCluster := auditPerClusterMirror(t)
 
 	type auditFilter = listFilter[db.ListAuditLogAdvancedParams, db.CountAuditLogAdvancedParams]
 	type (

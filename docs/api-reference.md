@@ -1918,7 +1918,7 @@ Every schedule carries `run_as`: the user whose grants its runs read under, stam
 | GET | `/audit-log/syslog-config` | Get syslog forwarding config |
 | PUT | `/audit-log/syslog-config` | Update syslog config |
 | POST | `/audit-log/syslog-test` | Test syslog forwarding |
-| GET | `/clusters/:id/audit-log` | List audit entries for a cluster (supports `limit`/`offset`) |
+| GET | `/clusters/:id/audit-log` | List audit entries for a cluster (supports `limit`/`offset`). `404` when the cluster does not exist: the entries of a removed cluster are read from `/audit-log` |
 
 Both audit routes share one filter set: `resource_type`, `user_id`, `action`,
 `source`, `start_time`/`end_time` (RFC 3339), and `vmids` — a comma-separated
