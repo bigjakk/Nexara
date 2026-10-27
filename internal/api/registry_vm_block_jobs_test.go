@@ -17,7 +17,8 @@ import (
 )
 
 // blockJobsDB is the cluster store with the guest and its node: what
-// resolveVM reads before it dials the cluster.
+// resolveVM (and resolveCT, which reads the same row as a container) reads
+// before it dials the cluster.
 type blockJobsDB struct {
 	*accessUpdateDB
 	vm   db.Vm
@@ -26,7 +27,7 @@ type blockJobsDB struct {
 
 func (d blockJobsDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	switch {
-	case strings.Contains(sql, "-- name: GetVM :one"):
+	case strings.Contains(sql, "-- name: GetVM :one"), strings.Contains(sql, "-- name: GetContainer :one"):
 		return structRow{d.vm}
 	case strings.Contains(sql, "-- name: GetNode :one"):
 		return structRow{d.node}
