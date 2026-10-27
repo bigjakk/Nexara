@@ -101,8 +101,12 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- it names is covered by some rule's row; an added or removed object, when any
 -- rule's row is found.
 --
--- The lookback for a row's start is bounded to a day before the window, so a
--- change is never weighed against the cluster's whole audit log.
+-- The window opens no earlier than lookback_seconds before the change was seen
+-- (observedLookback says how long and why): after an outage a change's window
+-- would otherwise be the whole gap, and one row from its start would explain
+-- everything found at its end. A task's start is looked for no more than a day
+-- before the window, so a change is never weighed against the cluster's whole
+-- audit log.
 --
 -- A change waits for the pass whose ingest listed every node the cluster calls
 -- online (all_nodes_listed), since the task that explains it may have run on
@@ -122,8 +126,9 @@ WITH rules AS MATERIALIZED (
     FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
 ), pending AS MATERIALIZED (
     SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.node,
-           LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes' AS win_from,
-           c.observed_at + interval '30 seconds'                       AS win_to
+           GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
+                    c.observed_at - make_interval(secs => sqlc.arg('lookback_seconds')::int)) AS win_from,
+           c.observed_at + interval '30 seconds'                                           AS win_to
     FROM cluster_object_changes c
     WHERE c.cluster_id = sqlc.arg('cluster_id')
       AND c.observed_by = 'observer'
@@ -222,8 +227,9 @@ WITH rules AS MATERIALIZED (
     FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
 ), pending AS MATERIALIZED (
     SELECT c.id, c.resource_type, c.resource_id, c.change,
-           LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes' AS win_from,
-           c.observed_at + interval '30 seconds'                       AS win_to
+           GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
+                    c.observed_at - make_interval(secs => sqlc.arg('lookback_seconds')::int)) AS win_from,
+           c.observed_at + interval '30 seconds'                                           AS win_to
     FROM cluster_object_changes c
     WHERE c.cluster_id IS NULL
       AND c.explained IS NULL

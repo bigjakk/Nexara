@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/bigjakk/nexara/internal/auditkey"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -38,11 +40,17 @@ type observedObject struct {
 
 // kindReading is what one read of a kind produced. unread holds the objects it
 // listed but could not read in full (a per-object read failed): they are left
-// exactly as stored, neither compared nor removed.
+// exactly as stored, neither compared nor removed. forget holds the stored
+// objects that went with a parent that is gone (an IP set's entries), which are
+// dropped without a change of their own: the parent's removal is the change.
+// quiet names fields a change limited to which records nothing (Proxmox VE 9's
+// HA group migration, observeHA).
 type kindReading struct {
 	kind    string
 	objects []observedObject
 	unread  map[string]bool
+	forget  map[string]bool
+	quiet   map[string]bool
 }
 
 // observeKind is one kind of a cluster's objects, read once per pass.
@@ -62,7 +70,8 @@ type observeNodeKind struct {
 	read func(ctx context.Context, p *observePass, node db.Node) ([]kindReading, readOutcome)
 }
 
-// observeClusterKinds is read in this order every pass.
+// observeClusterKinds is read in this order every pass, after the HA kinds
+// (observeHA), which are read together.
 var observeClusterKinds = []observeKind{
 	{kind: "pool", read: readPools},
 	{kind: "storage", read: listKind("storage", proxmox.ObserveStorage(), "storage", storageSpec)},
@@ -71,6 +80,22 @@ var observeClusterKinds = []observeKind{
 	{kind: "pci_mapping", read: listKind("pci_mapping", proxmox.ObservePCIMappings(), "id", mappingSpec)},
 	{kind: "metric_server", read: readMetricServers},
 	{kind: "cluster_options", sysAudit: true, read: readClusterOptions},
+	{kind: "sdn_zone", read: sdnKind("sdn_zone", "zones", "zone", sdnZoneSpec)},
+	{kind: "sdn_vnet", read: readSDNVNets},
+	{kind: "sdn_controller", read: sdnKind("sdn_controller", "controllers", "controller", sdnSpec)},
+	{kind: "sdn_ipam", read: sdnKind("sdn_ipam", "ipams", "ipam", sdnSpec)},
+	{kind: "sdn_dns", read: sdnKind("sdn_dns", "dns", "dns", sdnSpec)},
+	{kind: "firewall_options", read: readFirewallOptions},
+	{kind: "firewall_rule", read: readFirewallRules},
+	{kind: "firewall_alias", read: readFirewallAliases},
+	{kind: "firewall_ipset", read: readFirewallIPSets},
+	{kind: "firewall_security_group", read: readFirewallGroups},
+	{kind: "pve_user", read: readAccessUsers},
+	{kind: "pve_group", read: accessKind("pve_group", "groups", "groupid", accessGroupSpec)},
+	{kind: "pve_role", read: accessKind("pve_role", "roles", "roleid", accessRoleSpec)},
+	{kind: "pve_acl", read: readAccessACL},
+	{kind: "acme_account", read: listKind("acme_account", proxmox.ObserveACMEAccounts(), "name", acmeAccountSpec)},
+	{kind: "acme_plugin", read: listKind("acme_plugin", proxmox.ObserveACMEPlugins(), "plugin", acmePluginSpec)},
 }
 
 // observeNodeKinds is read in this order for each online node.
@@ -119,6 +144,37 @@ var (
 		"running-nets-host-mtu"}, nil)
 	// pve-container: lock and parent, as for a VM.
 	lxcConfigSpec = newFieldSpec([]string{"lock", "parent"}, nil)
+
+	// pve-ha-manager API2/HA/Resources.pm index: errors is derived (a group
+	// that does not exist).
+	haResourceSpec = newFieldSpec([]string{"errors"}, nil)
+	// API2/HA/Rules.pm index: order is the rule's place in rules.cfg, which
+	// moves when a rule above it is deleted, and errors is the feasibility
+	// check of the moment, derived from the nodes and the other rules.
+	haRuleSpec = newFieldSpec([]string{"order", "errors"}, nil)
+	// API2/HA/Groups.pm: nodes is re-encoded join(',', keys %$value), unsorted
+	// (HA/Groups.pm encode_value).
+	haGroupSpec = newFieldSpec([]string{"type"}, []string{"nodes"})
+	// pve-network: the plain view carries no pending or state, which only the
+	// pending view does; dropped should a release add them.
+	sdnSpec = newFieldSpec([]string{"pending", "state"}, nil)
+	// Zones/Plugin.pm encode_value: nodes and exitnodes join(',', keys %$value).
+	sdnZoneSpec = newFieldSpec([]string{"pending", "state"}, []string{"nodes", "exitnodes"})
+	// pve-firewall Firewall.pm parse_alias: ipversion is derived from the cidr.
+	firewallAliasSpec = newFieldSpec([]string{"ipversion"}, nil)
+	firewallPlainSpec = newFieldSpec(nil, nil)
+	// pve-access-control API2/User.pm index: realm-type is derived from
+	// domains.cfg, totp-locked and tfa-locked-until are TFA lockout state
+	// (priv/tfa.cfg), and tokens are their own objects. groups is a list.
+	accessUserSpec  = newFieldSpec([]string{"realm-type", "totp-locked", "tfa-locked-until", "tokens"}, []string{"groups"})
+	accessTokenSpec = newFieldSpec(nil, nil)
+	accessGroupSpec = newFieldSpec(nil, []string{"users"})
+	// API2/Role.pm index: special is derived (a built-in role).
+	accessRoleSpec  = newFieldSpec([]string{"special"}, []string{"privs"})
+	acmeAccountSpec = newFieldSpec(nil, nil)
+	// pve-manager API2/ACMEPlugin.pm: nodes is a list; data, the plugin's DNS
+	// API credentials, is a value like any other and is never stored.
+	acmePluginSpec = newFieldSpec(nil, []string{"nodes"})
 )
 
 // acmeConfigField is a node config key that belongs to its ACME settings, filed
@@ -349,6 +405,360 @@ func canonicalRules(items []map[string]json.RawMessage) []string {
 		out = append(out, string(b))
 	}
 	return out
+}
+
+// haMigrationFields are what Proxmox VE 9 rewrites on every HA resource when
+// it migrates the HA groups to rules, with no task (pve-ha-manager Manager.pm
+// $migrate_group_persistently: the group deleted, failback set).
+var haMigrationFields = map[string]bool{"group": true, "failback": true}
+
+// observeHA reads the HA resources, rules and groups, in that order, so the
+// groups are read last. Proxmox VE 9 migrates its groups to rules once every
+// node runs it: it writes the rules (which its rules listing already showed
+// while the groups were there: API2/HA/Rules.pm $get_full_rules_config), takes
+// the group off each resource, then deletes the groups, after which reading
+// them is refused. When that refusal follows groups read before, the groups are
+// forgotten with nothing recorded, and for this pass and the next a resource
+// whose only changes are its group and failback records nothing either.
+func (p *observePass) observeHA(ctx context.Context, sig string) {
+	type haKind struct {
+		kind, idField string
+		target        proxmox.ObserveTarget
+		spec          fieldSpec
+	}
+	kinds := []haKind{
+		{"ha_resource", "sid", proxmox.ObserveHAResources(), haResourceSpec},
+		{"ha_rule", "rule", proxmox.ObserveHARules(), haRuleSpec},
+		{"ha_group", "group", proxmox.ObserveHAGroups(), haGroupSpec},
+	}
+	readAt := time.Now()
+	readings := map[string]kindReading{}
+	for _, k := range kinds {
+		key := p.skipKey(k.kind, "")
+		if p.o.skipped(key) {
+			continue
+		}
+		raw, out, err := p.readWithError(ctx, k.target, p.o.gap)
+		if k.kind == "ha_group" && proxmox.IsGroupsMigratedError(err) && len(p.state["ha_group"]) > 0 {
+			p.o.startHAMigration(p.cluster.ID)
+			p.forgetKind(ctx, "ha_group")
+		}
+		if !p.settle(key, out) {
+			continue
+		}
+		items, ok := decodeList(raw)
+		if !ok {
+			continue
+		}
+		rd := kindReading{kind: k.kind}
+		for _, item := range items {
+			id := stringField(item, k.idField)
+			if !auditkey.ValidID(id) {
+				continue
+			}
+			rd.objects = append(rd.objects, observedObject{
+				id: id, resourceType: k.kind, resourceID: id, fields: k.spec.canonicalFields(item),
+			})
+		}
+		readings[k.kind] = rd
+	}
+	if p.o.haMigrating(p.cluster.ID) {
+		if rd, ok := readings["ha_resource"]; ok {
+			rd.quiet = haMigrationFields
+			readings["ha_resource"] = rd
+		}
+	}
+	for _, k := range kinds {
+		if rd, ok := readings[k.kind]; ok {
+			p.apply(ctx, rd, "", sig, readAt, time.Now())
+		}
+	}
+	p.o.endHAPass(p.cluster.ID)
+}
+
+// sdnKind reads one SDN list keyed by idField.
+func sdnKind(kind, path, idField string, spec fieldSpec) func(context.Context, *observePass) ([]kindReading, readOutcome) {
+	target, err := proxmox.ObserveSDN(path)
+	if err != nil {
+		panic(err)
+	}
+	return listKind(kind, target, idField, spec)
+}
+
+// readSDNVNets reads the vnets, then each vnet's subnets, filed as sdn_subnet
+// / <vnet>/<subnet id> (auditkey.SDNSubnet). A vnet whose subnets cannot be
+// read leaves them as stored; a vnet that is gone takes its subnets with it.
+func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
+	target, _ := proxmox.ObserveSDN("vnets")
+	items, out := p.readList(ctx, target)
+	if out != readOK {
+		return nil, out
+	}
+	vnets := kindReading{kind: "sdn_vnet"}
+	subnets := kindReading{kind: "sdn_subnet", unread: map[string]bool{}, forget: map[string]bool{}}
+	listed := map[string]bool{}
+	for _, item := range items {
+		vnet := stringField(item, "vnet")
+		if !auditkey.ValidID(vnet) {
+			continue
+		}
+		listed[vnet] = true
+		vnets.objects = append(vnets.objects, observedObject{
+			id: vnet, resourceType: "sdn_vnet", resourceID: vnet, fields: sdnSpec.canonicalFields(item),
+		})
+		t, err := proxmox.ObserveSDNSubnets(vnet)
+		if err != nil {
+			continue
+		}
+		entries, out := p.readList(ctx, t)
+		if out != readOK {
+			p.markChildren(subnets.unread, "sdn_subnet", vnet)
+			continue
+		}
+		for _, e := range entries {
+			id := auditkey.SDNSubnet(vnet, stringField(e, "subnet"))
+			if stringField(e, "subnet") == "" || !auditkey.ValidID(id) {
+				continue
+			}
+			subnets.objects = append(subnets.objects, observedObject{
+				id: id, resourceType: "sdn_subnet", resourceID: id, fields: sdnSpec.canonicalFields(e),
+			})
+		}
+	}
+	p.forgetOrphans(subnets.forget, "sdn_subnet", listed)
+	return []kindReading{vnets, subnets}, readOK
+}
+
+// readFirewallOptions reads the cluster firewall's options as one object,
+// firewall_options / cluster.
+func readFirewallOptions(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
+	target, _ := proxmox.ObserveFirewall("options")
+	obj, out := p.readObject(ctx, target)
+	if out != readOK {
+		return nil, out
+	}
+	return []kindReading{{kind: "firewall_options", objects: []observedObject{{
+		id: "cluster", resourceType: "firewall_options", resourceID: "cluster", fields: firewallPlainSpec.canonicalFields(obj),
+	}}}}, readOK
+}
+
+// readFirewallRules reads the cluster's rule set as one ordered list,
+// firewall_rule / cluster: a rule has no id but its position, which moves.
+func readFirewallRules(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
+	target, _ := proxmox.ObserveFirewall("rules")
+	items, out := p.readList(ctx, target)
+	if out != readOK {
+		return nil, out
+	}
+	return []kindReading{{kind: "firewall_rule", objects: []observedObject{{
+		id: "cluster", resourceType: "firewall_rule", resourceID: "cluster",
+		lists: map[string][]string{"rules": canonicalRules(items)},
+	}}}}, readOK
+}
+
+// readFirewallAliases lists the aliases under the lower-case name Proxmox
+// stores them by (auditkey.FirewallName); the name as typed is a field.
+func readFirewallAliases(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
+	target, _ := proxmox.ObserveFirewall("aliases")
+	items, out := p.readList(ctx, target)
+	if out != readOK {
+		return nil, out
+	}
+	rd := kindReading{kind: "firewall_alias"}
+	for _, item := range items {
+		id := auditkey.FirewallName(stringField(item, "name"))
+		if !auditkey.ValidID(id) {
+			continue
+		}
+		rd.objects = append(rd.objects, observedObject{
+			id: id, resourceType: "firewall_alias", resourceID: id, fields: firewallAliasSpec.canonicalFields(item),
+		})
+	}
+	return []kindReading{rd}, readOK
+}
+
+// readFirewallIPSets lists the IP sets, then each set's entries, filed as
+// firewall_ipset_entry / <set>/<entry as the set stores it>
+// (auditkey.IPSetEntry).
+func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
+	target, _ := proxmox.ObserveFirewall("ipset")
+	items, out := p.readList(ctx, target)
+	if out != readOK {
+		return nil, out
+	}
+	sets := kindReading{kind: "firewall_ipset"}
+	entries := kindReading{kind: "firewall_ipset_entry", unread: map[string]bool{}, forget: map[string]bool{}}
+	listed := map[string]bool{}
+	for _, item := range items {
+		name := stringField(item, "name")
+		id := auditkey.FirewallName(name)
+		if name == "" || !auditkey.ValidID(id) {
+			continue
+		}
+		listed[id] = true
+		sets.objects = append(sets.objects, observedObject{
+			id: id, resourceType: "firewall_ipset", resourceID: id, fields: firewallPlainSpec.canonicalFields(item),
+		})
+		t, err := proxmox.ObserveFirewallIPSet(name)
+		if err != nil {
+			continue
+		}
+		list, out := p.readList(ctx, t)
+		if out != readOK {
+			p.markChildren(entries.unread, "firewall_ipset_entry", id)
+			continue
+		}
+		for _, e := range list {
+			cidr := stringField(e, "cidr")
+			key := auditkey.IPSetEntry(name, cidr)
+			if cidr == "" || !auditkey.ValidID(key) {
+				continue
+			}
+			entries.objects = append(entries.objects, observedObject{
+				id: key, resourceType: "firewall_ipset_entry", resourceID: key, fields: firewallPlainSpec.canonicalFields(e),
+			})
+		}
+	}
+	p.forgetOrphans(entries.forget, "firewall_ipset_entry", listed)
+	return []kindReading{sets, entries}, readOK
+}
+
+// readFirewallGroups lists the security groups, then each group's rules as
+// one ordered list, firewall_security_group_rule / <group>.
+func readFirewallGroups(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
+	target, _ := proxmox.ObserveFirewall("groups")
+	items, out := p.readList(ctx, target)
+	if out != readOK {
+		return nil, out
+	}
+	groups := kindReading{kind: "firewall_security_group"}
+	rules := kindReading{kind: "firewall_security_group_rule", unread: map[string]bool{}, forget: map[string]bool{}}
+	listed := map[string]bool{}
+	for _, item := range items {
+		name := stringField(item, "group")
+		id := auditkey.FirewallName(name)
+		if name == "" || !auditkey.ValidID(id) {
+			continue
+		}
+		listed[id] = true
+		groups.objects = append(groups.objects, observedObject{
+			id: id, resourceType: "firewall_security_group", resourceID: id, fields: firewallPlainSpec.canonicalFields(item),
+		})
+		t, err := proxmox.ObserveFirewallGroup(name)
+		if err != nil {
+			continue
+		}
+		list, out := p.readList(ctx, t)
+		if out != readOK {
+			rules.unread[id] = true
+			continue
+		}
+		rules.objects = append(rules.objects, observedObject{
+			id: id, resourceType: "firewall_security_group_rule", resourceID: id,
+			lists: map[string][]string{"rules": canonicalRules(list)},
+		})
+	}
+	for id := range p.state["firewall_security_group_rule"] {
+		if !listed[id] {
+			rules.forget[id] = true
+		}
+	}
+	return []kindReading{groups, rules}, readOK
+}
+
+// readAccessUsers reads the users and, from the same listing, their API
+// tokens, pve_token / user@realm!tokenid.
+func readAccessUsers(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
+	items, out := p.readList(ctx, proxmox.ObserveAccessUsers())
+	if out != readOK {
+		return nil, out
+	}
+	users := kindReading{kind: "pve_user"}
+	tokens := kindReading{kind: "pve_token"}
+	for _, item := range items {
+		userid := stringField(item, "userid")
+		if !auditkey.ValidID(userid) {
+			continue
+		}
+		users.objects = append(users.objects, observedObject{
+			id: userid, resourceType: "pve_user", resourceID: userid, fields: accessUserSpec.canonicalFields(item),
+		})
+		var list []map[string]json.RawMessage
+		_ = json.Unmarshal(item["tokens"], &list)
+		for _, tok := range list {
+			id := userid + "!" + stringField(tok, "tokenid")
+			if stringField(tok, "tokenid") == "" || !auditkey.ValidID(id) {
+				continue
+			}
+			tokens.objects = append(tokens.objects, observedObject{
+				id: id, resourceType: "pve_token", resourceID: id, fields: accessTokenSpec.canonicalFields(tok),
+			})
+		}
+	}
+	return []kindReading{users, tokens}, readOK
+}
+
+// accessKind reads one access list keyed by idField.
+func accessKind(kind, part, idField string, spec fieldSpec) func(context.Context, *observePass) ([]kindReading, readOutcome) {
+	target, err := proxmox.ObserveAccess(part)
+	if err != nil {
+		panic(err)
+	}
+	return listKind(kind, target, idField, spec)
+}
+
+// readAccessACL reads the ACL as one object per path, pve_acl / <path as
+// Proxmox normalises it> (auditkey.ACLPath): its users, groups and tokens are
+// each the set of (who, role, propagate) granted there. Never compared by who:
+// the field names are the three kinds of grantee.
+func readAccessACL(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
+	target, _ := proxmox.ObserveAccess("acl")
+	items, out := p.readList(ctx, target)
+	if out != readOK {
+		return nil, out
+	}
+	grants := map[string]map[string][]json.RawMessage{}
+	for _, item := range items {
+		path := auditkey.ACLPath(stringField(item, "path"))
+		field := map[string]string{"user": "users", "group": "groups", "token": "tokens"}[stringField(item, "type")]
+		if !auditkey.ValidID(path) || field == "" {
+			continue
+		}
+		if grants[path] == nil {
+			grants[path] = map[string][]json.RawMessage{}
+		}
+		grant, _ := json.Marshal(stringField(item, "ugid") + ":" + stringField(item, "roleid") + ":" + stringField(item, "propagate"))
+		grants[path][field] = append(grants[path][field], grant)
+	}
+	rd := kindReading{kind: "pve_acl"}
+	for path, byField := range grants {
+		fields := map[string]string{}
+		for f, list := range byField {
+			fields[f], _ = canonicalSet(jsonArray(list))
+		}
+		rd.objects = append(rd.objects, observedObject{id: path, resourceType: "pve_acl", resourceID: path, fields: fields})
+	}
+	return []kindReading{rd}, readOK
+}
+
+// markChildren marks the stored objects of kind under parent unread.
+func (p *observePass) markChildren(unread map[string]bool, kind, parent string) {
+	for id := range p.state[kind] {
+		if strings.HasPrefix(id, parent+"/") {
+			unread[id] = true
+		}
+	}
+}
+
+// forgetOrphans marks the stored objects of kind whose parent is no longer
+// listed to be forgotten. A parent's name holds no "/" (pve-firewall and
+// pve-network both refuse one), so it is what precedes the first.
+func (p *observePass) forgetOrphans(forget map[string]bool, kind string, listed map[string]bool) {
+	for id := range p.state[kind] {
+		if parent, _, _ := strings.Cut(id, "/"); !listed[parent] {
+			forget[id] = true
+		}
+	}
 }
 
 // guestObject is a guest's configuration as one object: vm or container / its

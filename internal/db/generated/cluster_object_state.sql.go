@@ -27,12 +27,13 @@ WITH rules AS MATERIALIZED (
     FROM jsonb_array_elements($1::jsonb) AS e
 ), pending AS MATERIALIZED (
     SELECT c.id, c.resource_type, c.resource_id, c.change,
-           LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes' AS win_from,
-           c.observed_at + interval '30 seconds'                       AS win_to
+           GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
+                    c.observed_at - make_interval(secs => $2::int)) AS win_from,
+           c.observed_at + interval '30 seconds'                                           AS win_to
     FROM cluster_object_changes c
     WHERE c.cluster_id IS NULL
       AND c.explained IS NULL
-      AND c.observed_at < $2::timestamptz
+      AND c.observed_at < $3::timestamptz
 ), hits AS (
     SELECT p.id, r.field_re
     FROM pending p
@@ -61,8 +62,9 @@ WHERE c.id = p.id
 `
 
 type ClassifyGlobalObjectChangesParams struct {
-	Rules         json.RawMessage `json:"rules"`
-	SettledBefore time.Time       `json:"settled_before"`
+	Rules           json.RawMessage `json:"rules"`
+	LookbackSeconds int32           `json:"lookback_seconds"`
+	SettledBefore   time.Time       `json:"settled_before"`
 }
 
 // ClassifyGlobalObjectChanges is ClassifyObservedChanges for the rows of a
@@ -70,7 +72,7 @@ type ClassifyGlobalObjectChangesParams struct {
 // belong to no cluster: their explaining rows are found by resource_type and
 // resource_id alone ('id' rules only), and there is no node list to wait for.
 func (q *Queries) ClassifyGlobalObjectChanges(ctx context.Context, arg ClassifyGlobalObjectChangesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, classifyGlobalObjectChanges, arg.Rules, arg.SettledBefore)
+	result, err := q.db.Exec(ctx, classifyGlobalObjectChanges, arg.Rules, arg.LookbackSeconds, arg.SettledBefore)
 	if err != nil {
 		return 0, err
 	}
@@ -91,14 +93,15 @@ WITH rules AS MATERIALIZED (
     FROM jsonb_array_elements($1::jsonb) AS e
 ), pending AS MATERIALIZED (
     SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.node,
-           LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes' AS win_from,
-           c.observed_at + interval '30 seconds'                       AS win_to
+           GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
+                    c.observed_at - make_interval(secs => $2::int)) AS win_from,
+           c.observed_at + interval '30 seconds'                                           AS win_to
     FROM cluster_object_changes c
-    WHERE c.cluster_id = $2
+    WHERE c.cluster_id = $3
       AND c.observed_by = 'observer'
       AND c.explained IS NULL
-      AND c.observed_at < $3::timestamptz
-      AND ($4::bool OR c.observed_at < $5::timestamptz)
+      AND c.observed_at < $4::timestamptz
+      AND ($5::bool OR c.observed_at < $6::timestamptz)
 ), candidates AS (
     -- One arm per match_key, so each reads audit_log through the index its key
     -- can use.
@@ -175,11 +178,12 @@ WHERE c.id = p.id
 `
 
 type ClassifyObservedChangesParams struct {
-	Rules          json.RawMessage `json:"rules"`
-	ClusterID      uuid.UUID       `json:"cluster_id"`
-	SettledBefore  time.Time       `json:"settled_before"`
-	AllNodesListed bool            `json:"all_nodes_listed"`
-	GiveUpBefore   time.Time       `json:"give_up_before"`
+	Rules           json.RawMessage `json:"rules"`
+	LookbackSeconds int32           `json:"lookback_seconds"`
+	ClusterID       uuid.UUID       `json:"cluster_id"`
+	SettledBefore   time.Time       `json:"settled_before"`
+	AllNodesListed  bool            `json:"all_nodes_listed"`
+	GiveUpBefore    time.Time       `json:"give_up_before"`
 }
 
 // ClassifyObservedChanges decides, once, whether something already on record
@@ -203,8 +207,12 @@ type ClassifyObservedChangesParams struct {
 // it names is covered by some rule's row; an added or removed object, when any
 // rule's row is found.
 //
-// The lookback for a row's start is bounded to a day before the window, so a
-// change is never weighed against the cluster's whole audit log.
+// The window opens no earlier than lookback_seconds before the change was seen
+// (observedLookback says how long and why): after an outage a change's window
+// would otherwise be the whole gap, and one row from its start would explain
+// everything found at its end. A task's start is looked for no more than a day
+// before the window, so a change is never weighed against the cluster's whole
+// audit log.
 //
 // A change waits for the pass whose ingest listed every node the cluster calls
 // online (all_nodes_listed), since the task that explains it may have run on
@@ -213,6 +221,7 @@ type ClassifyObservedChangesParams struct {
 func (q *Queries) ClassifyObservedChanges(ctx context.Context, arg ClassifyObservedChangesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, classifyObservedChanges,
 		arg.Rules,
+		arg.LookbackSeconds,
 		arg.ClusterID,
 		arg.SettledBefore,
 		arg.AllNodesListed,

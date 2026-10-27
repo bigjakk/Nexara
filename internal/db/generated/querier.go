@@ -234,8 +234,12 @@ type Querier interface {
 	// it names is covered by some rule's row; an added or removed object, when any
 	// rule's row is found.
 	//
-	// The lookback for a row's start is bounded to a day before the window, so a
-	// change is never weighed against the cluster's whole audit log.
+	// The window opens no earlier than lookback_seconds before the change was seen
+	// (observedLookback says how long and why): after an outage a change's window
+	// would otherwise be the whole gap, and one row from its start would explain
+	// everything found at its end. A task's start is looked for no more than a day
+	// before the window, so a change is never weighed against the cluster's whole
+	// audit log.
 	//
 	// A change waits for the pass whose ingest listed every node the cluster calls
 	// online (all_nodes_listed), since the task that explains it may have run on

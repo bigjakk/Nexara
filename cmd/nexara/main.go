@@ -670,6 +670,7 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 			if err != nil {
 				logger.Warn("object observer disabled", "error", err)
 			} else {
+				syncer.SetObjectObserveInterval(observer.Interval())
 				go func() {
 					defer func() {
 						if r := recover(); r != nil {

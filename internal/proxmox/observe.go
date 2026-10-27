@@ -74,6 +74,87 @@ func ObserveMetricServer(id string) (ObserveTarget, error) {
 // whole file.
 func ObserveClusterOptions() ObserveTarget { return ObserveTarget{"/cluster/options"} }
 
+// ObserveHAResources, ObserveHARules and ObserveHAGroups list the HA
+// configuration. Proxmox VE 8 has no rules (501); Proxmox VE 9 answers the
+// groups read with an error once its groups have been migrated to rules.
+func ObserveHAResources() ObserveTarget { return ObserveTarget{"/cluster/ha/resources"} }
+
+// ObserveHARules: see ObserveHAResources.
+func ObserveHARules() ObserveTarget { return ObserveTarget{"/cluster/ha/rules"} }
+
+// ObserveHAGroups: see ObserveHAResources.
+func ObserveHAGroups() ObserveTarget { return ObserveTarget{"/cluster/ha/groups"} }
+
+// ObserveSDN lists one kind of the SDN configuration — zones, vnets,
+// controllers, ipams or dns — in its plain view: the configuration as edited,
+// which an apply copies to the running one (neither running nor pending is
+// asked for).
+func ObserveSDN(kind string) (ObserveTarget, error) {
+	switch kind {
+	case "zones", "vnets", "controllers", "ipams", "dns":
+		return ObserveTarget{"/cluster/sdn/" + kind}, nil
+	}
+	return ObserveTarget{}, fmt.Errorf("%w: SDN kind %q", ErrInvalidInput, kind)
+}
+
+// ObserveSDNSubnets lists one vnet's subnets.
+func ObserveSDNSubnets(vnet string) (ObserveTarget, error) {
+	if err := validatePathSegment("vnet", vnet); err != nil {
+		return ObserveTarget{}, err
+	}
+	return ObserveTarget{"/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets"}, nil
+}
+
+// ObserveFirewall reads one part of the cluster firewall: its options, rules,
+// aliases, IP sets or security groups.
+func ObserveFirewall(part string) (ObserveTarget, error) {
+	switch part {
+	case "options", "rules", "aliases", "ipset", "groups":
+		return ObserveTarget{"/cluster/firewall/" + part}, nil
+	}
+	return ObserveTarget{}, fmt.Errorf("%w: firewall part %q", ErrInvalidInput, part)
+}
+
+// ObserveFirewallIPSet lists one IP set's entries.
+func ObserveFirewallIPSet(name string) (ObserveTarget, error) {
+	if err := validatePathSegment("IP set", name); err != nil {
+		return ObserveTarget{}, err
+	}
+	return ObserveTarget{"/cluster/firewall/ipset/" + url.PathEscape(name)}, nil
+}
+
+// ObserveFirewallGroup lists one security group's rules, in order.
+func ObserveFirewallGroup(group string) (ObserveTarget, error) {
+	if err := validatePathSegment("security group", group); err != nil {
+		return ObserveTarget{}, err
+	}
+	return ObserveTarget{"/cluster/firewall/groups/" + url.PathEscape(group)}, nil
+}
+
+// ObserveAccessUsers lists the users with their groups and API tokens
+// (full=1), which spares a token listing per user. A token's secret is never
+// returned.
+func ObserveAccessUsers() ObserveTarget {
+	return ObserveTarget{"/access/users?" + url.Values{"full": {"1"}}.Encode()}
+}
+
+// ObserveAccess lists the groups, the roles or the ACL.
+func ObserveAccess(part string) (ObserveTarget, error) {
+	switch part {
+	case "groups", "roles", "acl":
+		return ObserveTarget{"/access/" + part}, nil
+	}
+	return ObserveTarget{}, fmt.Errorf("%w: access part %q", ErrInvalidInput, part)
+}
+
+// ObserveACMEAccounts lists the ACME accounts by name: an account's details
+// are root@pam's alone, which no API token is.
+func ObserveACMEAccounts() ObserveTarget { return ObserveTarget{"/cluster/acme/account"} }
+
+// ObserveACMEPlugins lists the ACME challenge plugins, their DNS API
+// credentials among them; it needs Sys.Modify on "/".
+func ObserveACMEPlugins() ObserveTarget { return ObserveTarget{"/cluster/acme/plugins"} }
+
 // ObserveNodeNetwork lists a node's network interfaces as they will be after
 // the pending changes are applied (interfaces.new, when there is one).
 func ObserveNodeNetwork(node string) (ObserveTarget, error) {

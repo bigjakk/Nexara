@@ -328,6 +328,10 @@ type Syncer struct {
 	backupLogTimeouts    sync.Map                // backup job UPID → reads of its log that ran out their own time
 	cephMu               sync.Mutex              // guards cephSeen
 	cephSeen             map[uuid.UUID]*cephSeen // each cluster's last Ceph reading, for the change diff
+
+	// objectObserveInterval is OBJECT_OBSERVE_INTERVAL, which bounds how far
+	// back an observed change's explanation is looked for (observedLookback).
+	objectObserveInterval time.Duration
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
@@ -476,6 +480,12 @@ func (s *Syncer) pbsProxmoxClient(ctx context.Context, server db.PbsServer) (PBS
 		return nil, fmt.Errorf("create pbs client: %w", err)
 	}
 	return client, nil
+}
+
+// SetObjectObserveInterval tells the syncer the observer's cadence, which the
+// classification of its changes looks back by (observedLookback).
+func (s *Syncer) SetObjectObserveInterval(d time.Duration) {
+	s.objectObserveInterval = d
 }
 
 // SetHealthMonitor attaches a health monitor to the syncer.

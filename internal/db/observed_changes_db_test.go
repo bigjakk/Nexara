@@ -197,6 +197,15 @@ func TestObservedChanges(t *testing.T) {
 	audit(observedCluster, ago(301), "node", "pve-01", 0, "create_directory", map[string]any{"upid": upid("dircreate", 9)})
 	addedUnexplained := seed(observedCluster, "storage", "store05", 0, "added", "", nil, ago(400))
 
+	// The look-back: a change first seen after an outage opens its window an
+	// hour before it was seen at the most, however long the gap.
+	afterOutage := seed(observedCluster, "storage", "store09", 0, "changed", "", []string{"nodes"}, ago(500))
+	exec("an outage's gap", `UPDATE cluster_object_changes SET last_seen_at = $2 WHERE id = $1`, afterOutage, ago(800))
+	audit(observedCluster, ago(700), "storage", "store09", 0, "update", nil)
+	afterOutageRecent := seed(observedCluster, "storage", "store10", 0, "changed", "", []string{"nodes"}, ago(500))
+	exec("an outage's gap", `UPDATE cluster_object_changes SET last_seen_at = $2 WHERE id = $1`, afterOutageRecent, ago(800))
+	audit(observedCluster, ago(530), "storage", "store10", 0, "update", nil)
+
 	// Timing and scope.
 	fresh := seed(observedCluster, "storage", "store06", 0, "changed", "", []string{"nodes"}, ago(1))
 	nothingOnRecord := seed(observedCluster, "storage", "store07", 0, "changed", "", []string{"nodes"}, ago(90))
@@ -223,8 +232,8 @@ func TestObservedChanges(t *testing.T) {
 	classify := func(allListed bool) {
 		t.Helper()
 		if _, err := q.ClassifyObservedChanges(ctx, gen.ClassifyObservedChangesParams{
-			Rules: rules, ClusterID: observedCluster, SettledBefore: ago(5), AllNodesListed: allListed,
-			GiveUpBefore: now.Add(-24 * time.Hour),
+			Rules: rules, LookbackSeconds: 3600, ClusterID: observedCluster, SettledBefore: ago(5),
+			AllNodesListed: allListed, GiveUpBefore: now.Add(-24 * time.Hour),
 		}); err != nil {
 			t.Fatalf("classify: %v", err)
 		}
@@ -274,6 +283,8 @@ func TestObservedChanges(t *testing.T) {
 		{"a revert of the node's pending network", byNode, "explained"},
 		{"added by a disk task", addedByTask, "explained"},
 		{"added, nothing on record", addedUnexplained, "shown"},
+		{"after an outage, by a row from the gap's start", afterOutage, "shown"},
+		{"after an outage, by a row within the look-back", afterOutageRecent, "explained"},
 		{"seen too recently", fresh, "waiting"},
 		{"settled, nothing on record", nothingOnRecord, "shown"},
 		{"another writer's row", notMine, "waiting"},
@@ -407,7 +418,7 @@ func TestObservedGlobalChanges(t *testing.T) {
 	rules, _ := json.Marshal([]map[string]any{{"kind": "pbs_server", "change": "", "audit_type": "pbs_server",
 		"match_key": "id", "untasked": false, "action_re": "", "except_re": "", "worker_re": "", "field_re": ""}})
 	if _, err := q.ClassifyGlobalObjectChanges(ctx, gen.ClassifyGlobalObjectChangesParams{
-		Rules: rules, SettledBefore: time.Now().Add(-5 * time.Minute),
+		Rules: rules, LookbackSeconds: 3600, SettledBefore: time.Now().Add(-5 * time.Minute),
 	}); err != nil {
 		t.Fatalf("classify: %v", err)
 	}

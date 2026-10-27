@@ -329,6 +329,83 @@ func TestObserverKinds(t *testing.T) {
 				`{"pos":1,"type":"in","action":"ACCEPT","dport":"22"}]`},
 			want: "changed node/pve-01 [firewall_rules]", value: "8006",
 			detail: `{"counts":{"firewall_rules":{"added":1,"removed":0}}}`},
+		{kind: "ha_resource",
+			base:  answers{"/cluster/ha/resources": `[{"sid":"vm:100","type":"vm","state":"started","digest":"h1"}]`},
+			noise: answers{"/cluster/ha/resources": `[{"sid":"vm:100","type":"vm","state":"started","digest":"h2","errors":{"group":"x"}}]`},
+			edit:  answers{"/cluster/ha/resources": `[{"sid":"vm:100","type":"vm","state":"started","max_restart":3}]`},
+			want:  "changed ha_resource/vm:100 [max_restart]", value: `"3"`},
+		{kind: "ha_rule",
+			base:  answers{"/cluster/ha/rules": `[{"rule":"apart","type":"resource-affinity","resources":"vm:100,vm:101","order":1,"digest":"r1"}]`},
+			noise: answers{"/cluster/ha/rules": `[{"rule":"apart","type":"resource-affinity","resources":"vm:100,vm:101","order":2,"errors":{"x":"y"}}]`},
+			edit:  answers{"/cluster/ha/rules": `[{"rule":"apart","type":"resource-affinity","resources":"vm:100,vm:101","comment":"spread"}]`},
+			want:  "changed ha_rule/apart [comment]", value: "spread"},
+		{kind: "ha_group",
+			base:  answers{"/cluster/ha/groups": `[{"group":"prefer01","type":"group","nodes":"pve-01:2,pve-02:1","digest":"g1"}]`},
+			noise: answers{"/cluster/ha/groups": `[{"group":"prefer01","type":"group","nodes":"pve-02:1,pve-01:2","digest":"g2"}]`},
+			edit:  answers{"/cluster/ha/groups": `[{"group":"prefer01","type":"group","nodes":"pve-02:1,pve-01:2","restricted":1}]`},
+			want:  "changed ha_group/prefer01 [restricted]", value: `"1"`},
+		{kind: "sdn_zone",
+			base:  answers{"/cluster/sdn/zones": `[{"zone":"zone01","type":"simple","nodes":"pve-01,pve-02","digest":"z1"}]`},
+			noise: answers{"/cluster/sdn/zones": `[{"zone":"zone01","type":"simple","nodes":"pve-02,pve-01","digest":"z2"}]`},
+			edit:  answers{"/cluster/sdn/zones": `[{"zone":"zone01","type":"simple","nodes":"pve-02,pve-01","ipam":"pve"}]`},
+			want:  "changed sdn_zone/zone01 [ipam]", value: `"pve"`},
+		{kind: "sdn_subnet",
+			base: answers{"/cluster/sdn/vnets": `[{"vnet":"vnet01","zone":"zone01"}]`,
+				"/cluster/sdn/vnets/vnet01/subnets": `[{"subnet":"zone01-192.0.2.0-24","gateway":"192.0.2.1","digest":"s1"}]`},
+			edit: answers{"/cluster/sdn/vnets/vnet01/subnets": `[{"subnet":"zone01-192.0.2.0-24","gateway":"192.0.2.254"}]`},
+			want: "changed sdn_subnet/vnet01/zone01-192.0.2.0-24 [gateway]", value: "192.0.2.254"},
+		{kind: "sdn_ipam",
+			base: answers{"/cluster/sdn/ipams": `[{"ipam":"netbox01","type":"netbox","url":"https://192.0.2.60","token":"s3cr3t"}]`},
+			edit: answers{"/cluster/sdn/ipams": `[{"ipam":"netbox01","type":"netbox","url":"https://192.0.2.60","token":"n3wsecret"}]`},
+			want: "changed sdn_ipam/netbox01 [token]", value: "n3wsecret"},
+		{kind: "firewall_options",
+			base:  answers{"/cluster/firewall/options": `{"enable":1,"policy_in":"DROP","digest":"o1"}`},
+			noise: answers{"/cluster/firewall/options": `{"enable":true,"policy_in":"DROP","digest":"o2"}`},
+			edit:  answers{"/cluster/firewall/options": `{"enable":1,"policy_in":"ACCEPT"}`},
+			want:  "changed firewall_options/cluster [policy_in]", value: "ACCEPT"},
+		{kind: "firewall_rule",
+			base:  answers{"/cluster/firewall/rules": `[{"pos":0,"type":"in","action":"ACCEPT","dport":"22","digest":"f1"}]`},
+			noise: answers{"/cluster/firewall/rules": `[{"pos":0,"type":"in","action":"ACCEPT","dport":"22","digest":"f2","ipversion":4}]`},
+			edit:  answers{"/cluster/firewall/rules": `[{"pos":0,"type":"in","action":"ACCEPT","dport":"2222"}]`},
+			want:  "changed firewall_rule/cluster [rules]", value: "2222",
+			detail: `{"counts":{"rules":{"added":1,"removed":1}}}`},
+		{kind: "firewall_alias",
+			base:  answers{"/cluster/firewall/aliases": `[{"name":"WebNet","cidr":"192.0.2.0/24","digest":"a1","ipversion":4}]`},
+			noise: answers{"/cluster/firewall/aliases": `[{"name":"WebNet","cidr":"192.0.2.0/24","digest":"a2","ipversion":6}]`},
+			edit:  answers{"/cluster/firewall/aliases": `[{"name":"WebNet","cidr":"192.0.2.0/24","comment":"front"}]`},
+			want:  "changed firewall_alias/webnet [comment]", value: "front"},
+		{kind: "firewall_ipset_entry",
+			base: answers{"/cluster/firewall/ipset": `[{"name":"blocked","digest":"s1"}]`,
+				"/cluster/firewall/ipset/blocked": `[{"cidr":"192.0.2.0/24","digest":"e1"}]`},
+			edit: answers{"/cluster/firewall/ipset/blocked": `[{"cidr":"192.0.2.0/24","nomatch":1}]`},
+			want: "changed firewall_ipset_entry/blocked/192.0.2.0/24 [nomatch]", value: `"1"`},
+		{kind: "firewall_security_group_rule",
+			base: answers{"/cluster/firewall/groups": `[{"group":"web","digest":"g1"}]`,
+				"/cluster/firewall/groups/web": `[{"pos":0,"type":"in","action":"ACCEPT","dport":"443"}]`},
+			edit: answers{"/cluster/firewall/groups/web": `[{"pos":0,"type":"in","action":"ACCEPT","dport":"8443"}]`},
+			want: "changed firewall_security_group_rule/web [rules]", value: "8443"},
+		{kind: "pve_token",
+			base: answers{"/access/users?full=1": `[{"userid":"user01@pve","enable":1,"groups":"ops,admins",` +
+				`"tokens":[{"tokenid":"token01","expire":0,"privsep":1}]}]`},
+			noise: answers{"/access/users?full=1": `[{"userid":"user01@pve","enable":1,"groups":"admins,ops","totp-locked":true,` +
+				`"tfa-locked-until":1700000000,"realm-type":"pve","tokens":[{"tokenid":"token01","expire":0,"privsep":1}]}]`},
+			edit: answers{"/access/users?full=1": `[{"userid":"user01@pve","enable":1,"groups":"admins,ops",` +
+				`"tokens":[{"tokenid":"token01","expire":0,"privsep":1,"comment":"ci"}]}]`},
+			want: "changed pve_token/user01@pve!token01 [comment]", value: `"ci"`},
+		{kind: "pve_role",
+			base:  answers{"/access/roles": `[{"roleid":"Auditors","privs":"Sys.Audit,VM.Audit","special":0}]`},
+			noise: answers{"/access/roles": `[{"roleid":"Auditors","privs":"VM.Audit,Sys.Audit","special":0}]`},
+			edit:  answers{"/access/roles": `[{"roleid":"Auditors","privs":"VM.Audit,Sys.Audit,Datastore.Audit","special":0}]`},
+			want:  "changed pve_role/Auditors [privs]", value: "Datastore"},
+		{kind: "pve_acl",
+			base: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1}]`},
+			edit: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1},` +
+				`{"path":"/vms/100","type":"group","ugid":"ops","roleid":"PVEAuditor","propagate":0}]`},
+			want: "changed pve_acl//vms/100 [groups]", value: "PVEAuditor"},
+		{kind: "acme_plugin",
+			base: answers{"/cluster/acme/plugins": `[{"plugin":"dns01","type":"dns","api":"cf","data":"QUJDREVG","digest":"p1"}]`},
+			edit: answers{"/cluster/acme/plugins": `[{"plugin":"dns01","type":"dns","api":"cf","data":"WllYV1ZV","digest":"p2"}]`},
+			want: "changed acme_plugin/dns01 [data]", value: "WllYV1ZV"},
 		{kind: "vm",
 			base: answers{pathGuest: `{"name":"linux01","memory":"2048","cores":2,"digest":"g1"}`},
 			noise: answers{pathGuest: `{"name":"linux01","memory":2048,"cores":"2","digest":"g2","lock":"backup","parent":"snap1",` +
@@ -487,6 +564,35 @@ func TestObserverOutcomes(t *testing.T) {
 		e.client.set(pathNet, `[`+bridge+`,{"iface":"vmbr1","type":"bridge"}]`)
 		e.expect("the NIC gone")
 	})
+	t.Run("Proxmox VE 9's HA group migration records nothing", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.client.set("/cluster/ha/groups", `[{"group":"prefer01","type":"group","nodes":"pve-01"}]`)
+		e.client.set("/cluster/ha/resources", `[{"sid":"vm:100","type":"vm","group":"prefer01"}]`)
+		e.client.set("/cluster/ha/rules", `[{"rule":"ha-group-prefer01","type":"node-affinity","resources":"vm:100","nodes":"pve-01"}]`)
+		e.expect("baseline")
+		e.client.fail("/cluster/ha/groups", &proxmox.APIError{StatusCode: http.StatusInternalServerError,
+			Message: "cannot index groups: ha groups have been migrated to rules"})
+		e.client.set("/cluster/ha/resources", `[{"sid":"vm:100","type":"vm","failback":0}]`)
+		e.expect("migrated")
+		e.expect("the next pass")
+		e.client.set("/cluster/ha/resources", `[{"sid":"vm:100","type":"vm","failback":1}]`)
+		e.expect("then an edit", "changed ha_resource/vm:100 [failback]")
+	})
+	t.Run("an IP set's entries go with it; a set not read keeps them", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.client.set("/cluster/firewall/ipset", `[{"name":"blocked"},{"name":"allowed"}]`)
+		e.client.set("/cluster/firewall/ipset/blocked", `[{"cidr":"192.0.2.0/24"}]`)
+		e.client.set("/cluster/firewall/ipset/allowed", `[{"cidr":"192.0.2.128/25"}]`)
+		e.expect("baseline")
+		e.client.fail("/cluster/firewall/ipset/allowed", errors.New("proxmox API error 500"))
+		e.client.set("/cluster/firewall/ipset", `[{"name":"allowed"}]`)
+		e.expect("one set gone, one unread", "removed firewall_ipset/blocked []")
+		e.client.set("/cluster/firewall/ipset/allowed", `[]`)
+		e.expect("the last entry gone: an empty kind, held") // see "an empty answer is held a pass"
+		e.expect("believed", "removed firewall_ipset_entry/allowed/192.0.2.128/25 []")
+	})
 	t.Run("an object changed every pass is recorded hourly, then flushed", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
@@ -642,15 +748,29 @@ func hasExplainRule(resourceType string) bool {
 	return slices.ContainsFunc(observedChangeRules, func(r explainRule) bool { return r.Kind == resourceType })
 }
 
-// Every action Nexara files for a guest with no task, at a call site that names
-// the action, is classified as an edit of its configuration or not: an action
-// nobody classified would show Nexara's own edit as one made in Proxmox, or
-// hide one made there.
-func TestObservedGuestActionVocabulary(t *testing.T) {
+// Every literal action Nexara files for an object the observer reads is
+// classified: by a rule of that kind, which says which way it changes the
+// object, or as one that changes nothing the observer compares; for a guest,
+// with no task, as an edit of its configuration or not. An action nobody
+// classified would show Nexara's own edit as one made in Proxmox.
+func TestObservedActionVocabulary(t *testing.T) {
 	t.Parallel()
-	classified := slices.Concat(guestConfigActions, guestOtherActions)
-	found := map[string]string{}
-	for _, dir := range []string{"../api/handlers", "../guesttools", "../scheduler", "../migration", "../drs"} {
+	observed := map[string]bool{}
+	for _, r := range observedChangeRules {
+		observed[r.Kind] = true
+	}
+	explains := func(kind, action string) bool {
+		if slices.Contains(observedActionsExplainingNothing[kind], action) {
+			return true
+		}
+		return slices.ContainsFunc(observedChangeRules, func(r explainRule) bool {
+			return r.Kind == kind && r.ActionRe != "" && regexp.MustCompile(r.ActionRe).MatchString(action)
+		})
+	}
+	guestClassified := slices.Concat(guestConfigActions, guestOtherActions)
+	checked := 0
+	for _, dir := range []string{"../api/handlers", "../guesttools", "../scheduler", "../migration", "../drs", "../rolling",
+		"../collector"} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
 			t.Fatal(err)
@@ -664,27 +784,41 @@ func TestObservedGuestActionVocabulary(t *testing.T) {
 				t.Fatal(err)
 			}
 			ast.Inspect(f, func(n ast.Node) bool {
-				for action, kind := range guestAuditActions(n) {
-					found[action] = kind + " in " + path
+				for _, site := range auditSites(n) {
+					switch {
+					case site.kind == "vm" || site.kind == "container":
+						if site.task {
+							break // explained by its worker type
+						}
+						checked++
+						if !slices.Contains(guestClassified, site.action) {
+							t.Errorf("%s: guest action %q is in neither guestConfigActions nor guestOtherActions", path, site.action)
+						}
+					case observed[site.kind]:
+						checked++
+						if !explains(site.kind, site.action) {
+							t.Errorf("%s: %s action %q is in no rule and not in observedActionsExplainingNothing",
+								path, site.kind, site.action)
+						}
+					}
 				}
 				return true
 			})
 		}
 	}
-	if len(found) < 8 {
-		t.Fatalf("found %d guest actions, the scan is not reading the call sites: %v", len(found), found)
-	}
-	for action, where := range found {
-		if !slices.Contains(classified, action) {
-			t.Errorf("guest action %q (%s) is in neither guestConfigActions nor guestOtherActions", action, where)
-		}
+	if checked < 60 {
+		t.Fatalf("checked %d call sites; the scan is not reading them", checked)
 	}
 }
 
-// guestAuditActions is the literal action of an AuditLog or AuditLogAs call, or
-// an InsertAuditLogParams literal, whose resource type is a literal "vm" or
-// "container".
-func guestAuditActions(n ast.Node) map[string]string {
+type auditSite struct {
+	kind, action string
+	task         bool // a TrackTask, which carries a UPID
+}
+
+// auditSites is the literal resource type and action of an AuditLog or
+// AuditLogAs call, or of an InsertAuditLogParams or TrackTaskParams literal.
+func auditSites(n ast.Node) []auditSite {
 	lit := func(e ast.Expr) string {
 		if b, ok := e.(*ast.BasicLit); ok && b.Kind == token.STRING {
 			s, _ := strconv.Unquote(b.Value)
@@ -692,7 +826,6 @@ func guestAuditActions(n ast.Node) map[string]string {
 		}
 		return ""
 	}
-	out := map[string]string{}
 	switch x := n.(type) {
 	case *ast.CallExpr:
 		name := ""
@@ -704,16 +837,20 @@ func guestAuditActions(n ast.Node) map[string]string {
 		}
 		typeAt := map[string]int{"AuditLog": 4, "AuditLogAs": 5}[name]
 		if typeAt > 0 && len(x.Args) > typeAt+2 {
-			if kind := lit(x.Args[typeAt]); kind == "vm" || kind == "container" {
-				if action := lit(x.Args[typeAt+2]); action != "" {
-					out[action] = kind
-				}
+			if kind, action := lit(x.Args[typeAt]), lit(x.Args[typeAt+2]); kind != "" && action != "" {
+				return []auditSite{{kind: kind, action: action}}
 			}
 		}
 	case *ast.CompositeLit:
-		sel, ok := x.Type.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "InsertAuditLogParams" {
-			return out
+		typeName := ""
+		switch tn := x.Type.(type) {
+		case *ast.Ident:
+			typeName = tn.Name
+		case *ast.SelectorExpr:
+			typeName = tn.Sel.Name
+		}
+		if typeName != "InsertAuditLogParams" && typeName != "TrackTaskParams" {
+			return nil
 		}
 		var kind, action string
 		for _, el := range x.Elts {
@@ -726,11 +863,11 @@ func guestAuditActions(n ast.Node) map[string]string {
 				}
 			}
 		}
-		if (kind == "vm" || kind == "container") && action != "" {
-			out[action] = kind
+		if kind != "" && action != "" {
+			return []auditSite{{kind: kind, action: action, task: typeName == "TrackTaskParams"}}
 		}
 	}
-	return out
+	return nil
 }
 
 func TestEveryOnlineNodeListed(t *testing.T) {

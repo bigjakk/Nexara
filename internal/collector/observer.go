@@ -117,6 +117,7 @@ type Observer struct {
 	held    map[string]bool         // hold key -> an empty reading has been held once
 	noisy   map[string]*noisyObject // object key -> how it has been changing
 	lastSig map[uuid.UUID]string    // the cluster signature a cluster's last pass saw
+	haMove  map[uuid.UUID]int       // passes left in which an HA group migration is Proxmox's (observeHA)
 }
 
 // NewObserver builds the observer. It refuses an encryption key crypto.Tag
@@ -138,6 +139,7 @@ func NewObserver(queries ObserverQueries, encryptionKey string, clients Observer
 		held:     map[string]bool{},
 		noisy:    map[string]*noisyObject{},
 		lastSig:  map[uuid.UUID]string{},
+		haMove:   map[uuid.UUID]int{},
 	}, nil
 }
 
@@ -240,6 +242,7 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 
 	clusterSig := observeSignature("cluster", o.tags.keyID, p.privFP, clusterVersions(nodes))
 	o.noticeSignature(cluster.ID, clusterSig)
+	p.observeHA(ctx, clusterSig)
 	for _, k := range observeClusterKinds {
 		p.observeClusterKind(ctx, k, clusterSig)
 	}
@@ -427,7 +430,9 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 				continue
 			}
 			batch.save(obj, tags, sig, readAt)
-			batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", fields, counts, old.lastSeen, doneAt), doneAt))
+			if !allIn(fields, rd.quiet) {
+				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", fields, counts, old.lastSeen, doneAt), doneAt))
+			}
 		}
 	}
 	for id, old := range prev {
@@ -435,6 +440,9 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			continue
 		}
 		batch.removed = append(batch.removed, id)
+		if rd.forget[id] {
+			continue
+		}
 		flushed := p.o.quiet(p.objectKey(rd.kind, id))
 		batch.record(flushed)
 		if baselined && old.signature == sig && !p.wasHardware(rd.kind, id, old) {
@@ -690,12 +698,18 @@ func observeOutcomeOf(err error) readOutcome {
 }
 
 func (p *observePass) read(ctx context.Context, target proxmox.ObserveTarget, gap time.Duration) (json.RawMessage, readOutcome) {
+	raw, out, _ := p.readWithError(ctx, target, gap)
+	return raw, out
+}
+
+// readWithError is read, with the error the outcome was sorted from.
+func (p *observePass) readWithError(ctx context.Context, target proxmox.ObserveTarget, gap time.Duration) (json.RawMessage, readOutcome, error) {
 	if p.aborted.Load() {
-		return nil, readFailed
+		return nil, readFailed, errors.New("pass ended")
 	}
 	release, err := p.lim.acquire(ctx, gap)
 	if err != nil {
-		return nil, readFailed
+		return nil, readFailed, err
 	}
 	defer release()
 	callCtx, cancel := context.WithTimeout(ctx, observeCallTimeout)
@@ -713,9 +727,9 @@ func (p *observePass) read(ctx context.Context, target proxmox.ObserveTarget, ga
 	out := observeOutcomeOf(err)
 	if out != readOK {
 		p.o.logger.Debug("object observer: read", "cluster_id", p.cluster.ID, "target", target.String(), "error", err)
-		return nil, out
+		return nil, out, err
 	}
-	return raw, readOK
+	return raw, readOK, nil
 }
 
 // readList reads a listing. An answer that is not a list — null, nothing —
@@ -725,11 +739,49 @@ func (p *observePass) readList(ctx context.Context, target proxmox.ObserveTarget
 	if out != readOK {
 		return nil, out
 	}
-	var items []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &items); err != nil || items == nil {
+	items, ok := decodeList(raw)
+	if !ok {
 		return nil, readFailed
 	}
 	return items, readOK
+}
+
+func decodeList(raw json.RawMessage) ([]map[string]json.RawMessage, bool) {
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil || items == nil {
+		return nil, false
+	}
+	return items, true
+}
+
+// forgetKind drops everything stored of one of the cluster's kinds, recording
+// nothing.
+func (p *observePass) forgetKind(ctx context.Context, kind string) {
+	ids := make([]string, 0, len(p.state[kind]))
+	for id := range p.state[kind] {
+		ids = append(ids, id)
+	}
+	if err := p.o.queries.DeleteClusterObjectState(ctx, db.DeleteClusterObjectStateParams{
+		ClusterID: p.cluster.ID, Kind: kind, ObjectIds: ids,
+	}); err != nil {
+		p.o.logger.Debug("object observer: forget a kind", "cluster_id", p.cluster.ID, "kind", kind, "error", err)
+		return
+	}
+	delete(p.state, kind)
+}
+
+// allIn reports whether every field is in set: a change set made only of
+// fields a reading keeps quiet.
+func allIn(fields []string, set map[string]bool) bool {
+	if len(set) == 0 {
+		return false
+	}
+	for _, f := range fields {
+		if !set[f] {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *observePass) readObject(ctx context.Context, target proxmox.ObserveTarget) (map[string]json.RawMessage, readOutcome) {
@@ -953,6 +1005,30 @@ func (o *Observer) passEmpty(key string, empty bool) bool {
 	}
 	o.held[key] = true
 	return false
+}
+
+// startHAMigration marks this pass and the next as the passes in which a
+// cluster's HA groups were migrated to rules.
+func (o *Observer) startHAMigration(cluster uuid.UUID) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.haMove[cluster] = 2
+	o.logger.Info("object observer: the cluster's HA groups were migrated to rules; recorded as nothing",
+		"cluster_id", cluster)
+}
+
+func (o *Observer) haMigrating(cluster uuid.UUID) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.haMove[cluster] > 0
+}
+
+func (o *Observer) endHAPass(cluster uuid.UUID) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.haMove[cluster] > 0 {
+		o.haMove[cluster]--
+	}
 }
 
 // noisyObject is how one object has been changing.
