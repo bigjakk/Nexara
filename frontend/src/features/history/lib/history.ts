@@ -47,38 +47,27 @@ export function historyKind(
   };
 }
 
-export const SOURCE_LABEL: Record<HistorySource, string> = {
-  nexara: "Nexara",
-  proxmox: "Proxmox",
-  detected: "No task",
-};
-
-export const SOURCE_OPTIONS: {
-  value: HistorySource | "";
-  label: string;
-}[] = [
-  { value: "", label: "All sources" },
-  { value: "nexara", label: "Done in Nexara" },
-  { value: "proxmox", label: "Done in Proxmox" },
-  { value: "detected", label: "No task (seen by Nexara)" },
+/** The source filter's choices, "" for every source; labelled from the shared
+ *  namespace's `sourceOptions`. */
+export const SOURCE_OPTIONS: readonly (HistorySource | "")[] = [
+  "",
+  "nexara",
+  "proxmox",
+  "detected",
 ];
 
-export const WINDOW_OPTIONS: { value: HistoryWindow; label: string }[] = [
-  { value: "", label: "All time" },
-  { value: "24h", label: "Last 24 hours" },
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
-  { value: "90d", label: "Last 90 days" },
+/** The time filter's choices, "" for the whole history (`windows`). */
+export const WINDOW_OPTIONS: readonly HistoryWindow[] = [
+  "",
+  "24h",
+  "7d",
+  "30d",
+  "90d",
 ];
 
 /** The History table's columns. None sorts: the timeline is newest first. */
 export type HistoryColumnKey =
-  | "time"
-  | "event"
-  | "summary"
-  | "who"
-  | "node"
-  | "outcome";
+  "time" | "event" | "summary" | "who" | "node" | "outcome";
 
 /**
  * What a History cell needs beyond the entry, resolved once per row so the

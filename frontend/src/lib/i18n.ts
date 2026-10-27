@@ -22,8 +22,9 @@ import auditEN from "@/locales/en/audit.json";
 import cephEN from "@/locales/en/ceph.json";
 import networksEN from "@/locales/en/networks.json";
 import snapshotsEN from "@/locales/en/snapshots.json";
-// Each kind of History keeps its strings in its own namespace, history-<kind>
-// (features/history/types/history.ts says how to add one).
+// The timeline every History shares keeps its strings in history; each kind
+// its own in history-<kind> (features/history/types/history.ts says how).
+import historyEN from "@/locales/en/history.json";
 import historyGuestEN from "@/locales/en/history-guest.json";
 
 export const defaultNS = "common";
@@ -50,6 +51,7 @@ export const resources = {
     ceph: cephEN,
     networks: networksEN,
     snapshots: snapshotsEN,
+    history: historyEN,
     "history-guest": historyGuestEN,
   },
 } as const;

@@ -4,11 +4,17 @@ import { resources } from "@/lib/i18n";
 import { makeHistoryEntry as entry } from "@/test/history.fixtures";
 import { historyActor, historyDisplayStatus } from "./history";
 
-// A kind's strings reach its timeline only once lib/i18n.ts registers them;
-// unregistered, every label shows its key and nothing fails.
-it("registers every kind's namespace", () => {
-  const files = Object.keys(import.meta.glob("/src/locales/en/history-*.json"));
-  expect(files.length).toBeGreaterThan(0);
+// A kind's strings — and the shared timeline's — reach it only once
+// lib/i18n.ts registers them; unregistered, every label shows its key and
+// nothing fails.
+it("registers every History namespace", () => {
+  const files = Object.keys(
+    import.meta.glob([
+      "/src/locales/en/history.json",
+      "/src/locales/en/history-*.json",
+    ]),
+  );
+  expect(files.length).toBeGreaterThan(1);
   for (const file of files) {
     const ns = file.slice(file.lastIndexOf("/") + 1, -".json".length);
     expect(Object.keys(resources.en)).toContain(ns);

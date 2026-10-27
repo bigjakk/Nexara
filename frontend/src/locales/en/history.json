@@ -1,0 +1,55 @@
+{
+  "filters": {
+    "type": "Type",
+    "allTypes": "All types",
+    "source": "Source",
+    "time": "Time"
+  },
+  "sources": {
+    "nexara": "Nexara",
+    "proxmox": "Proxmox",
+    "detected": "No task"
+  },
+  "sourceOptions": {
+    "all": "All sources",
+    "nexara": "Done in Nexara",
+    "proxmox": "Done in Proxmox",
+    "detected": "No task (seen by Nexara)"
+  },
+  "windows": {
+    "all": "All time",
+    "24h": "Last 24 hours",
+    "7d": "Last 7 days",
+    "30d": "Last 30 days",
+    "90d": "Last 90 days"
+  },
+  "row": {
+    "event": "Event",
+    "summary": "Summary",
+    "started": "Started",
+    "seen": "Seen",
+    "when": "When",
+    "lastSeen": "Last seen {{status}}",
+    "finished": "Finished",
+    "source": "Source",
+    "node": "Node",
+    "taskType": "Task type",
+    "exitStatus": "Exit status",
+    "upid": "UPID",
+    "details": "Details",
+    "liveView": "Live view"
+  },
+  "noMatches": "Nothing matches these filters.",
+  "empty": "Nothing has been recorded yet.",
+  "entries_one": "{{count}} entry",
+  "entries_other": "{{count}} entries",
+  "page": "Page {{page}} of {{pages}}",
+  "previousPage": "Previous page",
+  "nextPage": "Next page",
+  "drawer": {
+    "title": "History: {{title}}",
+    "description": "What happened to it, newest first — in Nexara and in Proxmox.",
+    "open": "History of {{title}}",
+    "button": "History"
+  }
+}

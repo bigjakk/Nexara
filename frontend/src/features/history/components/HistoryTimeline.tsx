@@ -17,7 +17,6 @@ import { detailPairs } from "@/features/events/lib/audit-details";
 import { useTaskLog, useTaskStatus } from "@/features/tasks/api/tasks-queries";
 import { HISTORY_PAGE_SIZE, useHistory } from "../api/history-queries";
 import {
-  SOURCE_LABEL,
   SOURCE_OPTIONS,
   WINDOW_OPTIONS,
   historyActor,
@@ -65,6 +64,7 @@ function HistoryRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const { t: shared } = useTranslation("history");
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const hasTask = entry.upid !== "";
 
@@ -129,29 +129,35 @@ function HistoryRow({
         <tr className="border-b bg-muted/10">
           <td colSpan={layout.columns.length} className="px-4 py-3">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-              <span className="text-muted-foreground">Event</span>
+              <span className="text-muted-foreground">
+                {shared("row.event")}
+              </span>
               <span className="font-medium">{label}</span>
 
               {summary !== "" && (
                 <>
-                  <span className="text-muted-foreground">Summary</span>
+                  <span className="text-muted-foreground">
+                    {shared("row.summary")}
+                  </span>
                   <span className="break-words">{summary}</span>
                 </>
               )}
 
               <span className="text-muted-foreground">
-                {hasTask
-                  ? "Started"
-                  : entry.kind === "status"
-                    ? "Seen"
-                    : "When"}
+                {shared(
+                  hasTask
+                    ? "row.started"
+                    : entry.kind === "status"
+                      ? "row.seen"
+                      : "row.when",
+                )}
               </span>
               <span>{formatDateTime(entry.occurred_at)}</span>
 
               {entry.last_seen_at && (
                 <>
                   <span className="text-muted-foreground">
-                    Last seen {entry.from_status}
+                    {shared("row.lastSeen", { status: entry.from_status })}
                   </span>
                   <span>{formatDateTime(entry.last_seen_at)}</span>
                 </>
@@ -159,27 +165,35 @@ function HistoryRow({
 
               {entry.finished_at && (
                 <>
-                  <span className="text-muted-foreground">Finished</span>
+                  <span className="text-muted-foreground">
+                    {shared("row.finished")}
+                  </span>
                   <span>{formatDateTime(entry.finished_at)}</span>
                 </>
               )}
 
-              <span className="text-muted-foreground">Source</span>
+              <span className="text-muted-foreground">
+                {shared("row.source")}
+              </span>
               <span>
-                {SOURCE_LABEL[entry.source]}
+                {shared(`sources.${entry.source}`)}
                 {actor !== "" && ` · ${actor}`}
               </span>
 
               {entry.node !== "" && (
                 <>
-                  <span className="text-muted-foreground">Node</span>
+                  <span className="text-muted-foreground">
+                    {shared("row.node")}
+                  </span>
                   <span>{entry.node}</span>
                 </>
               )}
 
               {hasTask && (
                 <>
-                  <span className="text-muted-foreground">Task type</span>
+                  <span className="text-muted-foreground">
+                    {shared("row.taskType")}
+                  </span>
                   <span className="font-mono">
                     {upidWorkerType(entry.upid) || entry.task_type || "—"}
                   </span>
@@ -188,14 +202,18 @@ function HistoryRow({
 
               {display === "failed" && exitText !== "" && (
                 <>
-                  <span className="text-muted-foreground">Exit status</span>
+                  <span className="text-muted-foreground">
+                    {shared("row.exitStatus")}
+                  </span>
                   <span className="break-all text-red-500">{exitText}</span>
                 </>
               )}
 
               {hasTask && (
                 <>
-                  <span className="text-muted-foreground">UPID</span>
+                  <span className="text-muted-foreground">
+                    {shared("row.upid")}
+                  </span>
                   <span className="break-all font-mono text-[10px]">
                     {entry.upid}
                   </span>
@@ -210,7 +228,7 @@ function HistoryRow({
             {details && (
               <div className="mt-2 border-t pt-2">
                 <span className="text-xs font-medium text-muted-foreground">
-                  Details
+                  {shared("row.details")}
                 </span>
                 <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
                   {details.map(([key, value]) => (
@@ -239,7 +257,7 @@ function HistoryRow({
                     }}
                   >
                     <Activity className="mr-1 h-3 w-3" />
-                    Live view
+                    {shared("row.liveView")}
                   </Button>
                 </div>
                 <TaskLogSection
@@ -278,6 +296,7 @@ export function HistoryTimeline({
   rowsAbove?: ((colSpan: number) => ReactNode) | undefined;
 }) {
   const { t } = useTranslation(historyNamespace(kind));
+  const { t: shared } = useTranslation("history");
   const [page, setPage] = useState(0);
   const [category, setCategory] = useState("");
   const [source, setSource] = useState<HistorySource | "">("");
@@ -304,7 +323,7 @@ export function HistoryTimeline({
   }, [error, page, totalPages]);
 
   const categoryOptions = [
-    { value: "", label: "All types" },
+    { value: "", label: shared("filters.allTypes") },
     ...kind.categories.map((c) => ({
       value: c,
       label: t(`categories.${c}`),
@@ -341,9 +360,30 @@ export function HistoryTimeline({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        {filterSelect("Type", category, categoryOptions, setCategory)}
-        {filterSelect("Source", source, SOURCE_OPTIONS, setSource)}
-        {filterSelect("Time", timeWindow, WINDOW_OPTIONS, setTimeWindow)}
+        {filterSelect(
+          shared("filters.type"),
+          category,
+          categoryOptions,
+          setCategory,
+        )}
+        {filterSelect(
+          shared("filters.source"),
+          source,
+          SOURCE_OPTIONS.map((value) => ({
+            value,
+            label: shared(`sourceOptions.${value || "all"}`),
+          })),
+          setSource,
+        )}
+        {filterSelect(
+          shared("filters.time"),
+          timeWindow,
+          WINDOW_OPTIONS.map((value) => ({
+            value,
+            label: shared(`windows.${value || "all"}`),
+          })),
+          setTimeWindow,
+        )}
         <span className="flex-1" />
         <ResetColumnsButton layout={layout} />
       </div>
@@ -410,10 +450,8 @@ export function HistoryTimeline({
                       className="px-4 py-8 text-center text-muted-foreground"
                     >
                       {category || source || timeWindow
-                        ? "Nothing matches these filters."
-                        : t("empty", {
-                            defaultValue: "Nothing has been recorded yet.",
-                          })}
+                        ? shared("noMatches")
+                        : t("empty", { defaultValue: shared("empty") })}
                     </td>
                   </tr>
                 )}
@@ -423,12 +461,12 @@ export function HistoryTimeline({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-muted-foreground">
-              {error ? "" : `${String(total)} entr${total === 1 ? "y" : "ies"}`}
+              {error ? "" : shared("entries", { count: total })}
             </p>
             {totalPages > 1 && (
               <div className="flex items-center gap-2">
                 <Button
-                  aria-label="Previous page"
+                  aria-label={shared("previousPage")}
                   variant="outline"
                   size="sm"
                   disabled={page === 0}
@@ -439,10 +477,10 @@ export function HistoryTimeline({
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
                 <span className="text-sm">
-                  Page {page + 1} of {totalPages}
+                  {shared("page", { page: page + 1, pages: totalPages })}
                 </span>
                 <Button
-                  aria-label="Next page"
+                  aria-label={shared("nextPage")}
                   variant="outline"
                   size="sm"
                   disabled={page + 1 >= totalPages}

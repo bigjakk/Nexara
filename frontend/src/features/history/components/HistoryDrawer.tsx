@@ -1,4 +1,5 @@
 import { useState, type SyntheticEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +39,7 @@ export function HistoryDrawer({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation("history");
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       {/* Portaled out of the list row that opens it, the drawer is still that
@@ -51,10 +53,8 @@ export function HistoryDrawer({
         onKeyDown={stopPropagation}
       >
         <SheetHeader>
-          <SheetTitle>History: {title}</SheetTitle>
-          <SheetDescription>
-            What happened to it, newest first — in Nexara and in Proxmox.
-          </SheetDescription>
+          <SheetTitle>{t("drawer.title", { title })}</SheetTitle>
+          <SheetDescription>{t("drawer.description")}</SheetDescription>
         </SheetHeader>
         <div className="mt-4">
           <HistoryTimeline kind={kind} target={target} enabled={open} />
@@ -71,6 +71,7 @@ export function HistoryDrawer({
  * refusals. The row's own view permission is the page's.
  */
 export function HistoryButton(props: HistoryDrawerProps) {
+  const { t } = useTranslation("history");
   const { hasPermission } = usePermissions();
   const [open, setOpen] = useState(false);
   if (!hasPermission("view", "audit") || !hasPermission("view", "task")) {
@@ -82,8 +83,8 @@ export function HistoryButton(props: HistoryDrawerProps) {
         variant="ghost"
         size="icon"
         className="h-7 w-7"
-        aria-label={`History of ${props.title}`}
-        title="History"
+        aria-label={t("drawer.open", { title: props.title })}
+        title={t("drawer.button")}
         onClick={(e) => {
           e.stopPropagation();
           setOpen(true);
