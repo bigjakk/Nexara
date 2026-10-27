@@ -107,9 +107,11 @@ type mockQueries struct {
 	nodePressureInserts []db.InsertNodePressureParams
 
 	// PBS jobs: a sync job upsert's answer, and the prunes asked for.
-	pbsSyncJobUpsertErr error
-	pbsSyncJobPrunes    int
-	pbsVerifyJobPrunes  int
+	pbsSyncJobUpsertErr     error
+	pbsSyncJobPrunes        int
+	pbsVerifyJobPrunes      int
+	pbsSnapshotUpsertErrFor string     // the datastore whose snapshots fail to write
+	pbsSnapshotPrunes       [][]string // the datastores each snapshot prune spared
 
 	// The observer's readings and what it filed (observer_test.go), and the
 	// classifications of its changes asked for.
@@ -404,7 +406,10 @@ func (m *mockQueries) ListActivePBSServers(_ context.Context) ([]db.PbsServer, e
 	return nil, nil
 }
 
-func (m *mockQueries) UpsertPBSSnapshot(_ context.Context, _ db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error) {
+func (m *mockQueries) UpsertPBSSnapshot(_ context.Context, arg db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error) {
+	if m.pbsSnapshotUpsertErrFor != "" && arg.Datastore == m.pbsSnapshotUpsertErrFor {
+		return db.PbsSnapshot{}, errors.New("snapshot not written")
+	}
 	return db.PbsSnapshot{}, nil
 }
 
@@ -416,7 +421,8 @@ func (m *mockQueries) UpsertPBSVerifyJob(_ context.Context, _ db.UpsertPBSVerify
 	return db.PbsVerifyJob{}, nil
 }
 
-func (m *mockQueries) DeleteStalePBSSnapshots(_ context.Context, _ db.DeleteStalePBSSnapshotsParams) error {
+func (m *mockQueries) DeleteStalePBSSnapshots(_ context.Context, arg db.DeleteStalePBSSnapshotsParams) error {
+	m.pbsSnapshotPrunes = append(m.pbsSnapshotPrunes, arg.Unwritten)
 	return nil
 }
 

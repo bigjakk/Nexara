@@ -15,19 +15,25 @@ import (
 const deleteStalePBSSnapshots = `-- name: DeleteStalePBSSnapshots :exec
 DELETE FROM pbs_snapshots
 WHERE pbs_server_id = $1
-  AND last_seen_at < now() - make_interval(secs => $2::int)
+  AND datastore <> ALL(COALESCE($2::text[], '{}'))
+  AND last_seen_at < now() - make_interval(secs => $3::int)
 `
 
 type DeleteStalePBSSnapshotsParams struct {
 	PbsServerID  uuid.UUID `json:"pbs_server_id"`
+	Unwritten    []string  `json:"unwritten"`
 	GraceSeconds int32     `json:"grace_seconds"`
 }
 
 // Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
 // a momentary non-observation no longer churns PBS inventory rows, and the
-// cutoff is driven from now() so the app and DB clocks aren't mixed.
+// cutoff is driven from now() so the app and DB clocks aren't mixed. The
+// caller runs it only after the server's datastores were listed, and names the
+// datastores whose snapshots were not listed and written whole (unwritten):
+// they keep their rows, which nothing refreshed. A datastore the PBS no longer
+// lists loses its snapshots. No unwritten datastore, NULL included, spares none.
 func (q *Queries) DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error {
-	_, err := q.db.Exec(ctx, deleteStalePBSSnapshots, arg.PbsServerID, arg.GraceSeconds)
+	_, err := q.db.Exec(ctx, deleteStalePBSSnapshots, arg.PbsServerID, arg.Unwritten, arg.GraceSeconds)
 	return err
 }
 

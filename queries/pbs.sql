@@ -61,9 +61,14 @@ ORDER BY job_id;
 -- name: DeleteStalePBSSnapshots :exec
 -- Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
 -- a momentary non-observation no longer churns PBS inventory rows, and the
--- cutoff is driven from now() so the app and DB clocks aren't mixed.
+-- cutoff is driven from now() so the app and DB clocks aren't mixed. The
+-- caller runs it only after the server's datastores were listed, and names the
+-- datastores whose snapshots were not listed and written whole (unwritten):
+-- they keep their rows, which nothing refreshed. A datastore the PBS no longer
+-- lists loses its snapshots. No unwritten datastore, NULL included, spares none.
 DELETE FROM pbs_snapshots
 WHERE pbs_server_id = $1
+  AND datastore <> ALL(COALESCE(sqlc.arg('unwritten')::text[], '{}'))
   AND last_seen_at < now() - make_interval(secs => @grace_seconds::int);
 
 -- name: DeleteStalePBSSyncJobs :exec

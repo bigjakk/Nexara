@@ -629,7 +629,11 @@ type Querier interface {
 	DeleteStaleNodePCIDevices(ctx context.Context, arg DeleteStaleNodePCIDevicesParams) error
 	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
 	// a momentary non-observation no longer churns PBS inventory rows, and the
-	// cutoff is driven from now() so the app and DB clocks aren't mixed.
+	// cutoff is driven from now() so the app and DB clocks aren't mixed. The
+	// caller runs it only after the server's datastores were listed, and names the
+	// datastores whose snapshots were not listed and written whole (unwritten):
+	// they keep their rows, which nothing refreshed. A datastore the PBS no longer
+	// lists loses its snapshots. No unwritten datastore, NULL included, spares none.
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
 	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error

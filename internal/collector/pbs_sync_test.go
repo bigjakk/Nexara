@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -13,11 +14,12 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// pbsFakeClient answers the reads syncPBSServer makes: one job of each type,
-// or the listing's error.
+// pbsFakeClient answers the reads syncPBSServer makes: two datastores of one
+// snapshot each and one job of each type, or the listing's error.
 type pbsFakeClient struct {
 	PBSProxmoxClient
-	syncErr, verifyErr error
+	datastoresErr, syncErr, verifyErr error
+	snapshotsErrFor                   string // the datastore whose snapshots cannot be listed
 }
 
 func (c *pbsFakeClient) GetDatastoreStatus(context.Context) ([]proxmox.PBSDatastoreStatus, error) {
@@ -25,7 +27,14 @@ func (c *pbsFakeClient) GetDatastoreStatus(context.Context) ([]proxmox.PBSDatast
 }
 
 func (c *pbsFakeClient) GetDatastores(context.Context) ([]proxmox.PBSDatastore, error) {
-	return nil, nil
+	return []proxmox.PBSDatastore{{Name: "datastore01"}, {Name: "datastore02"}}, c.datastoresErr
+}
+
+func (c *pbsFakeClient) GetSnapshots(_ context.Context, store string) ([]proxmox.PBSSnapshot, error) {
+	if store == c.snapshotsErrFor {
+		return nil, errors.New("no answer")
+	}
+	return []proxmox.PBSSnapshot{{BackupType: "vm", BackupID: "100", BackupTime: 1}}, nil
 }
 
 func (c *pbsFakeClient) GetSyncJobs(context.Context) ([]proxmox.PBSSyncJob, error) {
@@ -36,11 +45,12 @@ func (c *pbsFakeClient) GetVerifyJobs(context.Context) ([]proxmox.PBSVerifyJob, 
 	return []proxmox.PBSVerifyJob{{ID: "v-01", Store: "datastore01"}}, c.verifyErr
 }
 
-// A PBS's jobs are pruned only after a listing that was written whole: a
-// listing that failed refreshed no row, so pruning then deleted every job of a
-// PBS unreachable for longer than the grace, and a job that failed to write
-// would be pruned while the PBS still has it.
-func TestSyncPBSServerPrunesJobsOnlyAfterAWholeListing(t *testing.T) {
+// A PBS's jobs and snapshots are pruned only after a listing that was written
+// whole: a listing that failed refreshed no row, so pruning then deleted every
+// row of a PBS unreachable for longer than the grace, and a row that failed to
+// write would be pruned while the PBS still has it. A datastore's snapshots are
+// spared on their own.
+func TestSyncPBSServerPrunesOnlyAfterAWholeListing(t *testing.T) {
 	t.Parallel()
 	failed := errors.New("no answer")
 	secret, err := crypto.Encrypt("secret-token-value", testEncryptionKey)
@@ -48,25 +58,33 @@ func TestSyncPBSServerPrunesJobsOnlyAfterAWholeListing(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		name                   string
-		syncErr, verifyErr     error
-		upsertErr              error
-		wantSyncs, wantVerifys int
-		wantMarks              string // the job types marked read whole (migrations/000130)
+		name                              string
+		datastoresErr, syncErr, verifyErr error
+		snapshotsErrFor, snapshotNotFor   string
+		upsertErr                         error
+		wantSyncs, wantVerifys            int
+		wantMarks                         string // the job types marked read whole (migrations/000130)
+		wantSnapshotPrunes                string // the datastores each snapshot prune spared
 	}{
-		{name: "both listed and written", wantSyncs: 1, wantVerifys: 1, wantMarks: "sync verify"},
-		{name: "both listings failed", syncErr: failed, verifyErr: failed},
-		{name: "a sync job not written", upsertErr: failed, wantVerifys: 1, wantMarks: "verify"},
+		{name: "everything listed and written", wantSyncs: 1, wantVerifys: 1, wantMarks: "sync verify",
+			wantSnapshotPrunes: "[[]]"},
+		{name: "every listing failed", datastoresErr: failed, syncErr: failed, verifyErr: failed,
+			wantSnapshotPrunes: "[]"},
+		{name: "a sync job and a snapshot not written", upsertErr: failed, snapshotNotFor: "datastore02",
+			wantVerifys: 1, wantMarks: "verify", wantSnapshotPrunes: "[[datastore02]]"},
+		{name: "a datastore that did not answer", snapshotsErrFor: "datastore01", wantSyncs: 1, wantVerifys: 1,
+			wantMarks: "sync verify", wantSnapshotPrunes: "[[datastore01]]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mq := &mockQueries{pbsSyncJobUpsertErr: tc.upsertErr}
+			mq := &mockQueries{pbsSyncJobUpsertErr: tc.upsertErr, pbsSnapshotUpsertErrFor: tc.snapshotNotFor}
 			s := &Syncer{
 				queries:       mq,
 				encryptionKey: testEncryptionKey,
 				pbsClientFactory: func(string, string, string, string) (PBSProxmoxClient, error) {
-					return &pbsFakeClient{syncErr: tc.syncErr, verifyErr: tc.verifyErr}, nil
+					return &pbsFakeClient{datastoresErr: tc.datastoresErr, syncErr: tc.syncErr, verifyErr: tc.verifyErr,
+						snapshotsErrFor: tc.snapshotsErrFor}, nil
 				},
 				logger: testLogger(),
 			}
@@ -84,6 +102,9 @@ func TestSyncPBSServerPrunesJobsOnlyAfterAWholeListing(t *testing.T) {
 			}
 			if strings.Join(marks, " ") != tc.wantMarks {
 				t.Fatalf("marked %v, want %q", marks, tc.wantMarks)
+			}
+			if got := fmt.Sprint(mq.pbsSnapshotPrunes); got != tc.wantSnapshotPrunes {
+				t.Fatalf("snapshot prunes sparing %s, want %s", got, tc.wantSnapshotPrunes)
 			}
 		})
 	}

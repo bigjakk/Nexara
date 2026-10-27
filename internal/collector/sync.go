@@ -1463,8 +1463,14 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 		}
 	}
 
-	// Sync snapshots per datastore.
+	// Sync snapshots per datastore. They are pruned below only after the
+	// datastores were listed, and a datastore whose snapshots were not listed
+	// and written whole keeps its rows: a listing that failed refreshed none, so
+	// pruning then deleted every snapshot of a PBS unreachable for longer than
+	// the grace, and every snapshot of a datastore that did not answer.
 	datastores, err := client.GetDatastores(ctx)
+	datastoresListed := err == nil
+	var unwrittenDatastores []string
 	if err != nil {
 		s.logger.Warn("failed to get PBS datastores", "pbs_id", server.ID, "error", err)
 	} else {
@@ -1477,9 +1483,11 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 					"datastore", ds.Name,
 					"error", err,
 				)
+				unwrittenDatastores = append(unwrittenDatastores, ds.Name)
 				continue
 			}
 			s.logger.Debug("PBS snapshots", "pbs_id", server.ID, "datastore", ds.Name, "count", len(snaps))
+			written := true
 			for _, snap := range snaps {
 				verified := false
 				if snap.Verification != nil && snap.Verification.State == "ok" {
@@ -1502,7 +1510,11 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 						"pbs_id", server.ID,
 						"error", uErr,
 					)
+					written = false
 				}
+			}
+			if !written {
+				unwrittenDatastores = append(unwrittenDatastores, ds.Name)
 			}
 		}
 	}
@@ -1569,11 +1581,14 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 	}
 
 	// Prune stale inventory.
-	if err := s.queries.DeleteStalePBSSnapshots(ctx, db.DeleteStalePBSSnapshotsParams{
-		PbsServerID:  server.ID,
-		GraceSeconds: int32(staleInventoryGrace.Seconds()),
-	}); err != nil {
-		s.logger.Warn("failed to prune stale PBS snapshots", "pbs_id", server.ID, "error", err)
+	if datastoresListed {
+		if err := s.queries.DeleteStalePBSSnapshots(ctx, db.DeleteStalePBSSnapshotsParams{
+			PbsServerID:  server.ID,
+			Unwritten:    unwrittenDatastores,
+			GraceSeconds: int32(staleInventoryGrace.Seconds()),
+		}); err != nil {
+			s.logger.Warn("failed to prune stale PBS snapshots", "pbs_id", server.ID, "error", err)
+		}
 	}
 	if syncJobsWritten {
 		if err := s.queries.DeleteStalePBSSyncJobs(ctx, db.DeleteStalePBSSyncJobsParams{
