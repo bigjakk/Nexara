@@ -171,29 +171,45 @@ describe("useEventInvalidation — audit_entry and guest History", () => {
     expect(client.getQueryState(globalHistory)?.isInvalidated).toBe(true);
   });
 
-  // A burst of entries is one re-read, at its end, not one each.
-  it("re-reads a History at most once per throttle window", () => {
+  // The first entry re-reads at once; the rest of its burst are one re-read at
+  // the window's end — however late in it they came, as a debounce would not —
+  // which opens a window of its own. setQueryData stands in for the re-read.
+  it("re-reads a History at once, then at most once per throttle window", () => {
     vi.useFakeTimers();
     const history = guestHistoryKey(CLUSTER);
     const client = mount([history]);
-    const entry = {
-      kind: "audit_entry",
-      cluster_id: CLUSTER,
-      resource_type: "vm",
-      resource_id: "x",
-      action: "config_update",
+    const stale = () => client.getQueryState(history)?.isInvalidated;
+    const entry = () => {
+      act(() => {
+        deliver(`cluster:${CLUSTER}:events`, {
+          kind: "audit_entry",
+          cluster_id: CLUSTER,
+          resource_type: "vm",
+          resource_id: "x",
+          action: "config_update",
+        });
+      });
     };
-    act(() => {
-      deliver(`cluster:${CLUSTER}:events`, entry);
-    });
-    act(() => {
-      vi.advanceTimersByTime(HISTORY_THROTTLE_MS - 1);
-    });
-    expect(client.getQueryState(history)?.isInvalidated).toBe(false);
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(client.getQueryState(history)?.isInvalidated).toBe(true);
+    const wait = (ms: number) => {
+      act(() => {
+        vi.advanceTimersByTime(ms);
+      });
+    };
+    entry();
+    expect(stale()).toBe(true);
+    client.setQueryData(history, []);
+    entry();
+    wait(HISTORY_THROTTLE_MS - 1);
+    entry();
+    expect(stale()).toBe(false);
+    wait(1);
+    expect(stale()).toBe(true);
+    client.setQueryData(history, []);
+    entry();
+    wait(HISTORY_THROTTLE_MS - 1);
+    expect(stale()).toBe(false);
+    wait(1);
+    expect(stale()).toBe(true);
   });
 });
 

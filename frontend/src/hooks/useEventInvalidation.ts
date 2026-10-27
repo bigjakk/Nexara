@@ -7,12 +7,19 @@ import type { NexaraEvent } from "@/types/ws";
 const DEBOUNCE_MS = 300;
 
 /**
- * Histories are re-read at most this often: every audit entry or task event of
- * the cluster marks each of its Histories stale, a re-read costs what the
- * object's history costs, and the server finishes a superseded read anyway. A
- * burst of events is one re-read, at its end.
+ * A History is re-read at most once per this window: every audit entry or task
+ * event of the cluster marks each of its Histories stale, a re-read costs what
+ * the object's history costs, and the server finishes a superseded read anyway.
+ * The first event after a quiet spell re-reads at once; the rest of its burst
+ * wait for the window to end, and are one re-read, which opens the next window.
  */
 export const HISTORY_THROTTLE_MS = 5_000;
+
+/** An open throttle window: when it ends, and whether an event came in it. */
+interface ThrottleWindow {
+  timer: ReturnType<typeof setTimeout>;
+  pending: boolean;
+}
 
 /**
  * Subscribes to WS event channels and invalidates TanStack Query caches
@@ -32,8 +39,8 @@ export function useEventInvalidation(clusterIds: string[]): void {
   const pendingPrefixKeys = useRef<Set<string>>(new Set());
   const pendingExactKeys = useRef<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingHistoryKeys = useRef<Set<string>>(new Set());
-  const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Each History key's open throttle window.
+  const historyWindows = useRef(new Map<string, ThrottleWindow>());
 
   const flush = useCallback(() => {
     const prefixKeys = Array.from(pendingPrefixKeys.current);
@@ -70,18 +77,31 @@ export function useEventInvalidation(clusterIds: string[]): void {
 
   const scheduleHistoryInvalidation = useCallback(
     (key: string[]) => {
-      pendingHistoryKeys.current.add(JSON.stringify(key));
-      if (historyTimerRef.current !== null) return;
-      historyTimerRef.current = setTimeout(() => {
-        const keys = Array.from(pendingHistoryKeys.current);
-        pendingHistoryKeys.current.clear();
-        historyTimerRef.current = null;
-        for (const serialized of keys) {
-          void queryClient.invalidateQueries({
-            queryKey: JSON.parse(serialized) as string[],
-          });
+      const serialized = JSON.stringify(key);
+      const windows = historyWindows.current;
+      const open = windows.get(serialized);
+      if (open) {
+        open.pending = true;
+        return;
+      }
+      const reread = () => {
+        void queryClient.invalidateQueries({ queryKey: key });
+      };
+      const close = () => {
+        const window = windows.get(serialized);
+        if (!window?.pending) {
+          windows.delete(serialized);
+          return;
         }
-      }, HISTORY_THROTTLE_MS);
+        window.pending = false;
+        reread();
+        window.timer = setTimeout(close, HISTORY_THROTTLE_MS);
+      };
+      reread();
+      windows.set(serialized, {
+        timer: setTimeout(close, HISTORY_THROTTLE_MS),
+        pending: false,
+      });
     },
     [queryClient],
   );
@@ -309,6 +329,7 @@ export function useEventInvalidation(clusterIds: string[]): void {
       subscribe(ch, handleEvent);
     }
 
+    const windows = historyWindows.current;
     return () => {
       for (const ch of channels) {
         unsubscribe(ch, handleEvent);
@@ -317,10 +338,10 @@ export function useEventInvalidation(clusterIds: string[]): void {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      if (historyTimerRef.current !== null) {
-        clearTimeout(historyTimerRef.current);
-        historyTimerRef.current = null;
+      for (const window of windows.values()) {
+        clearTimeout(window.timer);
       }
+      windows.clear();
     };
   }, [clusterIds, canViewAudit, subscribe, unsubscribe, handleEvent]);
 }
