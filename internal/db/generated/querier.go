@@ -1552,9 +1552,13 @@ type Querier interface {
 	// guest's row comes before; NULL when a guest has none — are repeated in every
 	// arm: entries is read twice, so it is materialized, and a bound applied to it
 	// reaches no arm. A 24-hour window on the busiest guest on dev read all its
-	// rows otherwise. Both are written "IS NULL OR": a bare range on a parameter
-	// tempts a generic plan to AND the arm's index with the created_at index,
-	// which read all of dev's 32k audit rows for a 30-row guest. Each entry finds
+	// rows otherwise. In the guest arms both are written "IS NULL OR": a bare range
+	// on a parameter tempts a generic plan to AND the arm's index with the
+	// created_at index, which read all of dev's 32k audit rows for a 30-row guest.
+	// In the object arm's index reads since is a bare range against -infinity
+	// instead, which the (resource_type, resource_id, created_at) index takes as a
+	// bound: a node's 24 hours at 10x dev, 60-70 ms on a generic plan as "IS NULL
+	// OR", 14 ms so. Each entry finds
 	// its guest's cutoff by joining guests on its subject, materialized so the
 	// plan does not rebuild the list for every row.
 	//
