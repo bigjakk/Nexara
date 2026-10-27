@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type SyntheticEvent } from "react";
 import { History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +11,10 @@ import {
 import { usePermissions } from "@/hooks/usePermissions";
 import type { HistoryKind, HistoryTarget } from "../types/history";
 import { HistoryTimeline } from "./HistoryTimeline";
+
+function stopPropagation(e: SyntheticEvent) {
+  e.stopPropagation();
+}
 
 interface HistoryDrawerProps {
   kind: HistoryKind;
@@ -36,9 +40,15 @@ export function HistoryDrawer({
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
+      {/* Portaled out of the list row that opens it, the drawer is still that
+          row's child to React, which bubbles its events up the row: a click,
+          press or key inside would select or open the row. */}
       <SheetContent
         side="right"
         className="w-full overflow-y-auto sm:max-w-4xl"
+        onClick={stopPropagation}
+        onPointerDown={stopPropagation}
+        onKeyDown={stopPropagation}
       >
         <SheetHeader>
           <SheetTitle>History: {title}</SheetTitle>

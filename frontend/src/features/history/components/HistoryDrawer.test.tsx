@@ -25,7 +25,12 @@ const target: HistoryTarget = {
 
 function setPermissions(permissions: string[]) {
   useAuthStore.setState({
-    user: { id: "u1", email: "u@example.test", display_name: "U", role: "user" },
+    user: {
+      id: "u1",
+      email: "u@example.test",
+      display_name: "U",
+      role: "user",
+    },
     permissions,
     isAuthenticated: true,
     isInitialized: true,
@@ -33,7 +38,11 @@ function setPermissions(permissions: string[]) {
 }
 
 afterEach(() => {
-  useAuthStore.setState({ user: null, permissions: [], isAuthenticated: false });
+  useAuthStore.setState({
+    user: null,
+    permissions: [],
+    isAuthenticated: false,
+  });
 });
 
 describe("HistoryButton", () => {
@@ -42,7 +51,9 @@ describe("HistoryButton", () => {
     const user = setupUser();
     mockedPage.mockReset();
     mockedPage.mockResolvedValue({
-      items: [makeHistoryEntry({ action: "config_update", category: "config" })],
+      items: [
+        makeHistoryEntry({ action: "config_update", category: "config" }),
+      ],
       total: 1,
     });
 
@@ -50,7 +61,9 @@ describe("HistoryButton", () => {
     const { unmount } = renderWithProviders(
       <HistoryButton kind={guestHistoryKind} target={target} title="rule01" />,
     );
-    expect(screen.queryByRole("button", { name: "History of rule01" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "History of rule01" }),
+    ).toBeNull();
     unmount();
 
     setPermissions(["view:audit", "view:task"]);
@@ -65,5 +78,34 @@ describe("HistoryButton", () => {
     expect(String(mockedPage.mock.calls[0]?.[0])).toBe(
       "/api/v1/clusters/c1/ha/rules/rule01/history?limit=50&offset=0",
     );
+  });
+
+  // React bubbles a portal's events up its tree: the drawer's would reach the
+  // list row it was opened from.
+  it("keeps what is done inside the drawer from reaching the row it was opened from", async () => {
+    const user = setupUser();
+    mockedPage.mockResolvedValue({ items: [], total: 0 });
+    setPermissions(["view:audit", "view:task"]);
+    const onRow = vi.fn();
+    renderWithProviders(
+      <table>
+        <tbody>
+          <tr onClick={onRow} onPointerDown={onRow} onKeyDown={onRow}>
+            <td>
+              <HistoryButton
+                kind={guestHistoryKind}
+                target={target}
+                title="rule01"
+              />
+            </td>
+          </tr>
+        </tbody>
+      </table>,
+    );
+    await user.click(screen.getByRole("button", { name: "History of rule01" }));
+    onRow.mockClear();
+    await user.click(await screen.findByText("History: rule01"));
+    await user.keyboard("a");
+    expect(onRow).not.toHaveBeenCalled();
   });
 });
