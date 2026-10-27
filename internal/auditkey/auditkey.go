@@ -20,15 +20,16 @@ import (
 const MaxIDLen = 256
 
 // ValidID reports whether id can be filed as an audit resource_id: not empty,
-// not longer than MaxIDLen, no control character. An id read from a node's own
-// lists is still a name somebody typed (a pool, an alias), and one that fails
-// this is not filed under its own key.
+// not longer than MaxIDLen, and no control or format character (a zero-width
+// space or a right-to-left override changes how a name reads, not what it is).
+// An id read from a node's own lists is still a name somebody typed (a pool, an
+// alias), and one that fails this is not filed under its own key.
 func ValidID(id string) bool {
 	if id == "" || len(id) > MaxIDLen {
 		return false
 	}
 	for _, r := range id {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return false
 		}
 	}

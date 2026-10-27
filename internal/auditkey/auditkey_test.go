@@ -14,6 +14,9 @@ func TestValidID(t *testing.T) {
 		{"a name", "pool01", true},
 		{"empty", "", false},
 		{"a control character", "pool\n01", false},
+		{"a right-to-left override", "pool\u202e01", false},
+		{"a zero-width space", "pool\u200b01", false},
+		{"a letter beyond ASCII", "p\u00f6ol01", true},
 		{"at the bound", strings.Repeat("p", MaxIDLen), true},
 		{"past the bound", strings.Repeat("p", MaxIDLen+1), false},
 	} {
