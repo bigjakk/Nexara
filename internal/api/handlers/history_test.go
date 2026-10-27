@@ -364,3 +364,33 @@ func historyTestProps(name string, path apischema.Property) apischema.Properties
 		"source":     {Type: apischema.String, Optional: true},
 	}
 }
+
+// A guest-from-path kind skips the guest-permission filter for the path's
+// guest alone: a selection of any other guest is refused before the query.
+func TestHistoryListRefusesAGuestBesideThePath(t *testing.T) {
+	t.Parallel()
+	dbtx := &auditRowsDBTX{}
+	kind := GuestHistory()
+	kind.Select = func(context.Context, HistoryRequest) (HistorySelection, error) {
+		return HistorySelection{Guests: []HistoryGuest{{VMID: 101}}}, nil
+	}
+	cluster := uuid.New()
+	props := historyTestProps("cluster_id", apischema.StdOption("cluster-id"))
+	props["vmid"] = apischema.Property{Type: apischema.Integer}
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", clusterGrantEngine{action: "view", resource: "vm", cluster: cluster})
+		return c.Next()
+	})
+	app.Get("/clusters/:cluster_id/guests/:vmid/history", withRequestParams(t, props, []string{"cluster_id", "vmid"},
+		NewHistoryHandler(db.New(dbtx)).Route(kind).List))
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/guests/100/history", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError || len(dbtx.calls) != 0 {
+		t.Errorf("status %d after %d queries, want 500 before any", resp.StatusCode, len(dbtx.calls))
+	}
+}

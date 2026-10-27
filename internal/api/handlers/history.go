@@ -67,8 +67,9 @@ type HistoryKind struct {
 	// against its route's own view permission (ObservedTypePermission, which
 	// the registry checks). ListParams refuses an object of any other type.
 	ObjectTypes []string
-	// GuestFromPath says the selection's one guest is the one the path names:
-	// the caller asked for it by VMID, so listing it discloses nothing. Every
+	// GuestFromPath says the selection's one guest is the one the path's
+	// "vmid" names — List refuses any other selection — and the caller asked
+	// for it by VMID, so listing it discloses nothing. Every
 	// other kind's guests — a folder's members, a node's guests — are kept
 	// only where the caller may open them (viewableGuests).
 	GuestFromPath bool
@@ -651,6 +652,12 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	sel, err := r.kind.Select(ctx, HistoryRequest{Queries: r.h.queries, ClusterID: clusterID, Params: p})
 	if err != nil {
 		return err
+	}
+	// GuestFromPath exempts the path's guest, and that guest alone, from the
+	// filter below.
+	if r.kind.GuestFromPath && (len(sel.Guests) != 1 || int64(sel.Guests[0].VMID) != p.Int("vmid") || len(sel.Objects) > 0) {
+		slog.Error("history selection refused: a guest-from-path kind selected more than the path's guest", "kind", r.kind.Name)
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
 	}
 	if !r.kind.GuestFromPath && len(sel.Guests) > 0 {
 		vmids := make([]int32, 0, len(sel.Guests))
