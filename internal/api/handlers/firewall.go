@@ -658,7 +658,7 @@ func (h *NetworkHandler) AddFirewallIPSetEntry(c fiber.Ctx, p *apischema.Params)
 	if err := pxClient.AddFirewallIPSetEntry(c.Context(), name, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"set": name, "cidr": req.CIDR})
+	details, _ := json.Marshal(map[string]string{"set": auditkey.FirewallName(name), "cidr": req.CIDR})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", auditkey.IPSetEntry(name, req.CIDR), "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -688,7 +688,7 @@ func (h *NetworkHandler) DeleteFirewallIPSetEntry(c fiber.Ctx, p *apischema.Para
 	if err := pxClient.DeleteFirewallIPSetEntry(c.Context(), name, cidr); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"set": name, "cidr": cidr})
+	details, _ := json.Marshal(map[string]string{"set": auditkey.FirewallName(name), "cidr": cidr})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", auditkey.IPSetListed(name, cidr), "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

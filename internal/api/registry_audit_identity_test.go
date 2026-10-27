@@ -170,6 +170,8 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			target: "/firewall/ipset/MySet/entries", body: `{"cidr":"192.0.2.5/24"}`,
 			bind:     func(q *db.Queries) Handler { return net(q).AddFirewallIPSetEntry },
 			wantType: "firewall_ipset_entry", wantID: "myset/192.0.2.0/24", wantAction: "created",
+			// The set's History finds its entries by this, spelled as the set is filed.
+			wantDetails: map[string]any{"set": "myset"},
 		},
 		{
 			// A delete names the entry as the set lists it.
