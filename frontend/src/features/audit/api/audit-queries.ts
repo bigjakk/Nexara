@@ -15,6 +15,9 @@ export interface AuditLogEntry {
   user_email: string;
   user_display_name: string;
   cluster_name: string;
+  // True when cluster_id names a cluster that no longer exists: the entry keeps
+  // the id it was written with, and cluster_name reads "<name> (removed)".
+  cluster_removed: boolean;
   resource_vmid: number;
   resource_name: string;
   // Server-authoritative task status for UPID-bearing entries (Nexara tasks).

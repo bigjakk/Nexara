@@ -176,9 +176,9 @@ type ListExistingAuditLogUPIDsParams struct {
 }
 
 // ListExistingAuditLogUPIDs asks about ONE cluster's entries. Audit entries
-// outlive a removed cluster (detached, no cluster, since 000122), and a cluster
-// added again has the same nodes and so the same UPIDs: matching the UPID alone
-// would call every task it ever ran "already recorded" and skip them for good.
+// outlive a removed cluster (under its old id, since 000122), and a cluster added
+// again has a new id but the same nodes and so the same UPIDs: matching the UPID
+// alone would call every task it ever ran "already recorded" and skip them for good.
 func (q *Queries) ListExistingAuditLogUPIDs(ctx context.Context, arg ListExistingAuditLogUPIDsParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listExistingAuditLogUPIDs, arg.ClusterID, arg.Upids)
 	if err != nil {

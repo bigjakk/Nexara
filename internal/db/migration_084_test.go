@@ -58,8 +58,8 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 		pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer pcancel()
 		// Dropping the cluster takes the guest rows with it, but not the audit
-		// rows: audit_log.cluster_id is SET NULL since 000122 (CASCADE before),
-		// so every one goes by user.
+		// rows: they outlive their cluster since 000122 (a cascade before), so
+		// every one goes by user.
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE user_id = $1`, m084User)
 		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = $1`, m084Cluster)
 		_, _ = pool.Exec(pctx, `DELETE FROM users WHERE id = $1`, m084User)
@@ -204,6 +204,12 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 		case r.wantVmid != nil && got != nil && *got != *r.wantVmid:
 			t.Errorf("%s (%s): vmid = %d, want %d", r.action, r.resType, *got, *r.wantVmid)
 		}
+	}
+
+	// The reads below use today's query, which joins tables newer than 84; the
+	// backfill has run, so they go at head.
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate up: %v", err)
 	}
 
 	// Step 3: churn the live guest exactly as the collector does — delete the

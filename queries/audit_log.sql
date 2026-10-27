@@ -56,7 +56,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
 -- caller's view:audit scope (see the accessible_cluster_ids note on
 -- ListAuditLogAdvanced) rather than trimming afterwards: LIMIT 50 applied
 -- before the scope would hand a cluster-scoped user whatever survives of the
--- newest 50 global rows — usually far fewer than 50, sometimes none.
+-- newest 50 global rows — usually far fewer than 50, sometimes none. The
+-- cluster label and the cluster_removed flag are explained there too.
 -- name: ListRecentAuditLogEnriched :many
 SELECT
   a.id,
@@ -70,7 +71,9 @@ SELECT
   a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
-  COALESCE(c.name, '') AS cluster_name,
+  COALESCE(c.name, rc.name || ' (removed)',
+           CASE WHEN a.cluster_id IS NOT NULL THEN '(removed cluster)' ELSE '' END) AS cluster_name,
+  (a.cluster_id IS NOT NULL AND c.id IS NULL)::boolean AS cluster_removed,
   COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
   COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name,
   COALESCE(th.status, '') AS task_status,
@@ -79,10 +82,12 @@ SELECT
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
+LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
 WHERE (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
        OR a.cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
+  AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL OR c.id IS NOT NULL)
 ORDER BY a.created_at DESC
 LIMIT 50;
 
@@ -102,6 +107,18 @@ LIMIT 50;
 -- entry to every cluster-scoped user. TestScopeSQL_ScopedClausesExcludeNullCluster
 -- pins the shape, and TestAuditScope_NullClusterRowsAreGlobal the behaviour.
 --
+-- An entry outlives the cluster it was recorded against (000122 dropped the
+-- foreign key): it keeps its cluster_id, which then names no clusters row. The
+-- cluster's name was kept in removed_clusters by a trigger on its removal, and
+-- cluster_name falls back to it as "<name> (removed)", with cluster_removed set;
+-- "(removed cluster)" if even that is gone. Such an entry stays readable by a
+-- holder of GLOBAL view:audit only, as one with no cluster is: the second
+-- accessible_cluster_ids conjunct requires the cluster to exist, because a
+-- role assignment scoped to a cluster is not deleted with it, and its id could
+-- otherwise match `cluster_id = ANY(array)` for a caller who holds it. The
+-- conjunct is kept apart from the pinned clause above, which it must not change,
+-- and TestAuditScope_NullClusterRowsAreGlobal holds it.
+--
 -- vmids filters on the denormalized audit_log.vmid (000084), mirroring the
 -- same narg on ListTaskHistoryAdvanced. It deliberately reads the column and
 -- not the vms join: the column is the guest identity frozen at insert, so the
@@ -120,12 +137,15 @@ SELECT
   a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
-  COALESCE(c.name, '') AS cluster_name,
+  COALESCE(c.name, rc.name || ' (removed)',
+           CASE WHEN a.cluster_id IS NOT NULL THEN '(removed cluster)' ELSE '' END) AS cluster_name,
+  (a.cluster_id IS NOT NULL AND c.id IS NULL)::boolean AS cluster_removed,
   COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
   COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
+LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluster_id'))
   AND (sqlc.narg('resource_type')::text IS NULL OR a.resource_type = sqlc.narg('resource_type'))
@@ -137,13 +157,15 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluste
   AND (sqlc.narg('vmids')::int[] IS NULL OR a.vmid = ANY(sqlc.narg('vmids')::int[]))
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
        OR a.cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
+  AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL OR c.id IS NOT NULL)
 ORDER BY a.created_at DESC
 LIMIT $1 OFFSET $2;
 
 -- CountAuditLogAdvanced returns the total matching the same filters, for the
 -- audit page pagination. Must stay filter-for-filter in sync with
--- ListAuditLogAdvanced — in particular accessible_cluster_ids, or the Total
--- leaks how many entries the caller's inaccessible clusters hold.
+-- ListAuditLogAdvanced — in particular accessible_cluster_ids, with the
+-- existence conjunct beside it, or the Total leaks how many entries the
+-- caller's inaccessible clusters hold.
 -- name: CountAuditLogAdvanced :one
 SELECT count(*) FROM audit_log
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
@@ -155,7 +177,9 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_
   AND (sqlc.narg('end_time')::timestamptz IS NULL OR created_at <= sqlc.narg('end_time'))
   AND (sqlc.narg('vmids')::int[] IS NULL OR vmid = ANY(sqlc.narg('vmids')::int[]))
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
-       OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]));
+       OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
+  AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+       OR EXISTS (SELECT 1 FROM clusters c WHERE c.id = audit_log.cluster_id));
 
 -- name: ListDistinctAuditActions :many
 SELECT DISTINCT action FROM audit_log ORDER BY action;

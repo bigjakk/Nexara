@@ -26,6 +26,7 @@ function entry(over: Partial<AuditLogEntry>): AuditLogEntry {
     user_email: "u@example.com",
     user_display_name: "U",
     cluster_name: "cluster01",
+    cluster_removed: false,
     resource_vmid: 0,
     resource_name: "",
     ...over,

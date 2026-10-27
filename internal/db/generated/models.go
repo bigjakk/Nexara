@@ -872,6 +872,12 @@ type ProxmoxTaskSyncState struct {
 	LastSyncedAt int64     `json:"last_synced_at"`
 }
 
+type RemovedCluster struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	RemovedAt time.Time `json:"removed_at"`
+}
+
 type ReplicationJob struct {
 	ClusterID  uuid.UUID   `json:"cluster_id"`
 	JobID      string      `json:"job_id"`

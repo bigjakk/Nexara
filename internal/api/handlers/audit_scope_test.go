@@ -528,3 +528,33 @@ func TestAuditExport_ScopeGatesBeforeDB(t *testing.T) {
 		}
 	})
 }
+
+// An entry of a removed cluster reaches the client as "<name> (removed)" with
+// cluster_removed set, from both reads that build a response. The frontend keys
+// on the flag to stop asking that cluster for the entry's task log.
+func TestAuditResponses_CarryTheRemovedClusterFlag(t *testing.T) {
+	t.Parallel()
+
+	const label = "cluster01 (removed)"
+	responses := map[string]auditLogResponse{
+		"list": toAdvancedAuditResponse(db.ListAuditLogAdvancedRow{
+			ClusterName: label, ClusterRemoved: true, Details: json.RawMessage(`{}`),
+		}, nil),
+		"feed": toRecentAuditResponse(db.ListRecentAuditLogEnrichedRow{
+			ClusterName: label, ClusterRemoved: true, Details: json.RawMessage(`{}`),
+		}, nil),
+	}
+	for name, resp := range responses {
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", name, err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("%s: unmarshal: %v", name, err)
+		}
+		if got["cluster_name"] != label || got["cluster_removed"] != true {
+			t.Errorf("%s: cluster_name=%v cluster_removed=%v, want %q and true", name, got["cluster_name"], got["cluster_removed"], label)
+		}
+	}
+}

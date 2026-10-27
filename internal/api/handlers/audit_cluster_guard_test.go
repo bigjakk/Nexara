@@ -102,13 +102,12 @@ var auditClusterExempt = map[string]string{
 	"firewall_templates.go.UpdateTemplate": "firewall_templates has no cluster_id column",
 	"firewall_templates.go.DeleteTemplate": "firewall_templates has no cluster_id column",
 
-	// Deleting a cluster. The row is written after the delete, when the cluster it
-	// records is gone and no foreign key can name it, so it carries a NULL
-	// cluster_id and the cluster id and name travel in the details body. (Before
-	// 000122 the key was ON DELETE CASCADE, which also destroyed a row written
-	// before the delete.) Gated on delete:cluster, and the credential-revocation
-	// half additionally on global manage:cluster.
-	"clusters.go.Delete": "written after the delete, when the cluster it records is gone and no foreign key can name it",
+	// Deleting a cluster. The row is the instance's record of the removal, written
+	// after the delete, so it carries a NULL cluster_id (read with global view:audit
+	// only) and the cluster id and name travel in the details body. Gated on
+	// delete:cluster, and the credential-revocation half additionally on global
+	// manage:cluster.
+	"clusters.go.Delete": "the instance's record of a removal, written after the cluster is gone; global view:audit reads it",
 
 	// A failed cluster onboarding: there is no cluster row, because creating
 	// one is what failed. Gated on global manage:cluster, so the global-only

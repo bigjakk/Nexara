@@ -28,8 +28,10 @@ import {
   type ActivityCellCtx,
 } from "./activity-column-defs";
 
+// A removed cluster's entry keeps its id, but nothing can be asked of that
+// cluster any more, so it is treated as having none.
 function getClusterIdFromEntry(entry: AuditLogEntry): string {
-  return entry.cluster_id ?? "";
+  return entry.cluster_removed ? "" : (entry.cluster_id ?? "");
 }
 
 /**
@@ -389,9 +391,10 @@ export function TaskLogPanel() {
                     }}
                     layout={layout}
                     onFocus={() => {
-                      if (row.details.upid && row.entry.cluster_id) {
+                      const clusterId = getClusterIdFromEntry(row.entry);
+                      if (row.details.upid && clusterId) {
                         setFocusedTask({
-                          clusterId: row.entry.cluster_id,
+                          clusterId,
                           upid: row.details.upid,
                           description: activityLabel(row),
                         });

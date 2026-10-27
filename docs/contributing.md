@@ -289,8 +289,8 @@ from a test suite.
 
 **Never test cluster deletion against your dev stack.** `clusters.id` is the
 target of ~30 `ON DELETE CASCADE` foreign keys: deleting one row takes its
-nodes, VMs, task history, audit log and every metric sample with it. Re-adding
-the cluster gives you an empty shell.
+nodes, VMs, task history and every metric sample with it (its audit entries
+stay, labelled as removed). Re-adding the cluster gives you an empty shell.
 
 Instead, run a second Nexara seeded from a dump of your dev database.
 

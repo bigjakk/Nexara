@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
-import { detachedClusterEntry } from "@/test/audit-entry.fixtures";
+import { removedClusterEntry } from "@/test/audit-entry.fixtures";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 import { AuditLogPanel } from "./AuditLogPanel";
 import {
@@ -80,11 +80,11 @@ describe("AuditLogPanel", () => {
     expect(screen.getByText("syslog card")).toBeInTheDocument();
   });
 
-  it("shows the entry of a removed cluster, which names no cluster, as a system entry", () => {
-    renderFor(["view:audit"], [detachedClusterEntry]);
+  it("shows the entry of a removed cluster under the name it was recorded against", () => {
+    renderFor(["view:audit"], [removedClusterEntry]);
 
     expect(screen.getByText("linux01")).toBeInTheDocument();
-    expect(screen.getByText("System")).toBeInTheDocument();
+    expect(screen.getByText("cluster01 (removed)")).toBeInTheDocument();
   });
 
   it("leaves the syslog card out for a Viewer, whose every read of it would 403", () => {

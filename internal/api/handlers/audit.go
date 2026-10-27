@@ -58,9 +58,14 @@ type auditLogResponse struct {
 	Source          string     `json:"source"`
 	UserEmail       string     `json:"user_email"`
 	UserDisplayName string     `json:"user_display_name"`
-	ClusterName     string     `json:"cluster_name"`
-	ResourceVMID    int32      `json:"resource_vmid"`
-	ResourceName    string     `json:"resource_name"`
+	// ClusterName is the cluster's name, "<name> (removed)" once the cluster is
+	// gone, and empty for an entry that has no cluster.
+	ClusterName string `json:"cluster_name"`
+	// ClusterRemoved is true when the entry names a cluster that no longer
+	// exists. Its cluster_id is still the id the entry was written with.
+	ClusterRemoved bool   `json:"cluster_removed"`
+	ResourceVMID   int32  `json:"resource_vmid"`
+	ResourceName   string `json:"resource_name"`
 	// Server-authoritative task status, populated only for entries backed by a
 	// task_history row (Nexara-dispatched tasks). nil for non-task or external
 	// entries — the client falls back to the entry's own details for those.
@@ -145,6 +150,7 @@ func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow, visible map[string]bo
 		UserEmail:       a.UserEmail.String,
 		UserDisplayName: a.UserDisplayName.String,
 		ClusterName:     a.ClusterName,
+		ClusterRemoved:  a.ClusterRemoved,
 		ResourceVMID:    a.ResourceVmid,
 		ResourceName:    a.ResourceName,
 	}
@@ -408,6 +414,7 @@ func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow, visible map[strin
 		UserEmail:       a.UserEmail.String,
 		UserDisplayName: a.UserDisplayName.String,
 		ClusterName:     a.ClusterName,
+		ClusterRemoved:  a.ClusterRemoved,
 		ResourceVMID:    a.ResourceVmid,
 		ResourceName:    a.ResourceName,
 	}

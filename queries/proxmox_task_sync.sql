@@ -19,9 +19,9 @@ ON CONFLICT (cluster_id) DO UPDATE SET last_synced_at = $2;
 SELECT upid FROM task_history WHERE upid = ANY(sqlc.arg('upids')::text[]);
 
 -- ListExistingAuditLogUPIDs asks about ONE cluster's entries. Audit entries
--- outlive a removed cluster (detached, no cluster, since 000122), and a cluster
--- added again has the same nodes and so the same UPIDs: matching the UPID alone
--- would call every task it ever ran "already recorded" and skip them for good.
+-- outlive a removed cluster (under its old id, since 000122), and a cluster added
+-- again has a new id but the same nodes and so the same UPIDs: matching the UPID
+-- alone would call every task it ever ran "already recorded" and skip them for good.
 
 -- name: ListExistingAuditLogUPIDs :many
 SELECT (details->>'upid')::text AS upid FROM audit_log

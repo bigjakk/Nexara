@@ -72,9 +72,9 @@ Changing the address also **clears the cluster's stored SSH credential and every
 
 ### Removing a Cluster
 
-From the cluster list, click the delete button. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster. The audit entries recorded against it are kept, as system-wide entries: they leave the cluster-scoped views and are read by anyone who can view the audit log across all clusters. Each carries `details.detached_cluster`, the removed cluster's `id` and `name`, so the entries of two removed clusters can still be told apart.
+From the cluster list, click the delete button. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster. The audit entries recorded against it are kept, labelled with the cluster's name followed by `(removed)`. Earlier releases deleted them with the cluster. Like entries that belong to no cluster, they are shown only to someone who can view the audit log across all clusters: a role assignment scoped to the removed cluster no longer shows them. A cluster you add again is a new cluster, and its entries do not join the old ones.
 
-Keeping the entries means rewriting each of them, in the one database transaction that removes the cluster, and the request stays open until that commits. On a test database holding a million audit entries, about half of them this cluster's, the removal took 22 to 29 seconds (it varies with load); deleting the entries, as earlier releases did, took about a second. The time grows with the number of the cluster's entries, roughly 50 seconds per million. While it runs, the cluster's collector and anything else that records against the cluster wait, and fail once it is gone. If a reverse proxy in front of Nexara gives up first (60 seconds is a common limit, reached at around a million entries), you see the proxy's gateway-timeout error instead of Nexara's answer, but the removal is not cancelled and commits when it is done: reload the cluster list instead of retrying.
+Removing a cluster leaves its audit entries untouched, so it takes no longer for having many.
 
 ### API Token Requirements
 

@@ -17,10 +17,14 @@ var (
 	scopeTestUserID   = uuid.MustParse("5c09e000-0000-4000-8000-000000000001")
 	scopeTestClusterA = uuid.MustParse("5c09e000-0000-4000-8000-00000000000a")
 	scopeTestClusterB = uuid.MustParse("5c09e000-0000-4000-8000-00000000000b")
+	scopeTestClusterR = uuid.MustParse("5c09e000-0000-4000-8000-00000000000c") // removed after its entry was written
+	scopeTestClusterU = uuid.MustParse("5c09e000-0000-4000-8000-00000000000d") // never a cluster, or its name was lost
 
-	scopeTestRowA      = uuid.MustParse("5c09e000-0000-4000-8000-0000000000a1")
-	scopeTestRowB      = uuid.MustParse("5c09e000-0000-4000-8000-0000000000b1")
-	scopeTestRowGlobal = uuid.MustParse("5c09e000-0000-4000-8000-0000000000f1")
+	scopeTestRowA       = uuid.MustParse("5c09e000-0000-4000-8000-0000000000a1")
+	scopeTestRowB       = uuid.MustParse("5c09e000-0000-4000-8000-0000000000b1")
+	scopeTestRowRemoved = uuid.MustParse("5c09e000-0000-4000-8000-0000000000c1")
+	scopeTestRowUnknown = uuid.MustParse("5c09e000-0000-4000-8000-0000000000d1")
+	scopeTestRowGlobal  = uuid.MustParse("5c09e000-0000-4000-8000-0000000000f1")
 )
 
 // TestAuditScope_NullClusterRowsAreGlobal executes the real generated queries
@@ -40,6 +44,13 @@ var (
 //	nil  → global view:audit → every row, NULL-cluster entries included
 //	{A}  → scoped to A       → A's rows only, NEVER the NULL-cluster entry
 //	{}   → no grant anywhere  → nothing
+//
+// An entry also outlives a removed cluster (000122), keeping an id that names no
+// clusters row. Only global view:audit reads it, labelled with the name kept for
+// it ("(removed cluster)" when none was: the id of a cluster that never was).
+// {A, R, U} is a scoped caller whose assignments for clusters that are gone were
+// not deleted with them: their ids are in the array, and their entries still
+// must not appear.
 //
 // Skipped unless NEXARA_TEST_DB_URL names a throwaway database (CI sets it;
 // see .github/workflows/ci.yml). It seeds and deletes its own rows and does not
@@ -61,12 +72,14 @@ func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 	purge := func() {
 		pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer pcancel()
-		// Deleted by id: a removed cluster takes its audit rows with it only on
-		// the schemas before 000122, and the NULL-cluster row never had a parent.
+		// Deleted by id: a removed cluster keeps its audit rows since 000122, and
+		// the NULL-cluster row never had a parent. The clusters go before their
+		// removed_clusters rows, which their removal writes.
+		clusters := []uuid.UUID{scopeTestClusterA, scopeTestClusterB}
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE id = ANY($1)`,
-			[]uuid.UUID{scopeTestRowA, scopeTestRowB, scopeTestRowGlobal})
-		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`,
-			[]uuid.UUID{scopeTestClusterA, scopeTestClusterB})
+			[]uuid.UUID{scopeTestRowA, scopeTestRowB, scopeTestRowRemoved, scopeTestRowUnknown, scopeTestRowGlobal})
+		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, clusters)
+		_, _ = pool.Exec(pctx, `DELETE FROM removed_clusters WHERE id = ANY($1)`, append(clusters, scopeTestClusterR))
 		_, _ = pool.Exec(pctx, `DELETE FROM users WHERE id = $1`, scopeTestUserID)
 	}
 	purge()
@@ -76,6 +89,14 @@ func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 
 	queries := gen.New(pool)
 
+	// What each entry's cluster is called, and whether it is gone, to a reader that sees it.
+	labels := map[uuid.UUID]clusterLabel{
+		scopeTestRowA:       {"audit-scope-test-a", false},
+		scopeTestRowRemoved: {"audit-scope-test-r (removed)", true},
+		scopeTestRowUnknown: {"(removed cluster)", true},
+		scopeTestRowGlobal:  {"", false},
+	}
+
 	tests := []struct {
 		name    string
 		scope   []uuid.UUID
@@ -84,12 +105,19 @@ func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 		{
 			name:    "global view:audit (NULL scope) sees every row",
 			scope:   nil,
-			wantIDs: []uuid.UUID{scopeTestRowA, scopeTestRowB, scopeTestRowGlobal},
+			wantIDs: []uuid.UUID{scopeTestRowA, scopeTestRowB, scopeTestRowRemoved, scopeTestRowUnknown, scopeTestRowGlobal},
 		},
 		{
 			// The load-bearing case: the global entry must NOT appear.
 			name:    "scoped to cluster A sees A's rows and no global entry",
 			scope:   []uuid.UUID{scopeTestClusterA},
+			wantIDs: []uuid.UUID{scopeTestRowA},
+		},
+		{
+			// The other load-bearing case: the removed cluster's id is in the
+			// caller's scope, and its entry must still NOT appear.
+			name:    "scoped to A and to clusters that are gone sees A's rows only",
+			scope:   []uuid.UUID{scopeTestClusterA, scopeTestClusterR, scopeTestClusterU},
 			wantIDs: []uuid.UUID{scopeTestRowA},
 		},
 		{
@@ -113,6 +141,7 @@ func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 			got := make([]uuid.UUID, 0, len(rows))
 			for _, r := range rows {
 				got = append(got, r.ID)
+				assertClusterLabel(t, "ListAuditLogAdvanced", r.ID, labels, r.ClusterName, r.ClusterRemoved)
 			}
 			assertSameIDs(t, "ListAuditLogAdvanced", got, tt.wantIDs)
 			assertNoGlobalEntry(t, "ListAuditLogAdvanced", got, tt.wantIDs)
@@ -151,6 +180,7 @@ func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 					t.Errorf("ListRecentAuditLogEnriched returned %v to a caller scoped to %v, "+
 						"which must not see it", r.ID, tt.scope)
 				}
+				assertClusterLabel(t, "ListRecentAuditLogEnriched", r.ID, labels, r.ClusterName, r.ClusterRemoved)
 			}
 		})
 	}
@@ -160,9 +190,11 @@ func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 // them without assuming an empty audit_log.
 const scopeTestResourceType = "audit-scope-test"
 
-// seedAuditScopeFixture inserts one user, two clusters, and three audit rows:
-// one in cluster A, one in cluster B, and one global entry with a NULL
-// cluster_id — the shape the scope clause has to tell apart.
+// seedAuditScopeFixture inserts one user, two clusters, and five audit rows:
+// one in cluster A, one in cluster B, one in a cluster R that is then removed
+// (so its entry names no clusters row), one naming an id that was never a
+// cluster, and one global entry with a NULL cluster_id — the shapes the scope
+// clause has to tell apart.
 func seedAuditScopeFixture(t *testing.T, env *migrationTestEnv) {
 	t.Helper()
 
@@ -181,6 +213,7 @@ func seedAuditScopeFixture(t *testing.T, env *migrationTestEnv) {
 	}{
 		{scopeTestClusterA, "audit-scope-test-a"},
 		{scopeTestClusterB, "audit-scope-test-b"},
+		{scopeTestClusterR, "audit-scope-test-r"},
 	} {
 		if _, err := pool.Exec(ctx,
 			`INSERT INTO clusters (id, name, api_url, token_id, token_secret_encrypted)
@@ -197,6 +230,8 @@ func seedAuditScopeFixture(t *testing.T, env *migrationTestEnv) {
 	}{
 		{scopeTestRowA, &scopeTestClusterA, "cluster-a-entry"},
 		{scopeTestRowB, &scopeTestClusterB, "cluster-b-entry"},
+		{scopeTestRowRemoved, &scopeTestClusterR, "removed-cluster-entry"},
+		{scopeTestRowUnknown, &scopeTestClusterU, "unknown-cluster-entry"},
 		{scopeTestRowGlobal, nil, "global-entry"},
 	} {
 		if _, err := pool.Exec(ctx,
@@ -206,6 +241,32 @@ func seedAuditScopeFixture(t *testing.T, env *migrationTestEnv) {
 		); err != nil {
 			t.Fatalf("seed audit row %s: %v", r.action, err)
 		}
+	}
+
+	// The removal is what leaves the entry naming a cluster that is gone.
+	if _, err := pool.Exec(ctx, `DELETE FROM clusters WHERE id = $1`, scopeTestClusterR); err != nil {
+		t.Fatalf("remove cluster R: %v", err)
+	}
+	var kept int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE id = $1`, scopeTestRowRemoved).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("the entry of the removed cluster was deleted with it (kept=%d err=%v): the fixture is not exercising the case", kept, err)
+	}
+}
+
+// clusterLabel is what a reader shows for an entry's cluster: the name, and
+// whether the cluster is gone.
+type clusterLabel struct {
+	name    string
+	removed bool
+}
+
+// assertClusterLabel holds a returned fixture entry to its label; other tests'
+// entries in the same table are not this test's business.
+func assertClusterLabel(t *testing.T, label string, id uuid.UUID, want map[uuid.UUID]clusterLabel, name string, removed bool) {
+	t.Helper()
+
+	if w, ok := want[id]; ok && (name != w.name || removed != w.removed) {
+		t.Errorf("%s labels %v as %q (removed=%v), want %q (removed=%v)", label, id, name, removed, w.name, w.removed)
 	}
 }
 

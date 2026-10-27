@@ -310,8 +310,9 @@ type Querier interface {
 	CountAlertHistoryBySeverityInWindow(ctx context.Context, arg CountAlertHistoryBySeverityInWindowParams) ([]CountAlertHistoryBySeverityInWindowRow, error)
 	// CountAuditLogAdvanced returns the total matching the same filters, for the
 	// audit page pagination. Must stay filter-for-filter in sync with
-	// ListAuditLogAdvanced — in particular accessible_cluster_ids, or the Total
-	// leaks how many entries the caller's inaccessible clusters hold.
+	// ListAuditLogAdvanced — in particular accessible_cluster_ids, with the
+	// existence conjunct beside it, or the Total leaks how many entries the
+	// caller's inaccessible clusters hold.
 	CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAdvancedParams) (int64, error)
 	// How many OTHER cluster rows authenticate to Proxmox as the same PVE user.
 	//
@@ -1346,6 +1347,18 @@ type Querier interface {
 	// entry to every cluster-scoped user. TestScopeSQL_ScopedClausesExcludeNullCluster
 	// pins the shape, and TestAuditScope_NullClusterRowsAreGlobal the behaviour.
 	//
+	// An entry outlives the cluster it was recorded against (000122 dropped the
+	// foreign key): it keeps its cluster_id, which then names no clusters row. The
+	// cluster's name was kept in removed_clusters by a trigger on its removal, and
+	// cluster_name falls back to it as "<name> (removed)", with cluster_removed set;
+	// "(removed cluster)" if even that is gone. Such an entry stays readable by a
+	// holder of GLOBAL view:audit only, as one with no cluster is: the second
+	// accessible_cluster_ids conjunct requires the cluster to exist, because a
+	// role assignment scoped to a cluster is not deleted with it, and its id could
+	// otherwise match `cluster_id = ANY(array)` for a caller who holds it. The
+	// conjunct is kept apart from the pinned clause above, which it must not change,
+	// and TestAuditScope_NullClusterRowsAreGlobal holds it.
+	//
 	// vmids filters on the denormalized audit_log.vmid (000084), mirroring the
 	// same narg on ListTaskHistoryAdvanced. It deliberately reads the column and
 	// not the vms join: the column is the guest identity frozen at insert, so the
@@ -1441,9 +1454,9 @@ type Querier interface {
 	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
 	// ListExistingAuditLogUPIDs asks about ONE cluster's entries. Audit entries
-	// outlive a removed cluster (detached, no cluster, since 000122), and a cluster
-	// added again has the same nodes and so the same UPIDs: matching the UPID alone
-	// would call every task it ever ran "already recorded" and skip them for good.
+	// outlive a removed cluster (under its old id, since 000122), and a cluster added
+	// again has a new id but the same nodes and so the same UPIDs: matching the UPID
+	// alone would call every task it ever ran "already recorded" and skip them for good.
 	ListExistingAuditLogUPIDs(ctx context.Context, arg ListExistingAuditLogUPIDsParams) ([]string, error)
 	// ListExistingTaskHistoryUPIDs and ListExistingAuditLogUPIDs are the batch
 	// dedup the collector ingest uses: given a node's candidate UPIDs, return the
@@ -1794,7 +1807,8 @@ type Querier interface {
 	// caller's view:audit scope (see the accessible_cluster_ids note on
 	// ListAuditLogAdvanced) rather than trimming afterwards: LIMIT 50 applied
 	// before the scope would hand a cluster-scoped user whatever survives of the
-	// newest 50 global rows — usually far fewer than 50, sometimes none.
+	// newest 50 global rows — usually far fewer than 50, sometimes none. The
+	// cluster label and the cluster_removed flag are explained there too.
 	ListRecentAuditLogEnriched(ctx context.Context, accessibleClusterIds []uuid.UUID) ([]ListRecentAuditLogEnrichedRow, error)
 	// Failed tasks in the last 24h, grouped by type so we surface a count, not spam.
 	ListRecentFailedTasksByType(ctx context.Context) ([]ListRecentFailedTasksByTypeRow, error)

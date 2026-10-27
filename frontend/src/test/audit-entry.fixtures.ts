@@ -1,12 +1,13 @@
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 
 /**
- * What the entry of a removed cluster looks like once audit_log.cluster_id is
- * SET NULL: its guest and its task are still named, its cluster no longer is.
+ * What the entry of a removed cluster looks like: it keeps the cluster id it
+ * was written with, which no cluster has any more, and the name it carries is
+ * the one kept for it.
  */
-export const detachedClusterEntry: AuditLogEntry = {
+export const removedClusterEntry: AuditLogEntry = {
   id: "e1",
-  cluster_id: null,
+  cluster_id: "c1",
   user_id: "u1",
   resource_type: "vm",
   resource_id: "r1",
@@ -18,7 +19,8 @@ export const detachedClusterEntry: AuditLogEntry = {
   source: "nexara",
   user_email: "u@example.com",
   user_display_name: "U",
-  cluster_name: "",
+  cluster_name: "cluster01 (removed)",
+  cluster_removed: true,
   resource_vmid: 100,
   resource_name: "linux01",
 };

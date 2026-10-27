@@ -675,8 +675,9 @@ before paging: `/alerts`, `/alert-rules`, `/audit-log`, `/audit-log/recent`,
 rows for clusters the caller can view with the endpoint's permission
 (`view:alert`, `view:audit`, `view:migration`, `view:task`, `view:report`),
 and the response's `total` counts the scoped set. Rows with no cluster
-(global alert rules, non-cluster audit entries) are visible only to holders of
-the corresponding *global* permission. A caller with no grant at all gets an
+(global alert rules, non-cluster audit entries), and audit entries of a cluster
+that has since been removed, are visible only to holders of the corresponding
+*global* permission. A caller with no grant at all gets an
 empty list rather than an error.
 
 ---
@@ -736,7 +737,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | GET | `/clusters` | List all clusters |
 | GET | `/clusters/:id` | Get cluster details |
 | PUT | `/clusters/:id` | Update cluster |
-| DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential). The cluster's audit entries are kept with no cluster, so only a holder of global `view:audit` reads them; each gains `details.detached_cluster` (`id` and `name` of the removed cluster) |
+| DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential). The cluster's audit entries are kept, still carrying its id and labelled `<name> (removed)`; only a holder of global `view:audit` reads them (see [Audit Log](#audit-log)) |
 | POST | `/clusters/fetch-fingerprint` | Fetch TLS fingerprint from a Proxmox URL |
 
 #### Onboarding a cluster without a pre-made token
@@ -2020,10 +2021,20 @@ details name no storage; a PBS action that no single server can claim; and a
 backup job's `backup_job_created` entry, keyed `backup-job`. Entries from before
 the upgrade also have no `from_storage` on a disk move or a restore.
 
-An entry of a cluster that is later removed is kept, with no cluster, and gains
-`details.detached_cluster`, the removed cluster's `id` and `name`; nothing else
-about it changes, and the stamp is what tells it from the entries of another
-removed cluster that held a node of the same name.
+#### Entries of a removed cluster
+
+Removing a cluster does not delete or change its audit entries. An entry keeps
+the `cluster_id` it was written with, which no cluster has any more, and carries
+`cluster_removed: true`. Its `cluster_name` is the name the cluster had when it
+was removed, followed by ` (removed)`, or `(removed cluster)` when that name was
+not kept. Two removed clusters that shared a name are told apart by
+`cluster_id`, and a cluster added again has a new id, so its entries do not join
+the old ones. Earlier releases deleted the entries with the cluster.
+
+Such an entry is read like one with no cluster: only by a holder of *global*
+`view:audit`, from `/audit-log`, `/audit-log/recent` and the export. A role
+assignment scoped to the removed cluster, which is not deleted with the cluster,
+neither shows the entry nor counts it in `total`.
 
 #### Export
 

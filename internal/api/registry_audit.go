@@ -130,12 +130,13 @@ var auditFilterClusterParam = apischema.Property{
 // wider scope than the Items is a leak no per-row guard can repair — it counted
 // every cluster's entries and paginated over them — and it is the bug that
 // shape exists to prevent. NULL-cluster rows (logins, settings changes) are
-// excluded from a scoped caller by the same clause.
+// excluded from a scoped caller by the same clause, and the entries of a
+// removed cluster by a second conjunct that requires the cluster to exist.
 const auditScopeReason = "accessibleClusters(\"view\", \"audit\") builds the scope and applyAuditListScope " +
 	"stamps it on BOTH the listing and the count query — a Total computed under a wider scope than the " +
 	"Items is a leak no per-row guard can repair — with PermitsCluster re-checking each row and " +
-	"NULL-cluster global entries excluded from a scoped caller; the read spans every cluster, so there " +
-	"is none for a gate to resolve"
+	"NULL-cluster global entries and the entries of a removed cluster excluded from a scoped caller; the " +
+	"read spans every cluster, so there is none for a gate to resolve"
 
 // syslogConfigParams is the body both syslog writes take.
 //
