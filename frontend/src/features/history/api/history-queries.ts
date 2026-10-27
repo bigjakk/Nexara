@@ -21,6 +21,8 @@ interface HistoryParams {
   target: HistoryTarget;
   page: number;
   category: string;
+  /** Categories left out (historyExclusions). */
+  excludeCategories?: readonly string[];
   source: HistorySource | "";
   timeWindow: HistoryWindow;
   enabled: boolean;
@@ -56,6 +58,7 @@ export function useHistory({
   target,
   page,
   category,
+  excludeCategories = [],
   source,
   timeWindow,
   enabled,
@@ -67,6 +70,7 @@ export function useHistory({
       routeKey(target),
       page,
       category,
+      excludeCategories.join(","),
       source,
       timeWindow,
     ],
@@ -75,6 +79,9 @@ export function useHistory({
       params.set("limit", String(HISTORY_PAGE_SIZE));
       params.set("offset", String(page * HISTORY_PAGE_SIZE));
       if (category) params.set("category", category);
+      if (excludeCategories.length > 0) {
+        params.set("exclude_category", excludeCategories.join(","));
+      }
       if (source) params.set("source", source);
       if (timeWindow) {
         params.set(

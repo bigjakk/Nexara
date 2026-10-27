@@ -7,6 +7,7 @@ import type { HistoryEntry } from "../types/history";
 import {
   historyActor,
   historyDisplayStatus,
+  historyExclusions,
   historyEventLabel,
   historyKind,
   historySourceLabel,
@@ -135,4 +136,19 @@ describe("an observed change", () => {
       `Between ${at("2026-03-01T10:05:00Z", formatTimestampLong)} and ${at("2026-03-04T10:10:00Z", formatTimestampLong)}`,
     );
   });
+});
+
+describe("historyExclusions", () => {
+  const kind = { routine: ["updates", "hardware"] };
+  it.each([
+    [false, "", ["updates", "hardware"]],
+    [true, "", []],
+    // Filtering to a routine category shows it.
+    [false, "updates", ["hardware"]],
+  ] as const)(
+    "show routine %s, category %o: leaves out %o",
+    (show, category, want) => {
+      expect(historyExclusions(kind, show, category)).toEqual(want);
+    },
+  );
 });

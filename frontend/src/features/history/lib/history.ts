@@ -66,6 +66,17 @@ export const WINDOW_OPTIONS: readonly HistoryWindow[] = [
   "90d",
 ];
 
+/** The categories a timeline leaves out: the kind's routine ones, unless the
+ *  reader shows them or filters to one of them. */
+export function historyExclusions(
+  kind: Pick<HistoryKind, "routine">,
+  showRoutine: boolean,
+  category: string,
+): string[] {
+  if (showRoutine) return [];
+  return (kind.routine ?? []).filter((c) => c !== category);
+}
+
 /** The History table's columns. None sorts: the timeline is newest first. */
 export type HistoryColumnKey =
   "time" | "event" | "summary" | "who" | "node" | "outcome";

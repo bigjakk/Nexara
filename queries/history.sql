@@ -359,6 +359,7 @@ WITH guests AS MATERIALIZED (
     WHERE (g.vmid IS NULL OR c.occurred_at > g.after OR (g.inclusive AND c.occurred_at = g.after))
       AND (sqlc.narg('since')::timestamptz IS NULL OR c.occurred_at >= sqlc.narg('since')::timestamptz)
       AND (sqlc.narg('category')::text IS NULL OR c.category = sqlc.narg('category')::text)
+      AND NOT COALESCE(c.category = ANY(sqlc.arg('exclude_categories')::text[]), false)
       AND (sqlc.narg('source')::text IS NULL OR c.source = sqlc.narg('source')::text)
     ORDER BY c.occurred_at DESC, c.entry_id DESC
     LIMIT sqlc.arg('row_limit')::int OFFSET sqlc.arg('row_offset')::int

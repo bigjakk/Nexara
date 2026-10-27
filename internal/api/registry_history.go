@@ -92,6 +92,13 @@ func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 	}
 }
 
+// categoryListPattern accepts "" or a comma-separated list of the kind's
+// categories: an unknown one is a 400, as a typo in category is.
+func categoryListPattern(categories []string) string {
+	one := "(?:" + strings.Join(categories, "|") + ")"
+	return "^$|^" + one + "(?:," + one + ")*$"
+}
+
 // historyFilterParams are the paging and filters every History takes. The
 // type filter's vocabulary is the kind's: exactly the categories its rules
 // produce (HistoryKind.Validate), so a typo is a 400 rather than an empty
@@ -123,6 +130,16 @@ func historyFilterParams(kind handlers.HistoryKind) apischema.Properties {
 			Enum:        append([]string{""}, kind.Categories...),
 			Typetext:    "<" + strings.Join(kind.Categories, "|") + ">",
 			Description: "Narrow to one kind of entry. Empty or omitted returns every kind.",
+		},
+		// A list, so the routine checks a node runs daily can be left out
+		// while every other kind stays in.
+		"exclude_category": {
+			Type:     apischema.String,
+			Optional: true,
+			Pattern:  categoryListPattern(kind.Categories),
+			Typetext: "<category[,category...]>",
+			Description: "Leave out these kinds of entry, comma-separated, from the same vocabulary as " +
+				"category. Empty or omitted leaves nothing out.",
 		},
 		"source": {
 			Type:     apischema.String,

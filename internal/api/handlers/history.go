@@ -558,6 +558,7 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		ObjectKeys:          make([]string, 0, len(sel.Objects)),
 		ObjectValues:        make([]string, 0, len(sel.Objects)),
 		ObjectInList:        make([]bool, 0, len(sel.Objects)),
+		ExcludeCategories:   []string{},
 	}
 	for _, w := range sel.GuestWorkers {
 		if w == "" || !likePatternOK(w) {
@@ -730,6 +731,9 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	params.Since = since
 	if category := p.String("category"); category != "" {
 		params.Category = pgtype.Text{String: category, Valid: true}
+	}
+	if excluded := p.String("exclude_category"); excluded != "" {
+		params.ExcludeCategories = strings.Split(excluded, ",")
 	}
 	if source := p.String("source"); source != "" {
 		params.Source = pgtype.Text{String: source, Valid: true}

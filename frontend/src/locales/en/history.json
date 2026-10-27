@@ -3,7 +3,8 @@
     "type": "Type",
     "allTypes": "All types",
     "source": "Source",
-    "time": "Time"
+    "time": "Time",
+    "showRoutine": "Show routine checks"
   },
   "sources": {
     "nexara": "Nexara",

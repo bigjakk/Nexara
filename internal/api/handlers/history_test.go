@@ -386,6 +386,8 @@ func historyTestProps(name string, path apischema.Property) apischema.Properties
 		"start_time": {Type: apischema.String, Optional: true},
 		"category":   {Type: apischema.String, Optional: true},
 		"source":     {Type: apischema.String, Optional: true},
+		// Optional with no default: omitted, it is "".
+		"exclude_category": {Type: apischema.String, Optional: true},
 	}
 }
 

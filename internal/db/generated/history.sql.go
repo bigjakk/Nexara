@@ -261,9 +261,10 @@ WITH guests AS MATERIALIZED (
     WHERE (g.vmid IS NULL OR c.occurred_at > g.after OR (g.inclusive AND c.occurred_at = g.after))
       AND ($15::timestamptz IS NULL OR c.occurred_at >= $15::timestamptz)
       AND ($21::text IS NULL OR c.category = $21::text)
-      AND ($22::text IS NULL OR c.source = $22::text)
+      AND NOT COALESCE(c.category = ANY($22::text[]), false)
+      AND ($23::text IS NULL OR c.source = $23::text)
     ORDER BY c.occurred_at DESC, c.entry_id DESC
-    LIMIT $24::int OFFSET $23::int
+    LIMIT $25::int OFFSET $24::int
 )
 SELECT p.entry_id, p.kind, p.cluster_id, p.occurred_at, p.source, p.action, p.resource_type, p.resource_id, p.vmid,
        COALESCE(p.subject, 0)::int AS subject_vmid,
@@ -319,6 +320,7 @@ type ListHistoryParams struct {
 	StatusGuestTypes    []string           `json:"status_guest_types"`
 	DefaultCategory     string             `json:"default_category"`
 	Category            pgtype.Text        `json:"category"`
+	ExcludeCategories   []string           `json:"exclude_categories"`
 	Source              pgtype.Text        `json:"source"`
 	RowOffset           int32              `json:"row_offset"`
 	RowLimit            int32              `json:"row_limit"`
@@ -538,6 +540,7 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 		arg.StatusGuestTypes,
 		arg.DefaultCategory,
 		arg.Category,
+		arg.ExcludeCategories,
 		arg.Source,
 		arg.RowOffset,
 		arg.RowLimit,

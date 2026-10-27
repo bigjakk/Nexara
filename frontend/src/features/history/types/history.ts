@@ -101,6 +101,12 @@ export interface HistoryKind {
   summary?: (entry: HistoryEntry, t: TFunction) => string | undefined;
   /** A note under an expanded entry. */
   note?: (entry: HistoryEntry, t: TFunction) => string | undefined;
+  /** The time filter's first choice: an object's History costs what its whole
+   *  history costs, so a busy kind starts at a window. Unset: all time. */
+  defaultWindow?: HistoryWindow;
+  /** Categories of routine checks (a node's daily updates), left out until
+   *  the reader asks for them. */
+  routine?: readonly string[];
 }
 
 /** Which object's History to read, and where. */

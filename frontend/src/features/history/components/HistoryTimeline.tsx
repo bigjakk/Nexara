@@ -22,6 +22,7 @@ import {
   historyActor,
   historyDisplayStatus,
   historyEventLabel,
+  historyExclusions,
   historyNamespace,
   historyNote,
   historySourceLabel,
@@ -304,7 +305,10 @@ export function HistoryTimeline({
   const [page, setPage] = useState(0);
   const [category, setCategory] = useState("");
   const [source, setSource] = useState<HistorySource | "">("");
-  const [timeWindow, setTimeWindow] = useState<HistoryWindow>("");
+  const [timeWindow, setTimeWindow] = useState<HistoryWindow>(
+    kind.defaultWindow ?? "",
+  );
+  const [showRoutine, setShowRoutine] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const layout = useColumnLayout(kind.layoutKey, HISTORY_COLUMNS);
 
@@ -312,6 +316,7 @@ export function HistoryTimeline({
     target,
     page,
     category,
+    excludeCategories: historyExclusions(kind, showRoutine, category),
     source,
     timeWindow,
     enabled,
@@ -387,6 +392,19 @@ export function HistoryTimeline({
             label: shared(`windows.${value || "all"}`),
           })),
           setTimeWindow,
+        )}
+        {(kind.routine ?? []).length > 0 && (
+          <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={showRoutine}
+              onChange={(e) => {
+                setShowRoutine(e.target.checked);
+                setPage(0);
+              }}
+            />
+            {shared("filters.showRoutine")}
+          </label>
         )}
         <span className="flex-1" />
         <ResetColumnsButton layout={layout} />

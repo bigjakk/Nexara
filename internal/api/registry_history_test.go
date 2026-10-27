@@ -43,15 +43,18 @@ func TestHistoryAuditOnlyIsTheGuestAlone(t *testing.T) {
 	}
 }
 
-// A start_time that does not parse is the caller's 400 before any query
-// runs: this handler has no database, so reading one would panic.
+// A start_time that does not parse, or a category left out that the kind
+// does not have, is the caller's 400 before any query runs: this handler has
+// no database, so reading one would panic.
 func TestHistoryRefusesABadStartTimeFirst(t *testing.T) {
 	t.Parallel()
 	app := newRegistryApp(t, stubAuth(map[string]bool{"view:audit": true}),
 		historyEndpoint(&handlers.HistoryHandler{}, guestHistoryRoute()))
-	if status, env := send(t, app, authedRequest(http.MethodGet,
-		"/api/v1/clusters/"+testClusterID+"/guests/100/history?start_time=yesterday")); status != fiber.StatusBadRequest {
-		t.Errorf("status = %d (%q), want 400", status, env.Message)
+	for _, query := range []string{"start_time=yesterday", "exclude_category=power,nope"} {
+		if status, env := send(t, app, authedRequest(http.MethodGet,
+			"/api/v1/clusters/"+testClusterID+"/guests/100/history?"+query)); status != fiber.StatusBadRequest {
+			t.Errorf("%s: status = %d (%q), want 400", query, status, env.Message)
+		}
 	}
 }
 

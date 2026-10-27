@@ -598,6 +598,7 @@ func TestGuestHistory(t *testing.T) {
 			p.IncludeTasks, p.StatusGuestTypes = true, []string{"qemu"}
 		}), 12, ""},
 		{"category", withFilter(full, func(p *gen.ListHistoryParams) { p.Category = pgtype.Text{String: "power", Valid: true} }), 6, ""},
+		{"categories left out", withFilter(full, func(p *gen.ListHistoryParams) { p.ExcludeCategories = []string{"power", "ha"} }), 6, ""},
 		{"source", withFilter(full, func(p *gen.ListHistoryParams) { p.Source = pgtype.Text{String: "detected", Valid: true} }), 1, "status status_change power "},
 		{"since", withFilter(full, func(p *gen.ListHistoryParams) { p.Since = pgtype.Timestamptz{Time: hoursAgo(3.25), Valid: true} }), 8, ""},
 		{"a page", withFilter(full, func(p *gen.ListHistoryParams) { p.RowLimit, p.RowOffset = 3, 3 }), 13, "status status_change power "},
