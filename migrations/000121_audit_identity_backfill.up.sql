@@ -100,15 +100,7 @@ WHERE resource_type = 'proxmox_task'
 -- had), provided it already existed when the row was written; any other count
 -- leaves the row as it is. The old resource_id was exactly the label the
 -- activity feed showed, so it becomes resource_name.
-WITH known AS (
-    SELECT pbs_server_id, datastore FROM pbs_snapshots GROUP BY 1, 2
-    UNION SELECT pbs_server_id, datastore FROM pbs_datastore_metrics GROUP BY 1, 2
-    UNION SELECT pbs_server_id, store FROM pbs_sync_jobs
-    UNION SELECT pbs_server_id, store FROM pbs_verify_jobs
-), holders AS (
-    SELECT datastore, count(*) AS servers, (array_agg(pbs_server_id))[1] AS server_id
-    FROM known GROUP BY datastore
-), legacy AS (
+WITH legacy AS (
     SELECT a.id, a.created_at, a.resource_id AS label,
            CASE WHEN a.action IN ('gc_triggered', 'datastore_pruned')
                 THEN COALESCE(NULLIF(a.details->>'store', ''), a.resource_id)
@@ -119,6 +111,22 @@ WITH known AS (
       AND a.action IN ('gc_triggered', 'datastore_pruned', 'snapshot_deleted', 'snapshot_protected',
                        'snapshot_unprotected', 'snapshot_notes_updated')
       AND jsonb_typeof(a.details) = 'object'
+), names AS (
+    SELECT DISTINCT datastore FROM legacy
+), metric_pairs AS MATERIALIZED (
+    -- pbs_datastore_metrics is a hypertable with no index on (server, datastore):
+    -- read once, for the names that need it, and not at all when no row does.
+    SELECT DISTINCT pbs_server_id, datastore
+    FROM pbs_datastore_metrics
+    WHERE EXISTS (SELECT 1 FROM names) AND datastore IN (SELECT datastore FROM names)
+), holders AS (
+    SELECT n.datastore, count(*) AS servers, (array_agg(s.id))[1] AS server_id
+    FROM names n
+    JOIN pbs_servers s ON EXISTS (SELECT 1 FROM pbs_snapshots x WHERE x.pbs_server_id = s.id AND x.datastore = n.datastore)
+                       OR EXISTS (SELECT 1 FROM pbs_sync_jobs x WHERE x.pbs_server_id = s.id AND x.store = n.datastore)
+                       OR EXISTS (SELECT 1 FROM pbs_verify_jobs x WHERE x.pbs_server_id = s.id AND x.store = n.datastore)
+                       OR EXISTS (SELECT 1 FROM metric_pairs x WHERE x.pbs_server_id = s.id AND x.datastore = n.datastore)
+    GROUP BY n.datastore
 ), owned AS (
     SELECT l.id, l.label, l.datastore, h.server_id
     FROM legacy l

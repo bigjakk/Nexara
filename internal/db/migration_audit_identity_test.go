@@ -137,11 +137,14 @@ func TestMigrationAuditIdentityBackfill_RefilesWhatItCanResolve(t *testing.T) {
 		server    uuid.UUID
 		datastore string
 	}{{srv1, "datastore01"}, {srv1, "datastore02"}, {srv2, "datastore02"}, {srvStandAlon, "datastore03"}, {srvNew, "datastore04"},
-		{srv1, "datastore05"}, {srvOther, "datastore05"}} {
+		{srv1, "datastore05"}, {srvOther, "datastore05"}, {srvStandAlon, "datastore07"}} {
 		exec("snapshot", `INSERT INTO pbs_snapshots (pbs_server_id, datastore, backup_type, backup_id, backup_time)
 			VALUES ($1, $2, 'vm', '101', 1700000000)`, h.server, h.datastore)
 	}
-	exec("verify job", `INSERT INTO pbs_verify_jobs (pbs_server_id, job_id, store) VALUES ($1, 'verify01', 'datastore01'), ($2, 'verify09', 'datastore04')`, srv1, srvNew)
+	// Capacity samples are the only evidence of a datastore with no snapshots yet.
+	exec("metrics", `INSERT INTO pbs_datastore_metrics (time, pbs_server_id, datastore) VALUES (now(), $1, 'datastore06'), (now(), $2, 'datastore07')`, srv2, srv1)
+	exec("verify job", `INSERT INTO pbs_verify_jobs (pbs_server_id, job_id, store) VALUES ($1, 'verify01', 'datastore01'), ($2, 'verify09', 'datastore04'), ($3, 'verify08', 'datastore08')`, srv1, srvNew, srv2)
+	exec("sync job of a datastore nothing else shows", `INSERT INTO pbs_sync_jobs (pbs_server_id, job_id, store) VALUES ($1, 'sync10', 'datastore10')`, srv1)
 	for _, j := range []struct {
 		server    uuid.UUID
 		datastore string
@@ -219,6 +222,13 @@ func TestMigrationAuditIdentityBackfill_RefilesWhatItCanResolve(t *testing.T) {
 		{name: "gc on a datastore the servers of two clusters both hold", cluster: &clusterA, typ: "backup", id: "datastore05", action: "gc_triggered", details: `{}`},
 		{name: "gc with no cluster, on a datastore only a clustered server holds", typ: "backup", id: "datastore01", action: "gc_triggered", details: `{}`,
 			wantTyp: "pbs_server", wantID: srv1.String(), wantAct: "gc_triggered", wantDetails: `{"datastore":"datastore01","resource_name":"datastore01"}`},
+		{name: "gc on a datastore only a capacity sample says a server holds", cluster: &clusterA, typ: "backup", id: "datastore06", action: "gc_triggered", details: `{}`,
+			wantTyp: "pbs_server", wantID: srv2.String(), wantAct: "gc_triggered", wantDetails: `{"datastore":"datastore06","resource_name":"datastore06"}`},
+		{name: "gc on a datastore only a verify job says a server holds", cluster: &clusterA, typ: "backup", id: "datastore08", action: "gc_triggered", details: `{}`,
+			wantTyp: "pbs_server", wantID: srv2.String(), wantAct: "gc_triggered", wantDetails: `{"datastore":"datastore08","resource_name":"datastore08"}`},
+		{name: "gc on a datastore only a sync job says a server holds", cluster: &clusterA, typ: "backup", id: "datastore10", action: "gc_triggered", details: `{}`,
+			wantTyp: "pbs_server", wantID: srv1.String(), wantAct: "gc_triggered", wantDetails: `{"datastore":"datastore10","resource_name":"datastore10"}`},
+		{name: "gc on a datastore a sample and a snapshot put on different servers", cluster: &clusterA, typ: "backup", id: "datastore07", action: "gc_triggered", details: `{}`},
 		{name: "gc that predates the server", cluster: &clusterA, at: old, typ: "backup", id: "datastore04", action: "gc_triggered", details: `{}`},
 		{name: "verify job one server has", cluster: &clusterA, typ: "backup", id: "verify01", action: "verify_job_triggered", details: `{}`,
 			wantTyp: "pbs_server", wantID: srv1.String(), wantAct: "verify_job_triggered",
