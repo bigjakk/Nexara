@@ -324,6 +324,19 @@ func TestRegistryPermissionGateDeniesAndAllows(t *testing.T) {
 				t.Errorf("holding %s: message = %q, want it to name both requirements", granted, env.Message)
 			}
 		}
+
+		// Each requirement is held on the path's cluster: view:node on another
+		// cluster does not complete view:audit on this one.
+		split := &scopedRBACEngine{grants: []scopedGrant{
+			{permission: "view:audit", cluster: uuid.MustParse(testClusterID)},
+			{permission: "view:node", cluster: uuid.MustParse(otherClusterID)},
+		}}
+		cap := &capture{}
+		app := newRegistryApp(t, authWithEngine(split), gatedEndpoint(cap, all))
+		if status, env := send(t, app, authedRequest(http.MethodPost, target)); status != fiber.StatusForbidden || cap.called {
+			t.Errorf("view:audit here and view:node on another cluster: status = %d (%q), handler ran %v; want 403",
+				status, env.Message, cap.called)
+		}
 	})
 }
 
@@ -512,10 +525,10 @@ func TestGuard_EveryDeclaredGateIsMountedAsMiddleware(t *testing.T) {
 			continue
 		}
 		gated++
-		if !slices.ContainsFunc(chain, isPermissionGateLink) {
-			t.Errorf("%s declares the gate %q but no permission middleware is mounted on it — "+
-				"the declaration says it is authorized and nothing enforces that: %v",
-				key, e.Permissions.Describe(), chain)
+		if want := gateConstructorFor(e.Permissions); !containsFragment(chain, want) {
+			t.Errorf("%s declares the gate %q but %s is not mounted on it — the declaration says how it "+
+				"is authorized and something else, or nothing, enforces it: %v",
+				key, e.Permissions.Describe(), strings.Trim(want, "/."), chain)
 		}
 	}
 
@@ -535,6 +548,23 @@ var permissionGateConstructors = []string{
 	"/handlers.RequireClusterPermission.",
 	"/handlers.RequireAnyPermission.",
 	"/handlers.RequireAllPermissions.",
+}
+
+// gateConstructorFor is the one of permissionGateConstructors the declaration's
+// shape mounts: a gate of another shape on the route enforces something other
+// than what it declares — an any-of where an all-of was declared admits a
+// caller holding one of the two.
+func gateConstructorFor(p Permissions) string {
+	switch {
+	case p.Check != nil && p.Check.Scope == ScopeGlobal:
+		return permissionGateConstructors[0]
+	case p.Check != nil:
+		return permissionGateConstructors[1]
+	case len(p.Alternatives) > 0:
+		return permissionGateConstructors[2]
+	default:
+		return permissionGateConstructors[3]
+	}
 }
 
 // isPermissionGateLink reports whether a handler-chain entry is one of the
