@@ -1922,6 +1922,18 @@ Every schedule carries `run_as`: the user whose grants its runs read under, stam
 | PUT | `/audit-log/syslog-config` | Update syslog config |
 | POST | `/audit-log/syslog-test` | Test syslog forwarding |
 | GET | `/clusters/:id/audit-log` | List audit entries for a cluster (supports `limit`/`offset`). `404` when the cluster does not exist: the entries of a removed cluster are read from `/audit-log` |
+| GET | `/clusters/:id/history/ha` | What happened to the cluster's HA resources, groups and rules (`view:audit` and `view:ha`) |
+| GET | `/clusters/:id/history/pools` | What happened to the cluster's resource pools (`view:pool`) |
+| GET | `/clusters/:id/history/mappings` | What happened to its USB and PCI resource mappings (`view:cluster`) |
+| GET | `/clusters/:id/history/access` | What happened to its Proxmox users, tokens, groups, roles and permissions (`view:access`) |
+| GET | `/clusters/:id/history/replication` | What happened to its replication jobs (`view:replication`) |
+| GET | `/clusters/:id/history/ceph` | What happened to its Ceph OSDs, pools, monitors, managers and filesystems (`view:ceph`) |
+| GET | `/clusters/:id/history/networks` | What happened to its node interfaces and SDN objects, and what was applied (`view:network`) |
+| GET | `/clusters/:id/history/firewall` | What happened to its firewall rule set, options, aliases, IP sets, groups and the templates applied (`view:network`) |
+| GET | `/clusters/:id/history/certificates` | What happened to its ACME accounts and plugins and each node's certificate (`view:certificate`) |
+| GET | `/clusters/:id/history/metric-servers` | What happened to its metric servers (`view:cluster`) |
+| GET | `/clusters/:id/history/drs` | What happened to its DRS configuration and rules and Proxmox's HA rules (`view:drs`) |
+| GET | `/clusters/:id/history/options` | What happened to its datacenter options, notes and tags (`view:cluster`) |
 
 Both audit routes share one filter set: `resource_type`, `user_id`, `action`,
 `source`, `start_time`/`end_time` (RFC 3339), and `vmids` — a comma-separated
@@ -1930,6 +1942,25 @@ takes `cluster_id`. `/clusters/:id/audit-log` does not: the path already names
 the cluster, so a `?cluster_id=` there is refused with a 400
 (`cluster_id: must be sent in the request path, not as a query parameter`)
 rather than being overridden.
+
+Each tab's History has the Histories of its objects beneath it, at
+`/clusters/:id/history/<tab>/<objects>/<id>`: `ha/resources/:sid`,
+`ha/groups/:group`, `ha/rules/:rule`, `pools/:pool_id`, `mappings/usb/:mapping_id`,
+`mappings/pci/:mapping_id`, `access/users/:userid`, `access/groups/:groupid`,
+`access/roles/:roleid`, `replication/:job_id`, `ceph/osds/:osd_id`,
+`ceph/pools/:pool_name`, `ceph/monitors/:monitor`,
+`networks/interfaces/:node_name/:iface`, `networks/zones/:zone`,
+`networks/vnets/:vnet`, `networks/vnets/:vnet/subnets/:subnet`,
+`networks/controllers/:controller`, `networks/ipams/:ipam`, `networks/dns/:dns`,
+`firewall/aliases/:name`, `firewall/ipsets/:name`, `firewall/groups/:group`,
+`certificates/accounts/:name`, `certificates/plugins/:plugin_id`,
+`certificates/nodes/:node`, `metric-servers/:server_id` and `drs/rules/:rule_id`;
+and a firewall template's, which belongs to no cluster, at
+`/history/firewall-templates/:id` (an instance-wide `view:audit` and
+`view:network`). Each takes the guest History's filters — `limit`, `offset`,
+`category` (the tab's or object's own kinds of entry), `source` and
+`start_time` — and each is gated on `view:audit` and the view permission of the
+page the object is on.
 
 #### Guest identity on an audit entry
 
