@@ -144,7 +144,7 @@ func (s auditSent) names(also ...string) []string {
 // stores otherwise than the one read, compared as the change observer compares
 // them (kind, pvefield.Kind.Changed), and a name cleared that the object had,
 // so a form sent whole names only what it changes. before nil — the read
-// failed — is every name.
+// failed — is every name (auditFields marks it so).
 func (s auditSent) changed(before map[string]json.RawMessage, kind pvefield.Kind) []string {
 	if before == nil {
 		return s.names()
@@ -164,9 +164,14 @@ func (s auditSent) changed(before map[string]json.RawMessage, kind pvefield.Kind
 }
 
 // auditFields is details with an update's fields: what its write changes
-// (changed).
+// (changed) or, when its object could not be read first, every field it sent,
+// and fields_unverified, by which the observer's classifier takes the row to
+// explain no field (internal/collector observer_explain.go, FieldsFrom).
 func auditFields(details map[string]any, sent auditSent, before map[string]json.RawMessage, kind pvefield.Kind) map[string]any {
 	details["fields"] = sent.changed(before, kind)
+	if before == nil {
+		details["fields_unverified"] = true
+	}
 	return details
 }
 

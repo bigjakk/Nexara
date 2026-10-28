@@ -79,9 +79,10 @@ type explainRule struct {
 	// a disk, the unused<n> and boot a disk's change or removal moves);
 	// settings, the settings and cleared it lists (the datacenter options, a
 	// node's ACME); keys, its details' own keys (an HA or pool update);
-	// fields, the names of the fields it sent (handlers' auditFieldNames);
-	// realm, those its realm's sync_attributes map (a realm sync's,
-	// readRealmSyncs).
+	// fields, the names of the fields it sent or changed (handlers'
+	// auditFieldNames, auditFields), none when it could not read its object
+	// first and so names all it sent (fields_unverified); realm, those its
+	// realm's sync_attributes map (a realm sync's, readRealmSyncs).
 	FieldsFrom string `json:"fields_from"`
 	// Derived, with FieldsFrom fields, is what Proxmox rewrites with a field
 	// sent, by its name, and with any update, at "*".

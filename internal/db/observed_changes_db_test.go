@@ -278,6 +278,10 @@ func TestObservedChanges(t *testing.T) {
 	for _, iface := range []string{"pve-03/vmbr2", "pve-03/vmbr3"} {
 		audit(observedCluster, in, "network", iface, 0, "interface_updated", map[string]any{"fields": []string{"cidr"}})
 	}
+	// One that could not read its object first names all it sent, unverified.
+	sentUnverified := seed(observedCluster, "network", "pve-03/vmbr4", 0, "changed", "pve-03", []string{"cidr"}, at)
+	audit(observedCluster, in, "network", "pve-03/vmbr4", 0, "interface_updated",
+		map[string]any{"fields": []string{"cidr"}, "fields_unverified": true})
 	// A field a rule takes only where it appeared: a zone's mac filled in.
 	macFilled := seed(observedCluster, "sdn_zone", "zone01", 0, "changed", "", []string{"mac"}, at)
 	exec("an appeared field", `UPDATE cluster_object_changes SET detail = '{"fields_appeared":["mac"]}' WHERE id = $1`, macFilled)
@@ -628,6 +632,7 @@ func TestObservedChanges(t *testing.T) {
 		{"an update, and a field its row does not record", haKeysOther, "shown"},
 		{"an update of a field it sent, and of those derived from it", sentDerived, "explained"},
 		{"an update, and a field it did not send", sentOther, "shown"},
+		{"an update that could not read its object first", sentUnverified, "shown"},
 		{"a field filled in where there was none", macFilled, "explained"},
 		{"the same field changed", macChanged, "shown"},
 		{"a rule updated, one in and one out", ruleEdited, "explained"},

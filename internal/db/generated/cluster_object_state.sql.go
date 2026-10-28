@@ -265,8 +265,10 @@ WITH rules AS MATERIALIZED (
                -- (unused<n>, boot); the settings and cleared it lists; each key
                -- of its details, where an update records a field it set so; or
                -- the names its fields lists, with those the rule's derived says
-               -- Proxmox rewrites with each (and, at *, with any update); or
-               -- what the realm its task synced maps (realm_fields).
+               -- Proxmox rewrites with each (and, at *, with any update), and
+               -- none when it could not read its object first and so names all
+               -- it sent (fields_unverified); or what the realm its task synced
+               -- maps (realm_fields).
                CASE k.fields_from
                    WHEN 'config' THEN ARRAY(
                        SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
@@ -286,7 +288,7 @@ WITH rules AS MATERIALIZED (
                    WHEN 'realm' THEN ARRAY(
                        SELECT jsonb_array_elements_text(COALESCE(
                            $9::jsonb -> split_part(k.details->>'upid', ':', 7), '[]')))
-                   WHEN 'fields' THEN ARRAY(
+                   WHEN 'fields' THEN CASE WHEN k.details->'fields_unverified' = 'true' THEN '{}'::text[] ELSE ARRAY(
                        SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'fields') = 'array'
                                                                     THEN k.details->'fields' ELSE '[]' END) AS f
                        UNION
@@ -294,7 +296,7 @@ WITH rules AS MATERIALIZED (
                        FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'fields') = 'array'
                                                            THEN k.details->'fields' ELSE '[]' END) AS f
                        UNION
-                       SELECT jsonb_array_elements_text(COALESCE(k.derived->'*', '[]')))
+                       SELECT jsonb_array_elements_text(COALESCE(k.derived->'*', '[]'))) END
                END AS fields_named
     ) n
     LEFT JOIN task_history th ON th.cluster_id = k.cluster_id AND th.upid = k.details->>'upid'

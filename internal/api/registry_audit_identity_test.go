@@ -291,6 +291,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			// Proxmox keeps peers as sent, so a reorder is an edit, as the
 			// observer sees it (pvefield.SDNController).
 			wantType: "sdn_controller", wantID: "evpn01", wantAction: "sdn_controller_updated", wantFields: []string{"asn", "peers"},
+			wantAbsent: []string{"fields_unverified"},
 		},
 		{
 			name: "an SDN IPAM update", method: fiber.MethodPut, path: sdnScope + "/ipams/:ipam",
@@ -307,6 +308,14 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			replies: map[string]string{"GET /api2/json/cluster/sdn/dns/dns01": `{"dns":"dns01","type":"powerdns",` +
 				`"url":"https://dns.example.com","key":"s3cret-key"}`},
 			wantType: "sdn_dns", wantID: "dns01", wantAction: "sdn_dns_updated", wantFields: []string{"url"}, forbidden: "s3cret",
+		},
+		{
+			name: "an SDN DNS update whose object cannot be read first names every field it sent, unverified", method: fiber.MethodPut,
+			path: sdnScope + "/dns/:dns", target: "/sdn/dns/dns01", body: `{"url":"https://dns2.example.com","key":"s3cret-key"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateSDNDNS },
+			sequence: map[string][]string{"GET /api2/json/cluster/sdn/dns/dns01": {"refuse"}},
+			wantType: "sdn_dns", wantID: "dns01", wantAction: "sdn_dns_updated", wantFields: []string{"key", "url"},
+			wantDetails: map[string]any{"fields_unverified": true}, forbidden: "s3cret",
 		},
 		{
 			name: "a firewall alias update", method: fiber.MethodPut, path: firewallScope + "/aliases/:name",

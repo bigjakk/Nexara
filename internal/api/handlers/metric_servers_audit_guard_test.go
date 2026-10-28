@@ -68,8 +68,8 @@ func TestGuard_MetricServerAuditOmitsTheToken(t *testing.T) {
 				return true
 			}
 			arg := call.Args[0]
-			// auditFields adds to the literal the names an update changed:
-			// names, never values.
+			// auditFields adds to the literal the names an update changed,
+			// and a flag when it could not tell: names, never values.
 			if inner, isCall := arg.(*ast.CallExpr); isCall && len(inner.Args) > 0 {
 				if id, isIdent := inner.Fun.(*ast.Ident); isIdent && id.Name == "auditFields" {
 					arg = inner.Args[0]

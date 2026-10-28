@@ -41,7 +41,7 @@ func TestAuditFieldNames(t *testing.T) {
 
 // An update that read its object first names only what its write changes, as
 // its kind compares each field it sent (pvefield.Kind.Changed), and of what it
-// clears what the object had; with nothing read, every name.
+// clears what the object had; with nothing read, every name, marked so.
 func TestAuditSentChanged(t *testing.T) {
 	t.Parallel()
 	read := map[string]json.RawMessage{"mtu": json.RawMessage(`1450`), "bridge_ports": json.RawMessage(`"eno1 eno2"`),
@@ -49,16 +49,17 @@ func TestAuditSentChanged(t *testing.T) {
 	sent := auditSent{values: map[string]string{"mtu": "1450", "bridge_ports": "eno2,eno1", "comments": "uplink",
 		"autostart": "0"}, cleared: []string{"gateway", "vlan-aware", "slaves"}}
 	for _, tc := range []struct {
-		name   string
-		before map[string]json.RawMessage
-		want   []string
+		name       string
+		before     map[string]json.RawMessage
+		want       []string
+		unverified any
 	}{
-		{"read", read, []string{"comments", "gateway"}},
-		{"nothing read", nil, []string{"autostart", "bridge_ports", "comments", "gateway", "mtu", "slaves", "vlan-aware"}},
+		{"read", read, []string{"comments", "gateway"}, nil},
+		{"nothing read", nil, []string{"autostart", "bridge_ports", "comments", "gateway", "mtu", "slaves", "vlan-aware"}, true},
 	} {
 		got := auditFields(map[string]any{}, sent, tc.before, pvefield.Network)
-		if names, _ := got["fields"].([]string); !slices.Equal(names, tc.want) {
-			t.Errorf("%s: %v, want fields %q", tc.name, got, tc.want)
+		if names, _ := got["fields"].([]string); !slices.Equal(names, tc.want) || got["fields_unverified"] != tc.unverified {
+			t.Errorf("%s: %v, want fields %q, unverified %v", tc.name, got, tc.want, tc.unverified)
 		}
 	}
 	if got := auditSentOf(proxmox.UpdateNetworkInterfaceParams{Type: "bridge"}, "autostart").values; got["autostart"] != "0" ||
