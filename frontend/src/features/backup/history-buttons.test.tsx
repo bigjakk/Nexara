@@ -177,14 +177,15 @@ describe("a list row's History button", () => {
   );
 
   // The route of an object that belongs to no one cluster accepts only grants
-  // held on the whole install: a holder of them on one cluster would be
-  // answered 403, so is not offered the button; a backup job is a cluster's.
+  // held on the whole install: a holder of the object's own on one cluster
+  // would be answered 403, so is not offered the button; a backup job is a
+  // cluster's.
   it.each(rows)(
     "of %s is offered to a cluster-scoped holder only if it belongs to a cluster",
     (_, element, title, _path, global) => {
       signIn(
         ["view:audit", "view:task", "view:pbs", "view:veeam", "view:backup"],
-        [],
+        ["view:audit"],
       );
       renderWithProviders(element);
       expect(
