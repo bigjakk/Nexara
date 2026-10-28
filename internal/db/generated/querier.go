@@ -131,10 +131,10 @@ type Querier interface {
 	// decides them itself, with rules per kind of object.
 	//
 	// explained_unnamed keeps, by the row that explained it, each field a row
-	// covered without naming it (audit_row_names, 000124): a task of the object's
-	// own names none, an update names what its details say, and a row reaching the
-	// object from elsewhere (its host's, its device's, a rolling update's) names
-	// none of it.
+	// covered without naming it (000124): a row names only the field its rule
+	// reads from its fields list (names_field); a task of the object's own, an
+	// update its rule does not read so, and a row reaching the object from
+	// elsewhere (its host's, its device's, a rolling update's) name none.
 	//
 	// "Settled" is the caller's settled_before: a change seen more recently stays
 	// unclassified, and hidden, until the collector has had time to ingest the
@@ -270,10 +270,10 @@ type Querier interface {
 	// moved, not the memory someone changed in the GUI meanwhile; a guest's
 	// destroy explains that guest leaving a pool, not another guest leaving it.
 	// explained_unnamed keeps, by the row that covered it, each field or list a row
-	// covered without naming it (audit_row_names): one of the object's own rows
-	// ('id', 'vmid') names it or not, a row reaching the object from elsewhere
-	// names none of it; a row's own count on a list (a rule created, updated,
-	// deleted) is its naming of that list.
+	// covered without naming it (row_names, below): one of the object's own rows
+	// ('id', 'vmid') names what its rule reads it to say it set, a row reaching the
+	// object from elsewhere names none of it; a row's own count on a list (a rule
+	// created, updated, deleted) is its naming of that list.
 	//
 	// The window opens no earlier than lookback_seconds before the change was seen
 	// (observedLookback says how long and why): after an outage a change's window

@@ -172,10 +172,10 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- moved, not the memory someone changed in the GUI meanwhile; a guest's
 -- destroy explains that guest leaving a pool, not another guest leaving it.
 -- explained_unnamed keeps, by the row that covered it, each field or list a row
--- covered without naming it (audit_row_names): one of the object's own rows
--- ('id', 'vmid') names it or not, a row reaching the object from elsewhere
--- names none of it; a row's own count on a list (a rule created, updated,
--- deleted) is its naming of that list.
+-- covered without naming it (row_names, below): one of the object's own rows
+-- ('id', 'vmid') names what its rule reads it to say it set, a row reaching the
+-- object from elsewhere names none of it; a row's own count on a list (a rule
+-- created, updated, deleted) is its naming of that list.
 --
 -- The window opens no earlier than lookback_seconds before the change was seen
 -- (observedLookback says how long and why): after an outage a change's window
@@ -301,7 +301,7 @@ WITH rules AS MATERIALIZED (
     SELECT k.id, k.field_re, k.member, k.member_of = '' AS any_member, n.member_names, k.counts, k.fields_from,
            n.fields_named, k.audit_id, k.log_names, k.appeared,
            sqlc.arg('task_logs')::jsonb -> (k.details->>'upid') AS task_log,
-           k.created_at, k.match_key IN ('id', 'vmid') AS own, audit_row_names(k.details) AS row_names
+           k.created_at, k.match_key IN ('id', 'vmid') AS own, n.row_names
     FROM candidates k
     CROSS JOIN LATERAL (
         -- The value the rule's object takes from the row.
@@ -312,6 +312,38 @@ WITH rules AS MATERIALIZED (
                    WHEN k.object LIKE 'details.%' THEN k.details->>substr(split_part(k.object, ':', 1), 9)
                END AS v
     ) ov
+    CROSS JOIN LATERAL (
+        -- The fields the row says it set, when the rule takes them from it: a
+        -- guest config edit's changed keys (a row from before it recorded them:
+        -- every key it sent, those it deleted and those it reverted), the
+        -- settings and cleared it lists, each key of its details (where an
+        -- update records a field it set so), or the names its fields lists.
+        -- None when it could not read its object first and so names every one
+        -- it sent (fields_unverified).
+        SELECT CASE
+                   WHEN k.details->'fields_unverified' = 'true' THEN '{}'::text[]
+                   WHEN k.fields_from = 'config' AND jsonb_typeof(k.details->'changed') = 'array'
+                       THEN ARRAY(SELECT jsonb_array_elements_text(k.details->'changed'))
+                   WHEN k.fields_from = 'config' THEN ARRAY(
+                       SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
+                                                            THEN k.details->'fields' ELSE '{}' END) AS f
+                       UNION
+                       SELECT f FROM regexp_split_to_table(
+                           COALESCE(k.details->'fields'->>'delete', '') || ',' || COALESCE(k.details->'fields'->>'revert', ''),
+                           '[,; ]+') AS f WHERE f <> '')
+                   WHEN k.fields_from = 'settings' THEN ARRAY(
+                       SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'settings') = 'array'
+                                                                    THEN k.details->'settings' ELSE '[]' END) AS f
+                       UNION
+                       SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'cleared') = 'array'
+                                                                    THEN k.details->'cleared' ELSE '[]' END) AS f)
+                   WHEN k.fields_from = 'keys' THEN ARRAY(
+                       SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(k.details) = 'object' THEN k.details ELSE '{}' END))
+                   WHEN k.fields_from = 'fields' THEN ARRAY(
+                       SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'fields') = 'array'
+                                                             THEN k.details->'fields' ELSE '[]' END))
+               END AS said
+    ) s
     CROSS JOIN LATERAL (
         -- What the row names, in the form the rule's object and member_of give.
         -- A * is a wildcard only where the rule's format puts one: a value
@@ -345,50 +377,36 @@ WITH rules AS MATERIALIZED (
                           unnest(array_remove(regexp_split_to_array(
                               COALESCE(k.details->>substr(split_part(src, ':', 1), 8), ''), '[,; ]+'), '')) AS g
                      WHERE src LIKE 'grants.%' AND strpos(r, '*') = 0 AND strpos(g, '*') = 0) AS member_names,
-               -- The fields a row says it set, when the rule takes them from it:
-               -- the keys a guest config edit changed (a row from before it
-               -- recorded them: every key it sent, deleted or reverted) and,
-               -- when it named a disk, what replacing or deleting one moves
-               -- (unused<n>, boot); the settings and cleared it lists; each key
-               -- of its details, where an update records a field it set so; or
-               -- the names its fields lists, with those the rule's derived says
-               -- Proxmox rewrites with each (and, at *, with any update); none
-               -- for an edit or update that could not read its object first and
-               -- so names all it sent (fields_unverified); or what the realm its
-               -- task synced maps (realm_fields).
+               -- The fields the row explains, of what it says it set (said): with
+               -- the fields rule, those the rule's derived says Proxmox rewrites
+               -- with each (and, at *, with any update); with the realm rule, what
+               -- the realm its task synced maps (realm_fields).
                CASE k.fields_from
-                   WHEN 'config' THEN CASE
-                       WHEN k.details->'fields_unverified' = 'true' THEN '{}'::text[]
-                       WHEN jsonb_typeof(k.details->'changed') = 'array'
-                           THEN ARRAY(SELECT jsonb_array_elements_text(k.details->'changed'))
-                       ELSE ARRAY(
-                           SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
-                                                                THEN k.details->'fields' ELSE '{}' END) AS f
-                           UNION
-                           SELECT f FROM regexp_split_to_table(
-                               COALESCE(k.details->'fields'->>'delete', '') || ',' || COALESCE(k.details->'fields'->>'revert', ''),
-                               '[,; ]+') AS f WHERE f <> '') END
-                   WHEN 'settings' THEN ARRAY(
-                       SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'settings') = 'array'
-                                                                    THEN k.details->'settings' ELSE '[]' END) AS f
-                       UNION
-                       SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'cleared') = 'array'
-                                                                    THEN k.details->'cleared' ELSE '[]' END) AS f)
-                   WHEN 'keys' THEN ARRAY(
-                       SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(k.details) = 'object' THEN k.details ELSE '{}' END))
                    WHEN 'realm' THEN ARRAY(
                        SELECT jsonb_array_elements_text(COALESCE(
                            sqlc.arg('realm_fields')::jsonb -> split_part(k.details->>'upid', ':', 7), '[]')))
                    WHEN 'fields' THEN CASE WHEN k.details->'fields_unverified' = 'true' THEN '{}'::text[] ELSE ARRAY(
-                       SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'fields') = 'array'
-                                                                    THEN k.details->'fields' ELSE '[]' END) AS f
+                       SELECT unnest(s.said)
                        UNION
-                       SELECT jsonb_array_elements_text(COALESCE(k.derived->f, '[]'))
-                       FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'fields') = 'array'
-                                                           THEN k.details->'fields' ELSE '[]' END) AS f
+                       SELECT jsonb_array_elements_text(COALESCE(k.derived->f, '[]')) FROM unnest(s.said) AS f
                        UNION
                        SELECT jsonb_array_elements_text(COALESCE(k.derived->'*', '[]'))) END
-               END AS fields_named
+                   ELSE s.said
+               END AS fields_named,
+               -- What the row names of what it covers: what it says it set, as
+               -- its rule reads it (said, a flag <f>_changed or <f>_removed being
+               -- <f>), not what Proxmox derives nor a realm's mapping; for a rule
+               -- that reads none of it, the field of the flag it keys on
+               -- (detail_key) and the list it takes members from
+               -- (details-list.<key>). A rule that matches by field_re alone
+               -- names nothing.
+               CASE WHEN k.fields_from = 'realm' THEN '{}'::text[]
+                    WHEN k.fields_from <> '' THEN ARRAY(SELECT regexp_replace(f, '_(changed|removed)$', '') FROM unnest(s.said) AS f)
+                    ELSE ARRAY(SELECT regexp_replace(k.detail_key, '_(changed|removed)$', '') WHERE k.detail_key <> ''
+                               UNION
+                               SELECT split_part(substr(src, 14), ':', 1)
+                               FROM unnest(string_to_array(k.member_of, '+')) AS src WHERE src LIKE 'details-list.%')
+               END AS row_names
     ) n
     LEFT JOIN task_history th ON th.cluster_id = k.cluster_id AND th.upid = k.details->>'upid'
     WHERE (NOT k.untasked OR k.details->>'upid' IS NULL)
@@ -578,7 +596,7 @@ WITH rules AS MATERIALIZED (
 ), explainable AS (
     SELECT * FROM pending WHERE NOT (detail ? 'notice')
 ), hits AS (
-    SELECT p.id, r.field_re, a.id AS audit_id, a.created_at, audit_row_names(a.details) AS row_names
+    SELECT p.id, r.field_re, a.id AS audit_id, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
     JOIN audit_log a ON a.resource_type = r.audit_type AND a.resource_id = p.resource_id
@@ -596,14 +614,14 @@ WITH rules AS MATERIALIZED (
     CROSS JOIN LATERAL unnest(CASE WHEN p.change = 'changed' AND cardinality(p.fields) > 0
                                    THEN p.fields ELSE ARRAY['']::text[] END) AS f(name)
 ), covered AS (
-    -- Each row is the object's own: what it covered unnamed is what it does not
-    -- name.
+    -- These rules read nothing of a row's details (field_re alone), so a row
+    -- names none of what it covers.
     SELECT n.id, x.audit_id, x.created_at, n.name,
-           x.audit_id IS NOT NULL AND n.name <> '' AND NOT n.name = ANY(x.row_names) AS unnamed
+           x.audit_id IS NOT NULL AND n.name <> '' AS unnamed
     FROM needs n
     JOIN pending p ON p.id = n.id
     LEFT JOIN LATERAL (
-        SELECT h.audit_id, h.created_at, h.row_names
+        SELECT h.audit_id, h.created_at
         FROM hits h
         WHERE h.id = n.id AND (p.change <> 'changed' OR h.field_re = '' OR n.name ~ h.field_re)
         ORDER BY h.created_at DESC, h.audit_id

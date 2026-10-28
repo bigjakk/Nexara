@@ -105,10 +105,10 @@ VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('resource_id
 -- decides them itself, with rules per kind of object.
 --
 -- explained_unnamed keeps, by the row that explained it, each field a row
--- covered without naming it (audit_row_names, 000124): a task of the object's
--- own names none, an update names what its details say, and a row reaching the
--- object from elsewhere (its host's, its device's, a rolling update's) names
--- none of it.
+-- covered without naming it (000124): a row names only the field its rule
+-- reads from its fields list (names_field); a task of the object's own, an
+-- update its rule does not read so, and a row reaching the object from
+-- elsewhere (its host's, its device's, a rolling update's) name none.
 --
 -- "Settled" is the caller's settled_before: a change seen more recently stays
 -- unclassified, and hidden, until the collector has had time to ingest the
@@ -216,7 +216,8 @@ WITH rules(resource_type, change, field, direction, audit_type, action, match, n
                AND NOT (e.audit_id IS NOT NULL AND e.own AND t.field = ANY(e.row_names)) AS unnamed
     FROM todo t
     LEFT JOIN LATERAL (
-        SELECT a.id AS audit_id, a.created_at AS at, r.match = 'object' AS own, audit_row_names(a.details) AS row_names
+        SELECT a.id AS audit_id, a.created_at AS at, r.match = 'object' AS own,
+               CASE WHEN r.names_field THEN ARRAY[t.field] ELSE '{}'::text[] END AS row_names
         FROM rules r
         JOIN audit_log a ON a.cluster_id = t.cluster_id
                         AND a.resource_type = r.audit_type

@@ -302,10 +302,14 @@ func TestObservedChanges(t *testing.T) {
 		map[string]any{"fields": []string{"cidr"}})
 	twoEditsLater := audit(observedCluster, in.Add(30*time.Second), "network", "pve-03/vmbr5", 0, "interface_updated",
 		map[string]any{"fields": []string{"mtu"}})
-	// One that could not read its object first names all it sent, unverified.
+	// One that could not read its object first names all it sent, unverified,
+	// and explains none of it, nor what any update derives.
 	sentUnverified := seed(observedCluster, "network", "pve-03/vmbr4", 0, "changed", "pve-03", []string{"cidr"}, at)
-	audit(observedCluster, in, "network", "pve-03/vmbr4", 0, "interface_updated",
-		map[string]any{"fields": []string{"cidr"}, "fields_unverified": true})
+	sentUnverifiedDerived := seed(observedCluster, "network", "pve-03/vmbr6", 0, "changed", "pve-03", []string{"method"}, at)
+	for _, iface := range []string{"pve-03/vmbr4", "pve-03/vmbr6"} {
+		audit(observedCluster, in, "network", iface, 0, "interface_updated",
+			map[string]any{"fields": []string{"cidr"}, "fields_unverified": true})
+	}
 	// A field a rule takes only where it appeared: a zone's mac filled in.
 	macFilled := seed(observedCluster, "sdn_zone", "zone01", 0, "changed", "", []string{"mac"}, at)
 	exec("an appeared field", `UPDATE cluster_object_changes SET detail = '{"fields_appeared":["mac"]}' WHERE id = $1`, macFilled)
@@ -408,6 +412,12 @@ func TestObservedChanges(t *testing.T) {
 	audit(observedCluster, in, "pve_user", "user20@pve", 0, "updated", map[string]any{"keys_changed": true})
 	userKeysOther := seed(observedCluster, "pve_user", "user21@pve", 0, "changed", "", []string{"keys"}, at)
 	audit(observedCluster, in, "pve_user", "user21@pve", 0, "updated", map[string]any{"enable": true})
+	// A rule that matches by field alone names nothing, a detail of the name too;
+	// a row reaching another object names none of its fields, even by its flag.
+	userByFieldAlone := seed(observedCluster, "pve_user", "user22@pve", 0, "changed", "", []string{"email"}, at)
+	userByFieldAloneBy := audit(observedCluster, in, "pve_user", "user22@pve", 0, "updated", map[string]any{"email": "x"})
+	groupByUserFlag := seed(observedCluster, "pve_group", "group03", 0, "changed", "", []string{"comment"}, at)
+	groupByUserFlagBy := audit(observedCluster, in, "pve_user", "user24@pve", 0, "updated", map[string]any{"comment": "x"})
 	// A role's update: the privileges it lists join; without append, those it
 	// does not list leave.
 	roleJoined := seed(observedCluster, "pve_role", "Role05", 0, "changed", "", []string{"privs"}, at)
@@ -563,6 +573,7 @@ func TestObservedChanges(t *testing.T) {
 			"member_of", "details-list.users:users:%s+grants.users:user_grants:%1$s:%2$s:%3$s+"+
 				"details-list.groups:groups:%s+grants.groups:group_grants:%1$s:%2$s:%3$s"),
 		rule("pve_user", "changed", "pve_user", "id", false, "^updated$", "", "", "^(firstname|lastname|email|comment)$"),
+		with(rule("pve_group", "changed", "pve_user", "cluster", false, "^updated$", "", "", "^comment$"), "detail_key", "comment"),
 		with(rule("pve_user", "changed", "pve_user", "id", false, "^updated$", "", "", "^keys$"), "detail_key", "keys_changed"),
 		with(with(rule("pve_role", "changed", "pve_role", "id", false, "^updated$", "", "", "^privs$"), "member", "joined"),
 			"member_of", "details-list.privs:privs:%s"),
@@ -669,6 +680,7 @@ func TestObservedChanges(t *testing.T) {
 		{"two edits between passes", twoEdits, "explained"},
 		{"an update, and a field it did not send", sentOther, "shown"},
 		{"an update that could not read its object first", sentUnverified, "shown"},
+		{"an update that could not read its object first, what any update derives", sentUnverifiedDerived, "shown"},
 		{"a field filled in where there was none", macFilled, "explained"},
 		{"the same field changed", macChanged, "shown"},
 		{"a rule updated, one in and one out", ruleEdited, "explained"},
@@ -764,6 +776,11 @@ func TestObservedChanges(t *testing.T) {
 			map[string][]string{byClusterTaskBy.String(): {"vms"}}},
 		"a destroy, the job's vmid, which its own details name": {jobLeft,
 			map[string][]string{byClusterTaskBy.String(): {"vmid"}}},
+		"a flag naming its field, keys_changed, records nothing": {userKeysSet, nil},
+		"a rule matching by field alone names nothing": {userByFieldAlone,
+			map[string][]string{userByFieldAloneBy.String(): {"email"}}},
+		"another object's row names nothing of this one": {groupByUserFlag,
+			map[string][]string{groupByUserFlagBy.String(): {"comment"}}},
 	} {
 		var raw []byte
 		var got map[string][]string

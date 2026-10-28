@@ -83,9 +83,13 @@ type explainRule struct {
 	// lists (the datacenter options, a node's ACME); keys, its details' own keys
 	// (an HA or pool update); fields, the names of the fields it sent or changed
 	// (handlers' auditFieldNames, auditFields); realm, those its realm's
-	// sync_attributes map (a realm sync's, readRealmSyncs). None, config and
-	// fields, when it could not read its object first and so names all it sent
-	// (fields_unverified).
+	// sync_attributes map (a realm sync's, readRealmSyncs). None when it could
+	// not read its object first and so names all it sent (fields_unverified).
+	// What a row names, for explained_unnamed, is what its rule reads it to
+	// say it set, without what Proxmox derives or a realm maps; a rule reading
+	// none of it names its DetailKey's field (<f>_changed and <f>_removed being
+	// <f>) and a details-list.<key> its MemberOf reads, and one matching by
+	// FieldRe alone names nothing.
 	FieldsFrom string `json:"fields_from"`
 	// Derived, with FieldsFrom fields, is what Proxmox rewrites with a field
 	// sent, by its name, and with any update, at "*".
