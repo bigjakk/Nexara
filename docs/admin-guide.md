@@ -584,9 +584,9 @@ Create rules to control VM placement:
 
 Click **Evaluate Now** to trigger an immediate DRS evaluation. In Advisory mode, this generates migration recommendations that you can review and approve.
 
-### DRS History
+### DRS Migrations and History
 
-The **History** tab within DRS shows all past evaluations, including which migrations were recommended and executed.
+The **Migrations** tab within DRS shows all past evaluations, including which migrations were recommended and executed. Its **History** tab is the audit trail: who changed the DRS configuration, triggered an evaluation, created or deleted a rule, and what was done to Proxmox's HA rules from this page.
 
 ### Native CRS Coexistence (Proxmox VE 9.2+)
 
