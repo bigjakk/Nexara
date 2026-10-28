@@ -242,15 +242,20 @@ WITH rules AS MATERIALIZED (
            k.created_at
     FROM candidates k
     CROSS JOIN LATERAL (
-        -- What the row names, in the form the rule's object and member_of give.
+        -- The value the rule's object takes from the row.
         SELECT CASE
-                   WHEN k.object LIKE 'upid:%'  THEN format(substr(k.object, 6), split_part(k.details->>'upid', ':', 7))
-                   WHEN k.object LIKE 'audit:%' THEN format(substr(k.object, 7), k.audit_resource_id)
-                   WHEN k.object LIKE 'vmid:%'  THEN format(substr(k.object, 6), k.audit_vmid::text)
-                   WHEN k.object LIKE 'details.%'
-                       THEN format(substr(k.object, strpos(k.object, ':') + 1),
-                                   k.details->>substr(split_part(k.object, ':', 1), 9))
-               END AS object_named,
+                   WHEN k.object LIKE 'upid:%'  THEN split_part(k.details->>'upid', ':', 7)
+                   WHEN k.object LIKE 'audit:%' THEN k.audit_resource_id
+                   WHEN k.object LIKE 'vmid:%'  THEN k.audit_vmid::text
+                   WHEN k.object LIKE 'details.%' THEN k.details->>substr(split_part(k.object, ':', 1), 9)
+               END AS v
+    ) ov
+    CROSS JOIN LATERAL (
+        -- What the row names, in the form the rule's object and member_of give.
+        -- A * is a wildcard only where the rule's format puts one: a value
+        -- that holds one (a user id may) names nothing, never a pattern.
+        SELECT CASE WHEN strpos(ov.v, '*') = 0 THEN format(substr(k.object, strpos(k.object, ':') + 1), ov.v) END
+                   AS object_named,
                ARRAY(SELECT format(alt, v)
                      FROM unnest(string_to_array(substr(k.member_of, strpos(k.member_of, ':') + 1), '|')) AS alt,
                           unnest(CASE
@@ -263,7 +268,8 @@ WITH rules AS MATERIALIZED (
                                       COALESCE(k.details->>substr(split_part(k.member_of, ':', 1), 14), ''), '[,; ]+'), '')
                               WHEN k.member_of LIKE 'details.%'
                                   THEN ARRAY[k.details->>substr(split_part(k.member_of, ':', 1), 9)]
-                          END) AS v) AS member_names,
+                          END) AS v
+                     WHERE strpos(v, '*') = 0) AS member_names,
                -- The fields a row says it set, when the rule takes them from it:
                -- a guest config edit's keys, those it deleted or reverted, and
                -- what deleting a disk moves (unused<n>, boot); the datacenter

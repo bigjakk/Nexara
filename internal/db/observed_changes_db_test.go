@@ -286,6 +286,10 @@ func TestObservedChanges(t *testing.T) {
 	members(aclByGroupGrant, []string{"user_grants:T5:user06@pve", "users:user06@pve"}, []string{})
 	audit(observedCluster, in, "pve_acl", "/storage/store03", 0, "granted",
 		map[string]any{"users": "", "groups": "group01", "tokens": ""})
+	// A user id holding a * names that one user, never a pattern of them.
+	groupBesideStar := seed(observedCluster, "pve_group", "admins", 0, "changed", "", []string{"users"}, at)
+	members(groupBesideStar, []string{"users:user07@pve"}, []string{})
+	audit(observedCluster, in, "pve_user", "*@pve", 0, "created", map[string]any{"groups_set": true})
 	byRealmSync := seed(observedCluster, "pve_user", "user04@ldap01", 0, "changed", "", []string{"email"}, at)
 	besideRealmSync := seed(observedCluster, "pve_user", "user05@pve", 0, "changed", "", []string{"email"}, at)
 	audit(observedCluster, in, "proxmox_task", "ldap01", 0, "auth-realm-sync",
@@ -371,6 +375,8 @@ func TestObservedChanges(t *testing.T) {
 		with(with(rule("pve_acl", "changed", "pve_acl", "id", false, "^granted$", "", "", "^(users|user_grants)$"),
 			"member", "joined"), "member_of", "details-list.users:users:%s|user_grants:*:%s"),
 		with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", ""), "object", "upid:*@%s"),
+		with(with(with(rule("pve_group", "changed", "pve_user", "cluster", false, "^created$", "", "", "^users$"),
+			"detail_key", "groups_set"), "member", "joined"), "member_of", "audit:users:%s"),
 		with(rule("backup", "added", "backup", "cluster", false, "^backup_job_created$", "", "", ""), "audit_id_is", "backup-job"),
 		with(with(rule("sdn_subnet", "added", "sdn_subnet", "cluster", false, "^sdn_subnet_created$", "", "", ""),
 			"member", "joined"), "member_of", "audit:cidr:%s"),
@@ -468,6 +474,7 @@ func TestObservedChanges(t *testing.T) {
 		{"Nexara's grant to the users its row names", aclByGrant, "explained"},
 		{"Nexara's grant, and another user's arriving", aclBesideGrant, "shown"},
 		{"a grant naming only a group, a user arriving", aclByGroupGrant, "shown"},
+		{"a user created as *@pve, another user joining", groupBesideStar, "shown"},
 		{"a realm's sync, a user of that realm", byRealmSync, "explained"},
 		{"a realm's sync, a user of another", besideRealmSync, "shown"},
 		{"a restore started more than an hour before", byLongRestore, "shown"},
