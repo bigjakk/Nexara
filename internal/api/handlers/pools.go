@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -109,8 +110,10 @@ func (h *PoolHandler) UpdatePool(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 	// What the update touched, as sent: the guests and storages named, and the
-	// delete flag that turns them from additions into removals. A pool's History
-	// is mostly its membership, and a bare "updated" says none of it.
+	// delete flag that turns them from additions into removals, as "1" where
+	// Proxmox reads it so. A pool's History is mostly its membership, and a bare
+	// "updated" says none of it; the observer takes the members a row lists to
+	// have joined without the flag and left with it, and no other member.
 	detailMap := map[string]string{"poolid": poolID}
 	if req.VMs != "" {
 		detailMap["vms"] = auditTruncate(req.VMs, poolAuditTextMax)
@@ -118,8 +121,8 @@ func (h *PoolHandler) UpdatePool(c fiber.Ctx, p *apischema.Params) error {
 	if req.Storage != "" {
 		detailMap["storage"] = auditTruncate(req.Storage, poolAuditTextMax)
 	}
-	if req.Delete != "" {
-		detailMap["delete"] = auditTruncate(req.Delete, poolAuditTextMax)
+	if poolRemoves(req.Delete) {
+		detailMap["delete"] = "1"
 	}
 	if req.Comment != nil {
 		detailMap["comment"] = auditTruncate(*req.Comment, poolAuditTextMax)
@@ -128,6 +131,17 @@ func (h *PoolHandler) UpdatePool(c fiber.Ctx, p *apischema.Params) error {
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pool", poolID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindPoolChange, "pool", poolID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// poolRemoves reports whether a pool update's delete takes the members it
+// names out, as Proxmox parses the boolean (pve-common JSONSchema.pm
+// parse_boolean: 1, on, yes or true, in any case).
+func poolRemoves(flag string) bool {
+	switch strings.ToLower(flag) {
+	case "1", "on", "yes", "true":
+		return true
+	}
+	return false
 }
 
 // DeletePool handles DELETE /clusters/:cluster_id/pools/:pool_id.

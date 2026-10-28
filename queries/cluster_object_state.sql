@@ -141,7 +141,9 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- action and UPID worker type (anchored patterns, '' any), never an action
 -- matching except_re, only a row with no task when untasked, only a row whose
 -- details carry a non-empty detail_key ('' any: an alias update that renamed
--- it), and with detail_value, one where it is that value. object and member_of name what the row is about, as "<source>:<format>"
+-- it; !<k> only a row whose details carry no <k>, or an empty one: a pool
+-- update that added rather than removed), and with detail_value, one where it
+-- is that value. object and member_of name what the row is about, as "<source>:<format>"
 -- with source upid (the UPID's id), audit (the row's resource_id), vmid (the
 -- row's guest) or details.<k> (its details-><k>): with object set, the
 -- change's resource_id must be that name (a disk task's storage, the ACL path
@@ -403,7 +405,8 @@ WITH rules AS MATERIALIZED (
                -- names nothing.
                CASE WHEN k.fields_from = 'realm' THEN '{}'::text[]
                     WHEN k.fields_from <> '' THEN ARRAY(SELECT regexp_replace(f, '_(changed|removed)$', '') FROM unnest(s.said) AS f)
-                    ELSE ARRAY(SELECT regexp_replace(k.detail_key, '_(changed|removed)$', '') WHERE k.detail_key <> ''
+                    ELSE ARRAY(SELECT regexp_replace(k.detail_key, '_(changed|removed)$', '')
+                               WHERE k.detail_key <> '' AND left(k.detail_key, 1) <> '!'
                                UNION
                                SELECT split_part(substr(src, 14), ':', 1)
                                FROM unnest(string_to_array(k.member_of, '+')) AS src WHERE src LIKE 'details-list.%')
@@ -414,7 +417,9 @@ WITH rules AS MATERIALIZED (
       AND (k.action_re = '' OR k.action ~ k.action_re)
       AND (k.except_re = '' OR k.action !~ k.except_re)
       AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
-      AND (k.detail_key = '' OR COALESCE(k.details->>k.detail_key, '') <> '')
+      AND (k.detail_key = ''
+           OR left(k.detail_key, 1) <> '!' AND COALESCE(k.details->>k.detail_key, '') <> ''
+           OR left(k.detail_key, 1) = '!' AND COALESCE(k.details->>substr(k.detail_key, 2), '') = '')
       AND (k.detail_value = '' OR k.details->>k.detail_key = k.detail_value)
       -- A realm sync removes, adds and overwrites only what its log says it
       -- did, and leaves alone what its log, read, says it did not.

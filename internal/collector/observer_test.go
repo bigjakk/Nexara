@@ -1861,7 +1861,7 @@ func TestObservedChangeRules(t *testing.T) {
 		if (r.Object != "" && (!named(r.Object) || strings.ContainsAny(r.Object, "|+"))) ||
 			(r.MemberOf != "" && !named(r.MemberOf)) || !memberOK ||
 			!slices.Contains([]string{"", "add1", "del1", "edit1", "adds", "dels"}, r.Counts) ||
-			!regexp.MustCompile(`^[a-z_]*$`).MatchString(r.DetailKey) {
+			!regexp.MustCompile(`^!?[a-z_]*$`).MatchString(r.DetailKey) {
 			t.Errorf("rule %+v: object, member, counts or detail_key", r)
 		}
 		if !slices.Contains([]string{"", "config", "settings", "keys", "fields", "realm"}, r.FieldsFrom) ||
@@ -1896,6 +1896,11 @@ func TestObservedChangeRules(t *testing.T) {
 		}
 		if r.Kind == "pve_role" && r.Change == "changed" && r.MemberOf == "" {
 			t.Errorf("rule %+v: a role's update explains only the privileges its row lists", r)
+		}
+		if r.Kind == "pool" && r.AuditType == "pool" && r.Change == "changed" && (r.MemberOf == "" &&
+			(r.FieldRe == "" || regexp.MustCompile(r.FieldRe).MatchString("vms") || regexp.MustCompile(r.FieldRe).MatchString("storage")) ||
+			r.Member != "" && r.DetailKey != map[string]string{"joined": "!delete", "left": "delete"}[r.Member]) {
+			t.Errorf("rule %+v: a pool's update explains a member only by the members its row lists, joining without delete", r)
 		}
 		// A realm sync adds, removes, and purges the ACL of, only what its log
 		// says, and a user joins its group only where its log added or replaced it.

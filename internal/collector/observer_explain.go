@@ -42,7 +42,7 @@ type explainRule struct {
 	ExceptRe  string `json:"except_re"`  // an action that never explains; "" none
 	WorkerRe  string `json:"worker_re"`  // the row's UPID worker type; "" any
 	FieldRe   string `json:"field_re"`   // the fields it explains; "" any
-	DetailKey string `json:"detail_key"` // only a row whose details carry this key, not empty; "" any
+	DetailKey string `json:"detail_key"` // only a row whose details carry this key, not empty; !<key> one that carries none; "" any
 	// DetailValue, with DetailKey, is the text that key must have ("" any).
 	DetailValue string `json:"detail_value"`
 	// Object and MemberOf name what a row is about, "<source>:<format>": the
@@ -82,7 +82,7 @@ type explainRule struct {
 	// deleted or reverted), and, if it named a disk, the unused<n> and boot a
 	// disk's change or removal moves; settings, the settings and cleared it
 	// lists (the datacenter options, a node's ACME); keys, its details' own keys
-	// (an HA or pool update); fields, the names of the fields it sent or changed
+	// (an HA update, the firewall options); fields, the names of the fields it sent or changed
 	// (handlers' auditFieldNames, auditFields); realm, those its realm's
 	// sync_attributes map (a realm sync's, readRealmSyncs). None when it could
 	// not read its object first and so names all it sent (fields_unverified).
@@ -127,7 +127,7 @@ func sentFields(kind, created, updated, deleted string, derived map[string][]str
 }
 
 // crudKeys is byAction for a kind whose update row records each field it set
-// as a key of its details (ha.go, pools.go): the update explains only those.
+// as a key of its details (ha.go): the update explains only those.
 func crudKeys(kind string) []explainRule {
 	return append(byAction(kind, []string{"created"}, []string{"deleted"}),
 		explainRule{Kind: kind, Change: "changed", AuditType: kind, MatchKey: "id", ActionRe: `^updated$`, FieldsFrom: "keys"})
@@ -253,8 +253,22 @@ var observedChangeRules = slices.Concat(
 	// remove_storage_access). Each explains only the member it names: a
 	// guest's destroy that guest leaving, never another. A clone in the
 	// Proxmox GUI names its source in its UPID, so the clone's joining shows.
-	crudKeys("pool"),
+	// The pool's own update adds the guests and storages its row lists, or with
+	// delete takes them out (pve-manager API2/Pool.pm update_pool), and sets its
+	// comment if it sent one: so it explains those members joining, or leaving,
+	// and the comment.
+	byAction("pool", []string{"created"}, []string{"deleted"}),
 	[]explainRule{
+		{Kind: "pool", Change: "changed", AuditType: "pool", MatchKey: "id", ActionRe: `^updated$`,
+			FieldsFrom: "keys", FieldRe: `^comment$`},
+		{Kind: "pool", Change: "changed", AuditType: "pool", MatchKey: "id", ActionRe: `^updated$`,
+			DetailKey: "!delete", FieldRe: `^vms$`, Member: "joined", MemberOf: "details-list.vms:vms:%s"},
+		{Kind: "pool", Change: "changed", AuditType: "pool", MatchKey: "id", ActionRe: `^updated$`,
+			DetailKey: "delete", FieldRe: `^vms$`, Member: "left", MemberOf: "details-list.vms:vms:%s"},
+		{Kind: "pool", Change: "changed", AuditType: "pool", MatchKey: "id", ActionRe: `^updated$`,
+			DetailKey: "!delete", FieldRe: `^storage$`, Member: "joined", MemberOf: "details-list.storage:storage:%s"},
+		{Kind: "pool", Change: "changed", AuditType: "pool", MatchKey: "id", ActionRe: `^updated$`,
+			DetailKey: "delete", FieldRe: `^storage$`, Member: "left", MemberOf: "details-list.storage:storage:%s"},
 		{Kind: "pool", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qm|vz)(create|restore)$`,
 			FieldRe: `^vms$`, Member: "joined", MemberOf: "upid:vms:%s"},
 		{Kind: "pool", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`,

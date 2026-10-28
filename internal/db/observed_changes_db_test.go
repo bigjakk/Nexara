@@ -494,6 +494,19 @@ func TestObservedChanges(t *testing.T) {
 	cloneMade := seed(observedCluster, "vm", "150", 150, "changed", "pve-01", []string{"memory"}, ago(200))
 	cloneBeside := seed(observedCluster, "vm", "151", 151, "changed", "pve-01", []string{"memory"}, ago(200))
 	besideDetails := seed(observedCluster, "pool", "app", 0, "changed", "", []string{"vms"}, ago(200))
+	// A pool's own update explains the members its row lists joining, or with
+	// delete leaving, and no other.
+	poolUpdate := func(pool string, joined, left []string, details map[string]any) uuid.UUID {
+		id := seed(observedCluster, "pool", pool, 0, "changed", "", []string{"vms"}, ago(200))
+		members(id, joined, left)
+		audit(observedCluster, ago(201), "pool", pool, 0, "updated", details)
+		return id
+	}
+	poolJoined := poolUpdate("pool02", []string{"vms:199"}, []string{}, map[string]any{"poolid": "pool02", "vms": "199"})
+	poolBeside := poolUpdate("pool03", []string{"vms:100"}, []string{}, map[string]any{"poolid": "pool03", "vms": "199"})
+	poolLeft := poolUpdate("pool04", []string{}, []string{"vms:198"}, map[string]any{"poolid": "pool04", "vms": "198", "delete": "1"})
+	poolRemovalJoined := poolUpdate("pool05", []string{"vms:197"}, []string{},
+		map[string]any{"poolid": "pool05", "vms": "197", "delete": "1"})
 	byNode := seed(observedCluster, "network", "pve-01/vmbr1", 0, "removed", "pve-01", nil, at)
 	audit(observedCluster, in, "network", "pve-01", 0, "network_reverted", nil)
 	besideNode := seed(observedCluster, "network", "pve-02/vmbr1", 0, "removed", "pve-02", nil, at)
@@ -607,6 +620,10 @@ func TestObservedChanges(t *testing.T) {
 			"member_of", "vmid:vms:%s"),
 		with(with(rule("pool", "changed", "vm", "cluster", false, "^clone$", "", "", "^vms$"), "member", "joined"),
 			"member_of", "details.new_id:vms:%s"),
+		with(with(with(rule("pool", "changed", "pool", "id", false, "^updated$", "", "", "^vms$"), "detail_key", "!delete"),
+			"member", "joined"), "member_of", "details-list.vms:vms:%s"),
+		with(with(with(rule("pool", "changed", "pool", "id", false, "^updated$", "", "", "^vms$"), "detail_key", "delete"),
+			"member", "left"), "member_of", "details-list.vms:vms:%s"),
 		rule("vm", "changed", "vm", "details:new_id", false, "^clone$", "", "", ""),
 		rule("network", "", "network", "node", false, "^network_reverted$", "", "", ""),
 	})
@@ -752,6 +769,10 @@ func TestObservedChanges(t *testing.T) {
 		{"a clone Nexara made, by its new id", cloneMade, "explained"},
 		{"a guest beside Nexara's clone", cloneBeside, "shown"},
 		{"a guest moved into another pool", besideDetails, "shown"},
+		{"a pool's update, the guest it added joining", poolJoined, "explained"},
+		{"a pool's update adding one guest, another joining", poolBeside, "shown"},
+		{"a pool's update removing a guest, it leaving", poolLeft, "explained"},
+		{"a pool's update removing a guest, it joining", poolRemovalJoined, "shown"},
 		{"a revert of the node's pending network", byNode, "explained"},
 		{"a revert on another node", besideNode, "shown"},
 		{"added by a disk task", addedByTask, "explained"},

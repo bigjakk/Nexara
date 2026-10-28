@@ -239,7 +239,9 @@ type Querier interface {
 	// action and UPID worker type (anchored patterns, '' any), never an action
 	// matching except_re, only a row with no task when untasked, only a row whose
 	// details carry a non-empty detail_key ('' any: an alias update that renamed
-	// it), and with detail_value, one where it is that value. object and member_of name what the row is about, as "<source>:<format>"
+	// it; !<k> only a row whose details carry no <k>, or an empty one: a pool
+	// update that added rather than removed), and with detail_value, one where it
+	// is that value. object and member_of name what the row is about, as "<source>:<format>"
 	// with source upid (the UPID's id), audit (the row's resource_id), vmid (the
 	// row's guest) or details.<k> (its details-><k>): with object set, the
 	// change's resource_id must be that name (a disk task's storage, the ACL path
