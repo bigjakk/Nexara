@@ -57,6 +57,10 @@ CREATE INDEX IF NOT EXISTS idx_guest_node_changes_to
     ON guest_node_changes (cluster_id, to_node, observed_at);
 CREATE INDEX IF NOT EXISTS idx_guest_node_changes_guest
     ON guest_node_changes (cluster_id, vmid, observed_at);
+-- The runs, which a node's History reads by the nodes they went through
+-- (nodes holds them, no index the read can range over): only this.
+CREATE INDEX IF NOT EXISTS idx_guest_node_changes_runs
+    ON guest_node_changes (cluster_id, observed_at) WHERE run_count > 0;
 
 -- record_guest_node_change runs AFTER a vms row is inserted, or its node_id
 -- changes: it records a move when the guest's last node differs, and keeps the
