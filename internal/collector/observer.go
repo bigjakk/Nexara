@@ -702,9 +702,9 @@ func (p *observePass) noticeBackUnderCap(ctx context.Context, kind, node string,
 // its History reads. A tab's History reads every row of its types, so any id of
 // the cluster does, and the notice takes the cluster's own; the cluster's
 // firewall rule set and options are read by their id, cluster, and a node's own
-// kinds by the node's. A kind no tab reads whole — a storage's, a backup job's
-// and a guest's History are one object's — files it under the cluster, whose
-// History reads it.
+// kinds, its interfaces among them, by the node's. A kind no tab reads whole —
+// a storage's, a backup job's and a guest's History are one object's — files
+// it under the cluster, whose History reads it.
 func (p *observePass) noticeTarget(kind, node string) (resourceType, resourceID string) {
 	cluster := p.cluster.ID.String()
 	switch kind {
@@ -712,7 +712,7 @@ func (p *observePass) noticeTarget(kind, node string) (resourceType, resourceID 
 		return observedClusterType, cluster
 	case "firewall_rule", "firewall_options":
 		return kind, "cluster"
-	case "node_options", "node_dns", "node_time":
+	case "node_options", "node_dns", "node_time", "network":
 		return "node", node
 	case "node_firewall":
 		return "firewall_rule", "node/" + node

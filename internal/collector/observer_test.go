@@ -918,7 +918,7 @@ func TestObserverOutcomes(t *testing.T) {
 		e.expect("baseline")
 		e.client.set(pathNet, "["+strings.Join([]string{iface("vmbr0"), iface("vmbr1"), iface("vmbr2")}, ",")+"]")
 		overStart := time.Now()
-		e.expect("past the cap", "changed network/"+e.cluster.ID.String()+" [network]")
+		e.expect("past the cap", "changed node/pve-01 [network]")
 		e.expect("still past it")
 		e.client.set(pathNet, "["+iface("vmbr0")+","+iface("vmbr1")+"]")
 		for _, r := range e.passRows() {
