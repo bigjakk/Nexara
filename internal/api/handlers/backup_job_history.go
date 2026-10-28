@@ -41,15 +41,20 @@ func BackupJobHistory() HistoryKind {
 // which job it made: every such create, of any job, is filed there and names no
 // job in details, so that id is read only by the rows that do (job_id) — which
 // a job really called so has from its create on — and the unknown creates are
-// in no job's History.
+// in no job's History. The backup rows filed under the cluster's id are also
+// read: the observer's notices and its rows past the cap (collector
+// noticeTarget), filed under the type its objects file under.
 func selectBackupJob(_ context.Context, r HistoryRequest) (HistorySelection, error) {
 	job := r.Params.String("job_id")
+	notices := HistoryObject{ResourceType: "backup", Value: r.ClusterID.String(), ActionLike: `backup\_job\_%`}
 	if job == backupJobIDUnknown {
 		return HistorySelection{Objects: []HistoryObject{
 			{ResourceType: "backup", ResourceID: job, DetailKey: "job_id", Value: job},
+			notices,
 		}}, nil
 	}
 	return HistorySelection{Objects: []HistoryObject{
 		{ResourceType: "backup", Value: job, ActionLike: `backup\_job\_%`},
+		notices,
 	}}, nil
 }

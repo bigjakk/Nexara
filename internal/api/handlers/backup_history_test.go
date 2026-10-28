@@ -67,8 +67,8 @@ func TestBackupJobHistoryTakesOnlyAJobsActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	sel, err := BackupJobHistory().Select(context.Background(), HistoryRequest{Params: params})
-	if err != nil || len(sel.Objects) != 1 {
-		t.Fatalf("Select = %+v, %v; want one object", sel, err)
+	if err != nil || len(sel.Objects) != 2 {
+		t.Fatalf("Select = %+v, %v; want the job and the cluster's notices", sel, err)
 	}
 	pattern := likeRegexp(sel.Objects[0].ActionLike)
 	for action, mine := range map[string]bool{

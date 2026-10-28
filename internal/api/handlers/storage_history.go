@@ -79,12 +79,17 @@ var storageHistoryObjects = []HistoryObject{
 }
 
 // selectStorage is the storage kind's selector: the path's storage, and, when
-// the request names a node, only what did not run on another.
+// the request names a node, only what did not run on another. It also reads the
+// storage rows filed under the cluster's id, which are the observer's notices
+// (a kind past its cap) and its rows past the cap (collector noticeTarget): it
+// files them under the type its objects file under, so that this View reads
+// them, and at the cluster's id, which no storage is called.
 func selectStorage(ctx context.Context, r HistoryRequest) (HistorySelection, error) {
 	sel, err := SelectObjects("storage", storageHistoryObjects...)(ctx, r)
 	if err != nil {
 		return HistorySelection{}, err
 	}
+	sel.Objects = append(sel.Objects, HistoryObject{ResourceType: "storage", Value: r.ClusterID.String()})
 	sel.ObjectsOnNode = r.Params.String("node")
 	return sel, nil
 }

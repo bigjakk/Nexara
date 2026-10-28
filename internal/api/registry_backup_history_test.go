@@ -42,7 +42,7 @@ func TestBackupHistoryRoutes(t *testing.T) {
 			}
 		}
 		return "storage=store01 " + strings.Join(out, " ") + " backup.storage=store01 backup.from_storage=store01 " +
-			"node.storage=store01 pool.storage∋store01" + suffix
+			"node.storage=store01 pool.storage∋store01 storage=" + testClusterID + suffix
 	}
 	rows := []struct{ route, url, sibling, want string }{
 		{clusterScope + "/storages/:storage/history", base + "/storages/store01/history",
@@ -60,21 +60,21 @@ func TestBackupHistoryRoutes(t *testing.T) {
 		{veeamScope + "/:id/sessions/:session_id/history", "/api/v1/veeam-servers/" + server + "/sessions/" + session + "/history", "",
 			"veeam_session[" + session + "].veeam_server_id=" + server},
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/backup-1a2b3c4d/history",
-			clusterScope + "/backup-jobs", `backup=backup-1a2b3c4d~backup\_job\_%`},
+			clusterScope + "/backup-jobs", `backup=backup-1a2b3c4d~backup\_job\_% backup=` + testClusterID + `~backup\_job\_%`},
 		// A job made without an id is named by a UUID, which starts with a digit as often as not: it
 		// is a job's id like any other, the one the job's own routes take.
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/" + uuidJob + "/history", "",
-			`backup=` + uuidJob + `~backup\_job\_%`},
+			`backup=` + uuidJob + `~backup\_job\_% backup=` + testClusterID + `~backup\_job\_%`},
 		// A guest's number and a node's name are ids of the same type and shape: held to a job's
 		// actions, they read none of that guest's or node's backups.
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/100/history", "",
-			`backup=100~backup\_job\_%`},
+			`backup=100~backup\_job\_% backup=` + testClusterID + `~backup\_job\_%`},
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/pve-01/history", "",
-			`backup=pve-01~backup\_job\_%`},
+			`backup=pve-01~backup\_job\_% backup=` + testClusterID + `~backup\_job\_%`},
 		// The id a create files its row under when it could not find its job's: every such create
 		// is there, so it is read only by the rows that name it in details, which no such create does.
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/backup-job/history", "",
-			`backup[backup-job].job_id=backup-job`},
+			`backup[backup-job].job_id=backup-job backup=` + testClusterID + `~backup\_job\_%`},
 	}
 	covered := map[string]bool{}
 	for _, row := range rows {
