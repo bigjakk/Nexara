@@ -22,8 +22,9 @@ func TestStorageAuditRowsNameTheirStorageNotThePoolRow(t *testing.T) {
 		action             string
 		details            map[string]any
 	}{
+		// The stand-in's storage has no content and no nodes: clearing nodes changes nothing.
 		{"update", http.MethodPut, `{"params":{"content":"backup"},"delete":"nodes"}`, "update",
-			map[string]any{"storage": "store01", "resource_name": "store01", "fields": []any{"content", "nodes"}}},
+			map[string]any{"storage": "store01", "resource_name": "store01", "fields": []any{"content"}}},
 		{"delete", http.MethodDelete, "", "delete",
 			map[string]any{"storage": "store01", "resource_name": "store01", "type": "pbs"}},
 	}

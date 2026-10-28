@@ -346,23 +346,28 @@ WITH rules AS MATERIALIZED (
                               COALESCE(k.details->>substr(split_part(src, ':', 1), 8), ''), '[,; ]+'), '')) AS g
                      WHERE src LIKE 'grants.%' AND strpos(r, '*') = 0 AND strpos(g, '*') = 0) AS member_names,
                -- The fields a row says it set, when the rule takes them from it:
-               -- a guest config edit's keys, those it deleted or reverted, and,
+               -- the keys a guest config edit changed (a row from before it
+               -- recorded them: every key it sent, deleted or reverted) and,
                -- when it named a disk, what replacing or deleting one moves
                -- (unused<n>, boot); the settings and cleared it lists; each key
                -- of its details, where an update records a field it set so; or
                -- the names its fields lists, with those the rule's derived says
-               -- Proxmox rewrites with each (and, at *, with any update), and
-               -- none when it could not read its object first and so names all
-               -- it sent (fields_unverified); or what the realm its task synced
-               -- maps (realm_fields).
+               -- Proxmox rewrites with each (and, at *, with any update); none
+               -- for an edit or update that could not read its object first and
+               -- so names all it sent (fields_unverified); or what the realm its
+               -- task synced maps (realm_fields).
                CASE k.fields_from
-                   WHEN 'config' THEN ARRAY(
-                       SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
-                                                            THEN k.details->'fields' ELSE '{}' END) AS f
-                       UNION
-                       SELECT f FROM regexp_split_to_table(
-                           COALESCE(k.details->'fields'->>'delete', '') || ',' || COALESCE(k.details->'fields'->>'revert', ''),
-                           '[,; ]+') AS f WHERE f <> '')
+                   WHEN 'config' THEN CASE
+                       WHEN k.details->'fields_unverified' = 'true' THEN '{}'::text[]
+                       WHEN jsonb_typeof(k.details->'changed') = 'array'
+                           THEN ARRAY(SELECT jsonb_array_elements_text(k.details->'changed'))
+                       ELSE ARRAY(
+                           SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
+                                                                THEN k.details->'fields' ELSE '{}' END) AS f
+                           UNION
+                           SELECT f FROM regexp_split_to_table(
+                               COALESCE(k.details->'fields'->>'delete', '') || ',' || COALESCE(k.details->'fields'->>'revert', ''),
+                               '[,; ]+') AS f WHERE f <> '') END
                    WHEN 'settings' THEN ARRAY(
                        SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'settings') = 'array'
                                                                     THEN k.details->'settings' ELSE '[]' END) AS f

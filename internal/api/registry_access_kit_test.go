@@ -250,7 +250,8 @@ type accessUpdatePVE struct {
 }
 
 // reply makes the stand-in answer requests for path (as the server sees it
-// decoded, /api2/json/access/users) with body in place of the empty envelope.
+// decoded, /api2/json/access/users), or with "GET /api2/json/..." those of that
+// method alone, with body in place of the empty envelope.
 func (p *accessUpdatePVE) reply(path, body string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -279,8 +280,12 @@ func (p *accessUpdatePVE) serve(t *testing.T) string {
 		}
 		p.mu.Lock()
 		p.seen = append(p.seen, accessUpdatePVERequest{method: r.Method, path: r.URL.Path, form: r.PostForm})
-		body, ok := p.replies[r.URL.Path]
-		status := p.statuses[r.URL.Path]
+		key := r.Method + " " + r.URL.Path
+		if _, ok := p.replies[key]; !ok {
+			key = r.URL.Path
+		}
+		body, ok := p.replies[key]
+		status := p.statuses[key]
 		p.mu.Unlock()
 		if !ok {
 			body = `{"data":null}`
@@ -475,8 +480,9 @@ type auditWant struct {
 	message, body []string
 	// method and path are the one request that must reach Proxmox, with form; an
 	// empty path is a refusal made before anything is sent, which writes no audit row.
-	method, path string
-	form         url.Values
+	// read is a path the handler reads first, with a GET, the object it writes.
+	method, path, read string
+	form               url.Values
 	// audit is the one row that must be written; empty, none (Proxmox refused).
 	audit auditRowWant
 	// never are values the row's details must not carry, whatever key they sit under.
@@ -520,6 +526,12 @@ func requireAudited(t *testing.T, app *fiber.App, pve *accessUpdatePVE, store *a
 			t.Errorf("a refusal made before Proxmox: %d request(s) %+v and %d audit row(s) followed", len(sent), sent, len(rows))
 		}
 		return
+	}
+	if want.read != "" {
+		if len(sent) == 0 || sent[0].method != http.MethodGet || sent[0].path != want.read {
+			t.Fatalf("the handler made the Proxmox calls %+v, want a GET of %s first", sent, want.read)
+		}
+		sent = sent[1:]
 	}
 	if len(sent) != 1 {
 		t.Fatalf("the handler made %d Proxmox calls, want exactly 1: %+v", len(sent), sent)

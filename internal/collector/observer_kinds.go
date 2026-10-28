@@ -160,9 +160,7 @@ var observeNodeKinds = []observeNodeKind{
 }
 
 var (
-	// pve-storage Storage/Plugin.pm encode_value: content via
-	// content_hash_to_string and nodes via join(',', keys %$value), both unsorted.
-	storageSpec = newFieldSpec(nil, []string{"content", "nodes"})
+	storageSpec = specOf(pvefield.Storage)
 	// pve-manager API2/Cluster/Mapping/{PCI,USB}.pm index: checks appear only
 	// with check-node, never sent; map is one entry per node.
 	mappingSpec = newFieldSpec([]string{"checks"}, []string{"map"})
@@ -176,18 +174,8 @@ var (
 	// aliases and IP sets of the moment, ipversion is derived from the addresses
 	// (Firewall.pm copy_list_with_digest and the rule parser).
 	firewallRuleSpec = newFieldSpec([]string{"pos", "errors", "ipversion"}, nil)
-	// qemu-server: lock is set and cleared by tasks (backup, snapshot,
-	// migrate, clone, suspended); parent is the snapshot pointer; vmstate,
-	// runningmachine, runningcpu and running-nets-host-mtu are written when a VM
-	// hibernates and removed when it resumes (QemuConfig.pm
-	// __snapshot_save_vmstate, QemuServer.pm vm_start and
-	// remove_left_over_vmstate_opts). The API already drops the snapshot,
-	// pending and special (cloud-init, fleecing) sections (AbstractConfig.pm
-	// and QemuConfig.pm load_current_config).
-	qemuConfigSpec = newFieldSpec([]string{"lock", "parent", "vmstate", "runningmachine", "runningcpu",
-		"running-nets-host-mtu"}, nil)
-	// pve-container: lock and parent, as for a VM.
-	lxcConfigSpec = newFieldSpec([]string{"lock", "parent"}, nil)
+	qemuConfigSpec   = specOf(pvefield.QemuConfig)
+	lxcConfigSpec    = specOf(pvefield.LXCConfig)
 
 	// pve-ha-manager API2/HA/Resources.pm index: errors is derived (a group
 	// that does not exist).

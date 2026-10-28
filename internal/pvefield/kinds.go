@@ -285,4 +285,23 @@ var (
 	// pve-manager API2/ACMEPlugin.pm: nodes is a list; data, the plugin's DNS
 	// API credentials, is a value like any other and is never stored.
 	ACMEPlugin = Kind{Sets: []string{"nodes"}, Stored: numbers("validation-delay", "disable")}
+	// pve-storage Storage/Plugin.pm encode_value: content via
+	// content_hash_to_string and nodes via join(',', keys %$value), both
+	// unsorted; the integers and booleans of the API schema numified, as a
+	// SectionConfig's are. A plugin's sensitive properties (password,
+	// encryption-key, keyring, master-pubkey) are kept out of the config.
+	Storage = Kind{Sets: []string{"content", "nodes"}, Stored: numbers("create-base-path", "create-subdirs", "disable",
+		"fuse", "krbd", "max-protected-backups", "mkdir", "nocow", "nowritecache", "port", "saferemove",
+		"saferemove-stepsize", "shared", "skip-cert-verification", "snapshot-as-volume-chain", "sparse", "tagged_only")}
+	// qemu-server: lock is set and cleared by tasks (backup, snapshot,
+	// migrate, clone, suspended); parent is the snapshot pointer; vmstate,
+	// runningmachine, runningcpu and running-nets-host-mtu are written when a
+	// VM hibernates and removed when it resumes (QemuConfig.pm
+	// __snapshot_save_vmstate, QemuServer.pm vm_start and
+	// remove_left_over_vmstate_opts). The API already drops the snapshot,
+	// pending and special (cloud-init, fleecing) sections (AbstractConfig.pm
+	// and QemuConfig.pm load_current_config). A value is kept as sent.
+	QemuConfig = Kind{Ignore: []string{"lock", "parent", "vmstate", "runningmachine", "runningcpu", "running-nets-host-mtu"}}
+	// pve-container: lock and parent, as for a VM.
+	LXCConfig = Kind{Ignore: []string{"lock", "parent"}}
 )

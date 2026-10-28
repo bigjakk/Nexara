@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -265,6 +266,16 @@ func TestObservedChanges(t *testing.T) {
 	for vmid, fields := range map[int32]map[string]any{180: {"description": "x"}, 181: {"delete": "scsi1"},
 		182: {"delete": "net1"}, 183: {"description": "x"}} {
 		audit(observedCluster, in, "vm", uuid.NewString(), vmid, "config_update", map[string]any{"fields": fields})
+	}
+	// A row that says what its edit changed explains only that (changed), not
+	// another key it sent; one that could not read the config first, nothing.
+	changedSaid := seed(observedCluster, "vm", "184", 184, "changed", "pve-01", []string{"memory"}, at)
+	changedSent := seed(observedCluster, "vm", "185", 185, "changed", "pve-01", []string{"cores"}, at)
+	changedUnverified := seed(observedCluster, "vm", "186", 186, "changed", "pve-01", []string{"memory"}, at)
+	for vmid, extra := range map[int32]map[string]any{184: nil, 185: nil, 186: {"fields_unverified": true}} {
+		details := map[string]any{"fields": map[string]any{"memory": "4096", "cores": "2"}, "changed": []string{"memory"}}
+		maps.Copy(details, extra)
+		audit(observedCluster, in, "vm", uuid.NewString(), vmid, "config_update", details)
 	}
 	haKeysSet := seed(observedCluster, "ha_rule", "rule01", 0, "changed", "", []string{"comment"}, at)
 	audit(observedCluster, in, "ha_rule", "rule01", 0, "updated", map[string]any{"rule": "rule01", "comment": "x"})
@@ -647,6 +658,9 @@ func TestObservedChanges(t *testing.T) {
 		{"a config edit, the disk it left unused", configUnused, "explained"},
 		{"a config edit naming no disk, a disk left unused", configNoDisk, "shown"},
 		{"a config edit that deleted the key", configDeleted, "explained"},
+		{"a config edit that says it changed the key", changedSaid, "explained"},
+		{"a config edit that sent the key and says it changed another", changedSent, "shown"},
+		{"a config edit that could not read the config first", changedUnverified, "shown"},
 		{"an options edit of that setting", optionsSet, "explained"},
 		{"an options edit, another setting", optionsOther, "shown"},
 		{"an update of the field its row records", haKeysSet, "explained"},

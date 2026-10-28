@@ -380,7 +380,7 @@ type storageKeyExchange struct {
 	cacheControl string
 	body         string
 	response     map[string]any
-	proxmox      []storageKeyCall
+	proxmox      []storageKeyCall // its writes: an update's read of its storage first is left out
 	audits       []db.InsertAuditLogParams
 	queries      []capturedQuery
 	events       []string
@@ -410,7 +410,12 @@ func (h *storageKeyHarness) do(t *testing.T, method, body string) storageKeyExch
 	if err := json.Unmarshal(raw, &ex.response); err != nil {
 		t.Fatalf("the response is not a JSON object: %v (%s)", err, raw)
 	}
-	ex.proxmox = h.px.since(pxBefore)
+	for _, call := range h.px.since(pxBefore) {
+		if call.method == http.MethodGet {
+			continue // an update reading its storage first, which carries nothing
+		}
+		ex.proxmox = append(ex.proxmox, call)
+	}
 	ex.queries = h.dbtx.since(dbBefore)
 	ex.audits = (&captureDBTX{calls: ex.queries}).auditInserts(t)
 	ex.events = h.drainEvents(t)

@@ -75,15 +75,17 @@ type explainRule struct {
 	// Appeared keeps a rule to fields the object did not have before
 	// (detail.fields_appeared): a value Proxmox fills in where none was.
 	Appeared bool `json:"appeared"`
-	// FieldsFrom keeps a row to the fields its details name: config, a guest
-	// config edit's keys and the keys it deleted or reverted (and, if it named
-	// a disk, the unused<n> and boot a disk's change or removal moves);
-	// settings, the settings and cleared it lists (the datacenter options, a
-	// node's ACME); keys, its details' own keys (an HA or pool update);
-	// fields, the names of the fields it sent or changed (handlers'
-	// auditFieldNames, auditFields), none when it could not read its object
-	// first and so names all it sent (fields_unverified); realm, those its
-	// realm's sync_attributes map (a realm sync's, readRealmSyncs).
+	// FieldsFrom keeps a row to the fields its details name: config, the keys
+	// a guest config edit changed (details.changed, handlers'
+	// guestConfigDetails; a row from before it recorded them, every key it sent,
+	// deleted or reverted), and, if it named a disk, the unused<n> and boot a
+	// disk's change or removal moves; settings, the settings and cleared it
+	// lists (the datacenter options, a node's ACME); keys, its details' own keys
+	// (an HA or pool update); fields, the names of the fields it sent or changed
+	// (handlers' auditFieldNames, auditFields); realm, those its realm's
+	// sync_attributes map (a realm sync's, readRealmSyncs). None, config and
+	// fields, when it could not read its object first and so names all it sent
+	// (fields_unverified).
 	FieldsFrom string `json:"fields_from"`
 	// Derived, with FieldsFrom fields, is what Proxmox rewrites with a field
 	// sent, by its name, and with any update, at "*".

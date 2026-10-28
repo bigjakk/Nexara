@@ -104,14 +104,22 @@ func ObserveSDN(kind string) (ObserveTarget, error) {
 	return ObserveTarget{}, fmt.Errorf("%w: SDN kind %q", ErrInvalidInput, kind)
 }
 
-// ObjectBackupJob, ObjectNodeNetworkInterface, ObjectSDN, ObjectSDNSubnet
-// and ObjectACMEPlugin read the one object an update is about to write (one
-// metric server's is ObserveMetricServer).
+// ObjectBackupJob, ObjectStorage, ObjectNodeNetworkInterface, ObjectSDN,
+// ObjectSDNSubnet and ObjectACMEPlugin read the one object an update is about
+// to write (one metric server's is ObserveMetricServer, a guest's config
+// ObserveGuestConfig).
 func ObjectBackupJob(id string) (ObserveTarget, error) {
 	if err := validatePathSegment("backup job ID", id); err != nil {
 		return ObserveTarget{}, err
 	}
 	return ObserveTarget{path: "/cluster/backup/" + url.PathEscape(id)}, nil
+}
+
+func ObjectStorage(id string) (ObserveTarget, error) {
+	if err := validatePathSegment("storage ID", id); err != nil {
+		return ObserveTarget{}, err
+	}
+	return ObserveTarget{path: "/storage/" + url.PathEscape(id)}, nil
 }
 
 func ObjectNodeNetworkInterface(node, iface string) (ObserveTarget, error) {

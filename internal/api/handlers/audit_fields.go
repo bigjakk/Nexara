@@ -168,11 +168,35 @@ func (s auditSent) changed(before map[string]json.RawMessage, kind pvefield.Kind
 // and fields_unverified, by which the observer's classifier takes the row to
 // explain no field (internal/collector observer_explain.go, FieldsFrom).
 func auditFields(details map[string]any, sent auditSent, before map[string]json.RawMessage, kind pvefield.Kind) map[string]any {
-	details["fields"] = sent.changed(before, kind)
+	return auditChanges(details, "fields", sent.changed(before, kind), before)
+}
+
+// auditChanges is details with names under key, and fields_unverified when the
+// object could not be read first and names is every one sent.
+func auditChanges(details map[string]any, key string, names []string, before map[string]json.RawMessage) map[string]any {
+	details[key] = names
 	if before == nil {
 		details["fields_unverified"] = true
 	}
 	return details
+}
+
+// guestConfigDetails is a guest config write's details: fields, the values it
+// sent, which a History shows (AuditLogAs records a secret among them as
+// "(set)"), and changed, what the write changes beside before, the config as
+// read just before (auditSent.changed), with what it reverts: a pending
+// change dropped, which the config is read with. The observer's config rule
+// explains only changed. skiplock is no key.
+func guestConfigDetails(fields map[string]string, before map[string]json.RawMessage, kind pvefield.Kind) map[string]any {
+	form := url.Values{}
+	for k, v := range fields {
+		if k != "revert" && k != "skiplock" {
+			form.Set(k, v)
+		}
+	}
+	changed := slices.Concat(auditSentOf(form).changed(before, kind), pvefield.SplitList(fields["revert"]))
+	slices.Sort(changed)
+	return auditChanges(map[string]any{"fields": fields}, "changed", slices.Compact(changed), before)
 }
 
 // readBefore reads the object an update is about to write, raw, for

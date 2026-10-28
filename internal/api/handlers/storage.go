@@ -24,6 +24,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // StorageHandler handles storage pool read endpoints.
@@ -680,13 +681,15 @@ func (h *StorageHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	// is Proxmox's call; proxmox.UpdateStorage forwards any of them.
 	deleteOptions := proxmox.SplitStorageDeleteList(p.String("delete"))
 
+	before := readBefore(c.Context(), pxClient)(proxmox.ObjectStorage(pool.Storage))
 	result, err := pxClient.UpdateStorage(c.Context(), pool.Storage, form, deleteOptions)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
 
-	audit := map[string]any{"storage": pool.Storage, "resource_name": pool.Storage,
-		"fields": auditFieldNames(form, deleteOptions...)}
+	sent := auditSentOf(form)
+	sent.cleared = append(sent.cleared, deleteOptions...)
+	audit := auditFields(map[string]any{"storage": pool.Storage, "resource_name": pool.Storage}, sent, before, pvefield.Storage)
 	if change := encryptionKeyChange(pool.Type, form, deleteOptions); change != "" {
 		audit["encryption_key"] = change
 	}

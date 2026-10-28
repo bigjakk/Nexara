@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -49,6 +50,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 		forbidden    string         // text that must appear nowhere in the details
 		wantTask     bool           // a task_history row was written for it
 		vm           *db.Vm         // the guest the inventory holds, if any
+		models       map[string]any // more rows the database answers, by query name
 		wantNoProbe  bool           // Proxmox was not asked for the resource
 		wantSent     bool           // details.fields are the names Proxmox was sent
 		wantFields   []string       // details.fields, of an update that read its object first
@@ -230,6 +232,20 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			replies: map[string]string{"GET /api2/json/cluster/backup/backup-0a1b2c3d-4e5f": `{"id":"backup-0a1b2c3d-4e5f",` +
 				`"type":"vzdump","schedule":"daily","storage":"store01","all":1}`},
 			wantType: "backup", wantID: "backup-0a1b2c3d-4e5f", wantAction: "backup_job_updated", wantFields: []string{"all", "vmid"},
+		},
+		{
+			// content and nodes are sets, as Proxmox re-encodes them; maxfiles,
+			// cleared, the storage had.
+			name: "a storage update names what it changed, not the content it re-sent in another order", method: fiber.MethodPut,
+			path: storageScope + "/:storage_id", target: "/storage/" + testStorageID,
+			body: `{"params":{"content":"iso,images","nodes":"pve-02,pve-01","shared":"1"},"delete":"maxfiles"}`,
+			bind: func(q *db.Queries) Handler { return handlers.NewStorageHandler(q, haCreateEncKey, nil).Update },
+			models: map[string]any{"GetStoragePool": db.StoragePool{ID: uuid.MustParse(testStorageID),
+				ClusterID: uuid.MustParse(testClusterID), Storage: "store01", Type: "dir"}},
+			replies: map[string]string{"GET /api2/json/storage/store01": `{"storage":"store01","type":"dir",` +
+				`"content":"images,iso","nodes":"pve-01","shared":1,"maxfiles":3}`},
+			wantType: "storage", wantID: "store01", wantAction: "update", wantFields: []string{"maxfiles", "nodes"},
+			wantAbsent: []string{"fields_unverified"},
 		},
 		{
 			name: "a metric server update", method: fiber.MethodPut, path: metricServerScope + "/:server_id",
@@ -470,7 +486,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			e := declaredEndpoint(t, tc.method, tc.path)
-			dbtx := &haCreateDBTX{}
+			dbtx := &haCreateDBTX{models: maps.Clone(tc.models)}
 			if tc.vm != nil {
 				dbtx.models = map[string]any{"GetVMByClusterAndVmid": *tc.vm}
 			}

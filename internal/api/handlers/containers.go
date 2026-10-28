@@ -16,6 +16,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // ContainerHandler handles LXC container CRUD and lifecycle endpoints.
@@ -853,11 +854,12 @@ func (h *ContainerHandler) SetContainerConfig(c fiber.Ctx, p *apischema.Params) 
 		return err
 	}
 
+	before := readBefore(c.Context(), pxClient)(proxmox.ObserveGuestConfig(node.Name, "lxc", int(ct.Vmid)))
 	if err := pxClient.SetContainerConfig(c.Context(), node.Name, int(ct.Vmid), fields); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	configDetails, _ := json.Marshal(map[string]interface{}{"fields": fields})
+	configDetails, _ := json.Marshal(guestConfigDetails(fields, before, pvefield.LXCConfig))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "container", ct.ID.String(), "config_update", configDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "config_update")
 
