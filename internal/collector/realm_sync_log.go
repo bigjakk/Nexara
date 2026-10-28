@@ -14,21 +14,50 @@ import (
 )
 
 // A realm sync (pve-access-control API2/Domains.pm sync, worker
-// auth-realm-sync) logs each user and group it removes, and each whose ACL
-// entries it purges, before it writes user.cfg. The lines, transcribed from
-// its update_users and update_groups:
+// auth-realm-sync), once it has read the directory and locked user.cfg, logs
+// "got data from server, updating <what>", then a section for the users and
+// one for the groups it syncs, each opened by "syncing users" or "syncing
+// groups" (with the remove-vanished options it was given), and, once it has
+// written user.cfg, "successfully updated <what> configuration". In its
+// sections it logs each user and group it removes, and each whose ACL entries
+// it purges, as update_users and update_groups write them:
 //
 //	remove user '<userid>'
 //	purge users '<userid>' ACL entries
 //	remove group '<groupid>'
 //	purge groups '<groupid>' ACL entries
 //
-// What a sync removed is what its log names, so a user deleted in the GUI
-// while it ran is not taken for one of its own, and a purge with
-// remove-vanished acl but not entry — the grantee kept, its entries gone — is
-// the sync's exactly. ClassifyObservedChanges takes the logs as task_logs; a
-// log that could not be read names nothing, and the removals stay shown.
-var realmSyncLogLine = regexp.MustCompile(`^(?:remove (user|group) '(.+)'|purge (user|group)s '(.+)' ACL entries)$`)
+// What a sync did is what its log names, so a user deleted in the GUI while
+// it ran is not taken for one of its own. Before its sections it echoes the
+// directory's values in the warnings of what it skips (Auth/LDAP.pm get_users
+// and get_groups, through Auth/Plugin.pm verify_username, AccessControl.pm
+// verify_groupname and JSONSchema validate), and a value may hold a newline,
+// which ends its warning's line early and starts one of the directory's
+// choosing. So a line counts only in its own section, of a sync that finished
+// and wrote what it logged; a log with any of these lines out of place, or a
+// warning whose quoted value does not close on its line, names nothing, as
+// does one that could not be read. ClassifyObservedChanges takes the logs as
+// task_logs, and what no log names stays shown.
+var (
+	realmSyncData    = regexp.MustCompile(`^got data from server, updating (users|groups|users and groups)$`)
+	realmSyncSection = regexp.MustCompile(`^syncing (users|groups)(?: \(remove-vanished opts: .*\))?$`)
+	realmSyncDone    = regexp.MustCompile(`^successfully updated (users|groups|users and groups) configuration$`)
+	realmSyncLogLine = regexp.MustCompile(`^(?:(remove) (user|group) '(.+)'|(purge) (user|group)s '(.+)' ACL entries)$`)
+	// realmSyncWarnings are the warnings that quote a directory's value, by
+	// how each begins and the whole of it.
+	realmSyncWarnings = []struct {
+		start string
+		whole *regexp.Regexp
+	}{
+		{"user name '", regexp.MustCompile(`^user name '.*' is too (?:short|long \(\d+ > 64\))$`)},
+		{"value '", regexp.MustCompile(`^value '.*' does not look like a valid user name$`)},
+		{"group name '", regexp.MustCompile(`^group name '.*' contains invalid characters$`)},
+		{"skipping attribute mapping '", regexp.MustCompile(`^skipping attribute mapping '.*'->'.*' for user '.*' - ` +
+			`(?:value '.*' does not look like a valid user name|400 invalid value '.*'|` +
+			`internal error: no schema for attribute '.*' with value '.*' available!)$`)},
+		{"skipping bad 'sync_attributes' entry – '", regexp.MustCompile(`^skipping bad 'sync_attributes' entry – '.*' is not a valid target attribute$`)},
+	}
+)
 
 // realmSyncLog is what one sync's log names, by list (users, groups): task_logs'
 // entry for its UPID.
@@ -37,12 +66,17 @@ type realmSyncLog struct {
 	Purged  map[string][]string `json:"purged"`
 }
 
+func newRealmSyncLog() realmSyncLog {
+	return realmSyncLog{Removed: map[string][]string{}, Purged: map[string][]string{}}
+}
+
 const (
 	// realmSyncLogsPerPass bounds how many logs one pass reads for a cluster:
 	// a finished sync's is read once, so only a backlog waits.
 	realmSyncLogsPerPass = 4
 	// realmSyncLogMaxPages bounds one log's read: 50,000 lines, a line for
-	// each user or group a sync touches. A longer one is read as far as that.
+	// each user or group a sync touches. A longer one is read as far as that,
+	// and, without its end, names nothing.
 	realmSyncLogMaxPages = 10
 	realmSyncLogBudget   = 15 * time.Second
 )
@@ -54,10 +88,10 @@ var realmSyncFields = []string{"enable", "expire", "keys"}
 // readRealmSyncs reads, for the cluster's realm syncs a change waiting to be
 // classified may lie in the window of — the give-up's day and the look-back
 // before it — what ClassifyObservedChanges takes of them: taskLogs, each
-// sync's log by UPID, and realmFields, each synced realm's mapped
-// realmSyncFields. A finished sync's log is read once (s.realmSyncLogs), a
-// running one's each pass, as it logs a removal before it writes it; a realm
-// each pass, and one that cannot be read maps none. Nothing read is "{}".
+// finished sync's log by UPID, newest first, read once (s.realmSyncLogs), and
+// realmFields, each synced realm's mapped realmSyncFields, read each pass (one
+// that cannot be read maps none). A sync still running names nothing yet: its
+// log ends only once it wrote user.cfg. Nothing read is "{}".
 func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, cluster db.Cluster) (taskLogs, realmFields json.RawMessage) {
 	none := json.RawMessage(`{}`)
 	since := time.Now().Add(-statusChangeGiveUp - observedLookback(s.objectObserveInterval) - time.Hour)
@@ -68,6 +102,8 @@ func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, clust
 	}
 	ctx, cancel := context.WithTimeout(ctx, realmSyncLogBudget)
 	defer cancel()
+	prefix := cluster.ID.String() + "/"
+	listed := map[string]bool{}
 	fields := map[string][]string{}
 	for _, t := range tasks {
 		_, realm, ok := upidTypeAndID(t.Upid)
@@ -75,16 +111,17 @@ func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, clust
 			continue
 		}
 		fields[realm] = []string{}
-		attrs, err := client.GetRealmSyncAttributes(ctx, realm)
-		if err != nil {
+		if attrs, err := client.GetRealmSyncAttributes(ctx, realm); err != nil {
 			s.logger.Debug("read a synced realm's mapping", "cluster_id", cluster.ID, "realm", realm, "error", err)
-			continue
+		} else {
+			fields[realm] = realmMappedFields(attrs)
 		}
-		fields[realm] = realmMappedFields(attrs)
 	}
-	prefix := cluster.ID.String() + "/"
-	logs, listed, reads := map[string]realmSyncLog{}, map[string]bool{}, 0
+	logs, reads := map[string]realmSyncLog{}, 0
 	for _, t := range tasks {
+		if t.Status != "completed" {
+			continue // running, or it failed and wrote nothing
+		}
 		listed[prefix+t.Upid] = true
 		if v, ok := s.realmSyncLogs.Load(prefix + t.Upid); ok {
 			logs[t.Upid] = v.(realmSyncLog)
@@ -94,11 +131,9 @@ func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, clust
 			continue
 		}
 		reads++
-		if log, ok := readRealmSyncLog(ctx, client, t.Node, t.Upid); ok {
-			logs[t.Upid] = log
-			if t.Status != "running" {
-				s.realmSyncLogs.Store(prefix+t.Upid, log)
-			}
+		if lines, ok := readTaskLogLines(ctx, client, t.Node, t.Upid, realmSyncLogMaxPages); ok {
+			logs[t.Upid] = parseRealmSyncLog(lines)
+			s.realmSyncLogs.Store(prefix+t.Upid, logs[t.Upid])
 		}
 	}
 	s.realmSyncLogs.Range(func(key, _ any) bool {
@@ -130,27 +165,75 @@ func realmMappedFields(syncAttributes string) []string {
 	return mapped
 }
 
-// readRealmSyncLog reads one sync's log for what it removed and purged.
-func readRealmSyncLog(ctx context.Context, client ProxmoxClient, node, upid string) (realmSyncLog, bool) {
-	log := realmSyncLog{Removed: map[string][]string{}, Purged: map[string][]string{}}
-	for page, start := 0, 0; page < realmSyncLogMaxPages; page++ {
+// readTaskLogLines reads up to pages of a task's log, its lines in order.
+func readTaskLogLines(ctx context.Context, client ProxmoxClient, node, upid string, pages int) ([]string, bool) {
+	var lines []string
+	for page, start := 0, 0; page < pages; page++ {
 		entries, err := client.GetTaskLog(ctx, node, upid, start)
 		if err != nil {
-			return realmSyncLog{}, false
+			return nil, false
 		}
 		for _, e := range entries {
-			switch m := realmSyncLogLine.FindStringSubmatch(e.T); {
-			case m == nil:
-			case m[1] != "":
-				log.Removed[m[1]+"s"] = append(log.Removed[m[1]+"s"], m[2])
-			default:
-				log.Purged[m[3]+"s"] = append(log.Purged[m[3]+"s"], m[4])
-			}
+			lines = append(lines, e.T)
 		}
 		if len(entries) < proxmox.TaskLogPageLines {
 			break
 		}
 		start += len(entries)
 	}
-	return log, true
+	return lines, true
+}
+
+// parseRealmSyncLog is what a finished sync's log names, or nothing — an empty
+// log — when it is not one a sync wrote whole as realmSyncLogLine's comment
+// says: each line it pins by in its own section after the data line, once, and
+// its end.
+func parseRealmSyncLog(lines []string) realmSyncLog {
+	log := newRealmSyncLog()
+	var what, section string
+	sections, done := map[string]bool{}, false
+	for _, line := range lines {
+		for _, w := range realmSyncWarnings {
+			if strings.HasPrefix(line, w.start) && !w.whole.MatchString(line) {
+				return newRealmSyncLog()
+			}
+		}
+		if m := realmSyncData.FindStringSubmatch(line); m != nil {
+			if what != "" {
+				return newRealmSyncLog()
+			}
+			what = m[1]
+			continue
+		}
+		if m := realmSyncSection.FindStringSubmatch(line); m != nil {
+			if what == "" || done || sections[m[1]] {
+				return newRealmSyncLog()
+			}
+			section, sections[m[1]] = m[1], true
+			continue
+		}
+		if m := realmSyncDone.FindStringSubmatch(line); m != nil {
+			if done || m[1] != what {
+				return newRealmSyncLog()
+			}
+			done = true
+			continue
+		}
+		m := realmSyncLogLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		into, list, id := log.Removed, m[2]+"s", m[3]
+		if m[4] != "" {
+			into, list, id = log.Purged, m[5]+"s", m[6]
+		}
+		if done || list != section {
+			return newRealmSyncLog()
+		}
+		into[list] = append(into[list], id)
+	}
+	if !done {
+		return newRealmSyncLog()
+	}
+	return log
 }

@@ -597,11 +597,12 @@ WHERE explained IS NULL
   AND (observed_by = 'observer' OR cluster_id IS NULL)
   AND observed_at < sqlc.arg('before')::timestamptz;
 
--- ListRealmSyncTasks is a cluster's realm syncs since a time, whose logs say
--- what each removed and whose ACL entries it purged (readRealmSyncLogs).
+-- ListRealmSyncTasks is a cluster's realm syncs since a time, newest first,
+-- whose logs say what each removed and whose ACL entries it purged
+-- (readRealmSyncs).
 -- name: ListRealmSyncTasks :many
 SELECT upid, node, status
 FROM task_history
 WHERE cluster_id = sqlc.arg('cluster_id') AND task_type = 'auth-realm-sync'
   AND started_at >= sqlc.arg('since')::timestamptz
-ORDER BY started_at;
+ORDER BY started_at DESC;

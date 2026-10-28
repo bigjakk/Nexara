@@ -349,7 +349,7 @@ type Syncer struct {
 	// (classifyBatch).
 	observeBatches sync.Map
 	// realmSyncLogs is, per "<cluster>/<UPID>", what a finished realm sync's
-	// log says it removed and purged (readRealmSyncLogs).
+	// log says it did (readRealmSyncs).
 	realmSyncLogs sync.Map
 }
 

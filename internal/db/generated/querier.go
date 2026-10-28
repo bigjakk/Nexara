@@ -1911,8 +1911,9 @@ type Querier interface {
 	// The prune keep-set is built from this plus the newest release, so a pin held
 	// by one cluster protects that ISO on every cluster.
 	ListPinnedVirtioWinVersions(ctx context.Context) ([]string, error)
-	// ListRealmSyncTasks is a cluster's realm syncs since a time, whose logs say
-	// what each removed and whose ACL entries it purged (readRealmSyncLogs).
+	// ListRealmSyncTasks is a cluster's realm syncs since a time, newest first,
+	// whose logs say what each removed and whose ACL entries it purged
+	// (readRealmSyncs).
 	ListRealmSyncTasks(ctx context.Context, arg ListRealmSyncTasksParams) ([]ListRealmSyncTasksRow, error)
 	// ListRecentAuditLogEnriched backs the dashboard activity feed. It takes the
 	// caller's view:audit scope (see the accessible_cluster_ids note on

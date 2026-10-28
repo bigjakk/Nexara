@@ -68,8 +68,8 @@ type explainRule struct {
 	// out or one moved, adds any number in, dels any number out; "" anything.
 	Counts string `json:"counts"`
 	// LogNames keeps a rule to what the row's task logged (a realm sync's log,
-	// readRealmSyncLogs): removed:users or removed:groups, the object it
-	// removed; purged, an ACL's grantee whose entries it purged.
+	// readRealmSyncs): removed:users or removed:groups, the object it removed;
+	// purged, an ACL's grantee whose entries it purged.
 	LogNames string `json:"log_names"`
 	// Appeared keeps a rule to fields the object did not have before
 	// (detail.fields_appeared): a value Proxmox fills in where none was.

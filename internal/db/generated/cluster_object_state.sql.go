@@ -682,7 +682,7 @@ SELECT upid, node, status
 FROM task_history
 WHERE cluster_id = $1 AND task_type = 'auth-realm-sync'
   AND started_at >= $2::timestamptz
-ORDER BY started_at
+ORDER BY started_at DESC
 `
 
 type ListRealmSyncTasksParams struct {
@@ -696,8 +696,9 @@ type ListRealmSyncTasksRow struct {
 	Status string `json:"status"`
 }
 
-// ListRealmSyncTasks is a cluster's realm syncs since a time, whose logs say
-// what each removed and whose ACL entries it purged (readRealmSyncLogs).
+// ListRealmSyncTasks is a cluster's realm syncs since a time, newest first,
+// whose logs say what each removed and whose ACL entries it purged
+// (readRealmSyncs).
 func (q *Queries) ListRealmSyncTasks(ctx context.Context, arg ListRealmSyncTasksParams) ([]ListRealmSyncTasksRow, error) {
 	rows, err := q.db.Query(ctx, listRealmSyncTasks, arg.ClusterID, arg.Since)
 	if err != nil {
