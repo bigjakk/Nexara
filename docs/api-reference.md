@@ -2066,7 +2066,7 @@ Each answers one object's timeline, newest first, in the shape of a guest's Hist
 | GET | `/veeam-servers/:id/history` | A Veeam server, with its connection tests, its platform and backup-object mappings, and every job and run control action taken on it (`view:veeam`, instance-wide) |
 | GET | `/veeam-servers/:id/jobs/:job_id/history` | A Veeam job of that server, by Veeam's own id, with its runs stopped; a second server that repeats the id is not this job (`view:veeam`, instance-wide) |
 | GET | `/veeam-servers/:id/sessions/:session_id/history` | A Veeam run of that server, by Veeam's own id (`view:veeam`, instance-wide) |
-| GET | `/clusters/:id/backup-jobs/:job_id/history` | A Proxmox backup job, by the id Proxmox gave it, taken as the job's update, delete and run routes take it (a job made without an id is named by a UUID, which may start with a digit). Only the job's own rows are read (`backup_job_*` actions), so an id that is also a guest's VMID or a node's name reads none of that guest's or node's backups (`view:backup`) |
+| GET | `/clusters/:id/backup-jobs/:job_id/history` | A Proxmox backup job, by the id Proxmox gave it, taken as the job's update, delete and run routes take it (a job made without an id is named by a UUID, which may start with a digit). Only the job's own rows are read (`backup_job_*` actions), so an id that is also a guest's VMID or a node's name reads none of that guest's or node's backups. The id `backup-job`, which a create files its row under when it could not find which job it made, reads only the rows that name it as `job_id`: those creates are in no job's History (`view:backup`) |
 
 A run in the Veeam run listing, `GET /veeam-servers/:id/sessions`, names its job as `job_veeam_id`.
 

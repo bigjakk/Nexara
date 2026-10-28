@@ -71,6 +71,10 @@ func TestBackupHistoryRoutes(t *testing.T) {
 			`backup=100~backup\_job\_%`},
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/pve-01/history", "",
 			`backup=pve-01~backup\_job\_%`},
+		// The id a create files its row under when it could not find its job's: every such create
+		// is there, so it is read only by the rows that name it in details, which no such create does.
+		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/backup-job/history", "",
+			`backup[backup-job].job_id=backup-job`},
 	}
 	covered := map[string]bool{}
 	for _, row := range rows {
