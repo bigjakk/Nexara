@@ -381,6 +381,9 @@ type veeamSessionResponse struct {
 	InitiatedBy     string     `json:"initiated_by"`
 	NexaraInitiated bool       `json:"nexara_initiated"`
 	ClusterID       *uuid.UUID `json:"cluster_id"`
+	// JobVeeamID is Veeam's id of the job the run belongs to, null for a run
+	// that names none: the job's History lists its runs by it.
+	JobVeeamID *uuid.UUID `json:"job_veeam_id"`
 }
 
 // maxVeeamSessionRows bounds one listing. Sessions accumulate at roughly one
@@ -440,6 +443,10 @@ func (h *VeeamHandler) ListSessions(c fiber.Ctx, p *apischema.Params) error {
 			EndTime:         optionalTime(s.EndTime),
 			InitiatedBy:     s.InitiatedBy,
 			NexaraInitiated: s.NexaraInitiated,
+		}
+		if s.JobVeeamID.Valid {
+			jobID := uuid.UUID(s.JobVeeamID.Bytes)
+			row.JobVeeamID = &jobID
 		}
 		if s.PlatformID.Valid {
 			if clusterID, ok := scope.platformCluster[platform]; ok {
