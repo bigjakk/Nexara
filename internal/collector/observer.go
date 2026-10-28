@@ -858,13 +858,16 @@ func (p *observePass) applyGuest(batch *recordBatch, kind string, obj observedOb
 	if err != nil {
 		return
 	}
-	if obj.unsettled {
-		// Stored under a signature no reading has, so the first read once it
-		// is made is its baseline.
+	old, existed := p.state[kind][obj.id]
+	if obj.unsettled && (!existed || old.signature == observeUnsettled) {
+		// A guest being made, on its first sight or still unsettled since:
+		// stored under a signature no reading has, so the first read once it
+		// is made is its baseline. A guest already known is compared, lock or
+		// not, or an edit made between setting such a lock by hand and
+		// clearing it would land in a baseline unseen.
 		batch.save(obj, tags, observeUnsettled, readAt)
 		return
 	}
-	old, existed := p.state[kind][obj.id]
 	if existed && old.signature == sig {
 		d := diffTags(old.tags, tags)
 		if len(d.fields) == 0 {
