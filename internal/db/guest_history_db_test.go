@@ -184,6 +184,7 @@ func TestGuestHistory(t *testing.T) {
 		for i, at := range []time.Time{top.Add(time.Minute), top.Add(2 * time.Minute)} {
 			audit(historyClusterID, at, "nexara", "vm", uuid.NewString(), "clone", map[string]any{"vmid": 50, "new_id": 100})
 			audit(historyClusterID, at, "nexara", "ha_resource", "vm:100", "updated", map[string]any{})
+			audit(historyClusterID, at, "nexara", "pve_acl", "/above", "updated", map[string]any{"users": "bob@pve"})
 			exec("above: a status change", `INSERT INTO guest_status_changes (cluster_id, vmid, guest_type, node,
 				from_status, to_status, last_seen_at, observed_at, explained)
 			VALUES ($1, 100, 'qemu', 'pve-01', 'running', 'stopped', $2, $2, false)`, historyClusterID, at)
@@ -930,6 +931,13 @@ func TestGuestHistory(t *testing.T) {
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
 			}
+		}
+		// Capped at 2 and paged on below each stop, a list member's read is the
+		// whole read.
+		inList := selection(handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "pve_acl", DetailKey: "users", Value: "bob@pve", InList: true}}})
+		if whole, _ := list(inList); !slices.Equal(walk(inList, 2, listed), whole) {
+			t.Errorf("a list member's History capped at 2, page on page, is not its whole History %v", whole)
 		}
 
 		// Under the handler's exec mode each value arrives as it is: commas,
@@ -1855,19 +1863,23 @@ func TestGuestHistory(t *testing.T) {
 
 		// What an audit row explained is read by its id, of the granted types,
 		// in the History's cluster — a row naming none for a global kind alone.
-		explainer := uuid.New()
+		explainer, another := uuid.New(), uuid.New()
 		for _, x := range []struct {
 			cluster uuid.UUID
 			typ, id string
 			fields  []string
+			by      uuid.UUID
 		}{
-			{historyClusterID, "vm", "100", []string{"net0", "cores"}}, {historyClusterID, "pool", "pool2", []string{"comment"}},
-			{historyOtherID, "vm", "100", []string{"tags"}}, {uuid.Nil, "pbs_server", historyPBSID, []string{"notes"}},
+			{historyClusterID, "vm", "100", []string{"net0", "cores"}, explainer},
+			{historyClusterID, "pool", "pool2", []string{"comment"}, explainer},
+			{historyOtherID, "vm", "100", []string{"tags"}, explainer},
+			{uuid.Nil, "pbs_server", historyPBSID, []string{"notes"}, explainer},
+			{historyClusterID, "vm", "100", []string{"boot"}, another}, // another row's
 		} {
 			exec("explained "+x.typ, `INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, change,
 				fields, observed_by, last_seen_at, observed_at, explained, explained_by)
 			VALUES ($1, $2, $3, 'changed', $4, 'observer', $5, $5, true, $6)`,
-				pgtype.UUID{Bytes: x.cluster, Valid: x.cluster != uuid.Nil}, x.typ, x.id, x.fields, minsAgo(3), explainer)
+				pgtype.UUID{Bytes: x.cluster, Valid: x.cluster != uuid.Nil}, x.typ, x.id, x.fields, minsAgo(3), x.by)
 		}
 		for _, tt := range []struct {
 			name    string
