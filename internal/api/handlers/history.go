@@ -117,7 +117,8 @@ type HistoryKind struct {
 	// /clusters/:cluster_id and is gated on view:audit and its own view
 	// permission, both GLOBAL. Only for ids unique across Nexara — the
 	// resource types in globalHistoryResourceTypes, which ListParams holds a
-	// global kind to — since audit keys are unique only within a cluster.
+	// global kind to, and a cluster's type read by such an id
+	// (KeyedObjectTypes) — since audit keys are unique only within a cluster.
 	// A global kind has no guests.
 	Global bool
 	// ObjectsIgnoreGuestCutoff leaves an object's row that names one of the

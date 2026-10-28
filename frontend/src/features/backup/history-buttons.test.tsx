@@ -46,7 +46,7 @@ function signIn(permissions: string[]) {
 
 const server = {
   id: "srv-1",
-  name: "veeam01",
+  name: "vbr01",
   base_url: "https://192.0.2.10:9419",
   username: "",
   api_revision: "1.3-rev2",
@@ -84,7 +84,7 @@ describe("a list row's History button", () => {
         onEdit={vi.fn()}
         onDelete={vi.fn()}
       />,
-      "veeam01",
+      "vbr01",
       "/api/v1/veeam-servers/srv-1/history?limit=50&offset=0",
     ],
     [
