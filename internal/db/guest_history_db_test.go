@@ -907,12 +907,16 @@ func TestGuestHistory(t *testing.T) {
 		if err := folderProps.Compile(); err != nil {
 			t.Fatal(err)
 		}
-		selectFolder := func(cluster uuid.UUID, folder string) (handlers.HistorySelection, error) {
+		selectFolder := func(cluster uuid.UUID, folder string, types ...string) (handlers.HistorySelection, error) {
 			params, err := folderProps.Validate(map[string]any{"folder_id": folder})
 			if err != nil {
 				t.Fatal(err)
 			}
-			return handlers.FolderHistory().Select(ctx, handlers.HistoryRequest{Queries: q, ClusterID: cluster, Params: params})
+			if len(types) == 0 {
+				types = []string{"qemu", "lxc"}
+			}
+			return handlers.FolderHistory().Select(ctx, handlers.HistoryRequest{Queries: q, ClusterID: cluster, Params: params,
+				GuestTypes: types})
 		}
 		folderHistory := func(sel handlers.HistorySelection, types []string, rowCap int32) []string {
 			t.Helper()
@@ -986,15 +990,31 @@ func TestGuestHistory(t *testing.T) {
 				t.Errorf("the unfiled guests = %v and %d objects, want %v and none", vmids, len(unfiled.Objects), want)
 			}
 		}
-		// A folder of more than 500 guests follows the 500 lowest VMIDs.
+		// A folder of more than 500 guests follows the 500 with the latest audit
+		// rows, the lower VMIDs among those with none, and says of how many:
+		// VMID 1500's start makes it one, and leaves 1499 out.
 		big := mkFolder(historyClusterID, "B", nil)
 		exec("big folder", `INSERT INTO vm_folder_memberships (cluster_id, vmid, folder_id)
 			SELECT $1, g, $2 FROM generate_series(1000, 1500) g`, historyClusterID, big.ID)
-		if capped, err := selectFolder(historyClusterID, big.ID.String()); err != nil {
+		audit(historyClusterID, minsAgo(1), "nexara", "vm", "1500", "start", map[string]any{})
+		capped, err := selectFolder(historyClusterID, big.ID.String())
+		if err != nil {
 			t.Fatal(err)
-		} else if n := len(capped.Guests); n != 500 || capped.Guests[n-1].VMID != 1499 {
-			t.Errorf("a folder of 501 guests: %d of them, the last %v; want 500, up to 1499", n, capped.Guests)
 		}
+		followed := make([]int32, 0, len(capped.Guests))
+		for _, g := range capped.Guests {
+			followed = append(followed, g.VMID)
+		}
+		if len(followed) != 500 || followed[0] != 1500 || slices.Contains(followed, 1499) || capped.GuestsTotal != 501 {
+			t.Errorf("a folder of 501 guests follows %d of %d, first %v; want 500 of 501, first 1500, not 1499",
+				len(followed), capped.GuestsTotal, followed[:min(len(followed), 3)])
+		}
+		// Only the guests the caller may open count: none of these, which the
+		// inventory does not hold, for a caller with one of the two types.
+		if mine, err := selectFolder(historyClusterID, big.ID.String(), "lxc"); err != nil || len(mine.Guests)+mine.GuestsTotal != 0 {
+			t.Errorf("the folder of 501 for a container viewer: %d guests of %d (%v), want none", len(mine.Guests), mine.GuestsTotal, err)
+		}
+		exec("its start", `DELETE FROM audit_log WHERE cluster_id = $1 AND vmid = 1500`, historyClusterID)
 		elsewhere := mkFolder(historyOtherID, "F", nil)
 		var notFound *fiber.Error
 		if _, err := selectFolder(historyClusterID, elsewhere.ID.String()); !errors.As(err, &notFound) || notFound.Code != fiber.StatusNotFound {

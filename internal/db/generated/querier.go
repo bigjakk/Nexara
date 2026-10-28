@@ -1997,6 +1997,11 @@ type Querier interface {
 	// short pages with holes in them.
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
+	// ListMostActiveGuests is the row_limit of vmids with the latest audit rows,
+	// one probe each on (cluster_id, vmid, created_at): the members a folder's
+	// History follows past its cap. A guest with none comes last; the lower VMID
+	// first among equals.
+	ListMostActiveGuests(ctx context.Context, arg ListMostActiveGuestsParams) ([]int32, error)
 	ListNodeDisksByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeDisk, error)
 	// status is included so callers can prefer a member that is actually up when
 	// the configured api_url node is not: the rolling orchestrator and the client

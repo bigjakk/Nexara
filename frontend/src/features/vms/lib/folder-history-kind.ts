@@ -20,10 +20,6 @@ import type {
 } from "@/features/history/types/history";
 import { guestHistoryKind, guestRowNaming } from "./guest-history-kind";
 
-/** The most guests a folder's History follows, the lowest VMIDs (the server's
- *  folderHistoryGuestCap). */
-export const FOLDER_HISTORY_GUEST_CAP = 500;
-
 function isFolderRow(entry: HistoryEntry): boolean {
   return (
     entry.resource_type === "vm_folder" ||

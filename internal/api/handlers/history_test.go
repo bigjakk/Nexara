@@ -522,20 +522,30 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 }
 
 // A capped read says how far back it is whole, an empty page of one too —
-// whose one row carries no entry, and is no item.
+// whose one row carries no entry, and is no item — and a selection that
+// follows only some of its guests says how many of how many.
 func TestHistoryListSaysHowFarBackItSearched(t *testing.T) {
 	t.Parallel()
 	at := pgtype.Timestamptz{Time: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Valid: true}
 	entry := db.ListHistoryRow{EntryID: "audit:1", Kind: "audit", ResourceType: "node", Details: json.RawMessage(`{}`),
 		Total: 7, SearchedFrom: at}
+	following := ClusterHistory()
+	following.WholeCluster, following.Collapse = false, nil
+	following.Select = func(context.Context, HistoryRequest) (HistorySelection, error) {
+		return HistorySelection{GuestsTotal: 600}, nil
+	}
 	for _, tt := range []struct {
-		name      string
-		rows      []any
-		wantItems int
-		wantTotal int64
+		name       string
+		kind       HistoryKind
+		rows       []any
+		wantItems  int
+		wantTotal  int64
+		wantGuests string
 	}{
-		{"a page", []any{entry}, 1, 7},
-		{"an empty page", []any{db.ListHistoryRow{Details: json.RawMessage(`{}`), SearchedFrom: at}}, 0, 0},
+		{"a page", ClusterHistory(), []any{entry}, 1, 7, ""},
+		{"an empty page", ClusterHistory(), []any{db.ListHistoryRow{Details: json.RawMessage(`{}`), SearchedFrom: at}},
+			0, 0, ""},
+		{"some of its guests", following, []any{entry}, 1, 7, `{"followed":0,"total":600}`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -547,23 +557,25 @@ func TestHistoryListSaysHowFarBackItSearched(t *testing.T) {
 			})
 			app.Get("/clusters/:cluster_id/history", withRequestParams(t,
 				historyTestProps("cluster_id", apischema.StdOption("cluster-id")), []string{"cluster_id"},
-				NewHistoryHandler(db.New(&auditRowsDBTX{rows: tt.rows})).Route(ClusterHistory()).List))
+				NewHistoryHandler(db.New(&auditRowsDBTX{rows: tt.rows})).Route(tt.kind).List))
 			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+uuid.NewString()+"/history", nil))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer func() { _ = resp.Body.Close() }()
 			var body struct {
-				Items        []historyEntry `json:"items"`
-				Total        int64          `json:"total"`
-				SearchedFrom string         `json:"searched_from"`
+				Items        []historyEntry  `json:"items"`
+				Total        int64           `json:"total"`
+				SearchedFrom string          `json:"searched_from"`
+				Guests       json.RawMessage `json:"guests"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 				t.Fatalf("status %d: %v", resp.StatusCode, err)
 			}
-			if len(body.Items) != tt.wantItems || body.Total != tt.wantTotal || body.SearchedFrom != "2026-01-02T03:04:05Z" {
-				t.Errorf("%d items, total %d, searched from %q; want %d, %d, 2026-01-02T03:04:05Z",
-					len(body.Items), body.Total, body.SearchedFrom, tt.wantItems, tt.wantTotal)
+			if guests := string(body.Guests); len(body.Items) != tt.wantItems || body.Total != tt.wantTotal ||
+				body.SearchedFrom != "2026-01-02T03:04:05Z" || guests != tt.wantGuests {
+				t.Errorf("%d items, total %d, searched from %q, guests %s; want %d, %d, 2026-01-02T03:04:05Z, %s",
+					len(body.Items), body.Total, body.SearchedFrom, guests, tt.wantItems, tt.wantTotal, tt.wantGuests)
 			}
 		})
 	}

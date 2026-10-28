@@ -49,6 +49,7 @@
   "entries_one": "{{count}} entry",
   "entries_other": "{{count}} entries",
   "entriesMore": "More than {{cap}} entries — narrow the time or the type to reach older ones",
+  "guestsFollowed": "This History follows the {{followed}} most recently active of its {{total}} guests. Each guest's own page has its whole History.",
   "searchedFrom": "Searched back to {{when}}: each kind of record is read to its newest {{cap}} entries. Narrow the time or the type to look further back.",
   "page": "Page {{page}} of {{pages}}",
   "previousPage": "Previous page",

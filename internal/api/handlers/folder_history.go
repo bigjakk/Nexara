@@ -16,10 +16,12 @@ import (
 const UnfiledFolderSegment = "unassigned"
 
 // folderHistoryGuestCap is the most guests a folder's History follows — the
-// ones with the lowest VMIDs — as the Tasks tab it replaced filtered at most
-// 500. Each guest costs its own rows and its lifecycle read, so a folder of
-// thousands, or Discovered on a big cluster, would cost thousands of guests'
-// Histories. The page says so past it (FolderHistoryTab).
+// ones with the latest audit rows (ListMostActiveGuests) — as the Tasks tab it
+// replaced filtered at most 500. Each guest costs its own rows and its
+// lifecycle read, so a folder of thousands, or Discovered on a big cluster,
+// would cost thousands of guests' Histories. The response says how many it
+// follows of how many past it (HistorySelection.GuestsTotal), which the page
+// shows.
 const folderHistoryGuestCap = 500
 
 // FolderHistory is the folder kind: what happened to the guests filed in a
@@ -86,10 +88,36 @@ func selectFolder(ctx context.Context, r HistoryRequest) (HistorySelection, erro
 	}
 
 	slices.Sort(vmids)
-	if vmids = slices.Compact(vmids); len(vmids) > folderHistoryGuestCap {
-		vmids = vmids[:folderHistoryGuestCap]
+	vmids = slices.Compact(vmids)
+	sel := HistorySelection{}
+	// Only the members the caller may open count, and are followed: the rest
+	// would take places under the cap that viewableGuests then empties, and
+	// show in the count.
+	if len(vmids) > 0 {
+		types, err := r.Queries.ListGuestTypes(ctx, db.ListGuestTypesParams{ClusterID: r.ClusterID, Vmids: vmids})
+		if err != nil {
+			return HistorySelection{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to read the folder")
+		}
+		members := make([]HistoryGuest, 0, len(vmids))
+		for _, v := range vmids {
+			members = append(members, HistoryGuest{VMID: v})
+		}
+		vmids = vmids[:0]
+		for _, g := range viewableGuests(members, types, r.GuestTypes) {
+			vmids = append(vmids, g.VMID)
+		}
 	}
-	sel := HistorySelection{Guests: make([]HistoryGuest, 0, len(vmids))}
+	if len(vmids) > folderHistoryGuestCap {
+		sel.GuestsTotal = len(vmids)
+		active, err := r.Queries.ListMostActiveGuests(ctx, db.ListMostActiveGuestsParams{
+			ClusterID: r.ClusterID, Vmids: vmids, RowLimit: folderHistoryGuestCap,
+		})
+		if err != nil {
+			return HistorySelection{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to read the folder")
+		}
+		vmids = active
+	}
+	sel.Guests = make([]HistoryGuest, 0, len(vmids))
 	if len(vmids) > 0 {
 		events, err := r.Queries.ListGuestLifecycleEvents(ctx, db.ListGuestLifecycleEventsParams{
 			ClusterID: ClusterUUID(r.ClusterID),

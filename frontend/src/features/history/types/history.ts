@@ -93,6 +93,9 @@ export interface HistoryPage extends ListResponse<HistoryEntry> {
   /** Set when a source reached its cap (HistoryKind.RowCap): the read is
    *  whole back to here, and older entries of that source were not read. */
   searched_from?: string;
+  /** Set when the History follows only some of its guests (a folder past its
+   *  guest cap): how many, of how many the reader may open. */
+  guests?: { followed: number; total: number };
 }
 
 /** The time filter: how far back to look, or "" for the whole history. */

@@ -1146,3 +1146,49 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 	}
 	return items, nil
 }
+
+const listMostActiveGuests = `-- name: ListMostActiveGuests :many
+SELECT v.vmid::int AS vmid
+FROM unnest($1::int[]) AS v(vmid)
+LEFT JOIN LATERAL (
+    SELECT a.created_at
+    FROM audit_log a
+    WHERE a.cluster_id = $2::uuid
+      AND a.vmid IS NOT NULL
+      AND a.vmid = v.vmid
+    ORDER BY a.created_at DESC
+    LIMIT 1
+) l ON true
+ORDER BY l.created_at DESC NULLS LAST, v.vmid
+LIMIT $3::int
+`
+
+type ListMostActiveGuestsParams struct {
+	Vmids     []int32   `json:"vmids"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+	RowLimit  int32     `json:"row_limit"`
+}
+
+// ListMostActiveGuests is the row_limit of vmids with the latest audit rows,
+// one probe each on (cluster_id, vmid, created_at): the members a folder's
+// History follows past its cap. A guest with none comes last; the lower VMID
+// first among equals.
+func (q *Queries) ListMostActiveGuests(ctx context.Context, arg ListMostActiveGuestsParams) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listMostActiveGuests, arg.Vmids, arg.ClusterID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var vmid int32
+		if err := rows.Scan(&vmid); err != nil {
+			return nil, err
+		}
+		items = append(items, vmid)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

@@ -251,11 +251,15 @@ type HistoryRule struct {
 type HistorySelector func(ctx context.Context, r HistoryRequest) (HistorySelection, error)
 
 // HistoryRequest is what a selector reads: the path's cluster, which the
-// route's gate authorized, and the request's validated parameters.
+// route's gate authorized, the request's validated parameters, and the guest
+// types the caller may open (historyScope: qemu with view:vm, lxc with
+// view:container), so that a selector choosing among many guests chooses
+// among those, as viewableGuests will keep only those.
 type HistoryRequest struct {
-	Queries   *db.Queries
-	ClusterID uuid.UUID
-	Params    *apischema.Params
+	Queries    *db.Queries
+	ClusterID  uuid.UUID
+	Params     *apischema.Params
+	GuestTypes []string
 }
 
 // HistorySelection is which rows are the object's, through ListHistory's two
@@ -275,6 +279,10 @@ type HistorySelection struct {
 	// kind's: the tasks it ran, its status changes, the guests that arrived
 	// on it or left it (ListHistory's node arms).
 	Node string
+	// GuestsTotal is, for a selection that follows only some of the guests
+	// it chose from — a folder past folderHistoryGuestCap — how many there
+	// were: the caller's to open, as Guests are. Zero otherwise.
+	GuestsTotal int
 }
 
 // HistoryGuest is one guest a History covers, from its own cutoff.
@@ -783,7 +791,8 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 			return err
 		}
 	}
-	sel, err := r.kind.Select(ctx, HistoryRequest{Queries: r.h.queries, ClusterID: clusterID, Params: p})
+	sel, err := r.kind.Select(ctx, HistoryRequest{Queries: r.h.queries, ClusterID: clusterID, Params: p,
+		GuestTypes: statusTypes})
 	if err != nil {
 		return err
 	}
@@ -853,6 +862,9 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	// exists — but for a capped read's one row with none (EntryID ""), there
 	// only to say how far back it searched.
 	page := historyPage{Items: make([]historyEntry, 0, len(rows))}
+	if sel.GuestsTotal > 0 {
+		page.Guests = &historyGuestCount{Followed: len(sel.Guests), Total: sel.GuestsTotal}
+	}
 	for _, row := range rows {
 		if row.SearchedFrom.Valid && page.SearchedFrom == nil {
 			s := row.SearchedFrom.Time.Format(time.RFC3339Nano)
@@ -876,6 +888,15 @@ type historyPage struct {
 	// back to which the read is whole: older entries of that source were not
 	// read. Absent when the read is whole.
 	SearchedFrom *string `json:"searched_from,omitempty"`
+	// Guests is, for a History that follows only some of its guests, how
+	// many it follows of how many (HistorySelection.GuestsTotal).
+	Guests *historyGuestCount `json:"guests,omitempty"`
+}
+
+// historyGuestCount is historyPage.Guests.
+type historyGuestCount struct {
+	Followed int `json:"followed"`
+	Total    int `json:"total"`
 }
 
 // toHistoryEntry maps one row. showExitText is view:task — see List.

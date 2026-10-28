@@ -341,7 +341,6 @@ export function FolderDetailPage() {
             <FolderHistoryTab
               clusterId={clusterId}
               folderId={folderId}
-              guestCount={vmids.size}
               folderNames={folderNames}
               guestLinks={guestLinks}
             />

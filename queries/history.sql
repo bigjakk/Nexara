@@ -936,3 +936,22 @@ SELECT vmid, type
 FROM vms
 WHERE cluster_id = sqlc.arg('cluster_id')
   AND vmid = ANY(sqlc.arg('vmids')::int[]);
+
+-- ListMostActiveGuests is the row_limit of vmids with the latest audit rows,
+-- one probe each on (cluster_id, vmid, created_at): the members a folder's
+-- History follows past its cap. A guest with none comes last; the lower VMID
+-- first among equals.
+-- name: ListMostActiveGuests :many
+SELECT v.vmid::int AS vmid
+FROM unnest(sqlc.arg('vmids')::int[]) AS v(vmid)
+LEFT JOIN LATERAL (
+    SELECT a.created_at
+    FROM audit_log a
+    WHERE a.cluster_id = sqlc.arg('cluster_id')::uuid
+      AND a.vmid IS NOT NULL
+      AND a.vmid = v.vmid
+    ORDER BY a.created_at DESC
+    LIMIT 1
+) l ON true
+ORDER BY l.created_at DESC NULLS LAST, v.vmid
+LIMIT sqlc.arg('row_limit')::int;

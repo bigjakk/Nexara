@@ -467,6 +467,15 @@ export function HistoryTimeline({
         <ResetColumnsButton layout={layout} />
       </div>
 
+      {data?.guests !== undefined && (
+        <p className="text-xs text-muted-foreground">
+          {shared("guestsFollowed", {
+            followed: data.guests.followed.toLocaleString(),
+            total: data.guests.total.toLocaleString(),
+          })}
+        </p>
+      )}
+
       {data?.searched_from !== undefined && cap !== undefined && (
         <p className="text-xs text-muted-foreground">
           {shared("searchedFrom", {
