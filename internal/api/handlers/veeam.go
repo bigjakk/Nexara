@@ -380,10 +380,45 @@ type veeamSessionResponse struct {
 	EndTime         *time.Time `json:"end_time"`
 	InitiatedBy     string     `json:"initiated_by"`
 	NexaraInitiated bool       `json:"nexara_initiated"`
-	ClusterID       *uuid.UUID `json:"cluster_id"`
+	// NexaraStopped is true when Nexara asked the run to stop. Veeam records
+	// such a run as "Failed", so this is the only thing that tells it from a
+	// failure (and only for a stop made from Nexara).
+	NexaraStopped bool       `json:"nexara_stopped"`
+	ClusterID     *uuid.UUID `json:"cluster_id"`
 	// JobVeeamID is Veeam's id of the job the run belongs to, null for a run
 	// that names none: the job's History lists its runs by it.
 	JobVeeamID *uuid.UUID `json:"job_veeam_id"`
+}
+
+// toVeeamSessionResponse is a stored run as the listing sends it, without the
+// cluster its platform maps to, which only the caller's scope knows.
+func toVeeamSessionResponse(s db.VeeamSession) veeamSessionResponse {
+	row := veeamSessionResponse{
+		ID:              s.ID,
+		VeeamID:         s.VeeamID,
+		Name:            s.Name,
+		State:           s.State,
+		Result:          s.Result,
+		ResultMessage:   s.ResultMessage,
+		Algorithm:       s.Algorithm,
+		Bottleneck:      s.Bottleneck,
+		Duration:        s.Duration,
+		ProcessingRate:  s.ProcessingRate,
+		ProcessedSize:   s.ProcessedSize,
+		ReadSize:        s.ReadSize,
+		TransferredSize: s.TransferredSize,
+		ProgressPercent: s.ProgressPercent,
+		CreationTime:    s.CreationTime,
+		EndTime:         optionalTime(s.EndTime),
+		InitiatedBy:     s.InitiatedBy,
+		NexaraInitiated: s.NexaraInitiated,
+		NexaraStopped:   s.NexaraStopped,
+	}
+	if s.JobVeeamID.Valid {
+		jobID := uuid.UUID(s.JobVeeamID.Bytes)
+		row.JobVeeamID = &jobID
+	}
+	return row
 }
 
 // maxVeeamSessionRows bounds one listing. Sessions accumulate at roughly one
@@ -424,30 +459,7 @@ func (h *VeeamHandler) ListSessions(c fiber.Ctx, p *apischema.Params) error {
 		if !scope.permitsPlatform(platform, s.PlatformID.Valid) {
 			continue
 		}
-		row := veeamSessionResponse{
-			ID:              s.ID,
-			VeeamID:         s.VeeamID,
-			Name:            s.Name,
-			State:           s.State,
-			Result:          s.Result,
-			ResultMessage:   s.ResultMessage,
-			Algorithm:       s.Algorithm,
-			Bottleneck:      s.Bottleneck,
-			Duration:        s.Duration,
-			ProcessingRate:  s.ProcessingRate,
-			ProcessedSize:   s.ProcessedSize,
-			ReadSize:        s.ReadSize,
-			TransferredSize: s.TransferredSize,
-			ProgressPercent: s.ProgressPercent,
-			CreationTime:    s.CreationTime,
-			EndTime:         optionalTime(s.EndTime),
-			InitiatedBy:     s.InitiatedBy,
-			NexaraInitiated: s.NexaraInitiated,
-		}
-		if s.JobVeeamID.Valid {
-			jobID := uuid.UUID(s.JobVeeamID.Bytes)
-			row.JobVeeamID = &jobID
-		}
+		row := toVeeamSessionResponse(s)
 		if s.PlatformID.Valid {
 			if clusterID, ok := scope.platformCluster[platform]; ok {
 				row.ClusterID = &clusterID

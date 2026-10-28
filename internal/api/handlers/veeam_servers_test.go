@@ -13,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -441,6 +442,38 @@ func TestVeeamResponse_WithholdsUsernameFromReadOnlyCallers(t *testing.T) {
 	}
 	if !strings.Contains(string(full), "jdoe") {
 		t.Errorf("manage:veeam response should keep the account name: %s", full)
+	}
+}
+
+// Veeam records a run Nexara asked to stop as "Failed", so the flag is the one
+// thing that tells it from a failure, and the listing has to send it; the job
+// a run belongs to is what a job's History lists its runs by.
+func TestToVeeamSessionResponse(t *testing.T) {
+	t.Parallel()
+	job := uuid.New()
+	for _, tt := range []struct {
+		name    string
+		row     db.VeeamSession
+		stopped bool
+		jobID   any
+	}{
+		{"a run of a job that Nexara stopped",
+			db.VeeamSession{Result: "Failed", NexaraStopped: true, JobVeeamID: pgtype.UUID{Bytes: job, Valid: true}},
+			true, job.String()},
+		{"a run that names no job and was not stopped", db.VeeamSession{Result: "Failed"}, false, nil},
+	} {
+		encoded, err := json.Marshal(toVeeamSessionResponse(tt.row))
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", tt.name, err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(encoded, &got); err != nil {
+			t.Fatalf("%s: unmarshal: %v", tt.name, err)
+		}
+		if got["nexara_stopped"] != tt.stopped || got["job_veeam_id"] != tt.jobID {
+			t.Errorf("%s: sent nexara_stopped %v and job_veeam_id %v, want %v and %v",
+				tt.name, got["nexara_stopped"], got["job_veeam_id"], tt.stopped, tt.jobID)
+		}
 	}
 }
 
