@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -23,7 +24,11 @@ func TestDeleteStalePBSRowsKeepWhatTheListingShowed(t *testing.T) {
 	migrateUp(t, env.Migrate)
 	ctx, pool, q := env.Ctx, env.Pool, gen.New(env.Pool)
 	server := uuid.MustParse("128b0000-0000-4000-8000-0000000000b1")
-	purge := func() { _, _ = pool.Exec(context.Background(), `DELETE FROM pbs_servers WHERE id = $1`, server) }
+	purge := func() {
+		pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(pctx, `DELETE FROM pbs_servers WHERE id = $1`, server)
+	}
 	purge()
 	defer purge()
 	// backup_time names each row: 2 was seen just now; datastore02 cannot be
