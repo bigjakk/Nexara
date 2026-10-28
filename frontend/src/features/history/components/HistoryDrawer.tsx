@@ -10,11 +10,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { usePermissions } from "@/hooks/usePermissions";
 import {
   useHistoryDrawerStore,
   type HistoryDrawerRequest,
 } from "@/stores/history-drawer-store";
+import { useCanViewHistory } from "../hooks/useCanViewHistory";
 import { HistoryTimeline } from "./HistoryTimeline";
 
 function stopPropagation(e: SyntheticEvent) {
@@ -90,17 +90,16 @@ export function HistoryDrawerHost() {
 /**
  * A list row's History button. Shown only with view:audit and view:task, as a
  * guest's History tab is: the timeline is the audit log, and its rows open
- * Proxmox task logs, so without both it would be a table of refusals. The
- * row's own view permission is the page's. Its own click, press and keys stop
- * here; the drawer it opens is HistoryDrawerHost's.
+ * Proxmox task logs, so without both it would be a table of refusals (the
+ * audit grant held on the whole install, for an object of no one cluster —
+ * useCanViewHistory). The row's own view permission is the page's. Its own
+ * click, press and keys stop here; the drawer it opens is HistoryDrawerHost's.
  */
 export function HistoryButton(props: HistoryDrawerRequest) {
   const { t } = useTranslation("history");
-  const { hasPermission } = usePermissions();
+  const can = useCanViewHistory(undefined, props.target.clusterId === null);
   const open = useHistoryDrawerStore((s) => s.open);
-  if (!hasPermission("view", "audit") || !hasPermission("view", "task")) {
-    return null;
-  }
+  if (!can) return null;
   return (
     <Button
       variant="ghost"

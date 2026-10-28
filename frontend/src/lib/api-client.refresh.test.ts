@@ -796,6 +796,7 @@ describe("a refresh answered 200 with something that is not session-shaped", () 
       // Told as a list, whatever it was sent as: what it is told to takes .includes of it.
       expect(onRefresh).toHaveBeenCalledTimes(1);
       expect(onRefresh.mock.calls[0]?.[0].permissions).toEqual([]);
+      expect(onRefresh.mock.calls[0]?.[0].global_permissions).toEqual([]);
     },
   );
 
@@ -805,7 +806,10 @@ describe("a refresh answered 200 with something that is not session-shaped", () 
     server.routes[REFRESH] = () =>
       new Response(
         JSON.stringify(
-          authResponse(ADMIN, { permissions: ["view:cluster", "manage:user"] }),
+          authResponse(ADMIN, {
+            permissions: ["view:cluster", "manage:user"],
+            globalPermissions: ["view:cluster"],
+          }),
         ),
         { status: 200 },
       );
@@ -817,6 +821,9 @@ describe("a refresh answered 200 with something that is not session-shaped", () 
     expect(onRefresh.mock.calls[0]?.[0].permissions).toEqual([
       "view:cluster",
       "manage:user",
+    ]);
+    expect(onRefresh.mock.calls[0]?.[0].global_permissions).toEqual([
+      "view:cluster",
     ]);
   });
 });

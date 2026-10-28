@@ -67,8 +67,13 @@ export function authResponse(
   user: User,
   {
     permissions = [],
+    globalPermissions,
     expiresIn = 3600,
-  }: { permissions?: string[]; expiresIn?: number } = {},
+  }: {
+    permissions?: string[];
+    globalPermissions?: string[];
+    expiresIn?: number;
+  } = {},
 ): AuthResponse {
   return {
     user,
@@ -76,6 +81,9 @@ export function authResponse(
     refresh_token: "",
     expires_at: Math.floor(Date.now() / 1000) + expiresIn,
     permissions,
+    ...(globalPermissions === undefined
+      ? {}
+      : { global_permissions: globalPermissions }),
   };
 }
 

@@ -26,11 +26,13 @@ afterEach(() => {
   useAuthStore.setState({
     user: null,
     permissions: [],
+    globalPermissions: [],
     isAuthenticated: false,
   });
 });
 
-function signIn(permissions: string[]) {
+// The grants are held on the whole install unless a test says otherwise.
+function signIn(permissions: string[], globalPermissions = permissions) {
   useAuthStore.setState({
     user: {
       id: "u1",
@@ -39,6 +41,7 @@ function signIn(permissions: string[]) {
       role: "user",
     },
     permissions,
+    globalPermissions,
     isAuthenticated: true,
     isInitialized: true,
   });
@@ -73,12 +76,13 @@ const datastoreCards = (
 // the History takes, and reading the object's own route. One row for each
 // kind a list shows, the drawer being the host's.
 describe("a list row's History button", () => {
-  const rows: [string, ReactElement, string, string][] = [
+  const rows: [string, ReactElement, string, string, boolean][] = [
     [
       "a datastore",
       datastoreCards,
       "datastore01",
       "/api/v1/pbs-servers/p1/history?limit=50&offset=0&datastore=datastore01",
+      true,
     ],
     [
       "a Veeam server",
@@ -90,6 +94,7 @@ describe("a list row's History button", () => {
       />,
       "vbr01",
       "/api/v1/veeam-servers/srv-1/history?limit=50&offset=0",
+      true,
     ],
     [
       "a Veeam job",
@@ -100,6 +105,7 @@ describe("a list row's History button", () => {
       />,
       "Daily-Backup",
       `/api/v1/veeam-servers/srv-1/jobs/${JOB}/history?limit=50&offset=0`,
+      true,
     ],
     [
       "a Veeam run",
@@ -110,6 +116,7 @@ describe("a list row's History button", () => {
       />,
       "Daily-Backup",
       `/api/v1/veeam-servers/srv-1/sessions/${RUN}/history?limit=50&offset=0`,
+      true,
     ],
     [
       "a backup job",
@@ -120,6 +127,7 @@ describe("a list row's History button", () => {
       />,
       "backup-1a2b3c4d",
       "/api/v1/clusters/c1/backup-jobs/backup-1a2b3c4d/history?limit=50&offset=0",
+      false,
     ],
   ];
 
@@ -165,6 +173,23 @@ describe("a list row's History button", () => {
       expect(
         screen.queryByRole("button", { name: `History of ${title}` }),
       ).toBeNull();
+    },
+  );
+
+  // The route of an object that belongs to no one cluster accepts only grants
+  // held on the whole install: a holder of them on one cluster would be
+  // answered 403, so is not offered the button; a backup job is a cluster's.
+  it.each(rows)(
+    "of %s is offered to a cluster-scoped holder only if it belongs to a cluster",
+    (_, element, title, _path, global) => {
+      signIn(
+        ["view:audit", "view:task", "view:pbs", "view:veeam", "view:backup"],
+        [],
+      );
+      renderWithProviders(element);
+      expect(
+        screen.queryByRole("button", { name: `History of ${title}` }) !== null,
+      ).toBe(!global);
     },
   );
 

@@ -24,6 +24,9 @@ import { dismissToasts, resetSessionState } from "@/stores/session-reset";
 interface AuthState {
   user: User | null;
   permissions: string[];
+  /** Those of `permissions` held on the whole install, which the controls of
+   *  an object that belongs to no one cluster are offered by. */
+  globalPermissions: string[];
   isAuthenticated: boolean;
   isLoading: boolean;
   isInitialized: boolean;
@@ -231,6 +234,7 @@ function finishSignOut(
     set({
       user: null,
       permissions: [],
+      globalPermissions: [],
       isAuthenticated: false,
       totpPending: false,
       totpPendingToken: null,
@@ -276,6 +280,7 @@ function adoptIdentity(
   set({
     user: res.user,
     permissions: res.permissions,
+    globalPermissions: res.global_permissions ?? [],
     isAuthenticated: true,
     signedOutByUser: false,
     ...(begins ? { isLoggingOut: false, sessionBeganAt: Date.now() } : {}),
@@ -286,6 +291,7 @@ function adoptIdentity(
 export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   user: null,
   permissions: [],
+  globalPermissions: [],
   isAuthenticated: false,
   isLoading: false,
   isInitialized: false,
@@ -404,6 +410,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
           set({
             user: null,
             permissions: [],
+            globalPermissions: [],
             isAuthenticated: false,
             isLoading: false,
             isInitialized: true,
@@ -436,6 +443,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
         set({
           user: null,
           permissions: [],
+          globalPermissions: [],
           isAuthenticated: false,
           isLoading: false,
           isInitialized: true,
@@ -605,6 +613,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       set({
         user: null,
         permissions: [],
+        globalPermissions: [],
         isAuthenticated: false,
         totpPending: false,
         totpPendingToken: null,

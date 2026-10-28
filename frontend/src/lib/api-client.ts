@@ -453,9 +453,10 @@ function retryAfterMs(res: Response): number {
  */
 function isAuthResponse(value: unknown): value is Omit<
   AuthResponse,
-  "permissions"
+  "permissions" | "global_permissions"
 > & {
   permissions?: string[] | null;
+  global_permissions?: unknown;
 } {
   const answer = value as Record<string, unknown> | null;
   const userId = (answer?.["user"] as { id?: unknown } | null | undefined)?.id;
@@ -480,7 +481,14 @@ async function readSession(res: Response): Promise<AuthResponse | null> {
     return null; // not JSON at all: a proxy's page
   }
   if (!isAuthResponse(answer)) return null;
-  return { ...answer, permissions: answer.permissions ?? [] };
+  return {
+    ...answer,
+    permissions: answer.permissions ?? [],
+    // What is not a list is none: fewer controls offered, never a refused session.
+    global_permissions: Array.isArray(answer.global_permissions)
+      ? (answer.global_permissions as string[])
+      : [],
+  };
 }
 
 /**

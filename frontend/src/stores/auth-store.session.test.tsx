@@ -143,7 +143,10 @@ describe("a token refresh still in flight when the session ends", () => {
 
     held.resolve(
       json(
-        authResponse(ADMIN, { permissions: ["manage:user", "view:cluster"] }),
+        authResponse(ADMIN, {
+          permissions: ["manage:user", "view:cluster"],
+          globalPermissions: ["view:cluster"],
+        }),
       ),
     );
     await act(async () => {
@@ -156,6 +159,8 @@ describe("a token refresh still in flight when the session ends", () => {
       "manage:user",
       "view:cluster",
     ]);
+    // The ones held on the whole install come with them.
+    expect(useAuthStore.getState().globalPermissions).toEqual(["view:cluster"]);
   });
 });
 

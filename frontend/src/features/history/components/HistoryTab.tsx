@@ -15,7 +15,10 @@ export function HistoryTabTrigger({
   history: ClusterHistory;
   value?: string;
 }) {
-  const can = useCanViewHistory(history.permission);
+  const can = useCanViewHistory(
+    history.permission,
+    history.target.clusterId === null,
+  );
   return can ? <TabsTrigger value={value}>History</TabsTrigger> : null;
 }
 
@@ -35,7 +38,10 @@ export function HistoryTabContent({
    *  read meanwhile. */
   placeholder?: ReactNode;
 }) {
-  const can = useCanViewHistory(history.permission);
+  const can = useCanViewHistory(
+    history.permission,
+    history.target.clusterId === null,
+  );
   return can ? (
     <TabsContent value={value} className="mt-4">
       {placeholder ?? (

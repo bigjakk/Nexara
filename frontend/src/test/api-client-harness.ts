@@ -111,6 +111,7 @@ export function installApiClientHarness(options: SandboxOptions = {}): void {
 export const SIGNED_OUT = {
   user: null,
   permissions: [],
+  globalPermissions: [],
   isAuthenticated: false,
   isLoading: false,
   isInitialized: false,

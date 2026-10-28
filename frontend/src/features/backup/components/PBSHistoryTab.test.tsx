@@ -70,6 +70,8 @@ const firstPage = [
   }),
 ];
 
+const GRANTS = ["view:audit", "view:task", "view:pbs", "view:backup"];
+
 function mount() {
   return renderWithProviders(
     <Tabs defaultValue="history">
@@ -86,7 +88,8 @@ beforeEach(() => {
       display_name: "U",
       role: "user",
     },
-    permissions: ["view:audit", "view:task", "view:pbs", "view:backup"],
+    permissions: GRANTS,
+    globalPermissions: GRANTS,
     isAuthenticated: true,
     isInitialized: true,
   });
@@ -107,6 +110,7 @@ afterEach(() => {
   useAuthStore.setState({
     user: null,
     permissions: [],
+    globalPermissions: [],
     isAuthenticated: false,
   });
 });
@@ -159,11 +163,13 @@ describe("a PBS server's History tab", () => {
   });
 
   // Most of a server's rows are the backups' (snapshots, restores), which
-  // view:backup owns beside the server's own view:pbs.
-  it("is not offered without view:backup", async () => {
-    useAuthStore.setState({
-      permissions: ["view:audit", "view:task", "view:pbs"],
-    });
+  // view:backup owns beside the server's own view:pbs; and the server belongs
+  // to no one cluster, so only the grants held on the whole install count.
+  it.each([
+    ["without view:backup", GRANTS.slice(0, 3), GRANTS.slice(0, 3)],
+    ["held on one cluster only", GRANTS, []],
+  ])("is not offered %s", async (_, permissions, globalPermissions) => {
+    useAuthStore.setState({ permissions, globalPermissions });
     mount();
 
     await waitFor(() => {

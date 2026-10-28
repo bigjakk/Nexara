@@ -13,6 +13,9 @@ export interface AuthResponse {
   refresh_token: string;
   expires_at: number;
   permissions: string[];
+  /** Those of `permissions` held on the whole install (the server's global
+   *  gates accept only these); absent from an answer that carries none. */
+  global_permissions?: string[];
 }
 
 // RBAC types
@@ -181,6 +184,7 @@ export interface SSOStatus {
 
 export interface MyPermissionsResponse {
   permissions: string[];
+  global_permissions?: string[];
   roles: RBACUserRole[];
 }
 

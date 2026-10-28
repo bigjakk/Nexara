@@ -19,7 +19,10 @@ import { PBSLiveTaskRows } from "./PBSLiveTaskRows";
  */
 export function PBSHistoryTabContent({ pbsId }: { pbsId: string }) {
   const history = useMemo(() => backupHistories.pbsServer(pbsId), [pbsId]);
-  const can = useCanViewHistory(history.permission);
+  const can = useCanViewHistory(
+    history.permission,
+    history.target.clusterId === null,
+  );
   const { data, isError } = usePBSTasks(pbsId);
   const latest = useMemo(() => latestTasks(data ?? []), [data]);
   if (!can) return null;

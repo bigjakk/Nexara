@@ -3,6 +3,7 @@ import { useAuthStore } from "@/stores/auth-store";
 
 export function usePermissions() {
   const permissions = useAuthStore((s) => s.permissions);
+  const globalPermissions = useAuthStore((s) => s.globalPermissions);
   const user = useAuthStore((s) => s.user);
 
   const hasPermission = useCallback(
@@ -12,6 +13,16 @@ export function usePermissions() {
       return permissions.includes(`${action}:${resource}`);
     },
     [permissions, user?.role],
+  );
+
+  // A grant on the whole install, which a global gate on the server accepts;
+  // a cluster-scoped one is in `permissions` but not here.
+  const hasGlobalPermission = useCallback(
+    (action: string, resource: string): boolean => {
+      if (user?.role === "admin") return true;
+      return globalPermissions.includes(`${action}:${resource}`);
+    },
+    [globalPermissions, user?.role],
   );
 
   const canView = useCallback(
@@ -48,6 +59,7 @@ export function usePermissions() {
   return {
     permissions,
     hasPermission,
+    hasGlobalPermission,
     canView,
     canManage,
     canExecute,
