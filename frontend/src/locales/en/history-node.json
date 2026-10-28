@@ -16,7 +16,7 @@
   },
   "categoryNotes": {
     "checks": "Reads that change nothing on the node: package-list refreshes, Proxmox's daily one among them, memory-module reads, Nexara's daily one among them, and report downloads. Left out of the History until Show routine checks is ticked.",
-    "guests": "The guests that arrived on this node or left it, and the VMIDs seen on another node with no migration on record. Their tasks, and anything else naming a guest, show with Include guest activity.",
+    "guests": "The guests that arrived on this node or left it, and the VMIDs seen on another node with no migration to it on record. Their tasks, and anything else naming a guest, show with Include guest activity.",
     "status": "Changes of the node's status. One through Unknown — Proxmox not reporting the node — that is back within two minutes is not listed."
   },
   "empty": "Nothing has been recorded for this node yet.",
@@ -64,8 +64,8 @@
   },
   "notes": {
     "status": "Nexara saw this change in the node's status as Proxmox reported it. It happened between the two times shown.",
-    "move": "Nexara saw the guest on another node than before, with a migration of it on record. The migration's own task shows with Include guest activity.",
-    "nowOn": "Nexara saw this VMID on another node than before, with no migration of it on record: an HA recovery, a guest moved outside Proxmox's tasks, or a new guest on the VMID.",
+    "move": "Nexara saw the guest on another node than before, with a migration of it to that node on record that succeeded as it moved. The migration's own task shows with Include guest activity.",
+    "nowOn": "Nexara saw this VMID on another node than before, with no migration of it to that node on record that succeeded as it moved: an HA recovery, a guest moved outside Proxmox's tasks, or a new guest on the VMID.",
     "run": "Past twenty in an hour, Nexara counts the rest in one entry: how many, from the first to the last of them, and where they ended. The twenty before it are listed each on its own."
   }
 }

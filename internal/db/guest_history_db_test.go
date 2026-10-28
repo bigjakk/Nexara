@@ -1320,10 +1320,20 @@ func TestGuestHistory(t *testing.T) {
 		WHERE cluster_id = $1 AND vmid = 310 AND from_node = 'pve-01'`, historyThirdID, minsAgo(12))
 		exec("moves dated", `UPDATE guest_node_changes SET observed_at = $2::timestamptz, last_seen_at = $2::timestamptz - interval '1 minute'
 		WHERE cluster_id = $1 AND vmid = 310 AND from_node = 'pve-02'`, historyThirdID, minsAgo(11))
-		// VM 310's migrations, on record: its moves are arrivals and departures.
-		audit(historyThirdID, minsAgo(13.5), "proxmox", "vm", "310", "migrate",
-			map[string]any{"upid": historyUPID(57, "qmigrate", "310"), "status": "OK"})
-		exec("migration's guest", `UPDATE audit_log SET vmid = 310 WHERE cluster_id = $1 AND action = 'migrate'`, historyThirdID)
+		// VM 310's migration, on record and done as it moved: its moves are
+		// arrivals and departures.
+		migration := func(n int, vmid int32, source string, details map[string]any, status string, at float64) {
+			t.Helper()
+			upid := historyUPID(n, "qmigrate", fmt.Sprint(vmid))
+			details["upid"] = upid
+			audit(historyThirdID, minsAgo(at), source, "vm", fmt.Sprint(vmid), "migrate", details)
+			exec("migration's task", `INSERT INTO task_history (cluster_id, user_id, upid, status, exit_status, node,
+				task_type, vmid, started_at, finished_at, source)
+			VALUES ($1, $2, $3, $4, CASE $4 WHEN 'completed' THEN 'OK' ELSE 'migration aborted' END, 'pve-01', 'qmigrate',
+				$5, $6::timestamptz, $6::timestamptz + interval '1 minute', $7)`, historyThirdID, systemUserID, upid, status,
+				vmid, minsAgo(at), source)
+		}
+		migration(57, 310, "proxmox", map[string]any{"status": "OK"}, "completed", 13.5)
 		for _, st := range []struct {
 			from, to string
 			at       time.Time
@@ -1466,11 +1476,16 @@ func TestGuestHistory(t *testing.T) {
 
 		// VMID 340 destroyed on pve-01 and cloned into on pve-02 within five
 		// minutes, its row not yet let go: the VMID is seen on pve-02, with no
-		// migration on record — no move. A container in a VM's place on the
-		// VMID records nothing at all.
+		// migration of it there on record — no move. A container in a VM's
+		// place on the VMID records nothing at all.
 		place(340, thirdNode)
 		audit(historyThirdID, minsAgo(9.5), "proxmox", "vm", "340", "destroy",
 			map[string]any{"upid": historyUPID(58, "qmdestroy", "340"), "status": "OK"})
+		// None of these is its migration: one that failed, one to another node,
+		// and its previous occupant's, done before it was last seen.
+		migration(59, 340, "proxmox", map[string]any{"status": "migration aborted"}, "failed", 8)
+		migration(60, 340, "nexara", map[string]any{"target": "pve-03"}, "completed", 7)
+		migration(61, 340, "proxmox", map[string]any{"status": "OK"}, "completed", 30)
 		exec("sighting after the destroy began", `UPDATE vms SET last_seen_at = $2 WHERE cluster_id = $1 AND vmid = 340`,
 			historyThirdID, minsAgo(9))
 		place(340, otherNode)

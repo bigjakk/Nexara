@@ -1798,9 +1798,15 @@ type Querier interface {
 	// whose node stopped reporting it long before it showed up elsewhere. A move is
 	// a guest's arrival or departure only with a migration of its VMID on record —
 	// qmigrate, vzmigrate, an HA migrate or relocate, a remote migration's tunnel —
-	// begun in the day before it was seen; any other is the VMID seen on another
-	// node (now_on), since a new guest on a VMID the collector had not let go of
-	// looks the same. from_status and to_status carry its nodes.
+	// that succeeded, by its archived or live task row (as TaskSucceeded reads a
+	// stopped one), ended between the guest's last sighting on its old node less
+	// five minutes and its sighting on the new one plus five, and went to that
+	// node where its audit row names a target (target, target_node). It is the end
+	// that is bounded: a long migration begins well before the guest leaves; its
+	// audit row is looked for in the day before. A failed one, the VMID's previous
+	// occupant's or one elsewhere is no evidence, and any other move is the VMID
+	// seen on another node (now_on), since a new guest on a VMID the collector had
+	// not let go of looks the same. from_status and to_status carry its nodes.
 	//
 	// or, alone, the whole cluster (whole_cluster, HistoryKind.WholeCluster): every
 	// row of every source filed under the path's cluster, none of them a guest's

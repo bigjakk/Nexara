@@ -74,9 +74,15 @@
 -- whose node stopped reporting it long before it showed up elsewhere. A move is
 -- a guest's arrival or departure only with a migration of its VMID on record —
 -- qmigrate, vzmigrate, an HA migrate or relocate, a remote migration's tunnel —
--- begun in the day before it was seen; any other is the VMID seen on another
--- node (now_on), since a new guest on a VMID the collector had not let go of
--- looks the same. from_status and to_status carry its nodes.
+-- that succeeded, by its archived or live task row (as TaskSucceeded reads a
+-- stopped one), ended between the guest's last sighting on its old node less
+-- five minutes and its sighting on the new one plus five, and went to that
+-- node where its audit row names a target (target, target_node). It is the end
+-- that is bounded: a long migration begins well before the guest leaves; its
+-- audit row is looked for in the day before. A failed one, the VMID's previous
+-- occupant's or one elsewhere is no evidence, and any other move is the VMID
+-- seen on another node (now_on), since a new guest on a VMID the collector had
+-- not let go of looks the same. from_status and to_status carry its nodes.
 --
 -- or, alone, the whole cluster (whole_cluster, HistoryKind.WholeCluster): every
 -- row of every source filed under the path's cluster, none of them a guest's
@@ -796,12 +802,24 @@ WITH guests AS MATERIALIZED (
            '', g.from_node, g.to_node, g.last_seen_at, 0, 'moves'::text
     FROM guest_node_changes g
     CROSS JOIN LATERAL (
-        SELECT EXISTS (SELECT 1 FROM audit_log a
-                       WHERE a.cluster_id = g.cluster_id AND a.vmid = g.vmid
-                         AND a.created_at BETWEEN g.observed_at - interval '1 day' AND g.observed_at
-                         AND split_part(a.details->>'upid', ':', 6) IN ('qmigrate', 'vzmigrate', 'hamigrate',
-                                                                        'harelocate', 'qmtunnel', 'vzmtunnel'))
-               AS migrated) m
+        SELECT EXISTS (
+            SELECT 1
+            FROM audit_log a
+            LEFT JOIN task_history_archive r ON r.upid = a.details->>'upid' AND r.cluster_id = a.cluster_id
+            LEFT JOIN task_history t ON t.upid = a.details->>'upid' AND t.cluster_id = a.cluster_id
+            WHERE a.cluster_id = g.cluster_id AND a.vmid IS NOT NULL AND a.vmid = g.vmid
+              AND a.created_at BETWEEN g.last_seen_at - interval '1 day' AND g.observed_at
+              AND split_part(a.details->>'upid', ':', 6) IN ('qmigrate', 'vzmigrate', 'hamigrate',
+                                                             'harelocate', 'qmtunnel', 'vzmtunnel')
+              AND (COALESCE(r.status, t.status) = 'completed'
+                   OR COALESCE(r.status, t.status) = 'stopped'
+                      AND (upper(btrim(COALESCE(r.exit_status, t.exit_status))) IN ('', 'OK')
+                           OR upper(btrim(COALESCE(r.exit_status, t.exit_status))) LIKE 'OK %'
+                           OR upper(btrim(COALESCE(r.exit_status, t.exit_status))) LIKE 'WARNINGS%'))
+              AND COALESCE(r.finished_at, t.finished_at)
+                  BETWEEN g.last_seen_at - interval '5 minutes' AND g.observed_at + interval '5 minutes'
+              AND COALESCE(a.details->>'target', a.details->>'target_node', g.to_node) = g.to_node)
+        AS migrated) m
     WHERE sqlc.arg('node_name')::text <> ''
       AND (sqlc.narg('source')::text IS NULL OR sqlc.narg('source')::text = 'detected')
       AND g.cluster_id = sqlc.arg('cluster_id')::uuid
