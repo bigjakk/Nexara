@@ -339,6 +339,12 @@ func TestObservedChanges(t *testing.T) {
 	members(syncJoinedSynced, []string{"groups:staff-ldap01"}, []string{})
 	syncJoinedOther := seed(observedCluster, "pve_user", "user09@ldap01", 0, "changed", "", []string{"groups"}, at)
 	members(syncJoinedOther, []string{"groups:admins"}, []string{})
+	// A sync purges the ACL only of a grantee it removed.
+	syncACLRemoved := seed(observedCluster, "pve_acl", "/vms/175", 0, "changed", "", []string{"user_grants", "users"}, at)
+	members(syncACLRemoved, []string{}, []string{"user_grants:Role01:1:user15@ldap01", "users:user15@ldap01"})
+	seed(observedCluster, "pve_user", "user15@ldap01", 0, "removed", "", nil, at)
+	syncACLKept := seed(observedCluster, "pve_acl", "/vms/176", 0, "changed", "", []string{"user_grants", "users"}, at)
+	members(syncACLKept, []string{}, []string{"user_grants:Role01:1:user16@ldap01", "users:user16@ldap01"})
 	audit(observedCluster, in, "proxmox_task", "ldap01", 0, "auth-realm-sync",
 		map[string]any{"upid": "UPID:pve-01:0000000D:00000001:00000001:auth-realm-sync:ldap01:root@pam:"})
 	// A task reaching another object counts from an hour before the window,
@@ -394,6 +400,7 @@ func TestObservedChanges(t *testing.T) {
 			"audit_id_is": ""}
 	}
 	with := func(r map[string]any, key, value string) map[string]any { r[key] = value; return r }
+	granteeRemoved := func(r map[string]any) map[string]any { r["grantee_removed"] = true; return r }
 	rules := jsonOf([]map[string]any{
 		rule("storage", "", "storage", "id", false, "", "", "", ""),
 		rule("backup", "", "backup", "id", false, "", "^run$", "", ""),
@@ -426,6 +433,9 @@ func TestObservedChanges(t *testing.T) {
 			"^(enable|expire|firstname|lastname|email|comment|keys)$"), "object", "upid:*@%s"),
 		with(with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", "^groups$"),
 			"object", "upid:*@%s"), "member", "joined"), "member_of", "upid:groups:*-%s"),
+		granteeRemoved(with(with(rule("pve_acl", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
+			"^(users|user_grants)$"), "member", "left"), "member_of", "upid:users:*@%s|user_grants:*@%s")),
+		rule("pve_user", "removed", "", "cluster", false, "", "", "^auth-realm-sync$", ""),
 		with(with(rule("pve_acl", "added", "pve_acl", "id", false, "^granted$", "", "", ""), "member", "joined"),
 			"member_of", "details-list.users:users:%s|user_grants:*:%s+details-list.groups:groups:%s|group_grants:*:%s"),
 		with(with(rule("pve_acl", "changed", "pve_role", "cluster", false, "^deleted$", "", "", "^(user|group|token)_grants$"),
@@ -544,6 +554,8 @@ func TestObservedChanges(t *testing.T) {
 		{"a realm's sync, a user of another", besideRealmSync, "shown"},
 		{"a realm's sync, its user joining a group it syncs", syncJoinedSynced, "explained"},
 		{"a realm's sync, its user joining another group", syncJoinedOther, "shown"},
+		{"a realm's sync, the ACL of a user it removed", syncACLRemoved, "explained"},
+		{"a realm's sync, the ACL of a user it kept", syncACLKept, "shown"},
 		{"a restore started more than an hour before", byLongRestore, "shown"},
 		{"a guest moved into the pool from its page", byDetails, "explained"},
 		{"a guest cloned into the pool through Nexara", byClone, "explained"},

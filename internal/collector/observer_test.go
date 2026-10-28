@@ -1406,6 +1406,9 @@ func TestObservedChangeRules(t *testing.T) {
 		if r.Kind == "pve_acl" && r.Member == "" && (r.Change != "removed" || r.Object == "") {
 			t.Errorf("rule %+v explains an ACL change without naming its grantees", r)
 		}
+		if r.Kind == "pve_acl" && strings.Contains(r.WorkerRe, "auth-realm-sync") && !r.GranteeRemoved {
+			t.Errorf("rule %+v: a realm sync purges only the ACL of what it removed", r)
+		}
 		if source, formats, _ := strings.Cut(r.MemberOf, ":"); r.Kind == "pve_acl" && source == "audit" {
 			pinned := map[string]*regexp.Regexp{
 				"pve_role":  regexp.MustCompile(`^[a-z]+_grants:%s:\*$`),

@@ -250,7 +250,9 @@ type Querier interface {
 	// never a pattern. counts
 	// says what the row does to a list's items (listed, below); fields_from keeps
 	// it to the fields its details say it set (fields_named, below); audit_id_is
-	// to rows filed under that marker id.
+	// to rows filed under that marker id; grantee_removed (an ACL's grantee
+	// leaving) to a grantee whose own removal, a user, group or token removed
+	// change, the same row's task overlaps.
 	//
 	// A change is explained when everything it changed is: each member that joined
 	// or left a list of ids (members_joined, members_left), each other field in

@@ -62,6 +62,9 @@ type explainRule struct {
 	// how many came and went: add1 one in, del1 one out, edit1 one in and one
 	// out or one moved, adds any number in, dels any number out; "" anything.
 	Counts string `json:"counts"`
+	// GranteeRemoved keeps a row's ACL grantees leaving to those whose own
+	// removal (pve_user, pve_group or pve_token removed) its task overlaps.
+	GranteeRemoved bool `json:"grantee_removed"`
 	// FieldsFrom keeps a row to the fields its details name: config, a guest
 	// config edit's keys and the keys it deleted or reverted (and, if it named
 	// a disk, the unused<n> and boot a disk's change or removal moves);
@@ -572,11 +575,14 @@ var realmSyncRules = func() []explainRule {
 				FieldRe: `^users$`, Member: "joined", MemberOf: "upid:users:*@%s"},
 			{Kind: "pve_group", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
 				FieldRe: `^users$`, Member: "left"},
+			// With remove-vanished acl a sync purges the ACL of what vanished
+			// from the directory: a grantee leaving is this sync's only when
+			// the same sync removed that user or group.
 			{Kind: "pve_acl", Change: "changed", MatchKey: "cluster", WorkerRe: sync,
 				FieldRe: `^(users|user_grants|groups|group_grants)$`, Member: "left",
-				MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s"},
-			{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: sync,
-				Member: "sole", MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s"},
+				MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s", GranteeRemoved: true},
+			{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: sync, Member: "sole",
+				MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s", GranteeRemoved: true},
 		},
 	)
 }()
