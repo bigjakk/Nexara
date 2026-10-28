@@ -129,6 +129,8 @@ func TestHistoryEndpointRefusesAnUndecidedGate(t *testing.T) {
 		{"global on audit alone", historyRoute{Kind: global, Path: globalPath, AuditOnly: "because"}, nil, "set exactly one of Resource"},
 		{"global at a cluster's", historyRoute{Kind: global, Path: clusterPath, Resource: "pbs"}, cluster, "a History route is"},
 		{"a cluster's kind above", historyRoute{Kind: handlers.GuestHistory(), Path: globalPath, Resource: "vm"}, guest, "a History route is"},
+		{"a path outside the History's", historyRoute{Kind: probe, Path: clusterScope + "/probe/:vmid", Resource: "node"},
+			guest, "a History route is"},
 		{"a path guest undeclared", historyRoute{Kind: handlers.GuestHistory(), Path: clusterPath, AuditOnly: "because"}, cluster,
 			"the guest's path parameter"},
 		{"a cluster's kind with no cluster", historyRoute{Kind: probe, Path: clusterPath, Resource: "node"},

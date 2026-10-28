@@ -826,10 +826,10 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		// A guest's own rows are the guests family's, which the caller's view
 		// permission (viewableGuests) and the guest's cutoff hold to: a guest
 		// typed object reads them past both unless it is one of the guests —
-		// and a whole guest type is every guest's.
+		// and a whole guest type, which has no value to parse, is none of them.
 		if o.DetailKey == "" && (o.ResourceType == "vm" || o.ResourceType == "container") {
 			vmid, parseErr := strconv.ParseInt(o.Value, 10, 32)
-			if o.WholeType || parseErr != nil || !slices.Contains(params.Vmids, int32(vmid)) {
+			if parseErr != nil || !slices.Contains(params.Vmids, int32(vmid)) {
 				return db.ListHistoryParams{}, fmt.Errorf("history object %+v is a guest the selection does not hold", o)
 			}
 		}
