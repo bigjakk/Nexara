@@ -1172,6 +1172,13 @@ func TestGuestHistory(t *testing.T) {
 		audit(historyThirdID, time.Now(), "proxmox", "vm", "311", "destroy",
 			map[string]any{"upid": historyUPID(50, "qmdestroy", "311"), "status": "OK"})
 		place(311, otherNode) // a new guest on the VMID, no move
+		// Destroyed, and its VMID cloned into on another node more than five
+		// minutes after its row went — in Proxmox, no new_id on record: no move.
+		place(320, thirdNode)
+		exec("destroyed guest", `DELETE FROM vms WHERE cluster_id = $1 AND vmid = 320`, historyThirdID)
+		exec("gone a while", `UPDATE guest_node_state SET gone_at = now() - interval '10 minutes'
+			WHERE cluster_id = $1 AND vmid = 320`, historyThirdID)
+		place(320, otherNode)
 		var moves []string
 		if err := pool.QueryRow(ctx, `SELECT array_agg(vmid || ' ' || from_node || '>' || to_node ORDER BY observed_at, id)
 		FROM guest_node_changes WHERE cluster_id = $1`, historyThirdID).Scan(&moves); err != nil {
@@ -1303,6 +1310,7 @@ func TestGuestHistory(t *testing.T) {
 		if got := nodeHistory(func(*gen.ListHistoryParams) {}); len(got) < 2 || got[1] != "status status_change status offline>unknown" {
 			t.Errorf("a node still unknown after two minutes: %v, want its change second", got)
 		}
+
 	})
 
 	run("global", func(t *testing.T) {

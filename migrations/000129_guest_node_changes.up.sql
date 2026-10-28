@@ -10,15 +10,16 @@
 
 -- guest_node_state is the node each guest of a cluster was last seen on, keyed
 -- (cluster_id, vmid) as a guest is everywhere: it is what a move is measured
--- against. A trigger on vms.node_id alone would miss the commonest move — the
--- collector deletes a guest's row when a live migration hides it for a pass
--- and inserts a new one on the target — so the state outlives the row.
--- last_seen_at is when the guest was last seen on that node.
+-- against. A move is mostly an UPDATE of vms.node_id; the state outlives a
+-- deleted row too, for a guest the collector deleted and inserted again.
+-- last_seen_at is when the guest was last seen on that node, and gone_at when
+-- its row was deleted (NULL while it has one).
 CREATE TABLE IF NOT EXISTS guest_node_state (
     cluster_id   UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
     vmid         INTEGER NOT NULL,
     node         TEXT NOT NULL,
     last_seen_at TIMESTAMPTZ NOT NULL,
+    gone_at      TIMESTAMPTZ,
     PRIMARY KEY (cluster_id, vmid)
 );
 
@@ -26,8 +27,10 @@ CREATE TABLE IF NOT EXISTS guest_node_state (
 -- from_node. Node names are copied, as in node_status_changes. guest_type is
 -- the vms.type, the move being inventory data read under view:vm or
 -- view:container by kind. A VMID reused on another node after a destroy is no
--- move: the History leaves out a row with a create, restore, clone or destroy
--- of the VMID between last_seen_at and observed_at, at read time.
+-- move: no row is recorded for a guest back more than five minutes after its
+-- row went (record_guest_node_change), and the History leaves out one with a
+-- create, restore, clone or destroy of the VMID on record between last_seen_at
+-- and observed_at, at read time.
 CREATE TABLE IF NOT EXISTS guest_node_changes (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     cluster_id   UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
@@ -48,33 +51,45 @@ CREATE INDEX IF NOT EXISTS idx_guest_node_changes_to
 
 -- record_guest_node_change runs AFTER a vms row is inserted, or its node_id
 -- changes: it records a move when the guest's last node differs, and keeps the
--- state. Kept to plain INSERTs a vms row cannot fail, as a failure here fails
+-- state. Kept to statements a vms row cannot fail, as a failure here fails
 -- the inventory write.
+--
+-- A row inserted after its predecessor was deleted is the same guest only
+-- within five minutes of the delete. The collector deletes a row only after
+-- the guest went unseen for five minutes (staleVMGrace), so a live
+-- migration's one unseen pass never comes this way; a guest back on another
+-- node within one more such span — its new node's syncs failing meanwhile —
+-- moved, and a guest on the VMID any later is a new one: a destroy and a
+-- create or a clone into it, which Proxmox records as no move.
 CREATE OR REPLACE FUNCTION record_guest_node_change()
 RETURNS TRIGGER AS $$
 DECLARE
-    node_now text := COALESCE((SELECT n.name FROM nodes n WHERE n.id = NEW.node_id), '');
+    node_now text := COALESCE((SELECT n.name FROM nodes n
+                               WHERE n.id = NEW.node_id AND n.cluster_id = NEW.cluster_id), '');
     was      guest_node_state%ROWTYPE;
 BEGIN
     SELECT * INTO was FROM guest_node_state WHERE cluster_id = NEW.cluster_id AND vmid = NEW.vmid;
-    IF FOUND AND was.node <> node_now AND was.node <> '' AND node_now <> '' THEN
+    IF FOUND AND was.node <> node_now AND was.node <> '' AND node_now <> ''
+       AND (TG_OP = 'UPDATE' OR was.gone_at > now() - interval '5 minutes') THEN
         INSERT INTO guest_node_changes (cluster_id, vmid, guest_type, from_node, to_node, last_seen_at)
         VALUES (NEW.cluster_id, NEW.vmid, NEW.type, was.node, node_now,
                 CASE WHEN TG_OP = 'UPDATE' THEN OLD.last_seen_at ELSE was.last_seen_at END);
     END IF;
     INSERT INTO guest_node_state (cluster_id, vmid, node, last_seen_at)
     VALUES (NEW.cluster_id, NEW.vmid, node_now, NEW.last_seen_at)
-    ON CONFLICT (cluster_id, vmid) DO UPDATE SET node = EXCLUDED.node, last_seen_at = EXCLUDED.last_seen_at;
+    ON CONFLICT (cluster_id, vmid) DO UPDATE
+    SET node = EXCLUDED.node, last_seen_at = EXCLUDED.last_seen_at, gone_at = NULL;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
 
--- A deleted row's last sighting is kept, so the row that replaces it on
--- another node dates the move from it rather than from the last one before.
+-- A deleted row's last sighting is kept, and when it went, so a row that
+-- replaces it on another node soon after dates the move from the sighting,
+-- and one that comes later is no move at all.
 CREATE OR REPLACE FUNCTION keep_guest_node_last_seen()
 RETURNS TRIGGER AS $$
 BEGIN
-    UPDATE guest_node_state SET last_seen_at = OLD.last_seen_at
+    UPDATE guest_node_state SET last_seen_at = OLD.last_seen_at, gone_at = now()
     WHERE cluster_id = OLD.cluster_id AND vmid = OLD.vmid;
     RETURN NULL;
 END;

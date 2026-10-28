@@ -1788,8 +1788,11 @@ type Querier interface {
 	// change, and one younger than that is not shown yet. An arrival across a
 	// create, restore, clone or destroy of the VMID is a new guest, not a move: the
 	// audit rows of the move's window say, read by time (OFFSET 0 keeps the window
-	// the subquery's whole condition). Asked by VMID too, a generic plan read every
-	// row of the VMID for each move: a second for a busy node's week.
+	// the subquery's whole condition) and no further back than an hour. Asked by
+	// VMID too, a generic plan read every row of the VMID for each move: a second
+	// for a busy node's week. A window is minutes long: a move is recorded only
+	// within minutes of the guest going (000119), and an hour is the bound for one
+	// whose node stopped reporting it long before it showed up elsewhere.
 	//
 	// or, alone, the whole cluster (whole_cluster, HistoryKind.WholeCluster): every
 	// row of every source filed under the path's cluster, none of them a guest's
