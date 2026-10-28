@@ -47,6 +47,8 @@ const ICONS: Record<ClusterHistoryCategory, LucideIcon> = {
 
 /** The server's cap on an unfiltered read (clusterHistoryRowCap). */
 export const CLUSTER_HISTORY_ROW_CAP = 2_000;
+/** And on a narrowed one (clusterHistoryFilteredRowCap). */
+export const CLUSTER_HISTORY_FILTERED_ROW_CAP = 20_000;
 
 const isGuestRow = (entry: HistoryEntry) =>
   entry.kind !== "run" && historyGuestVmid(entry) > 0;
@@ -56,6 +58,7 @@ export const clusterHistoryKind = historyKind("cluster", strings, {
   // A cluster's whole trail is long: the default is its last week.
   defaultWindow: "7d",
   rowCap: CLUSTER_HISTORY_ROW_CAP,
+  filteredRowCap: CLUSTER_HISTORY_FILTERED_ROW_CAP,
   eventLabel: (entry) =>
     isGuestRow(entry) ? guestRowNaming.eventLabel(entry) : undefined,
   summary: (entry) =>

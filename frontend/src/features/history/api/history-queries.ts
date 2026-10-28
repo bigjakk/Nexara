@@ -25,6 +25,8 @@ interface HistoryParams {
   excludeCategories?: readonly string[];
   source: HistorySource | "";
   timeWindow: HistoryWindow;
+  /** No window on a kind whose route reads a default one without it. */
+  allTime?: boolean;
   /** The guests' own activity, on a kind with a guest toggle. */
   includeGuests?: boolean;
   enabled: boolean;
@@ -63,6 +65,7 @@ export function useHistory({
   excludeCategories = [],
   source,
   timeWindow,
+  allTime = false,
   includeGuests = false,
   enabled,
 }: HistoryParams) {
@@ -88,6 +91,7 @@ export function useHistory({
       }
       if (source) params.set("source", source);
       if (includeGuests) params.set("include_guests", "true");
+      if (allTime) params.set("all_time", "true");
       if (timeWindow) {
         params.set(
           "start_time",

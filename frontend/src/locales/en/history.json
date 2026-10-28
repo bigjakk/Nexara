@@ -47,6 +47,7 @@
   "entries_one": "{{count}} entry",
   "entries_other": "{{count}} entries",
   "entriesMore": "More than {{count}} entries — narrow the time or the type to reach older ones",
+  "narrowedCap": "A narrowed read searches the newest {{cap}} entries of each kind of record in this time.",
   "page": "Page {{page}} of {{pages}}",
   "previousPage": "Previous page",
   "nextPage": "Next page",

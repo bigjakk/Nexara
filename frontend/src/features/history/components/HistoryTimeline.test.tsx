@@ -64,14 +64,56 @@ describe("HistoryTimeline", () => {
   );
 
   // A capped read's total is one past the cap: "more than" it, and only the
-  // cap's worth of pages.
-  it("reads a total one past the kind's cap as more than it", async () => {
+  // cap's worth of pages; a narrowed read has the larger cap, and says so.
+  it.each([
+    ["unfiltered", "", 101, /^More than 100 entries/, "Page 1 of 2"],
+    ["narrowed", "other", 1001, /^More than 1,000 entries/, "Page 1 of 20"],
+  ])(
+    "reads a total one past the %s cap as more than it",
+    async (_name, category, total, more, pages) => {
+      const user = setupUser();
+      mockedPage.mockReset();
+      mockedPage.mockResolvedValue({ items: [], total });
+      const kind = historyKind(
+        "probe",
+        { categories: { other: "Other" } },
+        { icons: {}, rowCap: 100, filteredRowCap: 1000 },
+      );
+      renderWithProviders(
+        <HistoryTimeline
+          kind={kind}
+          target={{
+            clusterId: "c1",
+            path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
+          }}
+        />,
+      );
+      if (category) {
+        await user.selectOptions(
+          screen.getByRole("combobox", { name: "Type" }),
+          category,
+        );
+      }
+      expect(await screen.findByText(more)).toBeInTheDocument();
+      expect(screen.getByText(pages)).toBeInTheDocument();
+      expect(
+        screen.queryByText(/narrowed read searches the newest 1,000/) !== null,
+      ).toBe(category !== "");
+      // Nothing left out, so nothing to bring back.
+      expect(screen.queryByRole("checkbox")).toBeNull();
+    },
+  );
+
+  // Its route reads a kind's default window when none is named, so All time
+  // asks for all of it.
+  it("asks for all time when the reader picks it", async () => {
+    const user = setupUser();
     mockedPage.mockReset();
-    mockedPage.mockResolvedValue({ items: [], total: 101 });
+    mockedPage.mockResolvedValue({ items: [], total: 0 });
     const kind = historyKind(
       "probe",
       { categories: { other: "Other" } },
-      { icons: {}, rowCap: 100 },
+      { icons: {}, defaultWindow: "7d" },
     );
     renderWithProviders(
       <HistoryTimeline
@@ -82,11 +124,18 @@ describe("HistoryTimeline", () => {
         }}
       />,
     );
-    expect(
-      await screen.findByText(/^More than 100 entries/),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
-    // Nothing left out, so nothing to bring back.
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    await waitFor(() => {
+      expect(mockedPage).toHaveBeenCalled();
+    });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Time" }),
+      "",
+    );
+    await waitFor(() => {
+      expect(mockedPage.mock.calls.length).toBeGreaterThan(1);
+    });
+    const last = new URL(String(mockedPage.mock.calls.at(-1)?.[0]), "http://x");
+    expect(last.searchParams.get("all_time")).toBe("true");
+    expect(last.searchParams.get("start_time")).toBeNull();
   });
 });

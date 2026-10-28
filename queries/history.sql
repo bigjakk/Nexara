@@ -92,6 +92,8 @@
 -- the planner sorted after. In any other read the capped arms are LIMIT 0,
 -- which starts nothing under it: their whole_cluster gate sits below a
 -- generic plan's parallel scan, which starts its workers first — 20 ms a read.
+-- Each capped arm holds its rows to the caller's guest types itself, as the
+-- page does (status_guest_types), so a cap counts only rows the caller sees.
 --
 -- Every branch reads one cluster, a REQUIRED argument: the route's, which its
 -- cluster-scoped gate authorized. The one exception is a global kind's objects
@@ -367,6 +369,10 @@ WITH guests AS MATERIALIZED (
            >= (sqlc.arg('cluster_id')::uuid, COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz))
        AND (a.cluster_id, a.created_at) <= (sqlc.arg('cluster_id')::uuid, 'infinity'::timestamptz)
        AND (a.resource_type, a.action) NOT IN (SELECT k.resource_type, k.action FROM collapse k)
+       AND (a.vmid IS NULL
+            OR (sqlc.arg('status_guest_types')::text[] @> '{qemu,lxc}'
+            OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = a.cluster_id AND v.vmid = a.vmid
+                       AND v.type = ANY(sqlc.arg('status_guest_types')::text[]))))
      ORDER BY a.cluster_id DESC, a.created_at DESC
      LIMIT CASE WHEN sqlc.arg('whole_cluster')::bool THEN NULLIF(sqlc.arg('row_cap')::int, 0) ELSE 0 END)
 ), run_rows AS (
@@ -477,6 +483,10 @@ WITH guests AS MATERIALIZED (
        AND t.started_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
        AND NOT EXISTS (SELECT 1 FROM audit_log a
                        WHERE a.details->>'upid' = t.upid AND a.cluster_id = t.cluster_id)
+       AND (NOT is_guest_upid(t.upid) OR t.vmid IS NULL
+            OR (sqlc.arg('status_guest_types')::text[] @> '{qemu,lxc}'
+            OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = t.cluster_id AND v.vmid = t.vmid
+                       AND v.type = ANY(sqlc.arg('status_guest_types')::text[]))))
      ORDER BY t.started_at DESC
      LIMIT CASE WHEN sqlc.arg('whole_cluster')::bool THEN NULLIF(sqlc.arg('row_cap')::int, 0) ELSE 0 END)
     UNION ALL
@@ -488,6 +498,10 @@ WITH guests AS MATERIALIZED (
        AND r.started_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
        AND NOT EXISTS (SELECT 1 FROM audit_log a
                        WHERE a.details->>'upid' = r.upid AND a.cluster_id = r.cluster_id)
+       AND (r.vmid IS NULL
+            OR (sqlc.arg('status_guest_types')::text[] @> '{qemu,lxc}'
+            OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = r.cluster_id AND v.vmid = r.vmid
+                       AND v.type = ANY(sqlc.arg('status_guest_types')::text[]))))
      ORDER BY r.started_at DESC
      LIMIT CASE WHEN sqlc.arg('whole_cluster')::bool THEN NULLIF(sqlc.arg('row_cap')::int, 0) ELSE 0 END)
     UNION ALL
@@ -508,6 +522,9 @@ WITH guests AS MATERIALIZED (
      WHERE sqlc.arg('whole_cluster')::bool AND sqlc.arg('include_tasks')::bool
        AND b.cluster_id = sqlc.arg('cluster_id')::uuid
        AND b.started_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+       AND (sqlc.arg('status_guest_types')::text[] @> '{qemu,lxc}'
+            OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = b.cluster_id AND v.vmid = b.vmid
+                       AND v.type = ANY(sqlc.arg('status_guest_types')::text[])))
      ORDER BY b.started_at DESC
      LIMIT CASE WHEN sqlc.arg('whole_cluster')::bool THEN NULLIF(sqlc.arg('row_cap')::int, 0) ELSE 0 END)
     UNION ALL

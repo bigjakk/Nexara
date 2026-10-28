@@ -208,8 +208,12 @@ WITH guests AS MATERIALIZED (
            >= ($15::uuid, COALESCE($18::timestamptz, '-infinity'::timestamptz))
        AND (a.cluster_id, a.created_at) <= ($15::uuid, 'infinity'::timestamptz)
        AND (a.resource_type, a.action) NOT IN (SELECT k.resource_type, k.action FROM collapse k)
+       AND (a.vmid IS NULL
+            OR ($24::text[] @> '{qemu,lxc}'
+            OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = a.cluster_id AND v.vmid = a.vmid
+                       AND v.type = ANY($24::text[]))))
      ORDER BY a.cluster_id DESC, a.created_at DESC
-     LIMIT CASE WHEN $23::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $23::bool THEN NULLIF($25::int, 0) ELSE 0 END)
 ), run_rows AS (
     SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.user_id,
            CASE WHEN a.created_at - lag(a.created_at) OVER w <= k.gap THEN 0 ELSE 1 END AS starts
@@ -262,7 +266,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('task:' || t.upid)::text, 'task', NULL::uuid, t.cluster_id, t.started_at, t.source, t.task_type,
            'task', '', t.vmid, t.vmid, t.user_id, t.upid, t.node, '', '', '', NULL, 0
     FROM task_history t
-    WHERE $25::bool
+    WHERE $26::bool
       AND t.cluster_id = $15::uuid
       AND t.vmid IS NOT NULL
       AND t.vmid = ANY($1::int[])
@@ -276,7 +280,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.cluster_id, r.started_at, r.source, r.task_type,
            'task', '', r.vmid, r.vmid, r.user_id, r.upid, r.node, '', '', '', NULL, 0
     FROM task_history_archive r
-    WHERE $25::bool
+    WHERE $26::bool
       AND r.cluster_id = $15::uuid
       AND r.vmid = ANY($1::int[])
       AND history_worker_ok(r.upid, $16::text[])
@@ -291,7 +295,7 @@ WITH guests AS MATERIALIZED (
     WHERE s.cluster_id = $15::uuid
       AND s.vmid = ANY($1::int[])
       AND s.explained = false
-      AND s.guest_type = ANY($26::text[])
+      AND s.guest_type = ANY($24::text[])
       AND history_worker_ok(NULL, $16::text[])
       AND s.observed_at >= GREATEST(COALESCE($17::timestamptz, '-infinity'::timestamptz),
                            COALESCE($18::timestamptz, '-infinity'::timestamptz))
@@ -299,7 +303,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.cluster_id, b.started_at, b.source, 'vzdump',
            'backup', '', b.vmid, b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL, 0
     FROM guest_backups b
-    WHERE $25::bool
+    WHERE $26::bool
       AND b.cluster_id = $15::uuid
       AND b.vmid = ANY($1::int[])
       AND history_worker_ok(b.upid, $16::text[])
@@ -313,24 +317,32 @@ WITH guests AS MATERIALIZED (
             'task', '', CASE WHEN is_guest_upid(t.upid) THEN COALESCE(t.vmid, 0) ELSE 0 END, NULL::int,
             t.user_id, t.upid, t.node, '', '', '', NULL, 0
      FROM task_history t
-     WHERE $23::bool AND $25::bool
+     WHERE $23::bool AND $26::bool
        AND t.cluster_id = $15::uuid
        AND t.started_at >= COALESCE($18::timestamptz, '-infinity'::timestamptz)
        AND NOT EXISTS (SELECT 1 FROM audit_log a
                        WHERE a.details->>'upid' = t.upid AND a.cluster_id = t.cluster_id)
+       AND (NOT is_guest_upid(t.upid) OR t.vmid IS NULL
+            OR ($24::text[] @> '{qemu,lxc}'
+            OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = t.cluster_id AND v.vmid = t.vmid
+                       AND v.type = ANY($24::text[]))))
      ORDER BY t.started_at DESC
-     LIMIT CASE WHEN $23::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $23::bool THEN NULLIF($25::int, 0) ELSE 0 END)
     UNION ALL
     (SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.cluster_id, r.started_at, r.source, r.task_type,
             'task', '', COALESCE(r.vmid, 0), NULL::int, r.user_id, r.upid, r.node, '', '', '', NULL, 0
      FROM task_history_archive r
-     WHERE $23::bool AND $25::bool
+     WHERE $23::bool AND $26::bool
        AND r.cluster_id = $15::uuid
        AND r.started_at >= COALESCE($18::timestamptz, '-infinity'::timestamptz)
        AND NOT EXISTS (SELECT 1 FROM audit_log a
                        WHERE a.details->>'upid' = r.upid AND a.cluster_id = r.cluster_id)
+       AND (r.vmid IS NULL
+            OR ($24::text[] @> '{qemu,lxc}'
+            OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = r.cluster_id AND v.vmid = r.vmid
+                       AND v.type = ANY($24::text[]))))
      ORDER BY r.started_at DESC
-     LIMIT CASE WHEN $23::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $23::bool THEN NULLIF($25::int, 0) ELSE 0 END)
     UNION ALL
     (SELECT ('status:' || s.id::text)::text, 'status', s.id, s.cluster_id, s.observed_at, 'detected', 'status_change',
             'status', '', s.vmid, NULL::int, NULL::uuid, '', s.node, '', s.from_status, s.to_status, s.last_seen_at, 0
@@ -338,19 +350,22 @@ WITH guests AS MATERIALIZED (
      WHERE $23::bool
        AND s.cluster_id = $15::uuid
        AND s.explained = false
-       AND s.guest_type = ANY($26::text[])
+       AND s.guest_type = ANY($24::text[])
        AND s.observed_at >= COALESCE($18::timestamptz, '-infinity'::timestamptz)
      ORDER BY s.observed_at DESC
-     LIMIT CASE WHEN $23::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $23::bool THEN NULLIF($25::int, 0) ELSE 0 END)
     UNION ALL
     (SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.cluster_id, b.started_at, b.source,
             'vzdump', 'backup', '', b.vmid, NULL::int, b.user_id, b.upid, b.node, '', '', '', NULL, 0
      FROM guest_backups b
-     WHERE $23::bool AND $25::bool
+     WHERE $23::bool AND $26::bool
        AND b.cluster_id = $15::uuid
        AND b.started_at >= COALESCE($18::timestamptz, '-infinity'::timestamptz)
+       AND ($24::text[] @> '{qemu,lxc}'
+            OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = b.cluster_id AND v.vmid = b.vmid
+                       AND v.type = ANY($24::text[])))
      ORDER BY b.started_at DESC
-     LIMIT CASE WHEN $23::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $23::bool THEN NULLIF($25::int, 0) ELSE 0 END)
     UNION ALL
     SELECT ('run:' || u.last_id::text)::text, 'run', u.last_id, u.cluster_id, u.last_at, u.source, u.action,
            u.resource_type, u.resource_id, 0, NULL::int, u.user_id, '', '', '', '', '', u.first_at, u.n
@@ -362,7 +377,7 @@ WITH guests AS MATERIALIZED (
            'task', '', CASE WHEN is_guest_upid(t.upid) THEN COALESCE(t.vmid, 0) ELSE 0 END, NULL::int,
            t.user_id, t.upid, t.node, '', '', '', NULL, 0
     FROM task_history t
-    WHERE $20::text <> '' AND $25::bool
+    WHERE $20::text <> '' AND $26::bool
       AND t.cluster_id = $15::uuid
       AND t.node = $20::text
       AND ($21::bool OR NOT is_guest_upid(t.upid))
@@ -373,7 +388,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.cluster_id, r.started_at, r.source, r.task_type,
            'task', '', r.vmid, NULL::int, r.user_id, r.upid, r.node, '', '', '', NULL, 0
     FROM task_history_archive r
-    WHERE $20::text <> '' AND $25::bool
+    WHERE $20::text <> '' AND $26::bool
       AND $21::bool
       AND r.cluster_id = $15::uuid
       AND r.node = $20::text
@@ -409,7 +424,7 @@ WITH guests AS MATERIALIZED (
     WHERE $20::text <> ''
       AND g.cluster_id = $15::uuid
       AND (g.from_node = $20::text OR g.to_node = $20::text)
-      AND g.guest_type = ANY($26::text[])
+      AND g.guest_type = ANY($24::text[])
       AND g.observed_at >= COALESCE($18::timestamptz, '-infinity'::timestamptz)
       AND NOT EXISTS (SELECT 1
                       FROM (SELECT a.vmid, a.action, a.details FROM audit_log a
@@ -445,7 +460,7 @@ WITH guests AS MATERIALIZED (
                     || e.resource_type || ':' || e.action))::text AS category
     FROM entries e
 ), page AS (
-    SELECT c.entry_id, c.kind, c.ref_id, c.cluster_id, c.occurred_at, c.source, c.action, c.resource_type, c.resource_id, c.vmid, c.subject, c.user_id, c.upid, c.node, c.recorded_status, c.from_status, c.to_status, c.last_seen_at, c.run_count, c.category, LEAST(count(*) OVER (), NULLIF($24::int, 0) + 1)::bigint AS total
+    SELECT c.entry_id, c.kind, c.ref_id, c.cluster_id, c.occurred_at, c.source, c.action, c.resource_type, c.resource_id, c.vmid, c.subject, c.user_id, c.upid, c.node, c.recorded_status, c.from_status, c.to_status, c.last_seen_at, c.run_count, c.category, LEAST(count(*) OVER (), NULLIF($25::int, 0) + 1)::bigint AS total
     FROM categorized c
     CROSS JOIN guest_cutoffs gc
     WHERE (c.subject IS NULL OR NOT gc.m ? c.subject::text
@@ -454,10 +469,10 @@ WITH guests AS MATERIALIZED (
                AND c.occurred_at = (gc.m -> c.subject::text ->> 'after')::timestamptz))
       AND ($21::bool OR c.vmid = 0 OR c.kind = 'move')
       AND (c.vmid = 0 OR gc.m ? c.subject::text OR gc.m ? c.vmid::text
-           OR $26::text[] @> '{qemu,lxc}'
+           OR $24::text[] @> '{qemu,lxc}'
            OR EXISTS (SELECT 1 FROM vms v
                       WHERE v.cluster_id = c.cluster_id AND v.vmid = c.vmid
-                        AND v.type = ANY($26::text[])))
+                        AND v.type = ANY($24::text[])))
       AND ($18::timestamptz IS NULL OR c.occurred_at >= $18::timestamptz)
       AND ($28::text IS NULL OR c.category = $28::text)
       AND NOT COALESCE(c.category = ANY($29::text[]), false)
@@ -521,9 +536,9 @@ type ListHistoryParams struct {
 	IncludeGuests       bool               `json:"include_guests"`
 	Global              bool               `json:"global"`
 	WholeCluster        bool               `json:"whole_cluster"`
+	StatusGuestTypes    []string           `json:"status_guest_types"`
 	RowCap              int32              `json:"row_cap"`
 	IncludeTasks        bool               `json:"include_tasks"`
-	StatusGuestTypes    []string           `json:"status_guest_types"`
 	DefaultCategory     string             `json:"default_category"`
 	Category            pgtype.Text        `json:"category"`
 	ExcludeCategories   []string           `json:"exclude_categories"`
@@ -663,6 +678,8 @@ type ListHistoryRow struct {
 // the planner sorted after. In any other read the capped arms are LIMIT 0,
 // which starts nothing under it: their whole_cluster gate sits below a
 // generic plan's parallel scan, which starts its workers first — 20 ms a read.
+// Each capped arm holds its rows to the caller's guest types itself, as the
+// page does (status_guest_types), so a cap counts only rows the caller sees.
 //
 // Every branch reads one cluster, a REQUIRED argument: the route's, which its
 // cluster-scoped gate authorized. The one exception is a global kind's objects
@@ -810,9 +827,9 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 		arg.IncludeGuests,
 		arg.Global,
 		arg.WholeCluster,
+		arg.StatusGuestTypes,
 		arg.RowCap,
 		arg.IncludeTasks,
-		arg.StatusGuestTypes,
 		arg.DefaultCategory,
 		arg.Category,
 		arg.ExcludeCategories,

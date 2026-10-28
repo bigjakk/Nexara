@@ -398,6 +398,7 @@ func historyTestProps(name string, path apischema.Property) apischema.Properties
 		"source":     {Type: apischema.String, Optional: true},
 		// Optional with no default: omitted, it is "".
 		"exclude_category": {Type: apischema.String, Optional: true},
+		"all_time":         {Type: apischema.Boolean, Optional: true, Default: false},
 	}
 }
 
@@ -431,23 +432,39 @@ func TestHistoryListRefusesAGuestBesideThePath(t *testing.T) {
 	}
 }
 
-// A whole-cluster kind's unfiltered read by a caller who sees every guest is
-// capped; a filtered one, or one whose guest rows the page drops after the
-// cap, reads everything, so what it finds is all of it.
-func TestHistoryListCapsOnlyAnUnfilteredReadOfEveryGuest(t *testing.T) {
+// A cluster's read is capped, 2,000 rows a source unfiltered and 20,000
+// narrowed, for a caller without a guest type too (the arms apply it), and no
+// page past the cap is served. With no start_time it reads the last week,
+// unless it asks for all_time.
+func TestHistoryListBoundsAClusterRead(t *testing.T) {
 	t.Parallel()
+	// Where each bound sits among the query's arguments.
+	probe := &auditRowsDBTX{}
+	since := pgtype.Timestamptz{Time: time.Unix(1_000_000, 0), Valid: true}
+	if _, err := db.New(probe).ListHistory(context.Background(), db.ListHistoryParams{
+		RowCap: 11, RowOffset: 22, RowLimit: 33, Since: since}); err != nil {
+		t.Fatal(err)
+	}
+	at := func(v any) int { return slices.Index(probe.calls[0].args, v) }
+	atCap, atOffset, atLimit, atSince := at(int32(11)), at(int32(22)), at(int32(33)), at(since)
 	cluster := uuid.New()
 	every := func() permissionEngine { return &recordingEngine{actions: map[string]bool{"view": true}} }
+	week := time.Now().Add(-7 * 24 * time.Hour)
 	for _, tt := range []struct {
-		name, query string
-		engine      permissionEngine
-		capped      bool
+		name, query        string
+		engine             permissionEngine
+		cap, offset, limit int32
+		window             bool // the last week; else no bound
 	}{
-		{"unfiltered", "", every(), true},
-		{"a category", "?category=sync", every(), false},
-		{"categories left out", "?exclude_category=other", every(), false},
-		{"a source", "?source=nexara", every(), false},
-		{"a caller without view:container", "", clusterGrantEngine{action: "view", resource: "vm", cluster: cluster}, false},
+		{"unfiltered", "", every(), 2_000, 0, 50, true},
+		{"a category", "?category=sync", every(), 20_000, 0, 50, true},
+		{"categories left out", "?exclude_category=other", every(), 20_000, 0, 50, true},
+		{"a source", "?source=nexara", every(), 20_000, 0, 50, true},
+		{"a caller without view:container", "", clusterGrantEngine{action: "view", resource: "vm", cluster: cluster},
+			2_000, 0, 50, true},
+		{"the last page within the cap", "?offset=1980", every(), 2_000, 1_980, 20, true},
+		{"a page past the cap", "?offset=2050", every(), 2_000, 2_000, 0, true},
+		{"all time", "?all_time=true", every(), 2_000, 0, 50, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -469,8 +486,14 @@ func TestHistoryListCapsOnlyAnUnfilteredReadOfEveryGuest(t *testing.T) {
 			if len(dbtx.calls) != 1 {
 				t.Fatalf("status %d after %d queries, want ListHistory", resp.StatusCode, len(dbtx.calls))
 			}
-			if capped := slices.Contains(dbtx.calls[0].args, any(int32(clusterHistoryRowCap))); capped != tt.capped {
-				t.Errorf("capped = %v, want %v", capped, tt.capped)
+			args := dbtx.calls[0].args
+			if args[atCap] != tt.cap || args[atOffset] != tt.offset || args[atLimit] != tt.limit {
+				t.Errorf("cap %v, offset %v, limit %v; want %d, %d, %d", args[atCap], args[atOffset], args[atLimit],
+					tt.cap, tt.offset, tt.limit)
+			}
+			got, _ := args[atSince].(pgtype.Timestamptz)
+			if inWeek := got.Valid && got.Time.Sub(week).Abs() < time.Minute; inWeek != tt.window || !tt.window && got.Valid {
+				t.Errorf("since %v, want the last week: %v", got, tt.window)
 			}
 		})
 	}

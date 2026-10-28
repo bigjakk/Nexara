@@ -107,7 +107,9 @@ export interface HistoryKind {
   /** A note under an expanded entry. */
   note?: (entry: HistoryEntry, t: TFunction) => string | undefined;
   /** The time filter's first choice: an object's History costs what its whole
-   *  history costs, so a busy kind starts at a window. Unset: all time. */
+   *  history costs, so a busy kind starts at a window. Unset: all time. Its
+   *  route reads that window when none is named (HistoryKind.DefaultWindow),
+   *  so All time asks for all_time. */
   defaultWindow?: HistoryWindow;
   /** Categories of routine checks (a node's daily package-list refresh), left
    *  out until the reader asks for them. */
@@ -118,6 +120,9 @@ export interface HistoryKind {
   /** The server's cap on an unfiltered read (HistoryKind.RowCap): a total of
    *  rowCap + 1 means more than rowCap, of which rowCap can be paged. */
   rowCap?: number;
+  /** The cap on a read narrowed by type or source (HistoryKind.FilteredRowCap):
+   *  each source's newest filteredRowCap rows are searched. */
+  filteredRowCap?: number;
 }
 
 /** A guest an entry names, as the page showing the History links it. */

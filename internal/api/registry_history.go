@@ -176,7 +176,22 @@ func historyFilterParams(kind handlers.HistoryKind) apischema.Properties {
 			Optional:    true,
 			MaxLength:   apischema.Ptr(64),
 			Typetext:    "<RFC3339 timestamp>",
-			Description: "Oldest entry to return, inclusive. Empty or omitted sets no lower bound.",
+			Description: "Oldest entry to return, inclusive. " + historyWindowText(kind),
+		},
+		"all_time": {
+			Type:        apischema.Boolean,
+			Optional:    true,
+			Default:     false,
+			Typetext:    "<bool>",
+			Description: "Read the whole History when no start_time is given. " + historyWindowText(kind),
 		},
 	}
+}
+
+// historyWindowText says what a read naming no start_time covers.
+func historyWindowText(kind handlers.HistoryKind) string {
+	if kind.DefaultWindow == 0 {
+		return "Empty or omitted sets no lower bound."
+	}
+	return fmt.Sprintf("Empty or omitted reads the last %d days, unless all_time is set.", int(kind.DefaultWindow.Hours()/24))
 }

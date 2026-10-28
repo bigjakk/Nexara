@@ -108,13 +108,23 @@ type HistoryKind struct {
 	// out unless it is set. The registry declares it; a kind without one shows
 	// guest rows always.
 	GuestToggle string
-	// RowCap bounds a whole-cluster kind's read when nothing is filtered out
-	// after it — no filter, and a caller who may view every guest: each source
-	// newest first up to RowCap rows, so a page of a busy cluster's History
-	// costs RowCap rows, not its whole trail. The total then stops at
-	// RowCap+1, which the reader shows as "more than RowCap". Any other read
-	// is not capped, so what it finds is all of it.
+	// RowCap bounds a whole-cluster kind's unfiltered read: each source newest
+	// first up to RowCap rows, so a page of a busy cluster's History costs
+	// RowCap rows, not its whole trail. The total then stops at RowCap+1,
+	// which the reader shows as "more than RowCap", and no page past RowCap is
+	// served. The caller's guest types are applied inside each capped source,
+	// so the cap counts only rows the caller may see.
 	RowCap int
+	// FilteredRowCap is RowCap for a read narrowed by category or source.
+	// Larger: the narrowing is applied after each source's cap, so a narrowed
+	// read searches each source's newest FilteredRowCap rows — of its window,
+	// a week unless asked otherwise.
+	FilteredRowCap int
+	// DefaultWindow is how far back a read that names no start_time looks,
+	// unless it asks for all_time: the window the page opens on, held by the
+	// server too, so a client naming none cannot read a busy object's whole
+	// trail by accident. Zero reads the whole History (the guest's).
+	DefaultWindow time.Duration
 }
 
 // HistoryCollapse is one kind of repeated row a whole-cluster History reads
@@ -336,8 +346,11 @@ func (k HistoryKind) Validate() error {
 		return fmt.Errorf("history kind %q reads its whole cluster, so it names no guest or object and is no "+
 			"global kind", k.Name)
 	}
-	if !k.WholeCluster && (len(k.Collapse) > 0 || k.RowCap != 0) {
+	if !k.WholeCluster && (len(k.Collapse) > 0 || k.RowCap != 0 || k.FilteredRowCap != 0) {
 		return fmt.Errorf("history kind %q collapses or caps rows, which only a whole-cluster read does", k.Name)
+	}
+	if k.RowCap < 0 || k.FilteredRowCap < 0 || k.DefaultWindow < 0 {
+		return fmt.Errorf("history kind %q has a negative cap or window", k.Name)
 	}
 	for _, c := range k.Collapse {
 		if c.ResourceType == "" || c.Action == "" || c.Gap <= 0 {
@@ -743,14 +756,18 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	// The caller's own mistake is a 400 before anything is read. An empty
-	// filter is no filter, as on the audit and task listings.
+	// filter is no filter, as on the audit and task listings — but no window
+	// is the kind's default one, unless the caller asks for all of it.
 	var since pgtype.Timestamptz
-	if v := p.String("start_time"); v != "" {
+	switch v := p.String("start_time"); {
+	case v != "":
 		t, parseErr := time.Parse(time.RFC3339, v)
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid start_time (use RFC3339)")
 		}
 		since = pgtype.Timestamptz{Time: t, Valid: true}
+	case r.kind.DefaultWindow > 0 && !p.Bool("all_time"):
+		since = pgtype.Timestamptz{Time: time.Now().Add(-r.kind.DefaultWindow), Valid: true}
 	}
 
 	ctx, cancel := context.WithTimeout(c.Context(), historyQueryTimeout)
@@ -813,10 +830,14 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	if r.kind.GuestToggle != "" {
 		params.IncludeGuests = p.Bool(r.kind.GuestToggle)
 	}
-	// The cap only where nothing is filtered out after it: no filter, and a
-	// caller who sees every guest — the page drops the rest after the cap.
-	if !params.Category.Valid && len(params.ExcludeCategories) == 0 && !params.Source.Valid && len(statusTypes) == 2 {
-		params.RowCap = safeconv.Int32(r.kind.RowCap)
+	params.RowCap = safeconv.Int32(r.kind.RowCap)
+	if params.Category.Valid || len(params.ExcludeCategories) > 0 || params.Source.Valid {
+		params.RowCap = safeconv.Int32(r.kind.FilteredRowCap)
+	}
+	// No page past the cap: the rows there are not the newest of the whole.
+	if limitCap := params.RowCap; limitCap > 0 {
+		params.RowOffset = min(params.RowOffset, limitCap)
+		params.RowLimit = min(params.RowLimit, limitCap-params.RowOffset)
 	}
 
 	rows, err := r.h.queries.ListHistory(ctx, params)

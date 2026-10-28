@@ -25,7 +25,9 @@ func ClusterHistory() HistoryKind {
 			{ResourceType: "cluster", Action: "sync_failed", Gap: 15 * time.Minute},
 			{ResourceType: "cluster", Action: "tls_fingerprint_mismatch", Gap: 15 * time.Minute},
 		},
-		RowCap: clusterHistoryRowCap,
+		RowCap:         clusterHistoryRowCap,
+		FilteredRowCap: clusterHistoryFilteredRowCap,
+		DefaultWindow:  objectHistoryDefaultWindow,
 	}
 }
 
@@ -34,6 +36,16 @@ func ClusterHistory() HistoryKind {
 // trail that runs to millions of rows on a busy install. At 1M audit rows a
 // week of the cluster reads in 110–130 ms so, and 450–520 ms at 10,000.
 const clusterHistoryRowCap = 2_000
+
+// clusterHistoryFilteredRowCap is how many rows of each source a narrowed read
+// of a cluster's History searches, newest first: at 1M audit rows a week of a
+// cluster runs past it, so a narrowed read of a busy cluster covers its
+// newest 20,000 entries of each kind of record.
+const clusterHistoryFilteredRowCap = 20_000
+
+// objectHistoryDefaultWindow is the window a cluster's, a folder's and a
+// node's History open on, and read when a client names none.
+const objectHistoryDefaultWindow = 7 * 24 * time.Hour
 
 // clusterHistoryRules are the cluster kind's categories, by resource type
 // family and, for a task with no row of its own type, by worker type. A

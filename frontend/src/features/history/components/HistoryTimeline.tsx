@@ -335,22 +335,28 @@ export function HistoryTimeline({
     guestLink ? HISTORY_COLUMNS_WITH_GUEST : HISTORY_COLUMNS,
   );
 
+  const excludeCategories = historyExclusions(kind, showRoutine, category);
   const { data, isLoading, error } = useHistory({
     target,
     page,
     category,
-    excludeCategories: historyExclusions(kind, showRoutine, category),
+    excludeCategories,
     source,
     timeWindow,
+    // The server reads a kind's default window when none is named.
+    allTime: timeWindow === "" && kind.defaultWindow !== undefined,
     includeGuests: kind.guestToggle === true && includeGuests,
     enabled,
   });
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   // A capped read's total is one past the cap: more than it, of which the
-  // cap's worth can be paged.
-  const capped = kind.rowCap !== undefined && total === kind.rowCap + 1;
-  const reachable = capped ? (kind.rowCap ?? 0) : total;
+  // cap's worth can be paged. A narrowed read has the larger cap.
+  const narrowed =
+    category !== "" || source !== "" || excludeCategories.length > 0;
+  const cap = narrowed ? kind.filteredRowCap : kind.rowCap;
+  const capped = cap !== undefined && total === cap + 1;
+  const reachable = capped ? cap : total;
   const totalPages = Math.max(1, Math.ceil(reachable / HISTORY_PAGE_SIZE));
 
   // Snap back when a refetch shrinks the result below the current page, but
@@ -457,6 +463,15 @@ export function HistoryTimeline({
         <ResetColumnsButton layout={layout} />
       </div>
 
+      {narrowed && kind.filteredRowCap !== undefined && (
+        <p className="text-xs text-muted-foreground">
+          {shared("narrowedCap", {
+            count: kind.filteredRowCap,
+            cap: kind.filteredRowCap.toLocaleString(),
+          })}
+        </p>
+      )}
+
       {categoryNote !== "" && (
         <p className="text-xs text-muted-foreground">{categoryNote}</p>
       )}
@@ -535,7 +550,7 @@ export function HistoryTimeline({
                 ? ""
                 : capped
                   ? shared("entriesMore", {
-                      count: (kind.rowCap ?? 0).toLocaleString(),
+                      count: cap.toLocaleString(),
                     })
                   : shared("entries", { count: total })}
             </p>

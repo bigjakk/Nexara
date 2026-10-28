@@ -27,6 +27,7 @@ func NodeHistory() HistoryKind {
 		// names then: no guest's cutoff holds it.
 		ObjectsIgnoreGuestCutoff: true,
 		GuestToggle:              "include_guests",
+		DefaultWindow:            objectHistoryDefaultWindow,
 	}
 }
 

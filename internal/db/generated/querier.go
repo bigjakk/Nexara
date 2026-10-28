@@ -1816,6 +1816,8 @@ type Querier interface {
 	// the planner sorted after. In any other read the capped arms are LIMIT 0,
 	// which starts nothing under it: their whole_cluster gate sits below a
 	// generic plan's parallel scan, which starts its workers first — 20 ms a read.
+	// Each capped arm holds its rows to the caller's guest types itself, as the
+	// page does (status_guest_types), so a cap counts only rows the caller sees.
 	//
 	// Every branch reads one cluster, a REQUIRED argument: the route's, which its
 	// cluster-scoped gate authorized. The one exception is a global kind's objects

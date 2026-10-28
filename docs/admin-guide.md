@@ -1452,7 +1452,7 @@ Every VM and container page has a **History** tab: what happened to that guest, 
 
 ### A Folder's History
 
-A folder's page has a **History** tab, where its **Tasks** tab was: what happened to the guests in the folder and in the folders below it — each guest's History, as on the guest's own page, from that guest's own create, clone or restore — and to the folders themselves: folders made, renamed, moved and deleted, and guests filed into and out of them. A **Guest** column names each row's guest. It opens on the last 7 days; pick **All time** for the rest. **Discovered** has one too, for the guests in no folder.
+A folder's page has a **History** tab, where its **Tasks** tab was: what happened to the guests in the folder and in the folders below it — each guest's History, as on the guest's own page, from that guest's own create, clone or restore — and to the folders themselves: folders made, renamed, moved and deleted, and guests filed into and out of them. A **Guest** column names each row's guest. It opens on the last 7 days; pick **All time** for the rest. **Discovered** has one too, for the guests in no folder. A folder of more than 500 guests follows the 500 with the lowest VMIDs, and says so; each guest's own page has its full History.
 
 - A guest's whole History is the folder's while the guest is in it, including what happened before it was filed: when a guest joined a folder is not on record for guests filed before this release.
 - A guest that leaves the folder, and a subfolder that is moved out or deleted, show as leaving **for moves made from this release on**. Earlier ones were recorded without the folder they left, so the folder cannot find them.
@@ -1463,7 +1463,7 @@ A folder's page has a **History** tab, where its **Tasks** tab was: what happene
 A cluster's page has a **History** tab: everything that happened in the cluster, newest first — every action Nexara recorded in it, done in Nexara or in Proxmox, tasks with no audit entry, and its guests' status changes no task explains and parts of backup jobs — filterable by type (guests, nodes, storage, backup, Ceph, HA, network, access, certificates, replication, DRS, sync, options). A guest's row reads as it does on the guest's own History, and a **Guest** column links it. It opens on the last 7 days.
 
 - **Sync failures** are one entry per burst: an unreachable cluster files one every few minutes, so the History shows "Sync failed, 412 times" between the first and the last, with the last one's error. A quarter of an hour without one ends the run.
-- An unfiltered read holds the newest 2,000 entries of each source; past that the count reads **More than 2,000 entries**, and narrowing the time or the type reaches older ones. A filtered read is not capped.
+- An unfiltered read holds the newest 2,000 entries of each source; past that the count reads **More than 2,000 entries**, and narrowing the time or the type reaches older ones. A read narrowed by type or source searches the newest 20,000 entries of each source in the time chosen, and says so.
 - The tab needs `view:audit` and `view:task`. Through the API (`GET /api/v1/clusters/{cluster_id}/history`) it needs `view:audit` and `view:cluster`; a guest's entries need `view:vm` or `view:container` by its type, as on the guest's own History.
 
 ### A Node's History

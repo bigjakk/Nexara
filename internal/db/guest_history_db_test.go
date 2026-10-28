@@ -1126,6 +1126,12 @@ func TestGuestHistory(t *testing.T) {
 				"backup vzdump backup", "status status_change guests", "task cephcreatemgr ceph",
 				"run sync_failed sync 2 since " + runSince(40) + ", refused 4", "audit start guests",
 				"run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 2},
+			// Capped for a caller without view:vm, each source's cap counts
+			// only rows the caller sees: the apt update, not VM 300's start.
+			{"capped, without view:vm", func(p *gen.ListHistoryParams) {
+				p.RowCap, p.StatusGuestTypes = 1, []string{"lxc"}
+			}, []string{"task cephcreatemgr ceph", "run sync_failed sync 2 since " + runSince(40) + ", refused 4",
+				"audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 2},
 		} {
 			if got, total := clusterHistory(tt.f); !slices.Equal(got, tt.want) || total != tt.wantTotal {
 				t.Errorf("%s: the cluster's History =\n\t%v (total %d)\nwant\n\t%v (total %d)", tt.name, got, total, tt.want, tt.wantTotal)

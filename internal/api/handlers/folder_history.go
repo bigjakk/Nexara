@@ -39,8 +39,9 @@ func FolderHistory() HistoryKind {
 		Rules: append([]HistoryRule{
 			{Category: "folder", Field: HistoryFieldResourceType, Equals: []string{"vm_folder", "vm_folder_membership"}},
 		}, guestHistoryRules...),
-		Select:      selectFolder,
-		ObjectTypes: []string{"vm_folder", "vm_folder_membership"},
+		Select:        selectFolder,
+		ObjectTypes:   []string{"vm_folder", "vm_folder_membership"},
+		DefaultWindow: objectHistoryDefaultWindow,
 	}
 }
 
