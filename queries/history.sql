@@ -221,6 +221,13 @@ WITH guests AS MATERIALIZED (
     FROM unnest(sqlc.arg('vmids')::int[]) WITH ORDINALITY AS v(vmid, n)
     JOIN unnest(sqlc.arg('cutoff_after')::timestamptz[]) WITH ORDINALITY AS a(after, n) ON a.n = v.n
     JOIN unnest(sqlc.arg('cutoff_inclusive')::bool[]) WITH ORDINALITY AS i(inclusive, n) ON i.n = v.n
+), guest_cutoffs AS MATERIALIZED (
+    -- The guests and their cutoffs as one map, which each entry looks itself
+    -- up in: joined to the guests, the entries ran a nested loop over every
+    -- guest for each of them, 21M comparisons for a 500-guest folder's week.
+    SELECT COALESCE(jsonb_object_agg(g.vmid::text, jsonb_build_object('after', g.after, 'inclusive', g.inclusive)),
+                    '{}'::jsonb) AS m
+    FROM guests g
 ), objects AS (
     SELECT t.resource_type, r.resource_id, k.detail_key, v.value, l.in_list
     FROM unnest(sqlc.arg('object_types')::text[]) WITH ORDINALITY AS t(resource_type, n)
@@ -599,10 +606,13 @@ WITH guests AS MATERIALIZED (
 ), page AS (
     SELECT c.*, LEAST(count(*) OVER (), NULLIF(sqlc.arg('row_cap')::int, 0) + 1)::bigint AS total
     FROM categorized c
-    LEFT JOIN guests g ON g.vmid = c.subject
-    WHERE (g.vmid IS NULL OR c.occurred_at > g.after OR (g.inclusive AND c.occurred_at = g.after))
+    CROSS JOIN guest_cutoffs gc
+    WHERE (c.subject IS NULL OR NOT gc.m ? c.subject::text
+           OR c.occurred_at > (gc.m -> c.subject::text ->> 'after')::timestamptz
+           OR ((gc.m -> c.subject::text ->> 'inclusive')::bool
+               AND c.occurred_at = (gc.m -> c.subject::text ->> 'after')::timestamptz))
       AND (sqlc.arg('include_guests')::bool OR c.vmid = 0 OR c.kind = 'move')
-      AND (c.vmid = 0 OR c.subject = ANY(sqlc.arg('vmids')::int[]) OR c.vmid = ANY(sqlc.arg('vmids')::int[])
+      AND (c.vmid = 0 OR gc.m ? c.subject::text OR gc.m ? c.vmid::text
            OR sqlc.arg('status_guest_types')::text[] @> '{qemu,lxc}'
            OR EXISTS (SELECT 1 FROM vms v
                       WHERE v.cluster_id = c.cluster_id AND v.vmid = c.vmid
