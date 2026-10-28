@@ -265,6 +265,7 @@ func TestHistoryKindListParams(t *testing.T) {
 		"a lone-backslash action":       {Objects: []HistoryObject{{ResourceType: "pool", Value: "p1", ActionLike: `a\`}}},
 		"a second key and no value":     {Objects: []HistoryObject{{ResourceType: "pbs_server", ResourceID: "s1", DetailKey: "datastore", Value: "x", AndKey: "k"}}},
 		"a second key beside no first":  {Objects: []HistoryObject{{ResourceType: "pool", Value: "p1", AndKey: "k", AndValue: "v"}}},
+		"a second key beside a list":    {Objects: []HistoryObject{{ResourceType: "pool", DetailKey: "storage", Value: "s1", InList: true, AndKey: "k", AndValue: "v"}}},
 		"a lone-backslash worker":       {Guests: []HistoryGuest{{VMID: 100}}, GuestWorkers: []string{`ha\`}},
 		"a guest's object, not a guest": {Guests: []HistoryGuest{{VMID: 100}}, Objects: []HistoryObject{{ResourceType: "vm", Value: "101"}}},
 		"a guest's object by row id":    {Objects: []HistoryObject{{ResourceType: "container", Value: "d0000000-0000-4000-8000-000000000001"}}},

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -83,6 +84,10 @@ func TestBackupHistoryRoutes(t *testing.T) {
 	for _, r := range backupHistoryRoutes() {
 		if !covered[r.Path] {
 			t.Errorf("%s has no row", r.Path)
+		}
+		// Each opens on the week the SPA asks for (backup-histories.ts), and reads a bounded number of rows.
+		if r.Kind.DefaultWindow != 7*24*time.Hour || r.Kind.RowCap == 0 {
+			t.Errorf("%s opens on %v and reads up to %d rows a source, want a week and a cap", r.Path, r.Kind.DefaultWindow, r.Kind.RowCap)
 		}
 	}
 	for _, row := range rows {
