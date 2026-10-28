@@ -1215,6 +1215,19 @@ func TestObserveCanonicalForms(t *testing.T) {
 	if f, m := split(`{"vmid":"100,<b>x</b>"}`); f["vmid"] == "" || m != nil {
 		t.Errorf("a list that is no ids: %v %v", f, m)
 	}
+	// A user, token or grantee keeps every name Proxmox takes for one, but
+	// no control or format character.
+	for _, tc := range []struct {
+		list string
+		ok   bool
+	}{
+		{`["o'brien@ad"]`, true}, {`["o'brien@ad!ci01"]`, true}, {`["PVEAuditor:1:o'brien@ad"]`, true}, {`["ünal@ad"]`, true},
+		{`["o'brien"]`, false}, {`["x\u200b@pve"]`, false}, {`["a\u0007b@pve"]`, false},
+	} {
+		if _, ok := memberIDs(json.RawMessage(tc.list)); ok != tc.ok {
+			t.Errorf("member ids %s: kept %v, want %v", tc.list, ok, tc.ok)
+		}
+	}
 	d := diffTags(objectTags{members: map[string][]string{"vmid": {"100", "101"}}},
 		objectTags{members: map[string][]string{"vmid": {"101", "102"}}})
 	if fmt.Sprint(d.fields, d.joined, d.left, d.counts) != "[vmid] [vmid:102] [vmid:100] map[vmid:{1 1 0}]" {

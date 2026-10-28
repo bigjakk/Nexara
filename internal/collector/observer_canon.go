@@ -210,9 +210,14 @@ func (spec fieldSpec) split(item map[string]json.RawMessage) (fields map[string]
 
 // memberID is the shape a member must have to be kept as it is: a guest's
 // VMID, a storage, group or user id, an HA resource id, an SDN subnet's CIDR,
-// an ACL grant (a tag, then its grantee) — no separator, no space, nothing a
-// value could hide in at length.
-var memberID = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9@.:!/_-]{0,191}$`)
+// an ACL grant (its role and propagate, then its grantee) — no space, no list
+// separator, nothing a value could hide in at length. A user or a token, alone
+// or as a grantee, takes every name pve-access-control takes for one
+// (Auth/Plugin.pm user_regex [^\s:/]+ and realm_regex, AccessControl.pm
+// token_subid_regex) but one holding ',' or ';': Proxmox's own lists split on
+// those (PVE::Tools::split_list), so no list of Proxmox's can hold it either.
+var memberID = regexp.MustCompile(`^(?:[A-Za-z0-9_-][A-Za-z0-9@.:!/_-]{0,191}|` +
+	`(?:[A-Za-z0-9._-]{1,64}:[01]?:)?[^\s:/,;\p{Cc}\p{Cf}]{1,64}@[A-Za-z][A-Za-z0-9._-]{1,63}(?:![A-Za-z][A-Za-z0-9._-]{1,63})?)$`)
 
 // memberIDs is a member list's ids, sorted and once each: a JSON array, or a
 // list separated as Proxmox separates them (PVE::Tools::split_list).
