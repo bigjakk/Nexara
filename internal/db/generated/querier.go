@@ -1773,9 +1773,11 @@ type Querier interface {
 	//              a key        details->>key is the value, a string or an
 	//                           integer, within one resource_id when one is named
 	//                           (a PBS datastore within its server's rows);
-	//              a list key   the value is one element of a comma-separated
-	//                           details key (an ACL's users). Read by resource
-	//                           type alone, so for a type with few rows.
+	//              a list key   the value is one element of a list in a details
+	//                           key (an ACL's users), split as Proxmox splits a
+	//                           list: on commas, semicolons and white space. Read
+	//                           by resource type alone, so for a type with few
+	//                           rows.
 	//              whole        every row of the type, whatever its id: a tab's
 	//                           History, of all the objects of its kinds. Read by
 	//                           (resource_type, created_at) within the cluster,

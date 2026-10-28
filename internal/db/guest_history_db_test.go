@@ -872,6 +872,7 @@ func TestGuestHistory(t *testing.T) {
 		audit(historyClusterID, minsAgo(4), "nexara", "ceph_osd", "osd.120", "osd_restart", map[string]any{"osd_id": 120})
 		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/vms/100", "updated", map[string]any{"users": "alice@pve, bob@pve"})
 		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/", "updated", map[string]any{"users": "jbob@pve, carol@pve"})
+		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/storage", "updated", map[string]any{"users": "dave@pve;erin@pve frank@pve"})
 		// VM 105's HA task, its plain start, and its HA resource, which names it
 		// only by its sid and has no task.
 		audit(historyClusterID, minsAgo(3), "proxmox", "proxmox_task", "105", "hastart", map[string]any{"upid": historyUPID(32, "hastart", "105"), "status": "OK"})
@@ -900,6 +901,13 @@ func TestGuestHistory(t *testing.T) {
 			{"one element of a comma list", handlers.HistorySelection{Objects: []handlers.HistoryObject{
 				{ResourceType: "pve_acl", DetailKey: "users", Value: "bob@pve", InList: true}}},
 				[]string{"audit updated /vms/100"}},
+			// Proxmox reads a list split on semicolons and white space too.
+			{"an element after a semicolon", handlers.HistorySelection{Objects: []handlers.HistoryObject{
+				{ResourceType: "pve_acl", DetailKey: "users", Value: "erin@pve", InList: true}}},
+				[]string{"audit updated /storage"}},
+			{"an element after white space", handlers.HistorySelection{Objects: []handlers.HistoryObject{
+				{ResourceType: "pve_acl", DetailKey: "users", Value: "frank@pve", InList: true}}},
+				[]string{"audit updated /storage"}},
 			// The guest's other rows are turned away, and its HA resource row,
 			// which the guest arm would have taken, is still the object's.
 			{"a guest's tasks of one worker type", handlers.HistorySelection{

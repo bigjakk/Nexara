@@ -396,9 +396,10 @@ type HistoryGuest struct {
 //   - a DetailKey: those whose details->>DetailKey is Value, a string or an
 //     integer — and whose resource_id is ResourceID, when one is set: a PBS
 //     datastore is one name within its server's rows;
-//   - a DetailKey and InList: those whose DetailKey is a comma-separated list
-//     holding Value, such as an ACL's users. Read by ResourceType alone, so
-//     for a type with few rows;
+//   - a DetailKey and InList: those whose DetailKey is a list holding Value,
+//     such as an ACL's users, split as Proxmox splits one (split_list): on
+//     commas, semicolons and white space. Read by ResourceType alone, so for
+//     a type with few rows;
 //   - WholeType: every row of ResourceType, whatever its id — a tab's History,
 //     of all the objects of its kinds. It names no id, key or value, and is
 //     read by the type alone, so for a type of configuration objects, which

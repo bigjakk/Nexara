@@ -285,7 +285,7 @@ WITH guests AS MATERIALIZED (
                WHERE o.in_list
                  AND b.resource_type = o.resource_type
                  AND (o.resource_id = '' OR b.resource_id = o.resource_id)
-                 AND o.value = ANY(regexp_split_to_array(btrim(b.details->>o.detail_key), '\s*,\s*'))
+                 AND o.value = ANY(regexp_split_to_array(btrim(b.details->>o.detail_key), '[,;\s]+'))
                  AND ($31::bool OR b.cluster_id = $21::uuid)
                  AND ($29::bool OR b.vmid IS NULL)
                  AND ($25::text IS NULL OR b.source = $25::text
@@ -1048,9 +1048,11 @@ type ListHistoryRow struct {
 //	           a key        details->>key is the value, a string or an
 //	                        integer, within one resource_id when one is named
 //	                        (a PBS datastore within its server's rows);
-//	           a list key   the value is one element of a comma-separated
-//	                        details key (an ACL's users). Read by resource
-//	                        type alone, so for a type with few rows.
+//	           a list key   the value is one element of a list in a details
+//	                        key (an ACL's users), split as Proxmox splits a
+//	                        list: on commas, semicolons and white space. Read
+//	                        by resource type alone, so for a type with few
+//	                        rows.
 //	           whole        every row of the type, whatever its id: a tab's
 //	                        History, of all the objects of its kinds. Read by
 //	                        (resource_type, created_at) within the cluster,
