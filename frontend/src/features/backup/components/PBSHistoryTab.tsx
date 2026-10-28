@@ -12,7 +12,9 @@ import { PBSLiveTaskRows } from "./PBSLiveTaskRows";
  * configuration, datastore maintenance, jobs run, restores from it — and, above
  * the first page, the server's own latest tasks, live. A task Nexara started is
  * one row, named by who started it: its entry is the page's, and the live row
- * stands for it while the server still lists the task.
+ * stands for it while the server still lists the task. A refresh that failed
+ * leaves the last tasks read in the query, so the entries come back with the
+ * block's "could not read": nothing stands for them.
  */
 export function PBSHistoryTabContent({ pbsId }: { pbsId: string }) {
   const history = useMemo(() => backupHistories.pbsServer(pbsId), [pbsId]);
@@ -37,7 +39,9 @@ export function PBSHistoryTabContent({ pbsId }: { pbsId: string }) {
             colSpan={colSpan}
           />
         )}
-        absorbs={(entry) => listed.has(entryPbsUpid(entry))}
+        absorbs={
+          isError ? undefined : (entry) => listed.has(entryPbsUpid(entry))
+        }
       />
     </TabsContent>
   );
