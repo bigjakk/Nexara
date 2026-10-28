@@ -6,6 +6,12 @@ package handlers
 // The runs the scheduler starts name no job in the Proxmox task they start —
 // the task's id holds a guest, or nothing — so they are the guests' and the
 // node's, and not here.
+//
+// The type is shared: a guest's ad-hoc backup and its restores are filed under
+// its VMID and a node's ingested vzdump tasks under the node's name, all as
+// backup. A job's id is held to the actions that are a job's (backup_job_*),
+// which every row of it has, from before its create row named it in details
+// too — a node named as a job is the node's rows no more than a VMID is.
 func BackupJobHistory() HistoryKind {
 	return HistoryKind{
 		Name:       "backup-job",
@@ -18,7 +24,7 @@ func BackupJobHistory() HistoryKind {
 			{Category: "runs", Field: HistoryFieldAction, Like: []string{`backup\_job\_run%`}},
 			{Category: "runs", Field: HistoryFieldWorker, Equals: []string{"vzdump"}},
 		},
-		Select:      SelectObjects("job_id", HistoryObject{ResourceType: "backup"}),
+		Select:      SelectObjects("job_id", HistoryObject{ResourceType: "backup", ActionLike: `backup\_job\_%`}),
 		ObjectTypes: []string{"backup"},
 		// A job edited in Proxmox is seen by the observer.
 		ObservedTypes: []HistoryObservedType{{Type: "backup"}},

@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"reflect"
 	"testing"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
 // The rules of the storage, PBS, Veeam and backup-job kinds put the rows they
@@ -47,6 +50,34 @@ func TestBackupHistoryCategories(t *testing.T) {
 	} {
 		if got := categoryOf(tt.kind, tt.entry, tt.action, tt.typ, tt.worker); got != tt.want {
 			t.Errorf("%s: %s %s %s %s is %q, want %q", tt.kind.Name, tt.entry, tt.typ, tt.action, tt.worker, got, tt.want)
+		}
+	}
+}
+
+// A job's History is held to the actions that are a job's, because the guests'
+// and the nodes' backups are filed under the same type and may share the id.
+func TestBackupJobHistoryTakesOnlyAJobsActions(t *testing.T) {
+	t.Parallel()
+	props := apischema.Properties{"job_id": {Type: apischema.String}}
+	if err := props.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	params, err := props.Validate(map[string]any{"job_id": "backup-1a2b3c4d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, err := BackupJobHistory().Select(context.Background(), HistoryRequest{Params: params})
+	if err != nil || len(sel.Objects) != 1 {
+		t.Fatalf("Select = %+v, %v; want one object", sel, err)
+	}
+	pattern := likeRegexp(sel.Objects[0].ActionLike)
+	for action, mine := range map[string]bool{
+		"backup_job_created": true, "backup_job_updated": true, "backup_job_deleted": true,
+		"backup_job_run_requested": true, "backup_job_run": true,
+		"backup": false, "backup_triggered": false, "backup_restored": false,
+	} {
+		if got := pattern.MatchString(action); got != mine {
+			t.Errorf("%s is taken as a job's row: %v, want %v", action, got, mine)
 		}
 	}
 }

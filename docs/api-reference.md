@@ -2066,7 +2066,7 @@ Each answers one object's timeline, newest first, in the shape of a guest's Hist
 | GET | `/veeam-servers/:id/history` | A Veeam server, with its connection tests, its platform and backup-object mappings, and every job and run control action taken on it (`view:veeam`, instance-wide) |
 | GET | `/veeam-servers/:id/jobs/:job_id/history` | A Veeam job of that server, by Veeam's own id, with its runs stopped; a second server that repeats the id is not this job (`view:veeam`, instance-wide) |
 | GET | `/veeam-servers/:id/sessions/:session_id/history` | A Veeam run of that server, by Veeam's own id (`view:veeam`, instance-wide) |
-| GET | `/clusters/:id/backup-jobs/:job_id/history` | A Proxmox backup job, by the id Proxmox gave it (`view:backup`) |
+| GET | `/clusters/:id/backup-jobs/:job_id/history` | A Proxmox backup job, by the id Proxmox gave it: a letter first, then letters, digits, `_` and `-`. A number is a guest's backups and answers `400`; the rows read are the job's own (`backup_job_*` actions), not the backups of a guest or node of that id (`view:backup`) |
 
 A run in the Veeam run listing, `GET /veeam-servers/:id/sessions`, names its job as `job_veeam_id`.
 

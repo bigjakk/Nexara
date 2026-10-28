@@ -59,7 +59,10 @@ func TestBackupHistoryRoutes(t *testing.T) {
 		{veeamScope + "/:id/sessions/:session_id/history", "/api/v1/veeam-servers/" + server + "/sessions/" + session + "/history", "",
 			"veeam_session[" + session + "].veeam_server_id=" + server},
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/backup-1a2b3c4d/history",
-			clusterScope + "/backup-jobs", "backup=backup-1a2b3c4d"},
+			clusterScope + "/backup-jobs", `backup=backup-1a2b3c4d~backup\_job\_%`},
+		// A node's name is a job id too, to the shape: its rows are the node's, not the job's.
+		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/pve-01/history", "",
+			`backup=pve-01~backup\_job\_%`},
 	}
 	covered := map[string]bool{}
 	for _, row := range rows {
@@ -106,6 +109,28 @@ func TestBackupHistoryRoutes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A guest's VMID is the resource id of its backups, filed under the type a job's
+// rows are: a number is not a job's id, so its History is refused rather than read.
+func TestBackupJobHistoryRefusesAnIdThatIsAGuests(t *testing.T) {
+	t.Parallel()
+	var route historyRoute
+	for _, r := range historyRoutes() {
+		if r.Path == clusterScope+"/backup-jobs/:job_id/history" {
+			route = r
+		}
+	}
+	dbtx := &backupRunDBTX{lookups: map[string]any{"GetCluster": db.Cluster{}}, lists: map[string][]any{"ListHistory": nil}}
+	ep := historyEndpoint(handlers.NewHistoryHandler(dbtx, db.New(dbtx)), route)
+	app := newRegistryApp(t, stubAuth(grantsOf("view:audit", "view:backup")), ep)
+	url := "/api/v1/clusters/" + testClusterID + "/backup-jobs/100/history"
+	if status, _ := send(t, app, authedRequest(fiber.MethodGet, url)); status != http.StatusBadRequest {
+		t.Errorf("%s answered %d, want 400", url, status)
+	}
+	if len(dbtx.queried) != 0 {
+		t.Errorf("the History was read for a job id that is a VMID: %v", dbtx.queried)
 	}
 }
 
