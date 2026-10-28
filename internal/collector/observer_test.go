@@ -506,7 +506,7 @@ func TestObserverKinds(t *testing.T) {
 				`{"roleid":"PVEAuditor","privs":"Sys.Audit,VM.Audit","special":1}]`},
 			edit: answers{"/access/roles": `[{"roleid":"Auditors","privs":"VM.Audit,Sys.Audit,Datastore.Audit","special":0},` +
 				`{"roleid":"PVEAuditor","privs":"Sys.Audit,VM.Audit","special":1}]`},
-			want: "changed pve_role/Auditors [privs]", value: "Datastore"},
+			want: "changed pve_role/Auditors [privs]", value: "Datastore", members: "[privs:Datastore.Audit] []"},
 		{kind: "pve_acl",
 			base: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1}]`},
 			edit: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1},` +
@@ -1384,7 +1384,10 @@ func TestObservedChangeRules(t *testing.T) {
 			return true
 		}
 		memberOK := (r.Member == "" && r.MemberOf == "") || r.Member == "joined" || r.Member == "left" ||
-			(r.Member == "sole" && r.MemberOf != "")
+			(r.Member == "sole" || r.Member == "left_unlisted") && r.MemberOf != ""
+		if r.DetailValue != "" && r.DetailKey == "" {
+			memberOK = false
+		}
 		if (r.Object != "" && (!named(r.Object) || strings.ContainsAny(r.Object, "|+"))) ||
 			(r.MemberOf != "" && !named(r.MemberOf)) || !memberOK ||
 			!slices.Contains([]string{"", "add1", "del1", "edit1", "adds", "dels"}, r.Counts) ||
@@ -1408,6 +1411,9 @@ func TestObservedChangeRules(t *testing.T) {
 		// <role>:<propagate>:<grantee>); of a grantee, that grantee.
 		if r.Kind == "pve_acl" && r.Member == "" && (r.Change != "removed" || r.Object == "") {
 			t.Errorf("rule %+v explains an ACL change without naming its grantees", r)
+		}
+		if r.Kind == "pve_role" && r.Change == "changed" && r.MemberOf == "" {
+			t.Errorf("rule %+v: a role's update explains only the privileges its row lists", r)
 		}
 		if r.Kind == "pve_acl" && strings.Contains(r.WorkerRe, "auth-realm-sync") && !r.GranteeRemoved {
 			t.Errorf("rule %+v: a realm sync purges only the ACL of what it removed", r)
@@ -1454,7 +1460,7 @@ var anyFieldUpdates = []string{"storage", "backup", "metric_server", "network", 
 // and the readers that build members).
 var memberFields = map[string][]string{
 	"pool": {"vms", "storage"}, "backup": {"vmid", "exclude"}, "ha_rule": {"resources"}, "pve_user": {"groups"},
-	"pve_group": {"users"}, "sdn_subnet": {"cidr"},
+	"pve_group": {"users"}, "sdn_subnet": {"cidr"}, "pve_role": {"privs"},
 	"pve_acl": {"users", "groups", "tokens", "user_grants", "group_grants", "token_grants"},
 }
 

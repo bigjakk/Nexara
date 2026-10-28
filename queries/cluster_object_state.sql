@@ -110,7 +110,7 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- action and UPID worker type (anchored patterns, '' any), never an action
 -- matching except_re, only a row with no task when untasked, only a row whose
 -- details carry a non-empty detail_key ('' any: an alias update that renamed
--- it). object and member_of name what the row is about, as "<source>:<format>"
+-- it), and with detail_value, one where it is that value. object and member_of name what the row is about, as "<source>:<format>"
 -- with source upid (the UPID's id), audit (the row's resource_id), vmid (the
 -- row's guest) or details.<k> (its details-><k>): with object set, the
 -- change's resource_id must be that name (a disk task's storage, the ACL path
@@ -165,6 +165,7 @@ WITH rules AS MATERIALIZED (
            e.value->>'worker_re'           AS worker_re,
            e.value->>'field_re'            AS field_re,
            e.value->>'detail_key'          AS detail_key,
+           COALESCE(e.value->>'detail_value', '') AS detail_value,
            e.value->>'object'              AS object,
            e.value->>'member'              AS member,
            e.value->>'member_of'           AS member_of,
@@ -196,7 +197,7 @@ WITH rules AS MATERIALIZED (
     -- can use.
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed,
+           r.audit_id_is, r.grantee_removed, r.detail_value,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
            a.created_at
     FROM explainable p
@@ -207,7 +208,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed,
+           r.audit_id_is, r.grantee_removed, r.detail_value,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
@@ -217,7 +218,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed,
+           r.audit_id_is, r.grantee_removed, r.detail_value,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
@@ -227,7 +228,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed,
+           r.audit_id_is, r.grantee_removed, r.detail_value,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
@@ -238,7 +239,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed,
+           r.audit_id_is, r.grantee_removed, r.detail_value,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
@@ -248,7 +249,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed,
+           r.audit_id_is, r.grantee_removed, r.detail_value,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
@@ -333,6 +334,7 @@ WITH rules AS MATERIALIZED (
       AND (k.except_re = '' OR k.action !~ k.except_re)
       AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
       AND (k.detail_key = '' OR COALESCE(k.details->>k.detail_key, '') <> '')
+      AND (k.detail_value = '' OR k.details->>k.detail_key = k.detail_value)
       -- A marker names no object, so it explains the one change of its kind
       -- and direction whose window holds it, and none when two do: the case
       -- it is written for is a create whose id could not be told apart.
@@ -396,6 +398,9 @@ WITH rules AS MATERIALIZED (
                                  AND (h.any_member OR EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END))
                                   OR n.dir = '' AND p.change = 'removed' AND (h.any_member OR cardinality(p.members_left) > 0 AND
                                      NOT EXISTS (SELECT 1 FROM unnest(p.members_left) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END)))
+                  -- A member leaving that the row does not name: what a list
+                  -- the row replaced whole no longer holds.
+                  WHEN 'left_unlisted' THEN n.dir = 'left' AND NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END)
                   -- An object removed with its last members: every one is named.
                   WHEN 'sole'   THEN n.dir = '' AND p.change = 'removed' AND cardinality(p.members_left) > 0
                                  AND NOT EXISTS (SELECT 1 FROM unnest(p.members_left) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END))

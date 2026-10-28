@@ -343,6 +343,20 @@ func TestObservedChanges(t *testing.T) {
 	aclOtherRoleGone := seed(observedCluster, "pve_acl", "/vms/174", 0, "changed", "", []string{"user_grants"}, at)
 	members(aclOtherRoleGone, []string{}, []string{"user_grants:Role03:1:user14@pve"})
 	audit(observedCluster, in, "pve_role", "Role01", 0, "deleted", nil)
+	// A role's update: the privileges it lists join; without append, those it
+	// does not list leave.
+	roleJoined := seed(observedCluster, "pve_role", "Role05", 0, "changed", "", []string{"privs"}, at)
+	members(roleJoined, []string{"privs:VM.Audit"}, []string{})
+	audit(observedCluster, in, "pve_role", "Role05", 0, "updated", map[string]any{"privs": "VM.Audit,Sys.Audit", "append": true})
+	roleReplaced := seed(observedCluster, "pve_role", "Role06", 0, "changed", "", []string{"privs"}, at)
+	members(roleReplaced, []string{}, []string{"privs:Sys.Audit"})
+	audit(observedCluster, in, "pve_role", "Role06", 0, "updated", map[string]any{"privs": "VM.Audit", "append": false})
+	roleAppended := seed(observedCluster, "pve_role", "Role07", 0, "changed", "", []string{"privs"}, at)
+	members(roleAppended, []string{}, []string{"privs:Sys.Audit"})
+	audit(observedCluster, in, "pve_role", "Role07", 0, "updated", map[string]any{"privs": "VM.Audit", "append": true})
+	roleKeptListed := seed(observedCluster, "pve_role", "Role08", 0, "changed", "", []string{"privs"}, at)
+	members(roleKeptListed, []string{}, []string{"privs:VM.Audit"})
+	audit(observedCluster, in, "pve_role", "Role08", 0, "updated", map[string]any{"privs": "VM.Audit", "append": false})
 	// A user id holding a * names that one user, never a pattern of them.
 	groupBesideStar := seed(observedCluster, "pve_group", "admins", 0, "changed", "", []string{"users"}, at)
 	members(groupBesideStar, []string{"users:user07@pve"}, []string{})
@@ -457,6 +471,11 @@ func TestObservedChanges(t *testing.T) {
 		with(with(rule("pve_acl", "added", "pve_acl", "id", false, "^granted$", "", "", ""), "member", "joined"),
 			"member_of", "details-list.users:users:%s+grants.users:user_grants:%1$s:%2$s:%3$s+"+
 				"details-list.groups:groups:%s+grants.groups:group_grants:%1$s:%2$s:%3$s"),
+		with(with(rule("pve_role", "changed", "pve_role", "id", false, "^updated$", "", "", "^privs$"), "member", "joined"),
+			"member_of", "details-list.privs:privs:%s"),
+		with(with(with(with(rule("pve_role", "changed", "pve_role", "id", false, "^updated$", "", "", "^privs$"),
+			"member", "left_unlisted"), "member_of", "details-list.privs:privs:%s"), "detail_key", "append"),
+			"detail_value", "false"),
 		with(with(rule("pve_acl", "changed", "pve_role", "cluster", false, "^deleted$", "", "", "^(user|group|token)_grants$"),
 			"member", "left"), "member_of", "audit:user_grants:%s:*|group_grants:%s:*|token_grants:%s:*"),
 		with(with(with(rule("pve_group", "changed", "pve_user", "cluster", false, "^created$", "", "", "^users$"),
@@ -572,6 +591,10 @@ func TestObservedChanges(t *testing.T) {
 		{"a role's delete, and another role arriving", aclRoleBeside, "shown"},
 		{"a role's delete, another role's grant going", aclOtherRoleGone, "shown"},
 		{"a user created as *@pve, another user joining", groupBesideStar, "shown"},
+		{"a role's update, a privilege it lists joining", roleJoined, "explained"},
+		{"a role's update replacing its list, one it left out leaving", roleReplaced, "explained"},
+		{"a role's update appending, one leaving", roleAppended, "shown"},
+		{"a role's update replacing its list, one it lists leaving", roleKeptListed, "shown"},
 		{"a realm's sync, a user of that realm", byRealmSync, "explained"},
 		{"a realm's sync, a user of another", besideRealmSync, "shown"},
 		{"a realm's sync, its user joining a group it syncs", syncJoinedSynced, "explained"},

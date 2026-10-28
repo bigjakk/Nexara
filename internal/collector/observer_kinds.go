@@ -183,8 +183,10 @@ var (
 	accessUserSpec  = newFieldSpec([]string{"realm-type", "totp-locked", "tfa-locked-until", "tokens"}, nil).withMembers("groups")
 	accessTokenSpec = newFieldSpec(nil, nil)
 	accessGroupSpec = newFieldSpec(nil, nil).withMembers("users")
-	// API2/Role.pm index: special is derived (a built-in role).
-	accessRoleSpec   = newFieldSpec([]string{"special"}, []string{"privs"})
+	// API2/Role.pm index: special is derived (a built-in role). privs are the
+	// role's privileges, kept as members, so an update explains the ones its
+	// row lists joining and, replacing the list, the ones it does not leaving.
+	accessRoleSpec   = newFieldSpec([]string{"special"}, nil).withMembers("privs")
 	acmeAccountSpec  = newFieldSpec(nil, nil)
 	metricServerSpec = newFieldSpec(nil, nil)
 	nodeConfigSpec   = newFieldSpec(nil, nil)

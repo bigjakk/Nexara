@@ -43,11 +43,15 @@ type explainRule struct {
 	WorkerRe  string `json:"worker_re"`  // the row's UPID worker type; "" any
 	FieldRe   string `json:"field_re"`   // the fields it explains; "" any
 	DetailKey string `json:"detail_key"` // only a row whose details carry this key, not empty; "" any
+	// DetailValue, with DetailKey, is the text that key must have ("" any).
+	DetailValue string `json:"detail_value"`
 	// Object and MemberOf name what a row is about, "<source>:<format>": the
 	// UPID's id (upid), the row's resource_id (audit) or guest (vmid), or a
 	// details key (details.<k>, or details-list.<k> for a comma list), put into
 	// format at %s; or an ACL row's grants (grants.<list>: role, propagate and
-	// grantee as %1$s, %2$s, %3$s). A MemberOf may join several sources with +. With Object, the
+	// grantee as %1$s, %2$s, %3$s). A MemberOf may join several sources with +.
+	// Member left_unlisted is a member leaving that the row does NOT name: what
+	// a list it replaced whole no longer holds. With Object, the
 	// change's resource_id must be that name; with Member, the row explains
 	// only that member joining or leaving a list (joined, left), or an object
 	// removed with it as its last member (sole). Member with no MemberOf is any
@@ -404,8 +408,14 @@ var observedChangeRules = slices.Concat(
 			ActionRe: anyOf("updated", "regenerated"), DetailKey: "privsep", FieldRe: `^privsep$`},
 		{Kind: "pve_group", Change: "changed", AuditType: "pve_group", MatchKey: "id",
 			ActionRe: `^updated$`, FieldRe: `^comment$`},
+		// A role's privileges are members. Its update records the list it sent
+		// and append: what joins is on the list, and without append the list
+		// replaced the role's, so what leaves is what the list does not hold.
 		{Kind: "pve_role", Change: "changed", AuditType: "pve_role", MatchKey: "id",
-			ActionRe: `^updated$`, FieldRe: `^privs$`},
+			ActionRe: `^updated$`, FieldRe: `^privs$`, Member: "joined", MemberOf: "details-list.privs:privs:%s"},
+		{Kind: "pve_role", Change: "changed", AuditType: "pve_role", MatchKey: "id", ActionRe: `^updated$`,
+			DetailKey: "append", DetailValue: "false", FieldRe: `^privs$`, Member: "left_unlisted",
+			MemberOf: "details-list.privs:privs:%s"},
 		{Kind: "pve_user", Change: "changed", AuditType: "pve_group", MatchKey: "cluster",
 			ActionRe: `^deleted$`, FieldRe: `^groups$`, Member: "left", MemberOf: "audit:groups:%s"},
 		{Kind: "pve_group", Change: "changed", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^created$`,
