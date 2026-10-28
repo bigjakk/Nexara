@@ -19,7 +19,7 @@ import {
 } from "./veeam-format";
 import { VeeamJobActions } from "./VeeamJobActions";
 import { VeeamLiveRunRows } from "./VeeamLiveRunRows";
-import { ScopedHistoryButton } from "@/features/history/components/ScopedHistoryButton";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { backupHistories } from "@/features/history/lib/backup-histories";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamJob } from "../types/backup";
@@ -218,9 +218,8 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
     wrap: true,
     cell: (job, ctx) => (
       <div className="flex items-center justify-end gap-1">
-        <ScopedHistoryButton
-          resource="veeam"
-          {...backupHistories.veeamJob(ctx.serverId, job.veeam_id)}
+        <ClusterHistoryButton
+          history={backupHistories.veeamJob(ctx.serverId, job.veeam_id)}
           title={job.name}
           rowsAbove={(colSpan) => (
             <VeeamLiveRunRows

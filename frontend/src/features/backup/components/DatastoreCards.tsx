@@ -2,7 +2,7 @@ import { HardDrive } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { PBSDatastoreStatus } from "../types/backup";
 import { formatBytes } from "@/lib/format";
-import { ScopedHistoryButton } from "@/features/history/components/ScopedHistoryButton";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { backupHistories } from "@/features/history/lib/backup-histories";
 
 interface DatastoreCardsProps {
@@ -35,9 +35,8 @@ export function DatastoreCards({ datastores, pbsId }: DatastoreCardsProps) {
               <CardTitle className="text-sm font-medium">{ds.store}</CardTitle>
               <div className="flex items-center gap-1">
                 {pbsId !== undefined && (
-                  <ScopedHistoryButton
-                    resource="pbs"
-                    {...backupHistories.pbsServer(pbsId, ds.store)}
+                  <ClusterHistoryButton
+                    history={backupHistories.pbsServer(pbsId, ds.store)}
                     title={ds.store}
                   />
                 )}

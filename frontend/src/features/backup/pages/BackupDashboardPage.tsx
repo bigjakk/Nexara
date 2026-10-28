@@ -19,10 +19,9 @@ import { SnapshotTable } from "../components/SnapshotTable";
 import { SyncJobTable } from "../components/SyncJobTable";
 import { VerifyJobTable } from "../components/VerifyJobTable";
 import { PBSTaskTable } from "../components/PBSTaskTable";
-import {
-  PBSHistoryTabContent,
-  PBSHistoryTabTrigger,
-} from "../components/PBSHistoryTab";
+import { PBSHistoryTabContent } from "../components/PBSHistoryTab";
+import { HistoryTabTrigger } from "@/features/history/components/HistoryTab";
+import { backupHistories } from "@/features/history/lib/backup-histories";
 import { GCDialog } from "../components/GCDialog";
 import { PruneDialog } from "../components/PruneDialog";
 import { DatastoreChart } from "../components/DatastoreChart";
@@ -313,7 +312,9 @@ export function BackupDashboardPage() {
                     <TabsTrigger value="tasks">
                       Tasks ({tasks.length})
                     </TabsTrigger>
-                    <PBSHistoryTabTrigger />
+                    <HistoryTabTrigger
+                      history={backupHistories.pbsServer(activeServerId)}
+                    />
                   </TabsList>
 
                   <TabsContent value="overview" className="space-y-6">

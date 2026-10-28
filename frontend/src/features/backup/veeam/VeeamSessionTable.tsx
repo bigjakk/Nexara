@@ -20,7 +20,7 @@ import {
   sessionResultLabel,
 } from "./veeam-format";
 import { VeeamSessionActions } from "./VeeamSessionActions";
-import { ScopedHistoryButton } from "@/features/history/components/ScopedHistoryButton";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { backupHistories } from "@/features/history/lib/backup-histories";
 import { VeeamSessionLog } from "./VeeamSessionLog";
 import { VeeamTaskTable } from "./VeeamTaskTable";
@@ -165,9 +165,8 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
     wrap: true,
     cell: (session, ctx) => (
       <div className="flex items-center justify-end gap-1">
-        <ScopedHistoryButton
-          resource="veeam"
-          {...backupHistories.veeamSession(ctx.serverId, session.veeam_id)}
+        <ClusterHistoryButton
+          history={backupHistories.veeamSession(ctx.serverId, session.veeam_id)}
           title={session.name}
         />
         <VeeamSessionActions serverId={ctx.serverId} session={session} />

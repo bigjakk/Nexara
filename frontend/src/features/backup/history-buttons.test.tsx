@@ -142,8 +142,14 @@ describe("a list row's History button", () => {
     await user.click(
       screen.getByRole("button", { name: `History of ${title}` }),
     );
+    // The window the History opens on (a week back) is not what is asserted.
     await waitFor(() => {
-      expect(String(vi.mocked(apiClient.page).mock.calls[0]?.[0])).toBe(path);
+      expect(
+        String(vi.mocked(apiClient.page).mock.calls[0]?.[0]).replace(
+          /&start_time=[^&]*/,
+          "",
+        ),
+      ).toBe(path);
     });
   });
 

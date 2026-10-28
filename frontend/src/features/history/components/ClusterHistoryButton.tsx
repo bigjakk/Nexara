@@ -1,5 +1,6 @@
 import { usePermissions } from "@/hooks/usePermissions";
 import { unaddressableHint } from "@/lib/api-path";
+import type { HistoryDrawerRequest } from "@/stores/history-drawer-store";
 import type { ClusterHistory } from "../lib/cluster-histories";
 import { HistoryButton } from "./HistoryDrawer";
 
@@ -14,9 +15,12 @@ import { HistoryButton } from "./HistoryDrawer";
 export function ClusterHistoryButton({
   history,
   title,
+  rowsAbove,
 }: {
   history: ClusterHistory;
   title: string;
+  /** Live rows above the first page, as the drawer's (a Veeam job's runs). */
+  rowsAbove?: HistoryDrawerRequest["rowsAbove"];
 }) {
   const { hasPermission } = usePermissions();
   if (
@@ -26,6 +30,11 @@ export function ClusterHistoryButton({
     return null;
   }
   return (
-    <HistoryButton kind={history.kind} target={history.target} title={title} />
+    <HistoryButton
+      kind={history.kind}
+      target={history.target}
+      title={title}
+      rowsAbove={rowsAbove}
+    />
   );
 }

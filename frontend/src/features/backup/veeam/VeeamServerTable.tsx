@@ -14,7 +14,7 @@ import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
-import { ScopedHistoryButton } from "@/features/history/components/ScopedHistoryButton";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { backupHistories } from "@/features/history/lib/backup-histories";
 import { useTestVeeamServer } from "../api/backup-queries";
 import type { VeeamProbeResult, VeeamServer } from "../types/backup";
@@ -195,9 +195,8 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
           e.stopPropagation();
         }}
       >
-        <ScopedHistoryButton
-          resource="veeam"
-          {...backupHistories.veeamServer(server.id)}
+        <ClusterHistoryButton
+          history={backupHistories.veeamServer(server.id)}
           title={server.name}
         />
         <VeeamServerTestButton

@@ -1,17 +1,11 @@
 import { useMemo } from "react";
-import { TabsContent, TabsTrigger } from "@/components/ui/tabs";
+import { TabsContent } from "@/components/ui/tabs";
 import { HistoryTimeline } from "@/features/history/components/HistoryTimeline";
-import { useCanViewHistoryOf } from "@/features/history/hooks/useCanViewHistoryOf";
+import { useCanViewHistory } from "@/features/history/hooks/useCanViewHistory";
 import { backupHistories } from "@/features/history/lib/backup-histories";
 import { usePBSTasks } from "../api/backup-queries";
 import { entryPbsUpid, latestTasks } from "../lib/pbs-live-tasks";
 import { PBSLiveTaskRows } from "./PBSLiveTaskRows";
-
-/** The History tab's trigger, shown with the grants the History takes. */
-export function PBSHistoryTabTrigger() {
-  const can = useCanViewHistoryOf("pbs");
-  return can ? <TabsTrigger value="history">History</TabsTrigger> : null;
-}
 
 /**
  * A Proxmox Backup Server's History: what was done to it in Nexara — its
@@ -21,8 +15,8 @@ export function PBSHistoryTabTrigger() {
  * stands for it while the server still lists the task.
  */
 export function PBSHistoryTabContent({ pbsId }: { pbsId: string }) {
-  const can = useCanViewHistoryOf("pbs");
   const history = useMemo(() => backupHistories.pbsServer(pbsId), [pbsId]);
+  const can = useCanViewHistory(history.permission);
   const { data, isError } = usePBSTasks(pbsId);
   const latest = useMemo(() => latestTasks(data ?? []), [data]);
   const listed = useMemo(
