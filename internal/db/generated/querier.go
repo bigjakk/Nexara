@@ -1852,8 +1852,11 @@ type Querier interface {
 	// Each source is counted where its cap is applied. The source filter is
 	// applied in every arm, so a cap counts only that source's rows — Proxmox's
 	// together with the rows that may be their Nexara twins, which the duplicate
-	// probe needs. The type filter is not: a category is worked out once per kind
-	// of row after the arms (category_map), and per row in each arm it cost four
+	// probe needs — but for the guests' floor, which reads its index alone and so
+	// counts every source: under a source filter a folder's read can stop being
+	// whole sooner than the named source's own rows would make it. The type
+	// filter is not applied in the arms: a category is worked out once per kind
+	// of row after them (category_map), and per row in each arm it cost four
 	// times as much.
 	//
 	// Every branch reads one cluster, a REQUIRED argument: the route's, which its

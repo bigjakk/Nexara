@@ -30,7 +30,9 @@ func folderHistoryRoute() historyRoute {
 			"departure is listed for moves made from this release on. " + handlers.UnfiledFolderSegment +
 			" as the folder lists the guests in no folder. Of more than 500 guests the caller may open it " +
 			"follows the 500 most recently active, and guests gives how many of how many. Each source is read " +
-			"newest first up to 20,000 entries, all_time too. " + historyStretchText + " Requires view:audit and " +
+			"newest first up to 20,000 entries, all_time too; the guests' own entries from where their newest " +
+			"20,000 of every source begin, so under a source filter searched_from can be later than the " +
+			"named source's entries alone would make it. " + historyStretchText + " Requires view:audit and " +
 			"view:vm_folder; a guest is listed only with view:vm or view:container by its type, and tasks " +
 			"with no audit entry and backup-job entries need view:task.",
 		Resource:   "vm_folder",
