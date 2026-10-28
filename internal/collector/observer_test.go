@@ -726,22 +726,35 @@ func TestObserverOutcomes(t *testing.T) {
 		}
 		plugins("QUJD")
 		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-01"},{"storage":"store02","type":"dir"}]`)
+		aliases := func(comment string) {
+			e.client.set("/cluster/firewall/aliases", `[{"name":"web01","cidr":"192.0.2.10"`+comment+`},{"name":"web02","cidr":"192.0.2.11"`+comment+`}]`)
+		}
+		users := func(email string) {
+			e.client.set("/access/users?full=1", `[{"userid":"user01@pve","email":"a`+email+`@example.com"},{"userid":"user02@pve","email":"b`+email+`@example.com"}]`)
+		}
+		aliases("")
+		users("")
 		e.expect("baseline")
 		e.mq.nodesByCluster[0].PveVersion = "pve-manager/9.2.21/0000bbbb"
 		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-02"},{"storage":"store02","type":"dir","shared":1}]`)
 		e.client.set(pathGuest, `{"name":"linux01","memory":"4096"}`)
+		aliases(`,"comment":"front"`)
+		users("2")
 		rows := e.passRows()
 		var bulk []any
 		for _, r := range rows {
 			if r.Detail["during_upgrade"] != true {
 				t.Errorf("upgraded: filed %+v, want each marked during_upgrade", r)
 			}
-			if r.ResourceType == "storage" {
+			switch {
+			case r.ResourceType == "storage":
 				bulk = append(bulk, r.Detail["bulk"])
+			case r.Detail["bulk"] != nil:
+				t.Errorf("upgraded: filed %+v as one with others, want a firewall or access change on its own", r)
 			}
 		}
-		if len(rows) != 3 || len(bulk) != 2 || bulk[0] == nil || bulk[0] != bulk[1] {
-			t.Fatalf("upgraded: filed %+v, want both storages' edits as one and the guest's", rows)
+		if len(rows) != 7 || len(bulk) != 2 || bulk[0] == nil || bulk[0] != bulk[1] {
+			t.Fatalf("upgraded: filed %+v, want both storages' edits as one, the guest's, and each alias's and user's", rows)
 		}
 		e.expect("and the pass after, as any other")
 		token := "changed cluster/" + e.cluster.ID.String() + " [token_privileges]"

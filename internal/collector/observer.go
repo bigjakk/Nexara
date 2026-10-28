@@ -1071,10 +1071,12 @@ func (p *observePass) childrenOf(rd kindReading) map[string]int {
 	return out
 }
 
+// accessKinds are user.cfg's: its users, groups, tokens and roles, and the ACL.
+var accessKinds = []string{"pve_acl", "pve_user", "pve_group", "pve_token", "pve_role"}
+
 // capFor is a kind's cap: the access kinds' is what user.cfg holds in practice.
 func (p *observePass) capFor(kind string) int {
-	switch kind {
-	case "pve_acl", "pve_user", "pve_group", "pve_token", "pve_role":
+	if slices.Contains(accessKinds, kind) {
 		return p.o.maxAccess
 	}
 	return p.o.maxObjects
@@ -1158,10 +1160,13 @@ func maxTime(a, b time.Time) time.Time {
 // markBulk marks the changes of one kind a reading found, when there are more
 // than observeMaxChanges, with one id and their count in their detail (bulk,
 // bulk_size): something rewrote the lot, and a History can show them as one.
-// Across an upgrade (upgrading) any two are one. Each is still filed, and
-// explained or not on its own.
+// Across an upgrade (upgrading) any two are one, but for the access and the
+// firewall kinds, which no upgrade rewrites: an edit of who may do what, timed
+// to an upgrade, is not folded into it. Each is still filed, and explained or
+// not on its own.
 func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string, upgrading bool) {
-	if len(rows) <= observeMaxChanges && (!upgrading || len(rows) < 2) {
+	acrossUpgrade := upgrading && len(rows) >= 2 && !slices.Contains(accessKinds, kind) && !strings.HasPrefix(kind, "firewall_")
+	if len(rows) <= observeMaxChanges && !acrossUpgrade {
 		return
 	}
 	p.o.logger.Info("object observer: more changes of a kind in one reading than are shown one by one, or across an upgrade; marked as one",
