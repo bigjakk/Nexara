@@ -220,6 +220,15 @@ type ClusterObjectChange struct {
 	MembersLeft   []string        `json:"members_left"`
 }
 
+type ClusterObjectPresence struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Kind      string    `json:"kind"`
+	ObjectID  string    `json:"object_id"`
+	Node      string    `json:"node"`
+	Tag       string    `json:"tag"`
+	Signature string    `json:"signature"`
+}
+
 type ClusterObjectState struct {
 	ClusterID   uuid.UUID       `json:"cluster_id"`
 	Kind        string          `json:"kind"`

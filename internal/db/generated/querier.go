@@ -1485,6 +1485,9 @@ type Querier interface {
 	// resource_id is set. total is count(*) OVER the filtered set, computed before
 	// LIMIT, so the page and its count come from one query.
 	ListClusterObjectChanges(ctx context.Context, arg ListClusterObjectChangesParams) ([]ListClusterObjectChangesRow, error)
+	// ListClusterObjectPresence is what the observer holds of the objects it
+	// compares past a cap, read once a process and kept in memory between passes.
+	ListClusterObjectPresence(ctx context.Context, clusterID uuid.UUID) ([]ListClusterObjectPresenceRow, error)
 	// The observer's readings (migrations/000124) and the classification of what it
 	// records (internal/collector/observer.go, observer_explain.go). It files edits
 	// made directly in Proxmox into cluster_object_changes (000119) with
@@ -2414,7 +2417,11 @@ type Querier interface {
 	//   removed  the objects gone, whose stored reading is dropped;
 	//   touched  the objects read unchanged: only their last_seen_at moves;
 	//   baseline the signature the kind was read whole under, at seen_at, or ''
-	//            for a reading that marks nothing (a guest batch, a node's objects).
+	//            for a reading that marks nothing (a guest batch, a node's objects);
+	//   presence the objects past a cap that appeared or changed, their whole tag
+	//            to keep, and presence_removed those that went;
+	//   notices  the notice gates (observer_notices) as the reading leaves them, or
+	//            '' for none moved: a notice filed here goes with its gate.
 	//
 	// The sets are disjoint by construction. cluster_id is never NULL here: only a
 	// global kind's trigger writes a row with none (000125).

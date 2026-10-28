@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -67,16 +68,15 @@ func TestObservedChanges(t *testing.T) {
 	record := func(arg gen.RecordObservedObjectsParams) {
 		t.Helper()
 		arg.ClusterID, arg.Kind = observedCluster, "storage"
-		for _, s := range []*[]string{&arg.Removed, &arg.Touched} {
+		for _, s := range []*[]string{&arg.Removed, &arg.Touched, &arg.PresenceRemoved} {
 			if *s == nil {
 				*s = []string{}
 			}
 		}
-		if arg.Changes == nil {
-			arg.Changes = json.RawMessage(`[]`)
-		}
-		if arg.States == nil {
-			arg.States = json.RawMessage(`[]`)
+		for _, j := range []*json.RawMessage{&arg.Changes, &arg.States, &arg.Presence} {
+			if *j == nil {
+				*j = json.RawMessage(`[]`)
+			}
 		}
 		if err := q.RecordObservedObjects(ctx, arg); err != nil {
 			t.Fatalf("record: %v", err)
@@ -125,6 +125,23 @@ func TestObservedChanges(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0].ObjectID != "store01" || !rows[0].LastSeenAt.Equal(ago(1)) ||
 		string(rows[0].Fields) != `{"nodes": "t1"}` {
 		t.Fatalf("stored after the second reading: %+v, %v", rows, err)
+	}
+
+	// Past the cap: an object held by presence, and the notice gates, in the
+	// reading's own statement; then gone.
+	record(gen.RecordObservedObjectsParams{SeenAt: ago(1), Notices: `{"too_many_objects/storage/":{}}`,
+		Presence: jsonOf([]map[string]any{{"object_id": "store03", "node": "", "tag": "w1", "signature": "sig1"}})})
+	held, err := q.ListClusterObjectPresence(ctx, observedCluster)
+	marks, merr := q.ListClusterObjectBaselines(ctx, observedCluster)
+	if err != nil || merr != nil || len(held) != 1 || held[0].ObjectID != "store03" || held[0].Tag != "w1" ||
+		!slices.ContainsFunc(marks, func(m gen.ListClusterObjectBaselinesRow) bool {
+			return m.ResourceType == "observer_notices" && m.Signature == `{"too_many_objects/storage/":{}}`
+		}) {
+		t.Fatalf("held past the cap %+v (%v), marks %+v (%v)", held, err, marks, merr)
+	}
+	record(gen.RecordObservedObjectsParams{SeenAt: ago(1), PresenceRemoved: []string{"store03"}})
+	if held, err := q.ListClusterObjectPresence(ctx, observedCluster); err != nil || len(held) != 0 {
+		t.Fatalf("held after it went: %+v, %v", held, err)
 	}
 
 	// ── What explains a change: the rules the observer passes, applied here.

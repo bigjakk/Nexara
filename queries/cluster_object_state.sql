@@ -11,6 +11,13 @@ SELECT kind, object_id, fields, node, signature, last_seen_at
 FROM cluster_object_state
 WHERE cluster_id = $1;
 
+-- ListClusterObjectPresence is what the observer holds of the objects it
+-- compares past a cap, read once a process and kept in memory between passes.
+-- name: ListClusterObjectPresence :many
+SELECT kind, object_id, node, tag, signature
+FROM cluster_object_presence
+WHERE cluster_id = $1;
+
 -- ListClusterObjectBaselines is the signature each kind of a cluster was last
 -- read whole under, and when (000119, 000124). The replication trigger's own
 -- mark has neither.
@@ -29,7 +36,11 @@ WHERE cluster_id = $1;
 --   removed  the objects gone, whose stored reading is dropped;
 --   touched  the objects read unchanged: only their last_seen_at moves;
 --   baseline the signature the kind was read whole under, at seen_at, or ''
---            for a reading that marks nothing (a guest batch, a node's objects).
+--            for a reading that marks nothing (a guest batch, a node's objects);
+--   presence the objects past a cap that appeared or changed, their whole tag
+--            to keep, and presence_removed those that went;
+--   notices  the notice gates (observer_notices) as the reading leaves them, or
+--            '' for none moved: a notice filed here goes with its gate.
 --
 -- The sets are disjoint by construction. cluster_id is never NULL here: only a
 -- global kind's trigger writes a row with none (000125).
@@ -63,6 +74,23 @@ WITH changes AS (
     SELECT sqlc.arg('cluster_id')::uuid, sqlc.arg('kind')::text, sqlc.arg('baseline')::text,
            sqlc.arg('seen_at')::timestamptz
     WHERE sqlc.arg('baseline')::text <> ''
+    ON CONFLICT (cluster_id, resource_type) DO UPDATE
+        SET signature = EXCLUDED.signature, last_read_at = EXCLUDED.last_read_at
+), present AS (
+    INSERT INTO cluster_object_presence (cluster_id, kind, object_id, node, tag, signature)
+    SELECT sqlc.arg('cluster_id')::uuid, sqlc.arg('kind')::text, s.object_id, COALESCE(s.node, ''), s.tag, s.signature
+    FROM jsonb_to_recordset(sqlc.arg('presence')::jsonb) AS s(object_id text, node text, tag text, signature text)
+    ON CONFLICT (cluster_id, kind, object_id) DO UPDATE
+        SET node = EXCLUDED.node, tag = EXCLUDED.tag, signature = EXCLUDED.signature
+), absent AS (
+    DELETE FROM cluster_object_presence
+    WHERE cluster_id = sqlc.arg('cluster_id')::uuid
+      AND kind = sqlc.arg('kind')::text
+      AND object_id = ANY(sqlc.arg('presence_removed')::text[])
+), gated AS (
+    INSERT INTO cluster_object_baselines (cluster_id, resource_type, signature, last_read_at)
+    SELECT sqlc.arg('cluster_id')::uuid, 'observer_notices', sqlc.arg('notices')::text, sqlc.arg('seen_at')::timestamptz
+    WHERE sqlc.arg('notices')::text <> ''
     ON CONFLICT (cluster_id, resource_type) DO UPDATE
         SET signature = EXCLUDED.signature, last_read_at = EXCLUDED.last_read_at
 )

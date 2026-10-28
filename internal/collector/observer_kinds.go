@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,11 @@ type observedObject struct {
 	members      map[string][]string // field -> the other objects' ids it lists, sorted (fieldSpec.withMembers)
 	hardware     bool                // a physical NIC: it comes and goes with nobody editing
 	unsettled    bool                // a guest still being made: its reading is no baseline (guestObject)
+	// listing, for a kind read object by object, is what its listing said of
+	// it, which past the cap is all that is read of it (shallow): its whole
+	// tag is of that alone, whatever else was read (observePass.wholeTag).
+	listing map[string]string
+	shallow bool
 }
 
 // kindReading is what one read of a kind produced. unread holds the objects it
@@ -58,18 +64,34 @@ type kindReading struct {
 	forget  map[string]bool
 	quiet   map[string]bool
 	listed  int // past the cap, how many its listing held (capListing); 0 otherwise
-	// idsOnly are the ids a listing past the cap held that were not read on
-	// (capListing): compared, and filed, by their ids alone.
-	idsOnly []string
+	// childKind is the kind of a parent kind's own objects, childParentOf
+	// their parent: a parent gone takes them with it, and its removal says how
+	// many (observePass.childrenOf).
+	childKind     string
+	childParentOf func(id string) string
 	// parentOf, for a kind of a parent's objects (an IP set's entries, a
 	// group's rules, a vnet's subnets, a user's tokens), is the parent an id
 	// belongs to: the cap counts each parent's objects apart. parents are the
 	// parents listed, true for those whose objects were read; parentKind is
-	// theirs, so an object of a parent that appeared past that kind's cap
-	// appeared with it.
+	// theirs when past that kind's cap they are not read (a parent read
+	// shallow), so one of a parent read whole again appeared while it could
+	// not be seen. A user's tokens come with the users' listing, read always.
 	parentOf   func(id string) string
 	parents    map[string]bool
 	parentKind string
+}
+
+// shallowObjects is a listing's objects past the cap, read by what the listing
+// says of them alone, keyed by idField.
+func shallowObjects(kind, idField string, items []map[string]json.RawMessage) []observedObject {
+	var out []observedObject
+	for _, item := range items {
+		if id := stringField(item, idField); auditkey.ValidID(id) {
+			listing := listingSpec.canonicalFields(item)
+			out = append(out, observedObject{id: id, resourceType: kind, resourceID: id, fields: listing, listing: listing, shallow: true})
+		}
+	}
+	return out
 }
 
 // beforeSep is the parent of an id that is "<parent><sep><rest>": up to the
@@ -211,8 +233,11 @@ var (
 	// API2/Role.pm index: special is derived (a built-in role). privs are the
 	// role's privileges, kept as members, so an update explains the ones its
 	// row lists joining and, replacing the list, the ones it does not leaving.
-	accessRoleSpec   = newFieldSpec([]string{"special"}, nil).withMembers("privs")
-	acmeAccountSpec  = newFieldSpec(nil, nil)
+	accessRoleSpec  = newFieldSpec([]string{"special"}, nil).withMembers("privs")
+	acmeAccountSpec = newFieldSpec(nil, nil)
+	// listingSpec reads what a listing says of an object read object by
+	// object, its whole tag past the cap.
+	listingSpec      = newFieldSpec(nil, nil)
 	metricServerSpec = newFieldSpec(nil, nil)
 	nodeConfigSpec   = newFieldSpec(nil, nil)
 	// pve-manager API2/ACMEPlugin.pm: nodes is a list; data, the plugin's DNS
@@ -302,7 +327,9 @@ func readPools(ctx context.Context, p *observePass) ([]kindReading, readOutcome)
 		return nil, out
 	}
 	reading := kindReading{kind: "pool", unread: map[string]bool{}}
-	items, reading.idsOnly, reading.listed = p.capListing("pool", items, func(it map[string]json.RawMessage) string { return stringField(it, "poolid") })
+	items, shallow, listed := p.capListing("pool", items, func(it map[string]json.RawMessage) string { return stringField(it, "poolid") })
+	reading.listed = listed
+	reading.objects = shallowObjects("pool", "poolid", shallow)
 	for _, item := range items {
 		id := stringField(item, "poolid")
 		if !auditkey.ValidID(id) {
@@ -323,7 +350,9 @@ func readPools(ctx context.Context, p *observePass) ([]kindReading, readOutcome)
 			reading.unread[id] = true
 			continue
 		}
-		reading.objects = append(reading.objects, poolObject(id, detail[0]))
+		obj := poolObject(id, detail[0])
+		obj.listing = listingSpec.canonicalFields(item)
+		reading.objects = append(reading.objects, obj)
 	}
 	return []kindReading{reading}, readOK
 }
@@ -368,7 +397,9 @@ func readMetricServers(ctx context.Context, p *observePass) ([]kindReading, read
 	}
 	spec := metricServerSpec
 	reading := kindReading{kind: "metric_server", unread: map[string]bool{}}
-	items, reading.idsOnly, reading.listed = p.capListing("metric_server", items, func(it map[string]json.RawMessage) string { return stringField(it, "id") })
+	items, shallow, listed := p.capListing("metric_server", items, func(it map[string]json.RawMessage) string { return stringField(it, "id") })
+	reading.listed = listed
+	reading.objects = shallowObjects("metric_server", "id", shallow)
 	for _, item := range items {
 		id := stringField(item, "id")
 		if !auditkey.ValidID(id) {
@@ -385,6 +416,7 @@ func readMetricServers(ctx context.Context, p *observePass) ([]kindReading, read
 		}
 		reading.objects = append(reading.objects, observedObject{
 			id: id, resourceType: "metric_server", resourceID: id, fields: spec.canonicalFields(detail),
+			listing: listingSpec.canonicalFields(item),
 		})
 	}
 	return []kindReading{reading}, readOK
@@ -600,7 +632,7 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 	if out != readOK {
 		return nil, out
 	}
-	vnets := kindReading{kind: "sdn_vnet"}
+	vnets := kindReading{kind: "sdn_vnet", childKind: "sdn_subnet", childParentOf: beforeSep("/", false)}
 	subnets := kindReading{kind: "sdn_subnet", unread: map[string]bool{}, forget: map[string]bool{},
 		parentOf: beforeSep("/", false), parents: map[string]bool{}, parentKind: "sdn_vnet"}
 	listed := map[string]bool{}
@@ -608,9 +640,21 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 		listed[stringField(item, "vnet")] = true
 		subnets.parents[stringField(item, "vnet")] = false
 	}
-	// Past the cap only the vnets held are read on: a new vnet's subnets are
-	// not read until it is.
-	items, vnets.idsOnly, vnets.listed = p.capListing("sdn_vnet", items, func(it map[string]json.RawMessage) string { return stringField(it, "vnet") })
+	held := p.heldChildren("sdn_subnet")
+	// Past the cap only the vnets held field by field are read on: the
+	// others' subnets are left as held until they are.
+	items, shallow, count := p.capListing("sdn_vnet", items, func(it map[string]json.RawMessage) string { return stringField(it, "vnet") })
+	vnets.listed = count
+	for _, item := range shallow {
+		vnet := stringField(item, "vnet")
+		if !auditkey.ValidID(vnet) {
+			continue
+		}
+		vnets.objects = append(vnets.objects, observedObject{
+			id: vnet, resourceType: "sdn_vnet", resourceID: vnet, fields: sdnSpec.canonicalFields(item), shallow: true,
+		})
+		markChildren(subnets.unread, held, vnet)
+	}
 	for _, item := range items {
 		vnet := stringField(item, "vnet")
 		if !auditkey.ValidID(vnet) {
@@ -626,7 +670,7 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 		}
 		entries, out := p.readList(ctx, t)
 		if out != readOK {
-			p.markChildren(subnets.unread, "sdn_subnet", vnet)
+			markChildren(subnets.unread, held, vnet)
 			continue
 		}
 		subnets.parents[vnet] = true
@@ -648,7 +692,7 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 			subnets.objects = append(subnets.objects, obj)
 		}
 	}
-	p.forgetOrphans(subnets.forget, "sdn_subnet", listed)
+	forgetOrphans(subnets.forget, held, listed)
 	return []kindReading{vnets, subnets}, readOK
 }
 
@@ -709,7 +753,7 @@ func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, rea
 	if out != readOK {
 		return nil, out
 	}
-	sets := kindReading{kind: "firewall_ipset"}
+	sets := kindReading{kind: "firewall_ipset", childKind: "firewall_ipset_entry", childParentOf: beforeSep("/", false)}
 	entries := kindReading{kind: "firewall_ipset_entry", unread: map[string]bool{}, forget: map[string]bool{},
 		parentOf: beforeSep("/", false), parents: map[string]bool{}, parentKind: "firewall_ipset"}
 	listed := map[string]bool{}
@@ -717,8 +761,18 @@ func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, rea
 		listed[auditkey.FirewallName(stringField(item, "name"))] = true
 		entries.parents[auditkey.FirewallName(stringField(item, "name"))] = false
 	}
+	held := p.heldChildren("firewall_ipset_entry")
 	ipsetID := func(it map[string]json.RawMessage) string { return auditkey.FirewallName(stringField(it, "name")) }
-	items, sets.idsOnly, sets.listed = p.capListing("firewall_ipset", items, ipsetID)
+	items, shallow, count := p.capListing("firewall_ipset", items, ipsetID)
+	sets.listed = count
+	for _, item := range shallow {
+		if id := ipsetID(item); stringField(item, "name") != "" && auditkey.ValidID(id) {
+			sets.objects = append(sets.objects, observedObject{
+				id: id, resourceType: "firewall_ipset", resourceID: id, fields: firewallPlainSpec.canonicalFields(item), shallow: true,
+			})
+			markChildren(entries.unread, held, id)
+		}
+	}
 	for _, item := range items {
 		name := stringField(item, "name")
 		id := auditkey.FirewallName(name)
@@ -735,7 +789,7 @@ func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, rea
 		}
 		list, out := p.readList(ctx, t)
 		if out != readOK {
-			p.markChildren(entries.unread, "firewall_ipset_entry", id)
+			markChildren(entries.unread, held, id)
 			continue
 		}
 		entries.parents[id] = true
@@ -754,7 +808,7 @@ func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, rea
 			})
 		}
 	}
-	p.forgetOrphans(entries.forget, "firewall_ipset_entry", listed)
+	forgetOrphans(entries.forget, held, listed)
 	return []kindReading{sets, entries}, readOK
 }
 
@@ -766,7 +820,8 @@ func readFirewallGroups(ctx context.Context, p *observePass) ([]kindReading, rea
 	if out != readOK {
 		return nil, out
 	}
-	groups := kindReading{kind: "firewall_security_group"}
+	groups := kindReading{kind: "firewall_security_group", childKind: "firewall_security_group_rule",
+		childParentOf: func(id string) string { return id }}
 	// Each group's rules are one object, its own parent's.
 	rules := kindReading{kind: "firewall_security_group_rule", unread: map[string]bool{}, forget: map[string]bool{},
 		parentOf: func(id string) string { return id }, parents: map[string]bool{}, parentKind: "firewall_security_group"}
@@ -776,7 +831,16 @@ func readFirewallGroups(ctx context.Context, p *observePass) ([]kindReading, rea
 		rules.parents[auditkey.FirewallName(stringField(item, "group"))] = false
 	}
 	groupID := func(it map[string]json.RawMessage) string { return auditkey.FirewallName(stringField(it, "group")) }
-	items, groups.idsOnly, groups.listed = p.capListing("firewall_security_group", items, groupID)
+	items, shallow, count := p.capListing("firewall_security_group", items, groupID)
+	groups.listed = count
+	for _, item := range shallow {
+		if id := groupID(item); stringField(item, "group") != "" && auditkey.ValidID(id) {
+			groups.objects = append(groups.objects, observedObject{
+				id: id, resourceType: "firewall_security_group", resourceID: id, fields: firewallPlainSpec.canonicalFields(item), shallow: true,
+			})
+			rules.unread[id] = true
+		}
+	}
 	for _, item := range items {
 		name := stringField(item, "group")
 		id := auditkey.FirewallName(name)
@@ -802,7 +866,7 @@ func readFirewallGroups(ctx context.Context, p *observePass) ([]kindReading, rea
 			lists: map[string][]string{"rules": canonicalRules(list)},
 		})
 	}
-	for id := range p.state["firewall_security_group_rule"] {
+	for _, id := range p.heldIDs("firewall_security_group_rule") {
 		if !listed[id] {
 			rules.forget[id] = true
 		}
@@ -817,8 +881,8 @@ func readAccessUsers(ctx context.Context, p *observePass) ([]kindReading, readOu
 	if out != readOK {
 		return nil, out
 	}
-	users := kindReading{kind: "pve_user"}
-	tokens := kindReading{kind: "pve_token", parentOf: beforeSep("!", true), parents: map[string]bool{}, parentKind: "pve_user"}
+	users := kindReading{kind: "pve_user", childKind: "pve_token", childParentOf: beforeSep("!", true)}
+	tokens := kindReading{kind: "pve_token", parentOf: beforeSep("!", true), parents: map[string]bool{}}
 	for _, item := range items {
 		userid := stringField(item, "userid")
 		if !auditkey.ValidID(userid) {
@@ -839,6 +903,13 @@ func readAccessUsers(ctx context.Context, p *observePass) ([]kindReading, readOu
 			tokens.objects = append(tokens.objects, observedObject{
 				id: id, resourceType: "pve_token", resourceID: id, fields: accessTokenSpec.canonicalFields(tok),
 			})
+		}
+	}
+	// A user gone takes its tokens with it: its removal says how many.
+	tokens.forget = map[string]bool{}
+	for _, id := range p.heldIDs("pve_token") {
+		if !tokens.parents[tokens.parentOf(id)] {
+			tokens.forget[id] = true
 		}
 	}
 	return []kindReading{users, tokens}, readOK
@@ -927,22 +998,40 @@ func readAccessACL(ctx context.Context, p *observePass) ([]kindReading, readOutc
 	return []kindReading{rd}, readOK
 }
 
-// markChildren marks the stored objects of kind under parent unread.
-func (p *observePass) markChildren(unread map[string]bool, kind, parent string) {
-	for id := range p.state[kind] {
-		if strings.HasPrefix(id, parent+"/") {
-			unread[id] = true
-		}
+// heldIDs is every id of kind the cluster holds, field by field or by presence.
+func (p *observePass) heldIDs(kind string) []string {
+	ids := slices.Collect(maps.Keys(p.state[kind]))
+	return slices.AppendSeq(ids, maps.Keys(p.presence[kind]))
+}
+
+// heldChildren is the held objects of a kind of a parent's objects, by
+// parent: a parent's name holds no "/" (pve-firewall and pve-network both
+// refuse one), so it is what precedes the first. Built once a reading, so a
+// listing of many parents is not walked once for each.
+func (p *observePass) heldChildren(kind string) map[string][]string {
+	out := map[string][]string{}
+	for _, id := range p.heldIDs(kind) {
+		parent, _, _ := strings.Cut(id, "/")
+		out[parent] = append(out[parent], id)
+	}
+	return out
+}
+
+// markChildren marks a parent's held objects unread.
+func markChildren(unread map[string]bool, held map[string][]string, parent string) {
+	for _, id := range held[parent] {
+		unread[id] = true
 	}
 }
 
-// forgetOrphans marks the stored objects of kind whose parent is no longer
-// listed to be forgotten. A parent's name holds no "/" (pve-firewall and
-// pve-network both refuse one), so it is what precedes the first.
-func (p *observePass) forgetOrphans(forget map[string]bool, kind string, listed map[string]bool) {
-	for id := range p.state[kind] {
-		if parent, _, _ := strings.Cut(id, "/"); !listed[parent] {
-			forget[id] = true
+// forgetOrphans marks the held objects of the parents no longer listed to be
+// forgotten: a parent gone takes them with it, and its removal says how many.
+func forgetOrphans(forget map[string]bool, held map[string][]string, listed map[string]bool) {
+	for parent, ids := range held {
+		if !listed[parent] {
+			for _, id := range ids {
+				forget[id] = true
+			}
 		}
 	}
 }

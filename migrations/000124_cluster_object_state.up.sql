@@ -1,5 +1,5 @@
 -- Automatic in-place upgrade — no manual steps, no operator action required.
--- Purely additive: one new table, a column with a default on
+-- Purely additive: two new tables, a column with a default on
 -- cluster_object_baselines (000119), two with a default on
 -- cluster_object_changes (000119), and a partial index on task_history (built
 -- in the migration's transaction, a lock on that table for as long as the
@@ -48,6 +48,22 @@ CREATE TABLE IF NOT EXISTS cluster_object_state (
     last_seen_at  TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (cluster_id, kind, object_id)
 ) WITH (fillfactor = 70);
+
+-- What the observer holds of an object it compares past its kind's cap (or its
+-- parent's): its id and one tag of the whole object, written only when the
+-- object appears, changes or goes, never on a pass that finds it as it was.
+-- Such a kind's changes are counted, not filed one by one
+-- (internal/collector/observer.go, apply), and its objects move back to
+-- cluster_object_state, field by field, when it is under the cap again.
+CREATE TABLE IF NOT EXISTS cluster_object_presence (
+    cluster_id UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL,
+    object_id  TEXT NOT NULL,
+    node       TEXT NOT NULL DEFAULT '',
+    tag        TEXT NOT NULL,
+    signature  TEXT NOT NULL,
+    PRIMARY KEY (cluster_id, kind, object_id)
+);
 
 -- The signature a kind was last read whole under (when is the table's own
 -- last_read_at). An object that appears in a kind read before under the same

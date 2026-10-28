@@ -2,12 +2,14 @@ package collector
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"math"
+	"math/big"
 	"net"
 	"slices"
 	"sort"
@@ -18,7 +20,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/bigjakk/nexara/internal/auditkey"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
@@ -74,17 +75,24 @@ const (
 	// pass's reads before any other node's guest is read.
 	observeNodeSkipAfter = 2
 
-	// What one reading may cost: of a kind listing more objects than this, or
-	// of a parent's objects (an IP set's entries), only those already held are
-	// compared, with a notice in the cluster's History once a day
-	// (noticeOverCap), and what nothing holds is filed by its id alone,
-	// observeAddedPastCap a pass (apply); a reading that finds more changes
-	// than observeMaxChanges in one kind files each, marked as one bulk change
-	// (markBulk) so a History can show a mass rewrite as one, and each is
-	// explained or not like any other.
-	observeMaxObjects   = 10000
-	observeAddedPastCap = 100
-	observeMaxChanges   = 50
+	// What one reading may cost: a kind listing more objects than
+	// observeMaxObjects — or a parent's objects (an IP set's entries) more than
+	// that, or a kind more than observeMaxKindObjects across all its parents —
+	// is past its cap, and compared by presence and one tag of each whole
+	// object (apply), its changes counted in one row a pass, with a notice in
+	// the cluster's History once a day (noticeOverCap). The access kinds take
+	// observeMaxAccessObjects, as many as user.cfg holds in practice. A reading
+	// that finds more changes than observeMaxChanges in one kind files each,
+	// marked as one bulk change (markBulk) so a History can show a mass rewrite
+	// as one, and each is explained or not like any other.
+	observeMaxObjects       = 10000
+	observeMaxKindObjects   = 100000
+	observeMaxAccessObjects = 100000
+	observeMaxChanges       = 50
+	// observePastCapNamed is how many ids a pass's row past the cap names of
+	// each of what came, went and changed, picked at random: its counts are
+	// exact.
+	observePastCapNamed = 500
 
 	// An object read changed in this many passes running is noisy — something
 	// automated writes it — and from then on is recorded at most once an hour
@@ -100,11 +108,9 @@ const (
 	// under: no reading has it, so the next is a baseline.
 	observeUnsettled = "unsettled"
 
-	// observeIDOnly is the signature an object is held under by its id alone:
-	// filed as added while it was past the cap, nothing of it read. It is
-	// compared for being there, not for its fields, until a reading back under
-	// the cap reads it whole, its baseline.
-	observeIDOnly = "id-only"
+	// observeWholeField is the field name an object's whole tag is made under,
+	// which no field of Proxmox's has.
+	observeWholeField = "\x00whole"
 
 	// observedClusterType is the type a change of the cluster as a whole is
 	// filed under, cluster / <cluster id>: the token's privileges moved, a
@@ -150,6 +156,7 @@ type ObserverQueries interface {
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.Vm, error)
 	ListClusterObjectState(ctx context.Context, clusterID uuid.UUID) ([]db.ListClusterObjectStateRow, error)
 	ListClusterObjectBaselines(ctx context.Context, clusterID uuid.UUID) ([]db.ListClusterObjectBaselinesRow, error)
+	ListClusterObjectPresence(ctx context.Context, clusterID uuid.UUID) ([]db.ListClusterObjectPresenceRow, error)
 	RecordObservedObjects(ctx context.Context, arg db.RecordObservedObjectsParams) error
 	MarkObservedBulk(ctx context.Context, arg db.MarkObservedBulkParams) error
 	DeleteClusterObjectState(ctx context.Context, arg db.DeleteClusterObjectStateParams) error
@@ -167,7 +174,8 @@ type Observer struct {
 	gap        time.Duration // the least time between two reads' starts; tests zero it
 	spread     bool          // whether guest reads are spaced over the interval; tests turn it off
 	maxObjects int           // observeMaxObjects; tests lower it
-	addedCap   int           // observeAddedPastCap; tests lower it
+	maxKind    int           // observeMaxKindObjects; tests lower it
+	maxAccess  int           // observeMaxAccessObjects; tests lower it
 
 	inflight sync.Map       // cluster ID -> struct{}{} while its pass runs
 	passes   sync.WaitGroup // the passes running
@@ -180,9 +188,19 @@ type Observer struct {
 	unread  map[string]int          // "cluster/node" -> passes in a row with no version ever read
 	hung    map[string]bool         // "cluster/node" -> it stopped answering a pass, and has not answered since
 	haMove  map[uuid.UUID]int       // passes left in which an HA group migration is Proxmox's (observeHA)
-	// heldBack is, per "<cluster>/<cap gate>", what the last pass past the cap
-	// left to file by id for the next (fileAddedPastCap).
-	heldBack map[string]map[string]bool
+	// presence is, per cluster, what it holds of the objects it compares past
+	// a cap (kind -> object -> presenceEntry): read once a process
+	// (cluster_object_presence) and kept between passes, as it moves only when
+	// an object does. A write that failed drops a cluster's, to be read again.
+	presence map[uuid.UUID]map[string]map[string]presenceEntry
+}
+
+// presenceEntry is what is held of an object past a cap: one tag of it whole,
+// and the signature it was read under.
+type presenceEntry struct {
+	Tag       string `json:"tag"`
+	Node      string `json:"node"`
+	Signature string `json:"signature"`
 }
 
 // NewObserver builds the observer. It refuses an encryption key crypto.Tag
@@ -206,8 +224,9 @@ func NewObserver(queries ObserverQueries, encryptionKey string, clients Observer
 		gap:        observeMinGap,
 		spread:     true,
 		maxObjects: observeMaxObjects,
-		addedCap:   observeAddedPastCap,
-		heldBack:   map[string]map[string]bool{},
+		maxKind:    observeMaxKindObjects,
+		maxAccess:  observeMaxAccessObjects,
+		presence:   map[uuid.UUID]map[string]map[string]presenceEntry{},
 		skips:      map[string]time.Time{},
 		held:       map[string]bool{},
 		noisy:      map[string]*noisyObject{},
@@ -232,6 +251,7 @@ func (o *Observer) ObserveAll(ctx context.Context) {
 		return
 	}
 	o.forgetQuietObjects(time.Now())
+	o.forgetInactivePresence(clusters)
 	showUnclassified(ctx, o.queries, o.logger)
 	for _, cluster := range clusters {
 		if _, busy := o.inflight.LoadOrStore(cluster.ID, struct{}{}); busy {
@@ -267,10 +287,12 @@ type observePass struct {
 	state     map[string]map[string]storedObject // kind -> object id -> stored reading
 	baselines map[string]storedBaseline          // kind -> its mark
 	notices   map[string]noticeGate              // notice key -> its gate (observedNoticesMark)
-	// pastCap is what this pass filed as appeared while its kind was past the
-	// cap, "<kind>/<id>" -> the window's start: a parent's own objects, read
-	// for the first time, appeared with it.
+	// pastCap is what this pass read whole that its kind held past the cap,
+	// "<kind>/<id>" -> when the kind went over: a parent's own objects, read
+	// for the first time, appeared with it, while it could not be seen.
 	pastCap map[string]time.Time
+	// presence is the cluster's, the observer's own (Observer.presence).
+	presence map[string]map[string]presenceEntry
 
 	calls     atomic.Int64
 	changes   atomic.Int64
@@ -466,7 +488,54 @@ func (p *observePass) load(ctx context.Context) error {
 	}
 	p.notices = map[string]noticeGate{}
 	_ = json.Unmarshal([]byte(p.baselines[observedNoticesMark].signature), &p.notices)
-	return nil
+	p.presence, err = p.o.presenceOf(ctx, p.cluster.ID)
+	return err
+}
+
+// presenceOf is a cluster's presence, read from the database the first time a
+// process (or a failed write) needs it.
+func (o *Observer) presenceOf(ctx context.Context, cluster uuid.UUID) (map[string]map[string]presenceEntry, error) {
+	o.mu.Lock()
+	held, ok := o.presence[cluster]
+	o.mu.Unlock()
+	if ok {
+		return held, nil
+	}
+	rows, err := o.queries.ListClusterObjectPresence(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
+	held = map[string]map[string]presenceEntry{}
+	for _, r := range rows {
+		if held[r.Kind] == nil {
+			held[r.Kind] = map[string]presenceEntry{}
+		}
+		held[r.Kind][r.ObjectID] = presenceEntry{Tag: r.Tag, Node: r.Node, Signature: r.Signature}
+	}
+	o.mu.Lock()
+	o.presence[cluster] = held
+	o.mu.Unlock()
+	return held, nil
+}
+
+// forgetPresence drops a cluster's presence after a write that failed: what
+// the database holds is read again next pass.
+func (o *Observer) forgetPresence(cluster uuid.UUID) {
+	o.mu.Lock()
+	delete(o.presence, cluster)
+	o.mu.Unlock()
+}
+
+// forgetInactivePresence drops the presence of the clusters no longer active,
+// read again should one be again.
+func (o *Observer) forgetInactivePresence(active []db.Cluster) {
+	keep := make(map[uuid.UUID]bool, len(active))
+	for _, c := range active {
+		keep[c.ID] = true
+	}
+	o.mu.Lock()
+	maps.DeleteFunc(o.presence, func(id uuid.UUID, _ map[string]map[string]presenceEntry) bool { return !keep[id] })
+	o.mu.Unlock()
 }
 
 func (p *observePass) observeClusterKind(ctx context.Context, k observeKind, sig string) {
@@ -523,26 +592,37 @@ func (p *observePass) skipKey(kind, node string) string {
 // capScope is what the cap counts on its own: a reading, or for a kind of a
 // parent's objects one parent's objects in it (kindReading.parentOf).
 type capScope struct {
-	parent   string
-	key      string // its notice gate: too_many_objects/<kind>/<node>[/<parent>]
-	listed   int
-	over     bool
-	wasOver  bool
-	since    time.Time        // the last whole reading before it went over; zero for none
-	added    []observedObject // past the cap, what nothing holds: filed by its id
-	appeared int              // back under, what it filed as appeared while over
+	parent  string
+	key     string // its notice gate: too_many_objects/<kind>/<node>[/<parent>]
+	listed  int
+	cap     int       // what listed is held to
+	over    bool      // past its cap in this reading
+	wasOver bool      // past it before this reading (its gate)
+	since   time.Time // the kind's last reading before it went over; zero for none
+	// byKind: a parent's objects under their own cap, counted as one of a
+	// kind past maxKind, whose own notice says so; the parent files none.
+	byKind bool
+	// Compared by presence (byPresence): the objects read, and of what is held
+	// the ids that came, went and changed.
+	current                 []observedObject
+	added, removed, changed []string
 }
+
+// byPresence says the scope is compared by presence and whole tags: past its
+// cap, or coming back under it.
+func (s *capScope) byPresence() bool { return s.over || s.wasOver }
 
 // apply compares one reading with what is stored and writes the outcome: a
 // node's reading (node set) covers that node's stored objects of the kind, a
 // cluster's reading all of them.
 //
-// Past the cap (capScopes) what is held is compared, gone included, and what
-// nothing holds is filed as added by its id alone and held by it
-// (fileAddedPastCap) until the reading is back under the cap: then what
-// nothing held is filed as added while it was over (detail.while_over_cap), in
-// a window from the last whole reading before it went over. Neither depends
-// on the fields' signature, since whether an object is there does not.
+// A scope past its cap (capScopes) is compared by presence and one tag of each
+// object whole (comparePresence): what came, went and changed is counted in one
+// row a pass, and an object is written only when it appears, changes or goes.
+// On the pass that crosses the cap, what was held field by field is compared so
+// one last time and moves to presence; on the pass back under, presence is
+// compared one last time and every object is stored field by field again,
+// silently: the tags covered the time over.
 func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig string, readAt, doneAt time.Time) {
 	sig = p.kindSig(rd.kind, sig)
 	prev := map[string]storedObject{}
@@ -551,15 +631,22 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			prev[id] = s
 		}
 	}
+	held := map[string]presenceEntry{}
+	for id, e := range p.presence[rd.kind] {
+		if node == "" || e.Node == node {
+			held[id] = e
+		}
+	}
 
-	if !p.o.passEmpty(p.skipKey(rd.kind, node), len(rd.objects) == 0 && len(rd.idsOnly) == 0 && len(rd.unread) == 0 && len(prev) > 0) {
+	if !p.o.passEmpty(p.skipKey(rd.kind, node), len(rd.objects) == 0 && len(rd.unread) == 0 && len(prev)+len(held) > 0) {
 		return
 	}
 
 	// Whether an object new to this reading was created, or is part of a
 	// baseline: a cluster's kind was read whole under this signature before; a
 	// node's objects were read under it before. whole is the last reading of
-	// it under any signature, what a reading past the cap goes by.
+	// it under any signature: a scope with none takes its first reading past
+	// the cap as its baseline.
 	var (
 		baselined         bool
 		addedSince, whole time.Time
@@ -577,6 +664,9 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 				baselined, addedSince = true, maxTime(addedSince, s.lastSeen)
 			}
 		}
+		if len(held) > 0 && whole.IsZero() {
+			whole = readAt // held past the cap: read before
+		}
 	}
 	scopes, gone := p.capScopes(rd, node, whole)
 	scopeOf := func(id string) *capScope {
@@ -587,6 +677,9 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 	}
 
 	var batch recordBatch
+	// Whether the kind is held wholly by presence: nothing held or read field
+	// by field.
+	presenceOnly := len(prev) == 0 && len(rd.objects) > 0
 	seen := make(map[string]bool, len(rd.objects))
 	for _, obj := range rd.objects {
 		if seen[obj.id] {
@@ -596,14 +689,15 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		}
 		s := scopeOf(obj.id)
 		old, existed := prev[obj.id]
-		if s.over && (!existed || old.signature == observeIDOnly) {
+		presenceOnly = presenceOnly && s.byPresence()
+		if s.byPresence() {
 			seen[obj.id] = true
-			if existed {
-				batch.touched = append(batch.touched, obj.id)
-			} else if !obj.hardware {
-				s.added = append(s.added, obj)
+			s.current = append(s.current, obj)
+			// Only one held field by field, on the pass that crosses the cap,
+			// is compared so: its last row of its own.
+			if !existed || obj.shallow || s.wasOver {
+				continue
 			}
-			continue
 		}
 		tags, err := p.tagObject(rd.kind, obj)
 		if err != nil {
@@ -614,16 +708,23 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			continue
 		}
 		seen[obj.id] = true
+		if s.byPresence() {
+			if d := diffTags(old.tags, tags); old.signature == sig && len(d.fields) > 0 && !allIn(d.fields, rd.quiet) {
+				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", d, old.lastSeen, doneAt), doneAt))
+			}
+			continue
+		}
 		switch {
 		case !existed:
 			batch.save(obj, tags, sig, readAt)
-			// Back under the cap, or one of a parent that appeared past its
-			// own kind's: it appeared while it could not be seen.
-			since, pastCap := addedSince, s.wasOver
-			if pastCap {
-				since = s.since
-			} else if rd.parentOf != nil {
+			// One of a parent read whole for the first time since its kind was
+			// past the cap appeared while it could not be seen.
+			since, pastCap := addedSince, false
+			if rd.parentOf != nil {
 				since, pastCap = p.pastCapSince(rd.parentKind, rd.parentOf(obj.id))
+				if !pastCap {
+					since = addedSince
+				}
 			}
 			if obj.hardware || (pastCap && since.IsZero()) || (!pastCap && !baselined) {
 				break
@@ -631,15 +732,8 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			row := changeRow(obj, "added", tagDiff{joined: allMembers(tags.members)}, since, doneAt)
 			if pastCap {
 				row.Detail["while_over_cap"] = true
-				s.appeared++
-				p.notePastCap(rd.kind, obj.id, since)
 			}
 			batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), row, doneAt))
-		case old.signature == observeIDOnly:
-			// Back under the cap, read whole: its baseline; its addition was
-			// filed by its id while it was over.
-			batch.save(obj, tags, sig, readAt)
-			p.notePastCap(rd.kind, obj.id, s.since)
 		case old.signature != sig:
 			batch.save(obj, tags, sig, readAt)
 		default:
@@ -655,21 +749,7 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			}
 		}
 	}
-	for _, id := range rd.idsOnly {
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		if _, held := prev[id]; held {
-			batch.touched = append(batch.touched, id)
-		} else if s := scopeOf(id); s.over {
-			s.added = append(s.added, observedObject{id: id, resourceType: rd.kind, resourceID: id, node: node})
-		}
-	}
-	var notices []observedChangeRow
-	for _, key := range slices.Sorted(maps.Keys(scopes)) {
-		notices = append(notices, p.fileAddedPastCap(&batch, rd.kind, node, scopes[key], readAt, doneAt)...)
-	}
+	var children map[string]int // childrenOf, once a parent goes
 	for id, old := range prev {
 		if seen[id] || rd.unread[id] {
 			continue
@@ -680,83 +760,290 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		}
 		flushed := p.o.quiet(p.objectKey(rd.kind, id))
 		batch.record(flushed)
-		// Over the cap or not: an object held is compared, gone included,
-		// and one held by its id alone is filed as gone like any other.
-		switch obj := removedObject(rd.kind, id, old.node); {
-		case old.signature == observeIDOnly:
-			row := changeRow(obj, "removed", tagDiff{}, old.lastSeen, doneAt)
-			row.Detail["while_over_cap"] = true
+		// Over the cap or not: an object held field by field is compared,
+		// gone included.
+		if old.signature == sig && !p.wasHardware(rd.kind, id, old) {
+			obj := removedObject(rd.kind, id, old.node)
+			row := changeRow(obj, "removed", tagDiff{left: allMembers(old.tags.members)}, old.lastSeen, doneAt)
+			if rd.childKind != "" {
+				if children == nil {
+					children = p.childrenOf(rd)
+				}
+				if n := children[id]; n > 0 {
+					row.Detail["children"] = n
+				}
+			}
 			batch.record([]observedChangeRow{row})
-		case old.signature == sig && !p.wasHardware(rd.kind, id, old):
-			removed := tagDiff{left: allMembers(old.tags.members)}
-			batch.record([]observedChangeRow{changeRow(obj, "removed", removed, old.lastSeen, doneAt)})
 		}
 	}
 
-	// The kind's mark moves past the cap too: what is new there is filed by
-	// its id, and back under in the window its gate keeps, not the mark's.
+	// What is held by presence: compared per scope, and a parent gone takes
+	// its objects with it, silently (its own removal says how many).
+	heldIn := map[string][]string{}
+	for id := range held {
+		switch k := ""; {
+		case rd.forget[id]:
+			batch.presenceRemoved = append(batch.presenceRemoved, id)
+		case rd.unread[id]:
+		default:
+			if rd.parentOf != nil {
+				k = rd.parentOf(id)
+			}
+			heldIn[k] = append(heldIn[k], id)
+		}
+	}
+	var notices []observedChangeRow
+	gates := map[string]*noticeGate{}
+	for k := range gone {
+		gates[k] = nil
+	}
+	for _, key := range slices.Sorted(maps.Keys(scopes)) {
+		s := scopes[key]
+		if !s.byPresence() {
+			continue
+		}
+		p.comparePresence(&batch, rd, s, held, heldIn[key], prev, sig, readAt)
+		if row, ok := p.pastCapRow(rd.kind, node, s); ok {
+			notices = append(notices, row)
+		}
+		switch gate, given := p.notices[s.key]; {
+		case s.byKind:
+			if !given {
+				gates[s.key] = &noticeGate{Since: s.since} // over, and never noticed on its own
+			}
+		case s.over && (!given || time.Since(gate.Given) >= observeSkipFor):
+			notices = append(notices, p.noticeOverCap(rd.kind, node, s))
+			gates[s.key] = &noticeGate{Since: s.since, Given: time.Now()}
+		case !s.over:
+			if !gate.Given.IsZero() {
+				notices = append(notices, p.noticeBackUnderCap(rd.kind, node, s))
+			}
+			gates[s.key] = nil
+		}
+	}
+
+	// The kind's mark moves past the cap too, but a kind held wholly by
+	// presence writes nothing for a reading that moved nothing, its mark
+	// included: no object it holds reads that time.
 	mark := ""
 	if node == "" && len(rd.unread) == 0 {
 		mark = sig
 	}
+	if presenceOnly && batch.empty() && len(notices) == 0 && len(gates) == 0 && p.baselines[rd.kind].signature == mark {
+		mark = ""
+	}
 	p.markBulk(rd.kind, batch.changes, uuid.NewString())
 	batch.record(notices)
+	next := p.notices
+	if len(gates) > 0 {
+		next = maps.Clone(p.notices)
+		if next == nil {
+			next = map[string]noticeGate{}
+		}
+		for k, g := range gates {
+			if g == nil {
+				delete(next, k)
+			} else {
+				next[k] = *g
+			}
+		}
+		encoded, err := json.Marshal(next)
+		if err != nil {
+			return
+		}
+		batch.notices = string(encoded)
+	}
 	if !p.write(ctx, rd.kind, batch, readAt, mark) {
 		return
 	}
+	p.notices = next
 	if mark != "" {
 		p.baselines[rd.kind] = storedBaseline{signature: mark, lastRead: readAt}
 	}
-	if len(gone) > 0 {
-		p.saveNotices(ctx, gone)
-	}
-	for _, key := range slices.Sorted(maps.Keys(scopes)) {
-		switch s := scopes[key]; {
-		case s.over:
-			p.noticeOverCap(ctx, rd.kind, node, s)
-		case s.wasOver:
-			p.noticeBackUnderCap(ctx, rd.kind, node, s)
+}
+
+// comparePresence compares a scope's objects with what is held of them, one tag
+// each whole: an id not held came (unless this reading is the scope's first,
+// its baseline), one held and not read went, a tag that moved changed. Past the
+// cap what came or changed is written to presence, what went taken out; back
+// under, every object is stored field by field again and presence dropped.
+// Held field by field (the pass that crosses), an object moves to presence
+// without a count: its own row compared it.
+func (p *observePass) comparePresence(batch *recordBatch, rd kindReading, s *capScope, held map[string]presenceEntry, heldIDs []string, prev map[string]storedObject, sig string, readAt time.Time) {
+	baseline := s.over && !s.wasOver && s.since.IsZero()
+	read := make(map[string]bool, len(s.current))
+	for _, obj := range s.current {
+		read[obj.id] = true
+		tag, err := p.wholeTag(rd.kind, obj)
+		if err != nil {
+			continue
+		}
+		e, isHeld := held[obj.id]
+		_, fieldByField := prev[obj.id]
+		write := true
+		switch {
+		case fieldByField:
+			if s.over {
+				batch.removed = append(batch.removed, obj.id)
+			}
+		case !isHeld:
+			if !baseline && !obj.hardware {
+				s.added = append(s.added, obj.id)
+			}
+		case e.Signature != sig:
+			// Read under another signature: its new tag, and no count.
+		case e.Tag != tag:
+			s.changed = append(s.changed, obj.id)
+		default:
+			write = false
+		}
+		if !s.over {
+			// Back under: stored field by field again, its baseline.
+			if tags, err := p.tagObject(rd.kind, obj); err == nil {
+				batch.save(obj, tags, sig, readAt)
+			}
+			p.notePastCap(rd.kind, obj.id, s.since)
+			continue
+		}
+		if write {
+			batch.presence = append(batch.presence, observedPresenceRow{ObjectID: obj.id, Node: obj.node, Tag: tag, Signature: sig})
 		}
 	}
+	for _, id := range heldIDs {
+		if read[id] {
+			if !s.over {
+				batch.presenceRemoved = append(batch.presenceRemoved, id)
+			}
+			continue
+		}
+		s.removed = append(s.removed, id)
+		batch.presenceRemoved = append(batch.presenceRemoved, id)
+	}
+}
+
+// pastCapRow is a scope's one row a pass past the cap: what came, went and
+// changed, counted exactly, and of each at most observePastCapNamed ids, picked
+// at random so no flood can choose which are named. It is a notice: never
+// explained, it names no field and no member. None when nothing moved.
+func (p *observePass) pastCapRow(kind, node string, s *capScope) (observedChangeRow, bool) {
+	if len(s.added)+len(s.removed)+len(s.changed) == 0 {
+		return observedChangeRow{}, false
+	}
+	resourceType, resourceID := p.noticeTarget(kind, node)
+	row := noticeRow(resourceType, resourceID, "changed_past_cap", []string{kind})
+	row.Detail["while_over_cap"] = true
+	for name, ids := range map[string][]string{"added": s.added, "removed": s.removed, "changed": s.changed} {
+		row.Detail[name] = len(ids)
+		row.Detail[name+"_ids"] = sampleIDs(ids, observePastCapNamed)
+	}
+	if node != "" {
+		row.Detail["node"] = node
+	}
+	if s.parent != "" {
+		row.Detail["parent"] = s.parent
+	}
+	return row, true
+}
+
+// sampleIDs is at most n of ids, picked at random, sorted.
+func sampleIDs(ids []string, n int) []string {
+	out := slices.Clone(ids)
+	if len(out) > n {
+		// The first n of a shuffle, drawn from crypto/rand: what a flood
+		// names cannot be steered.
+		for i := range n {
+			j, err := rand.Int(rand.Reader, big.NewInt(int64(len(out)-i)))
+			if err != nil {
+				break
+			}
+			k := i + int(j.Int64())
+			out[i], out[k] = out[k], out[i]
+		}
+		out = out[:n]
+	}
+	slices.Sort(out)
+	return out
+}
+
+// wholeTag is one tag of an object whole: of what its listing said of it, for a
+// kind read object by object (past the cap only the listing is read), or of its
+// fields, lists and members.
+func (p *observePass) wholeTag(kind string, obj observedObject) (string, error) {
+	content := map[string]any{"fields": obj.fields, "lists": obj.lists, "members": obj.members}
+	if obj.listing != nil {
+		content = map[string]any{"listing": obj.listing}
+	}
+	b, err := json.Marshal(content)
+	if err != nil {
+		return "", err
+	}
+	return p.o.tags.tag(p.cluster.ID, kind, obj.id, observeWholeField, string(b))
+}
+
+// childrenOf is how many objects each parent of rd's kind holds, field by
+// field or by presence: a parent gone takes its own with it, and its removal
+// says how many rather than filing each.
+func (p *observePass) childrenOf(rd kindReading) map[string]int {
+	out := map[string]int{}
+	for _, id := range p.heldIDs(rd.childKind) {
+		out[rd.childParentOf(id)]++
+	}
+	return out
+}
+
+// capFor is a kind's cap: the access kinds' is what user.cfg holds in practice.
+func (p *observePass) capFor(kind string) int {
+	switch kind {
+	case "pve_acl", "pve_user", "pve_group", "pve_token", "pve_role":
+		return p.o.maxAccess
+	}
+	return p.o.maxObjects
 }
 
 // capScopes is what the cap counts in a reading, each with its gate: the
 // reading as a whole or, for a kind of a parent's objects, each parent whose
 // objects it read (kindReading.parents) on its own, so one IP set past the cap
-// leaves every other set's entries compared. whole is the kind's last reading
-// under any signature: a scope going over keeps it in its gate, the window its
-// additions are filed in. gone drops the gates of parents no longer listed.
-func (p *observePass) capScopes(rd kindReading, node string, whole time.Time) (scopes map[string]*capScope, gone map[string]*noticeGate) {
+// leaves every other set's entries compared field by field — unless the kind is
+// past maxKind across all its parents, which puts every parent with objects past
+// it (byKind) and is the kind's own scope's notice: that scope holds none of the
+// objects. whole is the kind's last reading: a scope going over keeps it in its
+// gate. gone drops the gates of parents no longer listed.
+func (p *observePass) capScopes(rd kindReading, node string, whole time.Time) (scopes map[string]*capScope, gone map[string]bool) {
 	key := "too_many_objects/" + rd.kind + "/" + node
-	scopes = map[string]*capScope{"": {key: key, listed: max(len(rd.objects)+len(rd.idsOnly), rd.listed)}}
+	limit := p.capFor(rd.kind)
+	scopes = map[string]*capScope{"": {key: key, listed: max(len(rd.objects), rd.listed), cap: limit}}
 	if rd.parentOf != nil {
-		scopes[""].listed = 0
+		scopes[""].cap = p.o.maxKind
 		for _, obj := range rd.objects {
 			parent := rd.parentOf(obj.id)
 			if scopes[parent] == nil {
-				scopes[parent] = &capScope{parent: parent, key: key + "/" + parent}
+				scopes[parent] = &capScope{parent: parent, key: key + "/" + parent, cap: limit}
 			}
 			scopes[parent].listed++
 		}
 		for parent, read := range rd.parents {
 			if read && scopes[parent] == nil {
-				scopes[parent] = &capScope{parent: parent, key: key + "/" + parent}
+				scopes[parent] = &capScope{parent: parent, key: key + "/" + parent, cap: limit}
 			}
 		}
 		for k := range p.notices {
 			if parent, ok := strings.CutPrefix(k, key+"/"); ok {
 				if _, listed := rd.parents[parent]; !listed {
 					if gone == nil {
-						gone = map[string]*noticeGate{}
+						gone = map[string]bool{}
 					}
-					gone[k] = nil
+					gone[k] = true
 				}
 			}
 		}
 	}
-	for _, s := range scopes {
+	pastKind := scopes[""].listed > scopes[""].cap
+	for k, s := range scopes {
 		gate, was := p.notices[s.key]
-		s.over, s.wasOver, s.since = s.listed > p.o.maxObjects, was, gate.Since
+		s.over, s.wasOver, s.since = s.listed > s.cap, was, gate.Since
+		if k != "" && pastKind && s.listed > 0 && !s.over {
+			s.over, s.byKind = true, true
+		}
 		if s.over && !was {
 			s.since = whole
 		}
@@ -764,61 +1051,8 @@ func (p *observePass) capScopes(rd kindReading, node string, whole time.Time) (s
 	return scopes, gone
 }
 
-// fileAddedPastCap files what nothing holds of a scope past the cap as added,
-// by its id alone (detail.while_over_cap, no field), and holds it by its id:
-// at most addedCap a pass, those the last pass did not leave waiting first, so
-// one made while a flood waits is filed in the pass it is seen. The rest wait,
-// and the notice it gives says how many (too_many_added). A scope never read
-// whole files none: without a reading of its ids, nothing tells an object made
-// past the cap from one that was there.
-func (p *observePass) fileAddedPastCap(batch *recordBatch, kind, node string, s *capScope, readAt, doneAt time.Time) []observedChangeRow {
-	key := p.cluster.ID.String() + "/" + s.key
-	if !s.over || s.since.IsZero() {
-		p.o.holdBack(key, nil)
-		return nil
-	}
-	waited := p.o.holdBack(key, nil)
-	slices.SortFunc(s.added, func(a, b observedObject) int {
-		if waited[a.id] != waited[b.id] {
-			if waited[a.id] {
-				return 1
-			}
-			return -1
-		}
-		return strings.Compare(a.id, b.id)
-	})
-	n := min(len(s.added), p.o.addedCap)
-	for _, obj := range s.added[:n] {
-		row := changeRow(obj, "added", tagDiff{}, s.since, doneAt)
-		row.Detail["while_over_cap"] = true
-		batch.record([]observedChangeRow{row})
-		batch.save(obj, objectTags{}, observeIDOnly, readAt)
-	}
-	rest := s.added[n:]
-	if len(rest) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(rest))
-	for _, obj := range rest {
-		ids = append(ids, obj.id)
-	}
-	p.o.holdBack(key, ids)
-	p.o.logger.Info("object observer: more objects appeared past the cap than one pass files; the rest wait",
-		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "parent", s.parent, "waiting", len(rest))
-	resourceType, resourceID := p.noticeTarget(kind, node)
-	row := noticeRow(resourceType, resourceID, "too_many_added", []string{kind})
-	row.Detail["held_back"], row.Detail["limit"] = len(rest), p.o.addedCap
-	if node != "" {
-		row.Detail["node"] = node
-	}
-	if s.parent != "" {
-		row.Detail["parent"] = s.parent
-	}
-	return []observedChangeRow{row}
-}
-
-// notePastCap and pastCapSince keep what this pass filed as appeared past its
-// kind's cap, for its own objects read after it (observePass.pastCap).
+// notePastCap and pastCapSince keep what this pass read whole that its kind
+// held past the cap, for its own objects read after it (observePass.pastCap).
 func (p *observePass) notePastCap(kind, id string, since time.Time) {
 	if since.IsZero() {
 		return
@@ -856,54 +1090,40 @@ func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string)
 	}
 }
 
-// noticeOverCap warns, and files in the cluster's History, once a day while it
-// lasts, that a kind (or a parent's objects: detail.parent) lists more objects
-// than are compared: what a reading cannot hold is filed by its id alone, and
-// the History should say so.
-//
-// The scope's since is its last whole reading before it went over, kept in the
-// gate: what it did not hold is filed as added since then (zero for a kind
-// never read whole, whose next whole reading is a baseline).
-func (p *observePass) noticeOverCap(ctx context.Context, kind, node string, s *capScope) {
-	gate, ok := p.notices[s.key]
-	if ok && time.Since(gate.Given) < observeSkipFor {
-		return
-	}
-	p.o.logger.Warn("object observer: a kind lists more objects than are compared; comparing only those it held",
-		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "parent", s.parent, "objects", s.listed, "cap", p.o.maxObjects)
+// noticeOverCap is the notice, once a day while it lasts, that a kind (or a
+// parent's objects: detail.parent) lists more objects than are compared field
+// by field: they are compared by presence and counted (pastCapRow). Its gate
+// goes in the same statement (apply).
+func (p *observePass) noticeOverCap(kind, node string, s *capScope) observedChangeRow {
+	p.o.logger.Warn("object observer: a kind lists more objects than are compared field by field; counting its changes",
+		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "parent", s.parent, "objects", s.listed)
 	resourceType, resourceID := p.noticeTarget(kind, node)
 	row := noticeRow(resourceType, resourceID, "too_many_objects", []string{kind})
-	row.Detail["objects"], row.Detail["cap"] = s.listed, p.o.maxObjects
+	row.Detail["objects"], row.Detail["cap"] = s.listed, s.cap
 	if node != "" {
 		row.Detail["node"] = node
 	}
 	if s.parent != "" {
 		row.Detail["parent"] = s.parent
 	}
-	gate.Since, gate.Given = s.since, time.Now()
-	p.saveNotices(ctx, map[string]*noticeGate{s.key: &gate}, row)
+	return row
 }
 
-// noticeBackUnderCap files, once, that a kind (or a parent's objects) is back
-// under the cap, with how many objects it filed as appeared while it was over,
-// or baseline when it had no whole reading before it went over and this one is
-// its baseline. The gate goes with it: a kind over the cap again is a new
-// notice at once, and one whose notice could not be written is back under
-// again next pass.
-func (p *observePass) noticeBackUnderCap(ctx context.Context, kind, node string, s *capScope) {
-	baseline := s.since.IsZero()
-	p.o.logger.Info("object observer: a kind is back under the cap; compared whole again",
-		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "parent", s.parent, "appeared", s.appeared, "baseline", baseline)
+// noticeBackUnderCap is the notice, once, that a kind (or a parent's objects)
+// is back under the cap and compared field by field again; its gate goes with
+// it, in the same statement.
+func (p *observePass) noticeBackUnderCap(kind, node string, s *capScope) observedChangeRow {
+	p.o.logger.Info("object observer: a kind is back under the cap; compared field by field again",
+		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "parent", s.parent)
 	resourceType, resourceID := p.noticeTarget(kind, node)
 	row := noticeRow(resourceType, resourceID, "back_under_cap", []string{kind})
-	row.Detail["appeared"], row.Detail["baseline"] = s.appeared, baseline
 	if node != "" {
 		row.Detail["node"] = node
 	}
 	if s.parent != "" {
 		row.Detail["parent"] = s.parent
 	}
-	p.saveNotices(ctx, map[string]*noticeGate{s.key: nil}, row)
+	return row
 }
 
 // noticeTarget is where a kind's notice is filed: under its own type, at an id
@@ -954,24 +1174,22 @@ func (p *observePass) saveNotices(ctx context.Context, changes map[string]*notic
 }
 
 // capListing keeps a listing whose every object costs a read of its own to the
-// cap: past it, only the objects held whole are read on, the ids of the rest
-// go with the reading (kindReading.idsOnly, compared and filed by id alone),
-// and so does the count it listed (kindReading.listed), so the kind is
-// compared as one past the cap.
-func (p *observePass) capListing(kind string, items []map[string]json.RawMessage, idOf func(map[string]json.RawMessage) string) (kept []map[string]json.RawMessage, idsOnly []string, listed int) {
-	if len(items) <= p.o.maxObjects {
+// cap: past it, only the objects held field by field are read on (the pass
+// that crosses the cap compares them so a last time), the rest by what the
+// listing says of them alone (shallow), and the count it listed goes with the
+// reading (kindReading.listed), so the kind is compared as one past the cap.
+func (p *observePass) capListing(kind string, items []map[string]json.RawMessage, idOf func(map[string]json.RawMessage) string) (kept, shallow []map[string]json.RawMessage, listed int) {
+	if len(items) <= p.capFor(kind) {
 		return items, nil, 0
 	}
-	kept = make([]map[string]json.RawMessage, 0, len(p.state[kind]))
 	for _, item := range items {
-		id := idOf(item)
-		if s, held := p.state[kind][id]; held && s.signature != observeIDOnly {
+		if _, held := p.state[kind][idOf(item)]; held {
 			kept = append(kept, item)
-		} else if auditkey.ValidID(id) {
-			idsOnly = append(idsOnly, id)
+		} else {
+			shallow = append(shallow, item)
 		}
 	}
-	return kept, idsOnly, len(items)
+	return kept, shallow, len(items)
 }
 
 // tagObject tags each of an object's fields.
@@ -1396,20 +1614,37 @@ func decodeList(raw json.RawMessage) ([]map[string]json.RawMessage, bool) {
 	return items, true
 }
 
-// forgetKind drops everything stored of one of the cluster's kinds, recording
+// forgetKind drops everything held of one of the cluster's kinds, recording
 // nothing.
 func (p *observePass) forgetKind(ctx context.Context, kind string) {
-	ids := make([]string, 0, len(p.state[kind]))
-	for id := range p.state[kind] {
-		ids = append(ids, id)
+	prefix := "too_many_objects/" + kind + "/"
+	p.forgetHeld(ctx, kind, slices.Collect(maps.Keys(p.state[kind])), slices.Collect(maps.Keys(p.presence[kind])),
+		func(gate string) bool { return strings.HasPrefix(gate, prefix) })
+}
+
+// forgetHeld drops, recording nothing, what is held of some of a kind's
+// objects, field by field (state) and by presence, and the notice gates drop
+// names, in one statement.
+func (p *observePass) forgetHeld(ctx context.Context, kind string, state, presence []string, drop func(gate string) bool) {
+	batch := recordBatch{removed: state, presenceRemoved: presence}
+	next := maps.Clone(p.notices)
+	maps.DeleteFunc(next, func(gate string, _ noticeGate) bool { return drop(gate) })
+	if len(next) != len(p.notices) {
+		encoded, err := json.Marshal(next)
+		if err != nil {
+			return
+		}
+		batch.notices = string(encoded)
 	}
-	if err := p.o.queries.DeleteClusterObjectState(ctx, db.DeleteClusterObjectStateParams{
-		ClusterID: p.cluster.ID, Kind: kind, ObjectIds: ids,
-	}); err != nil {
-		p.o.logger.Debug("object observer: forget a kind", "cluster_id", p.cluster.ID, "kind", kind, "error", err)
+	if batch.empty() || !p.write(ctx, kind, batch, time.Now(), "") {
 		return
 	}
-	delete(p.state, kind)
+	if batch.notices != "" {
+		p.notices = next
+	}
+	for _, id := range state {
+		delete(p.state[kind], id)
+	}
 }
 
 // allIn reports whether every field is in set: a change set made only of
@@ -1514,6 +1749,24 @@ type recordBatch struct {
 	states  []observedStateRow
 	removed []string
 	touched []string
+	// presence and presenceRemoved are the objects past a cap that came or
+	// changed, and went; notices the gates the batch leaves, "" for none moved.
+	presence        []observedPresenceRow
+	presenceRemoved []string
+	notices         string
+}
+
+// observedPresenceRow is one object held past a cap: its whole tag.
+type observedPresenceRow struct {
+	ObjectID  string `json:"object_id"`
+	Node      string `json:"node"`
+	Tag       string `json:"tag"`
+	Signature string `json:"signature"`
+}
+
+func (b *recordBatch) empty() bool {
+	return len(b.changes) == 0 && len(b.states) == 0 && len(b.removed) == 0 && len(b.touched) == 0 &&
+		len(b.presence) == 0 && len(b.presenceRemoved) == 0 && b.notices == ""
 }
 
 func (b *recordBatch) save(obj observedObject, tags objectTags, sig string, readAt time.Time) {
@@ -1565,7 +1818,7 @@ func noticeRow(resourceType, resourceID, notice string, fields []string) observe
 // failed write is logged, and the next pass compares against the old reading
 // and finds the same changes again.
 func (p *observePass) write(ctx context.Context, kind string, b recordBatch, seenAt time.Time, mark string) bool {
-	if len(b.changes) == 0 && len(b.states) == 0 && len(b.removed) == 0 && len(b.touched) == 0 && mark == "" {
+	if b.empty() && mark == "" {
 		return true
 	}
 	changes, err := json.Marshal(b.changes)
@@ -1576,27 +1829,55 @@ func (p *observePass) write(ctx context.Context, kind string, b recordBatch, see
 	if err != nil {
 		return false
 	}
+	presence, err := json.Marshal(nonNilPresence(b.presence))
+	if err != nil {
+		return false
+	}
 	if p.cluster.ID == uuid.Nil {
 		// Never a NULL-cluster row from here: only a global kind's trigger may
 		// write one (migrations/000125), and a zero UUID names no cluster.
 		return false
 	}
 	if err := p.o.queries.RecordObservedObjects(ctx, db.RecordObservedObjectsParams{
-		ClusterID: p.cluster.ID,
-		Kind:      kind,
-		Changes:   changes,
-		States:    states,
-		Removed:   nonNil(b.removed),
-		Touched:   nonNil(b.touched),
-		SeenAt:    seenAt,
-		Baseline:  mark,
+		ClusterID:       p.cluster.ID,
+		Kind:            kind,
+		Changes:         changes,
+		States:          states,
+		Removed:         nonNil(b.removed),
+		Touched:         nonNil(b.touched),
+		SeenAt:          seenAt,
+		Baseline:        mark,
+		Presence:        presence,
+		PresenceRemoved: nonNil(b.presenceRemoved),
+		Notices:         b.notices,
 	}); err != nil {
 		p.o.logger.Warn("object observer: record a reading",
 			"cluster_id", p.cluster.ID, "kind", kind, "error", err)
+		if len(b.presence) > 0 || len(b.presenceRemoved) > 0 {
+			p.o.forgetPresence(p.cluster.ID)
+		}
 		return false
 	}
 	p.changes.Add(int64(len(b.changes)))
+	if len(b.presence) > 0 || len(b.presenceRemoved) > 0 {
+		if p.presence[kind] == nil {
+			p.presence[kind] = map[string]presenceEntry{}
+		}
+		for _, id := range b.presenceRemoved {
+			delete(p.presence[kind], id)
+		}
+		for _, r := range b.presence {
+			p.presence[kind][r.ObjectID] = presenceEntry{Tag: r.Tag, Node: r.Node, Signature: r.Signature}
+		}
+	}
 	return true
+}
+
+func nonNilPresence(rows []observedPresenceRow) []observedPresenceRow {
+	if rows == nil {
+		return []observedPresenceRow{}
+	}
+	return rows
 }
 
 func nonNil(s []string) []string {
@@ -1754,24 +2035,6 @@ func (o *Observer) quiet(key string) []observedChangeRow {
 	return []observedChangeRow{*n.held}
 }
 
-// holdBack swaps what a scope past the cap left to file by id for the next
-// pass (key "<cluster>/<cap gate>"), giving back the last pass's.
-func (o *Observer) holdBack(key string, ids []string) map[string]bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	last := o.heldBack[key]
-	if len(ids) == 0 {
-		delete(o.heldBack, key)
-		return last
-	}
-	next := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		next[id] = true
-	}
-	o.heldBack[key] = next
-	return last
-}
-
 // forgetQuietObjects drops the streaks of objects not changed for a day: an
 // object no longer read (its guest gone, its node removed) would keep one.
 func (o *Observer) forgetQuietObjects(now time.Time) {
@@ -1817,32 +2080,33 @@ func sumCounts(held, next map[string]any) map[string]any {
 // nodeKinds are the kinds whose objects belong to a node.
 var nodeKinds = []string{"network", "node_options", "acme_config", "node_dns", "node_time", "node_firewall"}
 
-// forgetDepartedNodes drops, recording nothing, what is stored of the objects
-// of nodes that have left the cluster: no reading would ever compare them again.
+// forgetDepartedNodes drops, recording nothing, what is held of the objects of
+// nodes that have left the cluster, and their kinds' notice gates: no reading
+// would ever compare them again, and one of a node of that name added later is
+// its first.
 func (p *observePass) forgetDepartedNodes(ctx context.Context, nodes []db.Node) {
 	member := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
 		member[n.Name] = true
 	}
 	for _, kind := range nodeKinds {
-		var gone []string
+		var state, presence []string
 		for id, s := range p.state[kind] {
 			if s.node != "" && !member[s.node] {
-				gone = append(gone, id)
+				state = append(state, id)
 			}
 		}
-		if len(gone) == 0 {
-			continue
+		for id, e := range p.presence[kind] {
+			if e.Node != "" && !member[e.Node] {
+				presence = append(presence, id)
+			}
 		}
-		if err := p.o.queries.DeleteClusterObjectState(ctx, db.DeleteClusterObjectStateParams{
-			ClusterID: p.cluster.ID, Kind: kind, ObjectIds: gone,
-		}); err != nil {
-			p.o.logger.Debug("object observer: forget a departed node's objects", "cluster_id", p.cluster.ID, "error", err)
-			continue
-		}
-		for _, id := range gone {
-			delete(p.state[kind], id)
-		}
+		prefix := "too_many_objects/" + kind + "/"
+		p.forgetHeld(ctx, kind, state, presence, func(gate string) bool {
+			rest, ok := strings.CutPrefix(gate, prefix)
+			node, _, _ := strings.Cut(rest, "/")
+			return ok && node != "" && !member[node]
+		})
 	}
 }
 
