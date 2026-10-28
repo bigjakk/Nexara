@@ -51,7 +51,6 @@ var ruleReferenceSites = []string{
 	"registry_backup.go pveBackupJobIDParam = pve-object-id",
 	"registry_backup.go registerBackupEndpoints [datastore] = pbs-safe-id-or-empty",
 	"registry_backup.go registerBackupEndpoints [store] = pbs-safe-id-or-empty",
-	"registry_backup_job_history.go backupJobHistoryIDParam = pve-configid-existing",
 	"registry_ceph.go cephPoolNameParam = ceph-pool-name",
 	"registry_ceph.go createCephPoolParams [name] = ceph-pool-name",
 	"registry_containers.go createCTParams [storage] = storage-id-or-empty",

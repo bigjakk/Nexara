@@ -30,6 +30,7 @@ func TestBackupHistoryRoutes(t *testing.T) {
 		server  = "5a7b0001-0000-4000-8000-000000000001"
 		job     = "5a7b0002-0000-4000-8000-000000000002"
 		session = "5a7b0003-0000-4000-8000-000000000003"
+		uuidJob = "5a7b0004-0000-4000-8000-000000000004"
 		base    = "/api/v1/clusters/" + testClusterID
 	)
 	// The keys a storage's disk moves and restores name it by, in each type.
@@ -60,7 +61,14 @@ func TestBackupHistoryRoutes(t *testing.T) {
 			"veeam_session[" + session + "].veeam_server_id=" + server},
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/backup-1a2b3c4d/history",
 			clusterScope + "/backup-jobs", `backup=backup-1a2b3c4d~backup\_job\_%`},
-		// A node's name is a job id too, to the shape: its rows are the node's, not the job's.
+		// A job made without an id is named by a UUID, which starts with a digit as often as not: it
+		// is a job's id like any other, the one the job's own routes take.
+		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/" + uuidJob + "/history", "",
+			`backup=` + uuidJob + `~backup\_job\_%`},
+		// A guest's number and a node's name are ids of the same type and shape: held to a job's
+		// actions, they read none of that guest's or node's backups.
+		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/100/history", "",
+			`backup=100~backup\_job\_%`},
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/pve-01/history", "",
 			`backup=pve-01~backup\_job\_%`},
 	}
@@ -125,28 +133,6 @@ func TestPBSHistoryGate(t *testing.T) {
 	ep := declaredEndpoint(t, fiber.MethodGet, pbsBackupScope+"/history")
 	if want := []Check{global("audit"), global("pbs"), global("backup")}; !slices.Equal(ep.Permissions.AllOf, want) {
 		t.Errorf("the PBS History is gated on %v, want %v", ep.Permissions.AllOf, want)
-	}
-}
-
-// A guest's VMID is the resource id of its backups, filed under the type a job's
-// rows are: a number is not a job's id, so its History is refused rather than read.
-func TestBackupJobHistoryRefusesAnIdThatIsAGuests(t *testing.T) {
-	t.Parallel()
-	var route historyRoute
-	for _, r := range historyRoutes() {
-		if r.Path == clusterScope+"/backup-jobs/:job_id/history" {
-			route = r
-		}
-	}
-	dbtx := &backupRunDBTX{lookups: map[string]any{"GetCluster": db.Cluster{}}, lists: map[string][]any{"ListHistory": nil}}
-	ep := historyEndpoint(handlers.NewHistoryHandler(dbtx, db.New(dbtx)), route)
-	app := newRegistryApp(t, stubAuth(grantsOf("view:audit", "view:backup")), ep)
-	url := "/api/v1/clusters/" + testClusterID + "/backup-jobs/100/history"
-	if status, _ := send(t, app, authedRequest(fiber.MethodGet, url)); status != http.StatusBadRequest {
-		t.Errorf("%s answered %d, want 400", url, status)
-	}
-	if len(dbtx.queried) != 0 {
-		t.Errorf("the History was read for a job id that is a VMID: %v", dbtx.queried)
 	}
 }
 

@@ -11,7 +11,9 @@ package handlers
 // its VMID and a node's ingested vzdump tasks under the node's name, all as
 // backup. A job's id is held to the actions that are a job's (backup_job_*),
 // which every row of it has, from before its create row named it in details
-// too — a node named as a job is the node's rows no more than a VMID is.
+// too — so a job whose id is a number or a node's name, as one made without an
+// id by Proxmox's UUID can be, reads its own rows and not the guest's or the
+// node's.
 func BackupJobHistory() HistoryKind {
 	return HistoryKind{
 		Name:       "backup-job",
