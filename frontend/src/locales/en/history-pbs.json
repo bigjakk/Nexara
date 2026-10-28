@@ -34,9 +34,25 @@
     "title": "Recent tasks on the server",
     "note": "Read from the server itself, live; they are not part of the history below.",
     "startedInNexara": "Started in Nexara by {{user}}",
-    "running": "Running",
-    "failed": "Failed",
-    "ok": "OK",
-    "error": "Could not read the server's tasks."
+    "error": "Could not read the server's tasks.",
+    "workers": {
+      "backup": "Backup",
+      "reader": "Restore read",
+      "prune": "Prune",
+      "prunejob": "Prune job",
+      "garbage_collection": "Garbage collection",
+      "verify": "Verify",
+      "verificationjob": "Verify job",
+      "syncjob": "Sync job",
+      "sync": "Sync",
+      "logrotate": "Log rotation"
+    }
+  },
+  "summaries": {
+    "restoredTo": "→ VM/CT {{vmid}}",
+    "error": "Error: {{error}}"
+  },
+  "notes": {
+    "pbsTask": "This ran as a task of its own on the Proxmox Backup Server, whose outcome is in the server's Tasks tab for as long as the server keeps it."
   }
 }

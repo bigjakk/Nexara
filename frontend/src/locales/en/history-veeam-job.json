@@ -21,7 +21,9 @@
   "live": {
     "title": "Recent runs",
     "note": "Read from the runs Nexara has collected; they are not part of the history below.",
-    "none": "No run of this job has been collected.",
     "error": "Could not read the runs."
+  },
+  "summaries": {
+    "error": "Error: {{error}}"
   }
 }

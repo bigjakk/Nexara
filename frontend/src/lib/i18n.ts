@@ -30,6 +30,12 @@ import historyFolderEN from "@/locales/en/history-folder.json";
 import historyClusterEN from "@/locales/en/history-cluster.json";
 import historyNodeEN from "@/locales/en/history-node.json";
 import { historyClusterObjectsEN } from "@/locales/history-cluster-objects";
+import historyStorageEN from "@/locales/en/history-storage.json";
+import historyPbsEN from "@/locales/en/history-pbs.json";
+import historyVeeamServerEN from "@/locales/en/history-veeam-server.json";
+import historyVeeamJobEN from "@/locales/en/history-veeam-job.json";
+import historyVeeamSessionEN from "@/locales/en/history-veeam-session.json";
+import historyBackupJobEN from "@/locales/en/history-backup-job.json";
 
 export const defaultNS = "common";
 
@@ -61,6 +67,12 @@ export const resources = {
     "history-cluster": historyClusterEN,
     "history-node": historyNodeEN,
     ...historyClusterObjectsEN,
+    "history-storage": historyStorageEN,
+    "history-pbs": historyPbsEN,
+    "history-veeam-server": historyVeeamServerEN,
+    "history-veeam-job": historyVeeamJobEN,
+    "history-veeam-session": historyVeeamSessionEN,
+    "history-backup-job": historyBackupJobEN,
   },
 } as const;
 

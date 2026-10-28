@@ -27,5 +27,8 @@
     "veeam_job_disabled_failed": "Job disable failed",
     "veeam_session_stopped": "Run stopped",
     "veeam_session_stop_failed": "Run stop failed"
+  },
+  "summaries": {
+    "error": "Error: {{error}}"
   }
 }

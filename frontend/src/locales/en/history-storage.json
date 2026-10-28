@@ -44,5 +44,9 @@
     "vzdump": "Back up",
     "qmrestore": "Restore",
     "vzrestore": "Restore"
+  },
+  "summaries": {
+    "guest": "VM/CT {{vmid}}",
+    "error": "Error: {{error}}"
   }
 }

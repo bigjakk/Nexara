@@ -347,13 +347,20 @@ export function HistoryTimeline({
   enabled = true,
   rowsAbove,
   guestLink,
+  absorbs,
 }: {
   kind: HistoryKind;
   target: HistoryTarget;
   enabled?: boolean;
   /** Live rows above the first page — a running VM's block jobs — spanning
-   *  the table's colSpan columns. A failed read keeps them. */
-  rowsAbove?: ((colSpan: number) => ReactNode) | undefined;
+   *  the table's colSpan columns, given the page's entries. A failed read
+   *  keeps them. */
+  rowsAbove?:
+    ((colSpan: number, entries: HistoryEntry[]) => ReactNode) | undefined;
+  /** Entries of the first page that a live row above stands for, which the
+   *  page leaves out: a task the Proxmox Backup Server lists, and the entry
+   *  that records Nexara starting it. */
+  absorbs?: ((entry: HistoryEntry) => boolean) | undefined;
   /** A History of many guests (a folder's): adds a Guest column, each guest
    *  linked where this returns its page. */
   guestLink?: ((vmid: number) => HistoryGuestLink | undefined) | undefined;
@@ -436,6 +443,9 @@ export function HistoryTimeline({
       : Math.max(0, last.total - last.at.offset - last.items.length);
   // The pages before this one, what this one shows, and what is left.
   const listed = total - items.length + shown.length + left;
+  // The live rows above the first page stand for some of its entries.
+  const kept =
+    page === 0 && absorbs ? shown.filter((entry) => !absorbs(entry)) : shown;
   // Whole back to where the last stretch stopped, or, while it has more to
   // list, back to its top.
   const wholeFrom =
@@ -615,7 +625,7 @@ export function HistoryTimeline({
                 </tr>
               </thead>
               <tbody>
-                {page === 0 && rowsAbove?.(layout.columns.length)}
+                {page === 0 && rowsAbove?.(layout.columns.length, items)}
                 {error && (
                   <tr>
                     <td
@@ -627,7 +637,7 @@ export function HistoryTimeline({
                   </tr>
                 )}
                 {!error &&
-                  shown.map((entry) => (
+                  kept.map((entry) => (
                     <HistoryRow
                       key={entry.id}
                       kind={kind}
@@ -654,7 +664,7 @@ export function HistoryTimeline({
                     </td>
                   </tr>
                 )}
-                {!error && shown.length === 0 && (
+                {!error && kept.length === 0 && (
                   <tr>
                     <td
                       colSpan={layout.columns.length}

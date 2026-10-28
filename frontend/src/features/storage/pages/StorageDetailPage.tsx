@@ -7,6 +7,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
 import {
+  HistoryTabContent,
+  HistoryTabTrigger,
+} from "@/features/history/components/HistoryTab";
+import { backupHistories } from "@/features/history/lib/backup-histories";
+import {
   useCluster,
   useClusterNodes,
 } from "@/features/clusters/api/cluster-queries";
@@ -143,6 +148,12 @@ export function StorageDetailPage() {
     );
   }
 
+  const storageHistory = backupHistories.storage(
+    clusterId,
+    pool.storage,
+    pool.shared ? undefined : (hostNodeName ?? undefined),
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -227,6 +238,7 @@ export function StorageDetailPage() {
               VMs/CTs ({guestItems.length})
             </TabsTrigger>
           )}
+          <HistoryTabTrigger history={storageHistory} />
         </TabsList>
 
         <TabsContent value="summary" className="space-y-4">
@@ -350,6 +362,10 @@ export function StorageDetailPage() {
             )}
           </TabsContent>
         )}
+
+        {/* A storage that is not shared is a different one on each node, so
+            its History is its host node's. */}
+        <HistoryTabContent history={storageHistory} />
       </Tabs>
     </div>
   );
