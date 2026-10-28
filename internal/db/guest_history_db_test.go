@@ -170,11 +170,46 @@ func TestGuestHistory(t *testing.T) {
 		}
 		return got, total
 	}
-	// walk reads p capped at rowCap and on below each searched_from, as Show
-	// older does: every page whole for its stretch, so no entry on two pages.
+	// walk reads p capped at rowCap from top, an hour ahead, and on below each
+	// searched_from, as Show older does: every page whole for its stretch, so
+	// no entry on two pages. Meanwhile two rows of each source the walks read
+	// lie above top: none may be listed, and an arm without its until bound
+	// would count them toward its cap and stop at them.
+	top := now.Add(time.Hour)
 	walk := func(p gen.ListHistoryParams, rowCap int32, entry func(gen.ListHistoryRow) string) []string {
 		cur.Helper()
-		p.RowCap, p.RowLimit = rowCap, 200
+		for i, at := range []time.Time{top.Add(time.Minute), top.Add(2 * time.Minute)} {
+			audit(historyClusterID, at, "nexara", "vm", uuid.NewString(), "clone", map[string]any{"vmid": 50, "new_id": 100})
+			audit(historyClusterID, at, "nexara", "ha_resource", "vm:100", "updated", map[string]any{})
+			exec("above: a status change", `INSERT INTO guest_status_changes (cluster_id, vmid, guest_type, node,
+				from_status, to_status, last_seen_at, observed_at, explained)
+			VALUES ($1, 100, 'qemu', 'pve-01', 'running', 'stopped', $2, $2, false)`, historyClusterID, at)
+			for _, cluster := range []uuid.UUID{historyClusterID, historyThirdID} {
+				exec("above: a backup", `INSERT INTO guest_backups (cluster_id, upid, vmid, node, source, status,
+					started_at, finished_at, log_start, log_end)
+				VALUES ($1, $2, 100, 'pve-01', 'proxmox', 'completed', $3, $3, 0, 0)`,
+					cluster, historyUPID(90+i, "vzdump", ""), at)
+			}
+			exec("above: an archived task", `INSERT INTO task_history_archive (upid, cluster_id, vmid, status, node,
+				task_type, source, started_at)
+			VALUES ($1, $2, 310, 'completed', 'pve-01', 'qmstart', 'proxmox', $3)`,
+				historyUPID(92+i, "qmstart", "310"), historyThirdID, at)
+			exec("above: a run of status changes", `INSERT INTO node_status_changes (cluster_id, node, from_status,
+				to_status, last_seen_at, observed_at, run_count)
+			VALUES ($1, 'pve-01', 'online', 'offline', $2, $2, 3)`, historyThirdID, at)
+			exec("above: a run of moves", `INSERT INTO guest_node_changes (cluster_id, vmid, guest_type, from_node,
+				to_node, last_seen_at, observed_at, run_count, nodes)
+			VALUES ($1, 330, 'qemu', 'pve-01', 'pve-02', $2, $2, 2, '{pve-01,pve-02}')`, historyThirdID, at)
+		}
+		defer func() {
+			for _, dated := range []string{"audit_log.created_at", "guest_status_changes.observed_at",
+				"guest_backups.started_at", "task_history_archive.started_at", "node_status_changes.observed_at",
+				"guest_node_changes.observed_at"} {
+				table, column, _ := strings.Cut(dated, ".")
+				exec("above: gone", "DELETE FROM "+table+" WHERE "+column+" > $1", top)
+			}
+		}()
+		p.RowCap, p.RowLimit, p.Until = rowCap, 200, pgtype.Timestamptz{Time: top, Valid: true}
 		var got []string
 		seen := map[string]bool{}
 		for range 50 {
@@ -1415,8 +1450,11 @@ func TestGuestHistory(t *testing.T) {
 		if want := []string{"310 pve-01>pve-02", "310 pve-02>pve-01", "311 pve-01>pve-02"}; !slices.Equal(moves, want) {
 			t.Errorf("guest moves recorded = %v, want %v", moves, want)
 		}
-		// The moves at fixed times, and status changes: two through unknown —
-		// one back within two minutes, one not — and one too young to tell.
+		// The moves at fixed times, and status changes: four trips through
+		// unknown — two back within two minutes, one across a capped walk's stop
+		// 5 minutes back; one back after five; one on to offline, its rows either
+		// side of the walk's stop 7.75 minutes back, within the two minutes a
+		// stretch reads past its top — and one too young to tell.
 		exec("moves dated", `UPDATE guest_node_changes SET observed_at = $2::timestamptz, last_seen_at = $2::timestamptz - interval '1 minute'
 		WHERE cluster_id = $1 AND vmid = 310 AND from_node = 'pve-01'`, historyThirdID, minsAgo(12))
 		exec("moves dated", `UPDATE guest_node_changes SET observed_at = $2::timestamptz, last_seen_at = $2::timestamptz - interval '1 minute'
@@ -1441,7 +1479,9 @@ func TestGuestHistory(t *testing.T) {
 		}{
 			{"online", "unknown", minsAgo(30)}, {"unknown", "online", minsAgo(29)},
 			{"online", "unknown", minsAgo(20)}, {"unknown", "online", minsAgo(15)},
-			{"online", "offline", minsAgo(10)}, {"offline", "unknown", now.Add(-30 * time.Second)},
+			{"online", "offline", minsAgo(10)}, {"online", "unknown", minsAgo(7.75)}, {"unknown", "offline", minsAgo(7.25)},
+			{"online", "unknown", minsAgo(5.25)}, {"unknown", "online", minsAgo(4.75)},
+			{"offline", "unknown", now.Add(-30 * time.Second)},
 		} {
 			exec("node status", `INSERT INTO node_status_changes (cluster_id, node, from_status, to_status, last_seen_at, observed_at)
 			VALUES ($1, 'pve-01', $2, $3, $4, $4)`, historyThirdID, st.from, st.to, st.at)
@@ -1529,7 +1569,8 @@ func TestGuestHistory(t *testing.T) {
 		// VMID 311 that a destroy made a new guest, nor a round trip through
 		// unknown shorter than two minutes, nor one too young to tell.
 		own := []string{"task aptupdate checks", "audit srvreload network", "audit renewed certificates",
-			"audit firewall_rule_created network", "audit interface_updated network", "audit reboot power",
+			"audit firewall_rule_created network", "audit interface_updated network",
+			"status status_change status unknown>offline", "status status_change status online>unknown", "audit reboot power",
 			"audit enabled updates", "audit apt_update checks", "status status_change status online>offline",
 			"move arrived guests 310 pve-02", "move left guests 310 pve-02", "status status_change status unknown>online",
 			"status status_change status online>unknown", "task cephcreatemgr ceph", "audit apt_update checks"}
@@ -1542,7 +1583,8 @@ func TestGuestHistory(t *testing.T) {
 			{"with its guests' tasks", func(p *gen.ListHistoryParams) { p.IncludeGuests = true }, []string{
 				"audit destroy guests", "task qmstart guests", "task aptupdate checks", "audit start guests",
 				"audit srvreload network", "audit renewed certificates", "audit firewall_rule_created network",
-				"audit image_copy storage", "audit interface_updated network", "audit reboot power", "audit enabled updates",
+				"audit image_copy storage", "audit interface_updated network", "status status_change status unknown>offline",
+				"status status_change status online>unknown", "audit reboot power", "audit enabled updates",
 				"audit apt_update checks", "status status_change status online>offline", "move arrived guests 310 pve-02",
 				"move left guests 310 pve-02", "audit migrate guests", "status status_change status unknown>online",
 				"status status_change status online>unknown", "task cephcreatemgr ceph", "audit start guests",
