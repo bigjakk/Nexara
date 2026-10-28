@@ -497,23 +497,43 @@ func aclDeleteRules(auditType, who, grants string) []explainRule {
 }
 
 // realmSyncRules is a realm sync (pve-access-control API2/Domains.pm sync,
-// worker auth-realm-sync and the scheduled job's, both naming the realm): it
-// creates, edits and removes that realm's users (user@realm) and the groups it
-// syncs (name-realm, as Domains.pm names them), and with remove-vanished takes
-// their ACL entries out. A dry run (auth-realm-sync-test) writes nothing.
-var realmSyncRules = slices.Concat(
-	inDirections(explainRule{Kind: "pve_user", MatchKey: "cluster", WorkerRe: `^auth-realm-sync$`,
-		Object: "upid:*@%s"}, "added", "changed", "removed"),
-	inDirections(explainRule{Kind: "pve_group", MatchKey: "cluster", WorkerRe: `^auth-realm-sync$`,
-		Object: "upid:*-%s"}, "added", "changed", "removed"),
-	[]explainRule{
-		{Kind: "pve_acl", Change: "changed", MatchKey: "cluster", WorkerRe: `^auth-realm-sync$`,
-			FieldRe: `^(users|user_grants|groups|group_grants)$`, Member: "left",
-			MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s"},
-		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: `^auth-realm-sync$`,
-			Member: "sole", MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s"},
-	},
-)
+// worker auth-realm-sync and the scheduled job's, both naming the realm). It
+// adds and removes that realm's users (user@realm) and the groups it syncs
+// (name-realm, LDAP.pm get_groups), and with remove-vanished takes their ACL
+// entries out. A user's edit writes only the attributes a sync maps (LDAP.pm
+// get_users: enable, expire, names, e-mail, comment, keys); a group's only its
+// comment, which overwriting clears, and its users, which it replaces whole
+// (update_groups): that realm's users join it, and whoever was in it may leave.
+// So a user joins only a group the sync makes, and may leave one whoever it is.
+// A dry run (auth-realm-sync-test) writes nothing.
+var realmSyncRules = func() []explainRule {
+	const sync = `^auth-realm-sync$`
+	return slices.Concat(
+		inDirections(explainRule{Kind: "pve_user", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s"},
+			"added", "removed"),
+		inDirections(explainRule{Kind: "pve_group", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s"},
+			"added", "removed"),
+		[]explainRule{
+			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
+				FieldRe: `^(enable|expire|firstname|lastname|email|comment|keys)$`},
+			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
+				FieldRe: `^groups$`, Member: "joined", MemberOf: "upid:groups:*-%s"},
+			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync,
+				FieldRe: `^groups$`, Member: "left", MemberOf: "upid:groups:*-%s"},
+			{Kind: "pve_group", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
+				FieldRe: `^comment$`},
+			{Kind: "pve_group", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
+				FieldRe: `^users$`, Member: "joined", MemberOf: "upid:users:*@%s"},
+			{Kind: "pve_group", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
+				FieldRe: `^users$`, Member: "left"},
+			{Kind: "pve_acl", Change: "changed", MatchKey: "cluster", WorkerRe: sync,
+				FieldRe: `^(users|user_grants|groups|group_grants)$`, Member: "left",
+				MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s"},
+			{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: sync,
+				Member: "sole", MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s"},
+		},
+	)
+}()
 
 // observedActionsExplainingNothing are the actions handlers and the task
 // ingest (proxmoxTaskMap) file under an observed kind that change none of what
