@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
@@ -88,14 +90,16 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 		details = json.RawMessage(`{}`)
 	}
 
-	// One decode serves two purposes: injecting api_key_id, and lifting the
-	// guest identity out for the syslog forwarder. Re-marshalled only when
-	// something was actually injected, so an untouched details blob reaches
-	// the row byte-for-byte as the handler wrote it.
+	// One decode serves three purposes: redacting secrets, injecting
+	// api_key_id, and lifting the guest identity out for the syslog
+	// forwarder. Re-marshalled only when something was actually changed, so
+	// an untouched details blob reaches the row byte-for-byte as the handler
+	// wrote it.
 	var m map[string]any
 	if err := json.Unmarshal(details, &m); err != nil {
 		m = nil
 	}
+	rewrite := redactAuditSecrets(m)
 
 	// Inject api_key_id into details for API-key-authed requests so audit
 	// rows can be attributed to the specific key, not just the user.
@@ -104,9 +108,14 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 			m = map[string]any{}
 		}
 		m["api_key_id"] = apiKeyID.String()
-		if enriched, err := json.Marshal(m); err == nil {
-			details = enriched
+		rewrite = true
+	}
+	if rewrite {
+		enriched, err := json.Marshal(m)
+		if err != nil {
+			enriched = json.RawMessage(`{}`) // never the bytes a redaction was to change
 		}
+		details = enriched
 	}
 
 	var cidStr string
@@ -168,6 +177,77 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 			Details:      string(details),
 		})
 	}
+}
+
+// redactAuditSecrets replaces, in decoded audit details, the secrets a request
+// carried, and reports whether it changed anything. It runs where the row, the
+// syslog copy and (through the row) the History all read details, so no caller
+// has to remember it. A fields object is how a row records the values it sent
+// Proxmox, by parameter (the guest config writes): each secret one
+// (pvefield.Secret) keeps its key, so the row still says the request set it, and
+// is recorded as "(set)", or "(cleared)" when sent empty. A URL anywhere in the
+// details keeps no credentials (redactURLCredentials).
+func redactAuditSecrets(m map[string]any) bool {
+	changed := false
+	if fields, ok := m["fields"].(map[string]any); ok {
+		for k, v := range fields {
+			if !pvefield.Secret(k) {
+				continue
+			}
+			r := pvefield.RedactedSet
+			if s, isString := v.(string); v == nil || isString && s == "" {
+				r = pvefield.RedactedCleared
+			}
+			if v != r {
+				fields[k], changed = r, true
+			}
+		}
+	}
+	var walk func(v any) (any, bool)
+	walk = func(v any) (any, bool) {
+		moved := false
+		switch t := v.(type) {
+		case string:
+			r := redactURLCredentials(t)
+			return r, r != t
+		case map[string]any:
+			for k, e := range t {
+				if r, ok := walk(e); ok {
+					t[k], moved = r, true
+				}
+			}
+		case []any:
+			for i, e := range t {
+				if r, ok := walk(e); ok {
+					t[i], moved = r, true
+				}
+			}
+		}
+		return v, moved
+	}
+	if _, ok := walk(m); ok {
+		changed = true
+	}
+	return changed
+}
+
+// urlCredentials matches the userinfo of each URL in a text: from its "://" to
+// the last "@" before a "/", "?" or "#" ends its authority. A user name alone can
+// be the credential (a token sent as one), so the whole of it goes. White space
+// does not end it: a URL in prose may lose a few words with it, but a password
+// holding a space is not left behind.
+var urlCredentials = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/?#]*@`)
+
+// redactURLCredentials is s with "(set)" in place of the userinfo of every URL
+// in it: what an audit detail or a task description keeps of a URL a request
+// sent with a user name or password in it (a download-url source, say).
+// migrations/000127_redact_audit_secrets scrubs the rows written before with
+// the same pattern.
+func redactURLCredentials(s string) string {
+	if !strings.Contains(s, "@") {
+		return s
+	}
+	return urlCredentials.ReplaceAllString(s, "${1}"+pvefield.RedactedSet+"@")
 }
 
 // auditDetailString reads one detail field as a string for the syslog message.
@@ -289,7 +369,7 @@ func TrackTask(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p T
 		ClusterID:   p.ClusterID,
 		UserID:      uid,
 		Upid:        p.UPID,
-		Description: p.Description,
+		Description: redactURLCredentials(p.Description),
 		Status:      "running",
 		Node:        p.Node,
 		TaskType:    taskType,

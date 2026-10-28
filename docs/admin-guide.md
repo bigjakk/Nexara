@@ -1432,7 +1432,7 @@ The scheduler evaluates schedules every 60 seconds. Every execution of a schedul
 Everything that happens — user-initiated, scheduled, or automated (DRS, rolling updates) — is tracked in two places:
 
 - **Task history** — every Proxmox task (UPID) Nexara dispatches or observes, with live status (pending → running → completed / failed). Rows expand to show the full details and error output. Tasks started outside Nexara (directly in the Proxmox UI or CLI) are synced in as well and carry a **PVE** badge so you can tell where an action originated.
-- **Audit log** — who did what, when, and to which resource, with the full request details in expandable rows.
+- **Audit log** — who did what, when, and to which resource, with the full request details in expandable rows. A secret a request sent is never among them: a password, token or key sent to Proxmox (a cloud-init password, say) is recorded as `(set)`, or `(cleared)` when sent empty, and a URL's user name and password as `(set)`, in the row, its syslog copy and the task's description.
 
 Failed tasks surface the error message from Proxmox in the UI — failures are never silently swallowed.
 
