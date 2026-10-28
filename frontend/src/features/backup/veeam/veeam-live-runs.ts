@@ -4,21 +4,19 @@ import type { VeeamSession } from "../types/backup";
 export const LIVE_RUN_COUNT = 10;
 
 /**
- * A job's latest runs, newest first, from the runs Nexara has collected, and
- * within the time filter: from `since` (epoch milliseconds), or any time for
- * null.
+ * The latest of the runs it is given (a job's, from the listing asked for that
+ * job), newest first, and within the time filter: from `since` (epoch
+ * milliseconds), or any time for null.
  */
 export function latestRuns(
   sessions: readonly VeeamSession[],
-  jobId: string,
   since: number | null,
   count = LIVE_RUN_COUNT,
 ): VeeamSession[] {
   return sessions
     .filter(
       (session) =>
-        session.job_veeam_id === jobId &&
-        (since === null || new Date(session.creation_time).getTime() >= since),
+        since === null || new Date(session.creation_time).getTime() >= since,
     )
     .sort(
       (a, b) =>

@@ -751,14 +751,26 @@ export function useVeeamJobs(serverId: string) {
   });
 }
 
-export function useVeeamSessions(serverId: string) {
+/**
+ * The server's recent runs, or, with a job, that job's: its newest, however
+ * many other jobs have run since — which the server-wide list, cut at its
+ * newest few hundred, cannot promise of a job that seldom runs.
+ */
+export function useVeeamSessions(serverId: string, jobId?: string) {
   return useQuery({
-    queryKey: ["veeam-servers", serverId, "sessions"],
+    queryKey: [
+      "veeam-servers",
+      serverId,
+      "sessions",
+      ...(jobId === undefined ? [] : [{ job: jobId }]),
+    ],
     queryFn: () =>
       apiClient.list<VeeamSession>(
-        apiPath`/api/v1/veeam-servers/${serverId}/sessions`,
+        jobId === undefined
+          ? apiPath`/api/v1/veeam-servers/${serverId}/sessions`
+          : apiPath`/api/v1/veeam-servers/${serverId}/sessions?job_id=${jobId}`,
       ),
-    enabled: serverId.length > 0,
+    enabled: serverId.length > 0 && jobId !== "",
     refetchInterval: 60_000,
   });
 }

@@ -31,10 +31,10 @@ function runIcon(session: VeeamSession) {
 
 /**
  * A Veeam job's latest runs, as live rows at the top of its History: how each
- * ended, from the runs Nexara has collected (the server's Runs tab has them
- * all). The runs are not part of the history below, which is what was done to
- * the job: Veeam keeps tens of thousands of them, and a job that runs every
- * quarter hour would bury the changes.
+ * ended, from the job's runs Nexara has collected (the server's Runs tab has
+ * them all). The runs are not part of the history below, which is what was
+ * done to the job: Veeam keeps tens of thousands of them, and a job that runs
+ * every quarter hour would bury the changes.
  */
 export function VeeamLiveRunRows({
   serverId,
@@ -51,11 +51,8 @@ export function VeeamLiveRunRows({
   colSpan: number;
 }) {
   const { t } = useTranslation("history-veeam-job");
-  const { data, isError } = useVeeamSessions(serverId);
-  const runs = useMemo(
-    () => latestRuns(data ?? [], jobId, since),
-    [data, jobId, since],
-  );
+  const { data, isError } = useVeeamSessions(serverId, jobId);
+  const runs = useMemo(() => latestRuns(data ?? [], since), [data, since]);
 
   if (isError) {
     return (
