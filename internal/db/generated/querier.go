@@ -2687,6 +2687,10 @@ type Querier interface {
 	SetJobDisabledHARules(ctx context.Context, arg SetJobDisabledHARulesParams) error
 	SetJobNativeCRSPaused(ctx context.Context, arg SetJobNativeCRSPausedParams) error
 	SetLDAPUserActive(ctx context.Context, arg SetLDAPUserActiveParams) error
+	// SetLocalLockTimeout bounds every lock wait of the rest of the transaction —
+	// LockClusterFolders' among them — so requests queued behind a long change to
+	// a cluster's tree give their connections back instead of holding the pool.
+	SetLocalLockTimeout(ctx context.Context, timeout string) error
 	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
 	// Legacy: new code records disabled HA rules at job scope (see
 	// SetJobDisabledHARules); this remains only so the release path can clear

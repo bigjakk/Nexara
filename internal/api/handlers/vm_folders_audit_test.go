@@ -36,16 +36,20 @@ func (d *folderAuditDBTX) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error
 }
 
 // folderAuditTx runs its statements on the fake, noting whether the folder
-// lock was taken before a change to the tree.
+// lock was taken, under a lock_timeout, before a change to the tree.
 type folderAuditTx struct {
 	pgx.Tx
-	d      *folderAuditDBTX
-	locked bool
+	d             *folderAuditDBTX
+	timed, locked bool
 }
 
 func (t *folderAuditTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "-- name: SetLocalLockTimeout :exec") {
+		t.timed = true
+		return pgconn.CommandTag{}, nil
+	}
 	if strings.Contains(sql, "-- name: LockClusterFolders :exec") {
-		t.locked = true
+		t.locked = t.timed
 		return pgconn.CommandTag{}, nil
 	}
 	if t.locked {

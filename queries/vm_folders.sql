@@ -31,6 +31,12 @@ RETURNING id, cluster_id, parent_id, name, created_at, updated_at;
 -- name: LockClusterFolders :exec
 SELECT pg_advisory_xact_lock(1314408012, hashtext(sqlc.arg('cluster_id')::uuid::text));
 
+-- SetLocalLockTimeout bounds every lock wait of the rest of the transaction —
+-- LockClusterFolders' among them — so requests queued behind a long change to
+-- a cluster's tree give their connections back instead of holding the pool.
+-- name: SetLocalLockTimeout :exec
+SELECT set_config('lock_timeout', sqlc.arg('timeout')::text, true);
+
 -- MoveVMFolder moves the folder under parent_id (null for the top level),
 -- unless that is the folder itself or below it, or the tree above it runs past
 -- 1,024 levels (handlers.folderDepthCap): then no row. Run under

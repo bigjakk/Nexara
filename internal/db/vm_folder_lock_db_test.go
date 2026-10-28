@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,20 @@ func TestFolderMovesUnderTheClusterLock(t *testing.T) {
 		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted)`).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// A third, with a short lock_timeout, gives up while the first holds it.
+	third, errThird := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if errThird != nil {
+		t.Fatal(errThird)
+	}
+	q3 := q.WithTx(third)
+	errThird = q3.SetLocalLockTimeout(ctx, "100ms")
+	if errThird == nil {
+		errThird = q3.LockClusterFolders(ctx, folderLockClusterID)
+	}
+	_ = third.Rollback(context.Background())
+	if errThird == nil || !strings.Contains(errThird.Error(), "SQLSTATE 55P03") {
+		t.Errorf("a wait past its lock_timeout: %v, want lock_not_available", errThird)
 	}
 	if err := first.Commit(ctx); err != nil {
 		t.Fatal(err)

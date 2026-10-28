@@ -312,6 +312,18 @@ func (q *Queries) RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) 
 	return i, err
 }
 
+const setLocalLockTimeout = `-- name: SetLocalLockTimeout :exec
+SELECT set_config('lock_timeout', $1::text, true)
+`
+
+// SetLocalLockTimeout bounds every lock wait of the rest of the transaction —
+// LockClusterFolders' among them — so requests queued behind a long change to
+// a cluster's tree give their connections back instead of holding the pool.
+func (q *Queries) SetLocalLockTimeout(ctx context.Context, timeout string) error {
+	_, err := q.db.Exec(ctx, setLocalLockTimeout, timeout)
+	return err
+}
+
 const unassignVMFromFolder = `-- name: UnassignVMFromFolder :one
 DELETE FROM vm_folder_memberships WHERE cluster_id = $1 AND vmid = $2
 RETURNING folder_id

@@ -61,7 +61,14 @@ func (h *VMFoldersHandler) inFolderTree(ctx context.Context, clusterID uuid.UUID
 	}
 	defer releaseTx(tx, "folder tree change")()
 	q := h.queries.WithTx(tx)
-	if err := q.LockClusterFolders(ctx, clusterID); err != nil {
+	err = q.SetLocalLockTimeout(ctx, folderLockTimeout)
+	if err == nil {
+		err = q.LockClusterFolders(ctx, clusterID)
+	}
+	if isTransientDBError(err) {
+		return fiber.NewError(fiber.StatusServiceUnavailable, "Another change to this cluster's folders is under way; try again")
+	}
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to change the folder tree")
 	}
 	if err := fn(q); err != nil {
@@ -72,6 +79,11 @@ func (h *VMFoldersHandler) inFolderTree(ctx context.Context, clusterID uuid.UUID
 	}
 	return nil
 }
+
+// folderLockTimeout is the longest a change to a cluster's tree waits for the
+// one before it: a change takes milliseconds, so a wait this long is a stuck
+// one, and the request answers 503 rather than hold a pool connection.
+const folderLockTimeout = "5s"
 
 // treeFolder is the folder as the transaction reads it: Not Found when it is
 // gone, or not the cluster's.
