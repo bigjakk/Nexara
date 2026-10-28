@@ -711,20 +711,23 @@ func TestHistoryListPassesTheGuestToggle(t *testing.T) {
 func TestPermittedObservedTypes(t *testing.T) {
 	t.Parallel()
 	node := HistoryKind{ObservedTypes: []HistoryObservedType{{Type: "node"}, {Type: "unmapped"},
-		{Type: "firewall_rule", View: "network"}, {Type: "acme_config"}}}
+		{Type: "firewall_rule", View: "network"}, {Type: "acme_config"}, {Type: "network"}}}
 	for _, tt := range []struct {
 		granted []string
 		want    []string
 	}{
 		{[]string{"node"}, []string{"node"}},
-		{[]string{"node", "network", "certificate", "unmapped"}, []string{"node", "firewall_rule", "acme_config"}},
+		{[]string{"node", "network", "certificate", "unmapped"}, []string{"node", "firewall_rule", "acme_config", "network"}},
 		{[]string{"firewall_rule"}, []string{}},
 	} {
+		asked := map[string]int{}
 		got, err := permittedObservedTypes(node, func(_, resource string) (bool, error) {
+			asked[resource]++
 			return slices.Contains(tt.granted, resource), nil
 		})
-		if err != nil || !slices.Equal(got, tt.want) {
-			t.Errorf("granted %v: permitted observed types = %v (%v), want %v", tt.granted, got, err, tt.want)
+		if err != nil || !slices.Equal(got, tt.want) || asked["network"] != 1 {
+			t.Errorf("granted %v: permitted observed types = %v (%v), want %v; asked %v, each view once",
+				tt.granted, got, err, tt.want, asked)
 		}
 	}
 }

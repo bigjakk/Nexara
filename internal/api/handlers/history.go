@@ -191,17 +191,23 @@ func (t HistoryObservedType) observedView() (string, bool) {
 // holds, each under the permission it is declared with — its own, else the
 // type's in the map — in the request's scope (can): the observed changes a
 // request reads. A type with neither is not among them, whatever the kind
-// declares.
+// declares. Each view is asked once: a whole cluster's forty types share
+// thirteen.
 func permittedObservedTypes(k HistoryKind, can func(action, resource string) (bool, error)) ([]string, error) {
 	permitted := []string{}
+	granted := map[string]bool{}
 	for _, t := range k.ObservedTypes {
 		view, viewed := t.observedView()
 		if !viewed || slices.Contains(permitted, t.Type) {
 			continue
 		}
-		allowed, err := can("view", view)
-		if err != nil {
-			return nil, err
+		allowed, asked := granted[view]
+		if !asked {
+			var err error
+			if allowed, err = can("view", view); err != nil {
+				return nil, err
+			}
+			granted[view] = allowed
 		}
 		if allowed {
 			permitted = append(permitted, t.Type)
