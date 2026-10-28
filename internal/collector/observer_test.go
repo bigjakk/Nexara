@@ -1014,10 +1014,19 @@ func TestObserverOutcomes(t *testing.T) {
 		e.client.set(pathStorage, `[{"storage":"s1","type":"dir","nodes":"pve-03"},{"storage":"s2","type":"dir","nodes":"pve-02"},`+
 			`{"storage":"s3","type":"dir","nodes":"pve-02"},{"storage":"s4","type":"dir","nodes":"pve-02"}]`)
 		counted(t, pastCap(t, e.passRows()), []string{"s4"}, []string{"s0"}, []string{"s1"})
-		// Back under: compared field by field again, silently.
+		// Back under: each object is compared with the rows kept since the
+		// crossing and named (s0 went, s1 and s2 came), and only what went that
+		// no rows were kept of is counted.
 		e.client.set(pathStorage, storages("s1", "s2"))
 		rows = e.passRows()
-		counted(t, pastCap(t, rows), nil, []string{"s3", "s4"}, []string{"s1"})
+		counted(t, pastCap(t, rows), nil, []string{"s3", "s4"}, nil)
+		for _, want := range [][2]string{{"s0", "removed"}, {"s1", "added"}, {"s2", "added"}} {
+			if !slices.ContainsFunc(rows, func(r observedChangeRow) bool {
+				return r.ResourceID == want[0] && r.Change == want[1] && r.Detail["while_over_cap"] == true
+			}) {
+				t.Errorf("back under: filed %+v, want %s %s while over", rows, want[1], want[0])
+			}
+		}
 		if !slices.ContainsFunc(rows, func(r observedChangeRow) bool { return r.Detail["notice"] == "back_under_cap" }) {
 			t.Fatalf("back under: %+v, want the notice", rows)
 		}
@@ -1149,7 +1158,7 @@ func TestObserverOutcomes(t *testing.T) {
 			}
 		}
 	})
-	t.Run("an IP set read shallow past its kind's cap leaves its entries as held, and one added meanwhile is filed back under", func(t *testing.T) {
+	t.Run("past its kind's cap a set kept field by field has its entries read, one added read shallow is named back under with its own", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
 		e.obs.maxObjects = 2
@@ -1159,22 +1168,27 @@ func TestObserverOutcomes(t *testing.T) {
 		e.expect("baseline")
 		before := time.Now()
 		e.client.set("/cluster/firewall/ipset", `[{"name":"allow"},{"name":"block"},{"name":"extra"}]`)
+		e.client.set("/cluster/firewall/ipset/extra", `[{"cidr":"192.0.2.20"}]`)
 		e.passRows()
-		// An entry added while its set is read by the listing alone, and an
-		// upgrade meanwhile, which re-baselines what is read.
+		if n := e.client.readsOf("/cluster/firewall/ipset/extra"); n != 0 {
+			t.Fatalf("read the entries of a set read shallow %d times, want none", n)
+		}
 		e.client.set("/cluster/firewall/ipset/allow", `[{"cidr":"192.0.2.1"},{"cidr":"192.0.2.2"}]`)
-		e.mq.nodesByCluster[0].PveVersion = "pve-manager/9.2.21/0000bbbb"
-		e.expect("over, the entry not read")
-		e.client.set("/cluster/firewall/ipset", `[{"name":"allow"},{"name":"block"}]`)
-		var entries []observedChangeRow
+		e.expect("over, a kept set's entries compared", "added firewall_ipset_entry/allow/192.0.2.2 []")
+		e.client.set("/cluster/firewall/ipset", `[{"name":"allow"},{"name":"extra"}]`)
+		named := map[string]observedChangeRow{}
 		for _, r := range e.passRows() {
-			if r.ResourceType == "firewall_ipset_entry" {
-				entries = append(entries, r)
+			if r.Detail["notice"] == nil {
+				named[r.Change+" "+r.ResourceType+"/"+r.ResourceID] = r
 			}
 		}
-		if len(entries) != 1 || entries[0].ResourceID != "allow/192.0.2.2" || entries[0].Change != "added" ||
-			entries[0].Detail["while_over_cap"] != true || !entries[0].LastSeenAt.Before(before) {
-			t.Fatalf("back under: filed %+v, want allow's entry added while over, dated from before", entries)
+		for _, want := range []string{"removed firewall_ipset/block", "added firewall_ipset/extra", "added firewall_ipset_entry/extra/192.0.2.20"} {
+			if r, ok := named[want]; !ok || r.Detail["while_over_cap"] != true || !r.LastSeenAt.Before(before) {
+				t.Errorf("back under: filed %v, want %s while over, dated from before", slices.Collect(maps.Keys(named)), want)
+			}
+		}
+		if len(named) != 3 || named["removed firewall_ipset/block"].Detail["children"] != float64(1) {
+			t.Errorf("back under: filed %+v, want those three, block's removal counting its entry", named)
 		}
 	})
 	t.Run("a cluster no longer active leaves no presence held", func(t *testing.T) {
@@ -1279,6 +1293,69 @@ func TestObserverOutcomes(t *testing.T) {
 			t.Fatalf("the next pass filed %d back_under_cap, want 1", under)
 		}
 		e.expect("and not again")
+	})
+	t.Run("past the cap a pool kept field by field is tagged with its members, and back under what moved in it is named", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 2
+		e.client.set("/pools", `[{"poolid":"web"},{"poolid":"old"}]`)
+		e.client.set("/pools?poolid=web", `[{"poolid":"web","members":[]}]`)
+		e.client.set("/pools?poolid=old", `[{"poolid":"old","members":[]}]`)
+		e.expect("baseline")
+		before := time.Now()
+		e.client.set("/pools", `[{"poolid":"web"},{"poolid":"old"},{"poolid":"p0"},{"poolid":"p1"}]`)
+		counted(t, pastCap(t, e.passRows()), []string{"p0", "p1"}, nil, nil)
+		// The listing says nothing of a pool's members; its own read does.
+		e.client.set("/pools?poolid=web", `[{"poolid":"web","members":[{"type":"qemu","vmid":100}]}]`)
+		counted(t, pastCap(t, e.passRows()), nil, nil, []string{"web"})
+		// Back under, old gone with the flood and web's own read failing: old's
+		// removal is named, not counted, and web waits, still dated from before
+		// the flood, for the pass that reads it.
+		e.client.set("/pools", `[{"poolid":"web"}]`)
+		e.client.fail("/pools?poolid=web", &proxmox.APIError{StatusCode: http.StatusInternalServerError, Message: "got timeout"})
+		rows := e.passRows()
+		counted(t, pastCap(t, rows), nil, []string{"p0", "p1"}, nil)
+		if !slices.ContainsFunc(rows, func(r observedChangeRow) bool {
+			return r.ResourceID == "old" && r.Change == "removed" && r.Detail["while_over_cap"] == true
+		}) || slices.ContainsFunc(rows, func(r observedChangeRow) bool { return r.ResourceID == "web" }) {
+			t.Fatalf("back under, web unread: filed %+v, want old's removal named and nothing of web", rows)
+		}
+		e.client.set("/pools?poolid=web", `[{"poolid":"web","members":[{"type":"qemu","vmid":100}]}]`)
+		rows = e.passRows()
+		if len(rows) != 1 || rows[0].ResourceID != "web" || rows[0].Change != "changed" || !slices.Equal(rows[0].MembersJoined, []string{"vms:100"}) ||
+			rows[0].Detail["while_over_cap"] != true || !rows[0].LastSeenAt.Before(before) {
+			t.Fatalf("back under: filed %+v, want web's new member named, dated from before the flood", rows)
+		}
+		e.expect("and then as any other")
+	})
+	t.Run("back under in the pass its kind's signature moves, what came while over is still filed", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 1
+		perms := func(modify string) {
+			e.client.set(pathPerms, `{"/":{"Sys.Audit":1,"VM.Audit":1,"Datastore.Audit":1,"Pool.Audit":1,"Mapping.Audit":1,"Sys.Modify":`+modify+`}}`)
+		}
+		plugins := func(ids ...string) {
+			items := make([]string, 0, len(ids))
+			for _, id := range ids {
+				items = append(items, `{"plugin":"`+id+`","type":"dns","api":"cf"}`)
+			}
+			e.client.set("/cluster/acme/plugins", "["+strings.Join(items, ",")+"]")
+		}
+		perms("1")
+		plugins("dns01")
+		e.expect("baseline")
+		plugins("dns01", "dns02")
+		e.passRows()
+		// Sys.Modify kept, no longer propagated: the plugins' signature moves.
+		perms("0")
+		plugins("dns02")
+		rows := e.passRows()
+		if !slices.ContainsFunc(rows, func(r observedChangeRow) bool {
+			return r.ResourceID == "dns02" && r.Change == "added" && r.Detail["while_over_cap"] == true
+		}) {
+			t.Fatalf("back under: filed %+v, want dns02 added while over", rows)
+		}
 	})
 	t.Run("past the cap a reader reads on only what is held, and guests are read in turns", func(t *testing.T) {
 		t.Parallel()

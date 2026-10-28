@@ -606,6 +606,7 @@ type capScope struct {
 	// the ids that came, went and changed.
 	current                 []observedObject
 	added, removed, changed []string
+	heldUnread              bool // one it holds, by presence or field by field, unread this reading
 }
 
 // byPresence says the scope is compared by presence and whole tags: past its
@@ -619,10 +620,11 @@ func (s *capScope) byPresence() bool { return s.over || s.wasOver }
 // A scope past its cap (capScopes) is compared by presence and one tag of each
 // object whole (comparePresence): what came, went and changed is counted in one
 // row a pass, and an object is written only when it appears, changes or goes.
-// On the pass that crosses the cap, what was held field by field is compared so
-// one last time and moves to presence; on the pass back under, presence is
-// compared one last time and every object is stored field by field again,
-// silently: the tags covered the time over.
+// What was held field by field keeps its rows: the pass that crosses the cap
+// compares it so one last time, and the pass back under compares every object
+// with those rows and names what changed, came or went since the last reading
+// under the cap (while_over_cap), the scope being small enough again to name
+// each.
 func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig string, readAt, doneAt time.Time) {
 	sig = p.kindSig(rd.kind, sig)
 	prev := map[string]storedObject{}
@@ -680,9 +682,9 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		batch     recordBatch
 		unchanged []string // read as stored, field by field
 	)
-	// Whether the kind is held wholly by presence: nothing held or read field
-	// by field.
-	presenceOnly := len(prev) == 0 && len(rd.objects) > 0
+	// Whether every object read is past its cap: none is compared field by
+	// field this pass, so none reads the mark's time.
+	allOver := len(rd.objects) > 0
 	seen := make(map[string]bool, len(rd.objects))
 	for _, obj := range rd.objects {
 		if seen[obj.id] {
@@ -692,12 +694,15 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		}
 		s := scopeOf(obj.id)
 		old, existed := prev[obj.id]
-		presenceOnly = presenceOnly && s.byPresence()
+		allOver = allOver && s.over
 		if s.byPresence() {
-			seen[obj.id] = true
 			s.current = append(s.current, obj)
-			// Only one held field by field, on the pass that crosses the cap,
-			// is compared so: its last row of its own.
+		}
+		if s.over {
+			seen[obj.id] = true
+			// Held field by field, an object keeps its rows past the cap. Only
+			// the pass that crosses compares it with them: its last row of its
+			// own until the pass back under.
 			if !existed || obj.shallow || s.wasOver {
 				continue
 			}
@@ -711,22 +716,35 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			continue
 		}
 		seen[obj.id] = true
-		if s.byPresence() {
-			if d := diffTags(old.tags, tags); old.signature == sig && len(d.fields) > 0 && !allIn(d.fields, rd.quiet) {
+		if s.over {
+			d := diffTags(old.tags, tags)
+			if len(d.fields) > 0 || old.signature != sig {
+				batch.save(obj, tags, sig, readAt) // its rows as the cap found it
+			}
+			if old.signature == sig && len(d.fields) > 0 && !allIn(d.fields, rd.quiet) {
 				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", d, p.lastSeen(rd.kind, node, old), doneAt), doneAt))
 			}
 			continue
+		}
+		// Back under the cap, what moved is compared with the rows kept since
+		// the last reading under it.
+		seenAt := p.lastSeen(rd.kind, node, old)
+		if s.wasOver {
+			seenAt = maxTime(old.lastSeen, s.since)
 		}
 		switch {
 		case !existed:
 			batch.save(obj, tags, sig, readAt)
 			// One of a parent read whole for the first time since its kind was
-			// past the cap appeared while it could not be seen.
-			since, pastCap := addedSince, false
+			// past the cap appeared while it could not be seen; one of a scope
+			// back under it, since the scope went over.
+			since, pastCap := addedSince, s.wasOver
+			if pastCap {
+				since = s.since
+			}
 			if rd.parentOf != nil {
-				since, pastCap = p.pastCapSince(rd.parentKind, rd.parentOf(obj.id))
-				if !pastCap {
-					since = addedSince
+				if parentSince, ok := p.pastCapSince(rd.parentKind, rd.parentOf(obj.id)); ok && (!pastCap || parentSince.Before(since)) {
+					since, pastCap = parentSince, true
 				}
 			}
 			if obj.hardware || (pastCap && since.IsZero()) || (!pastCap && !baselined) {
@@ -748,13 +766,26 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			}
 			batch.save(obj, tags, sig, readAt)
 			if !allIn(d.fields, rd.quiet) {
-				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", d, p.lastSeen(rd.kind, node, old), doneAt), doneAt))
+				row := changeRow(obj, "changed", d, seenAt, doneAt)
+				if s.wasOver {
+					row.Detail["while_over_cap"] = true
+				}
+				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), row, doneAt))
 			}
 		}
 	}
 	var children map[string]int // childrenOf, once a parent goes
 	for id, old := range prev {
+		s := scopeOf(id)
+		if rd.unread[id] && s != nil {
+			s.heldUnread = true
+		}
 		if seen[id] || rd.unread[id] {
+			continue
+		}
+		// Past the cap, what is kept field by field stays as the crossing
+		// left it: presence counts it gone, and the pass back under names it.
+		if s != nil && s.over && s.wasOver && !rd.forget[id] {
 			continue
 		}
 		batch.removed = append(batch.removed, id)
@@ -763,11 +794,16 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		}
 		flushed := p.o.quiet(p.objectKey(rd.kind, id))
 		batch.record(flushed)
-		// Over the cap or not: an object held field by field is compared,
-		// gone included.
+		seenAt := p.lastSeen(rd.kind, node, old)
+		if s != nil && s.wasOver {
+			seenAt = maxTime(old.lastSeen, s.since)
+		}
 		if old.signature == sig && !p.wasHardware(rd.kind, id, old) {
 			obj := removedObject(rd.kind, id, old.node)
-			row := changeRow(obj, "removed", tagDiff{left: allMembers(old.tags.members)}, p.lastSeen(rd.kind, node, old), doneAt)
+			row := changeRow(obj, "removed", tagDiff{left: allMembers(old.tags.members)}, seenAt, doneAt)
+			if s != nil && s.wasOver {
+				row.Detail["while_over_cap"] = true
+			}
 			if rd.childKind != "" {
 				if children == nil {
 					children = p.childrenOf(rd)
@@ -788,6 +824,9 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		case rd.forget[id]:
 			batch.presenceRemoved = append(batch.presenceRemoved, id)
 		case rd.unread[id]:
+			if s := scopeOf(id); s != nil {
+				s.heldUnread = true
+			}
 		default:
 			if rd.parentOf != nil {
 				k = rd.parentOf(id)
@@ -805,7 +844,7 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		if !s.byPresence() {
 			continue
 		}
-		p.comparePresence(&batch, rd, s, held, heldIn[key], prev, sig, readAt)
+		p.comparePresence(&batch, rd, s, held, heldIn[key], prev, sig)
 		if row, ok := p.pastCapRow(rd.kind, node, s); ok {
 			notices = append(notices, row)
 		}
@@ -822,21 +861,27 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 				notices = append(notices, p.noticeBackUnderCap(rd.kind, node, s))
 			}
 			gates[s.key] = nil
+			if s.heldUnread {
+				// Back under with one it holds unread: the gate stays, without
+				// its notice, until the one is compared too.
+				gates[s.key] = &noticeGate{Since: s.since}
+			}
 		}
 	}
 
 	// A cluster's kind read whole moves its mark, and the mark's time is when
 	// each object read as stored was last seen (lastSeen), so none is touched
 	// one by one; a node's reading, or one that left an object unread, touches
-	// each. A kind held wholly by presence writes nothing for a reading that
-	// moved nothing, its mark included: no object it holds reads that time.
+	// each. A kind whose every object read is past its cap writes nothing for a
+	// reading that moved nothing, its mark included: none reads that time (the
+	// rows kept past the cap are compared back under from the crossing).
 	mark := ""
 	if node == "" && len(rd.unread) == 0 {
 		mark = sig
 	} else {
 		batch.touched = unchanged
 	}
-	if presenceOnly && batch.empty() && len(notices) == 0 && len(gates) == 0 && p.baselines[rd.kind].signature == mark {
+	if allOver && batch.empty() && len(notices) == 0 && len(gates) == 0 && p.baselines[rd.kind].signature == mark {
 		mark = ""
 	}
 	p.markBulk(rd.kind, batch.changes, uuid.NewString())
@@ -882,15 +927,20 @@ func (p *observePass) lastSeen(kind, node string, old storedObject) time.Time {
 // comparePresence compares a scope's objects with what is held of them, one tag
 // each whole: an id not held came (unless this reading is the scope's first,
 // its baseline), one held and not read went, a tag that moved changed. Past the
-// cap what came or changed is written to presence, what went taken out; back
-// under, every object is stored field by field again and presence dropped.
-// Held field by field (the pass that crosses), an object moves to presence
-// without a count: its own row compared it.
-func (p *observePass) comparePresence(batch *recordBatch, rd kindReading, s *capScope, held map[string]presenceEntry, heldIDs []string, prev map[string]storedObject, sig string, readAt time.Time) {
+// cap what came or changed is written to presence, what went taken out. Held
+// field by field too, an object is counted only from the pass after the one
+// that crosses, which compared it on its own. Back under, presence goes: apply
+// compares each object with its rows and names what moved, and what is counted
+// is only what went that it holds no rows of.
+func (p *observePass) comparePresence(batch *recordBatch, rd kindReading, s *capScope, held map[string]presenceEntry, heldIDs []string, prev map[string]storedObject, sig string) {
 	baseline := s.over && !s.wasOver && s.since.IsZero()
 	read := make(map[string]bool, len(s.current))
 	for _, obj := range s.current {
 		read[obj.id] = true
+		if !s.over {
+			p.notePastCap(rd.kind, obj.id, s.since)
+			continue
+		}
 		tag, err := p.wholeTag(rd.kind, obj)
 		if err != nil {
 			continue
@@ -899,10 +949,8 @@ func (p *observePass) comparePresence(batch *recordBatch, rd kindReading, s *cap
 		_, fieldByField := prev[obj.id]
 		write := true
 		switch {
-		case fieldByField:
-			if s.over {
-				batch.removed = append(batch.removed, obj.id)
-			}
+		case fieldByField && !s.wasOver:
+			// The pass that crosses compared it field by field.
 		case !isHeld:
 			if !baseline && !obj.hardware {
 				s.added = append(s.added, obj.id)
@@ -914,27 +962,19 @@ func (p *observePass) comparePresence(batch *recordBatch, rd kindReading, s *cap
 		default:
 			write = false
 		}
-		if !s.over {
-			// Back under: stored field by field again, its baseline.
-			if tags, err := p.tagObject(rd.kind, obj); err == nil {
-				batch.save(obj, tags, sig, readAt)
-			}
-			p.notePastCap(rd.kind, obj.id, s.since)
-			continue
-		}
 		if write {
 			batch.presence = append(batch.presence, observedPresenceRow{ObjectID: obj.id, Node: obj.node, Tag: tag, Signature: sig})
 		}
 	}
 	for _, id := range heldIDs {
-		if read[id] {
-			if !s.over {
-				batch.presenceRemoved = append(batch.presenceRemoved, id)
+		if !read[id] {
+			if _, kept := prev[id]; s.over || !kept {
+				s.removed = append(s.removed, id)
 			}
-			continue
 		}
-		s.removed = append(s.removed, id)
-		batch.presenceRemoved = append(batch.presenceRemoved, id)
+		if !read[id] || !s.over {
+			batch.presenceRemoved = append(batch.presenceRemoved, id)
+		}
 	}
 }
 
@@ -975,13 +1015,14 @@ func sampleIDs(ids []string, n int) []string {
 	return out
 }
 
-// wholeTag is one tag of an object whole: of what its listing said of it, for a
-// kind read object by object (past the cap only the listing is read), or of its
-// fields, lists and members.
+// wholeTag is one tag of an object whole: of everything read of it, its fields,
+// lists and members; of one read shallow (past the cap, by what its listing
+// says of it alone), of that. A kept object is never read shallow, nor one
+// read shallow kept, while its scope is past the cap.
 func (p *observePass) wholeTag(kind string, obj observedObject) (string, error) {
 	content := map[string]any{"fields": obj.fields, "lists": obj.lists, "members": obj.members}
-	if obj.listing != nil {
-		content = map[string]any{"listing": obj.listing}
+	if obj.shallow {
+		content = map[string]any{"listing": obj.fields}
 	}
 	b, err := json.Marshal(content)
 	if err != nil {

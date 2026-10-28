@@ -44,10 +44,8 @@ type observedObject struct {
 	members      map[string][]string // field -> the other objects' ids it lists, sorted (fieldSpec.withMembers)
 	hardware     bool                // a physical NIC: it comes and goes with nobody editing
 	unsettled    bool                // a guest still being made: its reading is no baseline (guestObject)
-	// listing, for a kind read object by object, is what its listing said of
-	// it, which past the cap is all that is read of it (shallow): its whole
-	// tag is of that alone, whatever else was read (observePass.wholeTag).
-	listing map[string]string
+	// shallow: past the cap, read by what its listing says of it alone (its
+	// fields), and not its own objects (a vnet's subnets) or own read.
 	shallow bool
 }
 
@@ -88,8 +86,7 @@ func shallowObjects(kind, idField string, items []map[string]json.RawMessage) []
 	var out []observedObject
 	for _, item := range items {
 		if id := stringField(item, idField); auditkey.ValidID(id) {
-			listing := listingSpec.canonicalFields(item)
-			out = append(out, observedObject{id: id, resourceType: kind, resourceID: id, fields: listing, listing: listing, shallow: true})
+			out = append(out, observedObject{id: id, resourceType: kind, resourceID: id, fields: listingSpec.canonicalFields(item), shallow: true})
 		}
 	}
 	return out
@@ -350,9 +347,7 @@ func readPools(ctx context.Context, p *observePass) ([]kindReading, readOutcome)
 			reading.unread[id] = true
 			continue
 		}
-		obj := poolObject(id, detail[0])
-		obj.listing = listingSpec.canonicalFields(item)
-		reading.objects = append(reading.objects, obj)
+		reading.objects = append(reading.objects, poolObject(id, detail[0]))
 	}
 	return []kindReading{reading}, readOK
 }
@@ -416,7 +411,6 @@ func readMetricServers(ctx context.Context, p *observePass) ([]kindReading, read
 		}
 		reading.objects = append(reading.objects, observedObject{
 			id: id, resourceType: "metric_server", resourceID: id, fields: spec.canonicalFields(detail),
-			listing: listingSpec.canonicalFields(item),
 		})
 	}
 	return []kindReading{reading}, readOK
@@ -1001,7 +995,12 @@ func readAccessACL(ctx context.Context, p *observePass) ([]kindReading, readOutc
 // heldIDs is every id of kind the cluster holds, field by field or by presence.
 func (p *observePass) heldIDs(kind string) []string {
 	ids := slices.Collect(maps.Keys(p.state[kind]))
-	return slices.AppendSeq(ids, maps.Keys(p.presence[kind]))
+	for id := range p.presence[kind] {
+		if _, kept := p.state[kind][id]; !kept {
+			ids = append(ids, id) // kept field by field past the cap too
+		}
+	}
+	return ids
 }
 
 // heldChildren is the held objects of a kind of a parent's objects, by
