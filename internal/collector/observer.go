@@ -94,10 +94,6 @@ const (
 	// under: no reading has it, so the next is a baseline.
 	observeUnsettled = "unsettled"
 
-	// observeOverCap is the mark of a kind last read past the cap: no reading
-	// has it, so the first under the cap is a baseline of what it missed.
-	observeOverCap = "over-cap"
-
 	// observedClusterType is the type a change of the cluster as a whole is
 	// filed under, cluster / <cluster id>: the token's privileges moved, a
 	// kind that could not be compared. Its History reads it under view:cluster.
@@ -508,18 +504,14 @@ func (p *observePass) skipKey(kind, node string) string {
 // cluster's reading all of them.
 func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig string, readAt, doneAt time.Time) {
 	sig = p.kindSig(rd.kind, sig)
-	// Past the cap only what is held is compared: a new object is neither
-	// stored nor filed, and the kind is marked so that its first whole reading
-	// under the cap is a baseline of what it missed. A node's kind is not
-	// compared at all, as its objects carry no such mark.
+	// Past the cap only what is held is compared, and what is not held is
+	// neither stored nor filed until the kind is back under it: then each is
+	// filed as added while it was over (detail.while_over_cap), in a window
+	// from the kind's last whole reading before it went over.
 	listed := max(len(rd.objects), rd.listed)
 	over := listed > p.o.maxObjects
-	if over {
-		p.noticeOverCap(ctx, rd.kind, node, listed)
-		if node != "" {
-			return
-		}
-	}
+	overKey := "too_many_objects/" + rd.kind + "/" + node
+	gate, wasOver := p.notices[overKey]
 	prev := map[string]storedObject{}
 	for id, s := range p.state[rd.kind] {
 		if node == "" || s.node == node {
@@ -551,8 +543,12 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			}
 		}
 	}
+	if wasOver && !over && !gate.Since.IsZero() {
+		addedSince = gate.Since
+	}
 
 	var batch recordBatch
+	appeared := 0
 	seen := make(map[string]bool, len(rd.objects))
 	for _, obj := range rd.objects {
 		if seen[obj.id] {
@@ -578,7 +574,12 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			batch.save(obj, tags, sig, readAt)
 			if baselined && !obj.hardware {
 				added := tagDiff{joined: allMembers(tags.members)}
-				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "added", added, addedSince, doneAt), doneAt))
+				row := changeRow(obj, "added", added, addedSince, doneAt)
+				if wasOver {
+					row.Detail["while_over_cap"] = true
+					appeared++
+				}
+				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), row, doneAt))
 			}
 		case old.signature != sig:
 			batch.save(obj, tags, sig, readAt)
@@ -605,23 +606,36 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		}
 		flushed := p.o.quiet(p.objectKey(rd.kind, id))
 		batch.record(flushed)
-		if baselined && old.signature == sig && !p.wasHardware(rd.kind, id, old) {
+		// Over the cap or not: an object held is compared, gone included.
+		if old.signature == sig && !p.wasHardware(rd.kind, id, old) {
 			obj := removedObject(rd.kind, id, old.node)
 			removed := tagDiff{left: allMembers(old.tags.members)}
 			batch.record([]observedChangeRow{changeRow(obj, "removed", removed, old.lastSeen, doneAt)})
 		}
 	}
 
+	// Over the cap the kind's mark stays its last whole reading, the window an
+	// object that appears meanwhile is filed in.
 	mark := ""
-	switch {
-	case over:
-		mark = observeOverCap
-	case node == "" && len(rd.unread) == 0:
+	if !over && node == "" && len(rd.unread) == 0 {
 		mark = sig
 	}
 	p.markBulk(rd.kind, batch.changes, uuid.NewString())
-	if p.write(ctx, rd.kind, batch, readAt, mark) && mark != "" {
+	if !p.write(ctx, rd.kind, batch, readAt, mark) {
+		return
+	}
+	if mark != "" {
 		p.baselines[rd.kind] = storedBaseline{signature: mark, lastRead: readAt}
+	}
+	switch {
+	case over:
+		since := gate.Since
+		if !wasOver && baselined {
+			since = addedSince
+		}
+		p.noticeOverCap(ctx, rd.kind, node, listed, since)
+	case wasOver:
+		p.noticeBackUnderCap(ctx, rd.kind, node, appeared, !baselined)
 	}
 }
 
@@ -643,7 +657,12 @@ func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string)
 // noticeOverCap warns, and files in the cluster's History, once a day while it
 // lasts, that a kind lists more objects than are compared: what a reading
 // cannot hold is not tracked, and the History should say so.
-func (p *observePass) noticeOverCap(ctx context.Context, kind, node string, listed int) {
+//
+// since is the kind's last whole reading before it went over, kept in the
+// gate: when it is back under, what it did not hold is filed as added since
+// then (zero for a kind never read whole, whose next whole reading is a
+// baseline).
+func (p *observePass) noticeOverCap(ctx context.Context, kind, node string, listed int, since time.Time) {
 	key := "too_many_objects/" + kind + "/" + node
 	gate, ok := p.notices[key]
 	if ok && time.Since(gate.Given) < observeSkipFor {
@@ -657,11 +676,25 @@ func (p *observePass) noticeOverCap(ctx context.Context, kind, node string, list
 	if node != "" {
 		row.Detail["node"] = node
 	}
-	if !ok {
-		gate.Since = time.Now()
-	}
-	gate.Given = time.Now()
+	gate.Since, gate.Given = since, time.Now()
 	p.notices[key] = gate
+	p.saveNotices(ctx, row)
+}
+
+// noticeBackUnderCap files, once, that a kind is back under the cap, with how
+// many objects it filed as appeared while it was over, or baseline when the
+// kind had no whole reading before it went over and this one is its baseline.
+// The gate goes: a kind over the cap again is a new notice at once.
+func (p *observePass) noticeBackUnderCap(ctx context.Context, kind, node string, appeared int, baseline bool) {
+	p.o.logger.Info("object observer: a kind is back under the cap; compared whole again",
+		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "appeared", appeared, "baseline", baseline)
+	resourceType, resourceID := p.noticeTarget(kind, node)
+	row := noticeRow(resourceType, resourceID, "back_under_cap", []string{kind})
+	row.Detail["appeared"], row.Detail["baseline"] = appeared, baseline
+	if node != "" {
+		row.Detail["node"] = node
+	}
+	delete(p.notices, "too_many_objects/"+kind+"/"+node)
 	p.saveNotices(ctx, row)
 }
 

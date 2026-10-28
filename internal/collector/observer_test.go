@@ -317,6 +317,17 @@ func (e *observeEnv) restart() {
 	e.obs = obs
 }
 
+// passRows runs one pass and returns the rows it filed, as written.
+func (e *observeEnv) passRows() []observedChangeRow {
+	e.obs.ObserveAll(context.Background())
+	e.obs.Wait()
+	e.mq.observed.mu.Lock()
+	defer e.mq.observed.mu.Unlock()
+	rows := e.mq.observed.changes
+	e.mq.observed.changes = nil
+	return rows
+}
+
 // pass runs one pass and returns what it filed.
 func (e *observeEnv) pass() []string {
 	e.obs.ObserveAll(context.Background())
@@ -836,28 +847,77 @@ func TestObserverOutcomes(t *testing.T) {
 		e.mq.observed.changes = nil
 		e.mq.observed.mu.Unlock()
 	})
-	t.Run("past the cap only what is held is compared, and a notice says so once a day", func(t *testing.T) {
+	t.Run("past the cap what is held is compared, gone included, and what appeared is filed back under it", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
 		e.obs.maxObjects = 3
-		storages := func(nodes string) string {
-			items := make([]string, 0, e.obs.maxObjects+1)
-			for i := range e.obs.maxObjects + 1 {
-				items = append(items, fmt.Sprintf(`{"storage":"s%05d","type":"dir","nodes":"%s"}`, i, nodes))
+		storages := func(first, n int) string {
+			items := make([]string, 0, n)
+			for i := first; i < first+n; i++ {
+				items = append(items, fmt.Sprintf(`{"storage":"s%05d","type":"dir","nodes":"pve-02"}`, i))
 			}
 			return "[" + strings.Join(items, ",") + "]"
 		}
+		cluster := "changed cluster/" + e.cluster.ID.String() + " [storage]"
 		e.client.set(pathStorage, `[{"storage":"s00000","type":"dir","nodes":"pve-01"}]`)
+		before := time.Now()
 		e.expect("baseline")
-		e.client.set(pathStorage, storages("pve-02"))
-		e.expect("past the cap", "changed cluster/"+e.cluster.ID.String()+" [storage]", "changed storage/s00000 [nodes]")
+		e.client.set(pathStorage, storages(0, 4))
+		overStart := time.Now()
+		e.expect("past the cap", cluster, "changed storage/s00000 [nodes]")
 		e.expect("still past it, the notice given")
 		e.restart()
 		e.expect("and after a restart")
-		e.client.set(pathStorage, `[{"storage":"s00000","type":"dir","nodes":"pve-02"},{"storage":"s00001","type":"dir"}]`)
-		e.expect("under it again: what it missed is a baseline")
-		e.client.set(pathStorage, `[{"storage":"s00000","type":"dir","nodes":"pve-02"},{"storage":"s00001","type":"dir"},{"storage":"s00002","type":"dir"}]`)
-		e.expect("then an addition", "added storage/s00002 []")
+		e.client.set(pathStorage, storages(1, 4))
+		e.expect("a held one deleted past the cap", "removed storage/s00000 []")
+		e.client.set(pathStorage, storages(1, 2))
+		rows := e.passRows()
+		if len(rows) != 3 {
+			t.Fatalf("back under: filed %+v, want the two that appeared and a notice", rows)
+		}
+		for _, r := range rows {
+			switch {
+			case r.Change == "added":
+				if r.Detail["while_over_cap"] != true || r.LastSeenAt.Before(before) || !r.LastSeenAt.Before(overStart) {
+					t.Errorf("appeared while over: %+v, want while_over_cap, its window from the last whole reading", r)
+				}
+			case r.Detail["notice"] != "back_under_cap" || r.Detail["appeared"] != float64(2) || r.Detail["baseline"] != false:
+				t.Errorf("back under: %+v, want back_under_cap, 2 appeared, no baseline", r)
+			}
+		}
+		e.client.set(pathStorage, storages(1, 3))
+		e.expect("then an addition, no longer while over", "added storage/s00003 []")
+	})
+	t.Run("a node's kind past the cap files what appeared from its last whole reading", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 2
+		iface := func(name string) string { return `{"iface":"` + name + `","type":"bridge"}` }
+		e.client.set(pathNet, "["+iface("vmbr0")+"]")
+		e.expect("baseline")
+		e.client.set(pathNet, "["+strings.Join([]string{iface("vmbr0"), iface("vmbr1"), iface("vmbr2")}, ",")+"]")
+		overStart := time.Now()
+		e.expect("past the cap", "changed network/"+e.cluster.ID.String()+" [network]")
+		e.expect("still past it")
+		e.client.set(pathNet, "["+iface("vmbr0")+","+iface("vmbr1")+"]")
+		for _, r := range e.passRows() {
+			if r.Change == "added" && !r.LastSeenAt.Before(overStart) {
+				t.Errorf("appeared on a node while over: %+v, want its window from the last whole reading", r)
+			}
+		}
+	})
+	t.Run("a kind never read whole before the cap takes its first whole reading as its baseline", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 1
+		e.client.set(pathStorage, `[{"storage":"s1","type":"dir"},{"storage":"s2","type":"dir"}]`)
+		e.expect("over from its first reading", "changed cluster/"+e.cluster.ID.String()+" [storage]")
+		e.client.set(pathStorage, `[{"storage":"s1","type":"dir"}]`)
+		rows := e.passRows()
+		if len(rows) != 1 || rows[0].Detail["notice"] != "back_under_cap" || rows[0].Detail["baseline"] != true ||
+			rows[0].Detail["appeared"] != float64(0) {
+			t.Fatalf("back under: filed %+v, want only a notice that this reading is the baseline", rows)
+		}
 	})
 	t.Run("past the cap a reader reads on only what is held, and guests are read in turns", func(t *testing.T) {
 		t.Parallel()
