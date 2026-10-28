@@ -1169,7 +1169,8 @@ func TestObservedClassifyBatchShrinksAfterATimeout(t *testing.T) {
 // type's view permission: a row of a type it lacks reaches no one.
 func TestObservedTypesHaveAReader(t *testing.T) {
 	t.Parallel()
-	types := []string{observedClusterType}
+	types := make([]string, 0, 1+len(observeKindSchemas))
+	types = append(types, observedClusterType)
 	for kind := range observeKindSchemas {
 		types = append(types, removedObject(kind, "x", "").resourceType)
 	}

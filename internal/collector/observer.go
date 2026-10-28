@@ -657,11 +657,11 @@ func (p *observePass) noticeOverCap(ctx context.Context, kind, node string, list
 // cap: past it, only the objects already held are read on, and the count it
 // listed goes with the reading (kindReading.listed), so the kind is compared
 // as one past the cap.
-func (p *observePass) capListing(kind string, items []map[string]json.RawMessage, idOf func(map[string]json.RawMessage) string) ([]map[string]json.RawMessage, int) {
+func (p *observePass) capListing(kind string, items []map[string]json.RawMessage, idOf func(map[string]json.RawMessage) string) (kept []map[string]json.RawMessage, listed int) {
 	if len(items) <= p.o.maxObjects {
 		return items, 0
 	}
-	kept := make([]map[string]json.RawMessage, 0, len(p.state[kind]))
+	kept = make([]map[string]json.RawMessage, 0, len(p.state[kind]))
 	for _, item := range items {
 		if _, held := p.state[kind][idOf(item)]; held {
 			kept = append(kept, item)
@@ -1496,13 +1496,11 @@ func (p *observePass) forgetDepartedNodes(ctx context.Context, nodes []db.Node) 
 // once, as an upgrade would.
 //
 // upgraded is whether a node runs another version than it last did.
-func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (string, []string, bool) {
+func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (versions string, unread []string, upgraded bool) {
 	const kind = "node_versions"
 	last := map[string]string{}
 	stored := p.baselines[kind].signature
 	_ = json.Unmarshal([]byte(stored), &last)
-	var unread []string
-	upgraded := false
 	vs := make([]string, 0, len(nodes))
 	for _, n := range nodes {
 		if n.PveVersion != "" {
