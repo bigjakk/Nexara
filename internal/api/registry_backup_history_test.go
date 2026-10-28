@@ -119,8 +119,9 @@ func TestBackupHistoryPathsAreTheSPAs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var spa, server []string
-	for _, m := range regexp.MustCompile("apiPath`(/api/v1/[^`?]+)").FindAllStringSubmatch(string(src), -1) {
+	templates := regexp.MustCompile("apiPath`(/api/v1/[^`?]+)").FindAllStringSubmatch(string(src), -1)
+	spa, server := make([]string, 0, len(templates)), make([]string, 0, len(backupHistoryRoutes()))
+	for _, m := range templates {
 		spa = append(spa, regexp.MustCompile(`\$\{[^}]*\}`).ReplaceAllString(m[1], ":p"))
 	}
 	for _, r := range backupHistoryRoutes() {
