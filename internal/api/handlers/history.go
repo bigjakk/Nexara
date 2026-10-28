@@ -134,10 +134,11 @@ type HistoryKind struct {
 	GuestToggle string
 	// RowCap bounds an unfiltered read: each source newest first up to RowCap
 	// rows, so a page of a busy cluster's, folder's or node's History costs
-	// RowCap rows a source, not its whole trail. The total then stops at
-	// RowCap+1, which the reader shows as "more than RowCap", and no page past
-	// RowCap is served. The caller's guest types are applied inside each
-	// capped source, so the cap counts only rows the caller may see.
+	// RowCap rows a source, not its whole trail. A read in which a source
+	// reaches it lists only what it is whole for, back to its searched_from,
+	// and counts only that; end_time set to searched_from reads the stretch
+	// before it. The caller's guest types are applied inside each capped
+	// source, so the cap counts only rows the caller may see.
 	RowCap int
 	// FilteredRowCap is RowCap for a read narrowed by category or source, set
 	// with it and no smaller: the narrowing is applied after each source's
@@ -804,6 +805,19 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	case r.kind.DefaultWindow > 0 && !p.Bool("all_time"):
 		since = pgtype.Timestamptz{Time: time.Now().Add(-r.kind.DefaultWindow), Valid: true}
 	}
+	// end_time lowers the window's top, the start kept: the next stretch of a
+	// read that stopped at searched_from.
+	var until pgtype.Timestamptz
+	if v := p.String("end_time"); v != "" {
+		t, parseErr := time.Parse(time.RFC3339, v)
+		if parseErr != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid end_time (use RFC3339)")
+		}
+		if p.String("start_time") != "" && !t.After(since.Time) {
+			return fiber.NewError(fiber.StatusBadRequest, "end_time must be later than start_time")
+		}
+		until = pgtype.Timestamptz{Time: t, Valid: true}
+	}
 
 	ctx, cancel := context.WithTimeout(c.Context(), historyQueryTimeout)
 	defer cancel()
@@ -853,7 +867,7 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	params.StatusGuestTypes = statusTypes
 	params.RowLimit = safeconv.Int32(int(p.Int("limit")))
 	params.RowOffset = safeconv.Int32(int(p.Int("offset")))
-	params.Since = since
+	params.Since, params.Until = since, until
 	if category := p.String("category"); category != "" {
 		params.Category = pgtype.Text{String: category, Valid: true}
 	}
@@ -870,12 +884,6 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	if params.Category.Valid || len(params.ExcludeCategories) > 0 || params.Source.Valid {
 		params.RowCap = safeconv.Int32(r.kind.FilteredRowCap)
 	}
-	// No page past the cap: the rows there are not the newest of the whole.
-	if limitCap := params.RowCap; limitCap > 0 {
-		params.RowOffset = min(params.RowOffset, limitCap)
-		params.RowLimit = min(params.RowLimit, limitCap-params.RowOffset)
-	}
-
 	rows, err := r.h.history.ListHistory(ctx, params)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
@@ -909,8 +917,9 @@ type historyPage struct {
 	Items []historyEntry `json:"items"`
 	Total int64          `json:"total"`
 	// SearchedFrom is, for a read in which a source reached its cap, the point
-	// back to which the read is whole: older entries of that source were not
-	// read. Absent when the read is whole.
+	// back to which it is whole: it lists only what is at or after it, and the
+	// same read with end_time set to it lists the next stretch. Absent when the
+	// read is whole.
 	SearchedFrom *string `json:"searched_from,omitempty"`
 	// Guests is, for a History that follows only some of its guests, how
 	// many it follows of how many (HistorySelection.GuestsTotal).

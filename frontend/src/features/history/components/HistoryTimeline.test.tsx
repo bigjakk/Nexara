@@ -4,6 +4,8 @@ import { renderWithProviders } from "@/test/test-utils";
 import { setupUser } from "@/test/user";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { formatDateTime } from "@/lib/format";
+import { makeHistoryEntry } from "@/test/history.fixtures";
 import { historyKind } from "../lib/history";
 import type { HistoryPage } from "../types/history";
 import { HistoryTimeline } from "./HistoryTimeline";
@@ -64,59 +66,91 @@ describe("HistoryTimeline", () => {
     },
   );
 
-  // A capped read's total is one past the cap: "more than" it, and only the
-  // cap's worth of pages; a narrowed read has the larger cap. Where the
-  // server says how far back it searched, so does the page.
-  it.each([
-    ["unfiltered", "", 101, /^More than 100 entries/, "Page 1 of 2", undefined],
-    [
-      "narrowed",
-      "other",
-      1001,
-      /^More than 1,000 entries/,
-      "Page 1 of 20",
-      "2026-01-02T03:04:05Z",
-    ],
-  ])(
-    "reads a total one past the %s cap as more than it",
-    async (_name, category, total, more, pages, searchedFrom) => {
-      const user = setupUser();
-      mockedPage.mockReset();
-      const response: HistoryPage = {
-        items: [],
-        total,
-        ...(searchedFrom === undefined ? {} : { searched_from: searchedFrom }),
-      };
-      mockedPage.mockResolvedValue(response);
-      const kind = historyKind(
-        "probe",
-        { categories: { other: "Other" } },
-        { icons: {}, rowCap: 100, filteredRowCap: 1000 },
-      );
-      renderWithProviders(
-        <HistoryTimeline
-          kind={kind}
-          target={{
-            clusterId: "c1",
-            path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
-          }}
-        />,
-      );
-      if (category) {
-        await user.selectOptions(
-          screen.getByRole("combobox", { name: "Type" }),
-          category,
-        );
-      }
-      expect(await screen.findByText(more)).toBeInTheDocument();
-      expect(screen.getByText(pages)).toBeInTheDocument();
-      expect(
-        screen.queryByText(/^Searched back to .*newest 1,000 entries/) !== null,
-      ).toBe(searchedFrom !== undefined);
-      // Nothing left out, so nothing to bring back.
-      expect(screen.queryByRole("checkbox")).toBeNull();
-    },
-  );
+  // A read whole back to a point says so, and that narrowing searches deeper
+  // where it does. Show older reads below the point with end_time, a stretch
+  // a page at a time and then the stretch below it, and appends each entry
+  // once; the page it started from is held still.
+  it("shows older entries below where a read was whole, each once", async () => {
+    const user = setupUser();
+    mockedPage.mockReset();
+    const s1 = "2026-01-02T03:04:05.000001Z";
+    const s2 = "2026-01-01T01:00:00.000001Z";
+    const entry = (id: string, action: string) =>
+      makeHistoryEntry({ id, action, resource_type: "node" });
+    const migrations = Array.from({ length: 49 }, (_, i) =>
+      entry(`audit:m${String(i)}`, "migrate"),
+    );
+    // By end_time and offset: the base page; the stretch below it, 51 long,
+    // whose first page repeats one of the base's; and the last stretch.
+    const pages: Record<string, HistoryPage> = {
+      ":0": {
+        items: [entry("audit:3", "reboot"), entry("audit:2", "shutdown")],
+        total: 2,
+        searched_from: s1,
+      },
+      [`${s1}:0`]: {
+        items: [entry("audit:2", "shutdown"), ...migrations],
+        total: 51,
+        searched_from: s2,
+      },
+      [`${s1}:50`]: {
+        items: [entry("audit:1", "wakeonlan")],
+        total: 51,
+        searched_from: s2,
+      },
+      [`${s2}:0`]: { items: [entry("audit:0", "hibernate")], total: 1 },
+    };
+    mockedPage.mockImplementation((path) => {
+      const q = new URL(String(path), "http://x").searchParams;
+      const at = `${q.get("end_time") ?? ""}:${q.get("offset") ?? ""}`;
+      return Promise.resolve(pages[at] ?? { items: [], total: 0 });
+    });
+    const kind = historyKind(
+      "probe",
+      { categories: { other: "Other" } },
+      { icons: {}, rowCap: 100, filteredRowCap: 1000 },
+    );
+    const { queryClient } = renderWithProviders(
+      <HistoryTimeline
+        kind={kind}
+        target={{
+          clusterId: "c1",
+          path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
+        }}
+      />,
+    );
+    // The note, with the hint a read that is not narrowed carries.
+    const note = (when: string) =>
+      `Complete back to ${formatDateTime(when)}; Show older lists the entries before it. ` +
+      "A read narrowed by type or source searches the newest 1,000 entries of each kind of record instead of 100.";
+    expect(await screen.findByText(note(s1))).toBeInTheDocument();
+    const showOlder = () =>
+      user.click(screen.getByRole("button", { name: "Show older" }));
+
+    await showOlder();
+    expect(await screen.findAllByText("Migrate")).toHaveLength(49);
+    // Mid-stretch, the listing is whole back to the stretch's top.
+    expect(screen.getByText(note(s1))).toBeInTheDocument();
+    await showOlder();
+    expect(await screen.findByText("Wakeonlan")).toBeInTheDocument();
+    expect(screen.getByText(note(s2))).toBeInTheDocument();
+    await showOlder();
+    expect(await screen.findByText("Hibernate")).toBeInTheDocument();
+
+    const reads = mockedPage.mock.calls.map((c) => {
+      const q = new URL(String(c[0]), "http://x").searchParams;
+      return `${q.get("end_time") ?? ""}:${q.get("offset") ?? ""}`;
+    });
+    expect(reads).toEqual([":0", `${s1}:0`, `${s1}:50`, `${s2}:0`]);
+    expect(screen.getAllByText("Shutdown")).toHaveLength(1);
+    expect(screen.getByText("53 entries")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show older" })).toBeNull();
+    expect(screen.queryByText(/^Complete back to/)).toBeNull();
+    // Held still: an event's re-read of the cluster's Histories reads neither
+    // the page nor the stretches below it again.
+    await queryClient.invalidateQueries({ queryKey: ["history", "c1"] });
+    expect(mockedPage).toHaveBeenCalledTimes(4);
+  });
 
   // Its route reads a kind's default window when none is named, so All time
   // asks for all of it; an empty window says so, not that a filter matched

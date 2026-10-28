@@ -402,6 +402,7 @@ func historyTestProps(name string, path apischema.Property) apischema.Properties
 		// Optional with no default: omitted, it is "".
 		"exclude_category": {Type: apischema.String, Optional: true},
 		"all_time":         {Type: apischema.Boolean, Optional: true, Default: false},
+		"end_time":         {Type: apischema.String, Optional: true},
 	}
 }
 
@@ -436,22 +437,25 @@ func TestHistoryListRefusesAGuestBesideThePath(t *testing.T) {
 }
 
 // A cluster's read is capped, 2,000 rows a source unfiltered and 20,000
-// narrowed, for a caller without a guest type too (the arms apply it), and no
-// page past the cap is served; a node's and a folder's at 20,000, all time
-// too. With no start_time each reads the last week, unless it asks for
-// all_time. ListHistory alone is planned for its own arguments (HistoryDBTX):
-// the folder's own read before it is not.
+// narrowed, for a caller without a guest type too (the arms apply it); a
+// node's and a folder's at 20,000, all time too. Every page is served: a read
+// lists only what it is whole for. With no start_time each reads the last
+// week, unless it asks for all_time, and end_time lowers its top. ListHistory
+// alone is planned for its own arguments (HistoryDBTX): the folder's own read
+// before it is not.
 func TestHistoryListBoundsACappedRead(t *testing.T) {
 	t.Parallel()
 	// Where each bound sits among the query's arguments.
 	probe := &auditRowsDBTX{}
 	since := pgtype.Timestamptz{Time: time.Unix(1_000_000, 0), Valid: true}
+	until := pgtype.Timestamptz{Time: time.Unix(2_000_000, 0), Valid: true}
 	if _, err := db.New(HistoryDBTX(probe)).ListHistory(context.Background(), db.ListHistoryParams{
-		RowCap: 11, RowOffset: 22, RowLimit: 33, Since: since}); err != nil {
+		RowCap: 11, RowOffset: 22, RowLimit: 33, Since: since, Until: until}); err != nil {
 		t.Fatal(err)
 	}
 	at := func(v any) int { return slices.Index(probe.calls[0].args, v) }
-	atCap, atOffset, atLimit, atSince := at(int32(11)), at(int32(22)), at(int32(33)), at(since)
+	atCap, atOffset, atLimit, atSince, atUntil := at(int32(11)), at(int32(22)), at(int32(33)), at(since), at(until)
+	end := time.Date(2026, 1, 2, 3, 4, 5, 6000, time.UTC)
 	cluster := uuid.New()
 	every := func() permissionEngine { return &recordingEngine{actions: map[string]bool{"view": true}} }
 	week := time.Now().Add(-7 * 24 * time.Hour)
@@ -467,20 +471,20 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 		route              route
 		engine             permissionEngine
 		cap, offset, limit int32
-		window             bool // the last week; else no bound
+		window             bool      // the last week; else no bound
+		until              time.Time // the window's top; zero for none
 	}{
-		{"unfiltered", "", clusterRoute, every(), 2_000, 0, 50, true},
-		{"a category", "?category=sync", clusterRoute, every(), 20_000, 0, 50, true},
-		{"categories left out", "?exclude_category=other", clusterRoute, every(), 20_000, 0, 50, true},
-		{"a source", "?source=nexara", clusterRoute, every(), 20_000, 0, 50, true},
+		{"unfiltered", "", clusterRoute, every(), 2_000, 0, 50, true, time.Time{}},
+		{"a category", "?category=sync", clusterRoute, every(), 20_000, 0, 50, true, time.Time{}},
+		{"categories left out", "?exclude_category=other", clusterRoute, every(), 20_000, 0, 50, true, time.Time{}},
+		{"a source", "?source=nexara", clusterRoute, every(), 20_000, 0, 50, true, time.Time{}},
 		{"a caller without view:container", "", clusterRoute,
-			clusterGrantEngine{action: "view", resource: "vm", cluster: cluster}, 2_000, 0, 50, true},
-		{"the last page within the cap", "?offset=1980", clusterRoute, every(), 2_000, 1_980, 20, true},
-		{"a page past the cap", "?offset=2050", clusterRoute, every(), 2_000, 2_000, 0, true},
-		{"all time", "?all_time=true", clusterRoute, every(), 2_000, 0, 50, false},
-		{"a node, all time", "?all_time=true", nodeRoute, every(), 20_000, 0, 50, false},
-		{"a node, a page past the cap", "?offset=20050", nodeRoute, every(), 20_000, 20_000, 0, true},
-		{"a folder", "", folderRoute, every(), 20_000, 0, 50, true},
+			clusterGrantEngine{action: "view", resource: "vm", cluster: cluster}, 2_000, 0, 50, true, time.Time{}},
+		{"a page past the cap", "?offset=2050", clusterRoute, every(), 2_000, 2_050, 50, true, time.Time{}},
+		{"all time", "?all_time=true", clusterRoute, every(), 2_000, 0, 50, false, time.Time{}},
+		{"the next stretch", "?end_time=" + end.Format(time.RFC3339Nano), clusterRoute, every(), 2_000, 0, 50, true, end},
+		{"a node, all time", "?all_time=true", nodeRoute, every(), 20_000, 0, 50, false, time.Time{}},
+		{"a folder", "", folderRoute, every(), 20_000, 0, 50, true, time.Time{}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -529,7 +533,29 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 			if inWeek := got.Valid && got.Time.Sub(week).Abs() < time.Minute; inWeek != tt.window || !tt.window && got.Valid {
 				t.Errorf("since %v, want the last week: %v", got, tt.window)
 			}
+			if top, _ := args[atUntil].(pgtype.Timestamptz); top.Valid != !tt.until.IsZero() || !top.Time.Equal(tt.until) {
+				t.Errorf("until %v, want %v", top, tt.until)
+			}
 		})
+	}
+	// An end at or before the start is the caller's mistake, refused unread.
+	dbtx := &auditRowsDBTX{}
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", every())
+		return c.Next()
+	})
+	app.Get("/clusters/:cluster_id/history", withRequestParams(t, historyTestProps("cluster_id",
+		apischema.StdOption("cluster-id")), []string{"cluster_id"}, NewHistoryHandler(dbtx, db.New(dbtx)).Route(ClusterHistory()).List))
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+
+		"/history?start_time=2026-01-02T00:00:00Z&end_time=2026-01-02T00:00:00Z", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || len(dbtx.calls) != 0 {
+		t.Errorf("an end no later than the start: status %d after %d queries, want 400 before any", resp.StatusCode, len(dbtx.calls))
 	}
 }
 

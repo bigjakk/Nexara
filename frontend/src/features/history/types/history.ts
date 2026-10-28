@@ -91,7 +91,8 @@ export interface HistoryEntry {
 /** One page of a History, as its route returns it. */
 export interface HistoryPage extends ListResponse<HistoryEntry> {
   /** Set when a source reached its cap (HistoryKind.RowCap): the read is
-   *  whole back to here, and older entries of that source were not read. */
+   *  whole back to here, lists only what is at or after it, and counts only
+   *  that in total; the same read with end_time set to it reads on below. */
   searched_from?: string;
   /** Set when the History follows only some of its guests (a folder past its
    *  guest cap): how many, of how many the reader may open. */
@@ -132,11 +133,10 @@ export interface HistoryKind {
   /** The route takes include_guests (HistoryKind.GuestToggle on the server):
    *  its guests' own activity is left out until the reader brings it in. */
   guestToggle?: boolean;
-  /** The server's cap on an unfiltered read (HistoryKind.RowCap): a total of
-   *  rowCap + 1 means more than rowCap, of which rowCap can be paged. */
+  /** The server's caps on each source of an unfiltered and of a narrowed read
+   *  (HistoryKind.RowCap, FilteredRowCap), set where they differ: a read
+   *  that stopped short says that narrowing it searches deeper. */
   rowCap?: number;
-  /** The cap on a read narrowed by type or source (HistoryKind.FilteredRowCap):
-   *  each source's newest filteredRowCap rows are searched. */
   filteredRowCap?: number;
 }
 

@@ -1815,13 +1815,13 @@ type Querier interface {
 	// as runs (collapse_*: one entry per run, kind run, a gap longer than the
 	// pair's starting the next), and each source — each pair's rows, of which the
 	// oldest run may then be only the newest part — is read newest first up to
-	// row_cap rows when the handler sets one, so a cluster's whole audit trail
-	// is never read to show one page of it; total then stops at row_cap + 1. The
-	// audit arm reads by the (cluster_id, created_at) index built after startup,
-	// through a row comparison only that index can serve: written cluster_id = X
-	// with an ORDER BY created_at, a generic plan — which takes X for an average
-	// cluster — walks the created_at index instead, through every other cluster's
-	// rows, and a small cluster's History in a big install read all 1M of them.
+	// row_cap rows when the handler sets one, so a cluster's whole audit trail is
+	// never read to show one page of it. The audit arm reads by the (cluster_id,
+	// created_at) index built after startup, through a row comparison only that
+	// index can serve: written cluster_id = X with an ORDER BY created_at, a
+	// generic plan — which takes X for an average cluster — walks the created_at
+	// index instead, through every other cluster's rows, and a small cluster's
+	// History in a big install read all 1M of them.
 	// The runs are read per pair (the LIMIT keeps the lateral a lateral), and the
 	// collapsed pairs are left out of the audit arm by a hashed NOT IN, a filter
 	// the index scan keeps its order through, where NOT EXISTS became an anti join
@@ -1832,24 +1832,28 @@ type Querier interface {
 	// page does (status_guest_types), so a cap counts only rows the caller sees.
 	//
 	// Any kind may cap its read so (row_cap, HistoryKind.RowCap: a folder's and a
-	// node's do): each source newest first up to row_cap rows, total stopping at
-	// row_cap + 1, and the guests' rows, the objects' and a node's tasks each read
-	// to the cap before their arm takes its newest row_cap of them. The guests'
-	// own rows are read per guest by (cluster_id, vmid, created_at) from where
-	// their row_cap newest rows begin, found from that index alone (vmid_floor):
-	// a folder of 500 busy guests reads its newest 20,000 rows, not all 700,000. A
-	// task arm caps the tasks it searches, not the few with no audit row it
-	// finds. The object reads apply the include_guests and guest-type tests the
-	// page applies, so the cap counts only rows the page could show.
+	// node's do): each source newest first up to row_cap rows, the guests' rows,
+	// the objects' and a node's tasks each read to the cap before their arm takes
+	// its newest row_cap of them. The guests' own rows are read per guest by
+	// (cluster_id, vmid, created_at) from where their row_cap newest rows begin,
+	// found from that index alone (vmid_floor): a folder of 500 busy guests reads
+	// its newest 20,000 rows, not all 700,000. A task arm caps the tasks it
+	// searches, not the few with no audit row it finds. The object reads apply the
+	// include_guests and guest-type tests the page applies, so the cap counts only
+	// rows the page could show.
 	//
-	// A capped read says how far back it is whole (searched_from, from horizon):
+	// A capped read is whole back to searched_from (horizon): a microsecond past
 	// the latest of the points where a source that reached its cap stopped, and
-	// of the guests' floor — an older entry of that source may be missing. Each
-	// source is counted where its cap is applied. The source filter is applied in
-	// every arm, so a cap counts only that source's rows — Proxmox's together
-	// with the rows that may be their Nexara twins, which the duplicate probe
-	// needs. The type filter is not: a category is worked out once per kind of
-	// row after the arms (category_map), and per row in each arm it cost four
+	// of the guests' floor, since rows at the point itself may be cut. It lists
+	// only what is at or after it, with that count as total, so each stretch is
+	// whole and the next — the same read with until (end_time, exclusive, in
+	// every arm beside since) set to searched_from — begins where it ends. Runs
+	// fold only the rows at or after it: a burst across it is a run on each side.
+	// Each source is counted where its cap is applied. The source filter is
+	// applied in every arm, so a cap counts only that source's rows — Proxmox's
+	// together with the rows that may be their Nexara twins, which the duplicate
+	// probe needs. The type filter is not: a category is worked out once per kind
+	// of row after the arms (category_map), and per row in each arm it cost four
 	// times as much.
 	//
 	// Every branch reads one cluster, a REQUIRED argument: the route's, which its
@@ -1975,8 +1979,9 @@ type Querier interface {
 	// moved it, not a row filed under its UPID since. total is
 	// count(*) OVER the filtered set, computed before LIMIT — the Items and the
 	// Total come from one query and so cannot be counted under different filters.
-	// An empty page of a capped read is one row with no entry (entry_id ''),
-	// there only to carry searched_from.
+	// An empty page of a capped read — past its end, or of a stretch with nothing
+	// in it — is one row with no entry (entry_id ''), there only to carry
+	// searched_from.
 	// An empty page of a capped read still says how far back it searched: one
 	// row with no entry (entry_id ''), which the handler reads only for that.
 	ListHistory(ctx context.Context, arg ListHistoryParams) ([]ListHistoryRow, error)

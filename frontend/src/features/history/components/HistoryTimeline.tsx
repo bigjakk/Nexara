@@ -15,7 +15,11 @@ import { useTaskLogStore } from "@/stores/task-log-store";
 import { selectClass } from "@/features/tasks/lib/task-filters";
 import { detailPairs } from "@/features/events/lib/audit-details";
 import { useTaskLog, useTaskStatus } from "@/features/tasks/api/tasks-queries";
-import { HISTORY_PAGE_SIZE, useHistory } from "../api/history-queries";
+import {
+  HISTORY_PAGE_SIZE,
+  useHistory,
+  useOlderHistory,
+} from "../api/history-queries";
 import {
   SOURCE_OPTIONS,
   WINDOW_OPTIONS,
@@ -40,6 +44,7 @@ import type {
   HistoryEntry,
   HistoryGuestLink,
   HistoryKind,
+  HistoryPage,
   HistorySource,
   HistoryTarget,
   HistoryWindow,
@@ -298,6 +303,16 @@ function HistoryRow({
   );
 }
 
+/** The entries, each once: the first time an id comes. */
+function uniqueEntries(entries: readonly HistoryEntry[]): HistoryEntry[] {
+  const seen = new Set<string>();
+  return entries.filter((e) => {
+    if (seen.has(e.id)) return false;
+    seen.add(e.id);
+    return true;
+  });
+}
+
 /**
  * An object's History: everything that happened to it, newest first — its
  * tasks in Nexara and in Proxmox with how each ended, its changes with no
@@ -340,9 +355,8 @@ export function HistoryTimeline({
   );
 
   const excludeCategories = historyExclusions(kind, showRoutine, category);
-  const { data, isLoading, error } = useHistory({
+  const filters = {
     target,
-    page,
     category,
     excludeCategories,
     source,
@@ -351,17 +365,67 @@ export function HistoryTimeline({
     allTime: timeWindow === "" && kind.defaultWindow !== undefined,
     includeGuests: kind.guestToggle === true && includeGuests,
     enabled,
-  });
+  };
+
+  // A read that reached a source's cap lists only what it is whole for, back
+  // to its searched_from, and from its last page Show older reads on below
+  // that point a stretch at a time. It reads from the page as it was when
+  // clicked, held still: each new row of a capped source raises the page's
+  // searched_from, which would leave a gap above the stretches read below
+  // the old one. A new page or filter goes live again.
+  const readKey = [
+    page,
+    category,
+    source,
+    timeWindow,
+    showRoutine,
+    includeGuests,
+  ].join("|");
+  const [held, setHeld] = useState<{ key: string; page: HistoryPage } | null>(
+    null,
+  );
+  if (held !== null && held.key !== readKey) setHeld(null);
+  const olderOn = held !== null && held.key === readKey;
+  const live = useHistory({ ...filters, page, enabled: enabled && !olderOn });
+  const data = olderOn ? held.page : live.data;
+  const error = olderOn ? null : live.error;
+  const isLoading = !olderOn && live.isLoading;
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
-  // A capped read's total is one past the cap: more than it, of which the
-  // cap's worth can be paged. A narrowed read has the larger cap.
   const narrowed =
     category !== "" || source !== "" || excludeCategories.length > 0;
-  const cap = narrowed ? kind.filteredRowCap : kind.rowCap;
-  const capped = cap !== undefined && total === cap + 1;
-  const reachable = capped ? cap : total;
-  const totalPages = Math.max(1, Math.ceil(reachable / HISTORY_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
+  const atEnd = page + 1 >= totalPages;
+
+  const older = useOlderHistory({
+    ...filters,
+    from: olderOn ? held.page.searched_from : undefined,
+  });
+  const olderPages = olderOn ? (older.data?.pages ?? []) : [];
+  // Each stretch is whole for its own span: an entry comes twice only when
+  // rows landing in a stretch moved its offsets between two of its pages.
+  const shown = olderOn
+    ? uniqueEntries([...items, ...olderPages.flatMap((p) => p.items)])
+    : items;
+  const last = olderPages.at(-1);
+  // What the stretch being read has yet to list.
+  const left =
+    last === undefined
+      ? 0
+      : Math.max(0, last.total - last.at.offset - last.items.length);
+  // The pages before this one, what this one shows, and what is left.
+  const listed = total - items.length + shown.length + left;
+  // Whole back to where the last stretch stopped, or, while it has more to
+  // list, back to its top.
+  const wholeFrom =
+    last === undefined
+      ? data?.searched_from
+      : left > 0
+        ? last.at.end
+        : last.searched_from;
+  const canShowOlder = olderOn
+    ? older.isFetching || older.hasNextPage || older.isError
+    : atEnd && !error && data?.searched_from !== undefined;
 
   // Snap back when a refetch shrinks the result below the current page, but
   // not while the fetch is failing — see TaskHistoryTable for why.
@@ -476,12 +540,25 @@ export function HistoryTimeline({
         </p>
       )}
 
-      {data?.searched_from !== undefined && cap !== undefined && (
+      {wholeFrom !== undefined && (
         <p className="text-xs text-muted-foreground">
-          {shared("searchedFrom", {
-            when: formatDateTime(data.searched_from),
-            cap: cap.toLocaleString(),
-          })}
+          {shared(
+            !atEnd
+              ? "searchedFromPaged"
+              : olderOn && !canShowOlder
+                ? "searchedFromStuck"
+                : "searchedFrom",
+            { when: formatDateTime(wholeFrom) },
+          )}
+          {!narrowed &&
+            kind.rowCap !== undefined &&
+            kind.filteredRowCap !== undefined &&
+            kind.filteredRowCap > kind.rowCap &&
+            " " +
+              shared("narrowingSearchesDeeper", {
+                cap: kind.rowCap.toLocaleString(),
+                narrowed: kind.filteredRowCap.toLocaleString(),
+              })}
         </p>
       )}
 
@@ -524,7 +601,7 @@ export function HistoryTimeline({
                   </tr>
                 )}
                 {!error &&
-                  items.map((entry) => (
+                  shown.map((entry) => (
                     <HistoryRow
                       key={entry.id}
                       kind={kind}
@@ -541,7 +618,17 @@ export function HistoryTimeline({
                       }}
                     />
                   ))}
-                {!error && items.length === 0 && (
+                {olderOn && older.error && (
+                  <tr>
+                    <td
+                      colSpan={layout.columns.length}
+                      className="px-4 py-8 text-center text-destructive"
+                    >
+                      {older.error.message}
+                    </td>
+                  </tr>
+                )}
+                {!error && shown.length === 0 && (
                   <tr>
                     <td
                       colSpan={layout.columns.length}
@@ -561,15 +648,22 @@ export function HistoryTimeline({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-muted-foreground">
-              {error
-                ? ""
-                : capped
-                  ? shared("entriesMore", {
-                      count: cap,
-                      cap: cap.toLocaleString(),
-                    })
-                  : shared("entries", { count: total })}
+              {error ? "" : shared("entries", { count: listed })}
             </p>
+            {canShowOlder && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={older.isFetching}
+                onClick={() => {
+                  if (olderOn) void older.fetchNextPage();
+                  else if (data !== undefined)
+                    setHeld({ key: readKey, page: data });
+                }}
+              >
+                {shared("showOlder")}
+              </Button>
+            )}
             {totalPages > 1 && (
               <div className="flex items-center gap-2">
                 <Button

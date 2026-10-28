@@ -14,8 +14,7 @@ const mockedPage = vi.mocked(apiClient.page);
 
 describe("FolderHistoryTab", () => {
   // The folder's route from the kind's default window, with a Guest column
-  // linking each guest the page knows — one that moved away included — and
-  // the server's cap read as more than it.
+  // linking each guest the page knows — one that moved away included.
   it("reads the folder's History and links each guest", async () => {
     mockedPage.mockResolvedValue({
       items: [
@@ -38,7 +37,7 @@ describe("FolderHistoryTab", () => {
           action: "config_update",
         }),
       ],
-      total: 20_001,
+      total: 2,
     });
     renderWithProviders(
       <FolderHistoryTab
@@ -66,7 +65,6 @@ describe("FolderHistoryTab", () => {
     );
     expect(screen.getByText("#102")).toBeInTheDocument();
     expect(screen.queryByText(/most recently active/)).toBeNull();
-    expect(screen.getByText(/^More than 20,000 entries/)).toBeInTheDocument();
   });
 
   // Past its cap the server follows the most recently active guests, and

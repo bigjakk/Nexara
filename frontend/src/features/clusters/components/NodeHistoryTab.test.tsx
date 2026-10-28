@@ -16,8 +16,7 @@ const mockedList = vi.mocked(apiClient.list);
 describe("NodeHistoryTab", () => {
   // The node's route from the kind's last week, without its routine checks
   // or its guests' own activity; a move named by the node kind, its guest
-  // linked to the guest's page, and dated as seen; a run dated from its first;
-  // the server's cap read as more than it.
+  // linked to the guest's page, and dated as seen; a run dated from its first.
   it("reads the node's History, a guest's move linked to the guest", async () => {
     const user = setupUser();
     mockedList.mockResolvedValue([
@@ -47,7 +46,7 @@ describe("NodeHistoryTab", () => {
           run_count: 2,
         }),
       ],
-      total: 20_001,
+      total: 2,
     });
     renderWithProviders(<NodeHistoryTab clusterId="c1" nodeName="pve-01" />);
 
@@ -62,7 +61,6 @@ describe("NodeHistoryTab", () => {
     expect(
       screen.getByRole("checkbox", { name: "Include guest activity" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/^More than 20,000 entries/)).toBeInTheDocument();
 
     await user.click(screen.getByText("Guest arrived"));
     expect(screen.getByText("Last seen before the move")).toBeInTheDocument();
