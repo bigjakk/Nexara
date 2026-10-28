@@ -3,6 +3,9 @@ package pvefield
 import (
 	"cmp"
 	"encoding/json"
+	"maps"
+	"os"
+	"regexp"
 	"slices"
 	"testing"
 )
@@ -92,6 +95,31 @@ func TestSplitList(t *testing.T) {
 	} {
 		if got := SplitList(in); !slices.Equal(got, want) {
 			t.Errorf("SplitList(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestSecretParamsAreTheScrubs holds the list to the names 000127 scrubbed from
+// the rows kept before it: a name added to one and not the other is a secret
+// either kept in old rows or redacted under a name no scrub reached.
+func TestSecretParamsAreTheScrubs(t *testing.T) {
+	t.Parallel()
+	sql, err := os.ReadFile("../../migrations/000127_redact_audit_secrets.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	arrays := regexp.MustCompile(`ARRAY\[('[^\]]*)\]`).FindAllSubmatch(sql, -1)
+	if len(arrays) != 2 {
+		t.Fatalf("found %d name lists in 000127, want the two of its fields statement", len(arrays))
+	}
+	for _, a := range arrays {
+		names := regexp.MustCompile(`'([^']+)'`).FindAllStringSubmatch(string(a[1]), -1)
+		got := make([]string, 0, len(names))
+		for _, n := range names {
+			got = append(got, n[1])
+		}
+		if want := slices.Sorted(maps.Keys(secretParams)); !slices.Equal(slices.Sorted(slices.Values(got)), want) {
+			t.Errorf("000127 scrubs %v, want secretParams %v", got, want)
 		}
 	}
 }
