@@ -97,10 +97,34 @@ function joined(parts: readonly string[]): string | undefined {
   return kept.length > 0 ? kept.join(" · ") : undefined;
 }
 
+/** Proxmox's boolean: 1, on, yes or true in any case (parse_boolean). */
+function pveTrue(value: string): boolean {
+  return /^(1|on|yes|true)$/i.test(value);
+}
+
+/**
+ * A pool update's Event, for a storage: whether it added the storage to the
+ * pool or took it out, which the update's `delete` flag says.
+ */
+function storageEventLabel(
+  entry: HistoryEntry,
+  t: TFunction,
+): string | undefined {
+  if (
+    entry.kind !== "audit" ||
+    entry.resource_type !== "pool" ||
+    entry.action !== "updated"
+  ) {
+    return undefined;
+  }
+  const removed = pveTrue(str(parseDetails(entry.details), "delete"));
+  return t(removed ? "poolMembership.removed" : "poolMembership.added");
+}
+
 /**
  * A storage's Summary: the file, the volume or the disk a row is about — a
  * disk move says where the disk was and where it went — and, for the rows of a
- * guest or a restore, which guest.
+ * guest or a restore, which guest, or, of a pool update, which pool.
  */
 function storageSummary(entry: HistoryEntry, t: TFunction): string | undefined {
   if (entry.kind !== "audit") return undefined;
@@ -114,6 +138,7 @@ function storageSummary(entry: HistoryEntry, t: TFunction): string | undefined {
   }
   const guest = str(d, "vmid") || (entry.vmid > 0 ? String(entry.vmid) : "");
   return joined([
+    entry.resource_type === "pool" ? entry.resource_id : "",
     moved,
     firstOf(d, ["volume", "filename", "reference", "template"]),
     entry.resource_type !== "storage" && guest !== ""
@@ -179,6 +204,7 @@ const kinds = {
   storage: historyKind("storage", storageStrings, {
     icons: ICONS,
     defaultWindow: WINDOW,
+    eventLabel: storageEventLabel,
     summary: storageSummary,
   }),
   pbs: historyKind("pbs", pbsStrings, {

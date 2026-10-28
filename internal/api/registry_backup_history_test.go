@@ -41,7 +41,7 @@ func TestBackupHistoryRoutes(t *testing.T) {
 			}
 		}
 		return "storage=store01 " + strings.Join(out, " ") + " backup.storage=store01 backup.from_storage=store01 " +
-			"node.storage=store01" + suffix
+			"node.storage=store01 pool.storage∋store01" + suffix
 	}
 	rows := []struct{ route, url, sibling, want string }{
 		{clusterScope + "/storages/:storage/history", base + "/storages/store01/history",
@@ -120,11 +120,12 @@ func TestBackupHistoryPathsAreTheSPAs(t *testing.T) {
 		t.Fatal(err)
 	}
 	templates := regexp.MustCompile("apiPath`(/api/v1/[^`?]+)").FindAllStringSubmatch(string(src), -1)
-	spa, server := make([]string, 0, len(templates)), make([]string, 0, len(backupHistoryRoutes()))
+	routes := backupHistoryRoutes()
+	spa, server := make([]string, 0, len(templates)), make([]string, 0, len(routes))
 	for _, m := range templates {
 		spa = append(spa, regexp.MustCompile(`\$\{[^}]*\}`).ReplaceAllString(m[1], ":p"))
 	}
-	for _, r := range backupHistoryRoutes() {
+	for _, r := range routes {
 		server = append(server, regexp.MustCompile(`:[a-z_]+`).ReplaceAllString(r.Path, ":p"))
 	}
 	slices.Sort(spa)

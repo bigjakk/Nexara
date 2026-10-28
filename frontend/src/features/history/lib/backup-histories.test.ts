@@ -64,6 +64,29 @@ describe("backupHistories", () => {
   });
 });
 
+// A pool update names the storages it added or removed, and says which with its
+// delete flag, in Proxmox's spelling of a boolean.
+describe("a storage's Event for a pool update", () => {
+  const t = i18n.getFixedT("en", "history-storage");
+  const update = (details: object) =>
+    entry({
+      resource_type: "pool",
+      resource_id: "pool01",
+      action: "updated",
+      details: JSON.stringify(details),
+    });
+  it.each([
+    [{ storage: "store01" }, "Added to a pool"],
+    [{ storage: "store01", delete: "0" }, "Added to a pool"],
+    [{ storage: "store01", delete: "1" }, "Removed from a pool"],
+    [{ storage: "store01", delete: "True" }, "Removed from a pool"],
+  ])("of %j is %s", (details, want) => {
+    expect(backupHistoryKinds.storage.eventLabel?.(update(details), t)).toBe(
+      want,
+    );
+  });
+});
+
 // A row says what it is about from its details, in its kind's words.
 describe("a kind's Summary", () => {
   const t = (ns: string) => i18n.getFixedT("en", ns);
@@ -90,6 +113,17 @@ describe("a kind's Summary", () => {
         details: JSON.stringify({ filename: "disk.iso" }),
       }),
       "disk.iso",
+    ],
+    [
+      "storage",
+      "history-storage",
+      entry({
+        resource_type: "pool",
+        resource_id: "pool01",
+        vmid: 0,
+        details: JSON.stringify({ storage: "store01,store02" }),
+      }),
+      "pool01",
     ],
     [
       "pbs",

@@ -17,6 +17,7 @@ func TestBackupHistoryCategories(t *testing.T) {
 		{StorageHistory(), "audit", "create", "storage", "", "lifecycle"},
 		{StorageHistory(), "audit", "create_lvm", "node", "", "lifecycle"},
 		{StorageHistory(), "audit", "update", "storage", "", "config"},
+		{StorageHistory(), "audit", "updated", "pool", "", "config"},
 		{StorageHistory(), "observed", "changed", "storage", "", "config"},
 		{StorageHistory(), "audit", "delete_content", "storage", "", "content"},
 		{StorageHistory(), "audit", "disk_move_running", "vm", "", "disks"},

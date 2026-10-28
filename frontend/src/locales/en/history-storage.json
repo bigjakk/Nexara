@@ -36,6 +36,10 @@
     "backup_job_created": "Backup job created",
     "backup_job_updated": "Backup job changed"
   },
+  "poolMembership": {
+    "added": "Added to a pool",
+    "removed": "Removed from a pool"
+  },
   "taskTypes": {
     "imgdel": "Volume deleted",
     "prunebackups": "Backups pruned",
