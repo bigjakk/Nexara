@@ -14,7 +14,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -582,11 +581,6 @@ type historyEntry struct {
 	// Fields is, for an observed change, the names of the fields that
 	// changed.
 	Fields []string `json:"fields,omitempty"`
-	// AlsoChanged is, for an audit entry, the fields the same edit changed in
-	// Proxmox beyond those it names (attachExplained).
-	AlsoChanged []string `json:"also_changed,omitempty"`
-	// named is, for an audit entry, the fields its served details name.
-	named []string
 	// LogStart and LogEnd are, for a backup entry, the lines of the job's
 	// task log that are this guest's part, by Proxmox's line numbers.
 	LogStart int32 `json:"log_start,omitempty"`
@@ -990,86 +984,7 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 		page.Total = row.Total
 		page.Items = append(page.Items, toHistoryEntry(row, visible, includeTasks))
 	}
-	if err := r.attachExplained(ctx, &page, params); err != nil {
-		return err
-	}
 	return c.JSON(page)
-}
-
-// historyExplainedLimit bounds the changes seen in Proxmox one page reads
-// beside its entries (attachExplained): a few per edit, for a page of at most
-// a few hundred.
-const historyExplainedLimit = 2_000
-
-// attachExplained names on each audit entry of the page the other fields the
-// same edit changed in Proxmox: the changes seen there that the entry explained
-// (000124's explained_by), less the fields its own details already name. One
-// read for the page, of the types the caller may view in its cluster.
-func (r *HistoryRoute) attachExplained(ctx context.Context, page *historyPage, params db.ListHistoryParams) error {
-	if len(params.ObservedTypes) == 0 {
-		return nil
-	}
-	ids := make([]uuid.UUID, 0, len(page.Items))
-	at := make(map[uuid.UUID]int, len(page.Items))
-	for i, e := range page.Items {
-		raw, audit := strings.CutPrefix(e.ID, "audit:")
-		if id, err := uuid.Parse(raw); audit && err == nil {
-			ids = append(ids, id)
-			at[id] = i
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	explained, err := r.h.queries.ListHistoryExplainedChanges(ctx, db.ListHistoryExplainedChangesParams{
-		AuditIds: ids, ObservedTypes: params.ObservedTypes, Global: params.Global, ClusterID: params.ClusterID,
-		RowLimit: historyExplainedLimit,
-	})
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
-	}
-	seen := make(map[uuid.UUID][]string, len(explained))
-	for _, x := range explained {
-		seen[x.AuditID] = append(seen[x.AuditID], x.Fields...)
-	}
-	for id, fields := range seen {
-		if i, ok := at[id]; ok {
-			page.Items[i].AlsoChanged = alsoChanged(page.Items[i].named, fields)
-		}
-	}
-	return nil
-}
-
-// auditNamedFields is the fields an audit row's details name in their
-// "fields": a list of names, or an object keyed by them.
-func auditNamedFields(details string) []string {
-	var d struct {
-		Fields json.RawMessage `json:"fields"`
-	}
-	if json.Unmarshal([]byte(details), &d) != nil || len(d.Fields) == 0 {
-		return nil
-	}
-	var list []string
-	if json.Unmarshal(d.Fields, &list) == nil {
-		return list
-	}
-	var keyed map[string]json.RawMessage
-	if json.Unmarshal(d.Fields, &keyed) == nil {
-		return slices.Sorted(maps.Keys(keyed))
-	}
-	return nil
-}
-
-// alsoChanged is fields, sorted and each once, without those named.
-func alsoChanged(named, fields []string) []string {
-	var also []string
-	for _, f := range fields {
-		if !slices.Contains(named, f) && !slices.Contains(also, f) {
-			also = append(also, f)
-		}
-	}
-	slices.Sort(also)
-	return also
 }
 
 // historyPage is a History route's response: the list envelope every
@@ -1128,9 +1043,6 @@ func toHistoryEntry(r db.ListHistoryRow, visible map[string]bool, showExitText b
 	}
 	if r.UserID.Valid {
 		e.UserID = uuid.UUID(r.UserID.Bytes).String()
-	}
-	if r.Kind == "audit" {
-		e.named = auditNamedFields(e.Details)
 	}
 	if e.Node == "" {
 		e.Node = r.TaskNode

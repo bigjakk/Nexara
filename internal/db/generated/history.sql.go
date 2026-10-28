@@ -1347,63 +1347,6 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 	return items, nil
 }
 
-const listHistoryExplainedChanges = `-- name: ListHistoryExplainedChanges :many
-SELECT o.explained_by::uuid AS audit_id, o.fields
-FROM cluster_object_changes o
-WHERE o.explained_by = ANY($1::uuid[])
-  AND o.explained = true
-  AND o.resource_type = ANY($2::text[])
-  AND ($3::bool AND o.cluster_id IS NULL
-       OR NOT $3::bool AND o.cluster_id = $4::uuid)
-ORDER BY o.explained_by, o.observed_at
-LIMIT $5::int
-`
-
-type ListHistoryExplainedChangesParams struct {
-	AuditIds      []uuid.UUID `json:"audit_ids"`
-	ObservedTypes []string    `json:"observed_types"`
-	Global        bool        `json:"global"`
-	ClusterID     uuid.UUID   `json:"cluster_id"`
-	RowLimit      int32       `json:"row_limit"`
-}
-
-type ListHistoryExplainedChangesRow struct {
-	AuditID uuid.UUID `json:"audit_id"`
-	Fields  []string  `json:"fields"`
-}
-
-// ListHistoryExplainedChanges is, for one page of a History, the changes seen in
-// Proxmox that the page's audit rows explained (explained_by, 000124): a
-// History lists only the unexplained ones, and shows these on the row that
-// explains them, as the other fields the same edit changed. Only of the types
-// the caller may view (observed_types), in the History's own cluster — a row
-// naming no cluster only for a global kind — and at most row_limit of them.
-func (q *Queries) ListHistoryExplainedChanges(ctx context.Context, arg ListHistoryExplainedChangesParams) ([]ListHistoryExplainedChangesRow, error) {
-	rows, err := q.db.Query(ctx, listHistoryExplainedChanges,
-		arg.AuditIds,
-		arg.ObservedTypes,
-		arg.Global,
-		arg.ClusterID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListHistoryExplainedChangesRow{}
-	for rows.Next() {
-		var i ListHistoryExplainedChangesRow
-		if err := rows.Scan(&i.AuditID, &i.Fields); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listMostActiveGuests = `-- name: ListMostActiveGuests :many
 SELECT v.vmid::int AS vmid
 FROM unnest($1::int[]) AS v(vmid)

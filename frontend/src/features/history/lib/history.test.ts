@@ -227,9 +227,8 @@ describe("an observed change", () => {
   });
 });
 
-// An update sums up as the fields it names, a list or keyed by name, and the
-// changes seen in Proxmox it explained add the fields they name that it does
-// not.
+// An update sums up as the fields it names, a list or keyed by name, and
+// says when Nexara could not check them.
 describe("an update's summary", () => {
   const kind = historyKind(
     "probe",
@@ -239,13 +238,7 @@ describe("an update's summary", () => {
   const t = i18n.getFixedT("en", "history-probe");
   it.each<[Partial<HistoryEntry>, string]>([
     [{ details: '{"fields":["comment","nodes"]}' }, "comment, nodes"],
-    [
-      {
-        details: '{"fields":{"memory":"4096"}}',
-        also_changed: ["cores", "net0"],
-      },
-      "memory · Also changed in Proxmox: cores, net0",
-    ],
+    [{ details: '{"fields":{"memory":"4096"}}' }, "memory"],
     [
       { details: '{"fields":["comment"],"fields_unverified":true}' },
       "comment · Fields not checked against Proxmox",

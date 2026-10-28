@@ -1,4 +1,3 @@
-DROP INDEX IF EXISTS idx_cluster_object_changes_explained_by;
 DROP INDEX IF EXISTS idx_guest_status_changes_cluster_observed;
 DROP INDEX IF EXISTS idx_guest_backups_cluster_started;
 DROP INDEX IF EXISTS idx_task_history_archive_cluster_node_started;

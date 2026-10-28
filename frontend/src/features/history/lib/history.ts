@@ -320,19 +320,15 @@ function str(d: Record<string, unknown>, key: string): string {
  * The Summary column: the few details that say what this entry did — where a
  * migration went, which snapshot, which settings — rather than the whole
  * details blob, which the expanded row shows. A kind's own summary comes
- * first. An audit entry that explained changes seen in Proxmox adds the
- * fields they name that it does not (also_changed).
+ * first. An audit entry whose fields Nexara could not check says so.
  */
 export function historySummary(
   kind: HistoryKind,
   entry: HistoryEntry,
   t: TFunction,
 ): string {
-  const also = entry.also_changed ?? [];
   return [
     entrySummary(kind, entry, t),
-    also.length > 0 &&
-      t("history:observed.alsoChanged", { fields: also.join(", ") }),
     entry.kind === "audit" && unverifiedMark(entry, t),
   ]
     .filter(Boolean)
