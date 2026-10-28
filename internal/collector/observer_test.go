@@ -8,6 +8,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
@@ -708,7 +709,7 @@ func TestObserverOutcomes(t *testing.T) {
 			t.Fatalf("%d reads of a cluster that answers none", reads)
 		}
 	})
-	t.Run("more objects than are compared, or more changes than are filed one by one", func(t *testing.T) {
+	t.Run("more objects than are compared, or more changes than are shown one by one", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
 		storages := func(n int, nodes string) string {
@@ -721,11 +722,60 @@ func TestObserverOutcomes(t *testing.T) {
 		e.client.set(pathStorage, storages(observeMaxChanges+1, "pve-01"))
 		e.expect("baseline")
 		e.client.set(pathStorage, storages(observeMaxChanges+1, "pve-02"))
-		e.expect("each one edited", "changed cluster/"+e.cluster.ID.String()+" [storage]")
+		e.obs.ObserveAll(context.Background())
+		e.obs.Wait()
+		e.mq.observed.mu.Lock()
+		bulk := map[any]int{}
+		for _, c := range e.mq.observed.changes {
+			bulk[c.Detail["bulk"]]++
+		}
+		e.mq.observed.changes = nil
+		e.mq.observed.mu.Unlock()
+		if id, _ := slices.Collect(maps.Keys(bulk))[0].(string); len(bulk) != 1 || id == "" ||
+			bulk[id] != observeMaxChanges+1 {
+			t.Fatalf("each one edited: %v, want every change filed and marked as one bulk", bulk)
+		}
+		e.client.set(pathStorage, strings.Replace(storages(observeMaxChanges+1, "pve-01"), `"pve-01"`, `"pve-02"`, 1))
+		e.obs.ObserveAll(context.Background())
+		e.obs.Wait()
+		e.mq.observed.mu.Lock()
+		for _, c := range e.mq.observed.changes {
+			if c.Detail["bulk"] != nil {
+				t.Errorf("%d changes, one marked bulk: %+v", observeMaxChanges, c)
+			}
+		}
+		e.mq.observed.changes = nil
+		e.mq.observed.mu.Unlock()
 		e.client.set(pathStorage, storages(observeMaxObjects+1, "pve-03"))
 		e.expect("too many")
-		if e.pass(); e.client.readsOf(pathStorage) != 3 {
+		if e.pass(); e.client.readsOf(pathStorage) != 4 {
 			t.Fatalf("read %d times, want the kind skipped after its cap", e.client.readsOf(pathStorage))
+		}
+	})
+	t.Run("a mass edit of guests is filed guest by guest, as one bulk", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.mq.vmsByCluster = nil
+		for vmid := 200; vmid <= 200+observeMaxChanges; vmid++ {
+			e.mq.vmsByCluster = append(e.mq.vmsByCluster,
+				db.Vm{ID: uuid.New(), ClusterID: e.cluster.ID, NodeID: e.node.ID, Vmid: int32(vmid), Type: "qemu"})
+			e.client.set(fmt.Sprintf("/nodes/pve-01/qemu/%d/config", vmid), `{"memory":"2048"}`)
+		}
+		e.expect("baseline")
+		for _, g := range e.mq.vmsByCluster {
+			e.client.set(fmt.Sprintf("/nodes/pve-01/qemu/%d/config", g.Vmid), `{"memory":"4096"}`)
+		}
+		e.obs.ObserveAll(context.Background())
+		e.obs.Wait()
+		e.mq.observed.mu.Lock()
+		defer e.mq.observed.mu.Unlock()
+		bulk := map[any]int{}
+		for _, c := range e.mq.observed.changes {
+			bulk[c.Detail["bulk"]]++
+		}
+		if id, _ := slices.Collect(maps.Keys(bulk))[0].(string); len(bulk) != 1 || id == "" ||
+			bulk[id] != observeMaxChanges+1 {
+			t.Fatalf("%d guests edited: %v, want each filed and marked as one bulk", observeMaxChanges+1, bulk)
 		}
 	})
 	t.Run("a guest is only ever changed", func(t *testing.T) {

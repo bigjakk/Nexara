@@ -68,8 +68,9 @@ const (
 
 	// What one reading may cost: a kind listing more objects than this is not
 	// compared, for a day, with a warning; a reading that finds more changes
-	// than observeMaxChanges in one kind files them as one change of the
-	// cluster (collapse), so a mass rewrite cannot bury a History.
+	// than observeMaxChanges in one kind files each, marked as one bulk change
+	// (markBulk) so a History can show a mass rewrite as one, and each is
+	// explained or not like any other.
 	observeMaxObjects = 10000
 	observeMaxChanges = 50
 
@@ -572,36 +573,25 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 	if node == "" && len(rd.unread) == 0 {
 		mark = sig
 	}
-	batch.changes = p.collapse(rd.kind, batch.changes)
+	p.markBulk(rd.kind, batch.changes, uuid.NewString())
 	if p.write(ctx, rd.kind, batch, readAt, mark) && mark != "" {
 		p.baselines[rd.kind] = storedBaseline{signature: mark, lastRead: readAt}
 	}
 }
 
-// collapse files a reading's changes of one kind one by one up to
-// observeMaxChanges, and beyond that as one change of the cluster naming the
-// kind, with how many there were: something rewrote the lot, and the History
-// says so once.
-func (p *observePass) collapse(kind string, rows []observedChangeRow) []observedChangeRow {
+// markBulk marks the changes of one kind a reading found, when there are more
+// than observeMaxChanges, with one id in their detail (bulk): something
+// rewrote the lot, and a History can show them as one. Each is still filed,
+// and explained or not on its own.
+func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string) {
 	if len(rows) <= observeMaxChanges {
-		return rows
+		return
 	}
-	first, last := rows[0].LastSeenAt, rows[0].ObservedAt
-	for _, r := range rows {
-		if r.LastSeenAt.Before(first) {
-			first = r.LastSeenAt
-		}
-		if r.ObservedAt.After(last) {
-			last = r.ObservedAt
-		}
-	}
-	p.o.logger.Warn("object observer: more changes of a kind in one reading than are filed one by one; filed as one",
+	p.o.logger.Info("object observer: more changes of a kind in one reading than are shown one by one; marked as one",
 		"cluster_id", p.cluster.ID, "kind", kind, "changes", len(rows))
-	id := p.cluster.ID.String()
-	row := changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id}, "changed",
-		tagDiff{fields: []string{kind}}, first, last)
-	row.Detail["collapsed"] = len(rows)
-	return []observedChangeRow{row}
+	for _, r := range rows {
+		r.Detail["bulk"] = id
+	}
 }
 
 // tagObject tags each of an object's fields.
@@ -741,6 +731,8 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 	}()
 
 	batches := map[string]*recordBatch{"vm": {}, "container": {}}
+	// A batch of guests is a reading for markBulk, and a pass's are one bulk.
+	bulkIDs := map[string]string{"vm": uuid.NewString(), "container": uuid.NewString()}
 	pending := map[string]int{}
 	refused := 0
 	for r := range results {
@@ -759,14 +751,14 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 		p.applyGuest(batches[kind], kind, guestObject(r.guest, r.node, r.config), p.kindSig(kind, sig), r.readAt, r.doneAt)
 		pending[kind]++
 		if pending[kind] >= observeGuestBatch {
-			batches[kind].changes = p.collapse(kind, batches[kind].changes)
+			p.markBulk(kind, batches[kind].changes, bulkIDs[kind])
 			p.write(ctx, kind, *batches[kind], time.Now(), "")
 			batches[kind], pending[kind] = &recordBatch{}, 0
 		}
 	}
 	for kind, b := range batches {
 		if pending[kind] > 0 {
-			b.changes = p.collapse(kind, b.changes)
+			p.markBulk(kind, b.changes, bulkIDs[kind])
 			p.write(ctx, kind, *b, time.Now(), "")
 		}
 	}
