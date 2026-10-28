@@ -64,6 +64,12 @@ ALTER TABLE cluster_object_baselines
 -- are ids, not values, and no reader selects them: the classification
 -- (ClassifyObservedChanges) needs them so that a guest's destroy explains only
 -- the jobs, pools and rules that guest left.
+--
+-- The observer's rows are kept, explained or not, as long as their cluster:
+-- one explained names its explanation (explained_by), which a History shows
+-- beside the audit row, so nothing prunes them. They grow by about one row for
+-- each edit Nexara makes to an observed object — the observer sees it too, and
+-- files it explained — and one for each edit made in Proxmox.
 ALTER TABLE cluster_object_changes
     ADD COLUMN IF NOT EXISTS members_joined TEXT[] NOT NULL DEFAULT '{}',
     ADD COLUMN IF NOT EXISTS members_left   TEXT[] NOT NULL DEFAULT '{}';
