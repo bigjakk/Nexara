@@ -3,10 +3,13 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -637,6 +640,7 @@ func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster
 	ctx, cancel := context.WithTimeout(ctx, observeClassifyTimeout)
 	defer cancel()
 	for ctx.Err() == nil {
+		batch := s.classifyBatch(cluster.ID)
 		n, err := s.queries.ClassifyObservedChanges(ctx, db.ClassifyObservedChangesParams{
 			Rules:           observedChangeRulesJSON,
 			LookbackSeconds: int32(observedLookback(s.objectObserveInterval).Seconds()),
@@ -644,15 +648,40 @@ func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster
 			SettledBefore:   time.Now().Add(-statusChangeSettle),
 			AllNodesListed:  allNodesListed,
 			GiveUpBefore:    time.Now().Add(-statusChangeGiveUp),
-			MaxRows:         observeClassifyBatch,
+			MaxRows:         batch,
 		})
+		s.settleBatch(cluster.ID, batch, err != nil && (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded)))
 		if err != nil {
 			s.logger.Warn("failed to classify observed object changes", "cluster_id", cluster.ID, "error", err)
 			return
 		}
-		if n < observeClassifyBatch {
+		if n < int64(batch) {
 			return
 		}
+	}
+}
+
+// classifyBatch is how many changes one classification statement of a
+// cluster's (uuid.Nil: the global kinds') decides.
+func (s *Syncer) classifyBatch(key uuid.UUID) int32 {
+	if v, ok := s.observeBatches.Load(key); ok {
+		return v.(int32)
+	}
+	return observeClassifyBatch
+}
+
+// settleBatch halves the next statement's batch after one ran out of time —
+// down to observeClassifyMinBatch — so a pass does not retry the same oldest
+// rows at the size that timed out, and doubles it back after one that did not.
+func (s *Syncer) settleBatch(key uuid.UUID, batch int32, timedOut bool) {
+	next := min(2*batch, observeClassifyBatch)
+	if timedOut {
+		next = max(batch/2, observeClassifyMinBatch)
+	}
+	if next == observeClassifyBatch {
+		s.observeBatches.Delete(key)
+	} else {
+		s.observeBatches.Store(key, next)
 	}
 }
 
@@ -661,32 +690,39 @@ func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster
 // is left waits for the next pass, and what waits past the give-up is shown
 // (ShowUnclassifiedObservedChanges).
 const (
-	observeClassifyBatch   = 500
-	observeClassifyTimeout = 30 * time.Second
+	observeClassifyBatch    int32 = 500
+	observeClassifyMinBatch int32 = 25
+	observeClassifyTimeout        = 30 * time.Second
 )
 
 // classifyGlobalObjectChanges decides the settled changes of the global kinds
 // (ClassifyGlobalObjectChanges), after each PBS pass.
-func (s *Syncer) classifyGlobalObjectChanges(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, observeClassifyTimeout)
+func (s *Syncer) classifyGlobalObjectChanges(parent context.Context) {
+	ctx, cancel := context.WithTimeout(parent, observeClassifyTimeout)
 	defer cancel()
 	for ctx.Err() == nil {
+		batch := s.classifyBatch(uuid.Nil)
 		n, err := s.queries.ClassifyGlobalObjectChanges(ctx, db.ClassifyGlobalObjectChangesParams{
 			Rules:           observedGlobalRulesJSON,
 			LookbackSeconds: int32(observedLookback(s.objectObserveInterval).Seconds()),
 			SettledBefore:   time.Now().Add(-statusChangeSettle),
-			MaxRows:         observeClassifyBatch,
+			MaxRows:         batch,
 		})
+		s.settleBatch(uuid.Nil, batch, err != nil && (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded)))
 		if err != nil {
 			s.logger.Warn("failed to classify global object changes", "error", err)
 			break
 		}
-		if n < observeClassifyBatch {
+		if n < int64(batch) {
 			break
 		}
 	}
-	// A PBS's rows are classified here even with the observer off.
-	showUnclassified(ctx, s.queries, s.logger)
+	cancel()
+	// A PBS's rows are classified here even with the observer off; with a
+	// context of their own, as the classification may have spent its time.
+	showCtx, showCancel := context.WithTimeout(parent, observeClassifyTimeout)
+	defer showCancel()
+	showUnclassified(showCtx, s.queries, s.logger)
 }
 
 // showUnclassified shows the changes no classification decided in a day and

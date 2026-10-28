@@ -1144,6 +1144,27 @@ func TestLCSLen(t *testing.T) {
 	}
 }
 
+// A classification that runs out of time decides half as many the next time,
+// so a pass does not retry the same oldest rows at the size that timed out,
+// and grows back once one answers.
+func TestObservedClassifyBatchShrinksAfterATimeout(t *testing.T) {
+	t.Parallel()
+	mq := &mockQueries{classifyErrs: []error{fmt.Errorf("classify: %w", context.DeadlineExceeded),
+		fmt.Errorf("classify: %w", context.DeadlineExceeded)}}
+	s := &Syncer{queries: mq, logger: testLogger()}
+	cluster := db.Cluster{ID: uuid.New()}
+	for range 4 {
+		s.classifyObservedChanges(context.Background(), cluster, true)
+	}
+	got := make([]int32, 0, len(mq.classifyObserved))
+	for _, c := range mq.classifyObserved {
+		got = append(got, c.MaxRows)
+	}
+	if want := []int32{observeClassifyBatch, observeClassifyBatch / 2, observeClassifyBatch / 4, observeClassifyBatch / 2}; !slices.Equal(got, want) {
+		t.Fatalf("batches %v, want %v", got, want)
+	}
+}
+
 // Every type the observer files under is one a History reads, under that
 // type's view permission: a row of a type it lacks reaches no one.
 func TestObservedTypesHaveAReader(t *testing.T) {

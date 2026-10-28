@@ -342,6 +342,10 @@ type Syncer struct {
 	// objectObserveInterval is OBJECT_OBSERVE_INTERVAL, which bounds how far
 	// back an observed change's explanation is looked for (observedLookback).
 	objectObserveInterval time.Duration
+	// observeBatches is, per cluster (uuid.Nil: the global kinds), how many
+	// changes a classification statement decides when not observeClassifyBatch
+	// (classifyBatch).
+	observeBatches sync.Map
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
