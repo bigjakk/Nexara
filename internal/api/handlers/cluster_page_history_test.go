@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -102,6 +103,27 @@ func TestClusterPageHistoryCategories(t *testing.T) {
 	} {
 		if got := categoryOf(tt.kind, tt.entry, tt.action, tt.typ, tt.worker); got != tt.want {
 			t.Errorf("%s: %s %s %s %s is %q, want %q", tt.kind.Name, tt.entry, tt.typ, tt.action, tt.worker, got, tt.want)
+		}
+	}
+}
+
+// The DRS tab shows the changes seen in Proxmox to the HA rules it lists, but
+// the rules' own view decides who reads them: view:drs opens the tab, not the
+// rules (view:ha).
+func TestDRSHistoryObservedRulesNeedViewHA(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		granted []string
+		want    []string
+	}{
+		{[]string{"drs"}, []string{}},
+		{[]string{"drs", "ha"}, []string{"ha_rule"}},
+	} {
+		got, err := permittedObservedTypes(DRSHistory(), func(_, resource string) (bool, error) {
+			return slices.Contains(tt.granted, resource), nil
+		})
+		if err != nil || !slices.Equal(got, tt.want) {
+			t.Errorf("granted %v: permitted observed types = %v (%v), want %v", tt.granted, got, err, tt.want)
 		}
 	}
 }

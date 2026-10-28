@@ -2002,6 +2002,33 @@ func TestGuestHistory(t *testing.T) {
 			}
 		}
 	})
+
+	run("pool", func(t *testing.T) {
+		// A guest moved into a pool is the pool's History's only to a caller who may
+		// open the guest: VM 7771, which the inventory does not hold, needs both
+		// guest types, and this caller has qemu alone.
+		audit(historyThirdID, minsAgo(2), "nexara", "vm", "7771", "set_pool", map[string]any{"old_pool": "", "new_pool": "pool01"})
+		pool := handlers.PoolHistory()
+		p, err := pool.ListParams(historyThirdID, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "vm", DetailKey: "new_pool", Value: "pool01"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.RowLimit = 50
+		for _, tt := range []struct {
+			types []string
+			want  int
+		}{{[]string{"qemu"}, 0}, {[]string{"qemu", "lxc"}, 1}} {
+			p.StatusGuestTypes = tt.types
+			rows, err := hq.ListHistory(ctx, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != tt.want {
+				t.Errorf("a pool's guest moved in, for a caller who may open %v: %d rows, want %d", tt.types, len(rows), tt.want)
+			}
+		}
+	})
 }
 
 func withFilter(p gen.ListHistoryParams, f func(*gen.ListHistoryParams)) gen.ListHistoryParams {
