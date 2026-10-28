@@ -21,8 +21,6 @@ const task = (over: Partial<PBSTask>): PBSTask => ({
   node: "pbs",
   pid: 1,
   starttime: 1_700_000_000,
-  endtime: 1_700_000_060,
-  status: "OK",
   worker_type: "garbage_collection",
   user: "root@pam!tok",
   ...over,
@@ -52,13 +50,12 @@ describe("a PBS server's History tab", () => {
       isInitialized: true,
     });
     vi.mocked(apiClient.list).mockResolvedValue([
-      task({}),
+      task({ endtime: 1_700_000_060, status: "OK" }),
+      // Still running: no end, no status.
       task({
         upid: BACKUP_UPID,
         worker_type: "backup",
         starttime: 1_700_000_100,
-        endtime: undefined,
-        status: undefined,
       }),
     ]);
     vi.mocked(apiClient.page).mockResolvedValue({
@@ -92,11 +89,15 @@ describe("a PBS server's History tab", () => {
     const live = await screen.findAllByTestId("pbs-live-task");
     expect(live).toHaveLength(2);
     // Newest first: the running backup, whose worker id is decoded.
-    expect(within(live[0]).getByText("datastore01:vm/100")).toBeInTheDocument();
-    expect(within(live[0]).getByText(/root@pam!tok/)).toBeInTheDocument();
+    expect(
+      within(live[0] as HTMLElement).getByText("datastore01:vm/100"),
+    ).toBeInTheDocument();
+    expect(
+      within(live[0] as HTMLElement).getByText(/root@pam!tok/),
+    ).toBeInTheDocument();
     // The garbage collection Nexara started is named by who started it…
     expect(
-      within(live[1]).getByText(/Started in Nexara by Alice/),
+      within(live[1] as HTMLElement).getByText(/Started in Nexara by Alice/),
     ).toBeInTheDocument();
     // …and its entry is not a second row; the one nothing lists is the page's.
     expect(screen.queryByText("Garbage collection started")).toBeNull();

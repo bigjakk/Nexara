@@ -33,6 +33,10 @@ it("lists the job's runs and how they ended, and no other job's", async () => {
 
   const rows = await screen.findAllByTestId("veeam-live-run");
   expect(rows).toHaveLength(2);
-  expect(within(rows[0]).getByText("Working")).toBeInTheDocument();
-  expect(within(rows[1]).getByText("Warning")).toBeInTheDocument();
+  expect(
+    within(rows[0] as HTMLElement).getByText("Working"),
+  ).toBeInTheDocument();
+  expect(
+    within(rows[1] as HTMLElement).getByText("Warning"),
+  ).toBeInTheDocument();
 });
