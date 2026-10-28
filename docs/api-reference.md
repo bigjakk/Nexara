@@ -2055,6 +2055,21 @@ details name no storage; a PBS action that no single server can claim; and a
 backup job's `backup_job_created` entry, keyed `backup-job`. Entries from before
 the upgrade also have no `from_storage` on a disk move or a restore.
 
+#### Histories of a storage, a backup server and a backup job
+
+Each answers one object's timeline, newest first, in the shape of a guest's History: `limit`, `offset`, `category`, `source` and `start_time`. All are `GET`, and gated on `view:audit` and the object's own view permission, both on the path's cluster — or instance-wide for a server, whose rows are in any cluster or none.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/clusters/:id/storages/:storage/history` | A storage, by its name as Proxmox calls it (`view:storage`). `node` leaves out what ran on another node, for a storage that is not shared |
+| GET | `/pbs-servers/:id/history` | A PBS server: its configuration, datastore maintenance, jobs run from Nexara and the restores from it. `datastore` narrows it to what names that datastore (`view:pbs`, instance-wide) |
+| GET | `/veeam-servers/:id/history` | A Veeam server, with every job and run control action taken on it (`view:veeam`, instance-wide) |
+| GET | `/veeam-servers/:id/jobs/:job_id/history` | A Veeam job, by Veeam's own id, with its runs stopped (`view:veeam`, instance-wide) |
+| GET | `/veeam-servers/:id/sessions/:session_id/history` | A Veeam run, by Veeam's own id (`view:veeam`, instance-wide) |
+| GET | `/clusters/:id/backup-jobs/:job_id/history` | A Proxmox backup job, by the id Proxmox gave it (`view:backup`) |
+
+A run in the Veeam run listing, `GET /veeam-servers/:id/sessions`, names its job as `job_veeam_id`.
+
 #### Entries of a removed cluster
 
 Removing a cluster does not delete or change its audit entries. An entry keeps

@@ -1489,6 +1489,19 @@ A node's page has a **History** tab: what happened to the node, newest first —
 - A node removed and added again under its name continues its History.
 - The tab needs `view:audit` and `view:task`. Through the API (`GET /api/v1/clusters/{cluster_id}/nodes/{node_name}/history`, with `include_guests=true` for the guests' activity) it needs `view:audit` and `view:node`; a guest's entries need `view:vm` or `view:container` by its type, as on the guest's own History, and tasks with no audit entry `view:task`.
 
+### Histories of Storage and Backup
+
+A storage, a backup server and a backup job have the same timeline as a guest: newest first, with the type, source and time filters, and rows that expand to their details and, for a task, its Proxmox log.
+
+- **A storage** — the **History** tab of its page: its definition added, changed or removed, uploads, downloads and deletes of its content, disks moved onto it or off it, the backups and restores that name it, and the LVM, LVM-thin or directory volume that added it. A storage is its name in its cluster, as Proxmox calls it on every node, so the History outlives Nexara's inventory row for the storage and never mixes in another cluster's storage of the same name. A storage that is not shared is a different storage on every node: its page shows what ran on its host node, and the changes to its configuration, which belong to every node's.
+- **A Proxmox Backup Server** — the **History** tab beside Tasks: the server added, changed or removed, datastore garbage collections and prunes, snapshot changes, sync and verify jobs run from Nexara, and the restores from the server. Above the first page are the server's own latest tasks, read live; a task Nexara started is one row there, named by who started it. **A datastore** has a **History** button on its card, with the rows that name it; a restore names the server and not the datastore, so it is the server's alone.
+- **A Veeam server, one of its jobs and one of its runs** — the **History** button in the row's actions: the server added, changed, removed or tested and a platform mapped to a cluster, every job started, stopped, enabled or disabled and every run stopped; the job's, what was done to it and its runs; the run's, a stop asked for. A job's latest runs are listed live above its history, from the runs Nexara has collected; they are not in the history itself, which is what was done to the job.
+- **A Proxmox backup job** — the **History** button in the Schedules table: created, changed or deleted, and run from Nexara, with each run's outcome. The runs Proxmox starts on the job's schedule are not here: the task they start names no job, so they are in the History of each guest they back up. A job is the id Proxmox gave it, not its name.
+
+Changes made directly in Proxmox that Nexara detects are listed too, as *Changed in Proxmox*.
+
+The tab and the buttons need `view:audit` and `view:task`, and the object's own permission: `view:storage` or `view:backup` on the cluster for a storage or a backup job. A backup server's rows are in any cluster, or none, so its History needs `view:audit` and `view:pbs` (or `view:veeam`) as instance-wide grants, not as grants on one cluster.
+
 ### Changes Made Directly in Proxmox
 
 An edit made in the Proxmox GUI, its API or a node's shell often runs no task — a VM's memory, a container's options, a pool's members, a storage definition, a node's DNS — and so leaves no audit entry. Every `OBJECT_OBSERVE_INTERVAL` (default `5m`, between `1m` and `1h`; `0` stops these reads, though a Proxmox Backup Server's job edits are still recorded, as below) Nexara reads each cluster's objects and compares them with what it read last, and a History shows what changed as **Changed in Proxmox**, **Created in Proxmox** or **Removed in Proxmox**, between the two reads.
