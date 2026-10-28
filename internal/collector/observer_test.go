@@ -304,6 +304,19 @@ func TestObserveLimiter(t *testing.T) {
 	release()
 }
 
+// restart is Nexara restarting: a new observer, over the same database.
+func (e *observeEnv) restart() {
+	e.t.Helper()
+	obs, err := NewObserver(e.mq, testEncryptionKey, func(context.Context, db.Cluster) (ObserverClient, error) {
+		return e.client, nil
+	}, time.Minute, testLogger())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	obs.gap, obs.spread, obs.maxObjects = 0, false, e.obs.maxObjects
+	e.obs = obs
+}
+
 // pass runs one pass and returns what it filed.
 func (e *observeEnv) pass() []string {
 	e.obs.ObserveAll(context.Background())
@@ -686,6 +699,10 @@ func TestObserverOutcomes(t *testing.T) {
 		}
 		e.expect("filed", "changed cluster/"+e.cluster.ID.String()+" [nodes]")
 		e.expect("once")
+		e.restart()
+		for pass := 1; pass <= observeUnreadNodePasses; pass++ {
+			e.expect("after a restart, pass " + strconv.Itoa(pass))
+		}
 	})
 	t.Run("IP set entries as the set lists them, one each", func(t *testing.T) {
 		t.Parallel()
@@ -835,6 +852,8 @@ func TestObserverOutcomes(t *testing.T) {
 		e.client.set(pathStorage, storages("pve-02"))
 		e.expect("past the cap", "changed cluster/"+e.cluster.ID.String()+" [storage]", "changed storage/s00000 [nodes]")
 		e.expect("still past it, the notice given")
+		e.restart()
+		e.expect("and after a restart")
 		e.client.set(pathStorage, `[{"storage":"s00000","type":"dir","nodes":"pve-02"},{"storage":"s00001","type":"dir"}]`)
 		e.expect("under it again: what it missed is a baseline")
 		e.client.set(pathStorage, `[{"storage":"s00000","type":"dir","nodes":"pve-02"},{"storage":"s00001","type":"dir"},{"storage":"s00002","type":"dir"}]`)
@@ -853,7 +872,7 @@ func TestObserverOutcomes(t *testing.T) {
 		}
 		e.client.set("/pools", "["+strings.Join(append(pools, `{"poolid":"web"}`), ",")+"]")
 		e.client.set("/pools?poolid=web", `[{"poolid":"web","comment":"x","members":[]}]`)
-		e.expect("past the cap", "changed cluster/"+e.cluster.ID.String()+" [pool]", "changed pool/web [comment]")
+		e.expect("past the cap", "changed pool/"+e.cluster.ID.String()+" [pool]", "changed pool/web [comment]")
 		if n := e.client.readsOf("/pools?poolid=p00000"); n != 0 {
 			t.Fatalf("read a pool it never held %d times", n)
 		}

@@ -103,6 +103,11 @@ const (
 	// kind that could not be compared. Its History reads it under view:cluster.
 	observedClusterType = "cluster"
 
+	// observedNoticesMark is the mark (cluster_object_baselines) the notices'
+	// gates are kept in, as node_versions keeps the nodes' versions, so that a
+	// restart files none of them again.
+	observedNoticesMark = "observer_notices"
+
 	// observeStateVersion is in every signature: a release that stores a field
 	// another way (a member list kept as ids, not one tag) re-baselines once,
 	// rather than reading the new form against the old as a change.
@@ -248,6 +253,7 @@ type observePass struct {
 
 	state     map[string]map[string]storedObject // kind -> object id -> stored reading
 	baselines map[string]storedBaseline          // kind -> its mark
+	notices   map[string]noticeGate              // notice key -> its gate (observedNoticesMark)
 
 	calls     atomic.Int64
 	changes   atomic.Int64
@@ -441,6 +447,8 @@ func (p *observePass) load(ctx context.Context) error {
 	for _, m := range marks {
 		p.baselines[m.ResourceType] = storedBaseline{signature: m.Signature, lastRead: m.LastReadAt}
 	}
+	p.notices = map[string]noticeGate{}
+	_ = json.Unmarshal([]byte(p.baselines[observedNoticesMark].signature), &p.notices)
 	return nil
 }
 
@@ -636,17 +644,60 @@ func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string)
 // lasts, that a kind lists more objects than are compared: what a reading
 // cannot hold is not tracked, and the History should say so.
 func (p *observePass) noticeOverCap(ctx context.Context, kind, node string, listed int) {
-	if !p.o.dueNotice(p.skipKey(kind, node) + "/over-cap") {
+	key := "too_many_objects/" + kind + "/" + node
+	gate, ok := p.notices[key]
+	if ok && time.Since(gate.Given) < observeSkipFor {
 		return
 	}
 	p.o.logger.Warn("object observer: a kind lists more objects than are compared; comparing only those it held",
 		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "objects", listed, "cap", p.o.maxObjects)
-	row := noticeRow(observedClusterType, p.cluster.ID.String(), "too_many_objects", []string{kind})
+	resourceType, resourceID := p.noticeTarget(kind, node)
+	row := noticeRow(resourceType, resourceID, "too_many_objects", []string{kind})
 	row.Detail["objects"], row.Detail["cap"] = listed, p.o.maxObjects
 	if node != "" {
 		row.Detail["node"] = node
 	}
-	p.write(ctx, kind, recordBatch{changes: []observedChangeRow{row}}, time.Now(), "")
+	if !ok {
+		gate.Since = time.Now()
+	}
+	gate.Given = time.Now()
+	p.notices[key] = gate
+	p.saveNotices(ctx, row)
+}
+
+// noticeTarget is where a kind's notice is filed: under its own type, at an id
+// its History reads. A tab's History reads every row of its types, so any id of
+// the cluster does, and the notice takes the cluster's own; the cluster's
+// firewall rule set and options are read by their id, cluster, and a node's own
+// kinds by the node's. A kind no tab reads whole — a storage's, a backup job's
+// and a guest's History are one object's — files it under the cluster, whose
+// History reads it.
+func (p *observePass) noticeTarget(kind, node string) (resourceType, resourceID string) {
+	cluster := p.cluster.ID.String()
+	switch kind {
+	case "storage", "backup", "vm", "container":
+		return observedClusterType, cluster
+	case "firewall_rule", "firewall_options":
+		return kind, "cluster"
+	case "node_options", "node_dns", "node_time":
+		return "node", node
+	case "node_firewall":
+		return "firewall_rule", "node/" + node
+	case "acme_config":
+		return kind, node
+	}
+	return kind, cluster
+}
+
+// saveNotices files rows, notices, with every notice's gate (p.notices) in one
+// statement: a notice is never filed without its gate kept, so a restart does
+// not file it again, nor its gate kept without it.
+func (p *observePass) saveNotices(ctx context.Context, rows ...observedChangeRow) {
+	gates, err := json.Marshal(p.notices)
+	if err != nil {
+		return
+	}
+	p.write(ctx, observedNoticesMark, recordBatch{changes: rows}, time.Now(), string(gates))
 }
 
 // capListing keeps a listing whose every object costs a read of its own to the
@@ -1203,6 +1254,13 @@ func changeRow(obj observedObject, change string, d tagDiff, lastSeen, observed 
 	return row
 }
 
+// noticeGate is a notice's gate: when its condition began, and when its notice
+// was last filed.
+type noticeGate struct {
+	Since time.Time `json:"since"`
+	Given time.Time `json:"given"`
+}
+
 // noticeRow is a notice: the observer's own word on a cluster or a kind (its
 // token's privileges moved, a kind it cannot hold whole), filed as a point
 // event, seen as it is filed, that no audit row explains (detail.notice).
@@ -1550,19 +1608,26 @@ func (p *observePass) noticeUnreadNodes(ctx context.Context, nodes []db.Node, un
 			continue
 		}
 		o.unread[key]++
-		if o.unread[key] == observeUnreadNodePasses {
+		if o.unread[key] >= observeUnreadNodePasses {
 			due = append(due, n.Name)
 		}
 	}
 	o.mu.Unlock()
-	var batch recordBatch
+	var rows []observedChangeRow
 	id := p.cluster.ID.String()
 	for _, name := range due {
+		key := "node_never_read/" + name
+		if _, given := p.notices[key]; given {
+			continue // filed before a restart: a node once read never comes back here
+		}
 		o.logger.Warn("object observer: a node of the cluster has never been read; what it holds is not compared",
 			"cluster_id", p.cluster.ID, "node", name, "passes", observeUnreadNodePasses)
 		row := noticeRow(observedClusterType, id, "node_never_read", []string{"nodes"})
 		row.Detail["node"] = name
-		batch.record([]observedChangeRow{row})
+		rows = append(rows, row)
+		p.notices[key] = noticeGate{Since: time.Now(), Given: time.Now()}
 	}
-	p.write(ctx, "node_versions", batch, time.Now(), "")
+	if len(rows) > 0 {
+		p.saveNotices(ctx, rows...)
+	}
 }
