@@ -47,6 +47,12 @@ const clusterHistoryFilteredRowCap = 20_000
 // node's History open on, and read when a client names none.
 const objectHistoryDefaultWindow = 7 * 24 * time.Hour
 
+// objectHistoryRowCap is how many rows of each source a folder's or a node's
+// History reads, newest first, whatever the window: all time, or a start_time
+// years back, reads no more. The cluster's narrowed cap, for a selection
+// already narrowed to a folder's guests or a node's records.
+const objectHistoryRowCap = clusterHistoryFilteredRowCap
+
 // clusterHistoryRules are the cluster kind's categories, by resource type
 // family and, for a task with no row of its own type, by worker type. A
 // guest's backup part and a Proxmox backup task are backup before the guest

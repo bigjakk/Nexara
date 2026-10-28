@@ -165,6 +165,8 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"runs outside a whole-cluster read", func(k *HistoryKind) {
 			k.Collapse = []HistoryCollapse{{ResourceType: "cluster", Action: "sync_failed", Gap: time.Minute}}
 		}, "only a whole-cluster read"},
+		{"a narrowed read capped and an unfiltered one not", func(k *HistoryKind) { k.FilteredRowCap = 100 },
+			"caps one read and not the other"},
 		{"a run with no gap", func(k *HistoryKind) {
 			k.WholeCluster, k.ObjectTypes = true, nil
 			k.Collapse = []HistoryCollapse{{ResourceType: "cluster", Action: "sync_failed"}}
@@ -434,9 +436,10 @@ func TestHistoryListRefusesAGuestBesideThePath(t *testing.T) {
 
 // A cluster's read is capped, 2,000 rows a source unfiltered and 20,000
 // narrowed, for a caller without a guest type too (the arms apply it), and no
-// page past the cap is served. With no start_time it reads the last week,
-// unless it asks for all_time.
-func TestHistoryListBoundsAClusterRead(t *testing.T) {
+// page past the cap is served; a node's and a folder's at 20,000, all time
+// too. With no start_time each reads the last week, unless it asks for
+// all_time.
+func TestHistoryListBoundsACappedRead(t *testing.T) {
 	t.Parallel()
 	// Where each bound sits among the query's arguments.
 	probe := &auditRowsDBTX{}
@@ -450,21 +453,32 @@ func TestHistoryListBoundsAClusterRead(t *testing.T) {
 	cluster := uuid.New()
 	every := func() permissionEngine { return &recordingEngine{actions: map[string]bool{"view": true}} }
 	week := time.Now().Add(-7 * 24 * time.Hour)
+	type route struct {
+		kind       HistoryKind
+		path, name string // the route's own path parameter, after cluster_id
+	}
+	clusterRoute := route{ClusterHistory(), "/history", ""}
+	nodeRoute := route{NodeHistory(), "/nodes/:node_name/history", "node_name"}
+	folderRoute := route{FolderHistory(), "/vm-folders/:folder_id/history", "folder_id"}
 	for _, tt := range []struct {
 		name, query        string
+		route              route
 		engine             permissionEngine
 		cap, offset, limit int32
 		window             bool // the last week; else no bound
 	}{
-		{"unfiltered", "", every(), 2_000, 0, 50, true},
-		{"a category", "?category=sync", every(), 20_000, 0, 50, true},
-		{"categories left out", "?exclude_category=other", every(), 20_000, 0, 50, true},
-		{"a source", "?source=nexara", every(), 20_000, 0, 50, true},
-		{"a caller without view:container", "", clusterGrantEngine{action: "view", resource: "vm", cluster: cluster},
-			2_000, 0, 50, true},
-		{"the last page within the cap", "?offset=1980", every(), 2_000, 1_980, 20, true},
-		{"a page past the cap", "?offset=2050", every(), 2_000, 2_000, 0, true},
-		{"all time", "?all_time=true", every(), 2_000, 0, 50, false},
+		{"unfiltered", "", clusterRoute, every(), 2_000, 0, 50, true},
+		{"a category", "?category=sync", clusterRoute, every(), 20_000, 0, 50, true},
+		{"categories left out", "?exclude_category=other", clusterRoute, every(), 20_000, 0, 50, true},
+		{"a source", "?source=nexara", clusterRoute, every(), 20_000, 0, 50, true},
+		{"a caller without view:container", "", clusterRoute,
+			clusterGrantEngine{action: "view", resource: "vm", cluster: cluster}, 2_000, 0, 50, true},
+		{"the last page within the cap", "?offset=1980", clusterRoute, every(), 2_000, 1_980, 20, true},
+		{"a page past the cap", "?offset=2050", clusterRoute, every(), 2_000, 2_000, 0, true},
+		{"all time", "?all_time=true", clusterRoute, every(), 2_000, 0, 50, false},
+		{"a node, all time", "?all_time=true", nodeRoute, every(), 20_000, 0, 50, false},
+		{"a node, a page past the cap", "?offset=20050", nodeRoute, every(), 20_000, 20_000, 0, true},
+		{"a folder", "", folderRoute, every(), 20_000, 0, 50, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -475,18 +489,26 @@ func TestHistoryListBoundsAClusterRead(t *testing.T) {
 				c.Locals("rbac_engine", tt.engine)
 				return c.Next()
 			})
-			app.Get("/clusters/:cluster_id/history", withRequestParams(t,
-				historyTestProps("cluster_id", apischema.StdOption("cluster-id")), []string{"cluster_id"},
-				NewHistoryHandler(db.New(dbtx)).Route(ClusterHistory()).List))
-			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/history"+tt.query, nil))
+			props, names, path := historyTestProps("cluster_id", apischema.StdOption("cluster-id")),
+				[]string{"cluster_id"}, "/clusters/"+cluster.String()+tt.route.path
+			if n := tt.route.name; n != "" {
+				// A node named pve-01; the folder of the guests in none, which
+				// reads no folder.
+				props[n], names = apischema.Property{Type: apischema.String}, append(names, n)
+				path = strings.Replace(path, ":"+n, map[string]string{"node_name": "pve-01", "folder_id": UnfiledFolderSegment}[n], 1)
+				props["include_guests"] = apischema.Property{Type: apischema.Boolean, Optional: true, Default: false}
+			}
+			app.Get("/clusters/:cluster_id"+tt.route.path, withRequestParams(t, props, names,
+				NewHistoryHandler(db.New(dbtx)).Route(tt.route.kind).List))
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, path+tt.query, nil))
 			if err != nil {
 				t.Fatal(err)
 			}
 			_ = resp.Body.Close()
-			if len(dbtx.calls) != 1 {
-				t.Fatalf("status %d after %d queries, want ListHistory", resp.StatusCode, len(dbtx.calls))
+			if n := len(dbtx.calls); n == 0 || !strings.Contains(dbtx.calls[n-1].sql, "name: ListHistory ") {
+				t.Fatalf("status %d after %d queries, want ListHistory last", resp.StatusCode, n)
 			}
-			args := dbtx.calls[0].args
+			args := dbtx.calls[len(dbtx.calls)-1].args
 			if args[atCap] != tt.cap || args[atOffset] != tt.offset || args[atLimit] != tt.limit {
 				t.Errorf("cap %v, offset %v, limit %v; want %d, %d, %d", args[atCap], args[atOffset], args[atLimit],
 					tt.cap, tt.offset, tt.limit)

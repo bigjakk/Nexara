@@ -1825,6 +1825,17 @@ type Querier interface {
 	// Each capped arm holds its rows to the caller's guest types itself, as the
 	// page does (status_guest_types), so a cap counts only rows the caller sees.
 	//
+	// Any kind may cap its read so (row_cap, HistoryKind.RowCap: a folder's and a
+	// node's do): each source newest first up to row_cap rows, total stopping at
+	// row_cap + 1, and the guests' rows, the objects' and a node's tasks each read
+	// to the cap before their arm takes its newest row_cap of them. The guests'
+	// own rows are read per guest by (cluster_id, vmid, created_at) from where
+	// their row_cap newest rows begin, found from that index alone (vmid_floor):
+	// a folder of 500 busy guests reads its newest 20,000 rows, not all 700,000. A
+	// task arm caps the tasks it searches, not the few with no audit row it
+	// finds. The object reads apply the include_guests and guest-type tests the
+	// page applies, so the cap counts only rows the page could show.
+	//
 	// Every branch reads one cluster, a REQUIRED argument: the route's, which its
 	// cluster-scoped gate authorized. The one exception is a global kind's objects
 	// (global, HistoryKind.Global): read in every cluster and in none, because
@@ -1880,8 +1891,9 @@ type Querier interface {
 	// new_id, the HA arm the resource_type index, the object arm theirs, all built
 	// after startup (db.EnsureHistoryIndexes; it works without them, slower) —
 	// instead of the planner settling on the whole cluster's rows. Each guest arm
-	// is bounded by the later of the cutoff floor and since in one condition the
-	// index can range over: as two "IS NULL OR" tests it read every row of each
+	// is bounded by the later of its guest's cutoff — or the cutoff floor, where
+	// an arm reads every guest at once — and since in one condition the index can
+	// range over: as two "IS NULL OR" tests it read every row of each
 	// guest, a folder's 7 days 11,249 rows to keep 1,482. Each later arm excludes the rows an
 	// earlier one keeps, so no row is read twice; a guest's row guest_workers turns
 	// away is still an object's to take. The object arm reads each object by its

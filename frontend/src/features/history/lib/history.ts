@@ -49,6 +49,10 @@ export function historyKind(
   };
 }
 
+/** The server's cap on each source of a folder's and a node's History, read
+ *  unfiltered or narrowed (handlers.objectHistoryRowCap). */
+export const OBJECT_HISTORY_ROW_CAP = 20_000;
+
 /** The source filter's choices, "" for every source; labelled from the shared
  *  namespace's `sourceOptions`. */
 export const SOURCE_OPTIONS: readonly (HistorySource | "")[] = [

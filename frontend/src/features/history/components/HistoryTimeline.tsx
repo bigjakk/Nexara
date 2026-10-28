@@ -467,14 +467,16 @@ export function HistoryTimeline({
         <ResetColumnsButton layout={layout} />
       </div>
 
-      {narrowed && kind.filteredRowCap !== undefined && (
-        <p className="text-xs text-muted-foreground">
-          {shared("narrowedCap", {
-            count: kind.filteredRowCap,
-            cap: kind.filteredRowCap.toLocaleString(),
-          })}
-        </p>
-      )}
+      {narrowed &&
+        kind.filteredRowCap !== undefined &&
+        kind.filteredRowCap !== kind.rowCap && (
+          <p className="text-xs text-muted-foreground">
+            {shared("narrowedCap", {
+              count: kind.filteredRowCap,
+              cap: kind.filteredRowCap.toLocaleString(),
+            })}
+          </p>
+        )}
 
       {categoryNote !== "" && (
         <p className="text-xs text-muted-foreground">{categoryNote}</p>

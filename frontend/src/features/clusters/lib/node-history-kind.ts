@@ -24,7 +24,11 @@ import {
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import strings from "@/locales/en/history-node.json";
-import { historyGuestVmid, historyKind } from "@/features/history/lib/history";
+import {
+  historyGuestVmid,
+  historyKind,
+  OBJECT_HISTORY_ROW_CAP,
+} from "@/features/history/lib/history";
 import type { HistoryEntry } from "@/features/history/types/history";
 import { guestRowNaming } from "@/features/vms/lib/guest-history-kind";
 
@@ -122,6 +126,8 @@ export const nodeHistoryKind = historyKind("node", strings, {
   // A busy node's trail is long: the default is its last week, without its
   // daily checks or its guests' activity, which the reader brings back.
   defaultWindow: "7d",
+  rowCap: OBJECT_HISTORY_ROW_CAP,
+  filteredRowCap: OBJECT_HISTORY_ROW_CAP,
   routine: ["checks"],
   guestToggle: true,
   eventLabel,

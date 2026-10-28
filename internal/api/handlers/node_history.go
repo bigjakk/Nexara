@@ -28,6 +28,8 @@ func NodeHistory() HistoryKind {
 		ObjectsIgnoreGuestCutoff: true,
 		GuestToggle:              "include_guests",
 		DefaultWindow:            objectHistoryDefaultWindow,
+		RowCap:                   objectHistoryRowCap,
+		FilteredRowCap:           objectHistoryRowCap,
 	}
 }
 

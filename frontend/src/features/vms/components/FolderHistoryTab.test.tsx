@@ -13,7 +13,8 @@ const mockedPage = vi.mocked(apiClient.page);
 
 describe("FolderHistoryTab", () => {
   // The folder's route from the kind's default window, with a Guest column
-  // linking each guest the page knows — one that moved away included.
+  // linking each guest the page knows — one that moved away included — and
+  // the server's cap read as more than it.
   it("reads the folder's History and links each guest", async () => {
     mockedPage.mockResolvedValue({
       items: [
@@ -36,7 +37,7 @@ describe("FolderHistoryTab", () => {
           action: "config_update",
         }),
       ],
-      total: 2,
+      total: 20_001,
     });
     renderWithProviders(
       <FolderHistoryTab
@@ -65,6 +66,7 @@ describe("FolderHistoryTab", () => {
     );
     expect(screen.getByText("#102")).toBeInTheDocument();
     expect(screen.queryByText(/lowest VMIDs/)).toBeNull();
+    expect(screen.getByText(/^More than 20,000 entries/)).toBeInTheDocument();
   });
 
   // Past the cap the server follows the lowest VMIDs, and the tab says so.

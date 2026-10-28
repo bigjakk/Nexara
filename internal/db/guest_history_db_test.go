@@ -583,6 +583,13 @@ func TestGuestHistory(t *testing.T) {
 		if !slices.Equal(got, want) || total != int64(len(want)) {
 			t.Fatalf("timeline =\n\t%v (total %d)\nwant\n\t%v (total %d)", got, total, want, len(want))
 		}
+		// Capped, each guest source is read newest first to the cap: the
+		// archive's newest task has its audit row, so the archive adds none.
+		if got, total := list(withFilter(full, func(p *gen.ListHistoryParams) { p.RowCap = 1 })); !slices.Equal(got, []string{
+			"task vzsuspend power completed", "backup vzdump backup failed", "audit start power completed",
+			"status status_change power ", "audit created ha ", "audit clone clone "}) || total != 2 {
+			t.Errorf("capped at 1: %v (total %d)", got, total)
+		}
 		// No cutoff — a guest older than the audit trail, whose birth was never
 		// recorded — is the whole history of the VMID, the previous guest's too.
 		whole, _ := list(withFilter(guest(false, handlers.HistoryGuest{VMID: 100}), func(p *gen.ListHistoryParams) {
@@ -907,13 +914,13 @@ func TestGuestHistory(t *testing.T) {
 			}
 			return handlers.FolderHistory().Select(ctx, handlers.HistoryRequest{Queries: q, ClusterID: cluster, Params: params})
 		}
-		folderHistory := func(sel handlers.HistorySelection, types []string) []string {
+		folderHistory := func(sel handlers.HistorySelection, types []string, rowCap int32) []string {
 			t.Helper()
 			p, err := handlers.FolderHistory().ListParams(historyClusterID, sel)
 			if err != nil {
 				t.Fatal(err)
 			}
-			p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 50, true, types
+			p.RowLimit, p.IncludeTasks, p.StatusGuestTypes, p.RowCap = 50, true, types, rowCap
 			rows, err := q.ListHistory(ctx, p)
 			if err != nil {
 				t.Fatal(err)
@@ -935,16 +942,21 @@ func TestGuestHistory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := folderHistory(sel, []string{"qemu", "lxc"}), []string{"start 120", "delete U", "update T",
+		if got, want := folderHistory(sel, []string{"qemu", "lxc"}, 0), []string{"start 120", "delete U", "update T",
 			"unassign 124", "assign 123", "update F", "create T", "assign 124", "assign 123", "assign 121", "create 121",
 			"assign 120", "create S", "create F"}; !slices.Equal(got, want) {
 			t.Errorf("folder F's History =\n\t%v\nwant\n\t%v", got, want)
+		}
+		// Capped, each source is read newest first to the cap: the guests' own
+		// rows and the folders'.
+		if got, want := folderHistory(sel, []string{"qemu", "lxc"}, 1), []string{"start 120", "delete U"}; !slices.Equal(got, want) {
+			t.Errorf("folder F's History capped at 1 = %v, want %v", got, want)
 		}
 		// Without view:vm its VMs are dropped (viewableGuests), and so is every
 		// row naming one of them that the folder's own rows would show: what is
 		// left is the folders' and container 124's.
 		sel.Guests = nil
-		if got, want := folderHistory(sel, []string{"lxc"}), []string{"delete U", "update T", "unassign 124",
+		if got, want := folderHistory(sel, []string{"lxc"}, 0), []string{"delete U", "update T", "unassign 124",
 			"update F", "create T", "assign 124", "create S", "create F"}; !slices.Equal(got, want) {
 			t.Errorf("folder F's History without view:vm =\n\t%v\nwant\n\t%v", got, want)
 		}
@@ -1321,6 +1333,15 @@ func TestGuestHistory(t *testing.T) {
 			{"without view:vm, guests' moves and tasks go", func(p *gen.ListHistoryParams) {
 				p.IncludeGuests, p.StatusGuestTypes = true, []string{"lxc"}
 			}, slices.DeleteFunc(slices.Clone(own), func(s string) bool { return strings.HasPrefix(s, "move ") })},
+			// Capped, each source is read newest first to the cap: its tasks, its
+			// audit rows, its status changes and its guests' moves.
+			{"capped", func(p *gen.ListHistoryParams) { p.RowCap = 1 }, []string{"task aptupdate checks",
+				"audit srvreload network", "status status_change status online>offline", "move arrived guests 310 pve-02"}},
+			// Capped for a caller without view:vm, each source's cap counts only
+			// rows the caller sees: not the VMs' tasks and moves.
+			{"capped, without view:vm", func(p *gen.ListHistoryParams) {
+				p.RowCap, p.IncludeGuests, p.StatusGuestTypes = 1, true, []string{"lxc"}
+			}, []string{"task aptupdate checks", "audit srvreload network", "status status_change status online>offline"}},
 		} {
 			if got := nodeHistory(tt.f); !slices.Equal(got, tt.want) {
 				t.Errorf("%s: the node's History =\n\t%v\nwant\n\t%v", tt.name, got, tt.want)

@@ -108,17 +108,17 @@ type HistoryKind struct {
 	// out unless it is set. The registry declares it; a kind without one shows
 	// guest rows always.
 	GuestToggle string
-	// RowCap bounds a whole-cluster kind's unfiltered read: each source newest
-	// first up to RowCap rows, so a page of a busy cluster's History costs
-	// RowCap rows, not its whole trail. The total then stops at RowCap+1,
-	// which the reader shows as "more than RowCap", and no page past RowCap is
-	// served. The caller's guest types are applied inside each capped source,
-	// so the cap counts only rows the caller may see.
+	// RowCap bounds an unfiltered read: each source newest first up to RowCap
+	// rows, so a page of a busy cluster's, folder's or node's History costs
+	// RowCap rows a source, not its whole trail. The total then stops at
+	// RowCap+1, which the reader shows as "more than RowCap", and no page past
+	// RowCap is served. The caller's guest types are applied inside each
+	// capped source, so the cap counts only rows the caller may see.
 	RowCap int
-	// FilteredRowCap is RowCap for a read narrowed by category or source.
-	// Larger: the narrowing is applied after each source's cap, so a narrowed
-	// read searches each source's newest FilteredRowCap rows — of its window,
-	// a week unless asked otherwise.
+	// FilteredRowCap is RowCap for a read narrowed by category or source, set
+	// with it and no smaller: the narrowing is applied after each source's
+	// cap, so a narrowed read searches each source's newest FilteredRowCap
+	// rows — of its window, a week unless asked otherwise.
 	FilteredRowCap int
 	// DefaultWindow is how far back a read that names no start_time looks,
 	// unless it asks for all_time: the window the page opens on, held by the
@@ -346,11 +346,12 @@ func (k HistoryKind) Validate() error {
 		return fmt.Errorf("history kind %q reads its whole cluster, so it names no guest or object and is no "+
 			"global kind", k.Name)
 	}
-	if !k.WholeCluster && (len(k.Collapse) > 0 || k.RowCap != 0 || k.FilteredRowCap != 0) {
-		return fmt.Errorf("history kind %q collapses or caps rows, which only a whole-cluster read does", k.Name)
+	if !k.WholeCluster && len(k.Collapse) > 0 {
+		return fmt.Errorf("history kind %q collapses rows, which only a whole-cluster read does", k.Name)
 	}
-	if k.RowCap < 0 || k.FilteredRowCap < 0 || k.DefaultWindow < 0 {
-		return fmt.Errorf("history kind %q has a negative cap or window", k.Name)
+	if k.RowCap < 0 || k.DefaultWindow < 0 || (k.RowCap == 0) != (k.FilteredRowCap == 0) || k.FilteredRowCap < k.RowCap {
+		return fmt.Errorf("history kind %q has a negative window or cap, or caps one read and not the other, or a "+
+			"narrowed one below an unfiltered one", k.Name)
 	}
 	for _, c := range k.Collapse {
 		if c.ResourceType == "" || c.Action == "" || c.Gap <= 0 {

@@ -10,7 +10,10 @@ import { FolderOpen } from "lucide-react";
 import type { TFunction } from "i18next";
 import strings from "@/locales/en/history-folder.json";
 import { parseDetails } from "@/components/layout/task-status";
-import { historyKind } from "@/features/history/lib/history";
+import {
+  historyKind,
+  OBJECT_HISTORY_ROW_CAP,
+} from "@/features/history/lib/history";
 import type {
   HistoryEntry,
   HistoryKind,
@@ -87,6 +90,8 @@ export function folderHistoryKind(
     icons: { ...guestHistoryKind.icons, folder: FolderOpen },
     // A folder holds many guests, and so many guests' histories.
     defaultWindow: "7d",
+    rowCap: OBJECT_HISTORY_ROW_CAP,
+    filteredRowCap: OBJECT_HISTORY_ROW_CAP,
     eventLabel: (entry, t) =>
       isFolderRow(entry)
         ? eventLabel(entry, t)
