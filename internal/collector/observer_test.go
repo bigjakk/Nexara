@@ -36,7 +36,8 @@ type observeStore struct {
 	state   map[string]db.ListClusterObjectStateRow // "cluster/kind/id"
 	marks   map[string]db.ListClusterObjectBaselinesRow
 	changes []observedChangeRow
-	shown   int // ShowUnclassifiedObservedChanges calls
+	shown   int            // ShowUnclassifiedObservedChanges calls
+	fail    map[string]int // RecordObservedObjects fails this many more writes of a kind
 }
 
 func (m *mockQueries) ListClusterObjectState(_ context.Context, cluster uuid.UUID) ([]db.ListClusterObjectStateRow, error) {
@@ -89,6 +90,10 @@ func (m *mockQueries) RecordObservedObjects(_ context.Context, arg db.RecordObse
 	s := &m.observed
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.fail[arg.Kind] > 0 {
+		s.fail[arg.Kind]--
+		return errors.New("the database refused the write")
+	}
 	if s.state == nil {
 		s.state, s.marks = map[string]db.ListClusterObjectStateRow{}, map[string]db.ListClusterObjectBaselinesRow{}
 	}
@@ -934,6 +939,30 @@ func TestObserverOutcomes(t *testing.T) {
 			rows[0].Detail["appeared"] != float64(0) {
 			t.Fatalf("back under: filed %+v, want only a notice that this reading is the baseline", rows)
 		}
+	})
+	t.Run("a notice whose write is refused keeps its gate, whatever the pass writes after it", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 2
+		three := `[{"storage":"s1","type":"dir"},{"storage":"s2","type":"dir"},{"storage":"s3","type":"dir"}]`
+		jobs := `[{"id":"j1","type":"vzdump"},{"id":"j2","type":"vzdump"},{"id":"j3","type":"vzdump"}]`
+		e.client.set(pathStorage, `[{"storage":"s1","type":"dir"}]`)
+		e.expect("baseline")
+		e.client.set(pathStorage, three)
+		e.expect("past the cap", "changed cluster/"+e.cluster.ID.String()+" [storage]")
+		// Storage back under, its notice refused; the backup jobs' notice,
+		// written next, may not take storage's gate with it.
+		e.client.set(pathStorage, `[{"storage":"s1","type":"dir"}]`)
+		e.client.set("/cluster/backup", jobs)
+		e.mq.observed.mu.Lock()
+		e.mq.observed.fail = map[string]int{observedNoticesMark: 1}
+		e.mq.observed.mu.Unlock()
+		e.expect("back under, its notice refused", "changed cluster/"+e.cluster.ID.String()+" [backup]")
+		rows := e.passRows()
+		if len(rows) != 1 || rows[0].Detail["notice"] != "back_under_cap" || rows[0].Fields[0] != "storage" {
+			t.Fatalf("the next pass filed %+v, want storage's back_under_cap", rows)
+		}
+		e.expect("and not again")
 	})
 	t.Run("past the cap a reader reads on only what is held, and guests are read in turns", func(t *testing.T) {
 		t.Parallel()

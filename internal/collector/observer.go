@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"net"
 	"slices"
@@ -677,14 +678,14 @@ func (p *observePass) noticeOverCap(ctx context.Context, kind, node string, list
 		row.Detail["node"] = node
 	}
 	gate.Since, gate.Given = since, time.Now()
-	p.notices[key] = gate
-	p.saveNotices(ctx, row)
+	p.saveNotices(ctx, map[string]*noticeGate{key: &gate}, row)
 }
 
 // noticeBackUnderCap files, once, that a kind is back under the cap, with how
 // many objects it filed as appeared while it was over, or baseline when the
 // kind had no whole reading before it went over and this one is its baseline.
-// The gate goes: a kind over the cap again is a new notice at once.
+// The gate goes with it: a kind over the cap again is a new notice at once, and
+// one whose notice could not be written is back under again next pass.
 func (p *observePass) noticeBackUnderCap(ctx context.Context, kind, node string, appeared int, baseline bool) {
 	p.o.logger.Info("object observer: a kind is back under the cap; compared whole again",
 		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "appeared", appeared, "baseline", baseline)
@@ -694,8 +695,7 @@ func (p *observePass) noticeBackUnderCap(ctx context.Context, kind, node string,
 	if node != "" {
 		row.Detail["node"] = node
 	}
-	delete(p.notices, "too_many_objects/"+kind+"/"+node)
-	p.saveNotices(ctx, row)
+	p.saveNotices(ctx, map[string]*noticeGate{"too_many_objects/" + kind + "/" + node: nil}, row)
 }
 
 // noticeTarget is where a kind's notice is filed: under its own type, at an id
@@ -722,15 +722,27 @@ func (p *observePass) noticeTarget(kind, node string) (resourceType, resourceID 
 	return kind, cluster
 }
 
-// saveNotices files rows, notices, with every notice's gate (p.notices) in one
-// statement: a notice is never filed without its gate kept, so a restart does
-// not file it again, nor its gate kept without it.
-func (p *observePass) saveNotices(ctx context.Context, rows ...observedChangeRow) {
-	gates, err := json.Marshal(p.notices)
-	if err != nil {
-		return
+// saveNotices files rows, notices, with the notice gates as changes leaves them
+// (a key to its new gate, or to nil to drop it) in one statement, and moves
+// p.notices to them only once that went through: a notice is never filed
+// without its gate kept, so a restart does not file it again, nor a gate moved
+// without its notice filed, so a failed write is the next pass's to try again.
+func (p *observePass) saveNotices(ctx context.Context, changes map[string]*noticeGate, rows ...observedChangeRow) {
+	gates := maps.Clone(p.notices)
+	if gates == nil {
+		gates = map[string]noticeGate{}
 	}
-	p.write(ctx, observedNoticesMark, recordBatch{changes: rows}, time.Now(), string(gates))
+	for key, gate := range changes {
+		if gate == nil {
+			delete(gates, key)
+		} else {
+			gates[key] = *gate
+		}
+	}
+	encoded, err := json.Marshal(gates)
+	if err == nil && p.write(ctx, observedNoticesMark, recordBatch{changes: rows}, time.Now(), string(encoded)) {
+		p.notices = gates
+	}
 }
 
 // capListing keeps a listing whose every object costs a read of its own to the
@@ -838,12 +850,11 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 				"cluster_id", p.cluster.ID, "guests", len(guests), "cap", p.o.maxObjects)
 			row := noticeRow(observedClusterType, p.cluster.ID.String(), turns, []string{"guests"})
 			row.Detail["guests"], row.Detail["per_pass"] = len(guests), p.o.maxObjects
-			p.notices[turns] = noticeGate{Since: time.Now(), Given: time.Now()}
-			p.saveNotices(ctx, row)
+			now := time.Now()
+			p.saveNotices(ctx, map[string]*noticeGate{turns: {Since: now, Given: now}}, row)
 		}
 	} else if _, on := p.notices[turns]; on {
-		delete(p.notices, turns)
-		p.saveNotices(ctx)
+		p.saveNotices(ctx, map[string]*noticeGate{turns: nil})
 	}
 
 	gap := p.o.gap
@@ -1664,6 +1675,7 @@ func (p *observePass) noticeUnreadNodes(ctx context.Context, nodes []db.Node, un
 	}
 	o.mu.Unlock()
 	var rows []observedChangeRow
+	gates := map[string]*noticeGate{}
 	id := p.cluster.ID.String()
 	for _, name := range due {
 		key := "node_never_read/" + name
@@ -1675,9 +1687,10 @@ func (p *observePass) noticeUnreadNodes(ctx context.Context, nodes []db.Node, un
 		row := noticeRow(observedClusterType, id, "node_never_read", []string{"nodes"})
 		row.Detail["node"] = name
 		rows = append(rows, row)
-		p.notices[key] = noticeGate{Since: time.Now(), Given: time.Now()}
+		now := time.Now()
+		gates[key] = &noticeGate{Since: now, Given: now}
 	}
 	if len(rows) > 0 {
-		p.saveNotices(ctx, rows...)
+		p.saveNotices(ctx, gates, rows...)
 	}
 }
