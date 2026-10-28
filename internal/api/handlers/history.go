@@ -5,7 +5,8 @@ package handlers
 //     derive them (first match wins, else Default), Select (which rows are the object's) and the
 //     ObjectTypes it names, an observed type's read under that type's own view. SelectObjects(param, …)
 //     reads audit rows by resource_type and id, or a DetailKey; param must be a declared String path
-//     parameter (a node's: StdOption("node-name"), which 404s a non-member). Global only for ids unique
+//     parameter (a node's: StdOption("node-name"), which 404s a non-member). SelectTypes(…) reads every
+//     row of the types in the cluster: a tab's History. Global only for ids unique
 //     across Nexara (globalHistoryResourceTypes): it reads every cluster's rows.
 //  2. api/registry_<kind>_history.go: its historyRoute (path, description, its own view permission), and
 //     one line in historyRoutes(). 3. Frontend: locales/en/history-<Name>.json with the same categories,
@@ -328,13 +329,19 @@ type HistoryGuest struct {
 //     datastore is one name within its server's rows;
 //   - a DetailKey and InList: those whose DetailKey is a comma-separated list
 //     holding Value, such as an ACL's users. Read by ResourceType alone, so
-//     for a type with few rows.
+//     for a type with few rows;
+//   - WholeType: every row of ResourceType, whatever its id — a tab's History,
+//     of all the objects of its kinds. It names no id, key or value, and is
+//     read by the type alone, so for a type of configuration objects, which
+//     are edited rarely. Never a guest's type: those are the guests' own
+//     (ListParams).
 type HistoryObject struct {
 	ResourceType string
 	ResourceID   string
 	DetailKey    string
 	Value        string
 	InList       bool
+	WholeType    bool
 }
 
 // SelectObjects is the generic selector, for any object with a stable audit
@@ -347,6 +354,18 @@ func SelectObjects(param string, objects ...HistoryObject) HistorySelector {
 		for i, o := range objects {
 			o.Value = value
 			sel.Objects[i] = o
+		}
+		return sel, nil
+	}
+}
+
+// SelectTypes is the selector of a tab's History: every row of each of the
+// resource types in the path's cluster (HistoryObject.WholeType).
+func SelectTypes(types ...string) HistorySelector {
+	return func(context.Context, HistoryRequest) (HistorySelection, error) {
+		sel := HistorySelection{Objects: make([]HistoryObject, len(types))}
+		for i, t := range types {
+			sel.Objects[i] = HistoryObject{ResourceType: t, WholeType: true}
 		}
 		return sel, nil
 	}
@@ -663,6 +682,7 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		ObjectKeys:          make([]string, 0, len(sel.Objects)),
 		ObjectValues:        make([]string, 0, len(sel.Objects)),
 		ObjectInList:        make([]bool, 0, len(sel.Objects)),
+		ObjectWhole:         make([]bool, 0, len(sel.Objects)),
 		ExcludeCategories:   []string{},
 		WholeCluster:        k.WholeCluster,
 		CollapseTypes:       make([]string, 0, len(k.Collapse)),
@@ -715,8 +735,9 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		params.CutoffFloor = pgtype.Timestamptz{}
 	}
 	for _, o := range sel.Objects {
-		if o.ResourceType == "" || o.Value == "" {
-			return db.ListHistoryParams{}, fmt.Errorf("history object %+v names no resource type or value", o)
+		if o.ResourceType == "" || (o.Value == "") != o.WholeType {
+			return db.ListHistoryParams{}, fmt.Errorf("history object %+v names no resource type or value, "+
+				"or a value beside WholeType", o)
 		}
 		if !slices.Contains(k.ObjectTypes, o.ResourceType) {
 			return db.ListHistoryParams{}, fmt.Errorf("history kind %q selected %q, which its ObjectTypes do not declare",
@@ -725,12 +746,16 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		if o.DetailKey == "" && (o.ResourceID != "" || o.InList) {
 			return db.ListHistoryParams{}, fmt.Errorf("history object %+v has a resource id or list but no details key", o)
 		}
+		if o.WholeType && (o.DetailKey != "" || o.ResourceID != "" || o.InList) {
+			return db.ListHistoryParams{}, fmt.Errorf("history object %+v is a whole type and names an id, key or list", o)
+		}
 		// A guest's own rows are the guests family's, which the caller's view
 		// permission (viewableGuests) and the guest's cutoff hold to: a guest
-		// typed object reads them past both unless it is one of the guests.
+		// typed object reads them past both unless it is one of the guests —
+		// and a whole guest type is every guest's.
 		if o.DetailKey == "" && (o.ResourceType == "vm" || o.ResourceType == "container") {
 			vmid, parseErr := strconv.ParseInt(o.Value, 10, 32)
-			if parseErr != nil || !slices.Contains(params.Vmids, int32(vmid)) {
+			if o.WholeType || parseErr != nil || !slices.Contains(params.Vmids, int32(vmid)) {
 				return db.ListHistoryParams{}, fmt.Errorf("history object %+v is a guest the selection does not hold", o)
 			}
 		}
@@ -739,6 +764,7 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		params.ObjectKeys = append(params.ObjectKeys, o.DetailKey)
 		params.ObjectValues = append(params.ObjectValues, o.Value)
 		params.ObjectInList = append(params.ObjectInList, o.InList)
+		params.ObjectWhole = append(params.ObjectWhole, o.WholeType)
 	}
 	params.RuleCategories, params.RuleFields, params.RulePatterns = k.sqlRules()
 	return params, nil

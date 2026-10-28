@@ -47,6 +47,11 @@
 --              a list key   the value is one element of a comma-separated
 --                           details key (an ACL's users). Read by resource
 --                           type alone, so for a type with few rows.
+--              whole        every row of the type, whatever its id: a tab's
+--                           History, of all the objects of its kinds. Read by
+--                           (resource_type, created_at) within the cluster,
+--                           so for a type of configuration objects, which
+--                           are edited rarely.
 --            The keyed objects of one key and value are read in one scan,
 --            whatever their types: a node's nine kinds of part all name it in
 --            details.node, and the GIN lookup of a value that common costs the
@@ -201,7 +206,8 @@
 -- away is still an object's to take. The object arm reads each object by its
 -- index: (resource_type, resource_id) for its own rows, GIN details @> {key:
 -- value} for a details key, once for every type keyed by that value — a filter
--- on details->>key read every row of the type. "vmid IS NOT NULL" lets the
+-- on details->>key read every row of the type — and (resource_type,
+-- created_at) for a whole type. "vmid IS NOT NULL" lets the
 -- vmid arms use their partial indexes whatever the plan: a generic plan cannot
 -- prove it from "= ANY(<parameter>)".
 -- The Proxmox-duplicate probe reads the selection
@@ -276,12 +282,13 @@ WITH guests AS MATERIALIZED (
                     '{}'::jsonb) AS m
     FROM guests g
 ), objects AS (
-    SELECT t.resource_type, r.resource_id, k.detail_key, v.value, l.in_list
+    SELECT t.resource_type, r.resource_id, k.detail_key, v.value, l.in_list, w.whole
     FROM unnest(sqlc.arg('object_types')::text[]) WITH ORDINALITY AS t(resource_type, n)
     JOIN unnest(sqlc.arg('object_resource_ids')::text[]) WITH ORDINALITY AS r(resource_id, n) ON r.n = t.n
     JOIN unnest(sqlc.arg('object_keys')::text[]) WITH ORDINALITY AS k(detail_key, n) ON k.n = t.n
     JOIN unnest(sqlc.arg('object_values')::text[]) WITH ORDINALITY AS v(value, n) ON v.n = t.n
     JOIN unnest(sqlc.arg('object_in_list')::bool[]) WITH ORDINALITY AS l(in_list, n) ON l.n = t.n
+    JOIN unnest(sqlc.arg('object_whole')::bool[]) WITH ORDINALITY AS w(whole, n) ON w.n = t.n
 ), rules AS (
     SELECT c.category, f.field, p.pattern, c.n AS ord
     FROM unnest(sqlc.arg('rule_categories')::text[]) WITH ORDINALITY AS c(category, n)
@@ -427,8 +434,33 @@ WITH guests AS MATERIALIZED (
                       b.user_id, b.details->>'upid' AS upid, b.details->>'node' AS node,
                       b.details->>'status' AS recorded_status, b.details->>'new_id' AS new_id
                FROM audit_log b
-               WHERE o.detail_key = ''
+               WHERE o.detail_key = '' AND NOT o.whole
                  AND b.resource_type = o.resource_type AND b.resource_id = o.value
+                 AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
+                 AND (sqlc.arg('include_guests')::bool OR b.vmid IS NULL)
+                 AND (sqlc.narg('source')::text IS NULL OR b.source = sqlc.narg('source')::text
+                      OR sqlc.narg('source')::text = 'proxmox' AND b.details ? 'upid')
+                 AND (b.vmid IS NULL OR b.vmid = ANY(sqlc.arg('vmids')::int[])
+                 OR NOT sqlc.arg('objects_ignore_cutoff')::bool
+                    AND (b.action IN ('clone', 'clone-to-template')
+                         AND b.details->>'new_id' = ANY(sqlc.arg('vmids')::int[]::text[])
+                         OR b.resource_type = 'ha_resource'
+                            AND b.resource_id = ANY(ARRAY(SELECT p || v FROM unnest(sqlc.arg('vmids')::int[]) AS v,
+                                                                           unnest('{vm:,ct:}'::text[]) AS p)))
+                 OR sqlc.arg('status_guest_types')::text[] @> '{qemu,lxc}'
+                 OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = b.cluster_id AND v.vmid = b.vmid
+                            AND v.type = ANY(sqlc.arg('status_guest_types')::text[])))
+                 AND b.created_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+                 AND b.created_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+               ORDER BY b.created_at DESC
+               LIMIT NULLIF(sqlc.arg('row_cap')::int, 0))
+              UNION ALL
+              (SELECT b.id, b.cluster_id, b.created_at, b.source, b.action, b.resource_type, b.resource_id, b.vmid,
+                      b.user_id, b.details->>'upid' AS upid, b.details->>'node' AS node,
+                      b.details->>'status' AS recorded_status, b.details->>'new_id' AS new_id
+               FROM audit_log b
+               WHERE o.whole
+                 AND b.resource_type = o.resource_type
                  AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
                  AND (sqlc.arg('include_guests')::bool OR b.vmid IS NULL)
                  AND (sqlc.narg('source')::text IS NULL OR b.source = sqlc.narg('source')::text

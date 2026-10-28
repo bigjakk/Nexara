@@ -856,11 +856,17 @@ func TestGuestHistory(t *testing.T) {
 		audit(historyClusterID, minsAgo(3), "proxmox", "proxmox_task", "105", "hastart", map[string]any{"upid": historyUPID(32, "hastart", "105"), "status": "OK"})
 		audit(historyClusterID, minsAgo(3), "proxmox", "vm", "105", "start", map[string]any{"upid": historyUPID(33, "qmstart", "105"), "status": "OK"})
 		audit(historyClusterID, minsAgo(2), "nexara", "ha_resource", "vm:105", "updated", map[string]any{"state": "started", "vmid": 105})
+		// A tab's whole type: every interface of the cluster, not the other's.
+		audit(historyClusterID, minsAgo(1.5), "nexara", "network", "pve-02/vmbr9", "interface_created", map[string]any{"node": "pve-02"})
+		audit(historyOtherID, minsAgo(1.5), "nexara", "network", "pve-02/vmbr9", "interface_created", map[string]any{"node": "pve-02"})
 		for _, tt := range []struct {
 			name string
 			sel  handlers.HistorySelection
 			want []string
 		}{
+			{"every row of a type", handlers.HistorySelection{Objects: []handlers.HistoryObject{
+				{ResourceType: "network", WholeType: true}}},
+				[]string{"audit interface_created pve-02/vmbr9", "audit interface_updated vmbr0"}},
 			{"a details key within one resource id", handlers.HistorySelection{Objects: []handlers.HistoryObject{
 				{ResourceType: "pbs_server", ResourceID: "srv-a", DetailKey: "datastore", Value: "datastore01"}}},
 				[]string{"audit datastore_update srv-a"}},
@@ -1193,7 +1199,8 @@ func TestGuestHistory(t *testing.T) {
 				{ResourceType: "network", DetailKey: "node", Value: "pve-01"},
 				{ResourceType: "pbs_server", ResourceID: "srv-a", DetailKey: "datastore", Value: "datastore01"},
 				{ResourceType: "ceph_osd", DetailKey: "osd_id", Value: "12"},
-				{ResourceType: "pve_acl", DetailKey: "users", Value: "bob@pve", InList: true}}},
+				{ResourceType: "pve_acl", DetailKey: "users", Value: "bob@pve", InList: true},
+				{ResourceType: "ceph_osd", WholeType: true}}},
 		} {
 			for _, cluster := range []uuid.UUID{historyClusterID, historyOtherID} {
 				p, err := withObjects.ListParams(cluster, sel)

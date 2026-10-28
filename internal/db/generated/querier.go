@@ -1771,6 +1771,11 @@ type Querier interface {
 	//              a list key   the value is one element of a comma-separated
 	//                           details key (an ACL's users). Read by resource
 	//                           type alone, so for a type with few rows.
+	//              whole        every row of the type, whatever its id: a tab's
+	//                           History, of all the objects of its kinds. Read by
+	//                           (resource_type, created_at) within the cluster,
+	//                           so for a type of configuration objects, which
+	//                           are edited rarely.
 	//            The keyed objects of one key and value are read in one scan,
 	//            whatever their types: a node's nine kinds of part all name it in
 	//            details.node, and the GIN lookup of a value that common costs the
@@ -1924,7 +1929,8 @@ type Querier interface {
 	// away is still an object's to take. The object arm reads each object by its
 	// index: (resource_type, resource_id) for its own rows, GIN details @> {key:
 	// value} for a details key, once for every type keyed by that value — a filter
-	// on details->>key read every row of the type. "vmid IS NOT NULL" lets the
+	// on details->>key read every row of the type — and (resource_type,
+	// created_at) for a whole type. "vmid IS NOT NULL" lets the
 	// vmid arms use their partial indexes whatever the plan: a generic plan cannot
 	// prove it from "= ANY(<parameter>)".
 	// The Proxmox-duplicate probe reads the selection

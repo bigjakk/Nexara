@@ -239,10 +239,23 @@ func TestHistoryKindListParams(t *testing.T) {
 		"a guest's object, not a guest": {Guests: []HistoryGuest{{VMID: 100}}, Objects: []HistoryObject{{ResourceType: "vm", Value: "101"}}},
 		"a guest's object by row id":    {Objects: []HistoryObject{{ResourceType: "container", Value: "d0000000-0000-4000-8000-000000000001"}}},
 		"an undeclared type":            {Objects: []HistoryObject{{ResourceType: "replication", Value: "job01"}}},
+		"a whole type with a value":     {Objects: []HistoryObject{{ResourceType: "pool", Value: "p1", WholeType: true}}},
+		"a whole type with a key":       {Objects: []HistoryObject{{ResourceType: "pve_acl", DetailKey: "users", WholeType: true}}},
+		"a whole guest type":            {Objects: []HistoryObject{{ResourceType: "vm", WholeType: true}}},
 	} {
 		if _, err := k.ListParams([16]byte{1}, sel); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+	// A tab's selector: every row of its types, each read whole.
+	sel, err := SelectTypes("pool", "pbs_server")(context.Background(), HistoryRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := k.ListParams([16]byte{1}, sel); err != nil || !slices.Equal(p.ObjectWhole, []bool{true, true}) ||
+		!slices.Equal(p.ObjectTypes, []string{"pool", "pbs_server"}) || !slices.Equal(p.ObjectValues, []string{"", ""}) {
+		t.Errorf("a tab's ListParams = types %v, values %v, whole %v (%v); want both types whole", p.ObjectTypes,
+			p.ObjectValues, p.ObjectWhole, err)
 	}
 	// A global kind reads every cluster: never a guest, nor an object whose id
 	// is unique only within one.
