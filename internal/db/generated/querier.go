@@ -281,7 +281,11 @@ type Querier interface {
 	// The window opens no earlier than lookback_seconds before the change was seen
 	// (observedLookback says how long and why): after an outage a change's window
 	// would otherwise be the whole gap, and one row from its start would explain
-	// everything found at its end. A task on the object itself is looked for from
+	// everything found at its end. A change filed back under the cap
+	// (detail.while_over_cap) happened at some time since its object was last
+	// compared, before the crossing, so for its object's own rows ('id', 'vmid')
+	// its window opens then (own_from); a row reaching it from elsewhere still
+	// counts from the look-back. A task on the object itself is looked for from
 	// a day before the window, since a disk move can run for hours; a row that
 	// reaches the object from elsewhere (match_key 'cluster') only from an hour
 	// before, so a long clone or restore does not cover a whole cluster while it

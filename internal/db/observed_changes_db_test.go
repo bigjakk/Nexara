@@ -537,6 +537,20 @@ func TestObservedChanges(t *testing.T) {
 	afterOutageRecent := seed(observedCluster, "storage", "store10", 0, "changed", "", []string{"nodes"}, ago(500))
 	exec("an outage's gap", `UPDATE cluster_object_changes SET last_seen_at = $2 WHERE id = $1`, afterOutageRecent, ago(800))
 	audit(observedCluster, ago(530), "storage", "store10", 0, "update", nil)
+	// Filed back under the cap, a change came at some time since its object was
+	// last compared, before the crossing: its own rows count from then, a row
+	// reaching it from elsewhere from the look-back still.
+	backUnder := func(id uuid.UUID) uuid.UUID {
+		exec("back under", `UPDATE cluster_object_changes SET last_seen_at = $2,
+			detail = detail || '{"while_over_cap": true}' WHERE id = $1`, id, ago(800))
+		return id
+	}
+	backUnderOwn := backUnder(seed(observedCluster, "storage", "store13", 0, "changed", "", []string{"nodes"}, ago(500)))
+	audit(observedCluster, ago(700), "storage", "store13", 0, "update", nil)
+	backUnderOther := backUnder(seed(observedCluster, "pool", "web3", 0, "changed", "", []string{"vms"}, ago(500)))
+	members(backUnderOther, []string{}, []string{"vms:132"})
+	audit(observedCluster, ago(700), "vm", "132", 132, "destroy", map[string]any{
+		"upid": "UPID:pve-01:00000013:00000001:00000001:qmdestroy:132:root@pam:", "node": "pve-01", "vmid": 132})
 
 	// Timing and scope.
 	fresh := seed(observedCluster, "storage", "store06", 0, "changed", "", []string{"nodes"}, ago(1))
@@ -798,6 +812,8 @@ func TestObservedChanges(t *testing.T) {
 		{"added, nothing on record", addedUnexplained, "shown"},
 		{"after an outage, by a row from the gap's start", afterOutage, "shown"},
 		{"after an outage, by a row within the look-back", afterOutageRecent, "explained"},
+		{"back under the cap, by its own row since its last reading", backUnderOwn, "explained"},
+		{"back under the cap, by a row from elsewhere before the look-back", backUnderOther, "shown"},
 		{"seen too recently", fresh, "waiting"},
 		{"settled, nothing on record", nothingOnRecord, "shown"},
 		{"another writer's row", notMine, "waiting"},

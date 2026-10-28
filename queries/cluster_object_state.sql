@@ -183,7 +183,11 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- The window opens no earlier than lookback_seconds before the change was seen
 -- (observedLookback says how long and why): after an outage a change's window
 -- would otherwise be the whole gap, and one row from its start would explain
--- everything found at its end. A task on the object itself is looked for from
+-- everything found at its end. A change filed back under the cap
+-- (detail.while_over_cap) happened at some time since its object was last
+-- compared, before the crossing, so for its object's own rows ('id', 'vmid')
+-- its window opens then (own_from); a row reaching it from elsewhere still
+-- counts from the look-back. A task on the object itself is looked for from
 -- a day before the window, since a disk move can run for hours; a row that
 -- reaches the object from elsewhere (match_key 'cluster') only from an hour
 -- before, so a long clone or restore does not cover a whole cluster while it
@@ -223,6 +227,9 @@ WITH rules AS MATERIALIZED (
            c.members_joined, c.members_left,
            GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
                     c.observed_at - make_interval(secs => sqlc.arg('lookback_seconds')::int)) AS win_from,
+           CASE WHEN c.detail @> '{"while_over_cap": true}' THEN LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes'
+                ELSE GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
+                              c.observed_at - make_interval(secs => sqlc.arg('lookback_seconds')::int)) END AS own_from,
            c.observed_at + interval '30 seconds'                                           AS win_to
     FROM cluster_object_changes c
     WHERE c.cluster_id = sqlc.arg('cluster_id')
@@ -239,7 +246,7 @@ WITH rules AS MATERIALIZED (
 ), candidates AS (
     -- One arm per match_key, so each reads audit_log through the index its key
     -- can use.
-    SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
+    SELECT p.id, p.cluster_id, p.resource_id, p.own_from AS win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
@@ -248,7 +255,7 @@ WITH rules AS MATERIALIZED (
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
                     AND a.resource_id = p.resource_id
-                    AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
+                    AND a.created_at BETWEEN p.own_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
@@ -260,7 +267,7 @@ WITH rules AS MATERIALIZED (
                     AND p.node <> '' AND a.resource_id = p.node
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
-    SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
+    SELECT p.id, p.cluster_id, p.resource_id, p.own_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at, r.match_key
@@ -268,7 +275,7 @@ WITH rules AS MATERIALIZED (
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.vmid = p.vmid
                     AND (r.audit_type = '' OR a.resource_type = r.audit_type)
-                    AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
+                    AND a.created_at BETWEEN p.own_from - interval '1 day' AND p.win_to + interval '10 minutes'
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
