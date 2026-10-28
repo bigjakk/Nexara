@@ -42,7 +42,13 @@ CREATE TABLE IF NOT EXISTS guest_node_changes (
     -- When the guest was last seen on from_node: it moved after this and by
     -- observed_at.
     last_seen_at TIMESTAMPTZ NOT NULL,
-    observed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    observed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- 0 for a move; for a run — the moves past the hourly cap, in one row — how
+    -- many, from_node the first one's, to_node where they ended, nodes every
+    -- node it went through, last_seen_at the first one's time and observed_at
+    -- the last one's.
+    run_count    INTEGER NOT NULL DEFAULT 0,
+    nodes        TEXT[] NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_guest_node_changes_from
@@ -69,10 +75,10 @@ CREATE INDEX IF NOT EXISTS idx_guest_node_changes_guest
 -- read time: a new guest on a VMID the collector had not yet let go of comes
 -- as an UPDATE of node_id, like a move.
 --
--- Twenty moves an hour a guest at most, as the observer caps its changes: past
--- that, the hour's last row takes the move in — it ends where the guest now is
--- — and a move straight back cancels it. A guest moved round and round writes
--- no more than that.
+-- Twenty moves an hour a guest, as the observer caps its changes; past that,
+-- the burst's run row counts the rest — its first, its last, how many and
+-- where they ended — so a guest moved round and round writes one row an hour
+-- more, and no move is lost or rewritten.
 CREATE OR REPLACE FUNCTION record_guest_node_change()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -80,7 +86,7 @@ DECLARE
                                WHERE n.id = NEW.node_id AND n.cluster_id = NEW.cluster_id), '');
     was      guest_node_state%ROWTYPE;
     type_was text;
-    last     guest_node_changes%ROWTYPE;
+    run      guest_node_changes%ROWTYPE;
 BEGIN
     SELECT * INTO was FROM guest_node_state WHERE cluster_id = NEW.cluster_id AND vmid = NEW.vmid;
     -- Not in the IF below: PL/pgSQL would end its condition at a CASE's THEN.
@@ -88,19 +94,25 @@ BEGIN
     IF FOUND AND was.node <> node_now AND was.node <> '' AND node_now <> '' AND NEW.type = type_was
        AND (TG_OP = 'UPDATE' OR was.gone_at > now() - interval '5 minutes') THEN
         IF (SELECT count(*) FROM guest_node_changes c
-            WHERE c.cluster_id = NEW.cluster_id AND c.vmid = NEW.vmid
+            WHERE c.cluster_id = NEW.cluster_id AND c.vmid = NEW.vmid AND c.run_count = 0
               AND c.observed_at > now() - interval '1 hour') < 20 THEN
             INSERT INTO guest_node_changes (cluster_id, vmid, guest_type, from_node, to_node, last_seen_at)
             VALUES (NEW.cluster_id, NEW.vmid, NEW.type, was.node, node_now,
                     CASE WHEN TG_OP = 'UPDATE' THEN OLD.last_seen_at ELSE was.last_seen_at END);
         ELSE
-            SELECT * INTO last FROM guest_node_changes c
-            WHERE c.cluster_id = NEW.cluster_id AND c.vmid = NEW.vmid
+            SELECT * INTO run FROM guest_node_changes c
+            WHERE c.cluster_id = NEW.cluster_id AND c.vmid = NEW.vmid AND c.run_count > 0
+              AND c.observed_at > now() - interval '1 hour'
             ORDER BY c.observed_at DESC, c.id DESC LIMIT 1;
-            IF last.from_node = node_now THEN
-                DELETE FROM guest_node_changes WHERE id = last.id;
+            IF FOUND THEN
+                UPDATE guest_node_changes
+                SET to_node = node_now, observed_at = now(), run_count = run.run_count + 1,
+                    nodes = CASE WHEN node_now = ANY(run.nodes) THEN run.nodes ELSE run.nodes || node_now END
+                WHERE id = run.id;
             ELSE
-                UPDATE guest_node_changes SET to_node = node_now, observed_at = now() WHERE id = last.id;
+                INSERT INTO guest_node_changes (cluster_id, vmid, guest_type, from_node, to_node, last_seen_at,
+                                                run_count, nodes)
+                VALUES (NEW.cluster_id, NEW.vmid, NEW.type, was.node, node_now, now(), 1, ARRAY[was.node, node_now]);
             END IF;
         END IF;
     END IF;

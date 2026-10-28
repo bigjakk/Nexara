@@ -33,6 +33,7 @@
     "when": "When",
     "lastSeen": "Last seen {{status}}",
     "lastSeenBeforeMove": "Last seen before the move",
+    "first": "First",
     "finished": "Finished",
     "source": "Source",
     "node": "Node",

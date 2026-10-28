@@ -80,8 +80,10 @@ export interface HistoryEntry {
    *  part, by Proxmox's line numbers. */
   log_start?: number;
   log_end?: number;
-  /** A run: how many rows it is, from last_seen_at (its first) to
-   *  occurred_at (its last); details are the last one's. */
+  /** A run — a cluster's sync failures, or a node's status changes or a
+   *  guest's moves past the hourly cap — how many it counts, from
+   *  last_seen_at (its first) to occurred_at (its last); details are the last
+   *  one's. */
   run_count?: number;
 }
 

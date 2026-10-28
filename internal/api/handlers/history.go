@@ -489,8 +489,10 @@ type historyEntry struct {
 	// task log that are this guest's part, by Proxmox's line numbers.
 	LogStart int32 `json:"log_start,omitempty"`
 	LogEnd   int32 `json:"log_end,omitempty"`
-	// RunCount is, for a run, how many rows it is: from LastSeenAt, its
-	// first, to OccurredAt, its last; Details are the last one's.
+	// RunCount is, for a run — a cluster's sync failures, or a node's status
+	// changes or a guest's moves past the hourly cap — how many it counts:
+	// from LastSeenAt, its first, to OccurredAt, its last; Details are the
+	// last one's.
 	RunCount int32 `json:"run_count,omitempty"`
 }
 

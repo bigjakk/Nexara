@@ -1286,6 +1286,9 @@ func TestGuestHistory(t *testing.T) {
 				case "move":
 					entry += fmt.Sprintf(" %d %s", r.Vmid, r.Node)
 				}
+				if r.RunCount > 0 {
+					entry += fmt.Sprintf(" run %d", r.RunCount)
+				}
 				got = append(got, entry)
 			}
 			return got
@@ -1355,28 +1358,60 @@ func TestGuestHistory(t *testing.T) {
 			t.Errorf("a reused VMID on another node: %v, want %v", reused, want)
 		}
 
-		// Twenty rows an hour a node, and a guest: a node flapping and a guest
-		// moved to and fro leave no more, the last ending where each now is.
+		// Twenty changes an hour a node, and moves a guest; past that a run row
+		// counts the rest and where they ended, the real rows untouched: 23 of
+		// each — 22 moves after the first placing, the last to a third node —
+		// leave 20 and a run of 3 or 2.
+		lastNode := uuid.New()
+		exec("third node 3", `INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'pve-03')`, lastNode, historyThirdID)
 		for i := range 23 {
 			if _, err := q.UpsertNode(ctx, gen.UpsertNodeParams{ClusterID: historyThirdID, Name: "pve-02",
 				Status: []string{"offline", "online"}[i%2]}); err != nil {
 				t.Fatal(err)
 			}
-			place(330, []uuid.UUID{otherNode, thirdNode}[i%2])
+			to := []uuid.UUID{otherNode, thirdNode}[i%2]
+			if i == 22 {
+				to = lastNode
+			}
+			place(330, to)
 		}
-		var statusRows, moveRows int
-		var lastStatus, lastNode string
-		if err := pool.QueryRow(ctx, `SELECT count(*), (array_agg(to_status ORDER BY observed_at DESC, id DESC))[1]
-			FROM node_status_changes WHERE cluster_id = $1 AND node = 'pve-02'`, historyThirdID).Scan(&statusRows, &lastStatus); err != nil {
-			t.Fatal(err)
+		for _, c := range []struct {
+			what, sql string
+			want      string
+		}{
+			{"status changes", `SELECT count(*) FILTER (WHERE run_count = 0) || ' ' ||
+				(array_agg(to_status ORDER BY observed_at DESC, id DESC) FILTER (WHERE run_count = 0))[1] || ', run ' ||
+				string_agg(run_count || ' ' || to_status, ',') FILTER (WHERE run_count > 0)
+				FROM node_status_changes WHERE cluster_id = $1 AND node = 'pve-02'`, "20 online, run 3 offline"},
+			{"moves", `SELECT count(*) FILTER (WHERE run_count = 0) || ' ' ||
+				(array_agg(to_node ORDER BY observed_at DESC, id DESC) FILTER (WHERE run_count = 0))[1] || ', run ' ||
+				string_agg(run_count || ' ' || to_node, ',') FILTER (WHERE run_count > 0)
+				FROM guest_node_changes WHERE cluster_id = $1 AND vmid = 330`, "20 pve-02, run 2 pve-03"},
+		} {
+			var got string
+			if err := pool.QueryRow(ctx, c.sql, historyThirdID).Scan(&got); err != nil || got != c.want {
+				t.Errorf("%s after 23 in an hour: %q (%v), want %q", c.what, got, err, c.want)
+			}
 		}
-		if err := pool.QueryRow(ctx, `SELECT count(*), (array_agg(to_node ORDER BY observed_at DESC, id DESC))[1]
-			FROM guest_node_changes WHERE cluster_id = $1 AND vmid = 330`, historyThirdID).Scan(&moveRows, &lastNode); err != nil {
-			t.Fatal(err)
-		}
-		if statusRows > 20 || lastStatus != "offline" || moveRows > 20 || lastNode != "pve-02" {
-			t.Errorf("after 23 changes in an hour: %d status rows ending %s, %d moves ending %s; want at most 20 each, "+
-				"ending offline and on pve-02", statusRows, lastStatus, moveRows, lastNode)
+		// Each run is one entry, and no real one: the guest's on every node it
+		// went through, pve-03's joined last, and the node's after its 20.
+		for _, c := range []struct {
+			node, prefix string
+			want         []string
+		}{
+			{"pve-01", "move moved ", []string{"move moved guests 330 pve-03 run 2"}},
+			{"pve-03", "move ", []string{"move moved guests 330 pve-02 run 2"}},
+			{"pve-02", "status status_change status online>offline run 3", nil},
+		} {
+			var got []string
+			for _, e := range nodeHistory(func(p *gen.ListHistoryParams) { p.NodeName, p.IncludeGuests = c.node, true }) {
+				if strings.HasPrefix(e, c.prefix) || c.want == nil && strings.HasPrefix(e, "status ") {
+					got = append(got, e)
+				}
+			}
+			if c.want == nil && (len(got) != 21 || got[0] != c.prefix) || c.want != nil && !slices.Equal(got, c.want) {
+				t.Errorf("the runs on %s's History: %v", c.node, got)
+			}
 		}
 	})
 

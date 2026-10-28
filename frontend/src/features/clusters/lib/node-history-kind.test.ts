@@ -68,6 +68,18 @@ describe("the node kind's own rows", () => {
       "VMID 101 now on pve-02",
       "pve-01 → pve-02, no migration on record",
     ],
+    [
+      "the status changes past the hour's twenty",
+      { ...status("online", "offline"), run_count: 3 },
+      "Status changed 3 times more",
+      "online → … → offline",
+    ],
+    [
+      "the moves past the hour's twenty",
+      { ...move("moved", "pve-02", "pve-02", "pve-01"), run_count: 1 },
+      "Moved once more",
+      "pve-02 → … → pve-01",
+    ],
   ])("%s", (_name, entry, label, summary) => {
     expect(historyEventLabel(nodeHistoryKind, entry, t)).toBe(label);
     expect(historySummary(nodeHistoryKind, entry, t)).toBe(summary);

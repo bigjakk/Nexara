@@ -433,6 +433,8 @@ type GuestNodeChange struct {
 	ToNode     string    `json:"to_node"`
 	LastSeenAt time.Time `json:"last_seen_at"`
 	ObservedAt time.Time `json:"observed_at"`
+	RunCount   int32     `json:"run_count"`
+	Nodes      []string  `json:"nodes"`
 }
 
 type GuestNodeState struct {
@@ -788,6 +790,7 @@ type NodeStatusChange struct {
 	ToStatus   string    `json:"to_status"`
 	LastSeenAt time.Time `json:"last_seen_at"`
 	ObservedAt time.Time `json:"observed_at"`
+	RunCount   int32     `json:"run_count"`
 }
 
 type NotificationChannel struct {

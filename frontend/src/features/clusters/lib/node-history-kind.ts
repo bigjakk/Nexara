@@ -52,7 +52,16 @@ const isNodeStatus = (entry: HistoryEntry) =>
 const isGuestRow = (entry: HistoryEntry) =>
   entry.kind !== "move" && !isNodeStatus(entry) && historyGuestVmid(entry) > 0;
 
+/** A run: the changes or moves past twenty an hour, counted in one entry. */
+const isRun = (entry: HistoryEntry) =>
+  (isNodeStatus(entry) || entry.kind === "move") && (entry.run_count ?? 0) > 0;
+
 function eventLabel(entry: HistoryEntry, t: TFunction): string | undefined {
+  if (isRun(entry)) {
+    return t(entry.kind === "move" ? "events.moveRun" : "events.statusRun", {
+      count: entry.run_count,
+    });
+  }
   if (isNodeStatus(entry)) {
     const to = entry.to_status ?? "";
     if (to === "unknown") return t("events.statusUnknown");
@@ -71,6 +80,12 @@ function eventLabel(entry: HistoryEntry, t: TFunction): string | undefined {
 }
 
 function summary(entry: HistoryEntry, t: TFunction): string | undefined {
+  if (isRun(entry)) {
+    return t("summaries.run", {
+      from: entry.from_status ?? "",
+      to: entry.to_status ?? "",
+    });
+  }
   if (isNodeStatus(entry)) {
     const from = entry.from_status ?? "";
     if (entry.to_status === "unknown") return t("summaries.unknown", { from });
@@ -94,6 +109,7 @@ function summary(entry: HistoryEntry, t: TFunction): string | undefined {
 }
 
 function note(entry: HistoryEntry, t: TFunction): string | undefined {
+  if (isRun(entry)) return t("notes.run");
   if (isNodeStatus(entry)) return t("notes.status");
   if (entry.kind === "move") {
     return t(entry.action === "now_on" ? "notes.nowOn" : "notes.move");

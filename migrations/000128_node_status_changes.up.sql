@@ -26,36 +26,44 @@ CREATE TABLE IF NOT EXISTS node_status_changes (
     -- When a slow pass last saw the node, before the change: it happened after
     -- this and by observed_at.
     last_seen_at TIMESTAMPTZ NOT NULL,
-    observed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    observed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- 0 for a change; for a run — the changes past the hourly cap, in one row
+    -- — how many, from_status the first one's, to_status where they ended,
+    -- last_seen_at the first one's time and observed_at the last one's.
+    run_count    INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_node_status_changes_node
     ON node_status_changes (cluster_id, node, observed_at);
 
 -- Kept to statements with no constraint a row can violate: a failure here
--- fails the inventory write that caused it. Twenty changes an hour a node at
--- most, as the observer caps its changes: past that, the hour's last row takes
--- the change in — it ends where the node now is — and a change straight back
--- cancels it, so a flapping node writes no more than that.
+-- fails the inventory write that caused it. Twenty changes an hour a node,
+-- as the observer caps its changes; past that, the burst's run row counts the
+-- rest — its first, its last, how many and where they ended, as a cluster's
+-- sync failures are read as runs — so a flapping node writes one row an hour
+-- more, and no change is lost or rewritten.
 CREATE OR REPLACE FUNCTION record_node_status_change()
 RETURNS TRIGGER AS $$
 DECLARE
-    last node_status_changes%ROWTYPE;
+    run node_status_changes%ROWTYPE;
 BEGIN
     IF (SELECT count(*) FROM node_status_changes c
-        WHERE c.cluster_id = NEW.cluster_id AND c.node = NEW.name
+        WHERE c.cluster_id = NEW.cluster_id AND c.node = NEW.name AND c.run_count = 0
           AND c.observed_at > now() - interval '1 hour') < 20 THEN
         INSERT INTO node_status_changes (cluster_id, node, from_status, to_status, last_seen_at)
         VALUES (NEW.cluster_id, NEW.name, OLD.status, NEW.status, OLD.last_seen_at);
+        RETURN NULL;
+    END IF;
+    SELECT * INTO run FROM node_status_changes c
+    WHERE c.cluster_id = NEW.cluster_id AND c.node = NEW.name AND c.run_count > 0
+      AND c.observed_at > now() - interval '1 hour'
+    ORDER BY c.observed_at DESC, c.id DESC LIMIT 1;
+    IF FOUND THEN
+        UPDATE node_status_changes SET to_status = NEW.status, observed_at = now(), run_count = run.run_count + 1
+        WHERE id = run.id;
     ELSE
-        SELECT * INTO last FROM node_status_changes c
-        WHERE c.cluster_id = NEW.cluster_id AND c.node = NEW.name
-        ORDER BY c.observed_at DESC, c.id DESC LIMIT 1;
-        IF last.from_status = NEW.status THEN
-            DELETE FROM node_status_changes WHERE id = last.id;
-        ELSE
-            UPDATE node_status_changes SET to_status = NEW.status, observed_at = now() WHERE id = last.id;
-        END IF;
+        INSERT INTO node_status_changes (cluster_id, node, from_status, to_status, last_seen_at, run_count)
+        VALUES (NEW.cluster_id, NEW.name, OLD.status, NEW.status, now(), 1);
     END IF;
     RETURN NULL;
 END;

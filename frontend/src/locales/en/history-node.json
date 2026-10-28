@@ -48,18 +48,24 @@
     "reportedAgain": "Reported {{status}} again",
     "arrived": "Guest arrived",
     "left": "Guest left",
-    "nowOn": "VMID {{vmid}} now on {{node}}"
+    "nowOn": "VMID {{vmid}} now on {{node}}",
+    "statusRun_one": "Status changed once more",
+    "statusRun_other": "Status changed {{count}} times more",
+    "moveRun_one": "Moved once more",
+    "moveRun_other": "Moved {{count}} times more"
   },
   "summaries": {
     "status": "{{from}} → {{to}}",
     "unknown": "Was {{from}}; Proxmox stopped reporting the node.",
     "arrived": "From {{node}}",
     "left": "To {{node}}",
-    "nowOn": "{{from}} → {{to}}, no migration on record"
+    "nowOn": "{{from}} → {{to}}, no migration on record",
+    "run": "{{from}} → … → {{to}}"
   },
   "notes": {
     "status": "Nexara saw this change in the node's status as Proxmox reported it. It happened between the two times shown.",
     "move": "Nexara saw the guest on another node than before, with a migration of it on record. The migration's own task shows with Include guest activity.",
-    "nowOn": "Nexara saw this VMID on another node than before, with no migration of it on record: an HA recovery, a guest moved outside Proxmox's tasks, or a new guest on the VMID."
+    "nowOn": "Nexara saw this VMID on another node than before, with no migration of it on record: an HA recovery, a guest moved outside Proxmox's tasks, or a new guest on the VMID.",
+    "run": "Past twenty in an hour, Nexara counts the rest in one entry: how many, from the first to the last of them, and where they ended. The twenty before it are listed each on its own."
   }
 }

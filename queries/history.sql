@@ -571,6 +571,7 @@ WITH guests AS MATERIALIZED (
           WHERE sqlc.arg('node_name')::text <> ''
             AND x.cluster_id = sqlc.arg('cluster_id')::uuid
             AND x.node = sqlc.arg('node_name')::text
+            AND x.run_count = 0
             AND x.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
                                  - interval '2 minutes'
           WINDOW w AS (ORDER BY x.observed_at, x.id)) n
@@ -580,6 +581,30 @@ WITH guests AS MATERIALIZED (
                     OR COALESCE(n.next_to = n.from_status AND n.next_at < n.observed_at + interval '2 minutes', false)))
       AND NOT COALESCE(n.from_status = 'unknown' AND n.prev_from = n.to_status
                        AND n.observed_at < n.prev_at + interval '2 minutes', false)
+    -- The runs of status changes past the hourly cap, and of moves: each one
+    -- entry, its first change as last_seen_at, as a cluster's runs are.
+    UNION ALL
+    SELECT ('nodestatus:' || x.id::text)::text, 'status', x.id, x.cluster_id, x.observed_at, 'detected', 'status_change',
+           'node', x.node, 0, NULL::int, NULL::uuid, '', x.node, '', x.from_status, x.to_status, x.last_seen_at,
+           x.run_count
+    FROM node_status_changes x
+    WHERE sqlc.arg('node_name')::text <> ''
+      AND x.cluster_id = sqlc.arg('cluster_id')::uuid
+      AND x.node = sqlc.arg('node_name')::text
+      AND x.run_count > 0
+      AND x.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+    UNION ALL
+    SELECT ('move:' || g.id::text)::text, 'move', g.id, g.cluster_id, g.observed_at, 'detected', 'moved',
+           CASE g.guest_type WHEN 'lxc' THEN 'container' ELSE 'vm' END, g.vmid::text, g.vmid, NULL::int, NULL::uuid,
+           '', CASE WHEN g.to_node = sqlc.arg('node_name')::text THEN g.from_node ELSE g.to_node END,
+           '', g.from_node, g.to_node, g.last_seen_at, g.run_count
+    FROM guest_node_changes g
+    WHERE sqlc.arg('node_name')::text <> ''
+      AND g.cluster_id = sqlc.arg('cluster_id')::uuid
+      AND sqlc.arg('node_name')::text = ANY(g.nodes)
+      AND g.run_count > 0
+      AND g.guest_type = ANY(sqlc.arg('status_guest_types')::text[])
+      AND g.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
     UNION ALL
     SELECT ('move:' || g.id::text)::text, 'move', g.id, g.cluster_id, g.observed_at, 'detected',
            CASE WHEN NOT m.migrated THEN 'now_on'
@@ -598,6 +623,7 @@ WITH guests AS MATERIALIZED (
     WHERE sqlc.arg('node_name')::text <> ''
       AND g.cluster_id = sqlc.arg('cluster_id')::uuid
       AND (g.from_node = sqlc.arg('node_name')::text OR g.to_node = sqlc.arg('node_name')::text)
+      AND g.run_count = 0
       AND g.guest_type = ANY(sqlc.arg('status_guest_types')::text[])
       AND g.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
       AND NOT EXISTS (SELECT 1

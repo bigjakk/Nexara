@@ -175,9 +175,13 @@ function HistoryRow({
                   <span className="text-muted-foreground">
                     {entry.kind === "observed"
                       ? shared("observed.lastSeen")
-                      : entry.kind === "move"
-                        ? shared("row.lastSeenBeforeMove")
-                        : shared("row.lastSeen", { status: entry.from_status })}
+                      : entry.kind === "run" || (entry.run_count ?? 0) > 0
+                        ? shared("row.first")
+                        : entry.kind === "move"
+                          ? shared("row.lastSeenBeforeMove")
+                          : shared("row.lastSeen", {
+                              status: entry.from_status,
+                            })}
                   </span>
                   <span>{formatDateTime(entry.last_seen_at)}</span>
                 </>
