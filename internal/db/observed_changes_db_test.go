@@ -265,6 +265,7 @@ func TestObservedChanges(t *testing.T) {
 	members(subnetByCIDR, []string{"cidr:vnet01/192.0.2.0/24"}, []string{})
 	subnetOther := seed(observedCluster, "sdn_subnet", "vnet01/zone01-198.51.100.0-24", 0, "added", "", nil, at)
 	members(subnetOther, []string{"cidr:vnet01/198.51.100.0/24"}, []string{})
+	subnetNoCIDR := seed(observedCluster, "sdn_subnet", "vnet01/zone01-203.0.113.0-24", 0, "added", "", nil, at)
 	audit(observedCluster, in, "sdn_subnet", "vnet01/192.0.2.0/24", 0, "sdn_subnet_created", nil)
 
 	// Access: a user's delete explains its own grants going, never another's
@@ -280,6 +281,11 @@ func TestObservedChanges(t *testing.T) {
 	aclBesideGrant := seed(observedCluster, "pve_acl", "/", 0, "changed", "", []string{"user_grants"}, at)
 	members(aclBesideGrant, []string{"user_grants:T4:user09@pve"}, []string{})
 	audit(observedCluster, in, "pve_acl", "/", 0, "granted", map[string]any{"users": "user02@pve,user03@pve"})
+	// A grant naming only a group names no user: a user arriving shows.
+	aclByGroupGrant := seed(observedCluster, "pve_acl", "/storage/store03", 0, "changed", "", []string{"user_grants", "users"}, at)
+	members(aclByGroupGrant, []string{"user_grants:T5:user06@pve", "users:user06@pve"}, []string{})
+	audit(observedCluster, in, "pve_acl", "/storage/store03", 0, "granted",
+		map[string]any{"users": "", "groups": "group01", "tokens": ""})
 	byRealmSync := seed(observedCluster, "pve_user", "user04@ldap01", 0, "changed", "", []string{"email"}, at)
 	besideRealmSync := seed(observedCluster, "pve_user", "user05@pve", 0, "changed", "", []string{"email"}, at)
 	audit(observedCluster, in, "proxmox_task", "ldap01", 0, "auth-realm-sync",
@@ -456,10 +462,12 @@ func TestObservedChanges(t *testing.T) {
 		{"a job added beside another's create", jobAddedBeside, "shown"},
 		{"a subnet created, filed under its CIDR", subnetByCIDR, "explained"},
 		{"a subnet added beside another CIDR's create", subnetOther, "shown"},
+		{"a subnet added that lists no CIDR to name", subnetNoCIDR, "shown"},
 		{"a user's delete, its grants going", aclByDelete, "explained"},
 		{"a user's delete, and another's grant arriving", aclEscalated, "shown"},
 		{"Nexara's grant to the users its row names", aclByGrant, "explained"},
 		{"Nexara's grant, and another user's arriving", aclBesideGrant, "shown"},
+		{"a grant naming only a group, a user arriving", aclByGroupGrant, "shown"},
 		{"a realm's sync, a user of that realm", byRealmSync, "explained"},
 		{"a realm's sync, a user of another", besideRealmSync, "shown"},
 		{"a restore started more than an hour before", byLongRestore, "shown"},

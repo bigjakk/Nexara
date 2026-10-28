@@ -46,7 +46,8 @@ type explainRule struct {
 	// change's resource_id must be that name; with Member, the row explains
 	// only that member joining or leaving a list (joined, left), or an object
 	// removed with it as its last member (sole). Member with no MemberOf is any
-	// member going that way.
+	// member going that way; a MemberOf whose row names nobody (an empty list)
+	// is none, and explains no object that came or went with no members.
 	Object   string `json:"object"`
 	Member   string `json:"member"`
 	MemberOf string `json:"member_of"`

@@ -243,7 +243,8 @@ type Querier interface {
 	// names — or the removal of an object whose last members it names (sole).
 	// member_of may name several (alternatives joined by |, a details-list.<k>
 	// source a comma list); a member rule with no member_of covers any member
-	// going its way. A name with a * matches any that
+	// going its way, and one whose row names nobody — an empty list — none, nor an
+	// object that came or went with no members to name. A name with a * matches any that
 	// begins and ends as it does around it (a realm's users, *@realm). counts
 	// says what the row does to a list's items (listed, below); fields_from keeps
 	// it to the fields its details say it set (fields_named, below); audit_id_is

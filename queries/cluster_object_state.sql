@@ -110,7 +110,8 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- names — or the removal of an object whose last members it names (sole).
 -- member_of may name several (alternatives joined by |, a details-list.<k>
 -- source a comma list); a member rule with no member_of covers any member
--- going its way. A name with a * matches any that
+-- going its way, and one whose row names nobody — an empty list — none, nor an
+-- object that came or went with no members to name. A name with a * matches any that
 -- begins and ends as it does around it (a realm's users, *@realm). counts
 -- says what the row does to a list's items (listed, below); fields_from keeps
 -- it to the fields its details say it set (fields_named, below); audit_id_is
@@ -236,7 +237,8 @@ WITH rules AS MATERIALIZED (
                     AND a.details->>substr(r.match_key, 9) = p.resource_id
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
 ), hits AS (
-    SELECT k.id, k.field_re, k.member, n.member_names, k.counts, k.fields_from, n.fields_named, k.audit_id,
+    SELECT k.id, k.field_re, k.member, k.member_of = '' AS any_member, n.member_names, k.counts, k.fields_from,
+           n.fields_named, k.audit_id,
            k.created_at
     FROM candidates k
     CROSS JOIN LATERAL (
@@ -326,11 +328,11 @@ WITH rules AS MATERIALIZED (
           AND CASE h.member
                   WHEN ''       THEN true
                   -- A member joining or leaving a list: the one the row names.
-                  WHEN 'joined' THEN n.dir = 'joined' AND (cardinality(h.member_names) = 0 OR EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END))
-                                  OR n.dir = '' AND p.change = 'added' AND (cardinality(h.member_names) = 0 OR
+                  WHEN 'joined' THEN n.dir = 'joined' AND (h.any_member OR EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END))
+                                  OR n.dir = '' AND p.change = 'added' AND (h.any_member OR cardinality(p.members_joined) > 0 AND
                                      NOT EXISTS (SELECT 1 FROM unnest(p.members_joined) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END)))
-                  WHEN 'left'   THEN n.dir = 'left' AND (cardinality(h.member_names) = 0 OR EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END))
-                                  OR n.dir = '' AND p.change = 'removed' AND (cardinality(h.member_names) = 0 OR
+                  WHEN 'left'   THEN n.dir = 'left' AND (h.any_member OR EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END))
+                                  OR n.dir = '' AND p.change = 'removed' AND (h.any_member OR cardinality(p.members_left) > 0 AND
                                      NOT EXISTS (SELECT 1 FROM unnest(p.members_left) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END)))
                   -- An object removed with its last members: every one is named.
                   WHEN 'sole'   THEN n.dir = '' AND p.change = 'removed' AND cardinality(p.members_left) > 0
