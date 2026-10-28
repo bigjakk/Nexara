@@ -242,10 +242,12 @@ type Querier interface {
 	// removed, only if every member that came or went with it is one the row
 	// names — or the removal of an object whose last members it names (sole).
 	// member_of may name several (alternatives joined by |, a details-list.<k>
-	// source a comma list); a member rule with no member_of covers any member
-	// going its way, and one whose row names nobody — an empty list — none, nor an
-	// object that came or went with no members to name. A name with a * matches any that
-	// begins and ends as it does around it (a realm's users, *@realm). counts
+	// source a comma list, sources joined by +). A member rule with no member_of
+	// covers any member going its way; one whose row names nobody (an empty list)
+	// covers none, nor an object that came or went with no members to name. A
+	// name with a * from the rule's format matches any that begins and ends as it
+	// does around it (a realm's users, *@realm); a value holding one names nothing,
+	// never a pattern. counts
 	// says what the row does to a list's items (listed, below); fields_from keeps
 	// it to the fields its details say it set (fields_named, below); audit_id_is
 	// to rows filed under that marker id.

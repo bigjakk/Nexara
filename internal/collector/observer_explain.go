@@ -42,7 +42,8 @@ type explainRule struct {
 	DetailKey string `json:"detail_key"` // only a row whose details carry this key, not empty; "" any
 	// Object and MemberOf name what a row is about, "<source>:<format>": the
 	// UPID's id (upid), the row's resource_id (audit) or guest (vmid), or a
-	// details key (details.<k>), put into format at %s. With Object, the
+	// details key (details.<k>, or details-list.<k> for a comma list), put into
+	// format at %s; a MemberOf may join several sources with +. With Object, the
 	// change's resource_id must be that name; with Member, the row explains
 	// only that member joining or leaving a list (joined, left), or an object
 	// removed with it as its last member (sole). Member with no MemberOf is any
@@ -385,12 +386,12 @@ var observedChangeRules = slices.Concat(
 	},
 	accessUserUpdates,
 
-	// The ACL. Nexara's grant and revoke on a path explain only the kind of
-	// grantee the row names (its users, groups or tokens): a grant brings
-	// grantees in and changes their grants any way (a propagate flag is one
-	// grant out and one in), a revoke only takes out. A path is added by its
-	// first grant and removed with its last.
-	byAction("pve_acl", []string{"granted"}, nil, []string{"revoked"}),
+	// The ACL. Nexara's grant and revoke on a path explain only the grantees
+	// the row names (its users, groups and tokens): a grant brings them in and
+	// changes their grants any way (a propagate flag is one grant out and one
+	// in), a revoke only takes out. A path is added by its first grant and
+	// removed with its last, and only when every grantee that came or went is
+	// one the row names.
 	aclGrantRules,
 	// Anything deleted takes its ACL entries with it (AccessControl.pm
 	// delete_user_acl, delete_group_acl and the like): only that grantee
@@ -464,11 +465,14 @@ var aclGrantees = []struct{ key, who, grants string }{
 
 // aclGrantRules is Nexara's own grant and revoke on a path, for the grantees
 // its row names: a grant brings them in and changes their grants any way, a
-// revoke only takes out.
+// revoke only takes out, and a path that came or went with them is theirs only
+// if no one else came or went with it (all three lists, joined by +).
 var aclGrantRules = func() []explainRule {
-	rules := make([]explainRule, 0, 3*len(aclGrantees))
+	rules := make([]explainRule, 0, 3*len(aclGrantees)+2)
+	every := make([]string, 0, len(aclGrantees))
 	for _, g := range aclGrantees {
 		who := "details-list." + g.key + ":" + g.who + ":%s|" + g.grants + ":*:%s"
+		every = append(every, who)
 		fields := "^(" + g.who + "|" + g.grants + ")$"
 		rules = append(rules,
 			explainRule{Kind: "pve_acl", Change: "changed", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^granted$`,
@@ -479,7 +483,13 @@ var aclGrantRules = func() []explainRule {
 				FieldRe: fields, Member: "left", MemberOf: who},
 		)
 	}
-	return rules
+	all := strings.Join(every, "+")
+	return append(rules,
+		explainRule{Kind: "pve_acl", Change: "added", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^granted$`,
+			Member: "joined", MemberOf: all},
+		explainRule{Kind: "pve_acl", Change: "removed", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^revoked$`,
+			Member: "left", MemberOf: all},
+	)
 }()
 
 // aclDeleteRules is what a deleted grantee (a user, a group, a token) does to

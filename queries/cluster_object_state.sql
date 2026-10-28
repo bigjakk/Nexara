@@ -109,10 +109,12 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- removed, only if every member that came or went with it is one the row
 -- names — or the removal of an object whose last members it names (sole).
 -- member_of may name several (alternatives joined by |, a details-list.<k>
--- source a comma list); a member rule with no member_of covers any member
--- going its way, and one whose row names nobody — an empty list — none, nor an
--- object that came or went with no members to name. A name with a * matches any that
--- begins and ends as it does around it (a realm's users, *@realm). counts
+-- source a comma list, sources joined by +). A member rule with no member_of
+-- covers any member going its way; one whose row names nobody (an empty list)
+-- covers none, nor an object that came or went with no members to name. A
+-- name with a * from the rule's format matches any that begins and ends as it
+-- does around it (a realm's users, *@realm); a value holding one names nothing,
+-- never a pattern. counts
 -- says what the row does to a list's items (listed, below); fields_from keeps
 -- it to the fields its details say it set (fields_named, below); audit_id_is
 -- to rows filed under that marker id.
@@ -257,17 +259,17 @@ WITH rules AS MATERIALIZED (
         SELECT CASE WHEN strpos(ov.v, '*') = 0 THEN format(substr(k.object, strpos(k.object, ':') + 1), ov.v) END
                    AS object_named,
                ARRAY(SELECT format(alt, v)
-                     FROM unnest(string_to_array(substr(k.member_of, strpos(k.member_of, ':') + 1), '|')) AS alt,
+                     FROM unnest(string_to_array(k.member_of, '+')) AS src,
+                          unnest(string_to_array(substr(src, strpos(src, ':') + 1), '|')) AS alt,
                           unnest(CASE
-                              WHEN k.member_of = '' THEN ARRAY[]::text[]
-                              WHEN k.member_of LIKE 'upid:%'  THEN ARRAY[split_part(k.details->>'upid', ':', 7)]
-                              WHEN k.member_of LIKE 'audit:%' THEN ARRAY[k.audit_resource_id]
-                              WHEN k.member_of LIKE 'vmid:%'  THEN ARRAY[k.audit_vmid::text]
-                              WHEN k.member_of LIKE 'details-list.%'
+                              WHEN src LIKE 'upid:%'  THEN ARRAY[split_part(k.details->>'upid', ':', 7)]
+                              WHEN src LIKE 'audit:%' THEN ARRAY[k.audit_resource_id]
+                              WHEN src LIKE 'vmid:%'  THEN ARRAY[k.audit_vmid::text]
+                              WHEN src LIKE 'details-list.%'
                                   THEN array_remove(regexp_split_to_array(
-                                      COALESCE(k.details->>substr(split_part(k.member_of, ':', 1), 14), ''), '[,; ]+'), '')
-                              WHEN k.member_of LIKE 'details.%'
-                                  THEN ARRAY[k.details->>substr(split_part(k.member_of, ':', 1), 9)]
+                                      COALESCE(k.details->>substr(split_part(src, ':', 1), 14), ''), '[,; ]+'), '')
+                              WHEN src LIKE 'details.%'
+                                  THEN ARRAY[k.details->>substr(split_part(src, ':', 1), 9)]
                           END) AS v
                      WHERE strpos(v, '*') = 0) AS member_names,
                -- The fields a row says it set, when the rule takes them from it:

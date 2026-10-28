@@ -286,6 +286,17 @@ func TestObservedChanges(t *testing.T) {
 	members(aclByGroupGrant, []string{"user_grants:T5:user06@pve", "users:user06@pve"}, []string{})
 	audit(observedCluster, in, "pve_acl", "/storage/store03", 0, "granted",
 		map[string]any{"users": "", "groups": "group01", "tokens": ""})
+	// A path's first grant names every grantee it brought, whatever its kind.
+	aclAddedByGrant := seed(observedCluster, "pve_acl", "/sdn/zones/zone01", 0, "added", "", nil, at)
+	members(aclAddedByGrant, []string{"users:user12@pve", "user_grants:T8:user12@pve", "groups:group02",
+		"group_grants:T9:group02"}, []string{})
+	audit(observedCluster, in, "pve_acl", "/sdn/zones/zone01", 0, "granted",
+		map[string]any{"users": "user12@pve", "groups": "group02", "tokens": ""})
+	aclAddedBeside := seed(observedCluster, "pve_acl", "/sdn/zones/zone02", 0, "added", "", nil, at)
+	members(aclAddedBeside, []string{"users:user12@pve", "user_grants:T8:user12@pve", "users:user13@pve",
+		"user_grants:T8:user13@pve"}, []string{})
+	audit(observedCluster, in, "pve_acl", "/sdn/zones/zone02", 0, "granted",
+		map[string]any{"users": "user12@pve", "groups": "", "tokens": ""})
 	// A role's delete takes grants out, wherever and whoever's; never one in.
 	aclRoleGone := seed(observedCluster, "pve_acl", "/vms/172", 0, "changed", "", []string{"user_grants"}, at)
 	members(aclRoleGone, []string{}, []string{"user_grants:T6:user10@pve"})
@@ -388,6 +399,8 @@ func TestObservedChanges(t *testing.T) {
 			"^(enable|expire|firstname|lastname|email|comment|keys)$"), "object", "upid:*@%s"),
 		with(with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", "^groups$"),
 			"object", "upid:*@%s"), "member", "joined"), "member_of", "upid:groups:*-%s"),
+		with(with(rule("pve_acl", "added", "pve_acl", "id", false, "^granted$", "", "", ""), "member", "joined"),
+			"member_of", "details-list.users:users:%s|user_grants:*:%s+details-list.groups:groups:%s|group_grants:*:%s"),
 		with(rule("pve_acl", "changed", "pve_role", "cluster", false, "^deleted$", "", "",
 			"^(users|groups|tokens|user_grants|group_grants|token_grants)$"), "member", "left"),
 		with(with(with(rule("pve_group", "changed", "pve_user", "cluster", false, "^created$", "", "", "^users$"),
@@ -489,6 +502,8 @@ func TestObservedChanges(t *testing.T) {
 		{"Nexara's grant to the users its row names", aclByGrant, "explained"},
 		{"Nexara's grant, and another user's arriving", aclBesideGrant, "shown"},
 		{"a grant naming only a group, a user arriving", aclByGroupGrant, "shown"},
+		{"a path's first grant, to a user and a group", aclAddedByGrant, "explained"},
+		{"a path's first grant, and another user on it", aclAddedBeside, "shown"},
 		{"a role's delete, its grant going", aclRoleGone, "explained"},
 		{"a role's delete, and another role arriving", aclRoleBeside, "shown"},
 		{"a user created as *@pve, another user joining", groupBesideStar, "shown"},

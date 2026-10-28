@@ -996,20 +996,22 @@ func TestObservedChangeRules(t *testing.T) {
 			t.Errorf("rule %+v names no direction", r)
 		}
 		named := func(s string) bool {
-			source, format, ok := strings.Cut(s, ":")
-			if !ok || !regexp.MustCompile(`^(upid|audit|vmid|details\.[a-z_]+|details-list\.[a-z_]+)$`).MatchString(source) {
-				return false
-			}
-			for _, alt := range strings.Split(format, "|") {
-				if strings.Count(alt, "%") != 1 || !strings.Contains(alt, "%s") || strings.Count(alt, "*") > 1 {
+			for _, part := range strings.Split(s, "+") {
+				source, format, ok := strings.Cut(part, ":")
+				if !ok || !regexp.MustCompile(`^(upid|audit|vmid|details\.[a-z_]+|details-list\.[a-z_]+)$`).MatchString(source) {
 					return false
+				}
+				for _, alt := range strings.Split(format, "|") {
+					if strings.Count(alt, "%") != 1 || !strings.Contains(alt, "%s") || strings.Count(alt, "*") > 1 {
+						return false
+					}
 				}
 			}
 			return true
 		}
 		memberOK := (r.Member == "" && r.MemberOf == "") || r.Member == "joined" || r.Member == "left" ||
 			(r.Member == "sole" && r.MemberOf != "")
-		if (r.Object != "" && (!named(r.Object) || strings.Contains(r.Object, "|"))) ||
+		if (r.Object != "" && (!named(r.Object) || strings.ContainsAny(r.Object, "|+"))) ||
 			(r.MemberOf != "" && !named(r.MemberOf)) || !memberOK ||
 			!slices.Contains([]string{"", "add1", "del1", "edit1", "adds", "dels"}, r.Counts) ||
 			!regexp.MustCompile(`^[a-z_]*$`).MatchString(r.DetailKey) {
@@ -1019,6 +1021,11 @@ func TestObservedChangeRules(t *testing.T) {
 			if _, err := regexp.Compile(re); err != nil || (re != "" && !strings.HasPrefix(re, "^")) {
 				t.Errorf("rule %+v: pattern %q", r, re)
 			}
+		}
+		// An ACL rule names its grantees, unless it is a path taken with its
+		// object: a grant explains no one it does not name.
+		if r.Kind == "pve_acl" && r.Member == "" && (r.Change != "removed" || r.Object == "") {
+			t.Errorf("rule %+v explains an ACL change without naming its grantees", r)
 		}
 		// A row that reaches the object from elsewhere and covers a list of ids
 		// says which way the ids go, or a role's delete hides a grant made
