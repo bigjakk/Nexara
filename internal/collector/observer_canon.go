@@ -559,20 +559,53 @@ func multisetDiff(prev, cur []string) listCount {
 	return c
 }
 
-// lcsLen is the length of the longest common subsequence of a and b.
-func lcsLen(a, b []string) int {
-	row := make([]int, len(b)+1)
-	for i := range a {
-		prevDiag := 0
-		for j := range b {
-			saved := row[j+1]
-			if a[i] == b[j] {
-				row[j+1] = prevDiag + 1
-			} else {
-				row[j+1] = max(row[j+1], row[j])
-			}
-			prevDiag = saved
+// lcsLen is the length of a longest common subsequence of a and b, the kept
+// items of a list in their two orders (multisetDiff).
+func lcsLen(a, b []string) int { return lcsLenWithin(a, b, lcsMatchLimit) }
+
+// lcsMatchLimit bounds the pairs lcsLenWithin matches exactly: two lists of one
+// rule repeated n times hold n² of them.
+const lcsMatchLimit = 1 << 20
+
+// lcsLenWithin is Hunt–Szymanski: each item of b is matched with its places
+// in a, latest first, and the longest strictly increasing run of places is the
+// subsequence — O((n + r) log n) for r matching pairs, where the table is
+// O(n·m) for every list. Past limit pairs each item of b takes the next unused
+// place of its value in a: exact for distinct items, and for repeated ones at
+// worst a moved duplicate counted again.
+func lcsLenWithin(a, b []string, limit int) int {
+	places := make(map[string][]int, len(a))
+	for i, t := range a {
+		places[t] = append(places[t], i)
+	}
+	pairs := 0
+	for _, t := range b {
+		pairs += len(places[t])
+	}
+	var run []int // run[k]: the least place ending an increasing run of k+1
+	extend := func(place int) {
+		k, _ := slices.BinarySearch(run, place)
+		if k == len(run) {
+			run = append(run, place)
+		} else {
+			run[k] = place
 		}
 	}
-	return row[len(b)]
+	if pairs <= limit {
+		for _, t := range b {
+			ps := places[t]
+			for i := len(ps) - 1; i >= 0; i-- {
+				extend(ps[i])
+			}
+		}
+		return len(run)
+	}
+	next := make(map[string]int, len(places))
+	for _, t := range b {
+		if i := next[t]; i < len(places[t]) {
+			next[t] = i + 1
+			extend(places[t][i])
+		}
+	}
+	return len(run)
 }

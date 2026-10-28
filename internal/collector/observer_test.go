@@ -8,6 +8,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -907,9 +908,56 @@ func TestObserveCanonicalForms(t *testing.T) {
 	// A rule set counts what came, went, and of the rest what moved.
 	for _, tc := range []struct{ prev, cur, want string }{
 		{"a b c", "b a c", "{0 0 1}"}, {"a b c", "c a b", "{0 0 1}"}, {"a b c", "a x c", "{1 1 0}"}, {"a a b", "a b a", "{0 0 1}"},
+		{"a b a b", "b a b a", "{0 0 1}"}, // one moved, though matching repeats in order would say two
 	} {
 		if got := fmt.Sprint(multisetDiff(strings.Fields(tc.prev), strings.Fields(tc.cur))); got != tc.want {
 			t.Errorf("%s -> %s: %s, want %s", tc.prev, tc.cur, got, tc.want)
+		}
+	}
+}
+
+// The subsequence that says what moved is the textbook table's, without its
+// cost: exact within the pair limit, and past it exact for distinct items.
+func TestLCSLen(t *testing.T) {
+	t.Parallel()
+	table := func(a, b []string) int { // the O(n·m) dynamic programme
+		row := make([]int, len(b)+1)
+		for i := range a {
+			diag := 0
+			for j := range b {
+				up := row[j+1]
+				if a[i] == b[j] {
+					row[j+1] = diag + 1
+				} else {
+					row[j+1] = max(row[j+1], row[j])
+				}
+				diag = up
+			}
+		}
+		return row[len(b)]
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 300 {
+		n, kinds := 1+rng.IntN(12), 1+rng.IntN(6)
+		a := make([]string, n)
+		for i := range a {
+			a[i] = strconv.Itoa(rng.IntN(kinds))
+		}
+		b := slices.Clone(a)
+		rng.Shuffle(len(b), func(i, j int) { b[i], b[j] = b[j], b[i] })
+		if got, want := lcsLen(a, b), table(a, b); got != want {
+			t.Fatalf("%v, %v: %d, want %d", a, b, got, want)
+		} else if past := lcsLenWithin(a, b, 0); past > want {
+			t.Fatalf("past the limit, %v, %v: %d, more than the %d there are", a, b, past, want)
+		}
+		distinct := slices.Clone(a)
+		for i := range distinct {
+			distinct[i] += "." + strconv.Itoa(i)
+		}
+		shuffled := slices.Clone(distinct)
+		rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+		if got, want := lcsLenWithin(distinct, shuffled, 0), table(distinct, shuffled); got != want {
+			t.Fatalf("past the limit, %v, %v: %d, want %d", distinct, shuffled, got, want)
 		}
 	}
 }
