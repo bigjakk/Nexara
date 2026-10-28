@@ -16,7 +16,9 @@ export interface AuditLogEntry {
   user_display_name: string;
   cluster_name: string;
   // True when cluster_id names a cluster that no longer exists: the entry keeps
-  // the id it was written with, and cluster_name reads "<name> (removed)".
+  // the id it was written with, and cluster_name is the name the cluster had
+  // (empty if none was kept), bare. The client writes "(removed)" itself, with
+  // auditClusterLabel.
   cluster_removed: boolean;
   resource_vmid: number;
   resource_name: string;

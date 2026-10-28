@@ -21,10 +21,11 @@
 -- to it. A cluster added again gets a new id, so nothing collides.
 --
 -- Who may read such an entry does not change: its cluster_id names no cluster,
--- so no cluster-scoped grant is meant to reach it, and the scoped readers say so
--- themselves (they require the cluster to exist; role assignments scoped to a
--- removed cluster are not deleted with it). Only a holder of GLOBAL view:audit
--- reads it, as with the entries that have no cluster at all.
+-- so no cluster-scoped grant is meant to reach it. The role assignments scoped to
+-- a cluster are deleted with it (000123), so none names one that is gone, and the
+-- scoped readers require the cluster to exist all the same, for the minutes a
+-- cached permission set can outlive a deleted assignment. Only a holder of GLOBAL
+-- view:audit reads it, as with the entries that have no cluster at all.
 --
 -- Upgrade: every existing cluster_id references a cluster that exists (the
 -- dropped constraint guaranteed it), so no row changes and there is nothing to
