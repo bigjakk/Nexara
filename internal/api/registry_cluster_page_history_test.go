@@ -149,7 +149,7 @@ func TestClusterPageHistoryRoutes(t *testing.T) {
 		{"networks/dns/:dns", "networks/dns/dns01", sdnScope + "/dns", "sdn_dns=dns01"},
 		{"firewall", "firewall", firewallScope + "/rules",
 			"firewall_rule=cluster firewall_options=cluster firewall_alias* firewall_ipset* firewall_ipset_entry* " +
-				"firewall_security_group* firewall_security_group_rule* firewall_template*"},
+				"firewall_security_group* firewall_security_group_rule*"},
 		{"firewall/aliases/:name", "firewall/aliases/Web", firewallScope + "/aliases", "firewall_alias=web firewall_alias.rename=web"},
 		{"firewall/ipsets/:name", "firewall/ipsets/Mgmt", firewallScope + "/ipset", "firewall_ipset=mgmt firewall_ipset_entry.set=mgmt"},
 		{"firewall/groups/:group", "firewall/groups/Admins", firewallScope + "/groups",

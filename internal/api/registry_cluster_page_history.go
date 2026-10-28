@@ -257,9 +257,10 @@ func firewallHistoryRoutes() []historyRoute {
 		{
 			Kind: handlers.FirewallHistory(), Path: historyPath("firewall"), Resource: "network",
 			Description: historyDescription("the cluster's firewall",
-				"its rule set and options, and its aliases, IP sets and security groups with their entries and rules, "+
-					"and the templates applied to it. A guest's and a node's rule sets are theirs, and a template's "+
-					"creation, change and removal belong to no cluster", "network"),
+				"its rule set and options, and its aliases, IP sets and security groups with their entries and rules. "+
+					"A template applied to the cluster is a row of the rule set. A guest's and a node's rule sets are "+
+					"theirs, and a template's own History (creation, change, removal and each application) belongs to "+
+					"no cluster", "network"),
 			Parameters: clusterParams(nil),
 		},
 		{

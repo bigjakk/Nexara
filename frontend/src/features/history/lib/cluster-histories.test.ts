@@ -192,6 +192,22 @@ describe("how a cluster History names its rows", () => {
       "Tags changed",
       "",
     ],
+    // A template applied is a row of the rule set, which names the template.
+    [
+      "firewall",
+      {
+        resource_type: "firewall_rule",
+        resource_id: "cluster",
+        action: "template_applied",
+        details: JSON.stringify({
+          template_name: "base",
+          applied: 3,
+          total: 4,
+        }),
+      },
+      "Template applied",
+      "base: 3 of 4 rules",
+    ],
     // Proxmox's own task reads the same, and so does a change Nexara saw it make.
     [
       "certificates",

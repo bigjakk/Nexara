@@ -13,19 +13,21 @@ import (
 var (
 	firewallSetTypes   = []string{"firewall_rule", "firewall_options"}
 	firewallWholeTypes = []string{"firewall_alias", "firewall_ipset", "firewall_ipset_entry",
-		"firewall_security_group", "firewall_security_group_rule", "firewall_template"}
+		"firewall_security_group", "firewall_security_group_rule"}
 )
 
 // FirewallHistory is the Firewall tab's kind: the cluster's rule set and
 // options — which have no row of their own, so they are read here and nowhere
-// else —, its aliases, IP sets and security groups with their entries and
-// rules, and the templates applied to the cluster. A guest's and a node's rule
-// sets are theirs: only the cluster's own is read. A template's creation,
-// change and removal belong to no cluster; its History is the template's.
+// else —, and its aliases, IP sets and security groups with their entries and
+// rules. A guest's and a node's rule sets are theirs: only the cluster's own is
+// read. A template applied to the cluster is a row of the rule set, which names
+// the template; the template's own rows, which belong to no cluster, are its
+// History's (FirewallTemplateHistory) — and reading them here too would list
+// every application twice.
 func FirewallHistory() HistoryKind {
 	return HistoryKind{
 		Name:       "firewall",
-		Categories: []string{"rules", "options", "aliases", "ipsets", "groups", "templates", "other"},
+		Categories: []string{"rules", "options", "aliases", "ipsets", "groups", "other"},
 		Default:    "other",
 		Rules: []HistoryRule{
 			typeRule("rules", "firewall_rule"),
@@ -33,7 +35,6 @@ func FirewallHistory() HistoryKind {
 			typeRule("aliases", "firewall_alias"),
 			typeRule("ipsets", "firewall_ipset", "firewall_ipset_entry"),
 			typeRule("groups", "firewall_security_group", "firewall_security_group_rule"),
-			typeRule("templates", "firewall_template"),
 		},
 		Select: func(context.Context, HistoryRequest) (HistorySelection, error) {
 			sel := HistorySelection{}
@@ -45,9 +46,8 @@ func FirewallHistory() HistoryKind {
 			}
 			return sel, nil
 		},
-		ObjectTypes: append(append([]string{}, firewallSetTypes...), firewallWholeTypes...),
-		// A template's rows are Nexara's own, not a Proxmox object.
-		ObservedTypes: observedOf(append(append([]string{}, firewallSetTypes...), firewallWholeTypes[:5]...)...),
+		ObjectTypes:   append(append([]string{}, firewallSetTypes...), firewallWholeTypes...),
+		ObservedTypes: observedOf(append(append([]string{}, firewallSetTypes...), firewallWholeTypes...)...),
 	}
 }
 

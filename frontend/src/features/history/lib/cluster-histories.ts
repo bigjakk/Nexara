@@ -49,6 +49,11 @@ import {
   Activity,
   type LucideIcon,
 } from "lucide-react";
+import type { TFunction } from "i18next";
+import {
+  parseDetails,
+  type ParsedDetails,
+} from "@/components/layout/task-status";
 import { apiPath, keepColons, type ApiPath } from "@/lib/api-path";
 import { historyKind, typedEventLabel } from "./history";
 import type {
@@ -92,7 +97,6 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
   options: SlidersHorizontal,
   aliases: AtSign,
   ipsets: ListFilter,
-  templates: FileText,
   accounts: User,
   plugins: Plug,
   nodes: Server,
@@ -147,17 +151,43 @@ type Strings = { categories: Record<string, string> };
  *  all_time. */
 const WINDOW = "7d";
 
+/** A detail of an audit row as text, "" when it is not a string or a number. */
+function detailText(details: ParsedDetails, key: string): string {
+  const value = details[key];
+  if (typeof value === "string") return value;
+  return typeof value === "number" ? String(value) : "";
+}
+
+/**
+ * A template applied to the cluster is a row of the cluster's rule set, which
+ * names the template and how many of its rules Proxmox took.
+ */
+function templateAppliedSummary(
+  entry: HistoryEntry,
+  t: TFunction,
+): string | undefined {
+  if (entry.action !== "template_applied") return undefined;
+  const details = parseDetails(entry.details);
+  const name = detailText(details, "template_name");
+  const applied = detailText(details, "applied");
+  const total = detailText(details, "total");
+  if (name === "" || applied === "" || total === "") return undefined;
+  return t("summaries.templateApplied", { name, applied, total });
+}
+
 /** A tab's kind: it reads several types of object, and says which each row is. */
 function tabKind(
   name: string,
   strings: Strings,
   skip: readonly string[] = [],
+  summary?: HistoryKind["summary"],
 ): HistoryKind {
   return historyKind(name, strings, {
     icons: ICONS,
     defaultWindow: WINDOW,
     eventLabel: typedEventLabel,
     subject: subjectOf(skip),
+    ...(summary === undefined ? {} : { summary }),
   });
 }
 
@@ -187,7 +217,6 @@ const opaqueIdTypes = [
   "cluster_options",
   "firewall_rule",
   "firewall_options",
-  "firewall_template",
 ];
 
 export const clusterHistoryKinds = {
@@ -221,7 +250,12 @@ export const clusterHistoryKinds = {
   sdnController: rowKind("sdn-controller", S["history-sdn-controller"]),
   sdnIpam: rowKind("sdn-ipam", S["history-sdn-ipam"]),
   sdnDns: rowKind("sdn-dns", S["history-sdn-dns"]),
-  firewall: tabKind("firewall", S["history-firewall"], opaqueIdTypes),
+  firewall: tabKind(
+    "firewall",
+    S["history-firewall"],
+    opaqueIdTypes,
+    templateAppliedSummary,
+  ),
   firewallAlias: rowKind("firewall-alias", S["history-firewall-alias"]),
   firewallIpset: rowKind(
     "firewall-ipset",

@@ -5,7 +5,6 @@
     "aliases": "Aliases",
     "ipsets": "IP sets",
     "groups": "Security groups",
-    "templates": "Templates",
     "other": "Other"
   },
   "types": {
@@ -25,8 +24,8 @@
     "rule_deleted": "Security group rule deleted",
     "template_applied": "Template applied"
   },
-  "categoryNotes": {
-    "templates": "A template's creation, change and removal belong to no cluster: they are in the template's own History."
+  "summaries": {
+    "templateApplied": "{{name}}: {{applied}} of {{total}} rules"
   },
   "empty": "Nothing has been recorded for this cluster's firewall yet."
 }
