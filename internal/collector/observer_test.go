@@ -723,7 +723,7 @@ func TestObserverOutcomes(t *testing.T) {
 			t.Fatalf("%d reads of a cluster that answers none", reads)
 		}
 	})
-	t.Run("more objects than are compared, or more changes than are shown one by one", func(t *testing.T) {
+	t.Run("more changes of a kind than are shown one by one", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
 		storages := func(n int, nodes string) string {
@@ -760,10 +760,67 @@ func TestObserverOutcomes(t *testing.T) {
 		}
 		e.mq.observed.changes = nil
 		e.mq.observed.mu.Unlock()
-		e.client.set(pathStorage, storages(observeMaxObjects+1, "pve-03"))
-		e.expect("too many")
-		if e.pass(); e.client.readsOf(pathStorage) != 4 {
-			t.Fatalf("read %d times, want the kind skipped after its cap", e.client.readsOf(pathStorage))
+	})
+	t.Run("past the cap only what is held is compared, and a notice says so once a day", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 3
+		storages := func(nodes string) string {
+			items := make([]string, 0, e.obs.maxObjects+1)
+			for i := range e.obs.maxObjects + 1 {
+				items = append(items, fmt.Sprintf(`{"storage":"s%05d","type":"dir","nodes":"%s"}`, i, nodes))
+			}
+			return "[" + strings.Join(items, ",") + "]"
+		}
+		e.client.set(pathStorage, `[{"storage":"s00000","type":"dir","nodes":"pve-01"}]`)
+		e.expect("baseline")
+		e.client.set(pathStorage, storages("pve-02"))
+		e.expect("past the cap", "changed cluster/"+e.cluster.ID.String()+" [storage]", "changed storage/s00000 [nodes]")
+		e.expect("still past it, the notice given")
+		e.client.set(pathStorage, `[{"storage":"s00000","type":"dir","nodes":"pve-02"},{"storage":"s00001","type":"dir"}]`)
+		e.expect("under it again: what it missed is a baseline")
+		e.client.set(pathStorage, `[{"storage":"s00000","type":"dir","nodes":"pve-02"},{"storage":"s00001","type":"dir"},{"storage":"s00002","type":"dir"}]`)
+		e.expect("then an addition", "added storage/s00002 []")
+	})
+	t.Run("past the cap a reader reads on only what is held, and guests are read in turns", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 3
+		e.client.set("/pools", `[{"poolid":"web"}]`)
+		e.client.set("/pools?poolid=web", `[{"poolid":"web","members":[]}]`)
+		e.expect("baseline")
+		pools := make([]string, 0, e.obs.maxObjects+1)
+		for i := range e.obs.maxObjects + 1 {
+			pools = append(pools, fmt.Sprintf(`{"poolid":"p%05d"}`, i))
+		}
+		e.client.set("/pools", "["+strings.Join(append(pools, `{"poolid":"web"}`), ",")+"]")
+		e.client.set("/pools?poolid=web", `[{"poolid":"web","comment":"x","members":[]}]`)
+		e.expect("past the cap", "changed cluster/"+e.cluster.ID.String()+" [pool]", "changed pool/web [comment]")
+		if n := e.client.readsOf("/pools?poolid=p00000"); n != 0 {
+			t.Fatalf("read a pool it never held %d times", n)
+		}
+
+		e.mq.vmsByCluster = nil
+		for vmid := range e.obs.maxObjects + 1 {
+			e.mq.vmsByCluster = append(e.mq.vmsByCluster,
+				db.Vm{ID: uuid.New(), ClusterID: e.cluster.ID, NodeID: e.node.ID, Vmid: int32(1000 + vmid), Type: "qemu"})
+			e.client.set(fmt.Sprintf("/nodes/pve-01/qemu/%d/config", 1000+vmid), `{"memory":"1"}`)
+		}
+		for range 2 {
+			e.pass()
+		}
+		e.client.mu.Lock()
+		defer e.client.mu.Unlock()
+		total := 0
+		for _, g := range e.mq.vmsByCluster {
+			n := e.client.reads[fmt.Sprintf("/nodes/pve-01/qemu/%d/config", g.Vmid)]
+			if n == 0 {
+				t.Fatalf("guest %d never read in two passes, want each read in turns", g.Vmid)
+			}
+			total += n
+		}
+		if total != 2*e.obs.maxObjects {
+			t.Fatalf("%d guest reads in two passes, want %d a pass", total, e.obs.maxObjects)
 		}
 	})
 	t.Run("a mass edit of guests is filed guest by guest, as one bulk", func(t *testing.T) {

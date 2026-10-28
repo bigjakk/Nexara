@@ -57,6 +57,7 @@ type kindReading struct {
 	unread  map[string]bool
 	forget  map[string]bool
 	quiet   map[string]bool
+	listed  int // past the cap, how many its listing held (capListing); 0 otherwise
 }
 
 // observeKind is one kind of a cluster's objects, read once per pass.
@@ -274,6 +275,7 @@ func readPools(ctx context.Context, p *observePass) ([]kindReading, readOutcome)
 		return nil, out
 	}
 	reading := kindReading{kind: "pool", unread: map[string]bool{}}
+	items, reading.listed = p.capListing("pool", items, func(it map[string]json.RawMessage) string { return stringField(it, "poolid") })
 	for _, item := range items {
 		id := stringField(item, "poolid")
 		if !auditkey.ValidID(id) {
@@ -339,6 +341,7 @@ func readMetricServers(ctx context.Context, p *observePass) ([]kindReading, read
 	}
 	spec := metricServerSpec
 	reading := kindReading{kind: "metric_server", unread: map[string]bool{}}
+	items, reading.listed = p.capListing("metric_server", items, func(it map[string]json.RawMessage) string { return stringField(it, "id") })
 	for _, item := range items {
 		id := stringField(item, "id")
 		if !auditkey.ValidID(id) {
@@ -574,6 +577,13 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 	subnets := kindReading{kind: "sdn_subnet", unread: map[string]bool{}, forget: map[string]bool{}}
 	listed := map[string]bool{}
 	for _, item := range items {
+		listed[stringField(item, "vnet")] = true
+	}
+	// Past the cap only the vnets held are read on, and their subnets are
+	// compared as a reading past the cap too: a new vnet's are not read.
+	items, vnets.listed = p.capListing("sdn_vnet", items, func(it map[string]json.RawMessage) string { return stringField(it, "vnet") })
+	subnets.listed = vnets.listed
+	for _, item := range items {
 		vnet := stringField(item, "vnet")
 		if !auditkey.ValidID(vnet) {
 			continue
@@ -674,6 +684,12 @@ func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, rea
 	entries := kindReading{kind: "firewall_ipset_entry", unread: map[string]bool{}, forget: map[string]bool{}}
 	listed := map[string]bool{}
 	for _, item := range items {
+		listed[auditkey.FirewallName(stringField(item, "name"))] = true
+	}
+	ipsetID := func(it map[string]json.RawMessage) string { return auditkey.FirewallName(stringField(it, "name")) }
+	items, sets.listed = p.capListing("firewall_ipset", items, ipsetID)
+	entries.listed = sets.listed
+	for _, item := range items {
 		name := stringField(item, "name")
 		id := auditkey.FirewallName(name)
 		if name == "" || !auditkey.ValidID(id) {
@@ -722,6 +738,12 @@ func readFirewallGroups(ctx context.Context, p *observePass) ([]kindReading, rea
 	groups := kindReading{kind: "firewall_security_group"}
 	rules := kindReading{kind: "firewall_security_group_rule", unread: map[string]bool{}, forget: map[string]bool{}}
 	listed := map[string]bool{}
+	for _, item := range items {
+		listed[auditkey.FirewallName(stringField(item, "group"))] = true
+	}
+	groupID := func(it map[string]json.RawMessage) string { return auditkey.FirewallName(stringField(it, "group")) }
+	items, groups.listed = p.capListing("firewall_security_group", items, groupID)
+	rules.listed = groups.listed
 	for _, item := range items {
 		name := stringField(item, "group")
 		id := auditkey.FirewallName(name)

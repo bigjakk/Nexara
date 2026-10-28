@@ -66,8 +66,9 @@ const (
 	observeGuestBatch  = 100
 	observeAbortAfter  = 5 // consecutive reads unanswered — refused connections, timeouts — that end a pass
 
-	// What one reading may cost: a kind listing more objects than this is not
-	// compared, for a day, with a warning; a reading that finds more changes
+	// What one reading may cost: of a kind listing more objects than this,
+	// only those already held are compared, with a notice in the cluster's
+	// History once a day (noticeOverCap); a reading that finds more changes
 	// than observeMaxChanges in one kind files each, marked as one bulk change
 	// (markBulk) so a History can show a mass rewrite as one, and each is
 	// explained or not like any other.
@@ -87,6 +88,10 @@ const (
 	// observeUnsettled is the signature a guest still being made is stored
 	// under: no reading has it, so the next is a baseline.
 	observeUnsettled = "unsettled"
+
+	// observeOverCap is the mark of a kind last read past the cap: no reading
+	// has it, so the first under the cap is a baseline of what it missed.
+	observeOverCap = "over-cap"
 
 	// observedClusterType is the type a change of the cluster as a whole is
 	// filed under, cluster / <cluster id>: the token's privileges moved, a
@@ -135,13 +140,14 @@ type ObserverQueries interface {
 // Observer is the loop's state between passes: what is skipped, what is held,
 // which objects are noisy. What it read is in the database.
 type Observer struct {
-	queries  ObserverQueries
-	clients  ObserverClients
-	tags     *observeTagger
-	interval time.Duration
-	logger   *slog.Logger
-	gap      time.Duration // the least time between two reads' starts; tests zero it
-	spread   bool          // whether guest reads are spaced over the interval; tests turn it off
+	queries    ObserverQueries
+	clients    ObserverClients
+	tags       *observeTagger
+	interval   time.Duration
+	logger     *slog.Logger
+	gap        time.Duration // the least time between two reads' starts; tests zero it
+	spread     bool          // whether guest reads are spaced over the interval; tests turn it off
+	maxObjects int           // observeMaxObjects; tests lower it
 
 	inflight sync.Map       // cluster ID -> struct{}{} while its pass runs
 	passes   sync.WaitGroup // the passes running
@@ -152,6 +158,7 @@ type Observer struct {
 	noisy   map[string]*noisyObject // object key -> how it has been changing
 	lastSig map[uuid.UUID]string    // the cluster signature a cluster's last pass saw
 	unread  map[string]int          // "cluster/node" -> passes in a row with no version ever read
+	notices map[string]time.Time    // notice key -> when it was last given (dueNotice)
 	haMove  map[uuid.UUID]int       // passes left in which an HA group migration is Proxmox's (observeHA)
 }
 
@@ -168,19 +175,21 @@ func NewObserver(queries ObserverQueries, encryptionKey string, clients Observer
 		interval = ObjectObserveMaxInterval
 	}
 	return &Observer{
-		queries:  queries,
-		clients:  clients,
-		tags:     tags,
-		interval: max(interval, ObjectObserveMinInterval),
-		logger:   logger,
-		gap:      observeMinGap,
-		spread:   true,
-		skips:    map[string]time.Time{},
-		held:     map[string]bool{},
-		noisy:    map[string]*noisyObject{},
-		lastSig:  map[uuid.UUID]string{},
-		unread:   map[string]int{},
-		haMove:   map[uuid.UUID]int{},
+		queries:    queries,
+		clients:    clients,
+		tags:       tags,
+		interval:   max(interval, ObjectObserveMinInterval),
+		logger:     logger,
+		gap:        observeMinGap,
+		spread:     true,
+		maxObjects: observeMaxObjects,
+		skips:      map[string]time.Time{},
+		held:       map[string]bool{},
+		noisy:      map[string]*noisyObject{},
+		lastSig:    map[uuid.UUID]string{},
+		unread:     map[string]int{},
+		notices:    map[string]time.Time{},
+		haMove:     map[uuid.UUID]int{},
 	}, nil
 }
 
@@ -477,11 +486,17 @@ func (p *observePass) skipKey(kind, node string) string {
 // cluster's reading all of them.
 func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig string, readAt, doneAt time.Time) {
 	sig = p.kindSig(rd.kind, sig)
-	if len(rd.objects) > observeMaxObjects {
-		p.o.logger.Warn("object observer: a kind lists more objects than are compared; not comparing it for a day",
-			"cluster_id", p.cluster.ID, "kind", rd.kind, "node", node, "objects", len(rd.objects), "cap", observeMaxObjects)
-		p.o.skipSilently(p.skipKey(rd.kind, node))
-		return
+	// Past the cap only what is held is compared: a new object is neither
+	// stored nor filed, and the kind is marked so that its first whole reading
+	// under the cap is a baseline of what it missed. A node's kind is not
+	// compared at all, as its objects carry no such mark.
+	listed := max(len(rd.objects), rd.listed)
+	over := listed > p.o.maxObjects
+	if over {
+		p.noticeOverCap(ctx, rd.kind, node, listed)
+		if node != "" {
+			return
+		}
 	}
 	prev := map[string]storedObject{}
 	for id, s := range p.state[rd.kind] {
@@ -523,6 +538,10 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			// is compared on its first: one statement may not write a row twice.
 			continue
 		}
+		old, existed := prev[obj.id]
+		if !existed && over {
+			continue
+		}
 		tags, err := p.tagObject(rd.kind, obj)
 		if err != nil {
 			if rd.unread == nil {
@@ -532,7 +551,6 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 			continue
 		}
 		seen[obj.id] = true
-		old, existed := prev[obj.id]
 		switch {
 		case !existed:
 			batch.save(obj, tags, sig, readAt)
@@ -573,7 +591,10 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 	}
 
 	mark := ""
-	if node == "" && len(rd.unread) == 0 {
+	switch {
+	case over:
+		mark = observeOverCap
+	case node == "" && len(rd.unread) == 0:
 		mark = sig
 	}
 	p.markBulk(rd.kind, batch.changes, uuid.NewString())
@@ -595,6 +616,42 @@ func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string)
 	for _, r := range rows {
 		r.Detail["bulk"] = id
 	}
+}
+
+// noticeOverCap warns, and files in the cluster's History, once a day while it
+// lasts, that a kind lists more objects than are compared: what a reading
+// cannot hold is not tracked, and the History should say so.
+func (p *observePass) noticeOverCap(ctx context.Context, kind, node string, listed int) {
+	if !p.o.dueNotice(p.skipKey(kind, node) + "/over-cap") {
+		return
+	}
+	p.o.logger.Warn("object observer: a kind lists more objects than are compared; comparing only those it held",
+		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "objects", listed, "cap", p.o.maxObjects)
+	id := p.cluster.ID.String()
+	row := changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id}, "changed",
+		tagDiff{fields: []string{kind}}, time.Now(), time.Now())
+	row.Detail["notice"], row.Detail["objects"], row.Detail["cap"] = "too_many_objects", listed, p.o.maxObjects
+	if node != "" {
+		row.Detail["node"] = node
+	}
+	p.write(ctx, kind, recordBatch{changes: []observedChangeRow{row}}, time.Now(), "")
+}
+
+// capListing keeps a listing whose every object costs a read of its own to the
+// cap: past it, only the objects already held are read on, and the count it
+// listed goes with the reading (kindReading.listed), so the kind is compared
+// as one past the cap.
+func (p *observePass) capListing(kind string, items []map[string]json.RawMessage, idOf func(map[string]json.RawMessage) string) ([]map[string]json.RawMessage, int) {
+	if len(items) <= p.o.maxObjects {
+		return items, 0
+	}
+	kept := make([]map[string]json.RawMessage, 0, len(p.state[kind]))
+	for _, item := range items {
+		if _, held := p.state[kind][idOf(item)]; held {
+			kept = append(kept, item)
+		}
+	}
+	return kept, len(items)
 }
 
 // tagObject tags each of an object's fields.
@@ -665,14 +722,6 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 		p.o.logger.Debug("object observer: list guests", "cluster_id", p.cluster.ID, "error", err)
 		return
 	}
-	if key := p.skipKey("guests", ""); p.o.skipped(key) {
-		return
-	} else if len(guests) > observeMaxObjects {
-		p.o.logger.Warn("object observer: more guests than are compared; not comparing them for a day",
-			"cluster_id", p.cluster.ID, "guests", len(guests), "cap", observeMaxObjects)
-		p.o.skipSilently(key)
-		return
-	}
 	nodeByID := make(map[uuid.UUID]string, len(online))
 	for _, n := range online {
 		nodeByID[n.ID] = n.Name
@@ -681,10 +730,20 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 		return p.state[guestKind(g.Type)][guestID(g)].lastSeen
 	}
 	sort.SliceStable(guests, func(i, j int) bool { return lastRead(guests[i]).Before(lastRead(guests[j])) })
+	walk := guests
+	if len(walk) > p.o.maxObjects {
+		// Past the cap a pass reads the least recently read, so every guest is
+		// still compared, in turns, at most maxObjects reads a pass.
+		walk = walk[:p.o.maxObjects]
+		if p.o.dueNotice(p.skipKey("guests", "over-cap")) {
+			p.o.logger.Warn("object observer: more guests than one pass reads; reading them in turns",
+				"cluster_id", p.cluster.ID, "guests", len(guests), "cap", p.o.maxObjects)
+		}
+	}
 
 	gap := p.o.gap
-	if p.o.spread && len(guests) > 0 {
-		gap = max(gap, time.Duration(observeGuestShare*float64(p.o.interval)/float64(len(guests))))
+	if p.o.spread && len(walk) > 0 {
+		gap = max(gap, time.Duration(observeGuestShare*float64(p.o.interval)/float64(len(walk))))
 	}
 
 	type result struct {
@@ -714,7 +773,7 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 	}
 	go func() {
 		defer close(jobs)
-		for _, g := range guests {
+		for _, g := range walk {
 			if _, online := nodeByID[g.NodeID]; !online || p.o.skipped(p.skipKey("guest", guestID(g))) {
 				continue
 			}
@@ -1139,6 +1198,18 @@ func (o *Observer) skipSilently(key string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.skips[key] = time.Now().Add(observeSkipFor)
+}
+
+// dueNotice reports whether key's notice is due — never given, or not for a
+// day — and marks it given.
+func (o *Observer) dueNotice(key string) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if at, ok := o.notices[key]; ok && time.Since(at) < observeSkipFor {
+		return false
+	}
+	o.notices[key] = time.Now()
+	return true
 }
 
 // noticeSignature clears a cluster's skips when its signature moves: an upgrade
