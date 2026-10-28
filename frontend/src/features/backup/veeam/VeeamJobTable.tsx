@@ -221,10 +221,11 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
         <ClusterHistoryButton
           history={backupHistories.veeamJob(ctx.serverId, job.veeam_id)}
           title={job.name}
-          rowsAbove={(colSpan) => (
+          rowsAbove={(colSpan, _entries, since) => (
             <VeeamLiveRunRows
               serverId={ctx.serverId}
               jobId={job.veeam_id}
+              since={since}
               colSpan={colSpan}
             />
           )}

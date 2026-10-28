@@ -13,6 +13,17 @@ export function latestTasks(
   return [...tasks].sort((a, b) => b.starttime - a.starttime).slice(0, count);
 }
 
+/** The tasks that began within the time filter: from `since` (epoch
+ *  milliseconds), or any time for null. */
+export function tasksSince(
+  tasks: readonly PBSTask[],
+  since: number | null,
+): PBSTask[] {
+  return since === null
+    ? [...tasks]
+    : tasks.filter((task) => task.starttime * 1000 >= since);
+}
+
 /**
  * The worker id a PBS task's UPID names — a datastore, or a datastore and what
  * it ran on: field 7 of UPID:node:pid:pstart:task:start:type:id:user:, whose

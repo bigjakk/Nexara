@@ -39,16 +39,23 @@ function runIcon(session: VeeamSession) {
 export function VeeamLiveRunRows({
   serverId,
   jobId,
+  since,
   colSpan,
 }: {
   serverId: string;
   jobId: string;
+  /** Where the History's time filter looks back to (epoch milliseconds), or
+   *  null for the whole history: older runs are left out, as older entries are. */
+  since: number | null;
   /** The table's column count, which each live row spans. */
   colSpan: number;
 }) {
   const { t } = useTranslation("history-veeam-job");
   const { data, isError } = useVeeamSessions(serverId);
-  const runs = useMemo(() => latestRuns(data ?? [], jobId), [data, jobId]);
+  const runs = useMemo(
+    () => latestRuns(data ?? [], jobId, since),
+    [data, jobId, since],
+  );
 
   if (isError) {
     return (

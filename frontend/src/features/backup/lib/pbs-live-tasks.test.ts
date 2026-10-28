@@ -6,6 +6,7 @@ import {
   latestTasks,
   pbsTaskOutcome,
   pbsWorkerId,
+  tasksSince,
 } from "./pbs-live-tasks";
 
 const task = (over: Partial<PBSTask>): PBSTask => ({
@@ -61,4 +62,13 @@ it("reads the task an entry records Nexara starting", () => {
   expect(
     entryPbsUpid(entry({ details: JSON.stringify({ upid: "UPID:y" }) })),
   ).toBe("");
+});
+
+// The time filter reaches the live rows as it does the entries below them.
+it("leaves out the tasks from before the time filter", () => {
+  const tasks = [100, 200].map((starttime) =>
+    task({ starttime, upid: `u${String(starttime)}` }),
+  );
+  expect(tasksSince(tasks, 150_000).map((x) => x.upid)).toEqual(["u200"]);
+  expect(tasksSince(tasks, null)).toHaveLength(2);
 });

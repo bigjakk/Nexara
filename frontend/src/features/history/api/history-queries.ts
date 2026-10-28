@@ -16,6 +16,18 @@ const WINDOW_MS: Record<Exclude<HistoryWindow, "">, number> = {
   "90d": 90 * 24 * 3600_000,
 };
 
+/**
+ * The instant a time filter looks back to, in epoch milliseconds, or null for
+ * the whole history. The live rows above a History's first page are held to it
+ * as the entries below them are.
+ */
+export function windowStartMs(
+  timeWindow: HistoryWindow,
+  now = Date.now(),
+): number | null {
+  return timeWindow === "" ? null : now - WINDOW_MS[timeWindow];
+}
+
 /** Rows per page, as on the task tables. */
 export const HISTORY_PAGE_SIZE = 50;
 
@@ -39,9 +51,8 @@ interface HistoryParams extends HistoryFilters {
 
 /** Where a read's window starts, when it has one: taken as it is sent. */
 function windowStart(f: HistoryFilters): Date | undefined {
-  return f.timeWindow
-    ? new Date(Date.now() - WINDOW_MS[f.timeWindow])
-    : undefined;
+  const at = windowStartMs(f.timeWindow);
+  return at === null ? undefined : new Date(at);
 }
 
 /** A read's route with its filters, from offset, and below end when set. */

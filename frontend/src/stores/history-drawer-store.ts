@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import type { ReactNode } from "react";
 import type {
   HistoryKind,
+  HistoryRowsAbove,
   HistoryTarget,
 } from "@/features/history/types/history";
 
@@ -12,7 +12,7 @@ export interface HistoryDrawerRequest {
   /** What the History is of, e.g. the object's name. */
   title: string;
   /** Live rows above the first page, as HistoryTimeline's. */
-  rowsAbove?: ((colSpan: number) => ReactNode) | undefined;
+  rowsAbove?: HistoryRowsAbove | undefined;
 }
 
 interface HistoryDrawerState {

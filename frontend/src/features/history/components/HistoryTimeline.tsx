@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Activity, ChevronLeft, ChevronRight } from "lucide-react";
@@ -19,6 +19,7 @@ import {
   routeKey,
   useHistory,
   useOlderHistory,
+  windowStartMs,
 } from "../api/history-queries";
 import {
   SOURCE_OPTIONS,
@@ -43,10 +44,12 @@ import {
   HISTORY_COLUMNS_WITH_GUEST,
 } from "../lib/history-column-defs";
 import type {
+  HistoryAbsorbs,
   HistoryEntry,
   HistoryGuestLink,
   HistoryKind,
   HistoryPage,
+  HistoryRowsAbove,
   HistorySource,
   HistoryTarget,
   HistoryWindow,
@@ -355,12 +358,11 @@ export function HistoryTimeline({
   /** Live rows above the first page — a running VM's block jobs — spanning
    *  the table's colSpan columns, given the page's entries. A failed read
    *  keeps them. */
-  rowsAbove?:
-    ((colSpan: number, entries: HistoryEntry[]) => ReactNode) | undefined;
+  rowsAbove?: HistoryRowsAbove | undefined;
   /** Entries of the first page that a live row above stands for, which the
    *  page leaves out: a task the Proxmox Backup Server lists, and the entry
    *  that records Nexara starting it. */
-  absorbs?: ((entry: HistoryEntry) => boolean) | undefined;
+  absorbs?: HistoryAbsorbs | undefined;
   /** A History of many guests (a folder's): adds a Guest column, each guest
    *  linked where this returns its page. */
   guestLink?: ((vmid: number) => HistoryGuestLink | undefined) | undefined;
@@ -419,6 +421,9 @@ export function HistoryTimeline({
   const error = olderOn ? null : live.error;
   const isLoading = !olderOn && live.isLoading;
   const items = data?.items ?? [];
+  // The live rows above the first page are held to the time filter as the
+  // entries are, and so is what they stand for.
+  const since = windowStartMs(timeWindow);
   const total = data?.total ?? 0;
   const narrowed =
     category !== "" || source !== "" || excludeCategories.length > 0;
@@ -445,7 +450,9 @@ export function HistoryTimeline({
   const listed = total - items.length + shown.length + left;
   // The live rows above the first page stand for some of its entries.
   const kept =
-    page === 0 && absorbs ? shown.filter((entry) => !absorbs(entry)) : shown;
+    page === 0 && absorbs
+      ? shown.filter((entry) => !absorbs(entry, since))
+      : shown;
   // The count is the server's, which still counts what `absorbs` leaves out of
   // the first page; the footer says how many.
   const absorbedHere = shown.length - kept.length;
@@ -628,7 +635,7 @@ export function HistoryTimeline({
                 </tr>
               </thead>
               <tbody>
-                {page === 0 && rowsAbove?.(layout.columns.length, items)}
+                {page === 0 && rowsAbove?.(layout.columns.length, items, since)}
                 {error && (
                   <tr>
                     <td

@@ -17,24 +17,32 @@ const GC_UPID = "UPID:pbs:1:2:3:4:garbage_collection:datastore01:root@pam!tok:";
 const BACKUP_UPID =
   "UPID:pbs:1:2:3:5:backup:datastore01\\x3avm\\x2f100:root@pam!tok:";
 
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+
 const task = (over: Partial<PBSTask>): PBSTask => ({
   upid: GC_UPID,
   node: "pbs",
   pid: 1,
-  starttime: 1_700_000_000,
+  starttime: nowSeconds() - 3 * 86_400,
   worker_type: "garbage_collection",
   user: "root@pam!tok",
   ...over,
 });
 
-// The garbage collection finished long ago; the backup began a minute ago and
-// is still running (no end, no status).
-const gcTask = () => task({ endtime: 1_700_000_060, status: "OK" });
+// The garbage collection finished three days ago, inside the History's default
+// week and outside a day; the backup began a minute ago and is still running
+// (no end, no status).
+const gcTask = () =>
+  task({
+    starttime: nowSeconds() - 3 * 86_400,
+    endtime: nowSeconds() - 3 * 86_400 + 60,
+    status: "OK",
+  });
 const backupTask = () =>
   task({
     upid: BACKUP_UPID,
     worker_type: "backup",
-    starttime: Math.floor(Date.now() / 1000) - 60,
+    starttime: nowSeconds() - 60,
   });
 
 // Three entries of a sixty-entry history: the one that records Nexara starting
@@ -134,6 +142,20 @@ describe("a PBS server's History tab", () => {
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await screen.findByText("Page 2 of 2");
     expect(screen.getByText("60 entries")).toBeInTheDocument();
+  });
+
+  // The live rows are held to the time filter as the entries are, and an entry
+  // is left out only for a task that is shown: the garbage collection began
+  // before the last 24 hours, so its row goes and its entry comes back.
+  it("holds the live tasks to the time filter", async () => {
+    const user = setupUser();
+    mount();
+    expect(await screen.findAllByTestId("pbs-live-task")).toHaveLength(2);
+
+    await user.selectOptions(screen.getByLabelText("Time"), "24h");
+
+    expect(await screen.findAllByTestId("pbs-live-task")).toHaveLength(1);
+    expect(screen.getByText("Garbage collection started")).toBeInTheDocument();
   });
 
   // TanStack keeps the last good data when a refetch fails, so the tasks it

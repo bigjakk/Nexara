@@ -12,6 +12,7 @@
  */
 import type { TFunction } from "i18next";
 import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import type { ListResponse } from "@/lib/api-client";
 import type { ApiPath } from "@/lib/api-path";
 
@@ -109,6 +110,25 @@ export interface HistoryPage extends ListResponse<HistoryEntry> {
 
 /** The time filter: how far back to look, or "" for the whole history. */
 export type HistoryWindow = "" | "24h" | "7d" | "30d" | "90d";
+
+/**
+ * Live rows above a History's first page, spanning the table's `colSpan`
+ * columns: given the page's entries and where the time filter looks back to
+ * (`since`, epoch milliseconds; null for the whole history), which they are
+ * held to as the entries are.
+ */
+export type HistoryRowsAbove = (
+  colSpan: number,
+  entries: HistoryEntry[],
+  since: number | null,
+) => ReactNode;
+
+/** Whether a live row above the first page stands for an entry of it, which the
+ *  page then leaves out; `since` is as for HistoryRowsAbove. */
+export type HistoryAbsorbs = (
+  entry: HistoryEntry,
+  since: number | null,
+) => boolean;
 
 /**
  * One kind of object with a History, as the timeline shows it. Its strings

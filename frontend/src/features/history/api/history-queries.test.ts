@@ -5,7 +5,7 @@ import { apiPath } from "@/lib/api-path";
 import { makeHistoryEntry } from "@/test/history.fixtures";
 import { createWrapper } from "@/test/test-utils";
 import type { HistoryTarget } from "../types/history";
-import { useHistory } from "./history-queries";
+import { useHistory, windowStartMs } from "./history-queries";
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
@@ -56,5 +56,15 @@ describe("useHistory", () => {
         );
       });
     }
+  });
+});
+
+describe("windowStartMs", () => {
+  it.each([
+    ["", null],
+    ["24h", 1_000_000_000 - 24 * 3600_000],
+    ["7d", 1_000_000_000 - 7 * 24 * 3600_000],
+  ] as const)("looks back %s to %s", (timeWindow, want) => {
+    expect(windowStartMs(timeWindow, 1_000_000_000)).toBe(want);
   });
 });

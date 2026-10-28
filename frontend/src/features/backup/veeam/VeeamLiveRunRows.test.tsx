@@ -26,7 +26,12 @@ it("lists the job's runs and how they ended, and no other job's", async () => {
   renderWithProviders(
     <table>
       <tbody>
-        <VeeamLiveRunRows serverId="srv-1" jobId="j1" colSpan={6} />
+        <VeeamLiveRunRows
+          serverId="srv-1"
+          jobId="j1"
+          since={null}
+          colSpan={6}
+        />
       </tbody>
     </table>,
   );
