@@ -225,7 +225,8 @@ WITH guests AS MATERIALIZED (
           AND b.resource_type = k.resource_type AND b.action = k.action
           AND b.cluster_id = $15::uuid
           AND b.created_at >= COALESCE($18::timestamptz, '-infinity'::timestamptz)
-        OFFSET 0
+        ORDER BY b.created_at DESC, b.id DESC
+        LIMIT NULLIF($25::int, 0)
     ) a
     WINDOW w AS (PARTITION BY a.resource_type, a.action ORDER BY a.created_at, a.id)
 ), runs AS (
@@ -703,15 +704,16 @@ type ListHistoryRow struct {
 // or an object's — a cluster's History. Rows of one (resource type, action)
 // repeated in bursts — the sync failures of an unreachable cluster — are read
 // as runs (collapse_*: one entry per run, kind run, a gap longer than the
-// pair's starting the next), and every other source is read newest first up
-// to row_cap rows when the handler sets one, so a cluster's whole audit trail
+// pair's starting the next), and each source — each pair's rows, of which the
+// oldest run may then be only the newest part — is read newest first up to
+// row_cap rows when the handler sets one, so a cluster's whole audit trail
 // is never read to show one page of it; total then stops at row_cap + 1. The
 // audit arm reads by the (cluster_id, created_at) index built after startup,
 // through a row comparison only that index can serve: written cluster_id = X
 // with an ORDER BY created_at, a generic plan — which takes X for an average
 // cluster — walks the created_at index instead, through every other cluster's
 // rows, and a small cluster's History in a big install read all 1M of them.
-// The runs are read per pair (OFFSET 0 keeps the lateral a lateral), and the
+// The runs are read per pair (the LIMIT keeps the lateral a lateral), and the
 // collapsed pairs are left out of the audit arm by a hashed NOT IN, a filter
 // the index scan keeps its order through, where NOT EXISTS became an anti join
 // the planner sorted after. In any other read the capped arms are LIMIT 0,
