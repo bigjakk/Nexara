@@ -154,11 +154,14 @@ func netVLANAware(string, map[string]string) (json.RawMessage, bool) {
 
 // netAutostart is an interface's autostart: an auto line, read back as 1, and
 // for 0 none, which the reading leaves out. An OVS port, internal port or bond
-// is started by its bridge, and written without one whatever was sent.
+// is started by its bridge, whatever was sent, and the ifupdown2 writer —
+// Proxmox VE's own since 7 — gives it an auto line beside the bridge's, read
+// back as 1 (pve-common Network/Interfaces.pm __interface_to_string); the
+// legacy ifupdown writer's allow-<bridge> line reads back as none.
 func netAutostart(sent string, update map[string]string) (json.RawMessage, bool) {
 	switch update["type"] {
 	case "OVSPort", "OVSIntPort", "OVSBond":
-		return nil, false
+		return json.RawMessage("1"), true
 	}
 	if sent == "" || sent == "0" {
 		return nil, false

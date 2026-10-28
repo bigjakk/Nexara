@@ -36,7 +36,7 @@ func TestKindChanged(t *testing.T) {
 		{"a job's guests, members", Backup, "vmid", `"100,101"`, "101 100", nil, false},
 		{"autostart off, left out", Network, "autostart", "", "0", nil, false},
 		{"autostart on", Network, "autostart", "", "1", nil, true},
-		{"an OVS port's autostart, its bridge's", Network, "autostart", "", "1", map[string]string{"type": "OVSPort"}, false},
+		{"an OVS port's autostart, an auto line whatever was sent", Network, "autostart", `1`, "0", map[string]string{"type": "OVSPort"}, false},
 		{"comments, a line each", Network, "comments", `"uplink\n"`, "uplink  ", nil, false},
 		{"comments with comments6, one", Network, "comments", `"uplink\nv6\n"`, "uplink", map[string]string{"comments6": "v6"}, false},
 		{"ports, sorted once each", Network, "bridge_ports", `"eno1 eno2"`, "eno2,eno1;none eno1", nil, false},
