@@ -412,13 +412,17 @@ func (h *VMFoldersHandler) ensureFolderInCluster(c fiber.Ctx, folderID, clusterI
 	return nil
 }
 
+// folderDepthCap is the deepest folder tree Nexara walks: a runaway guard, far
+// beyond any tree a person builds.
+const folderDepthCap = 1024
+
 // wouldCreateCycle reports whether re-parenting `folderID` under
 // `newParentID` would put `folderID` underneath one of its own descendants.
 // Walks up from the candidate parent toward the root; if we encounter
 // folderID, that's the cycle.
 func (h *VMFoldersHandler) wouldCreateCycle(c fiber.Ctx, folderID, newParentID, clusterID uuid.UUID) (bool, error) {
 	current := newParentID
-	for i := 0; i < 1024; i++ { // depth cap as a runaway guard
+	for i := 0; i < folderDepthCap; i++ {
 		if current == folderID {
 			return true, nil
 		}

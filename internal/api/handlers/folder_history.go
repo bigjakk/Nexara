@@ -2,11 +2,11 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -106,18 +106,42 @@ func selectFolder(ctx context.Context, r HistoryRequest) (HistorySelection, erro
 }
 
 // folderSubtree is id and every folder below it, or nothing when id is not
-// one of the cluster's folders.
+// one of the cluster's folders. Each folder is taken once and the walk stops
+// folderDepthCap levels down: a cycle in parent_id — two concurrent moves could
+// leave one before moves took the cluster's folder lock — would otherwise loop
+// here for ever, out of reach of the query timeout. Either is logged.
 func folderSubtree(all []db.VmFolder, id uuid.UUID) []uuid.UUID {
 	if !slices.ContainsFunc(all, func(f db.VmFolder) bool { return f.ID == id }) {
 		return nil
 	}
-	subtree := []uuid.UUID{id}
-	for i := 0; i < len(subtree); i++ {
-		for _, f := range all {
-			if f.ParentID == (pgtype.UUID{Bytes: subtree[i], Valid: true}) {
-				subtree = append(subtree, f.ID)
+	children := make(map[uuid.UUID][]uuid.UUID, len(all))
+	for _, f := range all {
+		if f.ParentID.Valid {
+			parent := uuid.UUID(f.ParentID.Bytes)
+			children[parent] = append(children[parent], f.ID)
+		}
+	}
+	seen := map[uuid.UUID]bool{id: true}
+	subtree, level := []uuid.UUID{id}, []uuid.UUID{id}
+	for depth := 0; len(level) > 0; depth++ {
+		if depth == folderDepthCap {
+			slog.Warn("folder tree deeper than the History reads", "folder_id", id, "depth", depth)
+			break
+		}
+		var next []uuid.UUID
+		for _, parent := range level {
+			for _, child := range children[parent] {
+				if seen[child] {
+					slog.Warn("folder tree has a cycle; the History reads each folder once",
+						"folder_id", id, "parent_id", parent, "child_id", child)
+					continue
+				}
+				seen[child] = true
+				next = append(next, child)
 			}
 		}
+		subtree = append(subtree, next...)
+		level = next
 	}
 	return subtree
 }
