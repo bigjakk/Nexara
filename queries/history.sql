@@ -59,6 +59,11 @@
 --                           (resource_type, created_at) within the cluster,
 --                           so for a type of configuration objects, which
 --                           are edited rarely.
+--            An object read by its resource id can be held to an action
+--            pattern (object_action_likes, '' for none): a backup job's id is a
+--            string shaped like a guest's VMID or a node's name, all filed
+--            under one resource type, so the id alone is not the job's
+--            identity and its action is the rest of it.
 --            objects_node, when set, drops the objects' rows that ran on
 --            another node: a row's node is its UPID's where it has one, its
 --            details.node otherwise, and a row naming none stays.
@@ -297,13 +302,14 @@ WITH guests AS MATERIALIZED (
                     '{}'::jsonb) AS m
     FROM guests g
 ), objects AS (
-    SELECT t.resource_type, r.resource_id, k.detail_key, v.value, l.in_list, w.whole
+    SELECT t.resource_type, r.resource_id, k.detail_key, v.value, l.in_list, w.whole, x.action_like
     FROM unnest(sqlc.arg('object_types')::text[]) WITH ORDINALITY AS t(resource_type, n)
     JOIN unnest(sqlc.arg('object_resource_ids')::text[]) WITH ORDINALITY AS r(resource_id, n) ON r.n = t.n
     JOIN unnest(sqlc.arg('object_keys')::text[]) WITH ORDINALITY AS k(detail_key, n) ON k.n = t.n
     JOIN unnest(sqlc.arg('object_values')::text[]) WITH ORDINALITY AS v(value, n) ON v.n = t.n
     JOIN unnest(sqlc.arg('object_in_list')::bool[]) WITH ORDINALITY AS l(in_list, n) ON l.n = t.n
     JOIN unnest(sqlc.arg('object_whole')::bool[]) WITH ORDINALITY AS w(whole, n) ON w.n = t.n
+    JOIN unnest(sqlc.arg('object_action_likes')::text[]) WITH ORDINALITY AS x(action_like, n) ON x.n = t.n
 ), hidden AS (
     SELECT t.resource_type, a.action, k.detail_key, v.value AS detail_value
     FROM unnest(sqlc.arg('hide_types')::text[]) WITH ORDINALITY AS t(resource_type, n)
@@ -457,6 +463,7 @@ WITH guests AS MATERIALIZED (
                FROM audit_log b
                WHERE o.detail_key = '' AND NOT o.whole
                  AND b.resource_type = o.resource_type AND b.resource_id = o.value
+                 AND (o.action_like = '' OR b.action LIKE o.action_like)
                  AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
                  AND (sqlc.arg('include_guests')::bool OR b.vmid IS NULL)
                  AND (sqlc.narg('source')::text IS NULL OR b.source = sqlc.narg('source')::text

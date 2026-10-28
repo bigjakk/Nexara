@@ -433,6 +433,12 @@ type HistoryObject struct {
 	Value        string
 	InList       bool
 	WholeType    bool
+	// ActionLike, when set, holds an object read by its resource id (no
+	// DetailKey) to the rows whose action is LIKE it, escaped as a rule's
+	// patterns are. It is for a type whose ids are shaped like other objects'
+	// and filed under the same resource type: a backup job's id, like a
+	// guest's VMID or a node's name, so the id alone is not an identity.
+	ActionLike string
 }
 
 // SelectObjects is the generic selector, for any object with a stable audit
@@ -809,6 +815,7 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		ObjectValues:        make([]string, 0, len(sel.Objects)),
 		ObjectInList:        make([]bool, 0, len(sel.Objects)),
 		ObjectWhole:         make([]bool, 0, len(sel.Objects)),
+		ObjectActionLikes:   make([]string, 0, len(sel.Objects)),
 		HideTypes:           make([]string, 0, len(k.Hide)),
 		HideActions:         make([]string, 0, len(k.Hide)),
 		HideKeys:            make([]string, 0, len(k.Hide)),
@@ -887,6 +894,13 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		if o.WholeType && (o.DetailKey != "" || o.ResourceID != "" || o.InList) {
 			return db.ListHistoryParams{}, fmt.Errorf("history object %+v is a whole type and names an id, key or list", o)
 		}
+		// ListHistory holds only an object read by its resource id to an
+		// action: one with a details key, or a whole type, would be left unheld
+		// and look held.
+		if o.ActionLike != "" && (o.DetailKey != "" || o.WholeType || !likePatternOK(o.ActionLike)) {
+			return db.ListHistoryParams{}, fmt.Errorf("history object %+v is held to an action but has a details key "+
+				"or is a whole type, or the pattern ends in a lone backslash", o)
+		}
 		// A guest's own rows are the guests family's, which the caller's view
 		// permission (viewableGuests) and the guest's cutoff hold to: a guest
 		// typed object reads them past both unless it is one of the guests —
@@ -907,6 +921,7 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		params.ObjectValues = append(params.ObjectValues, o.Value)
 		params.ObjectInList = append(params.ObjectInList, o.InList)
 		params.ObjectWhole = append(params.ObjectWhole, o.WholeType)
+		params.ObjectActionLikes = append(params.ObjectActionLikes, o.ActionLike)
 	}
 	params.ObjectsNode = sel.ObjectsOnNode
 	params.RuleCategories, params.RuleFields, params.RulePatterns = k.sqlRules()

@@ -146,7 +146,7 @@ func TestGuestHistory(t *testing.T) {
 	}
 	// The guest kind, reading the objects these cases name beside its guests.
 	withObjects := handlers.GuestHistory()
-	withObjects.ObjectTypes = []string{"vm", "ha_resource", "pbs_server", "ceph_osd", "pve_acl", "node", "network", "storage"}
+	withObjects.ObjectTypes = []string{"vm", "ha_resource", "pbs_server", "ceph_osd", "pve_acl", "node", "network", "storage", "backup"}
 	selection := func(sel handlers.HistorySelection) gen.ListHistoryParams {
 		cur.Helper()
 		p, err := withObjects.ListParams(historyClusterID, sel)
@@ -873,6 +873,10 @@ func TestGuestHistory(t *testing.T) {
 		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/vms/100", "updated", map[string]any{"users": "alice@pve, bob@pve"})
 		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/", "updated", map[string]any{"users": "jbob@pve, carol@pve"})
 		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/storage", "updated", map[string]any{"users": "dave@pve;erin@pve frank@pve"})
+		// A backup job and a node of one name: both are filed under that id as a
+		// backup, so the job's rows are the ones whose action is a job's.
+		audit(historyClusterID, minsAgo(3.8), "nexara", "backup", "pve-01", "backup_job_created", map[string]any{"job_id": "pve-01"})
+		audit(historyClusterID, minsAgo(3.9), "proxmox", "backup", "pve-01", "backup", map[string]any{"node": "pve-01"})
 		// A storage's rows: its configuration names no node, an upload and a disk
 		// move onto it name the one they ran on.
 		audit(historyClusterID, minsAgo(6), "nexara", "storage", "store01", "update", map[string]any{})
@@ -899,6 +903,12 @@ func TestGuestHistory(t *testing.T) {
 			{"every row of a type", handlers.HistorySelection{Objects: []handlers.HistoryObject{
 				{ResourceType: "network", WholeType: true}}},
 				[]string{"audit interface_created pve-02/vmbr9", "audit interface_updated vmbr0"}},
+			{"an object read by its id alone", handlers.HistorySelection{Objects: []handlers.HistoryObject{
+				{ResourceType: "backup", Value: "pve-01"}}},
+				[]string{"audit backup_job_created pve-01", "audit backup pve-01"}},
+			{"an object held to an action", handlers.HistorySelection{Objects: []handlers.HistoryObject{
+				{ResourceType: "backup", Value: "pve-01", ActionLike: `backup\_job\_%`}}},
+				[]string{"audit backup_job_created pve-01"}},
 			{"a details key within one resource id", handlers.HistorySelection{Objects: []handlers.HistoryObject{
 				{ResourceType: "pbs_server", ResourceID: "srv-a", DetailKey: "datastore", Value: "datastore01"}}},
 				[]string{"audit datastore_update srv-a"}},

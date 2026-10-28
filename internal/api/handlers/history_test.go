@@ -235,11 +235,12 @@ func TestHistoryKindListParams(t *testing.T) {
 	k.ObjectTypes = []string{"vm_folder", "vm_folder_membership", "pool", "pbs_server", "pve_acl", "vm", "container"}
 	p, err := k.ListParams([16]byte{1}, HistorySelection{
 		Guests:  []HistoryGuest{{VMID: 100}, {VMID: 101, After: pgtype.Timestamptz{Time: at, Valid: true}, Inclusive: true}},
-		Objects: []HistoryObject{{ResourceType: "vm_folder", Value: "f1"}, {ResourceType: "vm_folder_membership", DetailKey: "folder_id", Value: "f1"}},
+		Objects: []HistoryObject{{ResourceType: "vm_folder", Value: "f1", ActionLike: `folder\_%`}, {ResourceType: "vm_folder_membership", DetailKey: "folder_id", Value: "f1"}},
 	})
 	if err != nil || !slices.Equal(p.Vmids, []int32{100, 101}) || p.CutoffFloor.Valid ||
 		!slices.Equal(p.CutoffAfter, []time.Time{{}, at}) || !slices.Equal(p.CutoffInclusive, []bool{false, true}) ||
-		!slices.Equal(p.ObjectKeys, []string{"", "folder_id"}) {
+		!slices.Equal(p.ObjectKeys, []string{"", "folder_id"}) ||
+		!slices.Equal(p.ObjectActionLikes, []string{`folder\_%`, ""}) {
 		t.Errorf("ListParams = %+v, %v", p, err)
 	}
 	// Every arm reads from the earliest cutoff — none, above, when a guest has none.
@@ -259,6 +260,8 @@ func TestHistoryKindListParams(t *testing.T) {
 		"an object naming no value":     {Objects: []HistoryObject{{ResourceType: "pool"}}},
 		"a resource id with no key":     {Objects: []HistoryObject{{ResourceType: "pbs_server", ResourceID: "s1", Value: "x"}}},
 		"a list with no key":            {Objects: []HistoryObject{{ResourceType: "pve_acl", Value: "u@pve", InList: true}}},
+		"an action on a keyed object":   {Objects: []HistoryObject{{ResourceType: "pbs_server", ResourceID: "s1", DetailKey: "datastore", Value: "x", ActionLike: "a%"}}},
+		"a lone-backslash action":       {Objects: []HistoryObject{{ResourceType: "pool", Value: "p1", ActionLike: `a\`}}},
 		"a lone-backslash worker":       {Guests: []HistoryGuest{{VMID: 100}}, GuestWorkers: []string{`ha\`}},
 		"a guest's object, not a guest": {Guests: []HistoryGuest{{VMID: 100}}, Objects: []HistoryObject{{ResourceType: "vm", Value: "101"}}},
 		"a guest's object by row id":    {Objects: []HistoryObject{{ResourceType: "container", Value: "d0000000-0000-4000-8000-000000000001"}}},

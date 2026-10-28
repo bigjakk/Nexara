@@ -1783,6 +1783,11 @@ type Querier interface {
 	//                           (resource_type, created_at) within the cluster,
 	//                           so for a type of configuration objects, which
 	//                           are edited rarely.
+	//            An object read by its resource id can be held to an action
+	//            pattern (object_action_likes, '' for none): a backup job's id is a
+	//            string shaped like a guest's VMID or a node's name, all filed
+	//            under one resource type, so the id alone is not the job's
+	//            identity and its action is the rest of it.
 	//            objects_node, when set, drops the objects' rows that ran on
 	//            another node: a row's node is its UPID's where it has one, its
 	//            details.node otherwise, and a row naming none stays.
