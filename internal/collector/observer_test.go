@@ -943,8 +943,12 @@ func TestObserverOutcomes(t *testing.T) {
 				db.Vm{ID: uuid.New(), ClusterID: e.cluster.ID, NodeID: e.node.ID, Vmid: int32(1000 + vmid), Type: "qemu"})
 			e.client.set(fmt.Sprintf("/nodes/pve-01/qemu/%d/config", 1000+vmid), `{"memory":"1"}`)
 		}
-		for range 2 {
-			e.pass()
+		turns := "changed cluster/" + e.cluster.ID.String() + " [guests]"
+		if got := e.pass(); !slices.Contains(got, turns) {
+			t.Fatalf("first pass in turns filed %q, want a notice that guests are read in turns", got)
+		}
+		if got := e.pass(); slices.Contains(got, turns) {
+			t.Fatalf("second pass filed %q, want the notice once", got)
 		}
 		e.client.mu.Lock()
 		defer e.client.mu.Unlock()

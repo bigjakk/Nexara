@@ -164,7 +164,6 @@ type Observer struct {
 	noisy   map[string]*noisyObject // object key -> how it has been changing
 	lastSig map[uuid.UUID]string    // the cluster signature a cluster's last pass saw
 	unread  map[string]int          // "cluster/node" -> passes in a row with no version ever read
-	notices map[string]time.Time    // notice key -> when it was last given (dueNotice)
 	hung    map[string]bool         // "cluster/node" -> it stopped answering a pass, and has not answered since
 	haMove  map[uuid.UUID]int       // passes left in which an HA group migration is Proxmox's (observeHA)
 }
@@ -195,7 +194,6 @@ func NewObserver(queries ObserverQueries, encryptionKey string, clients Observer
 		noisy:      map[string]*noisyObject{},
 		lastSig:    map[uuid.UUID]string{},
 		unread:     map[string]int{},
-		notices:    map[string]time.Time{},
 		hung:       map[string]bool{},
 		haMove:     map[uuid.UUID]int{},
 	}, nil
@@ -827,14 +825,23 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 	}
 	sort.SliceStable(guests, func(i, j int) bool { return lastRead(guests[i]).Before(lastRead(guests[j])) })
 	walk := guests
+	const turns = "guests_read_in_turns"
 	if len(walk) > p.o.maxObjects {
 		// Past the cap a pass reads the least recently read, so every guest is
-		// still compared, in turns, at most maxObjects reads a pass.
+		// still compared, in turns, at most maxObjects reads a pass; the
+		// cluster's History says so when it starts.
 		walk = walk[:p.o.maxObjects]
-		if p.o.dueNotice(p.skipKey("guests", "over-cap")) {
+		if _, on := p.notices[turns]; !on {
 			p.o.logger.Warn("object observer: more guests than one pass reads; reading them in turns",
 				"cluster_id", p.cluster.ID, "guests", len(guests), "cap", p.o.maxObjects)
+			row := noticeRow(observedClusterType, p.cluster.ID.String(), turns, []string{"guests"})
+			row.Detail["guests"], row.Detail["per_pass"] = len(guests), p.o.maxObjects
+			p.notices[turns] = noticeGate{Since: time.Now(), Given: time.Now()}
+			p.saveNotices(ctx, row)
 		}
+	} else if _, on := p.notices[turns]; on {
+		delete(p.notices, turns)
+		p.saveNotices(ctx)
 	}
 
 	gap := p.o.gap
@@ -1381,18 +1388,6 @@ func (o *Observer) skipSilently(key string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.skips[key] = time.Now().Add(observeSkipFor)
-}
-
-// dueNotice reports whether key's notice is due — never given, or not for a
-// day — and marks it given.
-func (o *Observer) dueNotice(key string) bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if at, ok := o.notices[key]; ok && time.Since(at) < observeSkipFor {
-		return false
-	}
-	o.notices[key] = time.Now()
-	return true
 }
 
 // noticeSignature clears a cluster's skips when its signature moves: an upgrade
