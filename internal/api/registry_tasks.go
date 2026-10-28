@@ -263,7 +263,9 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 					"until the task finishes, so a value Proxmox did not mint files a row nothing can " +
 					"reconcile.",
 			},
-			"description": optString(512, "<string>", "What the task is, for the activity feed."),
+			"description": optString(512, "<string>", "What the caller says the task is. Kept in the filing's "+
+				"audit entry as provided_description, not as the task's own description, which Proxmox's "+
+				"task status does not carry."),
 			// The EMPTY string is a member here too, but not as a filter: the
 			// create handler read "" as "unspecified" and filed the row as
 			// running (`if status == "" { status = "running" }`), and Create

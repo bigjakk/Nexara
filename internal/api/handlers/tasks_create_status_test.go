@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +32,8 @@ func runningTask(_ fiber.Ctx, _ uuid.UUID, node, upid string) (*proxmox.TaskStat
 // members set, those alone. onRecord answers TaskUPIDOnRecord, and
 // insertConflicts makes the insert find its UPID taken. With task set it is
 // that task's row too: GetTaskByUpid answers it, and UpdateTaskHistory counts
-// its writes and updates one row. audits counts the audit rows written.
+// its writes and updates one row. audits counts the audit rows written, and
+// details keeps the last one's.
 type taskInsertDBTX struct {
 	args            []any
 	task            *db.TaskHistory
@@ -40,15 +42,17 @@ type taskInsertDBTX struct {
 	onRecord        bool
 	insertConflicts bool
 	audits          int
+	details         map[string]any
 }
 
-func (d *taskInsertDBTX) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+func (d *taskInsertDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	if d.task != nil && strings.Contains(sql, "-- name: UpdateTaskHistory :execrows") {
 		d.updates++
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
 	if strings.Contains(sql, "-- name: InsertAuditLog :exec") {
 		d.audits++
+		_ = json.Unmarshal(args[5].(json.RawMessage), &d.details)
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
 	}
 	return pgconn.CommandTag{}, errCaptured
@@ -90,11 +94,14 @@ func (d *taskInsertDBTX) QueryRow(_ context.Context, sql string, args ...any) pg
 // but a Default never applies to a key the caller sent, so an explicit "" has
 // to be substituted by the handler — or it is written into the row, which
 // then carries no state the listing's status filter can match.
-//
-// Every other string the insert takes is sent non-empty, so "no empty string
-// reached the insert" can only be about the status.
 func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 	clusterID := uuid.New()
+	// Where the status sits among the insert's arguments.
+	probe := &taskInsertDBTX{}
+	if _, err := db.New(probe).InsertTaskHistory(context.Background(), db.InsertTaskHistoryParams{Status: "probe"}); err != nil {
+		t.Fatal(err)
+	}
+	atStatus := slices.Index(probe.args, any("probe"))
 	mirror := compiledMirror(t, apischema.Properties{
 		"task_cluster_id": {Type: apischema.String, Alias: "cluster_id", Format: "uuid"},
 		"upid":            {Type: apischema.String, MaxLength: apischema.Ptr(512)},
@@ -155,8 +162,8 @@ func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 			if dbtx.args == nil {
 				t.Fatal("the insert never ran")
 			}
-			if !slices.Contains(dbtx.args, any(tt.want)) || slices.Contains(dbtx.args, any("")) {
-				t.Errorf("the insert was handed %v; want the state %q and no empty string", dbtx.args, tt.want)
+			if dbtx.args[atStatus] != tt.want {
+				t.Errorf("the insert was handed %v; want the state %q", dbtx.args, tt.want)
 			}
 		})
 	}
@@ -187,7 +194,8 @@ func TestTaskCreateRefusesWhatIsNotANewRunningTaskOfTheCluster(t *testing.T) {
 		status           func(fiber.Ctx, uuid.UUID, string, string) (*proxmox.TaskStatus, error)
 		want, audits     int
 	}{
-		{"a new running task", "", `,"node":"pve-01","task_type":"forged"`, taskInsertDBTX{}, nil, http.StatusCreated, 1},
+		{"a new running task", "", `,"node":"pve-01","task_type":"forged","description":"forged too"`, taskInsertDBTX{}, nil,
+			http.StatusCreated, 1},
 		{"a status but running", "", `,"status":"failed"`, taskInsertDBTX{}, nil, http.StatusBadRequest, 0},
 		{"a UPID on record", "", ``, taskInsertDBTX{onRecord: true}, nil, http.StatusConflict, 0},
 		{"a UPID already filed", "", ``, taskInsertDBTX{insertConflicts: true}, nil, http.StatusConflict, 0},
@@ -227,9 +235,13 @@ func TestTaskCreateRefusesWhatIsNotANewRunningTaskOfTheCluster(t *testing.T) {
 		if resp.StatusCode != tt.want || dbtx.audits != tt.audits {
 			t.Errorf("%s: status %d, %d audit rows; want %d, %d", tt.name, resp.StatusCode, dbtx.audits, tt.want, tt.audits)
 		}
-		// Filed with the type Proxmox reports, not the body's.
-		if tt.want == http.StatusCreated && (!slices.Contains(dbtx.args, any("qmcreate")) || slices.Contains(dbtx.args, any("forged"))) {
-			t.Errorf("%s: the insert was handed %v; want Proxmox's type, qmcreate", tt.name, dbtx.args)
+		// Filed with the type Proxmox reports, not the body's, and the body's
+		// description in the audit entry, as the caller's, not as the task's.
+		if tt.want == http.StatusCreated && (!slices.Contains(dbtx.args, any("qmcreate")) ||
+			slices.Contains(dbtx.args, any("forged")) || slices.Contains(dbtx.args, any("forged too")) ||
+			dbtx.details["provided_description"] != "forged too") {
+			t.Errorf("%s: the insert was handed %v, the audit entry %v; want Proxmox's type, qmcreate, and the "+
+				"description as provided_description alone", tt.name, dbtx.args, dbtx.details)
 		}
 	}
 }

@@ -401,14 +401,17 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusConflict, "The task is already on record")
 	}
 
+	// The description is the caller's word, which the task's own would pass
+	// for Proxmox's: Proxmox's task status carries none to take instead, so it
+	// is kept in the filing's audit entry, as provided_description, beside who
+	// provided it.
 	task, err := h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
-		ClusterID:   clusterID,
-		UserID:      uid,
-		Upid:        upid,
-		Description: p.String("description"),
-		Status:      status,
-		Node:        upidNode,
-		TaskType:    reported.Type,
+		ClusterID: clusterID,
+		UserID:    uid,
+		Upid:      upid,
+		Status:    status,
+		Node:      upidNode,
+		TaskType:  reported.Type,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fiber.NewError(fiber.StatusConflict, "The task is already on record")
@@ -419,7 +422,11 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 
 	// Under recorded_upid, not upid: an audit row naming the task's UPID
 	// would itself count as the task — a guest's birth, for a create.
-	details, _ := json.Marshal(map[string]any{"recorded_upid": upid, "node": upidNode, "task_type": reported.Type})
+	fields := map[string]any{"recorded_upid": upid, "node": upidNode, "task_type": reported.Type}
+	if provided := p.String("description"); provided != "" {
+		fields["provided_description"] = provided
+	}
+	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "task", upid, "task_recorded", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindTaskCreated, "task", task.ID.String(), "create")
 
