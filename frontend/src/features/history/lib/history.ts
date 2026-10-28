@@ -371,7 +371,7 @@ export function historySummary(
   t: TFunction,
 ): string {
   return [
-    kind.subject?.(entry),
+    kind.subject?.(entry, t),
     entrySummary(kind, entry, t),
     alsoChanged(entry, t),
     entry.kind === "audit" && unverifiedMark(entry, t),

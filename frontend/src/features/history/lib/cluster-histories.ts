@@ -134,11 +134,13 @@ function subjectOf(skip: readonly string[] = []) {
  * the id of the row it is, such as a token or a permission, or the guest.
  */
 function subjectBesides(primary: string) {
-  return (entry: HistoryEntry): string | undefined => {
+  return (entry: HistoryEntry, t: TFunction): string | undefined => {
     if (entry.resource_type === primary) return undefined;
     // A guest's row is filed under its inventory row, which says nothing.
     if (entry.resource_type === "vm") {
-      return entry.vmid > 0 ? `Guest ${String(entry.vmid)}` : undefined;
+      return entry.vmid > 0
+        ? t("history:subject.guest", { vmid: entry.vmid })
+        : undefined;
     }
     return entry.resource_id === "" ? undefined : entry.resource_id;
   };

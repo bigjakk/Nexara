@@ -126,5 +126,8 @@
     "ordered": "ordered",
     "renewed": "renewed"
   },
-  "typed": "{{type}} {{verb}}"
+  "typed": "{{type}} {{verb}}",
+  "subject": {
+    "guest": "Guest {{vmid}}"
+  }
 }
