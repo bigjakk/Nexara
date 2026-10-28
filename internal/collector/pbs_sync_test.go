@@ -64,7 +64,7 @@ func TestSyncPBSServerPrunesOnlyAfterAWholeListing(t *testing.T) {
 		snapshotsErrFor, snapshotNotFor   string
 		upsertErr                         error
 		wantSyncs, wantVerifys            int
-		wantMarks                         string // the job types marked read whole (migrations/000130)
+		wantMarks                         string // the job types marked read whole (migrations/000126)
 		wantSnapshotPrunes                string // what each snapshot prune spared
 		wantSyncKept                      string // the sync jobs the prune kept
 	}{

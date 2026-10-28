@@ -4,7 +4,7 @@
 -- migration is one transaction.
 --
 -- A PBS sync or verify job edited on the PBS itself — Nexara never edits one —
--- is recorded in cluster_object_changes (000124) the way 000125 records a
+-- is recorded in cluster_object_changes (000119) the way 000120 records a
 -- replication job edited in the Proxmox GUI, from the rows the collector keeps
 -- refreshing (syncPBSServer, every PBS pass):
 --
@@ -16,7 +16,7 @@
 --            next_run, last_seen_at) changes on a healthy job every run and is
 --            never compared.
 --
--- The rows are global: no cluster_id (000129), resource_type pbs_server and
+-- The rows are global: no cluster_id (000125), resource_type pbs_server and
 -- resource_id the server's id, as the audit rows for a PBS server are filed;
 -- the job and its datastore are in detail, the changed names (PBS's own
 -- spelling) in fields. Never a configuration value: detail holds the job's
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS pbs_job_baselines (
 
 -- record_pbs_job_change runs AFTER the row is written, so a failure here fails
 -- the inventory write that caused it; it is one INSERT, whose only constraint
--- the global-kinds CHECK of 000129 admits. TG_ARGV[0] is the job type and the
+-- the global-kinds CHECK of 000125 admits. TG_ARGV[0] is the job type and the
 -- rest are the compared columns, each "column" or "column=name as PBS spells it".
 CREATE OR REPLACE FUNCTION record_pbs_job_change()
 RETURNS TRIGGER AS $$

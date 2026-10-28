@@ -25,8 +25,8 @@ import (
 // options, a pool's members, a storage definition, a node's DNS. Every
 // OBJECT_OBSERVE_INTERVAL it reads each cluster's objects of the kinds in
 // observer_kinds.go, compares each with what it read last (cluster_object_state,
-// migrations/000128: HMAC tags, never values) and files what differs in
-// cluster_object_changes (000124), observed_by 'observer': the object as its
+// migrations/000124: HMAC tags, never values) and files what differs in
+// cluster_object_changes (000119), observed_by 'observer': the object as its
 // audit rows name it, the names of the fields that differ and the window
 // between the two reads. Classification (observer_explain.go) then hides every
 // change that something on record explains.
@@ -1081,7 +1081,7 @@ func (p *observePass) write(ctx context.Context, kind string, b recordBatch, see
 	}
 	if p.cluster.ID == uuid.Nil {
 		// Never a NULL-cluster row from here: only a global kind's trigger may
-		// write one (migrations/000129), and a zero UUID names no cluster.
+		// write one (migrations/000125), and a zero UUID names no cluster.
 		return false
 	}
 	if err := p.o.queries.RecordObservedObjects(ctx, db.RecordObservedObjectsParams{

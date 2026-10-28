@@ -143,7 +143,7 @@ GROUP BY 1, pbs_server_id, datastore
 ORDER BY 1 ASC, datastore ASC;
 
 -- MarkPBSJobBaseline says a server's jobs of one type were just listed and
--- written whole (migrations/000130): a job that appears after this is one made
+-- written whole (migrations/000126): a job that appears after this is one made
 -- on the PBS, and its window starts here. Only syncPBSServer calls it, after a
 -- listing whose every row was written.
 -- name: MarkPBSJobBaseline :exec

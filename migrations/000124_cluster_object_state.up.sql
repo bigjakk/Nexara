@@ -1,7 +1,7 @@
 -- Automatic in-place upgrade — no manual steps, no operator action required.
 -- Purely additive: one new table, a column with a default on
--- cluster_object_baselines (000124), and two with a default on
--- cluster_object_changes (000124). Nothing existing is read, rewritten or
+-- cluster_object_baselines (000119), and two with a default on
+-- cluster_object_changes (000119). Nothing existing is read, rewritten or
 -- backfilled, so an interrupted run leaves nothing behind — the migration is
 -- one transaction.
 --
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS cluster_object_state (
 -- last_read_at). An object that appears in a kind read before under the same
 -- signature was created after last_read_at; one that appears in a kind never
 -- read, or read under another signature, is part of a baseline. The
--- replication trigger's mark (000125) and every row from before this migration
+-- replication trigger's mark (000120) and every row from before this migration
 -- have no signature, which matches no reading.
 ALTER TABLE cluster_object_baselines
     ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT '';

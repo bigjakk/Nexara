@@ -20,7 +20,7 @@ var (
 	observedOther   = uuid.MustParse("128a0000-0000-4000-8000-00000000000b")
 )
 
-// TestObservedChanges runs the SQL behind the observer (migrations/000128,
+// TestObservedChanges runs the SQL behind the observer (migrations/000124,
 // queries/cluster_object_state.sql) against Postgres: a reading written in one
 // statement, and the rules that decide whether something on record explains a
 // change it filed.
@@ -492,7 +492,7 @@ var (
 	observedPBSGone = uuid.MustParse("128a0000-0000-4000-8000-0000000000a2")
 )
 
-// TestObservedGlobalChanges runs migrations 000129 and 000130 against Postgres:
+// TestObservedGlobalChanges runs migrations 000125 and 000126 against Postgres:
 // only a global kind's row may name no cluster, the PBS job triggers record an
 // edit, a job added after the server's jobs were read and a job removed — never
 // a server's own removal, nor the first read of its jobs — and the global

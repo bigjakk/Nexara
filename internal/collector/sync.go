@@ -1437,7 +1437,7 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 		}
 	}
 	// The PBS jobs edited on the PBS itself, which the triggers on the job
-	// tables recorded as this pass wrote them (migrations/000130).
+	// tables recorded as this pass wrote them (migrations/000126).
 	s.classifyGlobalObjectChanges(ctx)
 
 	return results
@@ -1531,7 +1531,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 
 	// Sync sync jobs. After a listing that succeeded, the jobs it lacked are
 	// pruned below — a job it showed but failed to write is kept — and the
-	// server's jobs are marked read whole (migrations/000130) only when every
+	// server's jobs are marked read whole (migrations/000126) only when every
 	// one was written, since a job left unwritten would read as added when it
 	// is written. A listing that failed prunes nothing: without that, a PBS
 	// unreachable for longer than the grace lost every job row.
@@ -1640,7 +1640,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 
 // markPBSJobBaseline records that a server's jobs of one type were just listed
 // and written whole: from the next listing on, a job that appears was made on
-// the PBS (the triggers of migrations/000130), and its window starts now.
+// the PBS (the triggers of migrations/000126), and its window starts now.
 func (s *Syncer) markPBSJobBaseline(ctx context.Context, server db.PbsServer, jobType string) {
 	if err := s.queries.MarkPBSJobBaseline(ctx, db.MarkPBSJobBaselineParams{
 		PbsServerID: server.ID, JobType: jobType,

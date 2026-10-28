@@ -30,7 +30,7 @@ sql:
             go_type:
               import: "encoding/json"
               type: "RawMessage"
-          # NULL only for a global kind's rows (000129), which a trigger writes
+          # NULL only for a global kind's rows (000125), which a trigger writes
           # and no Go writer may: kept a plain UUID so every cluster-scoped
           # caller is unchanged, and so Go cannot write a NULL by mistake — the
           # zero UUID it would send names no cluster and the foreign key refuses

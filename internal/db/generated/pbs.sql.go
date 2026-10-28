@@ -428,7 +428,7 @@ type MarkPBSJobBaselineParams struct {
 }
 
 // MarkPBSJobBaseline says a server's jobs of one type were just listed and
-// written whole (migrations/000130): a job that appears after this is one made
+// written whole (migrations/000126): a job that appears after this is one made
 // on the PBS, and its window starts here. Only syncPBSServer calls it, after a
 // listing whose every row was written.
 func (q *Queries) MarkPBSJobBaseline(ctx context.Context, arg MarkPBSJobBaselineParams) error {

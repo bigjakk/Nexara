@@ -1,6 +1,6 @@
--- The observer's readings (migrations/000128) and the classification of what it
+-- The observer's readings (migrations/000124) and the classification of what it
 -- records (internal/collector/observer.go, observer_explain.go). It files edits
--- made directly in Proxmox into cluster_object_changes (000124) with
+-- made directly in Proxmox into cluster_object_changes (000119) with
 -- observed_by 'observer'; ClassifyClusterObjectChanges decides the other
 -- writers' rows, ClassifyObservedChanges below decides these.
 
@@ -12,7 +12,7 @@ FROM cluster_object_state
 WHERE cluster_id = $1;
 
 -- ListClusterObjectBaselines is the signature each kind of a cluster was last
--- read whole under, and when (000124, 000128). The replication trigger's own
+-- read whole under, and when (000119, 000124). The replication trigger's own
 -- mark has neither.
 -- name: ListClusterObjectBaselines :many
 SELECT resource_type, signature, last_read_at
@@ -32,7 +32,7 @@ WHERE cluster_id = $1;
 --            for a reading that marks nothing (a guest batch, a node's objects).
 --
 -- The sets are disjoint by construction. cluster_id is never NULL here: only a
--- global kind's trigger writes a row with none (000129).
+-- global kind's trigger writes a row with none (000125).
 -- name: RecordObservedObjects :exec
 WITH changes AS (
     INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, vmid, change, fields, detail, node,
@@ -384,7 +384,7 @@ FROM verdict v
 WHERE c.id = v.id;
 
 -- ClassifyGlobalObjectChanges is ClassifyObservedChanges for the rows of a
--- global kind — a PBS server's jobs (000130), whoever recorded them — which
+-- global kind — a PBS server's jobs (000126), whoever recorded them — which
 -- belong to no cluster: their explaining rows are found by resource_type and
 -- resource_id alone ('id' rules only, without detail_key or upid_object), and
 -- there is no node list to wait for.
