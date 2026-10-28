@@ -396,15 +396,14 @@ var observedChangeRules = slices.Concat(
 	// delete_user_acl, delete_group_acl and the like): only that grantee
 	// leaving, and grants only going, never one arriving — a deletion never
 	// hides a grant made meanwhile. A path goes with the grantee only if it
-	// held no one else. A role's delete names no grantee, so any may leave.
+	// held no one else. A role's delete names no grantee, so any grant may
+	// leave, and none arrive.
 	aclDeleteRules("pve_user", "users", "user_grants"),
 	aclDeleteRules("pve_group", "groups", "group_grants"),
 	aclDeleteRules("pve_token", "tokens", "token_grants"),
 	[]explainRule{
 		{Kind: "pve_acl", Change: "changed", AuditType: "pve_role", MatchKey: "cluster", ActionRe: `^deleted$`,
-			FieldRe: `^(users|groups|tokens)$`, Member: "left"},
-		{Kind: "pve_acl", Change: "changed", AuditType: "pve_role", MatchKey: "cluster", ActionRe: `^deleted$`,
-			FieldRe: `^(user|group|token)_grants$`, Counts: "dels"},
+			FieldRe: `^(users|groups|tokens|user_grants|group_grants|token_grants)$`, Member: "left"},
 		// A guest, a storage or a pool removed takes its own path
 		// (remove_vm_access, remove_storage_access, delete_pool_acl).
 		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`, Object: "upid:/vms/%s"},
@@ -417,7 +416,7 @@ var observedChangeRules = slices.Concat(
 		{Kind: "pve_acl", Change: "removed", AuditType: "pool", MatchKey: "cluster", ActionRe: `^deleted$`,
 			Object: "audit:/pool/%s/*"},
 		{Kind: "pve_acl", Change: "changed", AuditType: "pool", MatchKey: "cluster", ActionRe: `^deleted$`,
-			Object: "audit:/pool/%s"},
+			Member: "left", Object: "audit:/pool/%s"},
 	},
 	realmSyncRules,
 

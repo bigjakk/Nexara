@@ -286,6 +286,12 @@ func TestObservedChanges(t *testing.T) {
 	members(aclByGroupGrant, []string{"user_grants:T5:user06@pve", "users:user06@pve"}, []string{})
 	audit(observedCluster, in, "pve_acl", "/storage/store03", 0, "granted",
 		map[string]any{"users": "", "groups": "group01", "tokens": ""})
+	// A role's delete takes grants out, wherever and whoever's; never one in.
+	aclRoleGone := seed(observedCluster, "pve_acl", "/vms/172", 0, "changed", "", []string{"user_grants"}, at)
+	members(aclRoleGone, []string{}, []string{"user_grants:T6:user10@pve"})
+	aclRoleBeside := seed(observedCluster, "pve_acl", "/vms/173", 0, "changed", "", []string{"user_grants"}, at)
+	members(aclRoleBeside, []string{"user_grants:T7:user11@pve"}, []string{"user_grants:T6:user11@pve"})
+	audit(observedCluster, in, "pve_role", "Role01", 0, "deleted", nil)
 	// A user id holding a * names that one user, never a pattern of them.
 	groupBesideStar := seed(observedCluster, "pve_group", "admins", 0, "changed", "", []string{"users"}, at)
 	members(groupBesideStar, []string{"users:user07@pve"}, []string{})
@@ -382,6 +388,8 @@ func TestObservedChanges(t *testing.T) {
 			"^(enable|expire|firstname|lastname|email|comment|keys)$"), "object", "upid:*@%s"),
 		with(with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", "^groups$"),
 			"object", "upid:*@%s"), "member", "joined"), "member_of", "upid:groups:*-%s"),
+		with(rule("pve_acl", "changed", "pve_role", "cluster", false, "^deleted$", "", "",
+			"^(users|groups|tokens|user_grants|group_grants|token_grants)$"), "member", "left"),
 		with(with(with(rule("pve_group", "changed", "pve_user", "cluster", false, "^created$", "", "", "^users$"),
 			"detail_key", "groups_set"), "member", "joined"), "member_of", "audit:users:%s"),
 		with(rule("backup", "added", "backup", "cluster", false, "^backup_job_created$", "", "", ""), "audit_id_is", "backup-job"),
@@ -481,6 +489,8 @@ func TestObservedChanges(t *testing.T) {
 		{"Nexara's grant to the users its row names", aclByGrant, "explained"},
 		{"Nexara's grant, and another user's arriving", aclBesideGrant, "shown"},
 		{"a grant naming only a group, a user arriving", aclByGroupGrant, "shown"},
+		{"a role's delete, its grant going", aclRoleGone, "explained"},
+		{"a role's delete, and another role arriving", aclRoleBeside, "shown"},
 		{"a user created as *@pve, another user joining", groupBesideStar, "shown"},
 		{"a realm's sync, a user of that realm", byRealmSync, "explained"},
 		{"a realm's sync, a user of another", besideRealmSync, "shown"},

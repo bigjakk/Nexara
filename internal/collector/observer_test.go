@@ -987,6 +987,7 @@ func TestObserveTags(t *testing.T) {
 func TestObservedChangeRules(t *testing.T) {
 	t.Parallel()
 	keys := regexp.MustCompile(`^(id|node|vmid|sid|cluster|details:[a-z_]+)$`)
+	checked := 0
 	for _, r := range slices.Concat(observedChangeRules, observedGlobalRules) {
 		if !keys.MatchString(r.MatchKey) || (r.AuditType == "" && !slices.Contains([]string{"vmid", "sid", "cluster"}, r.MatchKey)) {
 			t.Errorf("rule %+v: match key or audit type", r)
@@ -1019,7 +1020,29 @@ func TestObservedChangeRules(t *testing.T) {
 				t.Errorf("rule %+v: pattern %q", r, re)
 			}
 		}
+		// A row that reaches the object from elsewhere and covers a list of ids
+		// says which way the ids go, or a role's delete hides a grant made
+		// meanwhile: unpinned, it explains an id arriving as well as leaving.
+		lists, ok := memberFields[r.Kind]
+		if ok && r.Change == "changed" && r.MatchKey != "id" && r.Member == "" &&
+			slices.ContainsFunc(lists, func(f string) bool { return regexp.MustCompile(r.FieldRe).MatchString(f) }) {
+			checked++
+			t.Errorf("rule %+v reaches %s's ids from elsewhere and names no direction", r, r.Kind)
+		} else if ok && r.MatchKey != "id" {
+			checked++
+		}
 	}
+	if checked == 0 {
+		t.Fatal("no rule reaches a kind's ids from elsewhere: the direction check reads nothing")
+	}
+}
+
+// memberFields are each kind's lists of other objects' ids (fieldSpec.withMembers
+// and the readers that build members).
+var memberFields = map[string][]string{
+	"pool": {"vms", "storage"}, "backup": {"vmid", "exclude"}, "ha_rule": {"resources"}, "pve_user": {"groups"},
+	"pve_group": {"users"}, "sdn_subnet": {"cidr"},
+	"pve_acl": {"users", "groups", "tokens", "user_grants", "group_grants", "token_grants"},
 }
 
 func hasExplainRule(resourceType string) bool {
