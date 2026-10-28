@@ -33,7 +33,7 @@ https://nexara.example.com/api/v1
    ```
    The first registration is anonymous. It creates the first user, an administrator,
    and signs them in: the response is a sign-in's (`user`, `access_token`,
-   `expires_at`, `permissions`, with the session's refresh token in the cookie, as
+   `expires_at`, `permissions` and `global_permissions` (those of `permissions` held on the whole install, which is what an object that belongs to no one cluster — a backup server, a firewall template — is offered by), with the session's refresh token in the cookie, as
    under Login), and the `register` audit entry names the new account as the actor.
 
    Every later registration needs an administrator as the caller, creates a plain
@@ -55,7 +55,7 @@ https://nexara.example.com/api/v1
    ```
    POST /api/v1/auth/login
    Body: { "email": "admin@example.com", "password": "..." }
-   Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": ["view:cluster", ...] }
+   Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": ["view:cluster", ...], "global_permissions": [...] }
    ```
    The refresh token is **never** returned in the body — it is set as an
    HttpOnly, SameSite=Strict cookie, and the `refresh_token` response field is
@@ -102,7 +102,7 @@ https://nexara.example.com/api/v1
    POST /api/v1/auth/refresh
    Body: {}                            # the refresh cookie is read
    Body: { "refresh_token": "..." }    # or pass the token explicitly
-   Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...] }
+   Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...], "global_permissions": [...] }
    ```
    A missing, unknown, revoked or expired refresh token returns `401` and clears
    the cookie, and so does a cookie token longer than 1024 characters, which is
@@ -267,7 +267,7 @@ Complete the challenge with a 6-digit TOTP code, or with a recovery code:
 POST /api/v1/auth/totp/verify-login
 Body: { "totp_pending_token": "...", "code": "123456" }
 Body: { "totp_pending_token": "...", "recovery_code": "..." }
-Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...] }
+Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...], "global_permissions": [...] }
 ```
 
 The pending token remembers the state of the account that the first step's check
@@ -300,7 +300,7 @@ password. A pending token issued before this rule existed is refused as expired.
    ```
    POST /api/v1/auth/oidc/token-exchange
    Body: { "code": "..." }
-   Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...] }
+   Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...], "global_permissions": [...] }
    ```
    As with password login, the refresh token is set as an HttpOnly cookie
    rather than returned in the body, and a user with 2FA enabled gets
@@ -2109,7 +2109,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | GET | `/rbac/users/:user_id/roles` | List user's roles |
 | POST | `/rbac/users/:user_id/roles` | Assign role to user. With `scope_type: "cluster"`, `scope_id` must name an existing cluster, or the answer is `400`; the assignment is deleted with that cluster |
 | DELETE | `/rbac/users/:user_id/roles/:id` | Revoke role from user |
-| GET | `/rbac/me/permissions` | List current user's permissions |
+| GET | `/rbac/me/permissions` | List current user's permissions (`global_permissions`: those held on the whole install) and roles |
 
 ### Users
 

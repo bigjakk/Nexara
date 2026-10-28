@@ -517,6 +517,10 @@ func (h *RBACHandler) MyPermissions(c fiber.Ctx, _ *apischema.Params) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get permissions")
 	}
+	globalPerms, err := h.rbac.GetGlobalPermissions(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get permissions")
+	}
 
 	roles, err := h.queries.ListUserRoles(c.Context(), userID)
 	if err != nil {
@@ -542,7 +546,8 @@ func (h *RBACHandler) MyPermissions(c fiber.Ctx, _ *apischema.Params) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"permissions": perms,
-		"roles":       roleResp,
+		"permissions":        perms,
+		"global_permissions": globalPerms,
+		"roles":              roleResp,
 	})
 }

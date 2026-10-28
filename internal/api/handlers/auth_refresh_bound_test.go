@@ -507,17 +507,20 @@ func TestLogoutAll_IsBoundedAndSaysWhenItCouldNotConfirm(t *testing.T) {
 // fail over its permission display. Neither may hand back a nil slice, which encodes as null.
 func TestLoadPerms_AnEmptyListIsAnArray(t *testing.T) {
 	t.Run("an engine that is not wired is a user with none", func(t *testing.T) {
-		got, err := (&AuthHandler{}).loadPermsStrict(context.Background(), uuid.New())
-		if err != nil || got == nil || len(got) != 0 {
-			t.Errorf("loadPermsStrict with no engine = (%#v, %v), want an empty non-nil list and no error", got, err)
+		got, global, err := (&AuthHandler{}).loadPermsStrict(context.Background(), uuid.New())
+		if err != nil || got == nil || len(got) != 0 || global == nil || len(global) != 0 {
+			t.Errorf("loadPermsStrict with no engine = (%#v, %#v, %v), want empty non-nil lists and no error", got, global, err)
 		}
 	})
 
 	t.Run("a failed read is an error for Refresh and an empty array for the others", func(t *testing.T) {
 		a := newAuthRaceApp(t, func(s *raceStore) { s.permsErr = errRaceTransient })
-		a.app.Get("/test/perms", func(c fiber.Ctx) error { return c.JSON(a.handler.loadPerms(c, a.store.user.ID)) })
+		a.app.Get("/test/perms", func(c fiber.Ctx) error {
+			perms, global := a.handler.loadPerms(c, a.store.user.ID)
+			return c.JSON([][]string{perms, global})
+		})
 
-		if _, err := a.handler.loadPermsStrict(context.Background(), a.store.user.ID); err == nil {
+		if _, _, err := a.handler.loadPermsStrict(context.Background(), a.store.user.ID); err == nil {
 			t.Error("loadPermsStrict hid a failed read")
 		}
 		resp, err := a.app.Test(httptest.NewRequest(http.MethodGet, "/test/perms", nil), fiber.TestConfig{Timeout: time.Second, FailOnTimeout: true})
@@ -526,16 +529,17 @@ func TestLoadPerms_AnEmptyListIsAnArray(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = resp.Body.Close() })
 		raw, _ := io.ReadAll(resp.Body)
-		if strings.TrimSpace(string(raw)) != "[]" {
-			t.Errorf("loadPerms after a failed read encoded as %s, want []", raw)
+		if strings.TrimSpace(string(raw)) != "[[],[]]" {
+			t.Errorf("loadPerms after a failed read encoded as %s, want [[],[]]", raw)
 		}
 	})
 
 	t.Run("a healthy read returns the rows", func(t *testing.T) {
 		a := newAuthRaceApp(t, nil)
-		got, err := a.handler.loadPermsStrict(context.Background(), a.store.user.ID)
-		if err != nil || !reflect.DeepEqual(got, []string{"view:cluster", "manage:node"}) {
-			t.Errorf("loadPermsStrict = (%v, %v), want the two rows", got, err)
+		got, global, err := a.handler.loadPermsStrict(context.Background(), a.store.user.ID)
+		want := []string{"view:cluster", "manage:node"}
+		if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(global, want) {
+			t.Errorf("loadPermsStrict = (%v, %v, %v), want the two rows, each also held on the whole install", got, global, err)
 		}
 	})
 }

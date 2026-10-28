@@ -124,7 +124,9 @@ func (e *RBACEngine) LoadUserPermissions(ctx context.Context, userID uuid.UUID) 
 	return perms, nil
 }
 
-// GetFlatPermissions returns a simple list of "action:resource" strings for the user (global only).
+// GetFlatPermissions returns a simple list of "action:resource" strings for the user, whatever the
+// scope of the grant: a cluster-scoped one is in it too, which is what the pages of a cluster's
+// objects need. GetGlobalPermissions is the ones held on the whole install.
 func (e *RBACEngine) GetFlatPermissions(ctx context.Context, userID uuid.UUID) ([]string, error) {
 	rows, err := e.queries.GetUserPermissions(ctx, userID)
 	if err != nil {
@@ -133,6 +135,25 @@ func (e *RBACEngine) GetFlatPermissions(ctx context.Context, userID uuid.UUID) (
 	result := make([]string, 0, len(rows))
 	for _, r := range rows {
 		result = append(result, r.Action+":"+r.Resource)
+	}
+	return result, nil
+}
+
+// GetGlobalPermissions returns the "action:resource" strings of the grants the user holds on the whole
+// install (global scope), so it says what a global gate will answer: the pages of an object that belongs
+// to no one cluster — a backup server, a firewall template — offer their controls by it, not by a grant
+// on one cluster that the server refuses. Straight from the database, like GetFlatPermissions, and not
+// through the cache (LoadUserPermissions): a refresh reads it, and writes nothing to Redis before it ends.
+func (e *RBACEngine) GetGlobalPermissions(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	rows, err := e.queries.GetUserScopedPermissions(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("querying user scoped permissions: %w", err)
+	}
+	result := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.ScopeType == "global" {
+			result = append(result, r.Action+":"+r.Resource)
+		}
 	}
 	return result, nil
 }

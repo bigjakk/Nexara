@@ -407,6 +407,8 @@ func fixtureAuthResponse() authResponse {
 		RefreshToken: fixtureRefreshToken,
 		ExpiresAt:    1767225600,
 		Permissions:  []string{"view:cluster", "view:vm"},
+		// Held on the whole install, the ones of Permissions a global gate accepts.
+		GlobalPermissions: []string{"view:cluster"},
 	}
 }
 
@@ -424,7 +426,7 @@ func fixtureAuthResponse() authResponse {
 const fixtureAuthResponseJSON = `{"user":{"id":"00000000-0000-4000-8000-000000000001",` +
 	`"email":"admin@example.com","display_name":"Admin","role":"admin"},` +
 	`"access_token":"at-66666666-7777-8888-9999-aaaaaaaaaaaa","refresh_token":"",` +
-	`"expires_at":1767225600,"permissions":["view:cluster","view:vm"]}`
+	`"expires_at":1767225600,"permissions":["view:cluster","view:vm"],"global_permissions":["view:cluster"]}`
 
 // authResponse.MarshalJSON turns three call-site invariants into one type
 // invariant: the v1.9.x refresh-token-in-body leak can no longer be reopened

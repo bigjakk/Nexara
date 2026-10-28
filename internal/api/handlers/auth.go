@@ -411,6 +411,9 @@ type authResponse struct {
 	RefreshToken string   `json:"refresh_token"`
 	ExpiresAt    int64    `json:"expires_at"`
 	Permissions  []string `json:"permissions"`
+	// GlobalPermissions are the ones in Permissions held on the whole install,
+	// which the controls of an object that belongs to no one cluster are offered by.
+	GlobalPermissions []string `json:"global_permissions"`
 }
 
 // MarshalJSON turns three call-site invariants into one type invariant.
@@ -730,7 +733,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), "register", details)
 	})
 
-	perms := h.loadPerms(c, user.ID)
+	perms, globalPerms := h.loadPerms(c, user.ID)
 
 	setRefreshCookie(c, refreshToken, h.jwtService.RefreshTokenTTL())
 
@@ -741,10 +744,11 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 			DisplayName: user.DisplayName,
 			Role:        user.Role,
 		},
-		AccessToken:  accessToken,
-		RefreshToken: "",
-		ExpiresAt:    expiresAt.Unix(),
-		Permissions:  perms,
+		AccessToken:       accessToken,
+		RefreshToken:      "",
+		ExpiresAt:         expiresAt.Unix(),
+		Permissions:       perms,
+		GlobalPermissions: globalPerms,
 	})
 }
 
@@ -1093,7 +1097,7 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, epoch int64, auditA
 	details, _ := json.Marshal(map[string]string{"email": user.Email, "ip": c.IP()})
 	AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), auditAction, details)
 
-	perms := h.loadPerms(c, user.ID)
+	perms, globalPerms := h.loadPerms(c, user.ID)
 
 	setRefreshCookie(c, refreshToken, h.jwtService.RefreshTokenTTL())
 	// That cookie takes the place of whatever refresh cookie the browser held, so the
@@ -1108,10 +1112,11 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, epoch int64, auditA
 			DisplayName: user.DisplayName,
 			Role:        user.Role,
 		},
-		AccessToken:  accessToken,
-		RefreshToken: "",
-		ExpiresAt:    expiresAt.Unix(),
-		Permissions:  perms,
+		AccessToken:       accessToken,
+		RefreshToken:      "",
+		ExpiresAt:         expiresAt.Unix(),
+		Permissions:       perms,
+		GlobalPermissions: globalPerms,
 	})
 }
 
@@ -1493,7 +1498,7 @@ func (h *AuthHandler) Refresh(c fiber.Ctx, p *apischema.Params) error {
 	// A read that fails is a refresh that could not be completed: nothing rotated,
 	// nothing issued. It used to be answered with an empty list and a success,
 	// which signs the user in to a page that shows them nothing.
-	perms, err := h.loadPermsStrict(ctx, session.UserID)
+	perms, globalPerms, err := h.loadPermsStrict(ctx, session.UserID)
 	if err != nil {
 		return refreshDBFailed("permission lookup", "Failed to load permissions", session.ID, err)
 	}
@@ -1645,10 +1650,11 @@ func (h *AuthHandler) Refresh(c fiber.Ctx, p *apischema.Params) error {
 			DisplayName: user.DisplayName,
 			Role:        user.Role,
 		},
-		AccessToken:  accessToken,
-		RefreshToken: "",
-		ExpiresAt:    expiresAt.Unix(),
-		Permissions:  perms,
+		AccessToken:       accessToken,
+		RefreshToken:      "",
+		ExpiresAt:         expiresAt.Unix(),
+		Permissions:       perms,
+		GlobalPermissions: globalPerms,
 	})
 }
 
@@ -2231,32 +2237,34 @@ func (h *AuthHandler) SetupStatus(c fiber.Ctx, _ *apischema.Params) error {
 }
 
 // loadPermsStrict loads the flat permissions list for the given user via the RBAC
-// engine, and says so when it cannot. The list is never nil on success — the
-// response field is always a JSON array — and an engine that is not wired (the
-// no-database unit tests) is a user with none.
-func (h *AuthHandler) loadPermsStrict(ctx context.Context, userID uuid.UUID) ([]string, error) {
+// engine, and the ones of it held on the whole install, and says so when it cannot.
+// The lists are never nil on success — the response fields are always JSON arrays —
+// and an engine that is not wired (the no-database unit tests) is a user with none.
+func (h *AuthHandler) loadPermsStrict(ctx context.Context, userID uuid.UUID) (perms, global []string, err error) {
 	if h.rbac == nil {
-		return []string{}, nil
+		return []string{}, []string{}, nil
 	}
-	perms, err := h.rbac.GetFlatPermissions(ctx, userID)
-	if err != nil {
-		return nil, err
+	if perms, err = h.rbac.GetFlatPermissions(ctx, userID); err != nil {
+		return nil, nil, err
+	}
+	if global, err = h.rbac.GetGlobalPermissions(ctx, userID); err != nil {
+		return nil, nil, err
 	}
 	if perms == nil {
-		return []string{}, nil
+		perms = []string{}
 	}
-	return perms, nil
+	return perms, global, nil
 }
 
 // loadPerms is loadPermsStrict for a response that can do without: a failed read
-// is an empty list. Login and the SSO exchange use it. Refresh does not — it
+// is empty lists. Login and the SSO exchange use it. Refresh does not — it
 // answers 503 rather than sign a user in to a page that shows them nothing.
-func (h *AuthHandler) loadPerms(c fiber.Ctx, userID uuid.UUID) []string {
-	perms, err := h.loadPermsStrict(c.Context(), userID)
+func (h *AuthHandler) loadPerms(c fiber.Ctx, userID uuid.UUID) (perms, global []string) {
+	perms, global, err := h.loadPermsStrict(c.Context(), userID)
 	if err != nil {
-		return []string{}
+		return []string{}, []string{}
 	}
-	return perms
+	return perms, global
 }
 
 // SSOStatus returns whether OIDC/SSO is enabled and the provider name.

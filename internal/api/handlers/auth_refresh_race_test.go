@@ -224,6 +224,18 @@ func (s *raceStore) doQuery(name string, args []any) (pgx.Rows, error) {
 			items = append(items, p)
 		}
 		return &authFakeRows{items: items}, nil
+	case "GetUserScopedPermissions":
+		// The same rows, each held on the whole install, and one held on a cluster.
+		if s.permsErr != nil {
+			return nil, s.permsErr
+		}
+		items := make([]any, 0, len(s.permissions)+1)
+		for _, p := range s.permissions {
+			items = append(items, db.GetUserScopedPermissionsRow{Action: p.Action, Resource: p.Resource, ScopeType: "global"})
+		}
+		items = append(items, db.GetUserScopedPermissionsRow{Action: "view", Resource: "pbs", ScopeType: "cluster",
+			ScopeID: pgtype.UUID{Bytes: uuid.New(), Valid: true}})
+		return &authFakeRows{items: items}, nil
 	case "ListUserSessions":
 		if s.listErr != nil {
 			return nil, s.listErr
