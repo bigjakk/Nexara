@@ -1,11 +1,14 @@
 import { Badge } from "@/components/ui/badge";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import type { CephMon } from "../types/ceph";
 
 interface MonitorListProps {
   monitors: CephMon[];
+  clusterId: string;
 }
 
-export function MonitorList({ monitors }: MonitorListProps) {
+export function MonitorList({ monitors, clusterId }: MonitorListProps) {
   return (
     <div className="overflow-x-auto rounded-md border">
       <table className="w-full text-sm">
@@ -24,6 +27,10 @@ export function MonitorList({ monitors }: MonitorListProps) {
                 <div className="flex items-center gap-2">
                   <Badge variant="default">MON</Badge>
                   <span className="font-medium">{mon.name}</span>
+                  <ClusterHistoryButton
+                    history={clusterHistories.cephMonitor(clusterId, mon.name)}
+                    title={mon.name}
+                  />
                 </div>
               </td>
               <td className="px-4 py-2">{mon.host}</td>

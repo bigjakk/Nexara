@@ -53,6 +53,12 @@ import type {
   NodeACMEConfig,
 } from "@/features/acme/api/acme-queries";
 import { useClusterNodes } from "../api/cluster-queries";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import {
+  HistoryTabContent,
+  HistoryTabTrigger,
+} from "@/features/history/components/HistoryTab";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface ClusterACMETabProps {
   clusterId: string;
@@ -65,6 +71,7 @@ export function ClusterACMETab({ clusterId }: ClusterACMETabProps) {
         <TabsTrigger value="accounts">Accounts</TabsTrigger>
         <TabsTrigger value="plugins">Plugins</TabsTrigger>
         <TabsTrigger value="certificates">Node Certificates</TabsTrigger>
+        <HistoryTabTrigger />
       </TabsList>
       <TabsContent value="accounts" className="mt-4">
         <AccountsTab clusterId={clusterId} />
@@ -75,6 +82,7 @@ export function ClusterACMETab({ clusterId }: ClusterACMETabProps) {
       <TabsContent value="certificates" className="mt-4">
         <CertificatesTab clusterId={clusterId} />
       </TabsContent>
+      <HistoryTabContent history={clusterHistories.certificates(clusterId)} />
     </Tabs>
   );
 }
@@ -115,7 +123,13 @@ function AccountsTab({ clusterId }: { clusterId: string }) {
                 const name = acc.name ?? "default";
                 return (
                   <TableRow key={name}>
-                    <TableCell className="font-medium">{name}</TableCell>
+                    <TableCell className="font-medium">
+                      {name}
+                      <ClusterHistoryButton
+                        history={clusterHistories.acmeAccount(clusterId, name)}
+                        title={name}
+                      />
+                    </TableCell>
                     <TableCell className="text-xs max-w-[250px] truncate">
                       {acc.directory ?? "—"}
                     </TableCell>
@@ -202,7 +216,13 @@ function PluginsTab({ clusterId }: { clusterId: string }) {
             <TableBody>
               {pluginsQuery.data.map((p) => (
                 <TableRow key={p.plugin}>
-                  <TableCell className="font-medium">{p.plugin}</TableCell>
+                  <TableCell className="font-medium">
+                    {p.plugin}
+                    <ClusterHistoryButton
+                      history={clusterHistories.acmePlugin(clusterId, p.plugin)}
+                      title={p.plugin}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline">{p.type}</Badge>
                   </TableCell>
@@ -919,6 +939,12 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
               ))}
             </SelectContent>
           </Select>
+        )}
+        {certNode !== "" && (
+          <ClusterHistoryButton
+            history={clusterHistories.nodeCertificate(clusterId, certNode)}
+            title={certNode}
+          />
         )}
       </div>
 

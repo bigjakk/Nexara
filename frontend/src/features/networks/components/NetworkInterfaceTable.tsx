@@ -17,6 +17,8 @@ import {
   useRevertNetworkConfig,
 } from "../api/network-queries";
 import type { NetworkInterface } from "../types/network";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { CreateInterfaceDialog } from "./CreateInterfaceDialog";
 import { InterfaceFormDialog } from "./InterfaceFormDialog";
 import { ConfirmInterfaceDeleteDialog } from "./ConfirmInterfaceDeleteDialog";
@@ -144,7 +146,17 @@ function InterfaceRow({
   return (
     <TableRow>
       <TableCell className="font-medium">{nodeName}</TableCell>
-      <TableCell className="font-mono text-sm">{iface.iface}</TableCell>
+      <TableCell className="font-mono text-sm">
+        {iface.iface}
+        <ClusterHistoryButton
+          history={clusterHistories.networkInterface(
+            clusterId,
+            nodeName,
+            iface.iface,
+          )}
+          title={`${iface.iface} on ${nodeName}`}
+        />
+      </TableCell>
       <TableCell>
         <Badge variant="outline">{interfaceTypeLabel(iface.type)}</Badge>
       </TableCell>

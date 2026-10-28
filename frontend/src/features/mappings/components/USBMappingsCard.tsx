@@ -71,6 +71,8 @@ import {
 import { MappingDeleteDescription } from "./MappingDeleteDescription";
 import { NodeCheckResult } from "./NodeCheckResult";
 import { USBDevicePicker } from "./USBDevicePicker";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
@@ -316,6 +318,7 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
                   {mappings.map((m) => (
                     <MappingRows
                       key={m.id}
+                      clusterId={clusterId}
                       mapping={m}
                       canEdit={canEdit}
                       clusterNodes={clusterNodes}
@@ -440,6 +443,7 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
 // ---------------------------------------------------------------------------
 
 interface MappingRowsProps {
+  clusterId: string;
   mapping: ClusterUSBMapping;
   canEdit: boolean;
   clusterNodes: string[];
@@ -453,6 +457,7 @@ interface MappingRowsProps {
 }
 
 function MappingRows({
+  clusterId,
   mapping,
   canEdit,
   clusterNodes,
@@ -481,6 +486,12 @@ function MappingRows({
       <TableRow className="bg-muted/30 hover:bg-muted/30">
         <TableCell colSpan={4}>
           <span className="font-mono font-medium">{mapping.id}</span>
+          {addressable && (
+            <ClusterHistoryButton
+              history={clusterHistories.usbMapping(clusterId, mapping.id)}
+              title={mapping.id}
+            />
+          )}
           {description !== "" && (
             <span className="ml-2 text-muted-foreground">{description}</span>
           )}

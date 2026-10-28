@@ -36,6 +36,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ApiClientError } from "@/lib/api-client";
 import { unaddressableHint } from "@/lib/api-path";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 import {
   type AccessCapabilities,
@@ -236,6 +238,13 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                     <TableCell className="font-medium">
                       <span className="flex items-center gap-2">
                         {role.roleid}
+                        <ClusterHistoryButton
+                          history={clusterHistories.accessRole(
+                            clusterId,
+                            role.roleid,
+                          )}
+                          title={role.roleid}
+                        />
                         {role.special && (
                           <Badge variant="secondary" className="gap-1">
                             <Lock className="h-3 w-3" />

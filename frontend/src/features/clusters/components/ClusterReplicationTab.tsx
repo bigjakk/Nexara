@@ -38,6 +38,9 @@ import {
   useTriggerReplication,
 } from "@/features/replication/api/replication-queries";
 import type { ReplicationJob } from "@/features/replication/api/replication-queries";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { HistoryButton } from "@/features/history/components/HistoryDrawer";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import {
   useClusterVMs,
   useClusterNodes,
@@ -69,7 +72,13 @@ export function ClusterReplicationTab({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Replication Jobs</CardTitle>
+        <CardTitle>
+          Replication Jobs
+          <HistoryButton
+            {...clusterHistories.replication(clusterId)}
+            title="replication jobs"
+          />
+        </CardTitle>
         {canManage("replication") && (
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
@@ -118,7 +127,16 @@ export function ClusterReplicationTab({
             <TableBody>
               {jobsQuery.data.map((job) => (
                 <TableRow key={job.id}>
-                  <TableCell className="font-medium">{job.id}</TableCell>
+                  <TableCell className="font-medium">
+                    {job.id}
+                    <ClusterHistoryButton
+                      history={clusterHistories.replicationJob(
+                        clusterId,
+                        job.id,
+                      )}
+                      title={job.id}
+                    />
+                  </TableCell>
                   <TableCell>{job.guest}</TableCell>
                   <TableCell>{job.target}</TableCell>
                   <TableCell className="text-xs">

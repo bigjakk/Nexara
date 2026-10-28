@@ -47,6 +47,12 @@ import {
   type FirewallSecurityGroup,
 } from "@/features/networks/api/firewall-extra-queries";
 import { useClusterNodes } from "../api/cluster-queries";
+import {
+  HistoryTabContent,
+  HistoryTabTrigger,
+} from "@/features/history/components/HistoryTab";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface ClusterFirewallTabProps {
   clusterId: string;
@@ -63,6 +69,7 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
         <TabsTrigger value="groups">Security Groups</TabsTrigger>
         <TabsTrigger value="log">Log</TabsTrigger>
         <TabsTrigger value="options">Options</TabsTrigger>
+        <HistoryTabTrigger />
       </TabsList>
       <TabsContent value="rules" className="mt-4">
         <FirewallRulesTable clusterId={clusterId} />
@@ -85,6 +92,7 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
       <TabsContent value="options" className="mt-4">
         <FirewallOptionsCard clusterId={clusterId} />
       </TabsContent>
+      <HistoryTabContent history={clusterHistories.firewall(clusterId)} />
     </Tabs>
   );
 }
@@ -189,7 +197,16 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
             <TableBody>
               {aliasesQuery.data.map((a) => (
                 <TableRow key={a.name}>
-                  <TableCell className="font-medium">{a.name}</TableCell>
+                  <TableCell className="font-medium">
+                    {a.name}
+                    <ClusterHistoryButton
+                      history={clusterHistories.firewallAlias(
+                        clusterId,
+                        a.name,
+                      )}
+                      title={a.name}
+                    />
+                  </TableCell>
                   <TableCell>
                     <code className="text-xs">{a.cidr}</code>
                   </TableCell>
@@ -336,6 +353,13 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
                       >
                         {s.name}
                       </Badge>
+                      <ClusterHistoryButton
+                        history={clusterHistories.firewallIpset(
+                          clusterId,
+                          s.name,
+                        )}
+                        title={s.name}
+                      />
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {s.comment}
@@ -597,7 +621,16 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
             <TableBody>
               {groupsQuery.data.map((g) => (
                 <TableRow key={g.group}>
-                  <TableCell className="font-medium">{g.group}</TableCell>
+                  <TableCell className="font-medium">
+                    {g.group}
+                    <ClusterHistoryButton
+                      history={clusterHistories.firewallGroup(
+                        clusterId,
+                        g.group,
+                      )}
+                      title={g.group}
+                    />
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {g.comment}
                   </TableCell>

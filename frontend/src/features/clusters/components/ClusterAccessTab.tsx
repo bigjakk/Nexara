@@ -8,6 +8,11 @@ import { AccessGroupsSection } from "@/features/access/components/AccessGroupsSe
 import { AccessRealmsSection } from "@/features/access/components/AccessRealmsSection";
 import { AccessRolesSection } from "@/features/access/components/AccessRolesSection";
 import { AccessUsersSection } from "@/features/access/components/AccessUsersSection";
+import {
+  HistoryTabContent,
+  HistoryTabTrigger,
+} from "@/features/history/components/HistoryTab";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface ClusterAccessTabProps {
   clusterId: string;
@@ -51,6 +56,7 @@ export function ClusterAccessTab({ clusterId }: ClusterAccessTabProps) {
         <TabsTrigger value="roles">Roles</TabsTrigger>
         <TabsTrigger value="permissions">Permissions</TabsTrigger>
         <TabsTrigger value="realms">Realms</TabsTrigger>
+        <HistoryTabTrigger />
       </TabsList>
 
       <TabsContent value="users" className="mt-4">
@@ -71,6 +77,7 @@ export function ClusterAccessTab({ clusterId }: ClusterAccessTabProps) {
       <TabsContent value="realms" className="mt-4">
         <AccessRealmsSection clusterId={clusterId} />
       </TabsContent>
+      <HistoryTabContent history={clusterHistories.access(clusterId)} />
     </Tabs>
   );
 }

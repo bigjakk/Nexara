@@ -341,10 +341,29 @@ function str(d: Record<string, unknown>, key: string): string {
 }
 
 /**
+ * The Event of an audit row whose action is a plain verb and whose resource
+ * type the kind names in its `types`: "HA group created", "API token
+ * regenerated". For a kind that reads several types, where "Created" alone
+ * would not say what was.
+ */
+export function typedEventLabel(
+  entry: HistoryEntry,
+  t: TFunction,
+): string | undefined {
+  if (entry.kind !== "audit") return undefined;
+  const type = lookup(t, "types", entry.resource_type);
+  const verb = lookup(t, "history:verbs", entry.action);
+  return type !== undefined && verb !== undefined
+    ? t("history:typed", { type, verb })
+    : undefined;
+}
+
+/**
  * The Summary column: the few details that say what this entry did — where a
  * migration went, which snapshot, which settings — rather than the whole
  * details blob, which the expanded row shows. A kind's own summary comes
- * first. An audit entry whose fields Nexara could not check says so.
+ * first, and what the entry is about (HistoryKind.subject) before either. An
+ * audit entry whose fields Nexara could not check says so.
  */
 export function historySummary(
   kind: HistoryKind,
@@ -352,6 +371,7 @@ export function historySummary(
   t: TFunction,
 ): string {
   return [
+    kind.subject?.(entry),
     entrySummary(kind, entry, t),
     alsoChanged(entry, t),
     entry.kind === "audit" && unverifiedMark(entry, t),

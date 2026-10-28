@@ -23,6 +23,9 @@ import { Plus, Trash2 } from "lucide-react";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { useAuth } from "@/hooks/useAuth";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { HistoryButton } from "@/features/history/components/HistoryDrawer";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import {
   type MetricServerConfig,
   useMetricServers,
@@ -68,7 +71,13 @@ export function ClusterMetricServersTab({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Metric Servers</CardTitle>
+        <CardTitle>
+          Metric Servers
+          <HistoryButton
+            {...clusterHistories.metrics(clusterId)}
+            title="metric servers"
+          />
+        </CardTitle>
         {canManage("cluster") && (
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -160,7 +169,13 @@ export function ClusterMetricServersTab({
             <TableBody>
               {serversQuery.data.map((s) => (
                 <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.id}</TableCell>
+                  <TableCell className="font-medium">
+                    {s.id}
+                    <ClusterHistoryButton
+                      history={clusterHistories.metricServer(clusterId, s.id)}
+                      title={s.id}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline">{s.type}</Badge>
                   </TableCell>

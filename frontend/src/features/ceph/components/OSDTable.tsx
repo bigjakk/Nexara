@@ -17,6 +17,8 @@ import {
   LogOut,
 } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { OSDActionDialog } from "./OSDActionDialog";
 import type { CephOSD, CephOSDAction } from "../types/ceph";
 
@@ -55,7 +57,13 @@ export function OSDTable({ osds, clusterId }: OSDTableProps) {
           <tbody>
             {sorted.map((osd) => (
               <tr key={osd.id} className="border-b last:border-0">
-                <td className="px-4 py-2 font-mono">{osd.id}</td>
+                <td className="px-4 py-2 font-mono">
+                  {osd.id}
+                  <ClusterHistoryButton
+                    history={clusterHistories.cephOsd(clusterId, osd.id)}
+                    title={osd.name || `osd.${String(osd.id)}`}
+                  />
+                </td>
                 <td className="px-4 py-2">{osd.name}</td>
                 <td className="px-4 py-2">{osd.host}</td>
                 <td className="px-4 py-2">

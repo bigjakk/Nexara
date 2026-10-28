@@ -74,6 +74,8 @@ import { MappingDeleteDescription } from "./MappingDeleteDescription";
 import { NodeCheckResult } from "./NodeCheckResult";
 import { PCIDevicePicker } from "./PCIDevicePicker";
 import { PCIRiskConfirm } from "./PCIRiskConfirm";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
@@ -343,6 +345,7 @@ export function PCIMappingsCard({ clusterId }: { clusterId: string }) {
                   {mappings.map((m) => (
                     <MappingRows
                       key={m.id}
+                      clusterId={clusterId}
                       mapping={m}
                       canEdit={canEdit}
                       replaceOn={replaceOn}
@@ -483,6 +486,7 @@ function removeDescription(
 type ReplaceOffer = "offered" | "held" | "none";
 
 interface MappingRowsProps {
+  clusterId: string;
   mapping: ClusterPCIMapping;
   canEdit: boolean;
   replaceOn: (node: string) => ReplaceOffer;
@@ -496,6 +500,7 @@ interface MappingRowsProps {
 }
 
 function MappingRows({
+  clusterId,
   mapping,
   canEdit,
   replaceOn,
@@ -527,6 +532,12 @@ function MappingRows({
       <TableRow className="bg-muted/30 hover:bg-muted/30">
         <TableCell colSpan={4}>
           <span className="font-mono font-medium">{mapping.id}</span>
+          {addressable && (
+            <ClusterHistoryButton
+              history={clusterHistories.pciMapping(clusterId, mapping.id)}
+              title={mapping.id}
+            />
+          )}
           {description !== "" && (
             <span className="ml-2 text-muted-foreground">{description}</span>
           )}

@@ -4,6 +4,11 @@ import { EvaluateButton } from "@/features/drs/components/EvaluateButton";
 import { DRSRulesTable } from "@/features/drs/components/DRSRulesTable";
 import { CreateRuleDialog } from "@/features/drs/components/CreateRuleDialog";
 import { DRSHistoryTable } from "@/features/drs/components/DRSHistoryTable";
+import {
+  HistoryTabContent,
+  HistoryTabTrigger,
+} from "@/features/history/components/HistoryTab";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface ClusterDRSTabProps {
   clusterId: string;
@@ -15,7 +20,8 @@ export function ClusterDRSTab({ clusterId }: ClusterDRSTabProps) {
       <TabsList>
         <TabsTrigger value="configuration">Configuration</TabsTrigger>
         <TabsTrigger value="rules">Rules</TabsTrigger>
-        <TabsTrigger value="history">History</TabsTrigger>
+        <TabsTrigger value="migrations">Migrations</TabsTrigger>
+        <HistoryTabTrigger />
       </TabsList>
 
       <TabsContent value="configuration" className="space-y-6">
@@ -30,9 +36,11 @@ export function ClusterDRSTab({ clusterId }: ClusterDRSTabProps) {
         <DRSRulesTable clusterId={clusterId} />
       </TabsContent>
 
-      <TabsContent value="history">
+      <TabsContent value="migrations">
         <DRSHistoryTable clusterId={clusterId} />
       </TabsContent>
+
+      <HistoryTabContent history={clusterHistories.drs(clusterId)} />
     </Tabs>
   );
 }

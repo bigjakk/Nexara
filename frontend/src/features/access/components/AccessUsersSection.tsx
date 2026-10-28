@@ -10,6 +10,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 import {
   AlertDialog,
@@ -380,6 +382,13 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                       </TableCell>
                       <TableCell className="font-mono text-xs">
                         {user.userid}
+                        <ClusterHistoryButton
+                          history={clusterHistories.accessUser(
+                            clusterId,
+                            user.userid,
+                          )}
+                          title={user.userid}
+                        />
                       </TableCell>
                       <TableCell>
                         <Badge

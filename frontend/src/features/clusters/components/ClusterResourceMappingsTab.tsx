@@ -1,3 +1,5 @@
+import { HistoryButton } from "@/features/history/components/HistoryDrawer";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { PCIMappingsCard } from "@/features/mappings/components/PCIMappingsCard";
 import { USBMappingsCard } from "@/features/mappings/components/USBMappingsCard";
 
@@ -16,6 +18,12 @@ export function ClusterResourceMappingsTab({
 }: ClusterResourceMappingsTabProps) {
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <HistoryButton
+          {...clusterHistories.mappings(clusterId)}
+          title="resource mappings"
+        />
+      </div>
       <USBMappingsCard clusterId={clusterId} />
       <PCIMappingsCard clusterId={clusterId} />
     </div>

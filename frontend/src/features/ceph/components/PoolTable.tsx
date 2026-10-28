@@ -6,6 +6,8 @@ import { PoolDeleteDialog } from "./PoolDeleteDialog";
 import type { CephPool } from "../types/ceph";
 import { formatBytes } from "@/lib/format";
 import { unaddressableHint } from "@/lib/api-path";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface PoolTableProps {
   pools: CephPool[];
@@ -39,6 +41,13 @@ export function PoolTable({ pools, clusterId }: PoolTableProps) {
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{pool.pool_name}</span>
+                    <ClusterHistoryButton
+                      history={clusterHistories.cephPool(
+                        clusterId,
+                        pool.pool_name,
+                      )}
+                      title={pool.pool_name}
+                    />
                     {pool.pg_autoscale_mode === "on" && (
                       <Badge variant="outline" className="text-[10px]">
                         autoscale

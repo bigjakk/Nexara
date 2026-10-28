@@ -8,6 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  HistoryTabContent,
+  HistoryTabTrigger,
+} from "@/features/history/components/HistoryTab";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
+import {
   Table,
   TableBody,
   TableCell,
@@ -296,6 +301,7 @@ export function ClusterOptionsTab({
         <TabsTrigger value="general">General</TabsTrigger>
         <TabsTrigger value="tags">Tags</TabsTrigger>
         <TabsTrigger value="info">Cluster Info</TabsTrigger>
+        <HistoryTabTrigger />
       </TabsList>
 
       <TabsContent value="notes" className="mt-4">
@@ -328,6 +334,8 @@ export function ClusterOptionsTab({
         <JoinInfoSection joinQuery={joinQuery} />
         <CorosyncNodesSection nodesQuery={nodesQuery} />
       </TabsContent>
+
+      <HistoryTabContent history={clusterHistories.options(clusterId)} />
     </Tabs>
   );
 }

@@ -18,6 +18,8 @@ import {
 import { CreateTemplateDialog } from "./CreateTemplateDialog";
 import { ApplyTemplateDialog } from "./ApplyTemplateDialog";
 import type { FirewallTemplate } from "../types/network";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface FirewallTemplatesTableProps {
   clusterId: string;
@@ -61,7 +63,13 @@ export function FirewallTemplatesTable({
             <TableBody>
               {templates.map((tmpl: FirewallTemplate) => (
                 <TableRow key={tmpl.id}>
-                  <TableCell className="font-medium">{tmpl.name}</TableCell>
+                  <TableCell className="font-medium">
+                    {tmpl.name}
+                    <ClusterHistoryButton
+                      history={clusterHistories.firewallTemplate(tmpl.id)}
+                      title={tmpl.name}
+                    />
+                  </TableCell>
                   <TableCell className="max-w-[300px] truncate text-sm text-muted-foreground">
                     {tmpl.description || "-"}
                   </TableCell>

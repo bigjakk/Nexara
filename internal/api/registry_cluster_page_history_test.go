@@ -3,6 +3,9 @@ package api
 import (
 	"context"
 	"fmt"
+	"os"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -211,5 +214,32 @@ func TestClusterPageHistoryRoutes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The SPA asks for these Histories at the paths in cluster-histories.ts, each
+// parameter an interpolation; a route renamed on one side only is a History
+// that answers 404. Compared by shape — the literal segments and where the
+// parameters are — one for one.
+func TestClusterPageHistoryPathsAreTheSPAs(t *testing.T) {
+	t.Parallel()
+	src, err := os.ReadFile("../../frontend/src/features/history/lib/cluster-histories.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	templates := regexp.MustCompile("apiPath`(/api/v1/[^`?]+)").FindAllStringSubmatch(string(src), -1)
+	routes := clusterPageHistoryRoutes()
+	spa, server := make([]string, 0, len(templates)), make([]string, 0, len(routes))
+	for _, m := range templates {
+		spa = append(spa, regexp.MustCompile(`\$\{[^}]*\}`).ReplaceAllString(m[1], ":p"))
+	}
+	for _, r := range routes {
+		server = append(server, regexp.MustCompile(`:[a-z_]+`).ReplaceAllString(r.Path, ":p"))
+	}
+	slices.Sort(spa)
+	slices.Sort(server)
+	if !slices.Equal(spa, server) {
+		t.Errorf("the SPA reads %d History paths and the server declares %d; the SPA's:\n%s\nthe server's:\n%s",
+			len(spa), len(server), strings.Join(spa, "\n"), strings.Join(server, "\n"))
 	}
 }

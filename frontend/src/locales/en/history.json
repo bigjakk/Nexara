@@ -114,5 +114,17 @@
   "run": {
     "label_one": "{{event}}, once",
     "label_other": "{{event}}, {{count}} times"
-  }
+  },
+  "verbs": {
+    "created": "created",
+    "updated": "changed",
+    "deleted": "deleted",
+    "already_deleted": "deleted",
+    "regenerated": "regenerated",
+    "granted": "granted",
+    "revoked": "revoked",
+    "ordered": "ordered",
+    "renewed": "renewed"
+  },
+  "typed": "{{type}} {{verb}}"
 }

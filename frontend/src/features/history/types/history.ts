@@ -130,6 +130,9 @@ export interface HistoryKind {
   summary?: (entry: HistoryEntry, t: TFunction) => string | undefined;
   /** A note under an expanded entry. */
   note?: (entry: HistoryEntry, t: TFunction) => string | undefined;
+  /** What an entry is about, for a kind that reads several objects or types:
+   *  shown first in the Summary. */
+  subject?: (entry: HistoryEntry) => string | undefined;
   /** The time filter's first choice: an object's History costs what its whole
    *  history costs, so a busy kind starts at a window. Unset: all time. Its
    *  route reads that window when none is named (HistoryKind.DefaultWindow),

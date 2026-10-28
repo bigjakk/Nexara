@@ -72,6 +72,9 @@ import {
   useClusterStorage,
 } from "@/features/clusters/api/cluster-queries";
 import { formatBytes } from "@/lib/format";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { HistoryButton } from "@/features/history/components/HistoryDrawer";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface ClusterPoolsTabProps {
   clusterId: string;
@@ -128,7 +131,13 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Resource Pools</CardTitle>
+        <CardTitle>
+          Resource Pools
+          <HistoryButton
+            {...clusterHistories.pools(clusterId)}
+            title="resource pools"
+          />
+        </CardTitle>
         {canManage("pool") && (
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
@@ -206,7 +215,18 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                         <ChevronRight className="h-4 w-4" />
                       )}
                     </TableCell>
-                    <TableCell className="font-medium">{pool.poolid}</TableCell>
+                    <TableCell className="font-medium">
+                      {pool.poolid}
+                      {poolHint(pool.poolid) === null && (
+                        <ClusterHistoryButton
+                          history={clusterHistories.pool(
+                            clusterId,
+                            pool.poolid,
+                          )}
+                          title={pool.poolid}
+                        />
+                      )}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {pool.comment || "—"}
                     </TableCell>

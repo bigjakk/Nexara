@@ -23,6 +23,11 @@ import { ApiClientError } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import { retryState, useSettledQueryError } from "@/hooks/useSettledQueryError";
 import { formatTimestamp } from "@/lib/format";
+import {
+  HistoryTabContent,
+  HistoryTabTrigger,
+} from "@/features/history/components/HistoryTab";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface ClusterCephTabProps {
   clusterId: string;
@@ -222,6 +227,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
           {filesystems.length > 0 && (
             <TabsTrigger value="fs">CephFS ({filesystems.length})</TabsTrigger>
           )}
+          <HistoryTabTrigger />
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -245,7 +251,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
         </TabsContent>
 
         <TabsContent value="monitors" className="space-y-4">
-          <MonitorList monitors={monitors} />
+          <MonitorList monitors={monitors} clusterId={clusterId} />
         </TabsContent>
 
         {filesystems.length > 0 && (
@@ -280,6 +286,8 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
             </div>
           </TabsContent>
         )}
+
+        <HistoryTabContent history={clusterHistories.ceph(clusterId)} />
       </Tabs>
     </div>
   );

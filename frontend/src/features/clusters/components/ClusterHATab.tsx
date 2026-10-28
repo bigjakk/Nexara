@@ -66,6 +66,12 @@ import { HAResourceForm } from "@/features/ha/components/HAResourceForm";
 import { HARuleForm } from "@/features/ha/components/HARuleForm";
 import { HAMaintenanceCard } from "@/features/ha/components/HAMaintenanceCard";
 import { useClusterVMs, useClusterNodes } from "../api/cluster-queries";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import {
+  HistoryTabContent,
+  HistoryTabTrigger,
+} from "@/features/history/components/HistoryTab";
 import type { VMResponse } from "@/types/api";
 import {
   isPVEAtLeast,
@@ -335,6 +341,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         <TabsTrigger value="status">Status</TabsTrigger>
         <TabsTrigger value="resources">Resources</TabsTrigger>
         <TabsTrigger value="groups">Groups / Rules</TabsTrigger>
+        <HistoryTabTrigger />
       </TabsList>
 
       <TabsContent value="status" className="mt-4 space-y-4">
@@ -537,6 +544,13 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                               {vmNameBySID.get(res.sid)}
                             </span>
                           )}
+                          <ClusterHistoryButton
+                            history={clusterHistories.haResource(
+                              clusterId,
+                              res.sid,
+                            )}
+                            title={res.sid}
+                          />
                         </TableCell>
                         <TableCell>
                           {canManage("ha") ? (
@@ -711,7 +725,13 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                   <TableBody>
                     {(rulesQuery.data ?? []).map((r) => (
                       <TableRow key={r.rule}>
-                        <TableCell className="font-medium">{r.rule}</TableCell>
+                        <TableCell className="font-medium">
+                          {r.rule}
+                          <ClusterHistoryButton
+                            history={clusterHistories.haRule(clusterId, r.rule)}
+                            title={r.rule}
+                          />
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline">{r.type}</Badge>
                         </TableCell>
@@ -931,6 +951,13 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                         <TableRow key={g.group}>
                           <TableCell className="font-medium">
                             {g.group}
+                            <ClusterHistoryButton
+                              history={clusterHistories.haGroup(
+                                clusterId,
+                                g.group,
+                              )}
+                              title={g.group}
+                            />
                           </TableCell>
                           <TableCell className="text-xs font-mono">
                             {g.nodes}
@@ -1040,6 +1067,8 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
           </DialogContent>
         </Dialog>
       </TabsContent>
+
+      <HistoryTabContent history={clusterHistories.ha(clusterId)} />
 
       {/*
         Resource delete (pve-ha-manager API2/HA/Resources.pm "delete", then

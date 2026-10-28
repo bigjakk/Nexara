@@ -35,6 +35,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ApiClientError } from "@/lib/api-client";
 import { unaddressableHint } from "@/lib/api-path";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 import {
   type AccessCapabilities,
@@ -207,6 +209,13 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                       </TableCell>
                       <TableCell className="font-medium">
                         {group.groupid}
+                        <ClusterHistoryButton
+                          history={clusterHistories.accessGroup(
+                            clusterId,
+                            group.groupid,
+                          )}
+                          title={group.groupid}
+                        />
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {group.comment || "—"}

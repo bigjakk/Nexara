@@ -34,6 +34,8 @@ import {
   useDeleteSDNDNS,
 } from "../api/network-queries";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
+import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { CreateSDNZoneDialog } from "./CreateSDNZoneDialog";
 import { CreateSDNVNetDialog } from "./CreateSDNVNetDialog";
 import { CreateSDNSubnetDialog } from "./CreateSDNSubnetDialog";
@@ -140,7 +142,13 @@ function VNetSubnetsRow({
             <ChevronRight className="h-4 w-4" />
           )}
         </TableCell>
-        <TableCell className="font-medium">{vnet.vnet}</TableCell>
+        <TableCell className="font-medium">
+          {vnet.vnet}
+          <ClusterHistoryButton
+            history={clusterHistories.sdnVnet(clusterId, vnet.vnet)}
+            title={vnet.vnet}
+          />
+        </TableCell>
         <TableCell>{vnet.zone}</TableCell>
         <TableCell>{vnet.tag ?? "-"}</TableCell>
         <TableCell>{vnet.alias || "-"}</TableCell>
@@ -193,6 +201,14 @@ function VNetSubnetsRow({
                         <TableRow key={s.subnet}>
                           <TableCell className="font-medium">
                             {s.subnet}
+                            <ClusterHistoryButton
+                              history={clusterHistories.sdnSubnet(
+                                clusterId,
+                                vnet.vnet,
+                                s.subnet,
+                              )}
+                              title={s.subnet}
+                            />
                           </TableCell>
                           <TableCell>{s.gateway || "-"}</TableCell>
                           <TableCell>
@@ -311,6 +327,13 @@ function ControllersTab({ clusterId }: { clusterId: string }) {
                 <TableRow key={ctrl.controller}>
                   <TableCell className="font-medium">
                     {ctrl.controller}
+                    <ClusterHistoryButton
+                      history={clusterHistories.sdnController(
+                        clusterId,
+                        ctrl.controller,
+                      )}
+                      title={ctrl.controller}
+                    />
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">{ctrl.type}</Badge>
@@ -375,7 +398,13 @@ function IPAMTab({ clusterId }: { clusterId: string }) {
             <TableBody>
               {ipams.map((ipam) => (
                 <TableRow key={ipam.ipam}>
-                  <TableCell className="font-medium">{ipam.ipam}</TableCell>
+                  <TableCell className="font-medium">
+                    {ipam.ipam}
+                    <ClusterHistoryButton
+                      history={clusterHistories.sdnIpam(clusterId, ipam.ipam)}
+                      title={ipam.ipam}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline">{ipam.type}</Badge>
                   </TableCell>
@@ -437,7 +466,13 @@ function DNSTab({ clusterId }: { clusterId: string }) {
             <TableBody>
               {dnsPlugins.map((dns) => (
                 <TableRow key={dns.dns}>
-                  <TableCell className="font-medium">{dns.dns}</TableCell>
+                  <TableCell className="font-medium">
+                    {dns.dns}
+                    <ClusterHistoryButton
+                      history={clusterHistories.sdnDns(clusterId, dns.dns)}
+                      title={dns.dns}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline">{dns.type}</Badge>
                   </TableCell>
@@ -563,7 +598,16 @@ export function SDNTable({ clusterId }: SDNTableProps) {
                 <TableBody>
                   {zones.map((zone) => (
                     <TableRow key={zone.zone}>
-                      <TableCell className="font-medium">{zone.zone}</TableCell>
+                      <TableCell className="font-medium">
+                        {zone.zone}
+                        <ClusterHistoryButton
+                          history={clusterHistories.sdnZone(
+                            clusterId,
+                            zone.zone,
+                          )}
+                          title={zone.zone}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">{zone.type}</Badge>
                       </TableCell>
