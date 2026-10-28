@@ -33,6 +33,8 @@ import { useDeleteBackupJob, useRunBackupJob } from "../api/backup-queries";
 import { describeBackupJobRunConfirm } from "../lib/backup-job-run";
 import { describeSchedule } from "../lib/schedule";
 import { BackupJobDialog } from "./BackupJobDialog";
+import { ScopedHistoryButton } from "@/features/history/components/ScopedHistoryButton";
+import { backupHistories } from "@/features/history/lib/backup-histories";
 
 function formatNextRun(ts?: number): string {
   if (!ts) return "-";
@@ -110,7 +112,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
               <TableHead>Mode</TableHead>
               <TableHead>Enabled</TableHead>
               <TableHead>Next Run</TableHead>
-              <TableHead className="w-24" />
+              <TableHead className="w-32" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -175,6 +177,11 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                           e.stopPropagation();
                         }}
                       >
+                        <ScopedHistoryButton
+                          resource="backup"
+                          {...backupHistories.backupJob(clusterId, job.id)}
+                          title={job.id}
+                        />
                         <Button
                           variant="ghost"
                           size="sm"
