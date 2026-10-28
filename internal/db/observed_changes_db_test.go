@@ -165,6 +165,10 @@ func TestObservedChanges(t *testing.T) {
 	audit(observedCluster, at.Add(-9*time.Minute), "storage", "store02", 0, "update", nil)
 	otherCluster := seed(observedCluster, "storage", "store03", 0, "changed", "", []string{"nodes"}, at)
 	audit(observedOther, in, "storage", "store03", 0, "update", nil)
+	// A notice is never explained, even by a row that would explain an edit.
+	notice := seed(observedCluster, "storage", "store13", 0, "changed", "", []string{"storage"}, at)
+	exec("a notice", `UPDATE cluster_object_changes SET detail = '{"notice":"too_many_objects"}' WHERE id = $1`, notice)
+	audit(observedCluster, in, "storage", "store13", 0, "update", nil)
 
 	// A guest: a disk move explains the disk, not the memory changed beside it,
 	// unless a config task explains that too; Nexara's own untasked edit counts,
@@ -478,6 +482,7 @@ func TestObservedChanges(t *testing.T) {
 		{"its own row, of an action the rule excepts", byRunOnly, "shown"},
 		{"its own row from before the window", tooEarly, "shown"},
 		{"another cluster's row", otherCluster, "shown"},
+		{"a notice, beside a row that would explain an edit", notice, "shown"},
 		{"a disk move, the disk changed", diskOnly, "explained"},
 		{"a disk move, the disk and the memory changed", diskAndMemory, "shown"},
 		{"a disk move and a config task, both changed", bothCovered, "explained"},

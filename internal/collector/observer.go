@@ -404,9 +404,7 @@ func (p *observePass) observeTokenPrivileges(ctx context.Context, upgraded bool)
 	if known && mark.signature != "" {
 		p.o.logger.Warn("object observer: the cluster token's privileges on / changed; objects a filtered list shows may come and go",
 			"cluster_id", p.cluster.ID)
-		id := p.cluster.ID.String()
-		row := changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id},
-			"changed", tagDiff{fields: []string{kind}}, mark.lastRead, time.Now())
+		row := noticeRow(observedClusterType, p.cluster.ID.String(), kind, []string{kind})
 		if upgraded {
 			row.Detail["during_upgrade"] = true
 		}
@@ -643,10 +641,8 @@ func (p *observePass) noticeOverCap(ctx context.Context, kind, node string, list
 	}
 	p.o.logger.Warn("object observer: a kind lists more objects than are compared; comparing only those it held",
 		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "objects", listed, "cap", p.o.maxObjects)
-	id := p.cluster.ID.String()
-	row := changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id}, "changed",
-		tagDiff{fields: []string{kind}}, time.Now(), time.Now())
-	row.Detail["notice"], row.Detail["objects"], row.Detail["cap"] = "too_many_objects", listed, p.o.maxObjects
+	row := noticeRow(observedClusterType, p.cluster.ID.String(), "too_many_objects", []string{kind})
+	row.Detail["objects"], row.Detail["cap"] = listed, p.o.maxObjects
 	if node != "" {
 		row.Detail["node"] = node
 	}
@@ -1207,6 +1203,17 @@ func changeRow(obj observedObject, change string, d tagDiff, lastSeen, observed 
 	return row
 }
 
+// noticeRow is a notice: the observer's own word on a cluster or a kind (its
+// token's privileges moved, a kind it cannot hold whole), filed as a point
+// event, seen as it is filed, that no audit row explains (detail.notice).
+func noticeRow(resourceType, resourceID, notice string, fields []string) observedChangeRow {
+	now := time.Now()
+	row := changeRow(observedObject{id: resourceID, resourceType: resourceType, resourceID: resourceID}, "changed",
+		tagDiff{fields: fields}, now, now)
+	row.Detail["notice"] = notice
+	return row
+}
+
 // write records one batch in one statement; mark is the signature to mark the
 // kind read whole under, or "". It reports whether the write went through: a
 // failed write is logged, and the next pass compares against the old reading
@@ -1553,9 +1560,8 @@ func (p *observePass) noticeUnreadNodes(ctx context.Context, nodes []db.Node, un
 	for _, name := range due {
 		o.logger.Warn("object observer: a node of the cluster has never been read; what it holds is not compared",
 			"cluster_id", p.cluster.ID, "node", name, "passes", observeUnreadNodePasses)
-		row := changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id}, "changed",
-			tagDiff{fields: []string{"nodes"}}, time.Now(), time.Now())
-		row.Detail["notice"], row.Detail["node"] = "node_never_read", name
+		row := noticeRow(observedClusterType, id, "node_never_read", []string{"nodes"})
+		row.Detail["node"] = name
 		batch.record([]observedChangeRow{row})
 	}
 	p.write(ctx, "node_versions", batch, time.Now(), "")

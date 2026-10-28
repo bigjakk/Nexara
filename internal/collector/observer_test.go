@@ -650,8 +650,10 @@ func TestObserverOutcomes(t *testing.T) {
 		e.obs.Wait()
 		e.mq.observed.mu.Lock()
 		defer e.mq.observed.mu.Unlock()
-		if got := e.mq.observed.changes; len(got) != 1 || got[0].Fields[0] != "token_privileges" || got[0].Detail["during_upgrade"] != true {
-			t.Fatalf("filed %+v, want the token's privileges changed during an upgrade", got)
+		if got := e.mq.observed.changes; len(got) != 1 || got[0].Fields[0] != "token_privileges" ||
+			got[0].Detail["during_upgrade"] != true || got[0].Detail["notice"] != "token_privileges" ||
+			!got[0].LastSeenAt.Equal(got[0].ObservedAt) {
+			t.Fatalf("filed %+v, want a notice that the token's privileges changed during an upgrade", got)
 		}
 	})
 	t.Run("a node down, or back and not read yet, re-baselines nothing", func(t *testing.T) {

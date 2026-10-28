@@ -174,6 +174,10 @@ WITH rules AS MATERIALIZED (
       AND (sqlc.arg('all_nodes_listed')::bool OR c.observed_at < sqlc.arg('give_up_before')::timestamptz)
     ORDER BY c.observed_at, c.id
     LIMIT sqlc.arg('max_rows')::int
+), explainable AS (
+    -- A notice (detail.notice) is the observer's own word, never an edit: no
+    -- row explains it, whatever type it is filed under, and it is shown.
+    SELECT * FROM pending WHERE NOT (detail ? 'notice')
 ), candidates AS (
     -- One arm per match_key, so each reads audit_log through the index its key
     -- can use.
@@ -182,7 +186,7 @@ WITH rules AS MATERIALIZED (
            r.audit_id_is,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
            a.created_at
-    FROM pending p
+    FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
                     AND a.resource_id = p.resource_id
@@ -192,7 +196,7 @@ WITH rules AS MATERIALIZED (
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
-    FROM pending p
+    FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
                     AND p.node <> '' AND a.resource_id = p.node
@@ -202,7 +206,7 @@ WITH rules AS MATERIALIZED (
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
-    FROM pending p
+    FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.vmid = p.vmid
                     AND (r.audit_type = '' OR a.resource_type = r.audit_type)
@@ -212,7 +216,7 @@ WITH rules AS MATERIALIZED (
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
-    FROM pending p
+    FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
     JOIN audit_log a ON a.cluster_id = p.cluster_id
                     AND a.vmid = (substring(p.resource_id FROM '^(?:vm|ct):([0-9]{1,9})$'))::int
@@ -223,7 +227,7 @@ WITH rules AS MATERIALIZED (
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
-    FROM pending p
+    FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
     JOIN audit_log a ON a.cluster_id = p.cluster_id
                     AND (r.audit_type = '' OR a.resource_type = r.audit_type)
@@ -233,7 +237,7 @@ WITH rules AS MATERIALIZED (
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
-    FROM pending p
+    FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
                     AND a.details->>substr(r.match_key, 9) = p.resource_id
@@ -433,7 +437,7 @@ WITH rules AS MATERIALIZED (
            e.value->>'field_re'            AS field_re
     FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
 ), pending AS MATERIALIZED (
-    SELECT c.id, c.resource_type, c.resource_id, c.change, c.fields,
+    SELECT c.id, c.resource_type, c.resource_id, c.change, c.fields, c.detail,
            GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
                     c.observed_at - make_interval(secs => sqlc.arg('lookback_seconds')::int)) AS win_from,
            c.observed_at + interval '30 seconds'                                           AS win_to
@@ -443,9 +447,11 @@ WITH rules AS MATERIALIZED (
       AND c.observed_at < sqlc.arg('settled_before')::timestamptz
     ORDER BY c.observed_at, c.id
     LIMIT sqlc.arg('max_rows')::int
+), explainable AS (
+    SELECT * FROM pending WHERE NOT (detail ? 'notice')
 ), hits AS (
     SELECT p.id, r.field_re, a.id AS audit_id, a.created_at
-    FROM pending p
+    FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
     JOIN audit_log a ON a.resource_type = r.audit_type AND a.resource_id = p.resource_id
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
