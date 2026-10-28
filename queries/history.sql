@@ -146,9 +146,11 @@
 --            guest only by its HA sid ("vm:100", "ct:100") and so carries no
 --            vmid. For an object: by its resource identity. A Proxmox-ingested
 --            row is dropped when a Nexara row of the selection carries the same
---            UPID: the collector's dedupe can lose a race with a handler's own
---            insert, and the two rows are one task, the Nexara one the one that
---            says who asked. A twin outside the selection drops nothing — a
+--            UPID and is on the page: the collector's dedupe can lose a race
+--            with a handler's own insert, and the two rows are one task, the
+--            Nexara one the one that says who asked — but a filter of type or
+--            source that turns the Nexara row away keeps the Proxmox one, which
+--            it would otherwise lose with it. A twin outside the selection drops nothing — a
 --            node's History keeps a guest task it selects by details.node even
 --            when the Nexara row of it, filed under the guest, is not its own.
 --            An entry that names a guest outside the guests, filed under none
@@ -196,10 +198,9 @@
 -- vmid arms use their partial indexes whatever the plan: a generic plan cannot
 -- prove it from "= ANY(<parameter>)".
 -- The Proxmox-duplicate probe reads the selection
--- itself, never audit_log: probed there by UPID, a generic plan — pgx's
--- statement cache lets Postgres switch to one after five executions — scans
--- the whole cluster's rows on every request. It is an IN over the selection's
--- Nexara UPIDs, hashed once, rather than an EXISTS run for every row.
+-- itself, never audit_log: probed there by UPID, a generic plan scanned the
+-- whole cluster's rows on every request. It is an IN over the page's Nexara
+-- UPIDs, hashed once, rather than an EXISTS run for every row.
 --
 -- subject is the guest an entry is filed under — the clone's target, the HA
 -- sid's guest — and picks the cutoff it is held to: cutoff_after and
@@ -666,8 +667,6 @@ WITH guests AS MATERIALIZED (
            0                                        AS run_count,
            s.src                                    AS src
     FROM audit s
-    WHERE NOT (s.source = 'proxmox' AND s.upid IS NOT NULL AND s.upid IN (
-            SELECT b.upid FROM audit b WHERE b.source <> 'proxmox' AND b.upid IS NOT NULL))
     UNION ALL
     SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.cluster_id, r.started_at, r.source, r.task_type,
            'task', '', r.vmid, r.subject, r.user_id, r.upid, r.node, '', '', '', NULL, 0, 'task'::text
@@ -901,6 +900,13 @@ WITH guests AS MATERIALIZED (
       AND (sqlc.narg('category')::text IS NULL OR c.category = sqlc.narg('category')::text)
       AND NOT COALESCE(c.category = ANY(sqlc.arg('exclude_categories')::text[]), false)
       AND (sqlc.narg('source')::text IS NULL OR c.source = sqlc.narg('source')::text)
+      -- A Proxmox row is its Nexara twin's only while the twin is on the page.
+      AND NOT (c.source = 'proxmox' AND c.kind = 'audit' AND c.upid <> '' AND c.upid IN (
+            SELECT w.upid FROM categorized w
+            WHERE w.kind = 'audit' AND w.source <> 'proxmox' AND w.upid <> ''
+              AND (sqlc.narg('category')::text IS NULL OR w.category = sqlc.narg('category')::text)
+              AND NOT COALESCE(w.category = ANY(sqlc.arg('exclude_categories')::text[]), false)
+              AND (sqlc.narg('source')::text IS NULL OR w.source = sqlc.narg('source')::text)))
     ORDER BY c.occurred_at DESC, c.entry_id DESC
     LIMIT sqlc.arg('row_limit')::int OFFSET sqlc.arg('row_offset')::int
 )

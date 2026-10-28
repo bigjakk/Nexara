@@ -1869,9 +1869,11 @@ type Querier interface {
 	//            guest only by its HA sid ("vm:100", "ct:100") and so carries no
 	//            vmid. For an object: by its resource identity. A Proxmox-ingested
 	//            row is dropped when a Nexara row of the selection carries the same
-	//            UPID: the collector's dedupe can lose a race with a handler's own
-	//            insert, and the two rows are one task, the Nexara one the one that
-	//            says who asked. A twin outside the selection drops nothing — a
+	//            UPID and is on the page: the collector's dedupe can lose a race
+	//            with a handler's own insert, and the two rows are one task, the
+	//            Nexara one the one that says who asked — but a filter of type or
+	//            source that turns the Nexara row away keeps the Proxmox one, which
+	//            it would otherwise lose with it. A twin outside the selection drops nothing — a
 	//            node's History keeps a guest task it selects by details.node even
 	//            when the Nexara row of it, filed under the guest, is not its own.
 	//            An entry that names a guest outside the guests, filed under none
@@ -1919,10 +1921,9 @@ type Querier interface {
 	// vmid arms use their partial indexes whatever the plan: a generic plan cannot
 	// prove it from "= ANY(<parameter>)".
 	// The Proxmox-duplicate probe reads the selection
-	// itself, never audit_log: probed there by UPID, a generic plan — pgx's
-	// statement cache lets Postgres switch to one after five executions — scans
-	// the whole cluster's rows on every request. It is an IN over the selection's
-	// Nexara UPIDs, hashed once, rather than an EXISTS run for every row.
+	// itself, never audit_log: probed there by UPID, a generic plan scanned the
+	// whole cluster's rows on every request. It is an IN over the page's Nexara
+	// UPIDs, hashed once, rather than an EXISTS run for every row.
 	//
 	// subject is the guest an entry is filed under — the clone's target, the HA
 	// sid's guest — and picks the cutoff it is held to: cutoff_after and

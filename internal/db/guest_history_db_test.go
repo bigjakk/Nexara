@@ -691,6 +691,34 @@ func TestGuestHistory(t *testing.T) {
 			t.Errorf("node timeline = %v (total %d), want its network change, then its one apt update", got, total)
 		}
 
+		// A Proxmox row is its Nexara twin's only while the twin is on the page:
+		// a type or a source the Nexara row is not keeps the Proxmox row.
+		refreshUPID := historyUPID(31, "aptupdate", "")
+		audit(historyClusterID, minsAgo(4), "nexara", "node", "pve-03", "apt_refresh", map[string]any{"upid": refreshUPID})
+		audit(historyClusterID, minsAgo(4), "proxmox", "node", "pve-03", "apt_update", map[string]any{"upid": refreshUPID, "status": "OK"})
+		for _, tt := range []struct {
+			name string
+			f    func(*gen.ListHistoryParams)
+			want []string
+		}{
+			{"unfiltered", func(*gen.ListHistoryParams) {}, []string{"audit apt_refresh tasks "}},
+			{"its type", func(p *gen.ListHistoryParams) { p.Category = pgtype.Text{String: "updates", Valid: true} },
+				[]string{"audit apt_update updates "}},
+			{"its source", func(p *gen.ListHistoryParams) { p.Source = pgtype.Text{String: "proxmox", Valid: true} },
+				[]string{"audit apt_update updates "}},
+		} {
+			p, err := node.ListParams(historyClusterID, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+				{ResourceType: "node", Value: "pve-03"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.RowLimit = 50
+			tt.f(&p)
+			if got, _ := list(p); !slices.Equal(got, tt.want) {
+				t.Errorf("a twin, %s: %q, want %q", tt.name, got, tt.want)
+			}
+		}
+
 		// A twin outside the selection drops nothing: the node selects a guest's
 		// task by details.node, and the Nexara row of the same task, filed under
 		// the guest's inventory id with no node, is not the node's.
