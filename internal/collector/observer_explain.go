@@ -429,14 +429,19 @@ var observedChangeRules = slices.Concat(
 	// delete_user_acl, delete_group_acl and the like): only that grantee
 	// leaving, and grants only going, never one arriving — a deletion never
 	// hides a grant made meanwhile. A path goes with the grantee only if it
-	// held no one else. A role's delete names no grantee, so any grant may
-	// leave, and none arrive.
+	// held no one else. A role's delete takes out that role's grants alone,
+	// and none arrive.
 	aclDeleteRules("pve_user", "users", "user_grants"),
 	aclDeleteRules("pve_group", "groups", "group_grants"),
 	aclDeleteRules("pve_token", "tokens", "token_grants"),
 	[]explainRule{
+		// Proxmox drops a deleted role from every ACL entry: its grants go,
+		// and a grantee that held no other leaves (the grants pin that).
 		{Kind: "pve_acl", Change: "changed", AuditType: "pve_role", MatchKey: "cluster", ActionRe: `^deleted$`,
-			FieldRe: `^(users|groups|tokens|user_grants|group_grants|token_grants)$`, Member: "left"},
+			FieldRe: `^(user|group|token)_grants$`, Member: "left",
+			MemberOf: "audit:user_grants:%s:*|group_grants:%s:*|token_grants:%s:*"},
+		{Kind: "pve_acl", Change: "changed", AuditType: "pve_role", MatchKey: "cluster", ActionRe: `^deleted$`,
+			FieldRe: `^(users|groups|tokens)$`, Member: "left"},
 		// A guest, a storage or a pool removed takes its own path
 		// (remove_vm_access, remove_storage_access, delete_pool_acl).
 		{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`, Object: "upid:/vms/%s"},

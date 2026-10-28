@@ -221,7 +221,7 @@ var observeKindSchemas = map[string]string{
 	"pve_token":                    accessTokenSpec.digest(),
 	"pve_group":                    accessGroupSpec.digest(),
 	"pve_role":                     accessRoleSpec.digest(),
-	"pve_acl":                      "acl: members users, groups, tokens and their grants by role tag",
+	"pve_acl":                      "acl: members users, groups, tokens and their grants as role:propagate:grantee",
 	"acme_account":                 acmeAccountSpec.digest(),
 	"acme_plugin":                  acmePluginSpec.digest(),
 	"ha_resource":                  haResourceSpec.digest(),
@@ -850,9 +850,10 @@ var aclGrantee = map[string][2]string{
 // readAccessACL reads the ACL as one object per path, pve_acl / <path as
 // Proxmox normalises it> (auditkey.ACLPath). Each kind of grantee is two member
 // fields: who is granted something there (users, groups, tokens), and each
-// grant (user_grants ...) as "<tag of role and propagate>:<grantee>", so a
-// change says which grantee came, went or had a grant changed — a user
-// deleted explains only that user's grants going — and never which role.
+// grant (user_grants ...) as "<role>:<propagate>:<grantee>", so a change says
+// which grant came or went — a user deleted explains only that user's grants
+// going, a role deleted only that role's. Role names and grantees are
+// identities, kept in clear like every member; no reader selects them.
 func readAccessACL(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
 	target, _ := proxmox.ObserveAccess("acl")
 	items, out := p.readList(ctx, target)
@@ -870,13 +871,8 @@ func readAccessACL(ctx context.Context, p *observePass) ([]kindReading, readOutc
 		if paths[path] == nil {
 			paths[path] = map[string][]json.RawMessage{}
 		}
-		role, _ := canonicalValue(jsonArray([]json.RawMessage{item["roleid"], item["propagate"]}))
-		tag, err := p.o.tags.tag(p.cluster.ID, "pve_acl", path, fields[1], role)
-		if err != nil {
-			continue
-		}
 		who, _ := json.Marshal(ugid)
-		grant, _ := json.Marshal(strings.NewReplacer("+", "-", "/", "_").Replace(tag) + ":" + ugid)
+		grant, _ := json.Marshal(stringField(item, "roleid") + ":" + stringField(item, "propagate") + ":" + ugid)
 		paths[path][fields[0]] = append(paths[path][fields[0]], who)
 		paths[path][fields[1]] = append(paths[path][fields[1]], grant)
 	}

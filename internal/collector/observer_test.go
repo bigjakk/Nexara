@@ -511,7 +511,10 @@ func TestObserverKinds(t *testing.T) {
 			base: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1}]`},
 			edit: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1},` +
 				`{"path":"/vms/100","type":"group","ugid":"ops","roleid":"PVEAuditor","propagate":0}]`},
-			want: "changed pve_acl//vms/100 [group_grants groups]", value: "PVEAuditor"},
+			// A grant is its role, propagate and grantee, ids in clear, in
+			// the member columns alone.
+			want: "changed pve_acl//vms/100 [group_grants groups]", value: "PVEAuditor",
+			members: "[group_grants:PVEAuditor:0:ops groups:ops] []"},
 		{kind: "acme_plugin",
 			base: answers{"/cluster/acme/plugins": `[{"plugin":"dns01","type":"dns","api":"cf","data":"QUJDREVG","digest":"p1"}]`},
 			edit: answers{"/cluster/acme/plugins": `[{"plugin":"dns01","type":"dns","api":"cf","data":"WllYV1ZV","digest":"p2"}]`},
@@ -1397,9 +1400,24 @@ func TestObservedChangeRules(t *testing.T) {
 			t.Errorf("rule %+v explains any field of its object, and %s is not in anyFieldUpdates", r, r.Kind)
 		}
 		// An ACL rule names its grantees, unless it is a path taken with its
-		// object: a grant explains no one it does not name.
+		// object: a grant explains no one it does not name. A deletion of a
+		// role names that role in each grant it takes out (<kind>_grants:
+		// <role>:<propagate>:<grantee>); of a grantee, that grantee.
 		if r.Kind == "pve_acl" && r.Member == "" && (r.Change != "removed" || r.Object == "") {
 			t.Errorf("rule %+v explains an ACL change without naming its grantees", r)
+		}
+		if source, formats, _ := strings.Cut(r.MemberOf, ":"); r.Kind == "pve_acl" && source == "audit" {
+			pinned := map[string]*regexp.Regexp{
+				"pve_role":  regexp.MustCompile(`^[a-z]+_grants:%s:\*$`),
+				"pve_user":  regexp.MustCompile(`^(users:%s|user_grants:\*:%s)$`),
+				"pve_group": regexp.MustCompile(`^(groups:%s|group_grants:\*:%s)$`),
+				"pve_token": regexp.MustCompile(`^(tokens:%s|token_grants:\*:%s)$`),
+			}[r.AuditType]
+			for _, alt := range strings.Split(formats, "|") {
+				if pinned == nil || !pinned.MatchString(alt) {
+					t.Errorf("rule %+v: a deletion's %q does not name what it deleted where a grant names it", r, alt)
+				}
+			}
 		}
 		// A row that reaches the object from elsewhere and covers a list of ids
 		// says which way the ids go, or a role's delete hides a grant made

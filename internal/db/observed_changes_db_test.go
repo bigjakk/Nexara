@@ -296,36 +296,38 @@ func TestObservedChanges(t *testing.T) {
 	// arriving; Nexara's grant only the grantees its row names; a realm's sync
 	// only that realm's users.
 	aclByDelete := seed(observedCluster, "pve_acl", "/vms/170", 0, "changed", "", []string{"user_grants", "users"}, at)
-	members(aclByDelete, []string{}, []string{"user_grants:T1:user01@pve", "users:user01@pve"})
+	members(aclByDelete, []string{}, []string{"user_grants:Role01:1:user01@pve", "users:user01@pve"})
 	aclEscalated := seed(observedCluster, "pve_acl", "/vms/171", 0, "changed", "", []string{"user_grants", "users"}, at)
-	members(aclEscalated, []string{"user_grants:T2:user09@pve"}, []string{"user_grants:T1:user01@pve", "users:user01@pve"})
+	members(aclEscalated, []string{"user_grants:Role02:1:user09@pve"}, []string{"user_grants:Role01:1:user01@pve", "users:user01@pve"})
 	audit(observedCluster, in, "pve_user", "user01@pve", 0, "deleted", nil)
 	aclByGrant := seed(observedCluster, "pve_acl", "/", 0, "changed", "", []string{"user_grants", "users"}, at)
-	members(aclByGrant, []string{"user_grants:T3:user02@pve", "users:user02@pve"}, []string{})
+	members(aclByGrant, []string{"user_grants:Role01:1:user02@pve", "users:user02@pve"}, []string{})
 	aclBesideGrant := seed(observedCluster, "pve_acl", "/", 0, "changed", "", []string{"user_grants"}, at)
-	members(aclBesideGrant, []string{"user_grants:T4:user09@pve"}, []string{})
+	members(aclBesideGrant, []string{"user_grants:Role01:1:user09@pve"}, []string{})
 	audit(observedCluster, in, "pve_acl", "/", 0, "granted", map[string]any{"users": "user02@pve,user03@pve"})
 	// A grant naming only a group names no user: a user arriving shows.
 	aclByGroupGrant := seed(observedCluster, "pve_acl", "/storage/store03", 0, "changed", "", []string{"user_grants", "users"}, at)
-	members(aclByGroupGrant, []string{"user_grants:T5:user06@pve", "users:user06@pve"}, []string{})
+	members(aclByGroupGrant, []string{"user_grants:Role01:1:user06@pve", "users:user06@pve"}, []string{})
 	audit(observedCluster, in, "pve_acl", "/storage/store03", 0, "granted",
 		map[string]any{"users": "", "groups": "group01", "tokens": ""})
 	// A path's first grant names every grantee it brought, whatever its kind.
 	aclAddedByGrant := seed(observedCluster, "pve_acl", "/sdn/zones/zone01", 0, "added", "", nil, at)
-	members(aclAddedByGrant, []string{"users:user12@pve", "user_grants:T8:user12@pve", "groups:group02",
-		"group_grants:T9:group02"}, []string{})
+	members(aclAddedByGrant, []string{"users:user12@pve", "user_grants:Role01:1:user12@pve", "groups:group02",
+		"group_grants:Role01:1:group02"}, []string{})
 	audit(observedCluster, in, "pve_acl", "/sdn/zones/zone01", 0, "granted",
 		map[string]any{"users": "user12@pve", "groups": "group02", "tokens": ""})
 	aclAddedBeside := seed(observedCluster, "pve_acl", "/sdn/zones/zone02", 0, "added", "", nil, at)
-	members(aclAddedBeside, []string{"users:user12@pve", "user_grants:T8:user12@pve", "users:user13@pve",
-		"user_grants:T8:user13@pve"}, []string{})
+	members(aclAddedBeside, []string{"users:user12@pve", "user_grants:Role01:1:user12@pve", "users:user13@pve",
+		"user_grants:Role01:1:user13@pve"}, []string{})
 	audit(observedCluster, in, "pve_acl", "/sdn/zones/zone02", 0, "granted",
 		map[string]any{"users": "user12@pve", "groups": "", "tokens": ""})
 	// A role's delete takes grants out, wherever and whoever's; never one in.
 	aclRoleGone := seed(observedCluster, "pve_acl", "/vms/172", 0, "changed", "", []string{"user_grants"}, at)
-	members(aclRoleGone, []string{}, []string{"user_grants:T6:user10@pve"})
+	members(aclRoleGone, []string{}, []string{"user_grants:Role01:0:user10@pve"})
 	aclRoleBeside := seed(observedCluster, "pve_acl", "/vms/173", 0, "changed", "", []string{"user_grants"}, at)
-	members(aclRoleBeside, []string{"user_grants:T7:user11@pve"}, []string{"user_grants:T6:user11@pve"})
+	members(aclRoleBeside, []string{"user_grants:Role02:1:user11@pve"}, []string{"user_grants:Role01:0:user11@pve"})
+	aclOtherRoleGone := seed(observedCluster, "pve_acl", "/vms/174", 0, "changed", "", []string{"user_grants"}, at)
+	members(aclOtherRoleGone, []string{}, []string{"user_grants:Role03:1:user14@pve"})
 	audit(observedCluster, in, "pve_role", "Role01", 0, "deleted", nil)
 	// A user id holding a * names that one user, never a pattern of them.
 	groupBesideStar := seed(observedCluster, "pve_group", "admins", 0, "changed", "", []string{"users"}, at)
@@ -426,8 +428,8 @@ func TestObservedChanges(t *testing.T) {
 			"object", "upid:*@%s"), "member", "joined"), "member_of", "upid:groups:*-%s"),
 		with(with(rule("pve_acl", "added", "pve_acl", "id", false, "^granted$", "", "", ""), "member", "joined"),
 			"member_of", "details-list.users:users:%s|user_grants:*:%s+details-list.groups:groups:%s|group_grants:*:%s"),
-		with(rule("pve_acl", "changed", "pve_role", "cluster", false, "^deleted$", "", "",
-			"^(users|groups|tokens|user_grants|group_grants|token_grants)$"), "member", "left"),
+		with(with(rule("pve_acl", "changed", "pve_role", "cluster", false, "^deleted$", "", "", "^(user|group|token)_grants$"),
+			"member", "left"), "member_of", "audit:user_grants:%s:*|group_grants:%s:*|token_grants:%s:*"),
 		with(with(with(rule("pve_group", "changed", "pve_user", "cluster", false, "^created$", "", "", "^users$"),
 			"detail_key", "groups_set"), "member", "joined"), "member_of", "audit:users:%s"),
 		with(rule("backup", "added", "backup", "cluster", false, "^backup_job_created$", "", "", ""), "audit_id_is", "backup-job"),
@@ -536,6 +538,7 @@ func TestObservedChanges(t *testing.T) {
 		{"a path's first grant, and another user on it", aclAddedBeside, "shown"},
 		{"a role's delete, its grant going", aclRoleGone, "explained"},
 		{"a role's delete, and another role arriving", aclRoleBeside, "shown"},
+		{"a role's delete, another role's grant going", aclOtherRoleGone, "shown"},
 		{"a user created as *@pve, another user joining", groupBesideStar, "shown"},
 		{"a realm's sync, a user of that realm", byRealmSync, "explained"},
 		{"a realm's sync, a user of another", besideRealmSync, "shown"},
