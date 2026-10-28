@@ -130,14 +130,14 @@ describe("an observed change", () => {
         details:
           '{"notice":"changed_past_cap","while_over_cap":true,"added":3,"added_ids":["a","b","c"],"removed":1,"removed_ids":["d"],"changed":12,"node":"pve-01"}',
       },
-      "network on pve-01 past the cap: 3 added, 1 removed, 12 changed",
+      "Network on pve-01 past the cap: 3 added, 1 removed, 12 changed",
     ],
     [
       {
         fields: ["token_privileges"],
         details: '{"notice":"token_privileges","during_upgrade":true}',
       },
-      "The cluster token's privileges on / changed: objects Proxmox lists by privilege may come and go (during an upgrade)",
+      "The cluster token's privileges on / changed during an upgrade: objects Proxmox lists by privilege may come and go",
     ],
     [
       {
@@ -145,14 +145,14 @@ describe("an observed change", () => {
         details:
           '{"notice":"too_many_objects","objects":12000,"cap":10000,"parent":"blocklist"}',
       },
-      "firewall ipset entry of blocklist: 12000 objects, more than the 10000 compared field by field; until it is back under, what changes is counted",
+      "Firewall Ipset Entry of blocklist: 12,000 objects, more than the 10,000 compared field by field; until it is back under, what changes is counted",
     ],
     [
       {
         fields: ["network"],
         details: '{"notice":"back_under_cap","node":"pve-01"}',
       },
-      "network on pve-01: back under the cap and compared field by field again",
+      "Network on pve-01: back under the cap and compared field by field again",
     ],
     [
       {
@@ -167,7 +167,7 @@ describe("an observed change", () => {
         details:
           '{"notice":"guests_read_in_turns","guests":3200,"per_pass":3000}',
       },
-      "3200 guests, more than one pass reads: read in turns, 3000 a pass",
+      "3,200 guests, more than one pass reads: read in turns, 3,000 a pass",
     ],
   ])("%o reads %s", (over, want) => {
     expect(historyEventLabel(kind, observed(over), t)).toBe(want);

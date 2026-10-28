@@ -283,6 +283,7 @@ function HistoryRow({
                   {shared("row.list", {
                     key: key.replace(/_/g, " "),
                     count: items.length,
+                    n: items.length.toLocaleString(),
                   })}
                 </summary>
                 <p className="mt-1 break-all font-mono">{items.join(", ")}</p>

@@ -175,7 +175,7 @@ describe("HistoryTimeline", () => {
     renderWithProviders(<HistoryTimeline kind={kind} target={probeTarget} />);
     await user.click(
       await screen.findByText(
-        "pool past the cap: 12 added, 0 removed, 0 changed",
+        "Pool past the cap: 12 added, 0 removed, 0 changed",
       ),
     );
     const list = await screen.findByText("added ids: 12 items");

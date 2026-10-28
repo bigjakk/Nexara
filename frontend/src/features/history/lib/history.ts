@@ -11,6 +11,7 @@ import {
 } from "@/components/layout/activity-columns";
 import { formatTimestampLong, formatTimestampShort } from "@/lib/format";
 import { detailPairs } from "@/features/events/lib/audit-details";
+import { resourceTypeLabel } from "@/features/events/lib/resource-types";
 import {
   isOkExit,
   parseDetails,
@@ -137,10 +138,9 @@ function num(d: Record<string, unknown>, key: string): number | undefined {
   return typeof v === "number" ? v : undefined;
 }
 
-/** A kind of object as the observer names it (firewall_ipset_entry),
- *  spelled out. */
-function kindName(kind: string): string {
-  return kind.replace(/_/g, " ");
+/** A count as the reader's locale writes it: 12,000. */
+function formatCount(n: number): string {
+  return n.toLocaleString();
 }
 
 /** An observer's notice (detail.notice): its own word on a cluster or a kind
@@ -154,32 +154,36 @@ function noticeLabel(
   d: Record<string, unknown>,
   t: TFunction,
 ): string {
-  const kind = [
-    kindName(entry.fields?.[0] ?? ""),
-    str(d, "parent") &&
-      t("history:observed.notices.parent", { parent: str(d, "parent") }),
-    str(d, "node") &&
-      t("history:observed.notices.node", { node: str(d, "node") }),
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const label = t(`history:observed.notices.${notice}`, {
-    defaultValue: t("history:observed.notices.other", { notice }),
-    kind,
-    objects: num(d, "objects") ?? 0,
-    cap: num(d, "cap") ?? 0,
-    added: num(d, "added") ?? 0,
-    removed: num(d, "removed") ?? 0,
-    changed: num(d, "changed") ?? 0,
-    node: str(d, "node"),
-    guests: num(d, "guests") ?? 0,
-    per_pass: num(d, "per_pass") ?? 0,
-  });
-  const upgrade =
+  const parent = str(d, "parent");
+  const node = str(d, "node");
+  const count = (key: string) => formatCount(num(d, key) ?? 0);
+  // Each sentence has its own spelling with the parent and the node it counts,
+  // and the token's privileges one for a change during an upgrade
+  // (notices.<notice>_parent, _node, _parentNode, _upgrade).
+  const context =
     d["during_upgrade"] === true
-      ? t("history:observed.notices.duringUpgrade")
-      : "";
-  return [label, upgrade].filter(Boolean).join(" ");
+      ? "upgrade"
+      : parent && node
+        ? "parentNode"
+        : parent
+          ? "parent"
+          : node
+            ? "node"
+            : "";
+  return t(`history:observed.notices.${notice}`, {
+    defaultValue: t("history:observed.notices.other", { notice }),
+    context,
+    kind: resourceTypeLabel(entry.fields?.[0] ?? ""),
+    parent,
+    node,
+    objects: count("objects"),
+    cap: count("cap"),
+    added: count("added"),
+    removed: count("removed"),
+    changed: count("changed"),
+    guests: count("guests"),
+    per_pass: count("per_pass"),
+  });
 }
 
 /**
@@ -203,20 +207,40 @@ function observedLabel(entry: HistoryEntry, t: TFunction): string {
   if (entry.action === "removed") {
     const children = num(detail, "children");
     return children
-      ? t("history:observed.removedWithChildren", { count: children })
+      ? t("history:observed.removedWithChildren", {
+          count: children,
+          n: formatCount(children),
+        })
       : t("history:observed.removed");
   }
   const counts =
     detail["counts"] !== null && typeof detail["counts"] === "object"
       ? (detail["counts"] as Record<string, unknown>)
       : {};
-  const listOf = (c: { added: number; removed: number; moved: number }) =>
-    c.moved > 0
-      ? t("history:observed.listCountsMoved", c)
-      : t("history:observed.listCountsBare", c);
+  const counted = (c: { added: number; removed: number; moved: number }) => ({
+    count: c.added,
+    n: formatCount(c.added),
+    added: formatCount(c.added),
+    removed: formatCount(c.removed),
+    moved: formatCount(c.moved),
+  });
+  const listOf = (
+    field: string,
+    c: { added: number; removed: number; moved: number },
+  ) =>
+    t(
+      c.moved > 0
+        ? "history:observed.listCountsMoved"
+        : "history:observed.listCounts",
+      { field, ...counted(c) },
+    );
   const ruleCounts = (c: { added: number; removed: number; moved: number }) =>
-    t("history:observed.ruleCounts", { count: c.added, removed: c.removed }) +
-    (c.moved > 0 ? t("history:observed.moved", { count: c.moved }) : "");
+    t(
+      c.moved > 0
+        ? "history:observed.ruleCountsMoved"
+        : "history:observed.ruleCounts",
+      counted(c),
+    );
   const top = listCounts(detail);
   const parts = top
     ? [ruleCounts(top)]
@@ -225,7 +249,7 @@ function observedLabel(entry: HistoryEntry, t: TFunction): string {
         if (c === null) return field;
         return field === "rules" || field.endsWith("_rules")
           ? ruleCounts(c)
-          : `${field}: ${listOf(c)}`;
+          : listOf(field, c);
       });
   return parts.length > 0
     ? t("history:observed.changed", { fields: parts.join(", ") })
@@ -263,7 +287,9 @@ function observedMarks(entry: HistoryEntry, t: TFunction): string[] {
   }
   const bulk = num(d, "bulk_size");
   if (str(d, "bulk") && bulk !== undefined && bulk > 1) {
-    marks.push(t("history:observed.bulk", { count: bulk - 1 }));
+    marks.push(
+      t("history:observed.bulk", { count: bulk - 1, n: formatCount(bulk - 1) }),
+    );
   }
   return marks;
 }
