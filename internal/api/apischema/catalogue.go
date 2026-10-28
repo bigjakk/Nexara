@@ -867,6 +867,24 @@ func patternRules() []RuleDoc {
 			Accepts: []string{"0000:01:00.0", "0000:01:00", "10000:0a:1f.7"},
 			Rejects: []string{"", "01:00.0", "0000:0A:00.0", "0000:01:00.0;0000:02:00.0", "0000:01:00.0,node=x", "0000:01:00.10"},
 		},
+		{
+			Name: "pve-userid",
+			Kind: KindPattern,
+			Permits: "a PVE user id, name@realm: a name of any characters but whitespace, \":\" and \"/\", then " +
+				"a realm of a letter and one or more letters, digits, dots, dashes or underscores. The 3 to 64 " +
+				"characters it is held to overall are the property's MinLength and MaxLength.",
+			Rule:         `^[^\t\n\v\f\r :/]+@[A-Za-z][A-Za-z0-9._-]+$`,
+			RuleIsRegex:  true,
+			Origin:       OriginProxmox,
+			Upstream:     "pve-access-control src/PVE/Auth/Plugin.pm verify_username ($user_regex, $realm_regex)",
+			UpstreamRule: `length 3..64 AND ^([^\s:/]+)\@([A-Za-z][A-Za-z0-9\.\-_]+)\z`,
+			Divergence: "LOOSER by Unicode whitespace alone: Perl's \\s also matches it in a character string, " +
+				"and this class leaves out the ASCII whitespace only, so nothing Proxmox accepts is refused. " +
+				"Any other character is a name's, \"*\" and \"'\" among them: \"o'brien@ad\" is ordinary, and " +
+				"the change observer never reads a \"*\" in an id as a wildcard.",
+			Accepts: []string{"alice@pve", "o'brien@ad", "*@pve", "a.b-c_d@realm01", "x@pv"},
+			Rejects: []string{"", "alice", "@pve", "alice@p", "al ice@pve", "a:b@pve", "a/b@pve", "alice@1pve", "alice@pve!tok"},
+		},
 	}
 }
 

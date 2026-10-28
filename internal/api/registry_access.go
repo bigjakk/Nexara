@@ -611,9 +611,13 @@ func accessPrivsParam(optional bool) apischema.Property {
 // percent-encoding.
 func createAccessUserParams() apischema.Properties {
 	return withParams(accessUserFieldParams(), apischema.Properties{
+		// Proxmox's own pve-userid, transcribed (the catalogue holds its
+		// provenance): a body field, so no path segment, and no tighter than
+		// verify_username, or an account Proxmox would make is refused here.
 		"userid": {
 			Type:        apischema.String,
-			MinLength:   apischema.Ptr(1),
+			Pattern:     apischema.Rule("pve-userid"),
+			MinLength:   apischema.Ptr(3),
 			MaxLength:   apischema.Ptr(64),
 			Typetext:    "<user@realm>",
 			Description: "User id for the new account, in name@realm form.",

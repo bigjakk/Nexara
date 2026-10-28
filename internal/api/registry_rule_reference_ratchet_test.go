@@ -35,9 +35,10 @@ import (
 // reaches 33 routes through pveObjectNameParam alone, a route count moves on every endpoint
 // change (a ratchet people learn to bump) and a tightened literal at one site cancels a new rule
 // reference at another. The list moves only when a route declares its OWN inline rule reference,
-// which 13 of the 50 entries do.
+// which 14 of the 51 entries do.
 var ruleReferenceSites = []string{
 	"registry_access.go accessNameParam = path-safe-dotted-name",
+	"registry_access.go createAccessUserParams [userid] = pve-userid",
 	"registry_access.go registerAccessEndpoints [groupid] = path-safe-dotted-name",
 	"registry_access.go registerAccessEndpoints [roleid] = path-safe-dotted-name",
 	"registry_alerts.go alertFilterClusterParam = uuid-or-empty",
