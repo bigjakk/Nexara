@@ -1795,7 +1795,12 @@ type Querier interface {
 	// VMID too, a generic plan read every row of the VMID for each move: a second
 	// for a busy node's week. A window is minutes long: a move is recorded only
 	// within minutes of the guest going (000119), and an hour is the bound for one
-	// whose node stopped reporting it long before it showed up elsewhere.
+	// whose node stopped reporting it long before it showed up elsewhere. A move is
+	// a guest's arrival or departure only with a migration of its VMID on record —
+	// qmigrate, vzmigrate, an HA migrate or relocate, a remote migration's tunnel —
+	// begun in the day before it was seen; any other is the VMID seen on another
+	// node (now_on), since a new guest on a VMID the collector had not let go of
+	// looks the same. from_status and to_status carry its nodes.
 	//
 	// or, alone, the whole cluster (whole_cluster, HistoryKind.WholeCluster): every
 	// row of every source filed under the path's cluster, none of them a guest's

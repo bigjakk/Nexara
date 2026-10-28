@@ -441,6 +441,7 @@ type GuestNodeState struct {
 	Node       string             `json:"node"`
 	LastSeenAt time.Time          `json:"last_seen_at"`
 	GoneAt     pgtype.Timestamptz `json:"gone_at"`
+	GuestType  string             `json:"guest_type"`
 }
 
 // Cache of each QEMU guest's smbios1 uuid, which is the deterministic join key between Nexara's inventory and a Veeam backup object. Populated only for clusters with a linked Veeam platform — no Veeam, no per-guest config fetch

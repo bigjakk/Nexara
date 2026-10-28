@@ -12,14 +12,15 @@
 -- (cluster_id, vmid) as a guest is everywhere: it is what a move is measured
 -- against. A move is mostly an UPDATE of vms.node_id; the state outlives a
 -- deleted row too, for a guest the collector deleted and inserted again.
--- last_seen_at is when the guest was last seen on that node, and gone_at when
--- its row was deleted (NULL while it has one).
+-- last_seen_at is when the guest was last seen on that node, gone_at when its
+-- row was deleted (NULL while it has one), and guest_type what it was.
 CREATE TABLE IF NOT EXISTS guest_node_state (
     cluster_id   UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
     vmid         INTEGER NOT NULL,
     node         TEXT NOT NULL,
     last_seen_at TIMESTAMPTZ NOT NULL,
     gone_at      TIMESTAMPTZ,
+    guest_type   TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (cluster_id, vmid)
 );
 
@@ -62,7 +63,11 @@ CREATE INDEX IF NOT EXISTS idx_guest_node_changes_guest
 -- migration's one unseen pass never comes this way; a guest back on another
 -- node within one more such span — its new node's syncs failing meanwhile —
 -- moved, and a guest on the VMID any later is a new one: a destroy and a
--- create or a clone into it, which Proxmox records as no move.
+-- create or a clone into it, which Proxmox records as no move. A guest of
+-- another type on the VMID — a container where a VM was — is a new one too,
+-- however soon. Whether a move was a migration is the History's to say, at
+-- read time: a new guest on a VMID the collector had not yet let go of comes
+-- as an UPDATE of node_id, like a move.
 --
 -- Twenty moves an hour a guest at most, as the observer caps its changes: past
 -- that, the hour's last row takes the move in — it ends where the guest now is
@@ -74,10 +79,13 @@ DECLARE
     node_now text := COALESCE((SELECT n.name FROM nodes n
                                WHERE n.id = NEW.node_id AND n.cluster_id = NEW.cluster_id), '');
     was      guest_node_state%ROWTYPE;
+    type_was text;
     last     guest_node_changes%ROWTYPE;
 BEGIN
     SELECT * INTO was FROM guest_node_state WHERE cluster_id = NEW.cluster_id AND vmid = NEW.vmid;
-    IF FOUND AND was.node <> node_now AND was.node <> '' AND node_now <> ''
+    -- Not in the IF below: PL/pgSQL would end its condition at a CASE's THEN.
+    type_was := COALESCE(OLD.type, was.guest_type);
+    IF FOUND AND was.node <> node_now AND was.node <> '' AND node_now <> '' AND NEW.type = type_was
        AND (TG_OP = 'UPDATE' OR was.gone_at > now() - interval '5 minutes') THEN
         IF (SELECT count(*) FROM guest_node_changes c
             WHERE c.cluster_id = NEW.cluster_id AND c.vmid = NEW.vmid
@@ -96,10 +104,11 @@ BEGIN
             END IF;
         END IF;
     END IF;
-    INSERT INTO guest_node_state (cluster_id, vmid, node, last_seen_at)
-    VALUES (NEW.cluster_id, NEW.vmid, node_now, NEW.last_seen_at)
+    INSERT INTO guest_node_state (cluster_id, vmid, node, last_seen_at, guest_type)
+    VALUES (NEW.cluster_id, NEW.vmid, node_now, NEW.last_seen_at, NEW.type)
     ON CONFLICT (cluster_id, vmid) DO UPDATE
-    SET node = EXCLUDED.node, last_seen_at = EXCLUDED.last_seen_at, gone_at = NULL;
+    SET node = EXCLUDED.node, last_seen_at = EXCLUDED.last_seen_at, gone_at = NULL,
+        guest_type = EXCLUDED.guest_type;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -138,8 +147,8 @@ CREATE TRIGGER trg_vms_node_delete
     EXECUTE FUNCTION keep_guest_node_last_seen();
 
 -- Where each guest is now: a move is measured from here on.
-INSERT INTO guest_node_state (cluster_id, vmid, node, last_seen_at)
-SELECT v.cluster_id, v.vmid, n.name, v.last_seen_at
+INSERT INTO guest_node_state (cluster_id, vmid, node, last_seen_at, guest_type)
+SELECT v.cluster_id, v.vmid, n.name, v.last_seen_at, v.type
 FROM vms v
 JOIN nodes n ON n.id = v.node_id
 ON CONFLICT (cluster_id, vmid) DO NOTHING;

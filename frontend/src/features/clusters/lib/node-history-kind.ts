@@ -62,6 +62,9 @@ function eventLabel(entry: HistoryEntry, t: TFunction): string | undefined {
     return t("events.statusChanged", { status: to });
   }
   if (entry.kind === "move") {
+    if (entry.action === "now_on") {
+      return t("events.nowOn", { vmid: entry.vmid, node: entry.to_status });
+    }
     return t(entry.action === "arrived" ? "events.arrived" : "events.left");
   }
   return isGuestRow(entry) ? guestRowNaming.eventLabel(entry) : undefined;
@@ -74,6 +77,12 @@ function summary(entry: HistoryEntry, t: TFunction): string | undefined {
     return t("summaries.status", { from, to: entry.to_status ?? "" });
   }
   if (entry.kind === "move") {
+    if (entry.action === "now_on") {
+      return t("summaries.nowOn", {
+        from: entry.from_status,
+        to: entry.to_status,
+      });
+    }
     return t(
       entry.action === "arrived" ? "summaries.arrived" : "summaries.left",
       {
@@ -86,7 +95,9 @@ function summary(entry: HistoryEntry, t: TFunction): string | undefined {
 
 function note(entry: HistoryEntry, t: TFunction): string | undefined {
   if (isNodeStatus(entry)) return t("notes.status");
-  if (entry.kind === "move") return t("notes.move");
+  if (entry.kind === "move") {
+    return t(entry.action === "now_on" ? "notes.nowOn" : "notes.move");
+  }
   return isGuestRow(entry) ? guestRowNaming.note(entry) : undefined;
 }
 

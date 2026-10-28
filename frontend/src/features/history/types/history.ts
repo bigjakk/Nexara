@@ -36,7 +36,9 @@ export interface HistoryEntry {
    * in Proxmox that nothing on record explains (action added, removed or
    * changed) — or a run: a burst of one repeated row, a cluster's sync
    * failures, as one entry — or a move: a guest seen arriving on a node or
-   * leaving it (action arrived or left, node the other one).
+   * leaving it (action arrived or left, node the other one), or, with no
+   * migration of it on record, its VMID seen on another node (now_on); a
+   * move's from_status and to_status are its nodes.
    */
   kind: "audit" | "task" | "status" | "backup" | "observed" | "run" | "move";
   occurred_at: string;

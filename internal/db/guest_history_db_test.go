@@ -1208,6 +1208,10 @@ func TestGuestHistory(t *testing.T) {
 		WHERE cluster_id = $1 AND vmid = 310 AND from_node = 'pve-01'`, historyThirdID, minsAgo(12))
 		exec("moves dated", `UPDATE guest_node_changes SET observed_at = $2::timestamptz, last_seen_at = $2::timestamptz - interval '1 minute'
 		WHERE cluster_id = $1 AND vmid = 310 AND from_node = 'pve-02'`, historyThirdID, minsAgo(11))
+		// VM 310's migrations, on record: its moves are arrivals and departures.
+		audit(historyThirdID, minsAgo(13.5), "proxmox", "vm", "310", "migrate",
+			map[string]any{"upid": historyUPID(57, "qmigrate", "310"), "status": "OK"})
+		exec("migration's guest", `UPDATE audit_log SET vmid = 310 WHERE cluster_id = $1 AND action = 'migrate'`, historyThirdID)
 		for _, st := range []struct {
 			from, to string
 			at       time.Time
@@ -1305,7 +1309,7 @@ func TestGuestHistory(t *testing.T) {
 				"audit srvreload network", "audit renewed certificates", "audit firewall_rule_created network",
 				"audit image_copy storage", "audit interface_updated network", "audit reboot power", "audit enabled updates",
 				"audit apt_update checks", "status status_change status online>offline", "move arrived guests 310 pve-02",
-				"move left guests 310 pve-02", "status status_change status unknown>online",
+				"move left guests 310 pve-02", "audit migrate guests", "status status_change status unknown>online",
 				"status status_change status online>unknown", "task cephcreatemgr ceph", "audit start guests",
 				"audit apt_update checks", "audit create guests"}},
 			// A repository change is an update, not a check, and stays.
@@ -1324,6 +1328,31 @@ func TestGuestHistory(t *testing.T) {
 		WHERE cluster_id = $1 AND from_status = 'offline'`, historyThirdID, minsAgo(3))
 		if got := nodeHistory(func(*gen.ListHistoryParams) {}); len(got) < 2 || got[1] != "status status_change status offline>unknown" {
 			t.Errorf("a node still unknown after two minutes: %v, want its change second", got)
+		}
+
+		// VMID 340 destroyed on pve-01 and cloned into on pve-02 within five
+		// minutes, its row not yet let go: the VMID is seen on pve-02, with no
+		// migration on record — no move. A container in a VM's place on the
+		// VMID records nothing at all.
+		place(340, thirdNode)
+		audit(historyThirdID, minsAgo(9.5), "proxmox", "vm", "340", "destroy",
+			map[string]any{"upid": historyUPID(58, "qmdestroy", "340"), "status": "OK"})
+		exec("sighting after the destroy began", `UPDATE vms SET last_seen_at = $2 WHERE cluster_id = $1 AND vmid = 340`,
+			historyThirdID, minsAgo(9))
+		place(340, otherNode)
+		place(341, thirdNode)
+		if _, err := q.UpsertVM(ctx, gen.UpsertVMParams{ClusterID: historyThirdID, NodeID: otherNode,
+			Vmid: 341, Name: "linux41", Type: "lxc", Status: "running"}); err != nil {
+			t.Fatal(err)
+		}
+		var reused []string
+		for _, e := range nodeHistory(func(*gen.ListHistoryParams) {}) {
+			if strings.HasPrefix(e, "move ") && (strings.Contains(e, " 340 ") || strings.Contains(e, " 341 ")) {
+				reused = append(reused, e)
+			}
+		}
+		if want := []string{"move now_on guests 340 pve-02"}; !slices.Equal(reused, want) {
+			t.Errorf("a reused VMID on another node: %v, want %v", reused, want)
 		}
 
 		// Twenty rows an hour a node, and a guest: a node flapping and a guest

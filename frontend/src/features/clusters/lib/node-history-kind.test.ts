@@ -22,7 +22,7 @@ const status = (from: string, to: string) =>
     from_status: from,
     to_status: to,
   });
-const move = (action: string, node: string) =>
+const move = (action: string, node: string, from = "", to = "") =>
   makeHistoryEntry({
     kind: "move",
     source: "detected",
@@ -31,6 +31,8 @@ const move = (action: string, node: string) =>
     vmid: 101,
     subject_vmid: 0,
     node,
+    from_status: from,
+    to_status: to,
   });
 
 describe("the node kind's own rows", () => {
@@ -60,6 +62,12 @@ describe("the node kind's own rows", () => {
       "From pve-02",
     ],
     ["a guest left", move("left", "pve-03"), "Guest left", "To pve-03"],
+    [
+      "a VMID seen elsewhere, no migration on record",
+      move("now_on", "pve-02", "pve-01", "pve-02"),
+      "VMID 101 now on pve-02",
+      "pve-01 → pve-02, no migration on record",
+    ],
   ])("%s", (_name, entry, label, summary) => {
     expect(historyEventLabel(nodeHistoryKind, entry, t)).toBe(label);
     expect(historySummary(nodeHistoryKind, entry, t)).toBe(summary);

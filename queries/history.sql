@@ -71,7 +71,12 @@
 -- VMID too, a generic plan read every row of the VMID for each move: a second
 -- for a busy node's week. A window is minutes long: a move is recorded only
 -- within minutes of the guest going (000119), and an hour is the bound for one
--- whose node stopped reporting it long before it showed up elsewhere.
+-- whose node stopped reporting it long before it showed up elsewhere. A move is
+-- a guest's arrival or departure only with a migration of its VMID on record —
+-- qmigrate, vzmigrate, an HA migrate or relocate, a remote migration's tunnel —
+-- begun in the day before it was seen; any other is the VMID seen on another
+-- node (now_on), since a new guest on a VMID the collector had not let go of
+-- looks the same. from_status and to_status carry its nodes.
 --
 -- or, alone, the whole cluster (whole_cluster, HistoryKind.WholeCluster): every
 -- row of every source filed under the path's cluster, none of them a guest's
@@ -577,11 +582,19 @@ WITH guests AS MATERIALIZED (
                        AND n.observed_at < n.prev_at + interval '2 minutes', false)
     UNION ALL
     SELECT ('move:' || g.id::text)::text, 'move', g.id, g.cluster_id, g.observed_at, 'detected',
-           CASE WHEN g.to_node = sqlc.arg('node_name')::text THEN 'arrived' ELSE 'left' END,
+           CASE WHEN NOT m.migrated THEN 'now_on'
+                WHEN g.to_node = sqlc.arg('node_name')::text THEN 'arrived' ELSE 'left' END,
            CASE g.guest_type WHEN 'lxc' THEN 'container' ELSE 'vm' END, g.vmid::text, g.vmid, NULL::int, NULL::uuid,
            '', CASE WHEN g.to_node = sqlc.arg('node_name')::text THEN g.from_node ELSE g.to_node END,
-           '', '', '', g.last_seen_at, 0
+           '', g.from_node, g.to_node, g.last_seen_at, 0
     FROM guest_node_changes g
+    CROSS JOIN LATERAL (
+        SELECT EXISTS (SELECT 1 FROM audit_log a
+                       WHERE a.cluster_id = g.cluster_id AND a.vmid = g.vmid
+                         AND a.created_at BETWEEN g.observed_at - interval '1 day' AND g.observed_at
+                         AND split_part(a.details->>'upid', ':', 6) IN ('qmigrate', 'vzmigrate', 'hamigrate',
+                                                                        'harelocate', 'qmtunnel', 'vzmtunnel'))
+               AS migrated) m
     WHERE sqlc.arg('node_name')::text <> ''
       AND g.cluster_id = sqlc.arg('cluster_id')::uuid
       AND (g.from_node = sqlc.arg('node_name')::text OR g.to_node = sqlc.arg('node_name')::text)

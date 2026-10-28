@@ -16,7 +16,7 @@
   },
   "categoryNotes": {
     "checks": "Reads that change nothing on the node: package-list refreshes, Proxmox's daily one among them, memory-module reads, Nexara's daily one among them, and report downloads. Left out of the History until Show routine checks is ticked.",
-    "guests": "The guests that arrived on this node or left it. Their tasks, and anything else naming a guest, show with Include guest activity.",
+    "guests": "The guests that arrived on this node or left it, and the VMIDs seen on another node with no migration on record. Their tasks, and anything else naming a guest, show with Include guest activity.",
     "status": "Changes of the node's status. One through Unknown — Proxmox not reporting the node — that is back within two minutes is not listed."
   },
   "empty": "Nothing has been recorded for this node yet.",
@@ -47,16 +47,19 @@
     "statusUnknown": "Stopped reporting",
     "reportedAgain": "Reported {{status}} again",
     "arrived": "Guest arrived",
-    "left": "Guest left"
+    "left": "Guest left",
+    "nowOn": "VMID {{vmid}} now on {{node}}"
   },
   "summaries": {
     "status": "{{from}} → {{to}}",
     "unknown": "Was {{from}}; Proxmox stopped reporting the node.",
     "arrived": "From {{node}}",
-    "left": "To {{node}}"
+    "left": "To {{node}}",
+    "nowOn": "{{from}} → {{to}}, no migration on record"
   },
   "notes": {
     "status": "Nexara saw this change in the node's status as Proxmox reported it. It happened between the two times shown.",
-    "move": "Nexara saw the guest on another node than before. A migration's own task shows with Include guest activity; with none, the guest was moved outside a task — an HA recovery, say."
+    "move": "Nexara saw the guest on another node than before, with a migration of it on record. The migration's own task shows with Include guest activity.",
+    "nowOn": "Nexara saw this VMID on another node than before, with no migration of it on record: an HA recovery, a guest moved outside Proxmox's tasks, or a new guest on the VMID."
   }
 }
