@@ -116,14 +116,21 @@ describe("a storage's History tab", () => {
     });
   });
 
-  it("says so, and reads nothing, when the host node cannot be told", async () => {
-    const user = mountPage(false, () => Promise.reject(new Error("down")));
+  it.each([
+    ["the node list fails", () => Promise.reject(new Error("down"))],
+    // An empty name would drop `node` from the read, and with it every node's rows.
+    ["the node has no name", () => Promise.resolve([{ ...PVE_01, name: "" }])],
+  ])(
+    "says so, and reads nothing, when the host node cannot be told: %s",
+    async (_, nodes) => {
+      const user = mountPage(false, nodes);
 
-    await user.click(await screen.findByRole("tab", { name: "History" }));
+      await user.click(await screen.findByRole("tab", { name: "History" }));
 
-    expect(
-      await screen.findByText(/Which node this storage is on is not known/),
-    ).toBeInTheDocument();
-    expect(historyReads()).toEqual([]);
-  });
+      expect(
+        await screen.findByText(/Which node this storage is on is not known/),
+      ).toBeInTheDocument();
+      expect(historyReads()).toEqual([]);
+    },
+  );
 });

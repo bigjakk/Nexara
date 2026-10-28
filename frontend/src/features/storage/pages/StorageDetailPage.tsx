@@ -156,10 +156,12 @@ export function StorageDetailPage() {
   // A storage that is not shared is a different one on each node, so its
   // History is its host node's, and is not read before that node is known: the
   // first read would be the same-named storage of every node. A node that
-  // cannot be told (the node list failed, or does not hold the pool's node)
-  // reads nothing either, rather than falling back to every node's.
+  // cannot be told (the node list failed, does not hold the pool's node, or
+  // names it with nothing) reads nothing either, rather than falling back to
+  // every node's: a name is tested for being there, not for being null, since
+  // an empty one would drop `node` from the read.
   const historyPlaceholder =
-    pool.shared || hostNodeName !== null ? undefined : nodesQuery.isPending ? (
+    pool.shared || hostNodeName ? undefined : nodesQuery.isPending ? (
       <Skeleton className="h-40 w-full" />
     ) : (
       <p className="text-sm text-muted-foreground">
