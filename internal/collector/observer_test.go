@@ -985,7 +985,6 @@ func TestObserverOutcomes(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
 		e.obs.maxObjects = 3
-		cluster := "changed cluster/" + e.cluster.ID.String() + " [storage]"
 		e.client.set(pathStorage, `[{"storage":"s0","type":"dir","nodes":"pve-01"},{"storage":"s9","type":"dir"}]`)
 		e.expect("baseline")
 		// Crossing: what was held is compared field by field one last time,
@@ -1024,7 +1023,6 @@ func TestObserverOutcomes(t *testing.T) {
 		}
 		e.client.set(pathStorage, storages("s1", "s2", "s3"))
 		e.expect("then an addition, its own", "added storage/s3 []")
-		_ = cluster
 	})
 	t.Run("past the cap a flood is counted exactly, and names a few", func(t *testing.T) {
 		t.Parallel()
@@ -1049,7 +1047,7 @@ func TestObserverOutcomes(t *testing.T) {
 		e := newObserveEnv(t)
 		e.obs.maxObjects = 1
 		e.client.set(pathStorage, storages("s1", "s2"))
-		e.expect("over from its first reading", "changed cluster/"+e.cluster.ID.String()+" [storage]")
+		e.expect("over from its first reading", "changed storage/"+e.cluster.ID.String()+" [storage]")
 		e.client.set(pathStorage, storages("s1", "s3"))
 		counted(t, pastCap(t, e.passRows()), []string{"s3"}, []string{"s2"}, nil)
 	})
@@ -1223,20 +1221,40 @@ func TestObserverOutcomes(t *testing.T) {
 			`{"storage":"s3","type":"dir","nodes":"pve-01"}]`)
 		counted(t, pastCap(t, e.passRows()), nil, nil, []string{"s3"})
 	})
-	t.Run("a node's kind past the cap is counted under the node", func(t *testing.T) {
+	t.Run("every notice is filed under its kind's own type, the cluster's own under the cluster", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
-		e.obs.maxObjects = 2
-		iface := func(name string) string { return `{"iface":"` + name + `","type":"bridge"}` }
-		e.client.set(pathNet, "["+iface("vmbr0")+"]")
-		e.expect("baseline")
-		e.client.set(pathNet, "["+strings.Join([]string{iface("vmbr0"), iface("vmbr1"), iface("vmbr2")}, ",")+"]")
-		for _, r := range e.passRows() {
-			if r.Detail["notice"] != nil && (r.ResourceType != "node" || r.ResourceID != "pve-01") {
-				t.Errorf("past the cap: %+v, want it under the node, whose History reads it", r)
+		e.obs.maxObjects = 0 // every kind listing an object is past its cap, and the guests are read in turns
+		rows := e.passRows()
+		e.client.set(pathStorage, `[{"storage":"store01","type":"dir"},{"storage":"store02","type":"dir"}]`)
+		e.client.set(pathNet, `[{"iface":"vmbr0","type":"bridge"},{"iface":"vmbr1","type":"bridge"}]`)
+		rows = append(rows, e.passRows()...)
+		e.obs.maxObjects = 10
+		e.restart()
+		rows = append(rows, e.passRows()...)
+		clusters := map[string]bool{"token_privileges": true, "node_never_read": true, "guests_read_in_turns": true}
+		filed := map[string]bool{}
+		for _, r := range rows {
+			notice, _ := r.Detail["notice"].(string)
+			if notice == "" {
+				continue
+			}
+			want := removedObject(r.Fields[0], "", "").resourceType
+			if clusters[notice] {
+				want = observedClusterType
+			}
+			if r.ResourceType != want || r.Detail["node"] != nil && r.Node != r.Detail["node"] {
+				t.Errorf("%s of %v filed under %s (node %q), want %s", notice, r.Fields, r.ResourceType, r.Node, want)
+			}
+			filed[notice+" "+r.ResourceType+"/"+r.ResourceID] = true
+		}
+		id := e.cluster.ID.String()
+		for _, want := range []string{"too_many_objects storage/" + id, "changed_past_cap network/pve-01",
+			"back_under_cap node/pve-01", "guests_read_in_turns cluster/" + id} {
+			if !filed[want] {
+				t.Errorf("no %s among %v", want, slices.Sorted(maps.Keys(filed)))
 			}
 		}
-		e.expect("still past it")
 	})
 	t.Run("a back-under pass whose write is refused is the next pass's, once", func(t *testing.T) {
 		t.Parallel()

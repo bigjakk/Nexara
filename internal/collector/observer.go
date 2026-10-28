@@ -946,18 +946,11 @@ func (p *observePass) pastCapRow(kind, node string, s *capScope) (observedChange
 	if len(s.added)+len(s.removed)+len(s.changed) == 0 {
 		return observedChangeRow{}, false
 	}
-	resourceType, resourceID := p.noticeTarget(kind, node)
-	row := noticeRow(resourceType, resourceID, "changed_past_cap", []string{kind})
+	row := p.kindNotice(kind, node, s, "changed_past_cap")
 	row.Detail["while_over_cap"] = true
 	for name, ids := range map[string][]string{"added": s.added, "removed": s.removed, "changed": s.changed} {
 		row.Detail[name] = len(ids)
 		row.Detail[name+"_ids"] = sampleIDs(ids, observePastCapNamed)
-	}
-	if node != "" {
-		row.Detail["node"] = node
-	}
-	if s.parent != "" {
-		row.Detail["parent"] = s.parent
 	}
 	return row, true
 }
@@ -1114,15 +1107,8 @@ func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string)
 func (p *observePass) noticeOverCap(kind, node string, s *capScope) observedChangeRow {
 	p.o.logger.Warn("object observer: a kind lists more objects than are compared field by field; counting its changes",
 		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "parent", s.parent, "objects", s.listed)
-	resourceType, resourceID := p.noticeTarget(kind, node)
-	row := noticeRow(resourceType, resourceID, "too_many_objects", []string{kind})
+	row := p.kindNotice(kind, node, s, "too_many_objects")
 	row.Detail["objects"], row.Detail["cap"] = s.listed, s.cap
-	if node != "" {
-		row.Detail["node"] = node
-	}
-	if s.parent != "" {
-		row.Detail["parent"] = s.parent
-	}
 	return row
 }
 
@@ -1132,10 +1118,16 @@ func (p *observePass) noticeOverCap(kind, node string, s *capScope) observedChan
 func (p *observePass) noticeBackUnderCap(kind, node string, s *capScope) observedChangeRow {
 	p.o.logger.Info("object observer: a kind is back under the cap; compared field by field again",
 		"cluster_id", p.cluster.ID, "kind", kind, "node", node, "parent", s.parent)
+	return p.kindNotice(kind, node, s, "back_under_cap")
+}
+
+// kindNotice is a kind's notice (noticeRow) at its target (noticeTarget), with
+// the node of a node's reading, and the parent of a parent's objects.
+func (p *observePass) kindNotice(kind, node string, s *capScope, notice string) observedChangeRow {
 	resourceType, resourceID := p.noticeTarget(kind, node)
-	row := noticeRow(resourceType, resourceID, "back_under_cap", []string{kind})
+	row := noticeRow(resourceType, resourceID, notice, []string{kind})
 	if node != "" {
-		row.Detail["node"] = node
+		row.Node, row.Detail["node"] = node, node
 	}
 	if s.parent != "" {
 		row.Detail["parent"] = s.parent
@@ -1143,28 +1135,28 @@ func (p *observePass) noticeBackUnderCap(kind, node string, s *capScope) observe
 	return row
 }
 
-// noticeTarget is where a kind's notice is filed: under its own type, at an id
-// its History reads. A tab's History reads every row of its types, so any id of
-// the cluster does, and the notice takes the cluster's own; the cluster's
-// firewall rule set and options are read by their id, cluster, and a node's own
-// kinds, its interfaces among them, by the node's. A kind no tab reads whole —
-// a storage's, a backup job's and a guest's History are one object's — files
-// it under the cluster, whose History reads it.
+// noticeTarget is where a kind's notice, or its row past the cap, is filed:
+// under the type the kind's own objects file under (removedObject), which is
+// read under that type's own View — a row past the cap names ids, which no one
+// may read under another kind's — at an id a History of it reads: the
+// cluster's for a kind of the cluster, whose History reads every type filed in
+// it; cluster for the cluster's firewall rule set and options; for a node's
+// objects the node — its options, DNS and time at node / <node>, its
+// interfaces at network / <node>, its ACME settings at acme_config / <node> —
+// or its firewall rules at firewall_rule / node/<node>. Only the cluster's own
+// notices (token_privileges, node_never_read, guests_read_in_turns) file
+// under cluster / <cluster>.
 func (p *observePass) noticeTarget(kind, node string) (resourceType, resourceID string) {
-	cluster := p.cluster.ID.String()
+	resourceType = removedObject(kind, "", node).resourceType
 	switch kind {
-	case "storage", "backup", "vm", "container":
-		return observedClusterType, cluster
 	case "firewall_rule", "firewall_options":
-		return kind, "cluster"
-	case "node_options", "node_dns", "node_time", "network":
-		return "node", node
+		return resourceType, "cluster"
+	case "node_options", "node_dns", "node_time", "network", "acme_config":
+		return resourceType, node
 	case "node_firewall":
-		return "firewall_rule", "node/" + node
-	case "acme_config":
-		return kind, node
+		return resourceType, "node/" + node
 	}
-	return kind, cluster
+	return resourceType, p.cluster.ID.String()
 }
 
 // saveNotices files rows, notices, with the notice gates as changes leaves them
