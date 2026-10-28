@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -136,10 +137,15 @@ func (e *RBACEngine) GetFlatPermissions(ctx context.Context, userID uuid.UUID) (
 	return result, nil
 }
 
-// InvalidateUser clears the cached permissions for a user.
+// InvalidateUser clears the cached permissions for a user. A delete that fails is
+// logged, with the user it was for: the cached set then stays until its entry
+// expires (rbacCacheTTL), and a grant that was just revoked keeps working that long.
 func (e *RBACEngine) InvalidateUser(ctx context.Context, userID uuid.UUID) {
 	if e.redis != nil {
-		_ = e.redis.Del(ctx, rbacCachePrefix+userID.String()).Err()
+		if err := e.redis.Del(ctx, rbacCachePrefix+userID.String()).Err(); err != nil {
+			slog.Warn("rbac: could not clear a user's cached permissions; the cached set stays until its entry expires",
+				"user_id", userID, "ttl", rbacCacheTTL, "error", err)
+		}
 	}
 }
 
