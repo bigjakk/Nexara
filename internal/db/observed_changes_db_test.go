@@ -261,6 +261,13 @@ func TestObservedChanges(t *testing.T) {
 	for _, iface := range []string{"pve-03/vmbr2", "pve-03/vmbr3"} {
 		audit(observedCluster, in, "network", iface, 0, "interface_updated", map[string]any{"fields": []string{"cidr"}})
 	}
+	// A field a rule takes only where it appeared: a zone's mac filled in.
+	macFilled := seed(observedCluster, "sdn_zone", "zone01", 0, "changed", "", []string{"mac"}, at)
+	exec("an appeared field", `UPDATE cluster_object_changes SET detail = '{"fields_appeared":["mac"]}' WHERE id = $1`, macFilled)
+	macChanged := seed(observedCluster, "sdn_zone", "zone02", 0, "changed", "", []string{"mac"}, at)
+	for _, zone := range []string{"zone01", "zone02"} {
+		audit(observedCluster, in, "sdn_zone", zone, 0, "sdn_zone_updated", map[string]any{"fields": []string{"mtu"}})
+	}
 	// A rule set's own rows by count: an update one in and one out, a create
 	// one in and never a rule moved.
 	counted := func(id uuid.UUID, counts map[string]int) {
@@ -443,6 +450,7 @@ func TestObservedChanges(t *testing.T) {
 	with := func(r map[string]any, key, value string) map[string]any { r[key] = value; return r }
 	granteeRemoved := func(r map[string]any) map[string]any { r["grantee_removed"] = true; return r }
 	derived := func(r map[string]any, d map[string][]string) map[string]any { r["derived"] = d; return r }
+	appeared := func(r map[string]any) map[string]any { r["appeared"] = true; return r }
 	rules := jsonOf([]map[string]any{
 		rule("storage", "", "storage", "id", false, "", "", "", ""),
 		rule("backup", "", "backup", "id", false, "", "^run$", "", ""),
@@ -456,6 +464,7 @@ func TestObservedChanges(t *testing.T) {
 		with(rule("ha_rule", "changed", "ha_rule", "id", false, "^updated$", "", "", ""), "fields_from", "keys"),
 		derived(with(rule("network", "changed", "network", "id", false, "^interface_updated$", "", "", ""),
 			"fields_from", "fields"), map[string][]string{"cidr": {"address", "netmask"}, "*": {"method"}}),
+		appeared(rule("sdn_zone", "changed", "sdn_zone", "id", false, "^sdn_zone_updated$", "", "", "^mac$")),
 		with(rule("firewall_rule", "changed", "firewall_rule", "id", false, "^firewall_rule_updated$", "", "", "^rules$"),
 			"counts", "edit1"),
 		with(rule("firewall_security_group_rule", "changed", "firewall_security_group_rule", "id", false,
@@ -587,6 +596,8 @@ func TestObservedChanges(t *testing.T) {
 		{"an update, and a field its row does not record", haKeysOther, "shown"},
 		{"an update of a field it sent, and of those derived from it", sentDerived, "explained"},
 		{"an update, and a field it did not send", sentOther, "shown"},
+		{"a field filled in where there was none", macFilled, "explained"},
+		{"the same field changed", macChanged, "shown"},
 		{"a rule updated, one in and one out", ruleEdited, "explained"},
 		{"a rule updated, and another added", ruleEditedAndAdded, "shown"},
 		{"a rule created, one in", groupRuleAdded, "explained"},

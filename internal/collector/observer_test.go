@@ -1310,6 +1310,10 @@ func TestObserveCanonicalForms(t *testing.T) {
 			t.Errorf("member ids %s: kept %v, want %v", tc.list, ok, tc.ok)
 		}
 	}
+	if d := diffTags(objectTags{scalar: map[string]string{"a": "1", "b": "1"}},
+		objectTags{scalar: map[string]string{"a": "2", "b": "1", "c": "1"}}); fmt.Sprint(d.fields, d.appeared) != "[a c] [c]" {
+		t.Errorf("a field that appeared: %+v", d)
+	}
 	d := diffTags(objectTags{members: map[string][]string{"vmid": {"100", "101"}}},
 		objectTags{members: map[string][]string{"vmid": {"101", "102"}}})
 	if fmt.Sprint(d.fields, d.joined, d.left, d.counts) != "[vmid] [vmid:102] [vmid:100] map[vmid:{1 1 0}]" {
@@ -1519,8 +1523,8 @@ func TestObservedChangeRules(t *testing.T) {
 			t.Errorf("rule %+v: object, member, counts or detail_key", r)
 		}
 		if !slices.Contains([]string{"", "config", "settings", "keys", "fields"}, r.FieldsFrom) ||
-			len(r.Derived) > 0 && r.FieldsFrom != "fields" {
-			t.Errorf("rule %+v: fields_from, or derived without the fields it is derived from", r)
+			len(r.Derived) > 0 && r.FieldsFrom != "fields" || r.Appeared && r.FieldRe == "" {
+			t.Errorf("rule %+v: fields_from, derived without the fields it is derived from, or appeared naming no field", r)
 		}
 		for _, re := range []string{r.ActionRe, r.ExceptRe, r.WorkerRe, r.FieldRe} {
 			if _, err := regexp.Compile(re); err != nil || (re != "" && !strings.HasPrefix(re, "^")) {
@@ -1532,6 +1536,10 @@ func TestObservedChangeRules(t *testing.T) {
 		if r.Change == "changed" && r.MatchKey == "id" && r.Member == "" && r.FieldRe == "" && r.FieldsFrom == "" &&
 			r.DetailKey == "" && r.Counts == "" && !slices.Contains(anyFieldUpdates, r.Kind) {
 			t.Errorf("rule %+v explains any field of its object, and %s is not in anyFieldUpdates", r, r.Kind)
+		}
+		// Proxmox fills in a zone's mac only where there was none.
+		if r.Kind == "sdn_zone" && r.FieldRe != "" && regexp.MustCompile(r.FieldRe).MatchString("mac") && !r.Appeared {
+			t.Errorf("rule %+v: a zone's mac is explained only where it appeared", r)
 		}
 		// An ACL rule names its grantees, unless it is a path taken with its
 		// object: a grant explains no one it does not name. A deletion of a

@@ -1532,6 +1532,9 @@ func changeRow(obj observedObject, change string, d tagDiff, lastSeen, observed 
 	if len(d.counts) > 0 {
 		row.Detail["counts"] = d.counts
 	}
+	if len(d.appeared) > 0 {
+		row.Detail["fields_appeared"] = d.appeared
+	}
 	if obj.vmid != 0 {
 		vmid := obj.vmid
 		row.Vmid = &vmid

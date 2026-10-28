@@ -70,6 +70,9 @@ type explainRule struct {
 	// GranteeRemoved keeps a row's ACL grantees leaving to those whose own
 	// removal (pve_user, pve_group or pve_token removed) its task overlaps.
 	GranteeRemoved bool `json:"grantee_removed"`
+	// Appeared keeps a rule to fields the object did not have before
+	// (detail.fields_appeared): a value Proxmox fills in where none was.
+	Appeared bool `json:"appeared"`
 	// FieldsFrom keeps a row to the fields its details name: config, a guest
 	// config edit's keys and the keys it deleted or reverted (and, if it named
 	// a disk, the unused<n> and boot a disk's change or removal moves);
@@ -135,9 +138,9 @@ func mappingRules(kind string, mdev bool) []explainRule {
 }
 
 // sdnFields is sentFields for an SDN kind, whose actions carry the kind's
-// name.
-func sdnFields(kind string, derived map[string][]string) []explainRule {
-	return sentFields(kind, kind+"_created", kind+"_updated", kind+"_deleted", derived)
+// name, and from whose fields Proxmox derives none.
+func sdnFields(kind string) []explainRule {
+	return sentFields(kind, kind+"_created", kind+"_updated", kind+"_deleted", nil)
 }
 
 // inDirections is one rule for each direction named: an action that can change
@@ -386,19 +389,22 @@ var observedChangeRules = slices.Concat(
 	// SDN objects. An edit writes what it sent (pve-network
 	// API2/Network/SDN/*.pm update, whose hooks check and write no field but
 	// one): an EVPN zone left with no mac is given one (Zones/EvpnPlugin.pm
-	// on_update_hook).
-	sdnFields("sdn_zone", map[string][]string{"*": {"mac"}}),
-	sdnFields("sdn_vnet", nil),
-	sdnFields("sdn_subnet", nil),
+	// on_update_hook), so a zone's edit explains a mac appearing, never one
+	// changed.
+	sdnFields("sdn_zone"),
+	[]explainRule{{Kind: "sdn_zone", Change: "changed", AuditType: "sdn_zone", MatchKey: "id",
+		ActionRe: `^sdn_zone_updated$`, FieldRe: `^mac$`, Appeared: true}},
+	sdnFields("sdn_vnet"),
+	sdnFields("sdn_subnet"),
 	[]explainRule{
 		// A subnet created through Nexara whose id could not be read back is
 		// filed under its CIDR (sdn.go sdnSubnetKey), which the subnet lists.
 		{Kind: "sdn_subnet", Change: "added", AuditType: "sdn_subnet", MatchKey: "cluster",
 			ActionRe: `^sdn_subnet_created$`, Member: "joined", MemberOf: "audit:cidr:%s"},
 	},
-	sdnFields("sdn_controller", nil),
-	sdnFields("sdn_ipam", nil),
-	sdnFields("sdn_dns", nil),
+	sdnFields("sdn_controller"),
+	sdnFields("sdn_ipam"),
+	sdnFields("sdn_dns"),
 
 	// The cluster firewall. Its options and rule sets always exist, so they
 	// only change; a template applied adds to the rules. A node's rule set is

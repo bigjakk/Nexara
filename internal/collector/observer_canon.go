@@ -425,6 +425,7 @@ type listCount struct {
 // and only that guest's destroy may explain it.
 type tagDiff struct {
 	fields       []string
+	appeared     []string // of fields, the ones the last reading did not have
 	counts       map[string]listCount
 	joined, left []string
 }
@@ -436,6 +437,9 @@ func diffTags(prev, cur objectTags) tagDiff {
 	for k, v := range cur.scalar {
 		if old, ok := prev.scalar[k]; !ok || old != v {
 			d.fields = append(d.fields, k)
+			if !ok {
+				d.appeared = append(d.appeared, k)
+			}
 		}
 	}
 	for k := range prev.scalar {
@@ -462,6 +466,7 @@ func diffTags(prev, cur objectTags) tagDiff {
 	}
 	slices.Sort(d.fields)
 	d.fields = slices.Compact(d.fields)
+	slices.Sort(d.appeared)
 	slices.Sort(d.joined)
 	slices.Sort(d.left)
 	return d

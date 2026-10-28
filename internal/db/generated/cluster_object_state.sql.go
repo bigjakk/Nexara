@@ -126,7 +126,8 @@ WITH rules AS MATERIALIZED (
            e.value->>'fields_from'         AS fields_from,
            e.value->>'audit_id_is'         AS audit_id_is,
            COALESCE((e.value->>'grantee_removed')::bool, false) AS grantee_removed,
-           COALESCE(e.value->'derived', '{}')  AS derived
+           COALESCE(e.value->'derived', '{}')  AS derived,
+           COALESCE((e.value->>'appeared')::bool, false) AS appeared
     FROM jsonb_array_elements($1::jsonb) AS e
 ), pending AS MATERIALIZED (
     SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.fields, c.detail, c.node,
@@ -151,7 +152,7 @@ WITH rules AS MATERIALIZED (
     -- can use.
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
            a.created_at
     FROM explainable p
@@ -162,7 +163,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
@@ -172,7 +173,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
@@ -182,7 +183,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
@@ -193,7 +194,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
@@ -203,7 +204,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
@@ -212,7 +213,7 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
 ), hits AS (
     SELECT k.id, k.field_re, k.member, k.member_of = '' AS any_member, n.member_names, k.counts, k.fields_from,
-           n.fields_named, k.audit_id, k.grantee_removed,
+           n.fields_named, k.audit_id, k.grantee_removed, k.appeared,
            k.created_at,
            COALESCE(th.started_at, k.created_at) AS task_start,
            CASE WHEN th.upid IS NULL THEN k.created_at ELSE COALESCE(th.finished_at, now()) END AS task_end
@@ -344,6 +345,7 @@ WITH rules AS MATERIALIZED (
         FROM hits h
         WHERE h.id = n.id
           AND (n.field = '' OR h.field_re = '' OR n.field ~ h.field_re)
+          AND (NOT h.appeared OR COALESCE(p.detail->'fields_appeared' ? n.field, false))
           AND (h.fields_from = '' OR n.field = ANY(h.fields_named)
                OR (h.fields_from = 'config' AND n.field ~ '^(unused[0-9]+|boot)$'
                    AND EXISTS (SELECT 1 FROM unnest(h.fields_named) AS f
@@ -411,7 +413,7 @@ WITH rules AS MATERIALIZED (
                (array_agg(h.audit_id ORDER BY h.created_at DESC, h.audit_id))[1] AS audit_id,
                max(h.created_at)                            AS created_at
         FROM hits h
-        WHERE h.id = n.id AND h.member = '' AND (h.field_re = '' OR n.field ~ h.field_re)
+        WHERE h.id = n.id AND h.member = '' AND NOT h.appeared AND (h.field_re = '' OR n.field ~ h.field_re)
           AND (h.fields_from = '' OR n.field = ANY(h.fields_named))
     ) agg
     WHERE n.kind = 'list'
@@ -476,7 +478,8 @@ type ClassifyObservedChangesParams struct {
 // never a pattern. counts
 // says what the row does to a list's items (listed, below); fields_from keeps
 // it to the fields its details say it set and, with derived, those Proxmox
-// derives from them (fields_named, below); audit_id_is
+// derives from them (fields_named, below); appeared to fields the change
+// names in detail.fields_appeared, absent from the object before; audit_id_is
 // to rows filed under that marker id; grantee_removed (an ACL's grantee
 // leaving) to a grantee whose own removal, a user, group or token removed
 // change, the same row's task overlaps.
