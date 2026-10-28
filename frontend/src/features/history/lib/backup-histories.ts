@@ -149,20 +149,26 @@ function storageSummary(entry: HistoryEntry, t: TFunction): string | undefined {
 }
 
 /**
- * A PBS server's Summary: the datastore, job or snapshot a row is about, and
- * where a restore went.
+ * A PBS server's Summary: the datastore, job or snapshot a row is about, where
+ * a restore went, and whether the server it read from was confirmed: a restore
+ * tied to the server only because no other storage could be (matched_by
+ * only_candidate) is not shown as a restore from it without saying so.
  */
 function pbsSummary(entry: HistoryEntry, t: TFunction): string | undefined {
   if (entry.kind !== "audit") return undefined;
   const d = parseDetails(entry.details);
   const type = str(d, "backup_type");
   const id = str(d, "backup_id");
-  const restoredTo = entry.resource_type === "backup" ? str(d, "vmid") : "";
+  const restore = entry.resource_type === "backup";
+  const restoredTo = restore ? str(d, "vmid") : "";
   return joined([
     firstOf(d, ["datastore", "store"]),
     str(d, "job_id"),
     type !== "" && id !== "" ? `${type}/${id}` : "",
     restoredTo === "" ? "" : t("summaries.restoredTo", { vmid: restoredTo }),
+    restore && str(d, "matched_by") === "only_candidate"
+      ? t("summaries.sourceNotConfirmed")
+      : "",
     errorOf(d, t),
   ]);
 }

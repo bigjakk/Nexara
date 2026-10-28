@@ -135,9 +135,26 @@ describe("a kind's Summary", () => {
           backup_type: "vm",
           backup_id: "100",
           vmid: 105,
+          matched_by: "address",
         }),
       }),
       "datastore01 · vm/100 · → VM/CT 105",
+    ],
+    // Tied to the server only because no other storage could be.
+    [
+      "pbs",
+      "history-pbs",
+      entry({
+        resource_type: "backup",
+        details: JSON.stringify({
+          datastore: "datastore01",
+          backup_type: "vm",
+          backup_id: "100",
+          vmid: 105,
+          matched_by: "only_candidate",
+        }),
+      }),
+      "datastore01 · vm/100 · → VM/CT 105 · source not confirmed",
     ],
     [
       "veeamServer",

@@ -50,6 +50,7 @@
   },
   "summaries": {
     "restoredTo": "→ VM/CT {{vmid}}",
+    "sourceNotConfirmed": "source not confirmed",
     "error": "Error: {{error}}"
   },
   "notes": {
