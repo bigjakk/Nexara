@@ -53,6 +53,32 @@ func (k Kind) Changed(name string, before map[string]json.RawMessage, update map
 	return !ok || now != was
 }
 
+// Moved is the names of the fields whose canonical form differs between before
+// and after, two readings of one object, each field read as Changed reads it:
+// a synchronous update's write, read just before and just after it, moves
+// exactly what the observer will then find moved. A field in one reading alone
+// moved; the digest and Ignore never do. Never nil.
+func (k Kind) Moved(before, after map[string]json.RawMessage) []string {
+	names := map[string]bool{}
+	for _, reading := range []map[string]json.RawMessage{before, after} {
+		for name := range reading {
+			if name != "digest" && !slices.Contains(k.Ignore, name) {
+				names[name] = true
+			}
+		}
+	}
+	moved := []string{}
+	for name := range names {
+		was, had := k.canonical(name, before[name])
+		now, has := k.canonical(name, after[name])
+		if had != has || was != now {
+			moved = append(moved, name)
+		}
+	}
+	slices.Sort(moved)
+	return moved
+}
+
 // canonical is a field's value as the observer compares it: a member list's
 // ids, a set, or a value (internal/collector's fieldSpec.split).
 func (k Kind) canonical(name string, raw json.RawMessage) (string, bool) {
@@ -307,4 +333,19 @@ var (
 	QemuConfig = Kind{Ignore: []string{"lock", "parent", "vmstate", "runningmachine", "runningcpu", "running-nets-host-mtu"}}
 	// pve-container: lock and parent, as for a VM.
 	LXCConfig = Kind{Ignore: []string{"lock", "parent"}}
+	// pve-manager API2/Cluster.pm get_options: allowed-tags is derived per
+	// caller from the tag settings and the token's privileges.
+	ClusterOptions = Kind{Ignore: []string{"allowed-tags"}}
+	// pve-firewall API2/Firewall/Cluster.pm get_options: the options as written.
+	FirewallOptions = Kind{}
+	// pve-ha-manager API2/HA/Resources.pm index: errors is derived (a group
+	// that does not exist).
+	HAResource = Kind{Ignore: []string{"errors"}}
+	// API2/HA/Rules.pm index: order is the rule's place in rules.cfg, which
+	// moves when a rule above it is deleted, and errors is the feasibility
+	// check of the moment, derived from the nodes and the other rules.
+	HARule = Kind{Ignore: []string{"order", "errors"}, Members: []string{"resources"}}
+	// API2/HA/Groups.pm: nodes is re-encoded join(',', keys %$value), unsorted
+	// (HA/Groups.pm encode_value).
+	HAGroup = Kind{Ignore: []string{"type"}, Sets: []string{"nodes"}}
 )

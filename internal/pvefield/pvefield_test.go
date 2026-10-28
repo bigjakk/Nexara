@@ -99,6 +99,32 @@ func TestSplitList(t *testing.T) {
 	}
 }
 
+// TestKindMoved names what two readings of one object differ in, each field
+// compared as the observer compares it.
+func TestKindMoved(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name          string
+		kind          Kind
+		before, after string
+		want          []string
+	}{
+		{"a set in another order", HAGroup, `{"nodes":"pve-01,pve-02"}`, `{"nodes":"pve-02,pve-01"}`, []string{}},
+		{"members in another order", HARule, `{"resources":"vm:101,vm:100"}`, `{"resources":"vm:100,vm:101"}`, []string{}},
+		{"a number read as text", QemuConfig, `{"memory":2048}`, `{"memory":"2048"}`, []string{}},
+		{"what is ignored, and the digest", HARule, `{"order":1,"digest":"a"}`, `{"order":2,"digest":"b"}`, []string{}},
+		{"one changed, one appeared, one gone", QemuConfig, `{"memory":2048,"scsi1":"x"}`, `{"memory":4096,"unused0":"x"}`,
+			[]string{"memory", "scsi1", "unused0"}},
+	} {
+		var before, after map[string]json.RawMessage
+		_ = json.Unmarshal([]byte(tc.before), &before)
+		_ = json.Unmarshal([]byte(tc.after), &after)
+		if got := tc.kind.Moved(before, after); !slices.Equal(got, tc.want) || got == nil {
+			t.Errorf("%s: moved %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestSecretParamsAreTheScrubs holds the list to the names 000127 scrubbed from
 // the rows kept before it: a name added to one and not the other is a secret
 // either kept in old rows or redacted under a name no scrub reached.

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -12,6 +13,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // ClusterOptionsHandler handles cluster options and datacenter config endpoints.
@@ -36,23 +38,28 @@ func (h *ClusterOptionsHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.
 // what a History row needs to say what changed. action is the key these rows
 // have always carried. Taken from the typed params rather than a list of keys,
 // so an option added to the struct is covered without anyone remembering to.
-func clusterOptionsAudit(action string, req proxmox.UpdateClusterOptionsParams) json.RawMessage {
+// keep, when not nil, keeps the names to those it holds: what the write moved
+// (movedFields), as the options page sends its whole form.
+func clusterOptionsAudit(action string, req proxmox.UpdateClusterOptionsParams, keep func(string) bool) map[string]any {
+	if keep == nil {
+		keep = func(string) bool { return true }
+	}
 	settings := []string{}
 	v := reflect.ValueOf(req)
 	for i := 0; i < v.NumField(); i++ {
 		if f := v.Field(i); f.Kind() == reflect.Pointer && !f.IsNil() {
-			name, _, _ := strings.Cut(v.Type().Field(i).Tag.Get("json"), ",")
-			settings = append(settings, name)
+			if name, _, _ := strings.Cut(v.Type().Field(i).Tag.Get("json"), ","); keep(name) {
+				settings = append(settings, name)
+			}
 		}
 	}
 	cleared := []string{}
 	for _, name := range strings.Split(req.Delete, ",") {
-		if name = strings.TrimSpace(name); name != "" {
+		if name = strings.TrimSpace(name); name != "" && keep(name) {
 			cleared = append(cleared, name)
 		}
 	}
-	details, _ := json.Marshal(map[string]any{"action": action, "settings": settings, "cleared": cleared})
-	return details
+	return map[string]any{"action": action, "settings": settings, "cleared": cleared}
 }
 
 // GetOptions handles GET /clusters/:cluster_id/options.
@@ -110,11 +117,21 @@ func (h *ClusterOptionsHandler) UpdateOptions(c fiber.Ctx, p *apischema.Params) 
 	if err != nil {
 		return err
 	}
+	read := readBefore(c.Context(), pxClient)
+	before := read(proxmox.ObserveClusterOptions(), nil)
 	if err := pxClient.SetClusterOptions(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "updated",
-		clusterOptionsAudit("update_options", req))
+	moved, ok := movedFields(before, read(proxmox.ObserveClusterOptions(), nil), pvefield.ClusterOptions)
+	var details map[string]any
+	if ok {
+		details = clusterOptionsAudit("update_options", req, func(name string) bool { return slices.Contains(moved, name) })
+	} else {
+		details = clusterOptionsAudit("update_options", req, nil)
+		details["fields_unverified"] = true
+	}
+	audit, _ := json.Marshal(details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "updated", audit)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -156,8 +173,8 @@ func (h *ClusterOptionsHandler) UpdateDescription(c fiber.Ctx, p *apischema.Para
 	if err := pxClient.SetClusterOptions(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "description_updated",
-		clusterOptionsAudit("update_description", req))
+	details, _ := json.Marshal(clusterOptionsAudit("update_description", req, nil))
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "description_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -204,8 +221,8 @@ func (h *ClusterOptionsHandler) UpdateTags(c fiber.Ctx, p *apischema.Params) err
 	if err := pxClient.SetClusterOptions(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "tags_updated",
-		clusterOptionsAudit("update_tags", req))
+	details, _ := json.Marshal(clusterOptionsAudit("update_tags", req, nil))
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "tags_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

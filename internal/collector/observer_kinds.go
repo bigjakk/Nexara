@@ -163,10 +163,8 @@ var (
 	storageSpec = specOf(pvefield.Storage)
 	// pve-manager API2/Cluster/Mapping/{PCI,USB}.pm index: checks appear only
 	// with check-node, never sent; map is one entry per node.
-	mappingSpec = newFieldSpec([]string{"checks"}, []string{"map"})
-	// pve-manager API2/Cluster.pm get_options: allowed-tags is derived per
-	// caller from the tag settings and the token's privileges.
-	clusterOptionsSpec = newFieldSpec([]string{"allowed-tags"}, nil)
+	mappingSpec        = newFieldSpec([]string{"checks"}, []string{"map"})
+	clusterOptionsSpec = specOf(pvefield.ClusterOptions)
 	nodeDNSSpec        = newFieldSpec(nil, nil)
 	// pve-manager API2/Nodes.pm time: time and localtime are the clock.
 	nodeTimeSpec = newFieldSpec([]string{"time", "localtime"}, nil)
@@ -177,19 +175,13 @@ var (
 	qemuConfigSpec   = specOf(pvefield.QemuConfig)
 	lxcConfigSpec    = specOf(pvefield.LXCConfig)
 
-	// pve-ha-manager API2/HA/Resources.pm index: errors is derived (a group
-	// that does not exist).
-	haResourceSpec = newFieldSpec([]string{"errors"}, nil)
-	// API2/HA/Rules.pm index: order is the rule's place in rules.cfg, which
-	// moves when a rule above it is deleted, and errors is the feasibility
-	// check of the moment, derived from the nodes and the other rules.
-	haRuleSpec = newFieldSpec([]string{"order", "errors"}, nil).withMembers("resources")
-	// API2/HA/Groups.pm: nodes is re-encoded join(',', keys %$value), unsorted
-	// (HA/Groups.pm encode_value).
-	haGroupSpec = newFieldSpec([]string{"type"}, []string{"nodes"})
+	haResourceSpec = specOf(pvefield.HAResource)
+	haRuleSpec     = specOf(pvefield.HARule)
+	haGroupSpec    = specOf(pvefield.HAGroup)
 	// pve-firewall Firewall.pm parse_alias: ipversion is derived from the cidr.
-	firewallAliasSpec = newFieldSpec([]string{"ipversion"}, nil)
-	firewallPlainSpec = newFieldSpec(nil, nil)
+	firewallAliasSpec   = newFieldSpec([]string{"ipversion"}, nil)
+	firewallPlainSpec   = newFieldSpec(nil, nil)
+	firewallOptionsSpec = specOf(pvefield.FirewallOptions)
 	// An IP set entry's errors is the check of the moment against the aliases
 	// it names (pve-firewall IPSet.pm), derived like a rule's.
 	firewallIPSetEntrySpec = newFieldSpec([]string{"errors"}, nil)
@@ -247,7 +239,7 @@ var observeKindSchemas = map[string]string{
 	"sdn_controller":               sdnControllerSpec.digest(),
 	"sdn_ipam":                     sdnIPAMSpec.digest(),
 	"sdn_dns":                      sdnDNSSpec.digest(),
-	"firewall_options":             firewallPlainSpec.digest(),
+	"firewall_options":             firewallOptionsSpec.digest(),
 	"firewall_rule":                "rules: list; " + firewallRuleSpec.digest(),
 	"firewall_alias":               firewallAliasSpec.digest(),
 	"firewall_ipset":               firewallPlainSpec.digest(),
@@ -687,7 +679,7 @@ func readFirewallOptions(ctx context.Context, p *observePass) ([]kindReading, re
 		return nil, out
 	}
 	return []kindReading{{kind: "firewall_options", objects: []observedObject{{
-		id: "cluster", resourceType: "firewall_options", resourceID: "cluster", fields: firewallPlainSpec.canonicalFields(obj),
+		id: "cluster", resourceType: "firewall_options", resourceID: "cluster", fields: firewallOptionsSpec.canonicalFields(obj),
 	}}}}, readOK
 }
 

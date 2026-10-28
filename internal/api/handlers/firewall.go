@@ -14,6 +14,7 @@ import (
 	"github.com/bigjakk/nexara/internal/auditkey"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
@@ -446,11 +447,18 @@ func (h *NetworkHandler) SetFirewallOptions(c fiber.Ctx, p *apischema.Params) er
 		return err
 	}
 
+	// The options card sends its whole form, so the row records only what the
+	// write moved, read before and after it as the observer reads the options.
+	read := readBefore(c.Context(), pxClient)
+	before := read(proxmox.ObserveFirewall("options"))
 	if err := pxClient.SetClusterFirewallOptions(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
-
-	details, _ := json.Marshal(req)
+	moved, ok := movedFields(before, read(proxmox.ObserveFirewall("options")), pvefield.FirewallOptions)
+	var set map[string]any
+	sent, _ := json.Marshal(req)
+	_ = json.Unmarshal(sent, &set)
+	details, _ := json.Marshal(keepMoved(map[string]any{}, set, moved, ok))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_options", "cluster", "firewall_options_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})

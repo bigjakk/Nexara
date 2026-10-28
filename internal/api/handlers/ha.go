@@ -18,6 +18,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // decodeParamValue returns a path parameter URL-decoded, falling back to the
@@ -130,6 +131,18 @@ func haReportedSID(pxClient *proxmox.Client, sid string) func(context.Context) (
 			return "", err
 		}
 		return res.SID, nil
+	}
+}
+
+// haListed picks, from an HA list (/cluster/ha/resources, groups or rules), the
+// item whose key is id: for a resource's sid, a bare VMID matching the vm: or
+// ct: sid Proxmox gives it, as the API takes one.
+func haListed(key, id string) func(map[string]json.RawMessage) bool {
+	_, numErr := strconv.ParseUint(id, 10, 32)
+	return func(item map[string]json.RawMessage) bool {
+		var got string
+		_ = json.Unmarshal(item[key], &got)
+		return got == id || key == "sid" && numErr == nil && (got == "vm:"+id || got == "ct:"+id)
 	}
 }
 
@@ -394,33 +407,39 @@ func (h *HAHandler) UpdateResource(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	read := func() map[string]json.RawMessage {
+		return readListed(c.Context(), pxClient, proxmox.ObserveHAResources(), haListed("sid", sid))
+	}
+	before := read()
 	if err := pxClient.UpdateHAResource(c.Context(), sid, req); err != nil {
 		return mapProxmoxError(err)
 	}
+	moved, ok := movedFields(before, read(), pvefield.HAResource)
 	sid = h.sidKey(c.Context(), clusterID, sid, haReportedSID(pxClient, sid))
 	detailMap := map[string]any{"sid": sid}
 	if name := resolveSIDName(c.Context(), h.queries, clusterID, sid); name != "" {
 		detailMap["name"] = name
 	}
+	set := map[string]any{}
 	if req.State != nil {
-		detailMap["state"] = *req.State
+		set["state"] = *req.State
 	}
 	if req.Group != nil {
-		detailMap["group"] = *req.Group
+		set["group"] = *req.Group
 	}
 	if req.MaxRestart != nil {
-		detailMap["max_restart"] = *req.MaxRestart
+		set["max_restart"] = *req.MaxRestart
 	}
 	if req.MaxRelocate != nil {
-		detailMap["max_relocate"] = *req.MaxRelocate
+		set["max_relocate"] = *req.MaxRelocate
 	}
 	if req.Comment != nil {
-		detailMap["comment"] = *req.Comment
+		set["comment"] = *req.Comment
 	}
 	if req.Failback != nil {
-		detailMap["failback"] = *req.Failback
+		set["failback"] = *req.Failback
 	}
-	details, _ := json.Marshal(detailMap)
+	details, _ := json.Marshal(keepMoved(detailMap, set, moved, ok))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_resource", sid, "updated", details)
 	h.publishHA(c, clusterID, sid, "resource_updated")
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -592,26 +611,31 @@ func (h *HAHandler) UpdateGroup(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	read := func() map[string]json.RawMessage {
+		return readListed(c.Context(), pxClient, proxmox.ObserveHAGroups(), haListed("group", group))
+	}
+	before := read()
 	if err := pxClient.UpdateHAGroup(c.Context(), group, req); err != nil {
 		if proxmox.IsGroupsMigratedError(err) {
 			return fiber.NewError(fiber.StatusConflict, haGroupsMigratedMsg)
 		}
 		return mapProxmoxError(err)
 	}
-	detailMap := map[string]any{"group": group}
+	moved, ok := movedFields(before, read(), pvefield.HAGroup)
+	set := map[string]any{}
 	if req.Nodes != nil {
-		detailMap["nodes"] = *req.Nodes
+		set["nodes"] = *req.Nodes
 	}
 	if req.Restricted != nil {
-		detailMap["restricted"] = *req.Restricted
+		set["restricted"] = *req.Restricted
 	}
 	if req.NoFailback != nil {
-		detailMap["nofailback"] = *req.NoFailback
+		set["nofailback"] = *req.NoFailback
 	}
 	if req.Comment != nil {
-		detailMap["comment"] = *req.Comment
+		set["comment"] = *req.Comment
 	}
-	details, _ := json.Marshal(detailMap)
+	details, _ := json.Marshal(keepMoved(map[string]any{"group": group}, set, moved, ok))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_group", group, "updated", details)
 	h.publishHA(c, clusterID, group, "group_updated")
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -785,30 +809,38 @@ func (h *HAHandler) UpdateRule(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	read := func() map[string]json.RawMessage {
+		return readListed(c.Context(), pxClient, proxmox.ObserveHARules(), haListed("rule", rule))
+	}
+	before := read()
 	if err := pxClient.UpdateHARule(c.Context(), rule, ruleType, req); err != nil {
 		return mapHARuleError(err)
 	}
-	detailMap := map[string]any{"rule": rule, "type": ruleType}
+	moved, ok := movedFields(before, read(), pvefield.HARule)
+	set := map[string]any{}
 	if req.Resources != nil {
-		detailMap["resources"] = *req.Resources
-		if names := resolveResourceNames(c.Context(), h.queries, clusterID, *req.Resources); names != nil {
-			detailMap["resource_names"] = names
-		}
+		set["resources"] = *req.Resources
 	}
 	if req.Nodes != nil {
-		detailMap["nodes"] = *req.Nodes
+		set["nodes"] = *req.Nodes
 	}
 	if req.Strict != nil {
-		detailMap["strict"] = *req.Strict
+		set["strict"] = *req.Strict
 	}
 	if req.Affinity != nil {
-		detailMap["affinity"] = *req.Affinity
+		set["affinity"] = *req.Affinity
 	}
 	if req.Comment != nil {
-		detailMap["comment"] = *req.Comment
+		set["comment"] = *req.Comment
 	}
 	if req.Disable != nil {
-		detailMap["disable"] = *req.Disable
+		set["disable"] = *req.Disable
+	}
+	detailMap := keepMoved(map[string]any{"rule": rule, "type": ruleType}, set, moved, ok)
+	if resources, kept := detailMap["resources"].(string); kept {
+		if names := resolveResourceNames(c.Context(), h.queries, clusterID, resources); names != nil {
+			detailMap["resource_names"] = names
+		}
 	}
 	details, _ := json.Marshal(detailMap)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", rule, "updated", details)

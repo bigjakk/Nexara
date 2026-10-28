@@ -403,8 +403,73 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 				return handlers.NewClusterOptionsHandler(q, haCreateEncKey, nil).UpdateOptions
 			},
 			wantType: "cluster_options", wantID: testClusterID, wantAction: "updated",
-			wantDetails: map[string]any{"settings": []any{"http_proxy"}, "cleared": []any{"bwlimit"}},
+			wantDetails: map[string]any{"settings": []any{"http_proxy"}, "cleared": []any{"bwlimit"}, "fields_unverified": true},
 			forbidden:   "secret",
+		},
+		{
+			// A whole form sent, read before and after the write: the row keeps only
+			// what moved, an option re-sent as it was (a set of nodes in another
+			// order, a rule's place) never, so the observer explains no more.
+			name: "a cluster options write names only the options it moved", method: fiber.MethodPut, path: clusterScope + "/options",
+			target: "/options", body: `{"keyboard":"de","migration":"type=secure","delete":"bwlimit"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewClusterOptionsHandler(q, haCreateEncKey, nil).UpdateOptions
+			},
+			sequence: map[string][]string{"GET /api2/json/cluster/options": {
+				`{"keyboard":"en-us","migration":{"type":"secure"},"bwlimit":{"default":"1000"}}`,
+				`{"keyboard":"de","migration":{"type":"secure"}}`}},
+			wantType: "cluster_options", wantID: testClusterID, wantAction: "updated",
+			wantDetails: map[string]any{"settings": []any{"keyboard"}, "cleared": []any{"bwlimit"}},
+			wantAbsent:  []string{"fields_unverified"},
+		},
+		{
+			name: "a firewall options write records only what it moved", method: fiber.MethodPut, path: clusterScope + "/firewall/options",
+			target: "/firewall/options", body: `{"enable":1,"policy_in":"ACCEPT","policy_out":"ACCEPT"}`,
+			bind: func(q *db.Queries) Handler { return net(q).SetFirewallOptions },
+			sequence: map[string][]string{"GET /api2/json/cluster/firewall/options": {
+				`{"enable":1,"policy_in":"DROP","policy_out":"ACCEPT"}`, `{"enable":1,"policy_in":"ACCEPT","policy_out":"ACCEPT"}`}},
+			wantType: "firewall_options", wantID: "cluster", wantAction: "firewall_options_updated",
+			wantDetails: map[string]any{"policy_in": "ACCEPT"}, wantAbsent: []string{"enable", "policy_out", "fields_unverified"},
+		},
+		{
+			// Unread after the write: every option sent, and nothing explained.
+			name: "a firewall options write it could not read again", method: fiber.MethodPut, path: clusterScope + "/firewall/options",
+			target: "/firewall/options", body: `{"enable":1,"policy_in":"ACCEPT"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).SetFirewallOptions },
+			sequence: map[string][]string{"GET /api2/json/cluster/firewall/options": {`{"enable":1,"policy_in":"DROP"}`, "refuse"}},
+			wantType: "firewall_options", wantID: "cluster", wantAction: "firewall_options_updated",
+			wantDetails: map[string]any{"enable": json.Number("1"), "policy_in": "ACCEPT", "fields_unverified": true},
+		},
+		{
+			name: "an HA resource update records only what it moved", method: fiber.MethodPut, path: haScope + "/resources/:sid",
+			target: "/ha/resources/109", body: `{"state":"started","max_restart":1,"comment":"web"}`,
+			bind:    func(q *db.Queries) Handler { return ha(q).UpdateResource },
+			replies: map[string]string{"GET /api2/json/cluster/ha/resources/109": `{"sid":"vm:109","type":"vm"}`},
+			sequence: map[string][]string{"GET /api2/json/cluster/ha/resources": {
+				`[{"sid":"vm:109","state":"started","max_restart":1}]`,
+				`[{"sid":"vm:109","state":"started","max_restart":1,"comment":"web"}]`}},
+			wantType: "ha_resource", wantID: "vm:109", wantAction: "updated",
+			wantDetails: map[string]any{"comment": "web"}, wantAbsent: []string{"state", "max_restart", "fields_unverified"},
+		},
+		{
+			name: "an HA group update records only what it moved", method: fiber.MethodPut, path: haScope + "/groups/:group",
+			target: "/ha/groups/group01", body: `{"nodes":"pve-02,pve-01","comment":"web"}`,
+			bind: func(q *db.Queries) Handler { return ha(q).UpdateGroup },
+			sequence: map[string][]string{"GET /api2/json/cluster/ha/groups": {
+				`[{"group":"group01","nodes":"pve-01,pve-02","type":"group"}]`,
+				`[{"group":"group01","nodes":"pve-02,pve-01","comment":"web","type":"group"}]`}},
+			wantType: "ha_group", wantID: "group01", wantAction: "updated",
+			wantDetails: map[string]any{"comment": "web"}, wantAbsent: []string{"nodes", "fields_unverified"},
+		},
+		{
+			name: "an HA rule update records only what it moved", method: fiber.MethodPut, path: haScope + "/rules/:rule",
+			target: "/ha/rules/rule01", body: `{"type":"node-affinity","resources":"vm:100,vm:101","comment":"web"}`,
+			bind: func(q *db.Queries) Handler { return ha(q).UpdateRule },
+			sequence: map[string][]string{"GET /api2/json/cluster/ha/rules": {
+				`[{"rule":"rule01","type":"node-affinity","resources":"vm:101,vm:100","order":1}]`,
+				`[{"rule":"rule01","type":"node-affinity","resources":"vm:100,vm:101","comment":"web","order":2}]`}},
+			wantType: "ha_rule", wantID: "rule01", wantAction: "updated",
+			wantDetails: map[string]any{"comment": "web"}, wantAbsent: []string{"resources", "resource_names", "fields_unverified"},
 		},
 		{
 			// A node's firewall rules file under the node's rule set, as the cluster's and a

@@ -199,9 +199,60 @@ func guestConfigDetails(fields map[string]string, before map[string]json.RawMess
 	return auditChanges(map[string]any{"fields": fields}, "changed", slices.Compact(changed), before)
 }
 
+// movedFields is what a synchronous write changed: the fields of its object
+// whose canonical form moved between before and after, the object read just
+// before and just after the write, exactly as the observer will find them moved
+// (pvefield.Kind.Moved) — what it rewrote beside what it sent, and nothing it
+// re-sent as it was. ok is false when either reading is missing: what the write
+// changed is then unverified.
+func movedFields(before, after map[string]json.RawMessage, kind pvefield.Kind) (moved []string, ok bool) {
+	if before == nil || after == nil {
+		return nil, false
+	}
+	return kind.Moved(before, after), true
+}
+
+// keepMoved is details with each of set's fields the write moved, by its name
+// with the value sent, or with all of them and fields_unverified when that
+// cannot be told (movedFields): the row of an update whose details are the
+// fields it set as keys (an HA object's, the cluster firewall's options), so
+// the observer's keys rule names only what the write moved.
+func keepMoved(details, set map[string]any, moved []string, ok bool) map[string]any {
+	for name, v := range set {
+		if !ok || slices.Contains(moved, name) {
+			details[name] = v
+		}
+	}
+	if !ok {
+		details["fields_unverified"] = true
+	}
+	return details
+}
+
+// readListed is readBefore for an object the observer reads in a list (an HA
+// resource, group or rule): the item of target's list that match picks, nil
+// when the list cannot be read or holds none.
+func readListed(ctx context.Context, client *proxmox.Client, target proxmox.ObserveTarget, match func(map[string]json.RawMessage) bool) map[string]json.RawMessage {
+	raw, err := client.ObserveRead(ctx, target)
+	if err != nil {
+		return nil
+	}
+	var items []map[string]json.RawMessage
+	if json.Unmarshal(raw, &items) != nil {
+		return nil
+	}
+	for _, item := range items {
+		if match(item) {
+			return item
+		}
+	}
+	return nil
+}
+
 // readBefore reads the object an update is about to write, raw, for
 // auditSent.changed — readBefore(ctx, client)(proxmox.ObjectSDN(kind, id)) —
-// nil when it cannot, and the row then names every field the update sends.
+// or, for movedFields, has just written; nil when it cannot, and the row then
+// names every field the update sends.
 func readBefore(ctx context.Context, client *proxmox.Client) func(proxmox.ObserveTarget, error) map[string]json.RawMessage {
 	return func(target proxmox.ObserveTarget, err error) map[string]json.RawMessage {
 		if err != nil {
