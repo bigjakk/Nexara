@@ -570,14 +570,14 @@ func TestRoutesReadingAClustersAuditRowsAnswer404ForOneThatIsGone(t *testing.T) 
 	guestProps["vmid"] = apischema.Property{Type: apischema.Integer}
 	routes := []struct {
 		name, pattern, target string
-		serve                 func(*testing.T, *db.Queries) fiber.Handler
+		serve                 func(*testing.T, db.DBTX, *db.Queries) fiber.Handler
 	}{
 		{"the guest History", "/clusters/:cluster_id/guests/:vmid/history", "/guests/100/history",
-			func(t *testing.T, q *db.Queries) fiber.Handler {
-				return withRequestParams(t, guestProps, []string{"cluster_id", "vmid"}, NewHistoryHandler(q).Route(GuestHistory()).List)
+			func(t *testing.T, dbtx db.DBTX, q *db.Queries) fiber.Handler {
+				return withRequestParams(t, guestProps, []string{"cluster_id", "vmid"}, NewHistoryHandler(dbtx, q).Route(GuestHistory()).List)
 			}},
 		{"the cluster's audit list", "/clusters/:cluster_id/audit-log", "/audit-log",
-			func(t *testing.T, q *db.Queries) fiber.Handler {
+			func(t *testing.T, _ db.DBTX, q *db.Queries) fiber.Handler {
 				return withRequestParams(t, auditPerClusterMirror(t), []string{"cluster_id"}, NewAuditHandler(q, nil).ListByCluster)
 			}},
 	}
@@ -591,7 +591,7 @@ func TestRoutesReadingAClustersAuditRowsAnswer404ForOneThatIsGone(t *testing.T) 
 				c.Locals("rbac_engine", newGrantEngine("view:audit"))
 				return c.Next()
 			})
-			app.Get(rt.pattern, rt.serve(t, db.New(dbtx)))
+			app.Get(rt.pattern, rt.serve(t, dbtx, db.New(dbtx)))
 			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+uuid.NewString()+rt.target, nil))
 			if err != nil {
 				t.Fatal(err)

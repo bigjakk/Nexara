@@ -14,6 +14,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -327,7 +328,7 @@ func TestHistoryListDropsGuestsTheCallerCannotOpen(t *testing.T) {
 		return c.Next()
 	})
 	app.Get("/clusters/:cluster_id/probe", withRequestParams(t, props, []string{"cluster_id"},
-		NewHistoryHandler(db.New(dbtx)).Route(kind).List))
+		NewHistoryHandler(dbtx, db.New(dbtx)).Route(kind).List))
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/probe", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +377,7 @@ func TestHistoryListGlobalKindAsksNoCluster(t *testing.T) {
 		return c.Next()
 	})
 	app.Get("/probes/:id/history", withRequestParams(t, historyTestProps("id", apischema.Property{Type: apischema.String}),
-		[]string{"id"}, NewHistoryHandler(db.New(dbtx)).Route(kind).List))
+		[]string{"id"}, NewHistoryHandler(dbtx, db.New(dbtx)).Route(kind).List))
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probes/"+uuid.NewString()+"/history", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -423,7 +424,7 @@ func TestHistoryListRefusesAGuestBesideThePath(t *testing.T) {
 		return c.Next()
 	})
 	app.Get("/clusters/:cluster_id/guests/:vmid/history", withRequestParams(t, props, []string{"cluster_id", "vmid"},
-		NewHistoryHandler(db.New(dbtx)).Route(kind).List))
+		NewHistoryHandler(dbtx, db.New(dbtx)).Route(kind).List))
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/guests/100/history", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -438,13 +439,14 @@ func TestHistoryListRefusesAGuestBesideThePath(t *testing.T) {
 // narrowed, for a caller without a guest type too (the arms apply it), and no
 // page past the cap is served; a node's and a folder's at 20,000, all time
 // too. With no start_time each reads the last week, unless it asks for
-// all_time.
+// all_time. ListHistory alone is planned for its own arguments (HistoryDBTX):
+// the folder's own read before it is not.
 func TestHistoryListBoundsACappedRead(t *testing.T) {
 	t.Parallel()
 	// Where each bound sits among the query's arguments.
 	probe := &auditRowsDBTX{}
 	since := pgtype.Timestamptz{Time: time.Unix(1_000_000, 0), Valid: true}
-	if _, err := db.New(probe).ListHistory(context.Background(), db.ListHistoryParams{
+	if _, err := db.New(HistoryDBTX(probe)).ListHistory(context.Background(), db.ListHistoryParams{
 		RowCap: 11, RowOffset: 22, RowLimit: 33, Since: since}); err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +501,7 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 				props["include_guests"] = apischema.Property{Type: apischema.Boolean, Optional: true, Default: false}
 			}
 			app.Get("/clusters/:cluster_id"+tt.route.path, withRequestParams(t, props, names,
-				NewHistoryHandler(db.New(dbtx)).Route(tt.route.kind).List))
+				NewHistoryHandler(dbtx, db.New(dbtx)).Route(tt.route.kind).List))
 			resp, err := app.Test(httptest.NewRequest(http.MethodGet, path+tt.query, nil))
 			if err != nil {
 				t.Fatal(err)
@@ -509,6 +511,16 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 				t.Fatalf("status %d after %d queries, want ListHistory last", resp.StatusCode, n)
 			}
 			args := dbtx.calls[len(dbtx.calls)-1].args
+			for i, call := range dbtx.calls {
+				var mode pgx.QueryExecMode
+				if len(call.args) > 0 {
+					mode, _ = call.args[0].(pgx.QueryExecMode)
+				}
+				if (mode == pgx.QueryExecModeCacheDescribe) != (i == len(dbtx.calls)-1) {
+					t.Errorf("query %d of %d ran with exec mode %v; want CacheDescribe for ListHistory alone", i+1,
+						len(dbtx.calls), call.args[0])
+				}
+			}
 			if args[atCap] != tt.cap || args[atOffset] != tt.offset || args[atLimit] != tt.limit {
 				t.Errorf("cap %v, offset %v, limit %v; want %d, %d, %d", args[atCap], args[atOffset], args[atLimit],
 					tt.cap, tt.offset, tt.limit)
@@ -549,6 +561,7 @@ func TestHistoryListSaysHowFarBackItSearched(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			dbtx := &auditRowsDBTX{rows: tt.rows}
 			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 			app.Use(func(c fiber.Ctx) error {
 				c.Locals("user_id", uuid.New())
@@ -557,7 +570,7 @@ func TestHistoryListSaysHowFarBackItSearched(t *testing.T) {
 			})
 			app.Get("/clusters/:cluster_id/history", withRequestParams(t,
 				historyTestProps("cluster_id", apischema.StdOption("cluster-id")), []string{"cluster_id"},
-				NewHistoryHandler(db.New(&auditRowsDBTX{rows: tt.rows})).Route(tt.kind).List))
+				NewHistoryHandler(dbtx, db.New(dbtx)).Route(tt.kind).List))
 			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+uuid.NewString()+"/history", nil))
 			if err != nil {
 				t.Fatal(err)
@@ -588,7 +601,7 @@ func TestHistoryListPassesTheGuestToggle(t *testing.T) {
 	// Where IncludeGuests sits among the query's arguments: the one true in
 	// an otherwise zero call.
 	probe := &auditRowsDBTX{}
-	if _, err := db.New(probe).ListHistory(context.Background(), db.ListHistoryParams{IncludeGuests: true}); err != nil {
+	if _, err := db.New(HistoryDBTX(probe)).ListHistory(context.Background(), db.ListHistoryParams{IncludeGuests: true}); err != nil {
 		t.Fatal(err)
 	}
 	at := slices.Index(probe.calls[0].args, any(true))
@@ -615,7 +628,7 @@ func TestHistoryListPassesTheGuestToggle(t *testing.T) {
 				return c.Next()
 			})
 			app.Get("/clusters/:cluster_id/probe", withRequestParams(t, props, []string{"cluster_id"},
-				NewHistoryHandler(db.New(dbtx)).Route(kind).List))
+				NewHistoryHandler(dbtx, db.New(dbtx)).Route(kind).List))
 			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/probe"+tt.query, nil))
 			if err != nil {
 				t.Fatal(err)

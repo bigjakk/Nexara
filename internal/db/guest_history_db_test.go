@@ -50,6 +50,8 @@ func TestGuestHistory(t *testing.T) {
 	ctx, pool := env.Ctx, env.Pool
 	migrateUp(t, env.Migrate)
 	q := gen.New(pool)
+	// ListHistory as the handler runs it: planned for each call's own arguments.
+	hq := gen.New(handlers.HistoryDBTX(pool))
 
 	// Deferred rather than t.Cleanup: see setupMigration.
 	purge := func() {
@@ -153,7 +155,7 @@ func TestGuestHistory(t *testing.T) {
 	}
 	list := func(p gen.ListHistoryParams) ([]string, int64) {
 		cur.Helper()
-		rows, err := q.ListHistory(ctx, p)
+		rows, err := hq.ListHistory(ctx, p)
 		if err != nil {
 			cur.Fatalf("list: %v", err)
 		}
@@ -545,7 +547,7 @@ func TestGuestHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		p150.RowLimit = 50
-		if rows, err := q.ListHistory(ctx, p150); err != nil || len(rows) != 1 || rows[0].TaskStatus != "completed" {
+		if rows, err := hq.ListHistory(ctx, p150); err != nil || len(rows) != 1 || rows[0].TaskStatus != "completed" {
 			t.Errorf("the timeline's outcome of an archived create under a planted verdict: %+v (%v), want completed", rows, err)
 		}
 		// POST /api/v1/tasks refuses a UPID on record: in an audit row or the
@@ -600,7 +602,7 @@ func TestGuestHistory(t *testing.T) {
 			t.Errorf("with no cutoff: %v, want the previous guest's destroy, start and create after the clone", whole)
 		}
 		// The backup entry's end, error and lines are VM 100's, not the job's.
-		backups, err := q.ListHistory(ctx, withFilter(full, func(p *gen.ListHistoryParams) {
+		backups, err := hq.ListHistory(ctx, withFilter(full, func(p *gen.ListHistoryParams) {
 			p.Category = pgtype.Text{String: "backup", Valid: true}
 		}))
 		if err != nil || len(backups) != 1 {
@@ -648,7 +650,7 @@ func TestGuestHistory(t *testing.T) {
 			}
 			// One job's part for each of two guests is two entries: their ids
 			// are the page's keys and its last sort tie-break.
-			rows, err := q.ListHistory(ctx, tt.p)
+			rows, err := hq.ListHistory(ctx, tt.p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -728,7 +730,7 @@ func TestGuestHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 			p.RowLimit, p.StatusGuestTypes = 50, tt.types
-			rows, err := q.ListHistory(ctx, p)
+			rows, err := hq.ListHistory(ctx, p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -791,7 +793,7 @@ func TestGuestHistory(t *testing.T) {
 				GuestWorkers: []string{"ha%"}, Objects: []handlers.HistoryObject{{ResourceType: "vm", Value: "100"}}},
 				[]string{"audit start 100", "audit shutdown 100", "audit stop 100", "audit migrate 100", "audit start 100"}},
 		} {
-			rows, err := q.ListHistory(ctx, selection(tt.sel))
+			rows, err := hq.ListHistory(ctx, selection(tt.sel))
 			if err != nil {
 				t.Fatalf("%s: %v", tt.name, err)
 			}
@@ -801,6 +803,30 @@ func TestGuestHistory(t *testing.T) {
 			}
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
+			}
+		}
+
+		// Under the handler's exec mode each value arrives as it is: commas,
+		// quotes, braces and backslashes in an object's id, a details value and
+		// a rule's pattern, and an id spelled NULL — none split, unquoted or
+		// taken for a missing value, and the prefix of the odd id not matched.
+		odd, oddAction := `/a,b"c{d}\e`, `set,"{x}\`
+		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", odd, oddAction, map[string]any{"path": odd})
+		audit(historyClusterID, minsAgo(3), "nexara", "pve_acl", "NULL", "updated", map[string]any{})
+		audit(historyClusterID, minsAgo(2), "nexara", "pve_acl", "/a", "updated", map[string]any{"path": "/a"})
+		oddKind := withObjects
+		oddKind.Rules = append([]handlers.HistoryRule{
+			{Category: "odd", Field: handlers.HistoryFieldAction, Equals: []string{oddAction}},
+			{Category: "odd", Field: handlers.HistoryFieldResourceType, Like: []string{`{pve\_acl},%`}},
+		}, withObjects.Rules...)
+		if p, err := oddKind.ListParams(historyClusterID, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "pve_acl", Value: odd}, {ResourceType: "pve_acl", Value: "NULL"},
+			{ResourceType: "pve_acl", DetailKey: "path", Value: odd}}}); err != nil {
+			t.Fatal(err)
+		} else {
+			p.RowLimit = 50
+			if got, _ := list(p); !slices.Equal(got, []string{"audit updated other ", "audit " + oddAction + " odd "}) {
+				t.Errorf("odd values: %q", got)
 			}
 		}
 
@@ -925,7 +951,7 @@ func TestGuestHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 			p.RowLimit, p.IncludeTasks, p.StatusGuestTypes, p.RowCap = 50, true, types, rowCap
-			rows, err := q.ListHistory(ctx, p)
+			rows, err := hq.ListHistory(ctx, p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -964,7 +990,7 @@ func TestGuestHistory(t *testing.T) {
 		} else {
 			p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 50, true, []string{"qemu", "lxc"}
 			p.RowCap, p.Source = 1, pgtype.Text{String: "nexara", Valid: true}
-			rows, err := q.ListHistory(ctx, p)
+			rows, err := hq.ListHistory(ctx, p)
 			if err != nil || len(rows) != 1 || rows[0].Action != "delete" || !rows[0].SearchedFrom.Time.Equal(minsAgo(46)) {
 				t.Errorf("folder F's Nexara rows capped at 1: %+v (%v), want its delete, whole back to 46 minutes", rows, err)
 			}
@@ -1059,7 +1085,7 @@ func TestGuestHistory(t *testing.T) {
 					t.Fatal(err)
 				}
 				p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 200, true, []string{"qemu"}
-				rows, err := q.ListHistory(ctx, p)
+				rows, err := hq.ListHistory(ctx, p)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1126,7 +1152,7 @@ func TestGuestHistory(t *testing.T) {
 			}
 			p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 50, true, []string{"qemu", "lxc"}
 			f(&p)
-			rows, err := q.ListHistory(ctx, p)
+			rows, err := hq.ListHistory(ctx, p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1356,7 +1382,7 @@ func TestGuestHistory(t *testing.T) {
 			}
 			p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 50, true, []string{"qemu", "lxc"}
 			f(&p)
-			rows, err := q.ListHistory(ctx, p)
+			rows, err := hq.ListHistory(ctx, p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1427,7 +1453,7 @@ func TestGuestHistory(t *testing.T) {
 			t.Fatal(err)
 		} else {
 			p.RowLimit, p.RowCap, p.StatusGuestTypes = 50, 1, []string{"qemu", "lxc"}
-			if rows, err := q.ListHistory(ctx, p); err != nil || len(rows) == 0 || !rows[0].SearchedFrom.Time.Equal(minsAgo(4)) {
+			if rows, err := hq.ListHistory(ctx, p); err != nil || len(rows) == 0 || !rows[0].SearchedFrom.Time.Equal(minsAgo(4)) {
 				t.Errorf("the node's History capped at 1 without view:task: %d rows (%v), want whole back to 4 minutes", len(rows), err)
 			}
 		}
@@ -1533,7 +1559,7 @@ func TestGuestHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		tp.RowLimit = 50
-		templateRows, err := q.ListHistory(ctx, tp)
+		templateRows, err := hq.ListHistory(ctx, tp)
 		if err != nil {
 			t.Fatal(err)
 		}

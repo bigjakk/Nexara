@@ -23,6 +23,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -38,11 +39,34 @@ import (
 // where it comes from.
 type HistoryHandler struct {
 	queries *db.Queries
+	// history runs ListHistory alone, through HistoryDBTX.
+	history *db.Queries
 }
 
-// NewHistoryHandler creates the handler every History route shares.
-func NewHistoryHandler(queries *db.Queries) *HistoryHandler {
-	return &HistoryHandler{queries: queries}
+// NewHistoryHandler creates the handler every History route shares; pool is
+// the one queries reads through, which ListHistory reads through too.
+func NewHistoryHandler(pool db.DBTX, queries *db.Queries) *HistoryHandler {
+	return &HistoryHandler{queries: queries, history: db.New(HistoryDBTX(pool))}
+}
+
+// HistoryDBTX runs each query with a plan made for its own arguments, for
+// ListHistory: pgx.QueryExecModeCacheDescribe, an unnamed statement planned at
+// Bind with the values bound, its parameters typed as the server described
+// them and sent in binary, in one round trip once described. Under pgx's
+// statement cache Postgres may move a statement to one generic plan after
+// five runs, and ListHistory is one statement for every kind, its arms
+// switched on and off by its parameters: judged at average values, on a table
+// of one cluster that plan once read a cluster's whole audit index and sorted
+// it, 0.4-1.9 s against 50-130 ms. Each read plans in 14-18 ms, and parsing
+// it each time adds 4-8 ms. Never the simple protocol: its arguments would be
+// spliced into the SQL. Only Query changes: ListHistory is :many.
+func HistoryDBTX(dbtx db.DBTX) db.DBTX { return historyDBTX{dbtx} }
+
+// historyDBTX is HistoryDBTX's.
+type historyDBTX struct{ db.DBTX }
+
+func (d historyDBTX) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return d.DBTX.Query(ctx, sql, append([]any{pgx.QueryExecModeCacheDescribe}, args...)...)
 }
 
 // HistoryKind is one kind of object with a History: which rows are its own,
@@ -852,7 +876,7 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 		params.RowLimit = min(params.RowLimit, limitCap-params.RowOffset)
 	}
 
-	rows, err := r.h.queries.ListHistory(ctx, params)
+	rows, err := r.h.history.ListHistory(ctx, params)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
 	}

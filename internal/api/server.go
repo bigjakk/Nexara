@@ -420,7 +420,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 			WithEncryptionKey(d.cfg.EncryptionKey)
 		s.scheduleHandler = handlers.NewScheduleHandler(d.queries, d.eventPub)
 		s.auditHandler = handlers.NewAuditHandler(d.queries, d.eventPub)
-		s.historyHandler = handlers.NewHistoryHandler(d.queries)
+		s.historyHandler = handlers.NewHistoryHandler(d.pool, d.queries)
 		s.vmFoldersHandler = handlers.NewVMFoldersHandler(d.pool, d.queries, d.eventPub)
 		s.favoritesHandler = handlers.NewFavoritesHandler(d.queries)
 	}
