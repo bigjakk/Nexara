@@ -27,6 +27,14 @@
 -- cached permission set can outlive a deleted assignment. Only a holder of GLOBAL
 -- view:audit reads it, as with the entries that have no cluster at all.
 --
+-- What dropping the key also drops: a guard on new writes. The constraint refused an
+-- insert under a cluster id that never existed, and nothing does now. Such a row is
+-- accepted, and global readers see it as a removed cluster with no name ("Removed
+-- cluster"). A write that races a removal, a collector tick for one, can likewise add
+-- a few rows under the removed id. An ingested task cannot: its task_history row is
+-- written first and carries its own key to clusters, so the insert fails before the
+-- audit row is tried.
+--
 -- Upgrade: every existing cluster_id references a cluster that exists (the
 -- dropped constraint guaranteed it), so no row changes and there is nothing to
 -- back-fill; only the constraint goes and the table and trigger are added, in
