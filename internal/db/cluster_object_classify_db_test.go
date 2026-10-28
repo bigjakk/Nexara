@@ -106,10 +106,14 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 		audits     []classifyAudit
 		want       string
 		wantBy     int // the audit that explains it, -1 for none
+		// What that row covered without naming it (explained_unnamed), its id
+		// as {by}; "null" for none, "" not looked at.
+		unnamed string
 	}{
 		// An OSD going down or coming up, in or out, appearing or going.
 		{name: "down, stopped", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
-			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}"}}, want: explained, wantBy: 0},
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}"}}, want: explained, wantBy: 0,
+			unnamed: `{"{by}": ["up"]}`},
 		{name: "down, the stop's task was another OSD's", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
 			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.999"}}, want: shown, wantBy: -1},
 		{name: "down after an osd_in, which explains nothing", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
@@ -119,7 +123,8 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 		{name: "up, started", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
 			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_start"}}, want: explained, wantBy: 0},
 		{name: "down, its host rebooted", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
-			audits: []classifyAudit{{at: 11, rtype: "node", rid: "node", action: "reboot"}}, want: explained, wantBy: 0},
+			audits: []classifyAudit{{at: 11, rtype: "node", rid: "node", action: "reboot"}}, want: explained, wantBy: 0,
+			unnamed: `{"{by}": ["up"]}`},
 		{name: "down, another host rebooted", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
 			audits: []classifyAudit{{at: 11, rtype: "node", rid: "pve-99", action: "reboot"}}, want: shown, wantBy: -1},
 		{name: "down and out, only the stop is on record", rtype: "ceph_osd", change: "changed", fields: []string{"in", "up"},
@@ -272,7 +277,8 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 
 		// A replication job.
 		{name: "a job edited, the update names the field", rtype: "replication", change: "changed", fields: []string{"schedule"},
-			audits: []classifyAudit{{at: 10.2, rtype: "replication", action: "updated", details: map[string]any{"fields": []string{"schedule", "rate"}}}}, want: explained, wantBy: 0},
+			audits: []classifyAudit{{at: 10.2, rtype: "replication", action: "updated", details: map[string]any{"fields": []string{"schedule", "rate"}}}}, want: explained, wantBy: 0,
+			unnamed: "null"},
 		{name: "a job edited, the update names another field", rtype: "replication", change: "changed", fields: []string{"schedule"},
 			audits: []classifyAudit{{at: 10.2, rtype: "replication", action: "updated", details: map[string]any{"fields": []string{"comment"}}}}, want: shown, wantBy: -1},
 		{name: "a job edited in the GUI, a sync triggered beside it", rtype: "replication", change: "changed", fields: []string{"schedule"},
@@ -444,9 +450,21 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 	for i, tc := range cases {
 		var e pgtype.Bool
 		var by pgtype.UUID
-		if err := pool.QueryRow(ctx, `SELECT explained, explained_by FROM cluster_object_changes WHERE id = $1`, seededCases[i].id).
-			Scan(&e, &by); err != nil {
+		var unnamed []byte
+		if err := pool.QueryRow(ctx, `SELECT explained, explained_by, explained_unnamed FROM cluster_object_changes WHERE id = $1`,
+			seededCases[i].id).Scan(&e, &by, &unnamed); err != nil {
 			t.Fatalf("%s: read: %v", tc.name, err)
+		}
+		if want := tc.unnamed; want != "" {
+			if tc.wantBy >= 0 {
+				want = strings.ReplaceAll(want, "{by}", seededCases[i].audits[tc.wantBy].String())
+			}
+			if unnamed == nil {
+				unnamed = []byte("null")
+			}
+			if string(unnamed) != want {
+				t.Errorf("%s: explained_unnamed %s, want %s", tc.name, unnamed, want)
+			}
 		}
 		got := waiting
 		switch {

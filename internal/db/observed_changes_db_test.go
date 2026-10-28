@@ -240,7 +240,11 @@ func TestObservedChanges(t *testing.T) {
 	// leaving, and a job's removal only when the guest was all it held.
 	byClusterTask := seed(observedCluster, "pool", "web", 0, "changed", "", []string{"vms"}, at)
 	members(byClusterTask, []string{}, []string{"vms:111"})
-	audit(observedCluster, in, "vm", "111", 111, "destroy", map[string]any{"upid": "UPID:pve-01:00000008:00000001:00000001:qmdestroy:111:root@pam:"})
+	// The destroy's details as TrackTask writes them: its node and vmid too.
+	byClusterTaskBy := audit(observedCluster, in, "vm", "111", 111, "destroy", map[string]any{
+		"upid": "UPID:pve-01:00000008:00000001:00000001:qmdestroy:111:root@pam:", "node": "pve-01", "vmid": 111})
+	jobLeft := seed(observedCluster, "backup", "backup-04", 0, "changed", "", []string{"vmid"}, at)
+	members(jobLeft, []string{}, []string{"vmid:111"})
 	besideTask := seed(observedCluster, "pool", "ops", 0, "changed", "", []string{"vms"}, at)
 	members(besideTask, []string{}, []string{"vms:111", "vms:120"})
 	jobEmptied := seed(observedCluster, "backup", "backup-02", 0, "removed", "", nil, at)
@@ -278,6 +282,15 @@ func TestObservedChanges(t *testing.T) {
 	for _, iface := range []string{"pve-03/vmbr2", "pve-03/vmbr3"} {
 		audit(observedCluster, in, "network", iface, 0, "interface_updated", map[string]any{"fields": []string{"cidr"}})
 	}
+	// Two edits between passes: the earlier names the cidr it set, whose
+	// address and netmask Proxmox derives, the later the mtu, beside the method
+	// every edit sets.
+	twoEdits := seed(observedCluster, "network", "pve-03/vmbr5", 0, "changed", "pve-03",
+		[]string{"address", "cidr", "method", "mtu", "netmask"}, at)
+	twoEditsEarlier := audit(observedCluster, in, "network", "pve-03/vmbr5", 0, "interface_updated",
+		map[string]any{"fields": []string{"cidr"}})
+	twoEditsLater := audit(observedCluster, in.Add(30*time.Second), "network", "pve-03/vmbr5", 0, "interface_updated",
+		map[string]any{"fields": []string{"mtu"}})
 	// One that could not read its object first names all it sent, unverified.
 	sentUnverified := seed(observedCluster, "network", "pve-03/vmbr4", 0, "changed", "pve-03", []string{"cidr"}, at)
 	audit(observedCluster, in, "network", "pve-03/vmbr4", 0, "interface_updated",
@@ -509,6 +522,8 @@ func TestObservedChanges(t *testing.T) {
 			"member_of", "upid:vms:%s"),
 		with(with(rule("backup", "removed", "", "cluster", false, "", "", "^qmdestroy$", ""), "member", "sole"),
 			"member_of", "upid:vmid:%s"),
+		with(with(rule("backup", "changed", "", "cluster", false, "", "", "^qmdestroy$", "^vmid$"), "member", "left"),
+			"member_of", "upid:vmid:%s"),
 		with(with(rule("pool", "changed", "", "cluster", false, "", "", "^qmrestore$", "^vms$"), "member", "joined"),
 			"member_of", "upid:vms:%s"),
 		with(with(rule("ha_rule", "changed", "ha_resource", "cluster", false, "^deleted$", "", "", "^resources$"),
@@ -626,6 +641,7 @@ func TestObservedChanges(t *testing.T) {
 		{"a guest's destroy, another guest leaving too", besideTask, "shown"},
 		{"a job removed with its last guest's destroy", jobEmptied, "explained"},
 		{"a job removed that held another guest too", jobNotEmptied, "shown"},
+		{"a guest's destroy, that guest leaving a job", jobLeft, "explained"},
 		{"an HA resource deleted, its sid leaving a rule", byResourceDelete, "explained"},
 		{"a config edit, another key changed too", configOther, "shown"},
 		{"a config edit, the disk it left unused", configUnused, "explained"},
@@ -636,6 +652,7 @@ func TestObservedChanges(t *testing.T) {
 		{"an update of the field its row records", haKeysSet, "explained"},
 		{"an update, and a field its row does not record", haKeysOther, "shown"},
 		{"an update of a field it sent, and of those derived from it", sentDerived, "explained"},
+		{"two edits between passes", twoEdits, "explained"},
 		{"an update, and a field it did not send", sentOther, "shown"},
 		{"an update that could not read its object first", sentUnverified, "shown"},
 		{"a field filled in where there was none", macFilled, "explained"},
@@ -716,6 +733,29 @@ func TestObservedChanges(t *testing.T) {
 		if err := pool.QueryRow(ctx, `SELECT explained_by FROM cluster_object_changes WHERE id = $1`, tc.change).
 			Scan(&by); err != nil || by != tc.by {
 			t.Errorf("%s: explained by %s (%v), want %s", name, by, err, tc.by)
+		}
+	}
+
+	// explained_unnamed: by explaining row, what it covered without naming it,
+	// each row its own, a consequence under the object it reached.
+	for name, tc := range map[string]struct {
+		change uuid.UUID
+		want   map[string][]string
+	}{
+		"a row naming its settings records nothing": {optionsSet, nil},
+		"a change shown records nothing":            {diskAndMemory, nil},
+		"two edits, each row its own unnamed fields": {twoEdits,
+			map[string][]string{twoEditsEarlier.String(): {"address", "netmask"}, twoEditsLater.String(): {"method"}}},
+		"a destroy, the pool's vms under the pool's own change": {byClusterTask,
+			map[string][]string{byClusterTaskBy.String(): {"vms"}}},
+		"a destroy, the job's vmid, which its own details name": {jobLeft,
+			map[string][]string{byClusterTaskBy.String(): {"vmid"}}},
+	} {
+		var raw []byte
+		var got map[string][]string
+		if err := pool.QueryRow(ctx, `SELECT explained_unnamed FROM cluster_object_changes WHERE id = $1`, tc.change).
+			Scan(&raw); err != nil || raw != nil && json.Unmarshal(raw, &got) != nil || fmt.Sprint(got) != fmt.Sprint(tc.want) {
+			t.Errorf("%s: explained_unnamed %s (%v), want %v", name, raw, err, tc.want)
 		}
 	}
 
@@ -912,11 +952,15 @@ func TestObservedGlobalChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	serverRow("schedule_set", 64)
-	serverRow("comment_set", 63)
+	comment := serverRow("comment_set", 63)
 	latest := serverRow("schedule_set", 62)
 	classify("^schedule_set$", "^schedule$", "^comment_set$", "^comment$")
-	if err := pool.QueryRow(ctx, `SELECT explained_by FROM cluster_object_changes WHERE id = $1`, twoFields).
-		Scan(&by); err != nil || by != latest {
-		t.Errorf("explained by %s (%v), want the later of the schedule's two rows, %s", by, err, latest)
+	var raw []byte
+	var unnamed map[string][]string
+	if err := pool.QueryRow(ctx, `SELECT explained_by, explained_unnamed FROM cluster_object_changes WHERE id = $1`, twoFields).
+		Scan(&by, &raw); err != nil || by != latest || json.Unmarshal(raw, &unnamed) != nil ||
+		fmt.Sprint(unnamed) != fmt.Sprint(map[string][]string{latest.String(): {"schedule"}, comment.String(): {"comment"}}) {
+		t.Errorf("explained by %s, unnamed %s (%v), want the later of the schedule's two rows, %s, and each row its own field",
+			by, raw, err, latest)
 	}
 }

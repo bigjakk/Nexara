@@ -1,9 +1,10 @@
 -- Automatic in-place upgrade — no manual steps, no operator action required.
 -- Purely additive: two new tables, a column with a default on
--- cluster_object_baselines (000119), two with a default on
--- cluster_object_changes (000119), and a partial index on task_history (built
--- in the migration's transaction, a lock on that table for as long as the
--- build takes). Nothing existing is read, rewritten or backfilled, so an
+-- cluster_object_baselines (000119), two with a default and one nullable on
+-- cluster_object_changes (000119), a function, a partial index on task_history
+-- and a partial one on cluster_object_changes (each built in the migration's
+-- transaction, a lock on its table for as long as the build takes; the second
+-- indexes no existing row). Nothing existing is rewritten or backfilled, so an
 -- interrupted run leaves nothing behind — the migration is one transaction.
 --
 -- The observer (internal/collector/observer.go) records edits made directly in
@@ -92,6 +93,46 @@ ALTER TABLE cluster_object_baselines
 ALTER TABLE cluster_object_changes
     ADD COLUMN IF NOT EXISTS members_joined TEXT[] NOT NULL DEFAULT '{}',
     ADD COLUMN IF NOT EXISTS members_left   TEXT[] NOT NULL DEFAULT '{}';
+
+-- Of a change something explained, each explaining audit row's id and the
+-- fields it covered without naming them, {"<audit id>": ["<field>", ...]}: what
+-- Proxmox derives from what the row sent, a disk's unused<n> and boot beside
+-- the disk it names, every field of a task that names none (qmconfig), and
+-- anything of another object than the row's own (a guest's destroy leaving its
+-- pools). A History shows them beside that row as also changed in Proxmox. A
+-- field the row names (audit_row_names) is not here, nor anything of a change
+-- nothing explained; NULL for nothing. Written by the classifiers
+-- (ClassifyObservedChanges, ClassifyGlobalObjectChanges,
+-- ClassifyClusterObjectChanges), each for a change once, as it decides it.
+ALTER TABLE cluster_object_changes ADD COLUMN IF NOT EXISTS explained_unnamed JSONB;
+
+-- A page of audit rows reads what they covered unnamed by their ids:
+-- explained_unnamed ?| <ids>. No existing row has any, so the build reads the
+-- table and indexes nothing.
+CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_explained_unnamed
+    ON cluster_object_changes USING gin (explained_unnamed) WHERE explained_unnamed IS NOT NULL;
+
+-- audit_row_names is every field an audit row names, whichever way its details
+-- record them: its fields (a list, or a config edit's keys with what it deleted
+-- or reverted), its settings and what it cleared, and its details' own keys
+-- (an HA or pool update records what it set so). What a row covered and does not
+-- name is what explained_unnamed keeps.
+CREATE OR REPLACE FUNCTION audit_row_names(details JSONB) RETURNS TEXT[]
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+AS $$
+    SELECT ARRAY(
+        SELECT jsonb_object_keys(CASE WHEN jsonb_typeof($1) = 'object' THEN $1 ELSE '{}' END)
+        UNION
+        SELECT jsonb_object_keys(CASE WHEN jsonb_typeof($1->'fields') = 'object' THEN $1->'fields' ELSE '{}' END)
+        UNION
+        SELECT f FROM regexp_split_to_table(COALESCE($1->'fields'->>'delete', '') || ',' ||
+                                            COALESCE($1->'fields'->>'revert', ''), '[,; ]+') AS f
+        WHERE f <> ''
+        UNION
+        SELECT jsonb_array_elements_text(e.list)
+        FROM (VALUES ($1->'fields'), ($1->'settings'), ($1->'cleared')) AS e(list)
+        WHERE jsonb_typeof(e.list) = 'array')
+$$;
 
 -- A realm sync's removals are explained by its own log (ClassifyObservedChanges'
 -- task_logs), and the collector finds the syncs whose logs it reads by this:

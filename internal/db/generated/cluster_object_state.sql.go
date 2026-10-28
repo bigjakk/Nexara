@@ -39,7 +39,7 @@ WITH rules AS MATERIALIZED (
 ), explainable AS (
     SELECT id, resource_type, resource_id, change, fields, detail, win_from, win_to FROM pending WHERE NOT (detail ? 'notice')
 ), hits AS (
-    SELECT p.id, r.field_re, a.id AS audit_id, a.created_at
+    SELECT p.id, r.field_re, a.id AS audit_id, a.created_at, audit_row_names(a.details) AS row_names
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
     JOIN audit_log a ON a.resource_type = r.audit_type AND a.resource_id = p.resource_id
@@ -57,11 +57,14 @@ WITH rules AS MATERIALIZED (
     CROSS JOIN LATERAL unnest(CASE WHEN p.change = 'changed' AND cardinality(p.fields) > 0
                                    THEN p.fields ELSE ARRAY['']::text[] END) AS f(name)
 ), covered AS (
-    SELECT n.id, x.audit_id, x.created_at
+    -- Each row is the object's own: what it covered unnamed is what it does not
+    -- name.
+    SELECT n.id, x.audit_id, x.created_at, n.name,
+           x.audit_id IS NOT NULL AND n.name <> '' AND NOT n.name = ANY(x.row_names) AS unnamed
     FROM needs n
     JOIN pending p ON p.id = n.id
     LEFT JOIN LATERAL (
-        SELECT h.audit_id, h.created_at
+        SELECT h.audit_id, h.created_at, h.row_names
         FROM hits h
         WHERE h.id = n.id AND (p.change <> 'changed' OR h.field_re = '' OR n.name ~ h.field_re)
         ORDER BY h.created_at DESC, h.audit_id
@@ -73,11 +76,18 @@ WITH rules AS MATERIALIZED (
                AS explained_by
     FROM covered c
     GROUP BY c.id
+), unnamed AS (
+    SELECT r.id, jsonb_object_agg(r.audit_id::text, r.fields) AS by_row
+    FROM (SELECT id, audit_id, jsonb_agg(DISTINCT name ORDER BY name) AS fields
+          FROM covered WHERE unnamed GROUP BY id, audit_id) r
+    GROUP BY r.id
 )
 UPDATE cluster_object_changes c
 SET explained = v.explained,
-    explained_by = CASE WHEN v.explained THEN v.explained_by END
+    explained_by = CASE WHEN v.explained THEN v.explained_by END,
+    explained_unnamed = CASE WHEN v.explained THEN un.by_row END
 FROM verdict v
+LEFT JOIN unnamed un ON un.id = v.id
 WHERE c.id = v.id
 `
 
@@ -154,7 +164,7 @@ WITH rules AS MATERIALIZED (
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
-           a.created_at
+           a.created_at, r.match_key
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
@@ -164,7 +174,7 @@ WITH rules AS MATERIALIZED (
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
-           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at, r.match_key
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
@@ -174,7 +184,7 @@ WITH rules AS MATERIALIZED (
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
-           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at, r.match_key
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.vmid = p.vmid
@@ -184,7 +194,7 @@ WITH rules AS MATERIALIZED (
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
-           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at, r.match_key
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
     JOIN audit_log a ON a.cluster_id = p.cluster_id
@@ -195,7 +205,7 @@ WITH rules AS MATERIALIZED (
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
-           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at, r.match_key
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
     JOIN audit_log a ON a.cluster_id = p.cluster_id
@@ -205,7 +215,7 @@ WITH rules AS MATERIALIZED (
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
            r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
-           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
+           a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at, r.match_key
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
     JOIN audit_log a ON a.cluster_id = p.cluster_id AND a.resource_type = r.audit_type
@@ -215,7 +225,7 @@ WITH rules AS MATERIALIZED (
     SELECT k.id, k.field_re, k.member, k.member_of = '' AS any_member, n.member_names, k.counts, k.fields_from,
            n.fields_named, k.audit_id, k.log_names, k.appeared,
            $8::jsonb -> (k.details->>'upid') AS task_log,
-           k.created_at
+           k.created_at, k.match_key IN ('id', 'vmid') AS own, audit_row_names(k.details) AS row_names
     FROM candidates k
     CROSS JOIN LATERAL (
         -- The value the rule's object takes from the row.
@@ -345,12 +355,15 @@ WITH rules AS MATERIALIZED (
         SELECT '', '', '', 'whole' WHERE p.change <> 'changed' OR cardinality(p.fields) = 0
     ) u
 ), covered AS (
-    -- For each but a list, the latest row that explains it.
-    SELECT n.id, x.audit_id IS NOT NULL AS ok, x.audit_id, x.created_at
+    -- For each but a list, the latest row that explains it, and whether that
+    -- row covered a field without naming it: a field the row does not name, or
+    -- any field of another object than the row's own (unnamed).
+    SELECT n.id, x.audit_id IS NOT NULL AS ok, x.audit_id, x.created_at, n.field,
+           x.audit_id IS NOT NULL AND n.field <> '' AND NOT (x.own AND n.field = ANY(x.row_names)) AS unnamed
     FROM needs n
     JOIN pending p ON p.id = n.id
     LEFT JOIN LATERAL (
-        SELECT h.audit_id, h.created_at
+        SELECT h.audit_id, h.created_at, h.own, h.row_names
         FROM hits h
         WHERE h.id = n.id
           AND (n.field = '' OR h.field_re = '' OR n.field ~ h.field_re)
@@ -420,6 +433,15 @@ WITH rules AS MATERIALIZED (
           AND (h.fields_from = '' OR n.field = ANY(h.fields_named))
     ) agg
     WHERE n.kind = 'list'
+), listed_unnamed AS (
+    -- Each row that counted toward a list, where it did not name it: one of
+    -- another object's, or its own that neither names the list nor does to it
+    -- what its count says (a create, a delete or an update of one of its items).
+    SELECT DISTINCT n.id, h.audit_id, n.field
+    FROM needs n
+    JOIN hits h ON h.id = n.id AND h.member = '' AND NOT h.appeared AND (h.field_re = '' OR n.field ~ h.field_re)
+               AND (h.fields_from = '' OR n.field = ANY(h.fields_named))
+    WHERE n.kind = 'list' AND NOT (h.own AND (h.counts <> '' OR n.field = ANY(h.row_names)))
 ), verdict AS (
     SELECT u.id, bool_and(u.ok) AS explained,
            (array_agg(u.audit_id ORDER BY u.created_at DESC, u.audit_id) FILTER (WHERE u.audit_id IS NOT NULL))[1]
@@ -427,11 +449,21 @@ WITH rules AS MATERIALIZED (
     FROM (SELECT id, ok, audit_id, created_at FROM covered
           UNION ALL SELECT id, ok, audit_id, created_at FROM listed) u
     GROUP BY u.id
+), unnamed AS (
+    -- By explaining row, the fields it covered without naming them.
+    SELECT r.id, jsonb_object_agg(r.audit_id::text, r.fields) AS by_row
+    FROM (SELECT u.id, u.audit_id, jsonb_agg(DISTINCT u.field ORDER BY u.field) AS fields
+          FROM (SELECT id, audit_id, field FROM covered WHERE unnamed
+                UNION SELECT id, audit_id, field FROM listed_unnamed) u
+          GROUP BY u.id, u.audit_id) r
+    GROUP BY r.id
 )
 UPDATE cluster_object_changes c
 SET explained = v.explained,
-    explained_by = CASE WHEN v.explained THEN v.explained_by END
+    explained_by = CASE WHEN v.explained THEN v.explained_by END,
+    explained_unnamed = CASE WHEN v.explained THEN un.by_row END
 FROM verdict v
+LEFT JOIN unnamed un ON un.id = v.id
 WHERE c.id = v.id
 `
 
@@ -496,6 +528,11 @@ type ClassifyObservedChangesParams struct {
 // an object added or removed, the change itself. A disk move explains the disk it
 // moved, not the memory someone changed in the GUI meanwhile; a guest's
 // destroy explains that guest leaving a pool, not another guest leaving it.
+// explained_unnamed keeps, by the row that covered it, each field or list a row
+// covered without naming it (audit_row_names): one of the object's own rows
+// ('id', 'vmid') names it or not, a row reaching the object from elsewhere
+// names none of it; a row's own count on a list (a rule created, updated,
+// deleted) is its naming of that list.
 //
 // The window opens no earlier than lookback_seconds before the change was seen
 // (observedLookback says how long and why): after an outage a change's window

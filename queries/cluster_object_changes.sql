@@ -104,6 +104,12 @@ VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('resource_id
 -- The observer's rows (observed_by = 'observer') are not classified here: it
 -- decides them itself, with rules per kind of object.
 --
+-- explained_unnamed keeps, by the row that explained it, each field a row
+-- covered without naming it (audit_row_names, 000124): a task of the object's
+-- own names none, an update names what its details say, and a row reaching the
+-- object from elsewhere (its host's, its device's, a rolling update's) names
+-- none of it.
+--
 -- "Settled" is the caller's settled_before: a change seen more recently stays
 -- unclassified, and hidden, until the collector has had time to ingest the
 -- Proxmox task that may explain it. A change on a node waits for that node's
@@ -201,10 +207,16 @@ WITH rules(resource_type, change, field, direction, audit_type, action, match, n
            OR c.node = ANY(sqlc.arg('listed_nodes')::text[])
            OR c.observed_at < sqlc.arg('give_up_before')::timestamptz)
 ), found AS (
-    SELECT t.id, COALESCE(e.audit_id, ru.audit_id) AS audit_id, COALESCE(e.at, ru.at) AS at
+    -- Each field's explaining row, and whether it covered the field without
+    -- naming it: a row of the object's own that does not name it, or any row
+    -- reaching the object from elsewhere (its host's, its device's, a rolling
+    -- update's).
+    SELECT t.id, COALESCE(e.audit_id, ru.audit_id) AS audit_id, COALESCE(e.at, ru.at) AS at, t.field,
+           COALESCE(e.audit_id, ru.audit_id) IS NOT NULL AND t.field <> ''
+               AND NOT (e.audit_id IS NOT NULL AND e.own AND t.field = ANY(e.row_names)) AS unnamed
     FROM todo t
     LEFT JOIN LATERAL (
-        SELECT a.id AS audit_id, a.created_at AS at
+        SELECT a.id AS audit_id, a.created_at AS at, r.match = 'object' AS own, audit_row_names(a.details) AS row_names
         FROM rules r
         JOIN audit_log a ON a.cluster_id = t.cluster_id
                         AND a.resource_type = r.audit_type
@@ -263,11 +275,20 @@ WITH rules(resource_type, change, field, direction, audit_type, action, match, n
            (array_agg(f.audit_id ORDER BY f.at DESC) FILTER (WHERE f.audit_id IS NOT NULL))[1] AS explained_by
     FROM found f
     GROUP BY f.id
+), unnamed AS (
+    -- By explaining row, the fields it covered without naming them
+    -- (explained_unnamed, 000124).
+    SELECT r.id, jsonb_object_agg(r.audit_id::text, r.fields) AS by_row
+    FROM (SELECT id, audit_id, jsonb_agg(DISTINCT field ORDER BY field) AS fields
+          FROM found WHERE unnamed GROUP BY id, audit_id) r
+    GROUP BY r.id
 )
 UPDATE cluster_object_changes c
 SET explained = v.explained,
-    explained_by = CASE WHEN v.explained THEN v.explained_by END
+    explained_by = CASE WHEN v.explained THEN v.explained_by END,
+    explained_unnamed = CASE WHEN v.explained THEN un.by_row END
 FROM verdict v
+LEFT JOIN unnamed un ON un.id = v.id
 WHERE c.id = v.id;
 
 -- ListClusterObjectChanges is the unexplained changes of one cluster's objects of

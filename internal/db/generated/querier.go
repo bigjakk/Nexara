@@ -130,6 +130,12 @@ type Querier interface {
 	// The observer's rows (observed_by = 'observer') are not classified here: it
 	// decides them itself, with rules per kind of object.
 	//
+	// explained_unnamed keeps, by the row that explained it, each field a row
+	// covered without naming it (audit_row_names, 000124): a task of the object's
+	// own names none, an update names what its details say, and a row reaching the
+	// object from elsewhere (its host's, its device's, a rolling update's) names
+	// none of it.
+	//
 	// "Settled" is the caller's settled_before: a change seen more recently stays
 	// unclassified, and hidden, until the collector has had time to ingest the
 	// Proxmox task that may explain it. A change on a node waits for that node's
@@ -263,6 +269,11 @@ type Querier interface {
 	// an object added or removed, the change itself. A disk move explains the disk it
 	// moved, not the memory someone changed in the GUI meanwhile; a guest's
 	// destroy explains that guest leaving a pool, not another guest leaving it.
+	// explained_unnamed keeps, by the row that covered it, each field or list a row
+	// covered without naming it (audit_row_names): one of the object's own rows
+	// ('id', 'vmid') names it or not, a row reaching the object from elsewhere
+	// names none of it; a row's own count on a list (a rule created, updated,
+	// deleted) is its naming of that list.
 	//
 	// The window opens no earlier than lookback_seconds before the change was seen
 	// (observedLookback says how long and why): after an outage a change's window
