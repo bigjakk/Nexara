@@ -1172,6 +1172,10 @@ func TestGuestHistory(t *testing.T) {
 		exec("node status", `INSERT INTO node_status_changes (cluster_id, node, from_status, to_status, last_seen_at, observed_at)
 			VALUES ($1, 'pve-01', $2, $3, $4, $4)`, historyThirdID, st.from, st.to, st.at)
 	}
+	// A create of VMID 310 long before its moves explains neither: only a
+	// move's own window is read.
+	audit(historyThirdID, minsAgo(70), "proxmox", "vm", "310", "create",
+		map[string]any{"upid": historyUPID(56, "qmcreate", "310"), "status": "OK"})
 	audit(historyThirdID, minsAgo(9), "nexara", "node", "pve-01", "apt_update", map[string]any{})
 	audit(historyThirdID, minsAgo(8.5), "nexara", "apt_repository", "pve-01", "enabled", map[string]any{"node": "pve-01"})
 	audit(historyThirdID, minsAgo(8), "nexara", "node", "pve-01", "reboot", map[string]any{})
@@ -1256,7 +1260,7 @@ func TestGuestHistory(t *testing.T) {
 			"audit apt_update checks", "status status_change status online>offline", "move arrived guests 310 pve-02",
 			"move left guests 310 pve-02", "status status_change status unknown>online",
 			"status status_change status online>unknown", "task cephcreatemgr ceph", "audit start guests",
-			"audit apt_update checks"}},
+			"audit apt_update checks", "audit create guests"}},
 		// A repository change is an update, not a check, and stays.
 		{"without its routine checks", func(p *gen.ListHistoryParams) { p.ExcludeCategories = []string{"checks"} },
 			slices.DeleteFunc(slices.Clone(own), func(s string) bool { return strings.HasSuffix(s, " checks") })},

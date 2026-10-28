@@ -1766,6 +1766,13 @@ type Querier interface {
 	//              a list key   the value is one element of a comma-separated
 	//                           details key (an ACL's users). Read by resource
 	//                           type alone, so for a type with few rows.
+	//            The keyed objects of one key and value are read in one scan,
+	//            whatever their types: a node's nine kinds of part all name it in
+	//            details.node, and the GIN lookup of a value that common costs the
+	//            same for each type — at 1M audit rows, 30 ms a type. Each
+	//            selector returns whole rows, and a row two of them name is folded
+	//            by its id (DISTINCT ON): one read of each row, not its id and
+	//            then the row.
 	//
 	// A kind may also name a node (node_name, HistorySelection.Node), whose own
 	// records are then its: the tasks that ran on it — audit rows by the node in
@@ -1777,7 +1784,10 @@ type Querier interface {
 	// arrivals and departures, which are the node's own. A status change through
 	// "unknown" — pvestatd not reporting — that is back within two minutes is no
 	// change, and one younger than that is not shown yet. An arrival across a
-	// create, restore, clone or destroy of the VMID is a new guest, not a move.
+	// create, restore, clone or destroy of the VMID is a new guest, not a move: the
+	// audit rows of the move's window say, read by time (OFFSET 0 keeps the window
+	// the subquery's whole condition). Asked by VMID too, a generic plan read every
+	// row of the VMID for each move: a second for a busy node's week.
 	//
 	// or, alone, the whole cluster (whole_cluster, HistoryKind.WholeCluster): every
 	// row of every source filed under the path's cluster, none of them a guest's
@@ -1795,7 +1805,9 @@ type Querier interface {
 	// The runs are read per pair (OFFSET 0 keeps the lateral a lateral), and the
 	// collapsed pairs are left out of the audit arm by a hashed NOT IN, a filter
 	// the index scan keeps its order through, where NOT EXISTS became an anti join
-	// the planner sorted after.
+	// the planner sorted after. In any other read the capped arms are LIMIT 0,
+	// which starts nothing under it: their whole_cluster gate sits below a
+	// generic plan's parallel scan, which starts its workers first — 20 ms a read.
 	//
 	// Every branch reads one cluster, a REQUIRED argument: the route's, which its
 	// cluster-scoped gate authorized. The one exception is a global kind's objects
@@ -1853,11 +1865,12 @@ type Querier interface {
 	// (db.EnsureHistoryIndexes; it works without them, slower) — instead of the
 	// planner settling on the whole cluster's rows. Each later arm excludes the rows an
 	// earlier one keeps, so no row is read twice; a guest's row guest_workers turns
-	// away is still an object's to take. The object arm reads each object on its
-	// own: (resource_type, resource_id) for its own rows, GIN details @> {key:
-	// value} for a details key — a filter on details->>key read every row of the
-	// type. "vmid IS NOT NULL" lets the vmid arms use their partial indexes
-	// whatever the plan: a generic plan cannot prove it from "= ANY(<parameter>)".
+	// away is still an object's to take. The object arm reads each object by its
+	// index: (resource_type, resource_id) for its own rows, GIN details @> {key:
+	// value} for a details key, once for every type keyed by that value — a filter
+	// on details->>key read every row of the type. "vmid IS NOT NULL" lets the
+	// vmid arms use their partial indexes whatever the plan: a generic plan cannot
+	// prove it from "= ANY(<parameter>)".
 	// The Proxmox-duplicate probe reads the selection
 	// itself, never audit_log: probed there by UPID, a generic plan — pgx's
 	// statement cache lets Postgres switch to one after five executions — scans
