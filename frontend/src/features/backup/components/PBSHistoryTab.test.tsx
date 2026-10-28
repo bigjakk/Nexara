@@ -13,15 +13,16 @@ vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
 );
 
-const GC_UPID = "UPID:pbs:1:2:3:4:garbage_collection:datastore01:root@pam!tok:";
+const GC_UPID =
+  "UPID:pbs01:1:2:3:4:garbage_collection:datastore01:root@pam!tok:";
 const BACKUP_UPID =
-  "UPID:pbs:1:2:3:5:backup:datastore01\\x3avm\\x2f100:root@pam!tok:";
+  "UPID:pbs01:1:2:3:5:backup:datastore01\\x3avm\\x2f100:root@pam!tok:";
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 const task = (over: Partial<PBSTask>): PBSTask => ({
   upid: GC_UPID,
-  node: "pbs",
+  node: "pbs01",
   pid: 1,
   starttime: nowSeconds() - 3 * 86_400,
   worker_type: "garbage_collection",

@@ -42,6 +42,7 @@ afterEach(() => {
   useAuthStore.setState({
     user: null,
     permissions: [],
+    globalPermissions: [],
     isAuthenticated: false,
   });
 });
@@ -93,6 +94,30 @@ describe("HistoryButton", () => {
       "/api/v1/clusters/c1/ha/rules/rule01/history?limit=50&offset=0",
     );
   });
+
+  // An object of no one cluster is read by a route that takes the audit log
+  // held on the whole install, which a grant on one cluster is not.
+  it.each([
+    ["on one cluster only", [], false],
+    ["on the whole install", ["view:audit"], true],
+  ])(
+    "of an object of no cluster is offered to the audit log held %s: %s",
+    (_, globalPermissions, offered) => {
+      setPermissions(["view:audit", "view:task"]);
+      useAuthStore.setState({ globalPermissions });
+      renderWithProviders(
+        <HistoryButton
+          kind={guestHistoryKind}
+          target={{ ...target, clusterId: null }}
+          title="template01"
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: "History of template01" }) !==
+          null,
+      ).toBe(offered);
+    },
+  );
 
   // React bubbles a portal's events up its tree: the button's, the drawer's
   // and its overlay's would reach the list row it sits in.
