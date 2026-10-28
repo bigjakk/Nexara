@@ -70,6 +70,11 @@ var auditReadsExemptFromScope = map[string]string{
 	"guest_history.sql.ListGuestLifecycleEvents": "one cluster, a required arg the route's cluster-scoped view:audit Check authorized",
 	"history.sql.ListHistory": "one cluster, a required arg the route's cluster-scoped view:audit gate authorized; " +
 		"a global kind's objects every cluster, behind an all-GLOBAL view:audit gate",
+	// Which of a folder's members its History follows past the cap: the same
+	// required cluster, and back only the VMIDs the caller passed — the members
+	// it may open — in order of their latest row, never a row of the log.
+	"history.sql.ListMostActiveGuests": "one cluster, a required arg the route's cluster-scoped view:audit gate " +
+		"authorized; returns only the caller's own VMIDs, ordered",
 
 	// The collector's classification of a cluster's observed object changes: it
 	// reads audit_log only to decide whether something on record explains a
