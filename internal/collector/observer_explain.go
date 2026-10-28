@@ -237,7 +237,8 @@ var observedChangeRules = slices.Concat(
 	[]explainRule{
 		// A job created through Nexara whose id Proxmox did not give back is
 		// filed as backup / backup-job (history-backup's backupJobIDUnknown):
-		// nothing names the job, so it explains a job added anywhere.
+		// nothing names the job, so it explains the one job added in its
+		// window, and none when two were (ClassifyObservedChanges).
 		{Kind: "backup", Change: "added", AuditType: "backup", MatchKey: "cluster",
 			ActionRe: `^backup_job_created$`, AuditIDIs: "backup-job"},
 		{Kind: "backup", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qmdestroy|vzdestroy)$`,

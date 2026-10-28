@@ -261,7 +261,18 @@ WITH rules AS MATERIALIZED (
       AND (k.except_re = '' OR k.action !~ k.except_re)
       AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
       AND (k.detail_key = '' OR COALESCE(k.details->>k.detail_key, '') <> '')
-      AND (k.audit_id_is = '' OR k.audit_resource_id = k.audit_id_is)
+      -- A marker names no object, so it explains the one change of its kind
+      -- and direction whose window holds it, and none when two do: the case
+      -- it is written for is a create whose id could not be told apart.
+      AND (k.audit_id_is = '' OR k.audit_resource_id = k.audit_id_is
+           AND NOT EXISTS (SELECT 1 FROM pending pp
+                           JOIN cluster_object_changes o ON o.cluster_id = pp.cluster_id
+                                AND o.resource_type = pp.resource_type AND o.change = pp.change
+                                AND o.observed_by = 'observer' AND o.id <> pp.id
+                           WHERE pp.id = k.id
+                             AND k.created_at BETWEEN GREATEST(LEAST(o.last_seen_at, o.observed_at) - interval '2 minutes',
+                                                               o.observed_at - make_interval(secs => $2::int))
+                                                  AND o.observed_at + interval '30 seconds'))
       AND (k.object = '' OR COALESCE(CASE WHEN strpos(n.object_named, '*') = 0 THEN k.resource_id = n.object_named ELSE starts_with(k.resource_id, split_part(n.object_named, '*', 1)) AND right(k.resource_id, length(split_part(n.object_named, '*', 2))) = split_part(n.object_named, '*', 2) AND length(k.resource_id) >= length(n.object_named) END, false))
       AND COALESCE(th.started_at, k.created_at) <= k.win_to
       AND CASE WHEN th.upid IS NULL THEN k.created_at ELSE COALESCE(th.finished_at, now()) END >= k.win_from

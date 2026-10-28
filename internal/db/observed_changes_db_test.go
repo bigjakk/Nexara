@@ -257,12 +257,15 @@ func TestObservedChanges(t *testing.T) {
 	audit(observedCluster, in, "firewall_security_group_rule", "web", 0, "rule_created", nil)
 
 	// What Nexara filed with no id of the object explains only what it can:
-	// a job created with its id unknown, a job added anywhere; a subnet filed
-	// under its CIDR, the subnet with that CIDR.
+	// a job created with its id unknown, the one job added in its window and
+	// none if two were; a subnet filed under its CIDR, the subnet with that CIDR.
 	jobAddedUnknown := seed(observedCluster, "backup", "backup-11", 0, "added", "", nil, ago(250))
 	audit(observedCluster, ago(251), "backup", "backup-job", 0, "backup_job_created", nil)
 	jobAddedBeside := seed(observedCluster, "backup", "backup-13", 0, "added", "", nil, ago(350))
 	audit(observedCluster, ago(351), "backup", "backup-12", 0, "backup_job_created", nil)
+	twoJobsAdded := seed(observedCluster, "backup", "backup-14", 0, "added", "", nil, ago(450))
+	seed(observedCluster, "backup", "backup-15", 0, "added", "", nil, ago(450))
+	audit(observedCluster, ago(451), "backup", "backup-job", 0, "backup_job_created", nil)
 	subnetByCIDR := seed(observedCluster, "sdn_subnet", "vnet01/zone01-192.0.2.0-24", 0, "added", "", nil, at)
 	members(subnetByCIDR, []string{"cidr:vnet01/192.0.2.0/24"}, []string{})
 	subnetOther := seed(observedCluster, "sdn_subnet", "vnet01/zone01-198.51.100.0-24", 0, "added", "", nil, at)
@@ -497,6 +500,7 @@ func TestObservedChanges(t *testing.T) {
 		{"a rule created, and one moved", groupRuleMoved, "shown"},
 		{"a job created with its id unknown", jobAddedUnknown, "explained"},
 		{"a job added beside another's create", jobAddedBeside, "shown"},
+		{"one job created with its id unknown, two added", twoJobsAdded, "shown"},
 		{"a subnet created, filed under its CIDR", subnetByCIDR, "explained"},
 		{"a subnet added beside another CIDR's create", subnetOther, "shown"},
 		{"a subnet added that lists no CIDR to name", subnetNoCIDR, "shown"},
