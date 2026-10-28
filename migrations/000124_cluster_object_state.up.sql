@@ -111,7 +111,10 @@ ALTER TABLE cluster_object_changes
 ALTER TABLE cluster_object_changes ADD COLUMN IF NOT EXISTS explained_unnamed JSONB;
 
 -- A page of audit rows reads what they covered unnamed by their ids:
--- explained_unnamed ?| <ids>. No existing row has any, so the build reads the
+-- explained_unnamed ?| <ids>. Such a read keeps to what its viewer may see: a
+-- row's covered fields lie on other objects too (a guest's destroy, its pools),
+-- so it filters resource_type by the viewer's views and cluster_id by the
+-- cluster, as a History does. No existing row has any, so the build reads the
 -- table and indexes nothing.
 CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_explained_unnamed
     ON cluster_object_changes USING gin (explained_unnamed) WHERE explained_unnamed IS NOT NULL;
