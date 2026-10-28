@@ -2,12 +2,16 @@ import { HardDrive } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { PBSDatastoreStatus } from "../types/backup";
 import { formatBytes } from "@/lib/format";
+import { ScopedHistoryButton } from "@/features/history/components/ScopedHistoryButton";
+import { backupHistories } from "@/features/history/lib/backup-histories";
 
 interface DatastoreCardsProps {
   datastores: PBSDatastoreStatus[];
+  /** The server they are on, which a datastore's History is read from. */
+  pbsId?: string;
 }
 
-export function DatastoreCards({ datastores }: DatastoreCardsProps) {
+export function DatastoreCards({ datastores, pbsId }: DatastoreCardsProps) {
   if (datastores.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">No datastores found.</p>
@@ -29,7 +33,16 @@ export function DatastoreCards({ datastores }: DatastoreCardsProps) {
           <Card key={ds.store}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">{ds.store}</CardTitle>
-              <HardDrive className="h-4 w-4 text-muted-foreground" />
+              <div className="flex items-center gap-1">
+                {pbsId !== undefined && (
+                  <ScopedHistoryButton
+                    resource="pbs"
+                    {...backupHistories.pbsServer(pbsId, ds.store)}
+                    title={ds.store}
+                  />
+                )}
+                <HardDrive className="h-4 w-4 text-muted-foreground" />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex justify-between text-sm">
