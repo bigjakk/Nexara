@@ -253,17 +253,20 @@ func (backupRunCacheQueries) ListNodeEndpoints(context.Context, uuid.UUID) ([]db
 }
 
 // backupRunDBTX records the audit inserts (Exec) and the task_history inserts
-// (QueryRow) and fails anything else.
+// (QueryRow), answers the lookups a test names, and fails anything else.
 type backupRunDBTX struct {
 	mu     sync.Mutex
 	audits [][]any
 	tasks  [][]any
 	other  []string
 	// lookups answers a :one query by its sqlc name with the row struct to
-	// replay, and lists a :many query with its rows, for a handler that reads
-	// before it writes. Set before any request.
+	// replay — or, when the value is an error, fails it with that — and lists a
+	// :many query with its rows, for a handler that reads before it writes. Set
+	// before any request.
 	lookups map[string]any
 	lists   map[string][]any
+	// asked is the sqlc name of each :one query the handler ran, in order.
+	asked []string
 }
 
 func (d *backupRunDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -292,8 +295,12 @@ func (d *backupRunDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows
 func (d *backupRunDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.asked = append(d.asked, stmtName(sql))
 	for name, row := range d.lookups {
 		if strings.Contains(sql, "-- name: "+name+" :one") {
+			if err, failed := row.(error); failed {
+				return failedRow{err}
+			}
 			return structRow{row}
 		}
 	}

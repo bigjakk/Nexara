@@ -287,6 +287,7 @@ func TestClusterDeleteRequiresTheClusterName(t *testing.T) {
 // the users who held them is cleared with them: a cached set keeps a grant for five minutes
 // after its row is gone. A user who held two is cleared once, one who held none not at all.
 func TestClusterDeleteClearsThePermissionCacheOfTheUsersItRevoked(t *testing.T) {
+	t.Parallel()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
