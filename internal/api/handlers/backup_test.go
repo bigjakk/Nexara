@@ -213,7 +213,7 @@ func TestBackupJobRequestAuditDetails(t *testing.T) {
 	decode := func(t *testing.T, req backupJobRequest) map[string]any {
 		t.Helper()
 		var got map[string]any
-		if err := json.Unmarshal(req.auditDetails(nil), &got); err != nil {
+		if err := json.Unmarshal(req.auditDetails("backup-1a2b3c4d", nil), &got); err != nil {
 			t.Fatalf("auditDetails() is not valid JSON: %v", err)
 		}
 		return got
@@ -229,6 +229,7 @@ func TestBackupJobRequestAuditDetails(t *testing.T) {
 			VMID:     "100,101",
 		})
 		want := map[string]any{
+			"job_id":    "backup-1a2b3c4d",
 			"enabled":   true,
 			"schedule":  "mon,fri 02:00",
 			"storage":   "pbs",
@@ -255,6 +256,16 @@ func TestBackupJobRequestAuditDetails(t *testing.T) {
 			if got := decode(t, tt.req)["selection"]; got != tt.want {
 				t.Errorf("selection = %v, want %q", got, tt.want)
 			}
+		}
+	})
+
+	t.Run("a create that could not find the job's id names none", func(t *testing.T) {
+		var got map[string]any
+		if err := json.Unmarshal(backupJobRequest{}.auditDetails(backupJobIDUnknown, nil), &got); err != nil {
+			t.Fatalf("auditDetails() is not valid JSON: %v", err)
+		}
+		if _, named := got["job_id"]; named {
+			t.Errorf("details = %v, want no job_id for the marker", got)
 		}
 	})
 

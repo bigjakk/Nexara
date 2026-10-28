@@ -1259,8 +1259,16 @@ func (r backupJobRequest) selectionSummary() string {
 // ID on create, so without this the audit trail records only that "a job" was
 // created. Fields the request left unspecified are omitted rather than
 // defaulted, so a partial update is not recorded as having set them.
-func (r backupJobRequest) auditDetails(before map[string]json.RawMessage) json.RawMessage {
+//
+// The job is named in details as its run rows name it (job_id): the row's
+// resource id is the same kind of string as a guest's VMID and a node's name,
+// which are filed under resource type backup too. A create that could not tell
+// which job it made (backupJobIDUnknown) names none.
+func (r backupJobRequest) auditDetails(jobID string, before map[string]json.RawMessage) json.RawMessage {
 	fields := map[string]any{}
+	if jobID != backupJobIDUnknown {
+		fields["job_id"] = jobID
+	}
 	if r.Schedule != "" {
 		fields["schedule"] = r.Schedule
 	}
@@ -1314,7 +1322,7 @@ func (h *BackupHandler) CreateBackupJob(c fiber.Ctx, p *apischema.Params) error 
 			jobID = soleNewBackupJobID(before, after)
 		}
 	}
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_created", req.auditDetails(nil))
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_created", req.auditDetails(jobID, nil))
 
 	return c.JSON(fiber.Map{"status": "created"})
 }
@@ -1371,7 +1379,7 @@ func (h *BackupHandler) UpdateBackupJob(c fiber.Ctx, p *apischema.Params) error 
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_updated", req.auditDetails(before))
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_updated", req.auditDetails(jobID, before))
 
 	return c.JSON(fiber.Map{"status": "updated"})
 }
@@ -1394,7 +1402,9 @@ func (h *BackupHandler) DeleteBackupJob(c fiber.Ctx, p *apischema.Params) error 
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_deleted", nil)
+	// Marshalling a string map cannot fail.
+	details, _ := json.Marshal(map[string]string{"job_id": jobID})
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "deleted"})
 }
