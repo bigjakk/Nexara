@@ -952,6 +952,19 @@ func TestGuestHistory(t *testing.T) {
 		if got, want := folderHistory(sel, []string{"qemu", "lxc"}, 1), []string{"start 120", "delete U"}; !slices.Equal(got, want) {
 			t.Errorf("folder F's History capped at 1 = %v, want %v", got, want)
 		}
+		// Narrowed to Nexara's, the guests' rows are still read from their
+		// floor — where their newest row cap begins, a Proxmox start 46 minutes
+		// back — and the read is whole back to it, none of theirs Nexara's since.
+		if p, err := handlers.FolderHistory().ListParams(historyClusterID, sel); err != nil {
+			t.Fatal(err)
+		} else {
+			p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 50, true, []string{"qemu", "lxc"}
+			p.RowCap, p.Source = 1, pgtype.Text{String: "nexara", Valid: true}
+			rows, err := q.ListHistory(ctx, p)
+			if err != nil || len(rows) != 1 || rows[0].Action != "delete" || !rows[0].SearchedFrom.Time.Equal(minsAgo(46)) {
+				t.Errorf("folder F's Nexara rows capped at 1: %+v (%v), want its delete, whole back to 46 minutes", rows, err)
+			}
+		}
 		// Without view:vm its VMs are dropped (viewableGuests), and so is every
 		// row naming one of them that the folder's own rows would show: what is
 		// left is the folders' and container 124's.
@@ -1083,7 +1096,9 @@ func TestGuestHistory(t *testing.T) {
 		}
 		exec("third backup", `INSERT INTO guest_backups (cluster_id, upid, vmid, node, source, status, started_at, finished_at, log_start, log_end)
 		VALUES ($1, $2, 300, 'pve-01', 'proxmox', 'completed', $3, $3, 1, 2)`, historyThirdID, historyUPID(43, "vzdump", ""), minsAgo(10))
-		clusterHistory := func(f func(*gen.ListHistoryParams)) ([]string, int64) {
+		// The entries, the total and how far back the read is whole, if not
+		// all of it: read from every row, an empty page's lone one too.
+		clusterHistory := func(f func(*gen.ListHistoryParams)) ([]string, int64, time.Time) {
 			t.Helper()
 			p, err := handlers.ClusterHistory().ListParams(historyThirdID, handlers.HistorySelection{})
 			if err != nil {
@@ -1097,7 +1112,14 @@ func TestGuestHistory(t *testing.T) {
 			}
 			got := make([]string, 0, len(rows))
 			var total int64
+			var searched time.Time
 			for _, r := range rows {
+				if r.SearchedFrom.Valid {
+					searched = r.SearchedFrom.Time
+				}
+				if r.EntryID == "" {
+					continue
+				}
 				if uuid.UUID(r.ClusterID.Bytes) != historyThirdID {
 					t.Errorf("the cluster's History holds %s %s of cluster %s", r.Kind, r.Action, uuid.UUID(r.ClusterID.Bytes))
 				}
@@ -1110,43 +1132,75 @@ func TestGuestHistory(t *testing.T) {
 				got = append(got, entry)
 				total = r.Total
 			}
-			return got, total
+			return got, total, searched
 		}
 		runSince := func(m float64) string { return minsAgo(m).Format("15:04:05") }
+		// searched is how many minutes back a capped read is whole — the latest
+		// of its full sources' oldest rows — and 0 for one whole.
 		for _, tt := range []struct {
 			name      string
 			f         func(*gen.ListHistoryParams)
 			want      []string
 			wantTotal int64
+			searched  float64
 		}{
 			{"everything", func(*gen.ListHistoryParams) {}, []string{"backup vzdump backup", "status status_change guests",
 				"status status_change guests", "task cephcreatemgr ceph", "run sync_failed sync 2 since " + runSince(40) + ", refused 4",
-				"audit start guests", "audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 8},
+				"audit start guests", "audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 8, 0},
 			{"without view:vm", func(p *gen.ListHistoryParams) { p.StatusGuestTypes = []string{"lxc"} }, []string{
 				"task cephcreatemgr ceph", "run sync_failed sync 2 since " + runSince(40) + ", refused 4",
-				"audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 4},
+				"audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 4, 0},
 			{"without view:container", func(p *gen.ListHistoryParams) { p.StatusGuestTypes = []string{"qemu"} }, []string{
 				"backup vzdump backup", "status status_change guests", "task cephcreatemgr ceph",
 				"run sync_failed sync 2 since " + runSince(40) + ", refused 4", "audit start guests", "audit apt_update nodes",
-				"run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 7},
+				"run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 7, 0},
 			{"without view:task", func(p *gen.ListHistoryParams) { p.IncludeTasks = false }, []string{
 				"status status_change guests", "status status_change guests", "run sync_failed sync 2 since " + runSince(40) + ", refused 4",
-				"audit start guests", "audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 6},
+				"audit start guests", "audit apt_update nodes", "run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 6, 0},
 			// Capped, each source is read newest first to the cap — not the apt
 			// update behind the start, nor the sync failure behind the newest —
 			// and the total stops one past it.
 			{"capped", func(p *gen.ListHistoryParams) { p.RowCap = 1 }, []string{
 				"backup vzdump backup", "status status_change guests", "task cephcreatemgr ceph",
-				"run sync_failed sync 1 since " + runSince(35) + ", refused 4", "audit start guests"}, 2},
+				"run sync_failed sync 1 since " + runSince(35) + ", refused 4", "audit start guests"}, 2, 10},
 			// Capped for a caller without view:vm, each source's cap counts
 			// only rows the caller sees: the apt update, not VM 300's start.
 			{"capped, without view:vm", func(p *gen.ListHistoryParams) {
 				p.RowCap, p.StatusGuestTypes = 1, []string{"lxc"}
 			}, []string{"task cephcreatemgr ceph", "run sync_failed sync 1 since " + runSince(35) + ", refused 4",
-				"audit apt_update nodes"}, 2},
+				"audit apt_update nodes"}, 2, 25},
+			// At 2 the audit rows, the status changes, the tasks searched and the
+			// sync failures are full, back to 60, 25, 50 and 40 minutes: whole
+			// for the last 25. At 10 none is, and the read is whole.
+			{"capped at 2", func(p *gen.ListHistoryParams) { p.RowCap = 2 }, []string{"backup vzdump backup",
+				"status status_change guests", "status status_change guests", "task cephcreatemgr ceph",
+				"run sync_failed sync 2 since " + runSince(40) + ", refused 4", "audit start guests", "audit apt_update nodes"},
+				3, 25},
+			{"capped at 10", func(p *gen.ListHistoryParams) { p.RowCap = 10 }, []string{"backup vzdump backup",
+				"status status_change guests", "status status_change guests", "task cephcreatemgr ceph",
+				"run sync_failed sync 2 since " + runSince(40) + ", refused 4", "audit start guests", "audit apt_update nodes",
+				"run sync_failed sync 3 since " + runSince(100) + ", refused 2"}, 8, 0},
+			// Nothing of the type asked for, from a capped read: it still says.
+			{"capped, nothing of the type", func(p *gen.ListHistoryParams) {
+				p.RowCap, p.Category = 2, pgtype.Text{String: "certificates", Valid: true}
+			}, []string{}, 0, 25},
+			// Narrowed to Nexara's, each source's cap counts only its rows: the apt
+			// update, not the Proxmox start before it.
+			{"capped, Nexara's", func(p *gen.ListHistoryParams) {
+				p.RowCap, p.Source = 1, pgtype.Text{String: "nexara", Valid: true}
+			}, []string{"run sync_failed sync 1 since " + runSince(35) + ", refused 4", "audit apt_update nodes"}, 2, 35},
+			// Proxmox's, for a caller without view:vm: the tasks searched, back
+			// to the Ceph task, are the one full source.
+			{"capped, Proxmox's, without view:vm", func(p *gen.ListHistoryParams) {
+				p.RowCap, p.Source, p.StatusGuestTypes = 1, pgtype.Text{String: "proxmox", Valid: true}, []string{"lxc"}
+			}, []string{"task cephcreatemgr ceph"}, 1, 30},
 		} {
-			if got, total := clusterHistory(tt.f); !slices.Equal(got, tt.want) || total != tt.wantTotal {
+			got, total, searched := clusterHistory(tt.f)
+			if !slices.Equal(got, tt.want) || total != tt.wantTotal {
 				t.Errorf("%s: the cluster's History =\n\t%v (total %d)\nwant\n\t%v (total %d)", tt.name, got, total, tt.want, tt.wantTotal)
+			}
+			if want := minsAgo(tt.searched); tt.searched == 0 && !searched.IsZero() || tt.searched != 0 && !searched.Equal(want) {
+				t.Errorf("%s: whole back to %v, want %v minutes back", tt.name, searched, tt.searched)
 			}
 		}
 	})
@@ -1345,6 +1399,16 @@ func TestGuestHistory(t *testing.T) {
 		} {
 			if got := nodeHistory(tt.f); !slices.Equal(got, tt.want) {
 				t.Errorf("%s: the node's History =\n\t%v\nwant\n\t%v", tt.name, got, tt.want)
+			}
+		}
+		// Capped at 1 without view:task, the node's audit rows are the full
+		// source read latest: whole back to their newest, the reload 4 minutes on.
+		if p, err := handlers.NodeHistory().ListParams(historyThirdID, nodeSel); err != nil {
+			t.Fatal(err)
+		} else {
+			p.RowLimit, p.RowCap, p.StatusGuestTypes = 50, 1, []string{"qemu", "lxc"}
+			if rows, err := q.ListHistory(ctx, p); err != nil || len(rows) == 0 || !rows[0].SearchedFrom.Time.Equal(minsAgo(4)) {
+				t.Errorf("the node's History capped at 1 without view:task: %d rows (%v), want whole back to 4 minutes", len(rows), err)
 			}
 		}
 		// Two minutes on, a node that stopped reporting and stayed so is a change.

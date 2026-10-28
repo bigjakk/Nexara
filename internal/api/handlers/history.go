@@ -848,15 +848,34 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
 	}
 
-	// Every row carries the same total; a page past the end carries none, and
-	// reports 0 — the client snaps back to a page that exists.
-	var total int64
-	items := make([]historyEntry, 0, len(rows))
+	// Every row carries the same total and horizon; a page past the end
+	// carries no entry, and reports 0 — the client snaps back to a page that
+	// exists — but for a capped read's one row with none (EntryID ""), there
+	// only to say how far back it searched.
+	page := historyPage{Items: make([]historyEntry, 0, len(rows))}
 	for _, row := range rows {
-		total = row.Total
-		items = append(items, toHistoryEntry(row, visible, includeTasks))
+		if row.SearchedFrom.Valid && page.SearchedFrom == nil {
+			s := row.SearchedFrom.Time.Format(time.RFC3339Nano)
+			page.SearchedFrom = &s
+		}
+		if row.EntryID == "" {
+			continue
+		}
+		page.Total = row.Total
+		page.Items = append(page.Items, toHistoryEntry(row, visible, includeTasks))
 	}
-	return RespondList(c, items, total)
+	return c.JSON(page)
+}
+
+// historyPage is a History route's response: the list envelope every
+// collection returns (ListResponse), and how far back a capped read searched.
+type historyPage struct {
+	Items []historyEntry `json:"items"`
+	Total int64          `json:"total"`
+	// SearchedFrom is, for a read in which a source reached its cap, the point
+	// back to which the read is whole: older entries of that source were not
+	// read. Absent when the read is whole.
+	SearchedFrom *string `json:"searched_from,omitempty"`
 }
 
 // toHistoryEntry maps one row. showExitText is view:task — see List.

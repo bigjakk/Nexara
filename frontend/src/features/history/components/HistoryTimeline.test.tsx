@@ -64,16 +64,28 @@ describe("HistoryTimeline", () => {
   );
 
   // A capped read's total is one past the cap: "more than" it, and only the
-  // cap's worth of pages; a narrowed read has the larger cap, and says so.
+  // cap's worth of pages; a narrowed read has the larger cap. Where the
+  // server says how far back it searched, so does the page.
   it.each([
-    ["unfiltered", "", 101, /^More than 100 entries/, "Page 1 of 2"],
-    ["narrowed", "other", 1001, /^More than 1,000 entries/, "Page 1 of 20"],
+    ["unfiltered", "", 101, /^More than 100 entries/, "Page 1 of 2", undefined],
+    [
+      "narrowed",
+      "other",
+      1001,
+      /^More than 1,000 entries/,
+      "Page 1 of 20",
+      "2026-01-02T03:04:05Z",
+    ],
   ])(
     "reads a total one past the %s cap as more than it",
-    async (_name, category, total, more, pages) => {
+    async (_name, category, total, more, pages, searchedFrom) => {
       const user = setupUser();
       mockedPage.mockReset();
-      mockedPage.mockResolvedValue({ items: [], total });
+      mockedPage.mockResolvedValue({
+        items: [],
+        total,
+        searched_from: searchedFrom,
+      });
       const kind = historyKind(
         "probe",
         { categories: { other: "Other" } },
@@ -97,8 +109,8 @@ describe("HistoryTimeline", () => {
       expect(await screen.findByText(more)).toBeInTheDocument();
       expect(screen.getByText(pages)).toBeInTheDocument();
       expect(
-        screen.queryByText(/narrowed read searches the newest 1,000/) !== null,
-      ).toBe(category !== "");
+        screen.queryByText(/^Searched back to .*newest 1,000 entries/) !== null,
+      ).toBe(searchedFrom !== undefined);
       // Nothing left out, so nothing to bring back.
       expect(screen.queryByRole("checkbox")).toBeNull();
     },

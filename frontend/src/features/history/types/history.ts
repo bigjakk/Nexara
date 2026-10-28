@@ -12,6 +12,7 @@
  */
 import type { TFunction } from "i18next";
 import type { LucideIcon } from "lucide-react";
+import type { ListResponse } from "@/lib/api-client";
 import type { ApiPath } from "@/lib/api-path";
 
 /** Who did it: Nexara, Proxmox (an ingested task), or no task at all. */
@@ -85,6 +86,13 @@ export interface HistoryEntry {
    *  last_seen_at (its first) to occurred_at (its last); details are the last
    *  one's. */
   run_count?: number;
+}
+
+/** One page of a History, as its route returns it. */
+export interface HistoryPage extends ListResponse<HistoryEntry> {
+  /** Set when a source reached its cap (HistoryKind.RowCap): the read is
+   *  whole back to here, and older entries of that source were not read. */
+  searched_from?: string;
 }
 
 /** The time filter: how far back to look, or "" for the whole history. */

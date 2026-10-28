@@ -1836,6 +1836,16 @@ type Querier interface {
 	// finds. The object reads apply the include_guests and guest-type tests the
 	// page applies, so the cap counts only rows the page could show.
 	//
+	// A capped read says how far back it is whole (searched_from, from horizon):
+	// the latest of the points where a source that reached its cap stopped, and
+	// of the guests' floor — an older entry of that source may be missing. Each
+	// source is counted where its cap is applied. The source filter is applied in
+	// every arm, so a cap counts only that source's rows — Proxmox's together
+	// with the rows that may be their Nexara twins, which the duplicate probe
+	// needs. The type filter is not: a category is worked out once per kind of
+	// row after the arms (category_map), and per row in each arm it cost four
+	// times as much.
+	//
 	// Every branch reads one cluster, a REQUIRED argument: the route's, which its
 	// cluster-scoped gate authorized. The one exception is a global kind's objects
 	// (global, HistoryKind.Global): read in every cluster and in none, because
@@ -1958,6 +1968,10 @@ type Querier interface {
 	// moved it, not a row filed under its UPID since. total is
 	// count(*) OVER the filtered set, computed before LIMIT — the Items and the
 	// Total come from one query and so cannot be counted under different filters.
+	// An empty page of a capped read is one row with no entry (entry_id ''),
+	// there only to carry searched_from.
+	// An empty page of a capped read still says how far back it searched: one
+	// row with no entry (entry_id ''), which the handler reads only for that.
 	ListHistory(ctx context.Context, arg ListHistoryParams) ([]ListHistoryRow, error)
 	// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).
 	ListIOErrorGuests(ctx context.Context) ([]ListIOErrorGuestsRow, error)

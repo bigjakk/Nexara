@@ -521,6 +521,54 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 	}
 }
 
+// A capped read says how far back it is whole, an empty page of one too —
+// whose one row carries no entry, and is no item.
+func TestHistoryListSaysHowFarBackItSearched(t *testing.T) {
+	t.Parallel()
+	at := pgtype.Timestamptz{Time: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Valid: true}
+	entry := db.ListHistoryRow{EntryID: "audit:1", Kind: "audit", ResourceType: "node", Details: json.RawMessage(`{}`),
+		Total: 7, SearchedFrom: at}
+	for _, tt := range []struct {
+		name      string
+		rows      []any
+		wantItems int
+		wantTotal int64
+	}{
+		{"a page", []any{entry}, 1, 7},
+		{"an empty page", []any{db.ListHistoryRow{Details: json.RawMessage(`{}`), SearchedFrom: at}}, 0, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+			app.Use(func(c fiber.Ctx) error {
+				c.Locals("user_id", uuid.New())
+				c.Locals("rbac_engine", &recordingEngine{actions: map[string]bool{"view": true}})
+				return c.Next()
+			})
+			app.Get("/clusters/:cluster_id/history", withRequestParams(t,
+				historyTestProps("cluster_id", apischema.StdOption("cluster-id")), []string{"cluster_id"},
+				NewHistoryHandler(db.New(&auditRowsDBTX{rows: tt.rows})).Route(ClusterHistory()).List))
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+uuid.NewString()+"/history", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			var body struct {
+				Items        []historyEntry `json:"items"`
+				Total        int64          `json:"total"`
+				SearchedFrom string         `json:"searched_from"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatalf("status %d: %v", resp.StatusCode, err)
+			}
+			if len(body.Items) != tt.wantItems || body.Total != tt.wantTotal || body.SearchedFrom != "2026-01-02T03:04:05Z" {
+				t.Errorf("%d items, total %d, searched from %q; want %d, %d, 2026-01-02T03:04:05Z",
+					len(body.Items), body.Total, body.SearchedFrom, tt.wantItems, tt.wantTotal)
+			}
+		})
+	}
+}
+
 // A kind with a guest toggle reads guest rows only when the request sets it;
 // any other kind reads them always.
 func TestHistoryListPassesTheGuestToggle(t *testing.T) {

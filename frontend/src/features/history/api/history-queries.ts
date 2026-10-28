@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type {
   HistoryEntry,
+  HistoryPage,
   HistorySource,
   HistoryTarget,
   HistoryWindow,
@@ -81,7 +82,7 @@ export function useHistory({
       timeWindow,
       includeGuests,
     ],
-    queryFn: () => {
+    queryFn: (): Promise<HistoryPage> => {
       const params = new URLSearchParams();
       params.set("limit", String(HISTORY_PAGE_SIZE));
       params.set("offset", String(page * HISTORY_PAGE_SIZE));
