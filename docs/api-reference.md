@@ -945,6 +945,7 @@ leaves provenance intact.
 | POST | `/clusters/:id/nodes/:node/services/:service/:action` | Start/stop/restart a node service |
 | GET | `/clusters/:id/nodes/:node/syslog` | Read node syslog over a time window |
 | GET | `/clusters/:id/nodes/:node/journal` | Read the node's systemd journal by line count or cursor |
+| GET | `/clusters/:id/nodes/:node/history` | A node's History: its own and its parts' actions (network, repositories, OSDs, storage, firewall rules, certificates), the tasks it ran, its status changes and the guests that arrived on it or left it, newest first. A guest's task, and any other entry naming a guest but a move, only with `include_guests=true`. Needs `view:audit` and `view:node`; a guest's entries `view:vm` or `view:container`, tasks with no audit entry `view:task` |
 
 #### The node config save token
 

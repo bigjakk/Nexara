@@ -4,7 +4,8 @@
     "allTypes": "All types",
     "source": "Source",
     "time": "Time",
-    "showRoutine": "Show routine checks"
+    "showRoutine": "Show routine checks",
+    "includeGuests": "Include guest activity"
   },
   "sources": {
     "nexara": "Nexara",
@@ -31,6 +32,7 @@
     "seen": "Seen",
     "when": "When",
     "lastSeen": "Last seen {{status}}",
+    "lastSeenBeforeMove": "Last seen before the move",
     "finished": "Finished",
     "source": "Source",
     "node": "Node",

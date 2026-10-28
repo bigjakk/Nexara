@@ -14,42 +14,54 @@ vi.mock("@/lib/api-client", async () =>
 const mockedPage = vi.mocked(apiClient.page);
 
 describe("HistoryTimeline", () => {
-  // A busy kind starts at its window and without its routine checks; the
-  // reader can ask for those.
-  it("reads a kind's default window without its routine categories, until asked", async () => {
-    const user = setupUser();
-    mockedPage.mockReset();
-    mockedPage.mockResolvedValue({ items: [], total: 0 });
-    const kind = historyKind(
-      "probe",
-      { categories: { updates: "Updates", other: "Other" } },
-      { icons: {}, defaultWindow: "7d", routine: ["updates"] },
-    );
-    renderWithProviders(
-      <HistoryTimeline
-        kind={kind}
-        target={{
-          clusterId: "c1",
-          path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
-        }}
-      />,
-    );
-    await waitFor(() => {
-      expect(mockedPage).toHaveBeenCalled();
-    });
-    const first = new URL(String(mockedPage.mock.calls[0]?.[0]), "http://x");
-    expect(first.searchParams.get("exclude_category")).toBe("updates");
-    expect(first.searchParams.get("start_time")).not.toBeNull();
+  // A busy kind starts at its window, without its routine checks and its
+  // guests' own activity; the reader can bring each back.
+  it.each([
+    ["Show routine checks", "exclude_category", "updates", null],
+    ["Include guest activity", "include_guests", null, "true"],
+  ])(
+    "%s brings back what the kind leaves out",
+    async (box, param, before, after) => {
+      const user = setupUser();
+      mockedPage.mockReset();
+      mockedPage.mockResolvedValue({ items: [], total: 0 });
+      const kind = historyKind(
+        "probe",
+        { categories: { updates: "Updates", other: "Other" } },
+        {
+          icons: {},
+          defaultWindow: "7d",
+          routine: ["updates"],
+          guestToggle: true,
+        },
+      );
+      renderWithProviders(
+        <HistoryTimeline
+          kind={kind}
+          target={{
+            clusterId: "c1",
+            path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
+          }}
+        />,
+      );
+      await waitFor(() => {
+        expect(mockedPage).toHaveBeenCalled();
+      });
+      const first = new URL(String(mockedPage.mock.calls[0]?.[0]), "http://x");
+      expect(first.searchParams.get(param)).toBe(before);
+      expect(first.searchParams.get("start_time")).not.toBeNull();
 
-    await user.click(
-      screen.getByRole("checkbox", { name: "Show routine checks" }),
-    );
-    await waitFor(() => {
-      expect(mockedPage.mock.calls.length).toBeGreaterThan(1);
-    });
-    const last = new URL(String(mockedPage.mock.calls.at(-1)?.[0]), "http://x");
-    expect(last.searchParams.get("exclude_category")).toBeNull();
-  });
+      await user.click(screen.getByRole("checkbox", { name: box }));
+      await waitFor(() => {
+        expect(mockedPage.mock.calls.length).toBeGreaterThan(1);
+      });
+      const last = new URL(
+        String(mockedPage.mock.calls.at(-1)?.[0]),
+        "http://x",
+      );
+      expect(last.searchParams.get(param)).toBe(after);
+    },
+  );
 
   // A capped read's total is one past the cap: "more than" it, and only the
   // cap's worth of pages.
@@ -74,5 +86,7 @@ describe("HistoryTimeline", () => {
       await screen.findByText(/^More than 100 entries/),
     ).toBeInTheDocument();
     expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+    // Nothing left out, so nothing to bring back.
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 });

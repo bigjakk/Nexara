@@ -25,6 +25,8 @@ interface HistoryParams {
   excludeCategories?: readonly string[];
   source: HistorySource | "";
   timeWindow: HistoryWindow;
+  /** The guests' own activity, on a kind with a guest toggle. */
+  includeGuests?: boolean;
   enabled: boolean;
 }
 
@@ -61,6 +63,7 @@ export function useHistory({
   excludeCategories = [],
   source,
   timeWindow,
+  includeGuests = false,
   enabled,
 }: HistoryParams) {
   return useQuery({
@@ -73,6 +76,7 @@ export function useHistory({
       excludeCategories.join(","),
       source,
       timeWindow,
+      includeGuests,
     ],
     queryFn: () => {
       const params = new URLSearchParams();
@@ -83,6 +87,7 @@ export function useHistory({
         params.set("exclude_category", excludeCategories.join(","));
       }
       if (source) params.set("source", source);
+      if (includeGuests) params.set("include_guests", "true");
       if (timeWindow) {
         params.set(
           "start_time",

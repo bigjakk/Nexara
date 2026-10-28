@@ -161,7 +161,9 @@ function HistoryRow({
                 {shared(
                   hasTask
                     ? "row.started"
-                    : entry.kind === "status" || entry.kind === "observed"
+                    : entry.kind === "status" ||
+                        entry.kind === "observed" ||
+                        entry.kind === "move"
                       ? "row.seen"
                       : "row.when",
                 )}
@@ -173,7 +175,9 @@ function HistoryRow({
                   <span className="text-muted-foreground">
                     {entry.kind === "observed"
                       ? shared("observed.lastSeen")
-                      : shared("row.lastSeen", { status: entry.from_status })}
+                      : entry.kind === "move"
+                        ? shared("row.lastSeenBeforeMove")
+                        : shared("row.lastSeen", { status: entry.from_status })}
                   </span>
                   <span>{formatDateTime(entry.last_seen_at)}</span>
                 </>
@@ -324,6 +328,7 @@ export function HistoryTimeline({
     kind.defaultWindow ?? "",
   );
   const [showRoutine, setShowRoutine] = useState(false);
+  const [includeGuests, setIncludeGuests] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const layout = useColumnLayout(
     kind.layoutKey,
@@ -337,6 +342,7 @@ export function HistoryTimeline({
     excludeCategories: historyExclusions(kind, showRoutine, category),
     source,
     timeWindow,
+    includeGuests: kind.guestToggle === true && includeGuests,
     enabled,
   });
   const items = data?.items ?? [];
@@ -388,6 +394,26 @@ export function HistoryTimeline({
     );
   }
 
+  function filterCheckbox(
+    label: string,
+    checked: boolean,
+    onChange: (v: boolean) => void,
+  ) {
+    return (
+      <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => {
+            onChange(e.target.checked);
+            setPage(0);
+          }}
+        />
+        {label}
+      </label>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -415,19 +441,18 @@ export function HistoryTimeline({
           })),
           setTimeWindow,
         )}
-        {(kind.routine ?? []).length > 0 && (
-          <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={showRoutine}
-              onChange={(e) => {
-                setShowRoutine(e.target.checked);
-                setPage(0);
-              }}
-            />
-            {shared("filters.showRoutine")}
-          </label>
-        )}
+        {(kind.routine ?? []).length > 0 &&
+          filterCheckbox(
+            shared("filters.showRoutine"),
+            showRoutine,
+            setShowRoutine,
+          )}
+        {kind.guestToggle === true &&
+          filterCheckbox(
+            shared("filters.includeGuests"),
+            includeGuests,
+            setIncludeGuests,
+          )}
         <span className="flex-1" />
         <ResetColumnsButton layout={layout} />
       </div>

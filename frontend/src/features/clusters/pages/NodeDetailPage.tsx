@@ -107,6 +107,7 @@ import { openConsole } from "@/features/console/lib/open-console";
 import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
 import { usePermissions } from "@/hooks/usePermissions";
 import { NodeAptRepositories } from "../components/NodeAptRepositories";
+import { NodeHistoryTab } from "../components/NodeHistoryTab";
 import { NodePowerActions } from "../components/node/NodePowerActions";
 import { NodeReportButton } from "../components/node/NodeReportButton";
 import { NodeMetricsPanel } from "../components/node/NodeMetricsPanel";
@@ -165,7 +166,11 @@ export function NodeDetailPage() {
     );
   }, [clusterVMs, inventoryRows, clusterId, nodeId]);
   const liveMetric = clusterMetrics?.nodeMetrics.get(nodeId);
-  const { canConsole, canManage } = usePermissions();
+  const { canConsole, canManage, hasPermission } = usePermissions();
+  // History is read from the audit log, and its rows open Proxmox task logs:
+  // without both grants the tab would be a table of refusals.
+  const canHistory =
+    hasPermission("view", "audit") && hasPermission("view", "task");
 
   function openShell(keys: ConsoleClickKeys) {
     if (!node) return;
@@ -292,6 +297,7 @@ export function NodeDetailPage() {
           <TabsTrigger value="syslog">Syslog</TabsTrigger>
           <TabsTrigger value="pci">PCI Devices</TabsTrigger>
           <TabsTrigger value="updates">Updates</TabsTrigger>
+          {canHistory && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
 
         {/* Summary Tab */}
@@ -531,6 +537,13 @@ export function NodeDetailPage() {
             </p>
           )}
         </TabsContent>
+
+        {/* History Tab */}
+        {canHistory && (
+          <TabsContent value="history" className="mt-4">
+            <NodeHistoryTab clusterId={clusterId} nodeName={node.name} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

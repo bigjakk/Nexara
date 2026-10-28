@@ -28,6 +28,7 @@ import historyEN from "@/locales/en/history.json";
 import historyGuestEN from "@/locales/en/history-guest.json";
 import historyFolderEN from "@/locales/en/history-folder.json";
 import historyClusterEN from "@/locales/en/history-cluster.json";
+import historyNodeEN from "@/locales/en/history-node.json";
 
 export const defaultNS = "common";
 
@@ -57,6 +58,7 @@ export const resources = {
     "history-guest": historyGuestEN,
     "history-folder": historyFolderEN,
     "history-cluster": historyClusterEN,
+    "history-node": historyNodeEN,
   },
 } as const;
 

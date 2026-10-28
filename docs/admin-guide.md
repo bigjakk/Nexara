@@ -1466,6 +1466,16 @@ A cluster's page has a **History** tab: everything that happened in the cluster,
 - An unfiltered read holds the newest 2,000 entries of each source; past that the count reads **More than 2,000 entries**, and narrowing the time or the type reaches older ones. A filtered read is not capped.
 - The tab needs `view:audit` and `view:task`. Through the API (`GET /api/v1/clusters/{cluster_id}/history`) it needs `view:audit` and `view:cluster`; a guest's entries need `view:vm` or `view:container` by its type, as on the guest's own History.
 
+### A Node's History
+
+A node's page has a **History** tab: what happened to the node, newest first — reboots and shutdowns, maintenance and evacuations, repository changes, option, DNS and time-zone changes, its network, firewall-rule, storage, Ceph OSD and certificate changes, console opens, the tasks that ran on it, done in Nexara or in Proxmox, its status changes, and the guests that arrived on it or left it. It opens on the last 7 days.
+
+- **Show routine checks** brings back the reads that change nothing on the node, left out until then: package-list refreshes — Proxmox runs one daily — memory-module reads — Nexara makes one daily — and report downloads.
+- **Include guest activity** adds what the node's guests did on it — their tasks, migrations and backups — which a busy node runs by the thousand; each guest has its own History. Without it, a guest is listed only where it arrived on the node or left it, and a **Guest** column links it.
+- **Status changes** — online, offline, and unknown while Proxmox does not report the node — and **guest arrivals and departures** are recorded from this release on, as Nexara sees them. A round trip through unknown that is back within two minutes is not listed. A guest seen on another node is listed whether or not a task moved it: a migration's own task is guest activity, and a move with no task is an HA recovery, say. A guest destroyed and created again under its VMID has not moved.
+- A node removed and added again under its name continues its History.
+- The tab needs `view:audit` and `view:task`. Through the API (`GET /api/v1/clusters/{cluster_id}/nodes/{node_name}/history`, with `include_guests=true` for the guests' activity) it needs `view:audit` and `view:node`; a guest's entries need `view:vm` or `view:container` by its type, as on the guest's own History, and tasks with no audit entry `view:task`.
+
 ### Changes Made Directly in Proxmox
 
 An edit made in the Proxmox GUI, its API or a node's shell often runs no task — a VM's memory, a container's options, a pool's members, a storage definition, a node's DNS — and so leaves no audit entry. Every `OBJECT_OBSERVE_INTERVAL` (default `5m`, between `1m` and `1h`; `0` stops these reads, though a Proxmox Backup Server's job edits are still recorded, as below) Nexara reads each cluster's objects and compares them with what it read last, and a History shows what changed as **Changed in Proxmox**, **Created in Proxmox** or **Removed in Proxmox**, between the two reads.

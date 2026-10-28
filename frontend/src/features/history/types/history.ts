@@ -35,9 +35,10 @@ export interface HistoryEntry {
    * Proxmox task names none of them — or an observed change: one Nexara saw
    * in Proxmox that nothing on record explains (action added, removed or
    * changed) — or a run: a burst of one repeated row, a cluster's sync
-   * failures, as one entry.
+   * failures, as one entry — or a move: a guest seen arriving on a node or
+   * leaving it (action arrived or left, node the other one).
    */
-  kind: "audit" | "task" | "status" | "backup" | "observed" | "run";
+  kind: "audit" | "task" | "status" | "backup" | "observed" | "run" | "move";
   occurred_at: string;
   /** One of the kind's categories, derived on the server before the page is
    *  cut so the type filter applies to the whole history. */
@@ -108,9 +109,12 @@ export interface HistoryKind {
   /** The time filter's first choice: an object's History costs what its whole
    *  history costs, so a busy kind starts at a window. Unset: all time. */
   defaultWindow?: HistoryWindow;
-  /** Categories of routine checks (a node's daily updates), left out until
-   *  the reader asks for them. */
+  /** Categories of routine checks (a node's daily package-list refresh), left
+   *  out until the reader asks for them. */
   routine?: readonly string[];
+  /** The route takes include_guests (HistoryKind.GuestToggle on the server):
+   *  its guests' own activity is left out until the reader brings it in. */
+  guestToggle?: boolean;
   /** The server's cap on an unfiltered read (HistoryKind.RowCap): a total of
    *  rowCap + 1 means more than rowCap, of which rowCap can be paged. */
   rowCap?: number;
