@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 
@@ -175,6 +176,7 @@ const observeTagLen = 16
 type observeTagger struct {
 	key   string
 	keyID string
+	made  atomic.Int64 // tags made, which a reading unchanged since the last pass makes none of (tagMemo)
 }
 
 func newObserveTagger(encryptionKey string) (*observeTagger, error) {
@@ -189,6 +191,7 @@ func newObserveTagger(encryptionKey string) (*observeTagger, error) {
 // field are part of the message, so one password set on two guests, or one
 // value in two fields, gives unrelated tags.
 func (t *observeTagger) tag(cluster uuid.UUID, kind, objectID, field, value string) (string, error) {
+	t.made.Add(1)
 	mac, err := crypto.Tag(t.key, observeFieldPurpose, lengthPrefixed(cluster.String(), kind, objectID, field, value))
 	if err != nil {
 		return "", err

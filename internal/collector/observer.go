@@ -3,6 +3,8 @@ package collector
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -81,13 +84,14 @@ const (
 	// is past its cap, and compared by presence and one tag of each whole
 	// object (apply), its changes counted in one row a pass, with a notice in
 	// the cluster's History once a day (noticeOverCap). The access kinds take
-	// observeMaxAccessObjects, as many as user.cfg holds in practice. A reading
-	// that finds more changes than observeMaxChanges in one kind files each,
-	// marked as one bulk change (markBulk) so a History can show a mass rewrite
-	// as one, and each is explained or not like any other.
+	// observeMaxAccessObjects: user.cfg rarely holds a tenth of it, and a pass
+	// reading that many takes about a second (tagMemo). A reading that finds
+	// more changes than observeMaxChanges in one kind files each, marked as one
+	// bulk change (markBulk) so a History can show a mass rewrite as one, and
+	// each is explained or not like any other.
 	observeMaxObjects       = 10000
 	observeMaxKindObjects   = 100000
-	observeMaxAccessObjects = 100000
+	observeMaxAccessObjects = 20000
 	observeMaxChanges       = 50
 	// observePastCapNamed is how many ids a pass's row past the cap names of
 	// each of what came, went and changed, picked at random: its counts are
@@ -193,6 +197,20 @@ type Observer struct {
 	// (cluster_object_presence) and kept between passes, as it moves only when
 	// an object does. A write that failed drops a cluster's, to be read again.
 	presence map[uuid.UUID]map[string]map[string]presenceEntry
+	// memo is, per cluster, the tags its last pass made, by object (tagMemo).
+	memo map[uuid.UUID]map[string]tagMemo
+}
+
+// tagMemo is one object's tags as a pass made them, by kind/id, with the digest
+// of the reading they were made of: an object read as it was then takes them
+// rather than an HMAC of each field again (tagObject, wholeTag), which at the
+// access kinds' cap is most of a pass. Held in memory only, for the objects the
+// last pass tagged; the digest is never stored, so a reading cannot be tested
+// against it from a dump.
+type tagMemo struct {
+	digest [sha256.Size]byte
+	tags   *objectTags
+	whole  string
 }
 
 // presenceEntry is what is held of an object past a cap: one tag of it whole,
@@ -227,6 +245,7 @@ func NewObserver(queries ObserverQueries, encryptionKey string, clients Observer
 		maxKind:    observeMaxKindObjects,
 		maxAccess:  observeMaxAccessObjects,
 		presence:   map[uuid.UUID]map[string]map[string]presenceEntry{},
+		memo:       map[uuid.UUID]map[string]tagMemo{},
 		skips:      map[string]time.Time{},
 		held:       map[string]bool{},
 		noisy:      map[string]*noisyObject{},
@@ -310,6 +329,11 @@ type observePass struct {
 
 	nodeMu    sync.Mutex
 	nodeFails map[string]int // node -> reads in a row it left unanswered this pass
+
+	// memo is the tags the cluster's last pass made, and nextMemo this pass's,
+	// which the next takes (tagMemo).
+	memoMu         sync.Mutex
+	memo, nextMemo map[string]tagMemo
 }
 
 type storedObject struct {
@@ -355,6 +379,17 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 		o.logger.Debug("object observer: load state", "cluster_id", cluster.ID, "error", err)
 		return
 	}
+	o.mu.Lock()
+	p.memo, p.nextMemo = o.memo[cluster.ID], map[string]tagMemo{}
+	o.mu.Unlock()
+	defer func() {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		if o.memo == nil {
+			o.memo = map[uuid.UUID]map[string]tagMemo{}
+		}
+		o.memo[cluster.ID] = p.nextMemo
+	}()
 
 	p.forgetDepartedNodes(ctx, nodes)
 	versions, unread, upgraded := p.nodeVersions(ctx, nodes)
@@ -1049,6 +1084,10 @@ func sampleIDs(ids []string, n int) []string {
 // says of it alone), of that. A kept object is never read shallow, nor one
 // read shallow kept, while its scope is past the cap.
 func (p *observePass) wholeTag(kind string, obj observedObject) (string, error) {
+	key, digest := kind+"/"+obj.id, readingDigest(obj)
+	if m, ok := p.remembered(key, digest); ok && m.whole != "" {
+		return m.whole, nil
+	}
 	content := map[string]any{"fields": obj.fields, "lists": obj.lists, "members": obj.members}
 	if obj.shallow {
 		content = map[string]any{"listing": obj.fields}
@@ -1057,7 +1096,11 @@ func (p *observePass) wholeTag(kind string, obj observedObject) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	return p.o.tags.tag(p.cluster.ID, kind, obj.id, observeWholeField, string(b))
+	whole, err := p.o.tags.tag(p.cluster.ID, kind, obj.id, observeWholeField, string(b))
+	if err == nil {
+		p.remember(key, digest, func(m *tagMemo) { m.whole = whole })
+	}
+	return whole, err
 }
 
 // childrenOf is how many objects each parent of rd's kind holds, field by
@@ -1302,8 +1345,85 @@ func (p *observePass) capListing(kind string, items []map[string]json.RawMessage
 	return kept, shallow, len(items)
 }
 
-// tagObject tags each of an object's fields.
+// tagObject tags each of an object's fields, or takes the tags the last pass
+// made of the same reading (tagMemo).
 func (p *observePass) tagObject(kind string, obj observedObject) (objectTags, error) {
+	key, digest := kind+"/"+obj.id, readingDigest(obj)
+	if m, ok := p.remembered(key, digest); ok && m.tags != nil {
+		return *m.tags, nil
+	}
+	out, err := p.makeTags(kind, obj)
+	if err == nil {
+		p.remember(key, digest, func(m *tagMemo) { m.tags = &out })
+	}
+	return out, err
+}
+
+// remembered is the memo of the object at key, taken into this pass's, when it
+// was made of the reading digest names.
+func (p *observePass) remembered(key string, digest [sha256.Size]byte) (tagMemo, bool) {
+	p.memoMu.Lock()
+	defer p.memoMu.Unlock()
+	m, ok := p.nextMemo[key]
+	if !ok || m.digest != digest {
+		if m, ok = p.memo[key]; !ok || m.digest != digest {
+			return tagMemo{}, false
+		}
+		p.nextMemo[key] = m
+	}
+	return m, true
+}
+
+// remember keeps in this pass's memo what set adds of the object at key, of the
+// reading digest names.
+func (p *observePass) remember(key string, digest [sha256.Size]byte, set func(*tagMemo)) {
+	p.memoMu.Lock()
+	defer p.memoMu.Unlock()
+	if p.nextMemo == nil {
+		return
+	}
+	m := p.nextMemo[key]
+	if m.digest != digest {
+		m = tagMemo{digest: digest}
+	}
+	set(&m)
+	p.nextMemo[key] = m
+}
+
+// readingDigest is a digest of all that is read of an object: its fields,
+// lists and members, and whether it was read shallow, each part length-prefixed
+// in sorted order.
+func readingDigest(obj observedObject) [sha256.Size]byte {
+	h := sha256.New()
+	part := func(s string) {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(s)))
+		h.Write(n[:])
+		h.Write([]byte(s))
+	}
+	part(strconv.FormatBool(obj.shallow))
+	for _, f := range slices.Sorted(maps.Keys(obj.fields)) {
+		part("f")
+		part(f)
+		part(obj.fields[f])
+	}
+	for name, lists := range map[string]map[string][]string{"l": obj.lists, "m": obj.members} {
+		for _, f := range slices.Sorted(maps.Keys(lists)) {
+			part(name)
+			part(f)
+			part(strconv.Itoa(len(lists[f])))
+			for _, v := range lists[f] {
+				part(v)
+			}
+		}
+	}
+	var out [sha256.Size]byte
+	h.Sum(out[:0])
+	return out
+}
+
+// makeTags tags each of an object's fields.
+func (p *observePass) makeTags(kind string, obj observedObject) (objectTags, error) {
 	out := objectTags{scalar: make(map[string]string, len(obj.fields)), lists: map[string][]string{}}
 	for f, v := range obj.fields {
 		t, err := p.o.tags.tag(p.cluster.ID, kind, obj.id, f, v)

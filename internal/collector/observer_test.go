@@ -678,6 +678,29 @@ func TestObserverOutcomes(t *testing.T) {
 			t.Fatalf("filed %+v, want one change whose window opens at the reading before it", rows)
 		}
 	})
+	t.Run("a reading as it was makes no tags, an edit's object does", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.expect("baseline")
+		made := e.obs.tags.made.Load()
+		e.expect("unchanged")
+		if n := e.obs.tags.made.Load() - made; n != 0 {
+			t.Fatalf("a pass reading what the last read made %d tags, want none", n)
+		}
+		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","path":"/srv/store01","content":"images,iso","nodes":"pve-01","digest":"d2"}]`)
+		e.expect("edited", "changed storage/store01 [nodes]")
+		if n := e.obs.tags.made.Load() - made; n == 0 {
+			t.Fatal("an edited object made no tags")
+		}
+		// Past the cap each object is tagged whole, and that tag is kept alike.
+		e.obs.maxObjects = 0
+		e.passRows()
+		made = e.obs.tags.made.Load()
+		e.passRows()
+		if n := e.obs.tags.made.Load() - made; n != 0 {
+			t.Fatalf("a pass past the cap reading what the last read made %d tags, want none", n)
+		}
+	})
 	t.Run("an empty answer is held a pass", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
