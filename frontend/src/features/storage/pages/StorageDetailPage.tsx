@@ -151,7 +151,7 @@ export function StorageDetailPage() {
   const storageHistory = backupHistories.storage(
     clusterId,
     pool.storage,
-    pool.shared ? undefined : (hostNodeName ?? undefined),
+    hostNodeName ?? undefined,
   );
 
   return (
@@ -364,7 +364,8 @@ export function StorageDetailPage() {
         )}
 
         {/* A storage that is not shared is a different one on each node, so
-            its History is its host node's. */}
+            its History is its host node's (hostNodeName: none for a shared
+            one). */}
         <HistoryTabContent history={storageHistory} />
       </Tabs>
     </div>
