@@ -16,9 +16,14 @@ import (
 // (queries/history.sql, ListHistory): an object's own rows by (resource_type,
 // resource_id) within a time window, the rows naming it in a details key,
 // through details @> {key: value}, a cluster's own rows newest first, for its
-// History, and the tasks a node ran, by the node field of their UPID — partial
-// on details ? 'upid', which the query repeats. Without them the selectors
-// work, reading every row of the type — or of every cluster — instead.
+// History, the tasks a node ran, by the node field of their UPID — partial on
+// details ? 'upid', which the query repeats — and a guest's rows within a
+// window, by (cluster_id, vmid, created_at), which the (cluster_id, vmid) index
+// of 000084 cannot bound. Two partial ones keep a guest's lifecycle read
+// (ListGuestLifecycleEvents) to its few events however long its history is:
+// its creates, restores and destroys by their worker type, and the clones into
+// it by details.new_id. Without them the selectors work, reading every row of
+// the type, of the guest — or of every cluster — instead.
 //
 // They are built here, after startup, rather than in migration 000117: see
 // that migration's header. Infrastructure DDL like EnsureSchema's, so it is
@@ -41,6 +46,26 @@ var historyIndexes = []historyIndex{
 		keys:      []string{"cluster_id", "split_part(details ->> 'upid'::text, ':'::text, 2)", "created_at"},
 		opclasses: []string{"", "", ""},
 		predicate: "details ? 'upid'::text"},
+	{name: "idx_audit_log_cluster_vmid_created",
+		columns:   "(cluster_id, vmid, created_at) WHERE vmid IS NOT NULL",
+		method:    "btree",
+		keys:      []string{"cluster_id", "vmid", "created_at"},
+		opclasses: []string{"", "", ""},
+		predicate: "vmid IS NOT NULL"},
+	{name: "idx_audit_log_lifecycle",
+		columns: "(cluster_id, vmid, created_at) WHERE split_part(details->>'upid', ':', 6) IN " +
+			"('qmcreate', 'vzcreate', 'qmrestore', 'vzrestore', 'qmdestroy', 'vzdestroy')",
+		method:    "btree",
+		keys:      []string{"cluster_id", "vmid", "created_at"},
+		opclasses: []string{"", "", ""},
+		predicate: "split_part(details ->> 'upid'::text, ':'::text, 6) = ANY (ARRAY['qmcreate'::text, " +
+			"'vzcreate'::text, 'qmrestore'::text, 'vzrestore'::text, 'qmdestroy'::text, 'vzdestroy'::text])"},
+	{name: "idx_audit_log_clones",
+		columns:   "(cluster_id, (details->>'new_id'), created_at) WHERE action IN ('clone', 'clone-to-template')",
+		method:    "btree",
+		keys:      []string{"cluster_id", "(details ->> 'new_id'::text)", "created_at"},
+		opclasses: []string{"", "", ""},
+		predicate: "action = ANY (ARRAY['clone'::text, 'clone-to-template'::text])"},
 }
 
 // historyIndex is one of historyIndexes: columns is what CREATE INDEX builds

@@ -1688,7 +1688,10 @@ type Querier interface {
 	// newest first, each guest's read on its own as one guest's would be. Bounded
 	// per guest: the handler only needs the newest birth and the newest destroy
 	// that did not fail, and a guest restored nightly would otherwise drag in a
-	// year of restores.
+	// year of restores. Each half reads its own partial index newest first
+	// (db.EnsureHistoryIndexes: idx_audit_log_lifecycle, idx_audit_log_clones),
+	// so a guest's events cost the same however long its history: as one OR, the
+	// read took every row of the guest to find them.
 	ListGuestLifecycleEvents(ctx context.Context, arg ListGuestLifecycleEventsParams) ([]ListGuestLifecycleEventsRow, error)
 	ListGuestSmbiosByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSmbios, error)
 	ListGuestSnapshotsByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSnapshot, error)
@@ -1865,10 +1868,13 @@ type Querier interface {
 	// audit_log.vmid is already gated the same way at insert.
 	//
 	// The audit branches are four rather than one OR, so each reads its own index
-	// — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA arm
-	// the resource_type index, the object arm the two built after startup
-	// (db.EnsureHistoryIndexes; it works without them, slower) — instead of the
-	// planner settling on the whole cluster's rows. Each later arm excludes the rows an
+	// — the vmid arm (cluster_id, vmid, created_at), the clone arm the clones by
+	// new_id, the HA arm the resource_type index, the object arm theirs, all built
+	// after startup (db.EnsureHistoryIndexes; it works without them, slower) —
+	// instead of the planner settling on the whole cluster's rows. Each guest arm
+	// is bounded by the later of the cutoff floor and since in one condition the
+	// index can range over: as two "IS NULL OR" tests it read every row of each
+	// guest, a folder's 7 days 11,249 rows to keep 1,482. Each later arm excludes the rows an
 	// earlier one keeps, so no row is read twice; a guest's row guest_workers turns
 	// away is still an object's to take. The object arm reads each object by its
 	// index: (resource_type, resource_id) for its own rows, GIN details @> {key:

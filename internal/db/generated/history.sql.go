@@ -88,8 +88,8 @@ WITH guests AS MATERIALIZED (
       AND a.vmid IS NOT NULL
       AND a.vmid = ANY($1::int[])
       AND history_worker_ok(a.details->>'upid', $16::text[])
-      AND ($17::timestamptz IS NULL OR a.created_at >= $17::timestamptz)
-      AND ($18::timestamptz IS NULL OR a.created_at >= $18::timestamptz)
+      AND a.created_at >= GREATEST(COALESCE($17::timestamptz, '-infinity'::timestamptz),
+                           COALESCE($18::timestamptz, '-infinity'::timestamptz))
     UNION ALL
     SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
@@ -100,8 +100,8 @@ WITH guests AS MATERIALIZED (
       AND NOT COALESCE(a.vmid = ANY($1::int[]), false)
       AND a.details->>'new_id' = ANY($1::int[]::text[])
       AND history_worker_ok(a.details->>'upid', $16::text[])
-      AND ($17::timestamptz IS NULL OR a.created_at >= $17::timestamptz)
-      AND ($18::timestamptz IS NULL OR a.created_at >= $18::timestamptz)
+      AND a.created_at >= GREATEST(COALESCE($17::timestamptz, '-infinity'::timestamptz),
+                           COALESCE($18::timestamptz, '-infinity'::timestamptz))
     UNION ALL
     SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
@@ -113,8 +113,8 @@ WITH guests AS MATERIALIZED (
       AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest($1::int[]) AS v,
                                                      unnest('{vm:,ct:}'::text[]) AS p))
       AND history_worker_ok(a.details->>'upid', $16::text[])
-      AND ($17::timestamptz IS NULL OR a.created_at >= $17::timestamptz)
-      AND ($18::timestamptz IS NULL OR a.created_at >= $18::timestamptz)
+      AND a.created_at >= GREATEST(COALESCE($17::timestamptz, '-infinity'::timestamptz),
+                           COALESCE($18::timestamptz, '-infinity'::timestamptz))
     UNION ALL
     SELECT DISTINCT ON (a.id)
            a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
@@ -261,8 +261,8 @@ WITH guests AS MATERIALIZED (
       AND t.vmid = ANY($1::int[])
       AND is_guest_upid(t.upid)
       AND history_worker_ok(t.upid, $16::text[])
-      AND ($17::timestamptz IS NULL OR t.started_at >= $17::timestamptz)
-      AND ($18::timestamptz IS NULL OR t.started_at >= $18::timestamptz)
+      AND t.started_at >= GREATEST(COALESCE($17::timestamptz, '-infinity'::timestamptz),
+                           COALESCE($18::timestamptz, '-infinity'::timestamptz))
       AND NOT EXISTS (SELECT 1 FROM audit_log a
                       WHERE a.details->>'upid' = t.upid AND a.cluster_id = t.cluster_id)
     UNION ALL
@@ -273,8 +273,8 @@ WITH guests AS MATERIALIZED (
       AND r.cluster_id = $15::uuid
       AND r.vmid = ANY($1::int[])
       AND history_worker_ok(r.upid, $16::text[])
-      AND ($17::timestamptz IS NULL OR r.started_at >= $17::timestamptz)
-      AND ($18::timestamptz IS NULL OR r.started_at >= $18::timestamptz)
+      AND r.started_at >= GREATEST(COALESCE($17::timestamptz, '-infinity'::timestamptz),
+                           COALESCE($18::timestamptz, '-infinity'::timestamptz))
       AND NOT EXISTS (SELECT 1 FROM audit_log a
                       WHERE a.details->>'upid' = r.upid AND a.cluster_id = r.cluster_id)
     UNION ALL
@@ -286,8 +286,8 @@ WITH guests AS MATERIALIZED (
       AND s.explained = false
       AND s.guest_type = ANY($26::text[])
       AND history_worker_ok(NULL, $16::text[])
-      AND ($17::timestamptz IS NULL OR s.observed_at >= $17::timestamptz)
-      AND ($18::timestamptz IS NULL OR s.observed_at >= $18::timestamptz)
+      AND s.observed_at >= GREATEST(COALESCE($17::timestamptz, '-infinity'::timestamptz),
+                           COALESCE($18::timestamptz, '-infinity'::timestamptz))
     UNION ALL
     SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.cluster_id, b.started_at, b.source, 'vzdump',
            'backup', '', b.vmid, b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL, 0
@@ -296,8 +296,8 @@ WITH guests AS MATERIALIZED (
       AND b.cluster_id = $15::uuid
       AND b.vmid = ANY($1::int[])
       AND history_worker_ok(b.upid, $16::text[])
-      AND ($17::timestamptz IS NULL OR b.started_at >= $17::timestamptz)
-      AND ($18::timestamptz IS NULL OR b.started_at >= $18::timestamptz)
+      AND b.started_at >= GREATEST(COALESCE($17::timestamptz, '-infinity'::timestamptz),
+                           COALESCE($18::timestamptz, '-infinity'::timestamptz))
     -- The whole cluster's: any task with no audit row, its guests' status
     -- changes and parts of backup jobs, and the runs. A task names a guest only
     -- when it is a guest task (is_guest_upid).
@@ -705,10 +705,13 @@ type ListHistoryRow struct {
 // audit_log.vmid is already gated the same way at insert.
 //
 // The audit branches are four rather than one OR, so each reads its own index
-// — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA arm
-// the resource_type index, the object arm the two built after startup
-// (db.EnsureHistoryIndexes; it works without them, slower) — instead of the
-// planner settling on the whole cluster's rows. Each later arm excludes the rows an
+// — the vmid arm (cluster_id, vmid, created_at), the clone arm the clones by
+// new_id, the HA arm the resource_type index, the object arm theirs, all built
+// after startup (db.EnsureHistoryIndexes; it works without them, slower) —
+// instead of the planner settling on the whole cluster's rows. Each guest arm
+// is bounded by the later of the cutoff floor and since in one condition the
+// index can range over: as two "IS NULL OR" tests it read every row of each
+// guest, a folder's 7 days 11,249 rows to keep 1,482. Each later arm excludes the rows an
 // earlier one keeps, so no row is read twice; a guest's row guest_workers turns
 // away is still an object's to take. The object arm reads each object by its
 // index: (resource_type, resource_id) for its own rows, GIN details @> {key:
