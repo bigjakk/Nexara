@@ -66,7 +66,8 @@ func haHistoryRoutes() []historyRoute {
 			Description: historyDescription("one HA resource",
 				"its creation, changes and removal, and the starts, stops, migrations and relocations the HA manager "+
 					"ordered for its guest (listed to a caller who may open the guest, with view:task for a task "+
-					"recorded only in the task history)", "ha"),
+					"recorded only in the task history). Rows an older Nexara filed under a bare VMID are not listed "+
+					"here when the resource is asked for by its vm: or ct: sid; the HA tab's History lists them", "ha"),
 			Parameters: clusterParams(apischema.Properties{"sid": haSIDParam}),
 		},
 		{
