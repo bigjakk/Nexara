@@ -47,11 +47,11 @@ func realmSyncLines(users, groups []string) []string {
 		[]string{"successfully updated users and groups configuration", "TASK OK"})
 }
 
-// A sync's log names what it removed, purged, added and overwrote, each in its
-// own section of a sync that wrote it; a log with a line out of place — a
-// directory's value echoed in a warning may start one — or a warning whose
-// quoted value runs past its line, names nothing and is not whole, as is one
-// that never got to write.
+// A sync's log names what it removed, purged, added, overwrote and updated,
+// each in its own section of a sync that wrote it; a log with a line out of
+// place — a directory's value echoed in a warning may start one — or a warning
+// whose quoted value runs past its line, names nothing and is not whole, as is
+// one that never got to write.
 func TestParseRealmSyncLog(t *testing.T) {
 	t.Parallel()
 	users := []string{"remove user 'user01@ldap01'", "purge users 'o'brien@ldap01' ACL entries",
@@ -60,7 +60,8 @@ func TestParseRealmSyncLog(t *testing.T) {
 	whole := realmSyncLog{Removed: map[string][]string{"users": {"user01@ldap01"}, "groups": {"staff-ldap01"}},
 		Purged:      map[string][]string{"users": {"o'brien@ldap01"}, "groups": {"ops-ldap01"}},
 		Overwritten: map[string][]string{"users": {"user02@ldap01"}},
-		Added:       map[string][]string{"users": {"user03@ldap01"}, "groups": {"dev-ldap01"}}}
+		Added:       map[string][]string{"users": {"user03@ldap01"}, "groups": {"dev-ldap01"}},
+		Updated:     map[string][]string{"users": {"user05@ldap01"}}}
 	forged := []string{"syncing users", "remove user 'user04@ldap01'", "successfully updated users configuration"}
 	for _, tc := range []struct {
 		name  string

@@ -365,6 +365,13 @@ WITH rules AS MATERIALIZED (
                                       COALESCE(k.details->>substr(split_part(src, ':', 1), 14), ''), '[,; ]+'), '')
                               WHEN src LIKE 'details.%'
                                   THEN ARRAY[k.details->>substr(split_part(src, ':', 1), 9)]
+                              -- log.<what>[,<what>…].<list>: the ids the row's task log
+                              -- lists under each what (a realm sync's: task_logs).
+                              WHEN src LIKE 'log.%' THEN ARRAY(
+                                  SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(x.l) = 'array' THEN x.l ELSE '[]' END)
+                                  FROM unnest(string_to_array(split_part(split_part(src, ':', 1), '.', 2), ',')) AS w,
+                                       LATERAL (SELECT sqlc.arg('task_logs')::jsonb -> (k.details->>'upid') -> w
+                                                       -> split_part(split_part(src, ':', 1), '.', 3) AS l) AS x)
                           END) AS v
                      WHERE strpos(v, '*') = 0
                      UNION ALL

@@ -451,6 +451,14 @@ func TestObservedChanges(t *testing.T) {
 	// enable, whatever the realm maps, and with the log unread none is its.
 	syncJoinedUnlogged := seed(observedCluster, "pve_user", "user12@ldap01", 0, "changed", "", []string{"groups"}, at)
 	members(syncJoinedUnlogged, []string{"groups:staff-ldap01"}, []string{})
+	// On either side, a user joins a sync's group by it only as its log names
+	// that user: added, replaced whole or updated in place.
+	syncJoinedUpdated := seed(observedCluster, "pve_user", "user21@ldap01", 0, "changed", "", []string{"groups"}, at)
+	members(syncJoinedUpdated, []string{"groups:staff-ldap01"}, []string{})
+	syncGroupJoined := seed(observedCluster, "pve_group", "staff-ldap01", 0, "changed", "", []string{"users"}, at)
+	members(syncGroupJoined, []string{"users:user08@ldap01", "users:user21@ldap01"}, []string{})
+	syncGroupJoinedUnlogged := seed(observedCluster, "pve_group", "dev-ldap01", 0, "changed", "", []string{"users"}, at)
+	members(syncGroupJoinedUnlogged, []string{"users:user12@ldap01"}, []string{})
 	syncAdded := seed(observedCluster, "pve_user", "user13@ldap01", 0, "added", "", nil, at)
 	syncAddedUnlogged := seed(observedCluster, "pve_user", "user14@ldap01", 0, "added", "", nil, at)
 	syncEnableOverwritten := seed(observedCluster, "pve_user", "user20@ldap01", 0, "changed", "", []string{"enable"}, at)
@@ -465,7 +473,8 @@ func TestObservedChanges(t *testing.T) {
 		"removed":     map[string][]string{"users": {"user15@ldap01"}},
 		"purged":      map[string][]string{"users": {"user15@ldap01", "user19@ldap01"}},
 		"overwritten": map[string][]string{"users": {"user20@ldap01", "user08@ldap01", "user09@ldap01"}},
-		"added":       map[string][]string{"users": {"user13@ldap01"}}}})
+		"added":       map[string][]string{"users": {"user13@ldap01"}},
+		"updated":     map[string][]string{"users": {"user21@ldap01"}}}})
 	// A user it replaced whole: its keys, which its realm does not map.
 	syncOverwritten := seed(observedCluster, "pve_user", "user20@ldap01", 0, "changed", "", []string{"keys"}, at)
 	syncACLRemoved := seed(observedCluster, "pve_acl", "/vms/175", 0, "changed", "", []string{"user_grants", "users"}, at)
@@ -590,6 +599,10 @@ func TestObservedChanges(t *testing.T) {
 			"^enable$"), "object", "upid:*@%s"), "fields_from", "realm"), "log_names", "!overwritten:users"),
 		with(with(with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", "^groups$"),
 			"object", "upid:*@%s"), "member", "joined"), "member_of", "upid:groups:*-%s"), "log_names", "overwritten:users"),
+		with(with(with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", "^groups$"),
+			"object", "upid:*@%s"), "member", "joined"), "member_of", "upid:groups:*-%s"), "log_names", "updated:users"),
+		with(with(with(rule("pve_group", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", "^users$"),
+			"object", "upid:*-%s"), "member", "joined"), "member_of", "log.added,updated,overwritten.users:users:%s"),
 		with(with(rule("pve_user", "added", "", "cluster", false, "", "", "^auth-realm-sync$", ""), "object", "upid:*@%s"),
 			"log_names", "added:users"),
 		with(with(with(rule("pve_acl", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
@@ -754,6 +767,9 @@ func TestObservedChanges(t *testing.T) {
 		{"a realm's sync, its user joining a group it syncs", syncJoinedSynced, "explained"},
 		{"a realm's sync, its user joining another group", syncJoinedOther, "shown"},
 		{"a realm's sync, a user it did not add or replace joining", syncJoinedUnlogged, "shown"},
+		{"a realm's sync, a user it updated joining a group it syncs", syncJoinedUpdated, "explained"},
+		{"a realm's sync, its group joined by users its log names", syncGroupJoined, "explained"},
+		{"a realm's sync, its group joined by a user its log does not name", syncGroupJoinedUnlogged, "shown"},
 		{"a realm's sync, a user its log says it added", syncAdded, "explained"},
 		{"a realm's sync, a user added beside it", syncAddedUnlogged, "shown"},
 		{"a realm's sync, the enable of a user it replaced", syncEnableOverwritten, "shown"},

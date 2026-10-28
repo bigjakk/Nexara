@@ -1829,6 +1829,7 @@ func TestObservedChangeRules(t *testing.T) {
 	t.Parallel()
 	keys := regexp.MustCompile(`^(id|node|vmid|sid|cluster|details:[a-z_]+)$`)
 	checked := 0
+	var joiners []string
 	for _, r := range slices.Concat(observedChangeRules, observedGlobalRules) {
 		if !keys.MatchString(r.MatchKey) || (r.AuditType == "" && !slices.Contains([]string{"vmid", "sid", "cluster"}, r.MatchKey)) {
 			t.Errorf("rule %+v: match key or audit type", r)
@@ -1839,7 +1840,8 @@ func TestObservedChangeRules(t *testing.T) {
 		named := func(s string) bool {
 			for _, part := range strings.Split(s, "+") {
 				source, format, ok := strings.Cut(part, ":")
-				if !ok || !regexp.MustCompile(`^(upid|audit|vmid|details\.[a-z_]+|details-list\.[a-z_]+|grants\.(users|groups|tokens))$`).MatchString(source) {
+				if !ok || !regexp.MustCompile(`^(upid|audit|vmid|details\.[a-z_]+|details-list\.[a-z_]+|grants\.(users|groups|tokens)|`+
+					`log\.(added|updated|overwritten)(,(added|updated|overwritten))*\.(users|groups))$`).MatchString(source) {
 					return false
 				}
 				for _, alt := range strings.Split(format, "|") {
@@ -1903,12 +1905,17 @@ func TestObservedChangeRules(t *testing.T) {
 			t.Errorf("rule %+v: a pool's update explains a member only by the members its row lists, joining without delete", r)
 		}
 		// A realm sync adds, removes, and purges the ACL of, only what its log
-		// says, and a user joins its group only where its log added or replaced it.
+		// says, and a user joins its group, on either side, only where its log
+		// added, replaced or updated that user.
 		sync := strings.Contains(r.WorkerRe, "auth-realm-sync")
+		if sync && r.Kind == "pve_user" && r.Member == "joined" {
+			joiners = append(joiners, r.LogNames)
+		}
 		if sync && (r.Kind == "pve_acl" && r.LogNames != "purged" ||
 			r.Change == "removed" && r.Kind != "pve_acl" && !strings.HasPrefix(r.LogNames, "removed:") ||
 			r.Change == "added" && !strings.HasPrefix(r.LogNames, "added:") ||
-			r.Kind == "pve_user" && r.Member == "joined" && r.LogNames != "added:users" && r.LogNames != "overwritten:users") ||
+			r.Kind == "pve_user" && r.Member == "joined" && !slices.Contains(realmSyncJoiners, r.LogNames) ||
+			r.Kind == "pve_group" && r.Member == "joined" && r.MemberOf != "log.added,updated,overwritten.users:users:%s") ||
 			r.LogNames != "" && r.WorkerRe != `^auth-realm-sync$` {
 			t.Errorf("rule %+v: a realm sync's additions, removals and joins are what its log names, and only its log is read", r)
 		}
@@ -1951,7 +1958,14 @@ func TestObservedChangeRules(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("no rule reaches a kind's ids from elsewhere: the direction check reads nothing")
 	}
+	if slices.Sort(joiners); !slices.Equal(joiners, realmSyncJoiners) {
+		t.Errorf("a realm sync's user joins a group by its log naming it %q, want each of %q", joiners, realmSyncJoiners)
+	}
 }
+
+// realmSyncJoiners are what a realm sync's log must name a user as for its
+// joining one of the sync's groups to be the sync's.
+var realmSyncJoiners = []string{"added:users", "overwritten:users", "updated:users"}
 
 // anyFieldUpdates are the kinds whose own update explains any field of the
 // object changed in its window, its handler unable to know what it set. There

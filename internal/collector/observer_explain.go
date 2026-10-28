@@ -46,10 +46,12 @@ type explainRule struct {
 	// DetailValue, with DetailKey, is the text that key must have ("" any).
 	DetailValue string `json:"detail_value"`
 	// Object and MemberOf name what a row is about, "<source>:<format>": the
-	// UPID's id (upid), the row's resource_id (audit) or guest (vmid), or a
-	// details key (details.<k>, or details-list.<k> for a comma list), put into
-	// format at %s; or an ACL row's grants (grants.<list>: role, propagate and
-	// grantee as %1$s, %2$s, %3$s). A MemberOf may join several sources with +.
+	// UPID's id (upid), the row's resource_id (audit) or guest (vmid), a
+	// details key (details.<k>, or details-list.<k> for a comma list), or the
+	// ids the row's task log lists (log.<what>[,<what>…].<list>, a realm sync's),
+	// put into format at %s; or an ACL row's grants (grants.<list>: role,
+	// propagate and grantee as %1$s, %2$s, %3$s). A MemberOf may join several
+	// sources with +.
 	// Member left_unlisted is a member leaving that the row does NOT name: what
 	// a list it replaced whole no longer holds. With Object, the
 	// change's resource_id must be that name; with Member, the row explains
@@ -70,8 +72,9 @@ type explainRule struct {
 	// LogNames keeps a rule to what the row's task logged (a realm sync's log,
 	// readRealmSyncs): removed:users or removed:groups, the object it removed;
 	// added:users or added:groups, one it added; overwritten:users, a user it
-	// replaced whole; !<what>:<list>, one its log, read, does not name so;
-	// purged, an ACL's grantee whose entries it purged.
+	// replaced whole; updated:users, one it updated in place; !<what>:<list>,
+	// one its log, read, does not name so; purged, an ACL's grantee whose
+	// entries it purged.
 	LogNames string `json:"log_names"`
 	// Appeared keeps a rule to fields the object did not have before
 	// (detail.fields_appeared): a value Proxmox fills in where none was.
@@ -649,9 +652,11 @@ func aclDeleteRules(auditType, who, grants string) []explainRule {
 // (realm_sync_log.go), and only that is explained. A group's edit is its
 // comment, which overwriting clears, and its users, which it replaces whole
 // (update_groups): that realm's users join it, and whoever was in it may leave.
-// So a user joins only a group the sync makes, and only a user its log says it
-// added or replaced whole, and may leave one whoever it is. A dry run
-// (auth-realm-sync-test) writes nothing.
+// A group's members it maps only through the users it syncs (LDAP.pm
+// get_groups, by their DNs), each of which its log names as added, replaced
+// whole or updated in place. So a user joins, on either side, only a group the
+// sync makes, and only if its log names that user so, and may leave one
+// whoever it is. A dry run (auth-realm-sync-test) writes nothing.
 //
 // What a sync writes on a user it already has, transcribed (LDAP.pm get_users,
 // Domains.pm update_users): every attribute the directory returns that maps to
@@ -691,12 +696,14 @@ var realmSyncRules = func() []explainRule {
 				FieldRe: `^groups$`, Member: "joined", MemberOf: "upid:groups:*-%s", LogNames: "added:users"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
 				FieldRe: `^groups$`, Member: "joined", MemberOf: "upid:groups:*-%s", LogNames: "overwritten:users"},
+			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
+				FieldRe: `^groups$`, Member: "joined", MemberOf: "upid:groups:*-%s", LogNames: "updated:users"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync,
 				FieldRe: `^groups$`, Member: "left", MemberOf: "upid:groups:*-%s"},
 			{Kind: "pve_group", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
 				FieldRe: `^comment$`},
 			{Kind: "pve_group", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
-				FieldRe: `^users$`, Member: "joined", MemberOf: "upid:users:*@%s"},
+				FieldRe: `^users$`, Member: "joined", MemberOf: "log.added,updated,overwritten.users:users:%s"},
 			{Kind: "pve_group", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
 				FieldRe: `^users$`, Member: "left"},
 			// With remove-vanished acl a sync purges the ACL of what vanished
