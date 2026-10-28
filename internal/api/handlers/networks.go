@@ -261,6 +261,8 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx, p *apischema.Params
 		"type":     req.Type,
 		"settings": networkAuditSettings(req.NetworkInterfaceOptions),
 		"cleared":  req.Delete,
+		// The client sends autostart whatever its value (networkIfaceOptionsToForm).
+		"fields": auditFieldNames(req, "autostart"),
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_updated", details)
 

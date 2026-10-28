@@ -1278,6 +1278,7 @@ func (r backupJobRequest) auditDetails() json.RawMessage {
 	if selection := r.selectionSummary(); selection != "" {
 		fields["selection"] = selection
 	}
+	fields["fields"] = auditFieldNames(r.toParams(), r.clearedProperties()...)
 	details, _ := json.Marshal(fields)
 	return details
 }

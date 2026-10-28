@@ -353,7 +353,7 @@ func (h *ACMEHandler) UpdatePlugin(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateACMEPlugin(c.Context(), pluginID, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"id": pluginID})
+	details, _ := json.Marshal(map[string]any{"id": pluginID, "fields": auditFieldNames(req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_plugin", pluginID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_plugin", pluginID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})

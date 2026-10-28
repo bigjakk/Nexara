@@ -685,7 +685,8 @@ func (h *StorageHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	audit := map[string]string{"storage": pool.Storage, "resource_name": pool.Storage}
+	audit := map[string]any{"storage": pool.Storage, "resource_name": pool.Storage,
+		"fields": auditFieldNames(form, deleteOptions...)}
 	if change := encryptionKeyChange(pool.Type, form, deleteOptions); change != "" {
 		audit["encryption_key"] = change
 	}

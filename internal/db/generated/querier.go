@@ -249,7 +249,8 @@ type Querier interface {
 	// does around it (a realm's users, *@realm); a value holding one names nothing,
 	// never a pattern. counts
 	// says what the row does to a list's items (listed, below); fields_from keeps
-	// it to the fields its details say it set (fields_named, below); audit_id_is
+	// it to the fields its details say it set and, with derived, those Proxmox
+	// derives from them (fields_named, below); audit_id_is
 	// to rows filed under that marker id; grantee_removed (an ACL's grantee
 	// leaving) to a grantee whose own removal, a user, group or token removed
 	// change, the same row's task overlaps.

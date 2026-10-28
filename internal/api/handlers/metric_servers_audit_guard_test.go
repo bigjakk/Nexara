@@ -18,8 +18,9 @@ func TestGuard_MetricServerAuditOmitsTheToken(t *testing.T) {
 	const file = "metric_servers.go"
 
 	// The fields a metric-server audit row may carry. Adding one is a
-	// deliberate edit here, which is the point.
-	allowed := map[string]bool{"id": true, "type": true}
+	// deliberate edit here, which is the point. fields is the names the
+	// update sent, and only as auditFieldNames gives them.
+	allowed := map[string]bool{"id": true, "type": true, "fields": true}
 
 	f, err := guardParsed(file)
 	if err != nil {
@@ -89,6 +90,13 @@ func TestGuard_MetricServerAuditOmitsTheToken(t *testing.T) {
 					t.Errorf("%s records the audit field %q; only %v are allowed on a metric-server row, "+
 						"because this body carries a credential and view:audit is a default Viewer grant",
 						fn.Name.Name, name, sortedAllowedAuditFields(allowed))
+				}
+				var fun *ast.Ident
+				if call, isCall := kv.Value.(*ast.CallExpr); isCall {
+					fun, _ = call.Fun.(*ast.Ident)
+				}
+				if name == "fields" && (fun == nil || fun.Name != "auditFieldNames") {
+					t.Errorf("%s records fields other than auditFieldNames gives them, names never values", fn.Name.Name)
 				}
 			}
 			return true

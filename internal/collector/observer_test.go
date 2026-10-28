@@ -1394,6 +1394,10 @@ func TestObservedChangeRules(t *testing.T) {
 			!regexp.MustCompile(`^[a-z_]*$`).MatchString(r.DetailKey) {
 			t.Errorf("rule %+v: object, member, counts or detail_key", r)
 		}
+		if !slices.Contains([]string{"", "config", "settings", "keys", "fields"}, r.FieldsFrom) ||
+			len(r.Derived) > 0 && r.FieldsFrom != "fields" {
+			t.Errorf("rule %+v: fields_from, or derived without the fields it is derived from", r)
+		}
 		for _, re := range []string{r.ActionRe, r.ExceptRe, r.WorkerRe, r.FieldRe} {
 			if _, err := regexp.Compile(re); err != nil || (re != "" && !strings.HasPrefix(re, "^")) {
 				t.Errorf("rule %+v: pattern %q", r, re)
@@ -1453,12 +1457,10 @@ func TestObservedChangeRules(t *testing.T) {
 }
 
 // anyFieldUpdates are the kinds whose own update explains any field of the
-// object changed in its window: its row records nothing of what it set
-// (storage, SDN, metric servers, ACME plugins, firewall aliases), or not all of
-// it (a backup job's; an interface's, whose address fields Proxmox derives from
-// each other). The admin guide lists them, with qmconfig's task.
-var anyFieldUpdates = []string{"storage", "backup", "metric_server", "network", "sdn_zone", "sdn_vnet", "sdn_subnet",
-	"sdn_controller", "sdn_ipam", "sdn_dns", "firewall_alias", "acme_plugin"}
+// object changed in its window, its handler unable to know what it set. There
+// are none: each records the names it sent (handlers' auditFieldNames). The
+// admin guide says so, beside qmconfig's task, which explains any field.
+var anyFieldUpdates []string
 
 // memberFields are each kind's lists of other objects' ids (fieldSpec.withMembers
 // and the readers that build members).

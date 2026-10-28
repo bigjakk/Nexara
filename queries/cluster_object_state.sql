@@ -126,7 +126,8 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- does around it (a realm's users, *@realm); a value holding one names nothing,
 -- never a pattern. counts
 -- says what the row does to a list's items (listed, below); fields_from keeps
--- it to the fields its details say it set (fields_named, below); audit_id_is
+-- it to the fields its details say it set and, with derived, those Proxmox
+-- derives from them (fields_named, below); audit_id_is
 -- to rows filed under that marker id; grantee_removed (an ACL's grantee
 -- leaving) to a grantee whose own removal, a user, group or token removed
 -- change, the same row's task overlaps.
@@ -172,7 +173,8 @@ WITH rules AS MATERIALIZED (
            e.value->>'counts'              AS counts,
            e.value->>'fields_from'         AS fields_from,
            e.value->>'audit_id_is'         AS audit_id_is,
-           COALESCE((e.value->>'grantee_removed')::bool, false) AS grantee_removed
+           COALESCE((e.value->>'grantee_removed')::bool, false) AS grantee_removed,
+           COALESCE(e.value->'derived', '{}')  AS derived
     FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
 ), pending AS MATERIALIZED (
     SELECT c.id, c.cluster_id, c.resource_type, c.resource_id, c.vmid, c.change, c.fields, c.detail, c.node,
@@ -197,7 +199,7 @@ WITH rules AS MATERIALIZED (
     -- can use.
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
            a.created_at
     FROM explainable p
@@ -208,7 +210,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
@@ -218,7 +220,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
@@ -228,7 +230,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
@@ -239,7 +241,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
@@ -249,7 +251,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value,
+           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
@@ -308,8 +310,10 @@ WITH rules AS MATERIALIZED (
                -- The fields a row says it set, when the rule takes them from it:
                -- a guest config edit's keys, those it deleted or reverted, and,
                -- when it named a disk, what replacing or deleting one moves
-               -- (unused<n>, boot); the settings and cleared it lists; or each
-               -- key of its details, where an update records a field it set so.
+               -- (unused<n>, boot); the settings and cleared it lists; each key
+               -- of its details, where an update records a field it set so; or
+               -- the names its fields lists, with those the rule's derived says
+               -- Proxmox rewrites with each (and, at *, with any update).
                CASE k.fields_from
                    WHEN 'config' THEN ARRAY(
                        SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
@@ -326,6 +330,15 @@ WITH rules AS MATERIALIZED (
                                                                     THEN k.details->'cleared' ELSE '[]' END) AS f)
                    WHEN 'keys' THEN ARRAY(
                        SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(k.details) = 'object' THEN k.details ELSE '{}' END))
+                   WHEN 'fields' THEN ARRAY(
+                       SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'fields') = 'array'
+                                                                    THEN k.details->'fields' ELSE '[]' END) AS f
+                       UNION
+                       SELECT jsonb_array_elements_text(COALESCE(k.derived->f, '[]'))
+                       FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'fields') = 'array'
+                                                           THEN k.details->'fields' ELSE '[]' END) AS f
+                       UNION
+                       SELECT jsonb_array_elements_text(COALESCE(k.derived->'*', '[]')))
                END AS fields_named
     ) n
     LEFT JOIN task_history th ON th.cluster_id = k.cluster_id AND th.upid = k.details->>'upid'

@@ -253,6 +253,14 @@ func TestObservedChanges(t *testing.T) {
 	optionsOther := seed(observedCluster, "cluster_options", observedCluster.String(), 0, "changed", "", []string{"migration"}, at)
 	audit(observedCluster, in, "cluster_options", observedCluster.String(), 0, "updated",
 		map[string]any{"settings": []string{"crs"}, "cleared": []string{}})
+	// An update that lists the fields it sent explains those and what the
+	// rule says Proxmox derives from them, by name and from any update.
+	sentDerived := seed(observedCluster, "network", "pve-03/vmbr2", 0, "changed", "pve-03",
+		[]string{"address", "cidr", "method", "netmask"}, at)
+	sentOther := seed(observedCluster, "network", "pve-03/vmbr3", 0, "changed", "pve-03", []string{"mtu"}, at)
+	for _, iface := range []string{"pve-03/vmbr2", "pve-03/vmbr3"} {
+		audit(observedCluster, in, "network", iface, 0, "interface_updated", map[string]any{"fields": []string{"cidr"}})
+	}
 	// A rule set's own rows by count: an update one in and one out, a create
 	// one in and never a rule moved.
 	counted := func(id uuid.UUID, counts map[string]int) {
@@ -434,6 +442,7 @@ func TestObservedChanges(t *testing.T) {
 	}
 	with := func(r map[string]any, key, value string) map[string]any { r[key] = value; return r }
 	granteeRemoved := func(r map[string]any) map[string]any { r["grantee_removed"] = true; return r }
+	derived := func(r map[string]any, d map[string][]string) map[string]any { r["derived"] = d; return r }
 	rules := jsonOf([]map[string]any{
 		rule("storage", "", "storage", "id", false, "", "", "", ""),
 		rule("backup", "", "backup", "id", false, "", "^run$", "", ""),
@@ -445,6 +454,8 @@ func TestObservedChanges(t *testing.T) {
 		with(rule("cluster_options", "changed", "cluster_options", "id", false, "^updated$", "", "", ""),
 			"fields_from", "settings"),
 		with(rule("ha_rule", "changed", "ha_rule", "id", false, "^updated$", "", "", ""), "fields_from", "keys"),
+		derived(with(rule("network", "changed", "network", "id", false, "^interface_updated$", "", "", ""),
+			"fields_from", "fields"), map[string][]string{"cidr": {"address", "netmask"}, "*": {"method"}}),
 		with(rule("firewall_rule", "changed", "firewall_rule", "id", false, "^firewall_rule_updated$", "", "", "^rules$"),
 			"counts", "edit1"),
 		with(rule("firewall_security_group_rule", "changed", "firewall_security_group_rule", "id", false,
@@ -574,6 +585,8 @@ func TestObservedChanges(t *testing.T) {
 		{"an options edit, another setting", optionsOther, "shown"},
 		{"an update of the field its row records", haKeysSet, "explained"},
 		{"an update, and a field its row does not record", haKeysOther, "shown"},
+		{"an update of a field it sent, and of those derived from it", sentDerived, "explained"},
+		{"an update, and a field it did not send", sentOther, "shown"},
 		{"a rule updated, one in and one out", ruleEdited, "explained"},
 		{"a rule updated, and another added", ruleEditedAndAdded, "shown"},
 		{"a rule created, one in", groupRuleAdded, "explained"},

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -49,6 +50,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 		wantTask     bool           // a task_history row was written for it
 		vm           *db.Vm         // the guest the inventory holds, if any
 		wantNoProbe  bool           // Proxmox was not asked for the resource
+		wantSent     bool           // details.fields are the names Proxmox was sent
 	}{
 		{
 			// Proxmox resolves a bare VMID to vm: or ct: by the guest's type, and
@@ -211,6 +213,80 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 				return handlers.NewAccessHandler(q, haCreateEncKey, nil).UpdateACL
 			},
 			wantType: "pve_acl", wantID: "/vms/100", wantAction: "granted", wantDetails: map[string]any{"propagate": false},
+		},
+		// An update names the fields it sent, never a value, so the change
+		// observer explains only those (wantSent).
+		{
+			name: "a backup job update names the fields it sent", method: fiber.MethodPut, path: clusterScope + "/backup-jobs/:job_id",
+			target: "/backup-jobs/backup-0a1b2c3d-4e5f", body: `{"schedule":"daily","vmid":"100,101"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewBackupHandler(q, haCreateEncKey, nil).UpdateBackupJob
+			},
+			wantType: "backup", wantID: "backup-0a1b2c3d-4e5f", wantAction: "backup_job_updated", wantSent: true,
+		},
+		{
+			name: "a metric server update", method: fiber.MethodPut, path: metricServerScope + "/:server_id",
+			target: "/metric-servers/influx01", body: `{"server":"192.0.2.30","port":8086,"token":"s3cret-token"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewMetricServerHandler(q, haCreateEncKey, nil).UpdateServer
+			},
+			wantType: "metric_server", wantID: "influx01", wantAction: "updated", wantSent: true, forbidden: "s3cret",
+		},
+		{
+			name: "a network interface update", method: fiber.MethodPut, path: networkScope + "/:node_name/:iface",
+			target: "/networks/pve-01/vmbr0", body: `{"type":"bridge","cidr":"192.0.2.10/24","delete":["gateway"]}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateNetworkInterface },
+			wantType: "network", wantID: "pve-01/vmbr0", wantAction: "interface_updated", wantSent: true,
+		},
+		{
+			name: "an SDN zone update", method: fiber.MethodPut, path: sdnScope + "/zones/:zone",
+			target: "/sdn/zones/zone01", body: `{"mtu":1450}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateSDNZone },
+			wantType: "sdn_zone", wantID: "zone01", wantAction: "sdn_zone_updated", wantSent: true,
+		},
+		{
+			name: "an SDN VNet update", method: fiber.MethodPut, path: sdnScope + "/vnets/:vnet",
+			target: "/sdn/vnets/vnet01", body: `{"alias":"lab"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateSDNVNet },
+			wantType: "sdn_vnet", wantID: "vnet01", wantAction: "sdn_vnet_updated", wantSent: true,
+		},
+		{
+			name: "an SDN subnet update", method: fiber.MethodPut, path: sdnScope + "/vnets/:vnet/subnets/:subnet",
+			target: "/sdn/vnets/vnet01/subnets/zone01-192.0.2.0-24", body: `{"gateway":"192.0.2.1"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateSDNSubnet },
+			wantType: "sdn_subnet", wantID: "vnet01/zone01-192.0.2.0-24", wantAction: "sdn_subnet_updated", wantSent: true,
+		},
+		{
+			name: "an SDN controller update", method: fiber.MethodPut, path: sdnScope + "/controllers/:controller",
+			target: "/sdn/controllers/evpn01", body: `{"asn":65000}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateSDNController },
+			wantType: "sdn_controller", wantID: "evpn01", wantAction: "sdn_controller_updated", wantSent: true,
+		},
+		{
+			name: "an SDN IPAM update", method: fiber.MethodPut, path: sdnScope + "/ipams/:ipam",
+			target: "/sdn/ipams/ipam01", body: `{"url":"https://ipam.example.com","token":"s3cret-token"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateSDNIPAM },
+			wantType: "sdn_ipam", wantID: "ipam01", wantAction: "sdn_ipam_updated", wantSent: true, forbidden: "s3cret",
+		},
+		{
+			name: "an SDN DNS update", method: fiber.MethodPut, path: sdnScope + "/dns/:dns",
+			target: "/sdn/dns/dns01", body: `{"url":"https://dns.example.com","key":"s3cret-key"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateSDNDNS },
+			wantType: "sdn_dns", wantID: "dns01", wantAction: "sdn_dns_updated", wantSent: true, forbidden: "s3cret",
+		},
+		{
+			name: "a firewall alias update", method: fiber.MethodPut, path: firewallScope + "/aliases/:name",
+			target: "/firewall/aliases/mynet", body: `{"cidr":"192.0.2.0/24","comment":"lab"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).UpdateFirewallAlias },
+			wantType: "firewall_alias", wantID: "mynet", wantAction: "updated", wantSent: true,
+		},
+		{
+			name: "an ACME plugin update", method: fiber.MethodPut, path: acmeScope + "/plugins/:plugin_id",
+			target: "/acme/plugins/cf01", body: `{"api":"cf","data":"CF_Token=s3cret-token"}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewACMEHandler(q, haCreateEncKey, nil).UpdatePlugin
+			},
+			wantType: "acme_plugin", wantID: "cf01", wantAction: "updated", wantSent: true, forbidden: "s3cret",
 		},
 		{
 			// An account update or deactivation is a task too (acmeupdate,
@@ -422,6 +498,34 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			for _, key := range tc.wantAbsent {
 				if _, ok := details[key]; ok {
 					t.Errorf("the row carries %s, which Proxmox never gave: %s", key, raw)
+				}
+			}
+			if tc.wantSent {
+				// Each name with a value, and each its delete list takes out.
+				var sent []string
+				pve.mu.Lock()
+				for _, r := range pve.seen {
+					for key, values := range r.form {
+						for _, v := range values {
+							switch {
+							case key == "delete":
+								sent = append(sent, strings.Split(v, ",")...)
+							case key != "digest" && v != "":
+								sent = append(sent, key)
+							}
+						}
+					}
+				}
+				pve.mu.Unlock()
+				slices.Sort(sent)
+				fields, _ := details["fields"].([]any)
+				got := make([]string, 0, len(fields))
+				for _, f := range fields {
+					name, _ := f.(string)
+					got = append(got, name)
+				}
+				if sent = slices.Compact(sent); !slices.Equal(got, sent) {
+					t.Errorf("the row names the fields %q, and Proxmox was sent %q", got, sent)
 				}
 			}
 			if tc.forbidden != "" && bytes.Contains(raw, []byte(tc.forbidden)) {

@@ -150,7 +150,7 @@ func (h *NetworkHandler) UpdateSDNZone(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]string{"zone": zone})
+	details, _ := json.Marshal(map[string]any{"zone": zone, "fields": auditFieldNames(req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_zone", zone, "sdn_zone_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -268,7 +268,7 @@ func (h *NetworkHandler) UpdateSDNVNet(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]string{"vnet": vnet})
+	details, _ := json.Marshal(map[string]any{"vnet": vnet, "fields": auditFieldNames(req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_vnet", vnet, "sdn_vnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -427,7 +427,7 @@ func (h *NetworkHandler) UpdateSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
+	details, _ := json.Marshal(map[string]any{"vnet": vnet, "subnet": subnet, "fields": auditFieldNames(req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet", auditkey.SDNSubnet(vnet, subnet), "sdn_subnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -571,7 +571,7 @@ func (h *NetworkHandler) UpdateSDNController(c fiber.Ctx, p *apischema.Params) e
 	if err := pxClient.UpdateSDNController(c.Context(), controller, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"controller": controller})
+	details, _ := json.Marshal(map[string]any{"controller": controller, "fields": auditFieldNames(req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_controller", controller, "sdn_controller_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -690,7 +690,7 @@ func (h *NetworkHandler) UpdateSDNIPAM(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateSDNIPAM(c.Context(), ipam, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"ipam": ipam})
+	details, _ := json.Marshal(map[string]any{"ipam": ipam, "fields": auditFieldNames(req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_ipam", ipam, "sdn_ipam_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -800,7 +800,7 @@ func (h *NetworkHandler) UpdateSDNDNS(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateSDNDNS(c.Context(), dns, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"dns": dns})
+	details, _ := json.Marshal(map[string]any{"dns": dns, "fields": auditFieldNames(req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_dns", dns, "sdn_dns_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

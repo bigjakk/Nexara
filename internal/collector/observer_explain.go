@@ -74,21 +74,26 @@ type explainRule struct {
 	// config edit's keys and the keys it deleted or reverted (and, if it named
 	// a disk, the unused<n> and boot a disk's change or removal moves);
 	// settings, the settings and cleared it lists (the datacenter options, a
-	// node's ACME); keys, its details' own keys (an HA or pool update).
+	// node's ACME); keys, its details' own keys (an HA or pool update);
+	// fields, the names of the fields it sent (handlers' auditFieldNames).
 	FieldsFrom string `json:"fields_from"`
+	// Derived, with FieldsFrom fields, is what Proxmox rewrites with a field
+	// sent, by its name, and with any update, at "*".
+	Derived map[string][]string `json:"derived,omitempty"`
 }
 
-// byAction is the rules a kind's own audit rows give: an audit row for the same
-// object explains a change only by an action of the change's direction — an
-// object created by a create, changed by an update, removed by a delete — so
-// nothing done to an object in Nexara hides a different change made to it in
-// Proxmox. A direction with no action has no rule.
-func byAction(kind string, added, changed, removed []string) []explainRule {
+// byAction is the rules a kind's own audit rows give for an object made or
+// taken away: an audit row for the same object explains one only by an action
+// of the change's direction — an object created by a create, removed by a
+// delete — so nothing done to an object in Nexara hides a different change
+// made to it in Proxmox. An update's rules are a kind's own, each kept to what
+// the update set. A direction with no action has no rule.
+func byAction(kind string, added, removed []string) []explainRule {
 	var rules []explainRule
 	for _, d := range []struct {
 		change  string
 		actions []string
-	}{{"added", added}, {"changed", changed}, {"removed", removed}} {
+	}{{"added", added}, {"removed", removed}} {
 		if len(d.actions) > 0 {
 			rules = append(rules, explainRule{Kind: kind, Change: d.change, AuditType: kind, MatchKey: "id",
 				ActionRe: anyOf(d.actions...)})
@@ -97,16 +102,19 @@ func byAction(kind string, added, changed, removed []string) []explainRule {
 	return rules
 }
 
-// crud is byAction for the kinds whose handlers file created, updated and
-// deleted, an update whose row records no fields explaining any of them.
-func crud(kind string) []explainRule {
-	return byAction(kind, []string{"created"}, []string{"updated"}, []string{"deleted"})
+// sentFields is byAction for a kind whose update row lists the fields it sent
+// (auditFieldNames): the update explains those, and what Proxmox derives from
+// them (derived, as explainRule.Derived).
+func sentFields(kind, created, updated, deleted string, derived map[string][]string) []explainRule {
+	return append(byAction(kind, []string{created}, []string{deleted}),
+		explainRule{Kind: kind, Change: "changed", AuditType: kind, MatchKey: "id", ActionRe: "^" + updated + "$",
+			FieldsFrom: "fields", Derived: derived})
 }
 
-// crudKeys is crud for a kind whose update row records each field it set as a
-// key of its details (ha.go, pools.go): the update explains only those.
+// crudKeys is byAction for a kind whose update row records each field it set
+// as a key of its details (ha.go, pools.go): the update explains only those.
 func crudKeys(kind string) []explainRule {
-	return append(byAction(kind, []string{"created"}, nil, []string{"deleted"}),
+	return append(byAction(kind, []string{"created"}, []string{"deleted"}),
 		explainRule{Kind: kind, Change: "changed", AuditType: kind, MatchKey: "id", ActionRe: `^updated$`, FieldsFrom: "keys"})
 }
 
@@ -118,7 +126,7 @@ func mappingRules(kind string, mdev bool) []explainRule {
 		return explainRule{Kind: kind, Change: "changed", AuditType: kind, MatchKey: "id", ActionRe: `^updated$`,
 			DetailKey: detailKey, FieldRe: fieldRe}
 	}
-	rules := append(byAction(kind, []string{"created"}, nil, []string{"deleted"}),
+	rules := append(byAction(kind, []string{"created"}, []string{"deleted"}),
 		rule("", `^map$`), rule("description", `^description$`), rule("description_removed", `^description$`))
 	if mdev {
 		rules = append(rules, rule("mdev", `^mdev$`))
@@ -126,9 +134,10 @@ func mappingRules(kind string, mdev bool) []explainRule {
 	return rules
 }
 
-// sdnCRUD is crud for an SDN kind, whose actions carry the kind's name.
-func sdnCRUD(kind string) []explainRule {
-	return byAction(kind, []string{kind + "_created"}, []string{kind + "_updated"}, []string{kind + "_deleted"})
+// sdnFields is sentFields for an SDN kind, whose actions carry the kind's
+// name.
+func sdnFields(kind string, derived map[string][]string) []explainRule {
+	return sentFields(kind, kind+"_created", kind+"_updated", kind+"_deleted", derived)
 }
 
 // inDirections is one rule for each direction named: an action that can change
@@ -252,9 +261,13 @@ var observedChangeRules = slices.Concat(
 	// A storage, created, edited and removed through Nexara — an ESXi import
 	// source is one, and enabling import content edits its content — and by
 	// the disk and Ceph tasks that define, extend or remove the one they name.
-	byAction("storage", []string{"create", "create_import_source"}, []string{"update"},
-		[]string{"delete", "delete_import_source"}),
+	// An edit writes the fields it sent and deletes those it cleared, and no
+	// plugin writes another (pve-storage API2/Storage/Config.pm update; the
+	// on_update_hook of PBSPlugin.pm stores the encryption-key and
+	// master-pubkey it was sent, the others keep secrets out of the config).
+	byAction("storage", []string{"create", "create_import_source"}, []string{"delete", "delete_import_source"}),
 	[]explainRule{
+		{Kind: "storage", Change: "changed", AuditType: "storage", MatchKey: "id", ActionRe: `^update$`, FieldsFrom: "fields"},
 		{Kind: "storage", Change: "changed", AuditType: "storage", MatchKey: "id",
 			ActionRe: `^enable_import_content$`, FieldRe: `^content$`},
 		{Kind: "storage", Change: "added", MatchKey: "cluster",
@@ -267,8 +280,16 @@ var observedChangeRules = slices.Concat(
 	// A backup job; a guest destroyed with purge leaves every job it was in,
 	// and a job it was the last guest of is deleted (VZDump::Plugin
 	// remove_vmid_from_backup_jobs): that guest's destroy explains that guest
-	// leaving, and the removal of a job it was the only guest of.
-	byAction("backup", []string{"backup_job_created"}, []string{"backup_job_updated"}, []string{"backup_job_deleted"}),
+	// leaving, and the removal of a job it was the only guest of. An edit
+	// writes what it sent and what Proxmox derives from it (pve-manager
+	// API2/Backup.pm update_job): a vmid takes out all, exclude and pool; all
+	// takes out vmid and pool; a pool takes out vmid, all and exclude; an
+	// exclude without a pool sets all; and any edit of a job still in
+	// vzdump.cron moves it to jobs.cfg, where it carries a type.
+	sentFields("backup", "backup_job_created", "backup_job_updated", "backup_job_deleted", map[string][]string{
+		"vmid": {"all", "exclude", "pool"}, "all": {"vmid", "pool"}, "pool": {"vmid", "all", "exclude"},
+		"exclude": {"all"}, "*": {"type"},
+	}),
 	[]explainRule{
 		// A job created through Nexara whose id Proxmox did not give back is
 		// filed as backup / backup-job (history-backup's backupJobIDUnknown):
@@ -288,7 +309,10 @@ var observedChangeRules = slices.Concat(
 	// no removal.
 	mappingRules("usb_mapping", false),
 	mappingRules("pci_mapping", true),
-	crud("metric_server"),
+	// A metric server's edit writes what it sent; a token is kept apart, and
+	// never read (pve-manager API2/Cluster/MetricServer.pm update,
+	// Status/InfluxDB.pm on_update_hook).
+	sentFields("metric_server", "created", "updated", "deleted", nil),
 	// The datacenter options, which the rolling update also edits (it pauses
 	// and restores the CRS option). The notes and the tag settings have routes
 	// of their own, which write nothing else.
@@ -305,8 +329,18 @@ var observedChangeRules = slices.Concat(
 
 	// A node's interfaces: their own rows, and a revert of the pending
 	// changes, which is filed under the node and undoes any of them, in any
-	// direction.
-	byAction("network", []string{"interface_created"}, []string{"interface_updated"}, []string{"interface_deleted"}),
+	// direction. An edit writes what it sent and what Proxmox derives from it
+	// (pve-manager API2/Network.pm update_network): every edit sets method and
+	// method6, by whether it sent an address; a cidr is split into address
+	// and netmask, and cleared takes them along. The file holds a netmask only
+	// beside its address, and the reading derives cidr from both and folds
+	// comments6 into comments (pve-common Network/Interfaces.pm).
+	sentFields("network", "interface_created", "interface_updated", "interface_deleted", map[string][]string{
+		"*":    {"method", "method6"},
+		"cidr": {"address", "netmask"}, "address": {"cidr", "netmask"}, "netmask": {"cidr"},
+		"cidr6": {"address6", "netmask6"}, "address6": {"cidr6", "netmask6"}, "netmask6": {"cidr6"},
+		"comments6": {"comments"},
+	}),
 	inDirections(explainRule{Kind: "network", AuditType: "network", MatchKey: "node", ActionRe: `^network_reverted$`},
 		"added", "changed", "removed"),
 
@@ -349,18 +383,22 @@ var observedChangeRules = slices.Concat(
 			Member: "sole", MemberOf: "audit:resources:%s"},
 	},
 
-	sdnCRUD("sdn_zone"),
-	sdnCRUD("sdn_vnet"),
-	sdnCRUD("sdn_subnet"),
+	// SDN objects. An edit writes what it sent (pve-network
+	// API2/Network/SDN/*.pm update, whose hooks check and write no field but
+	// one): an EVPN zone left with no mac is given one (Zones/EvpnPlugin.pm
+	// on_update_hook).
+	sdnFields("sdn_zone", map[string][]string{"*": {"mac"}}),
+	sdnFields("sdn_vnet", nil),
+	sdnFields("sdn_subnet", nil),
 	[]explainRule{
 		// A subnet created through Nexara whose id could not be read back is
 		// filed under its CIDR (sdn.go sdnSubnetKey), which the subnet lists.
 		{Kind: "sdn_subnet", Change: "added", AuditType: "sdn_subnet", MatchKey: "cluster",
 			ActionRe: `^sdn_subnet_created$`, Member: "joined", MemberOf: "audit:cidr:%s"},
 	},
-	sdnCRUD("sdn_controller"),
-	sdnCRUD("sdn_ipam"),
-	sdnCRUD("sdn_dns"),
+	sdnFields("sdn_controller", nil),
+	sdnFields("sdn_ipam", nil),
+	sdnFields("sdn_dns", nil),
 
 	// The cluster firewall. Its options and rule sets always exist, so they
 	// only change; a template applied adds to the rules. A node's rule set is
@@ -377,15 +415,18 @@ var observedChangeRules = slices.Concat(
 		{Kind: "firewall_rule", Change: "changed", AuditType: "firewall_rule", MatchKey: "id",
 			ActionRe: `^template_applied$`, FieldRe: `^rules$`, Counts: "adds"},
 	},
-	byAction("firewall_alias", []string{"created"}, []string{"updated"}, []string{"deleted"}),
+	// An alias's edit writes it whole (pve-firewall API2/Firewall/Aliases.pm
+	// update_alias): its name as the request spelled it, the cidr it must
+	// send, and a comment only if it sent one.
+	sentFields("firewall_alias", "created", "updated", "deleted", map[string][]string{"*": {"name", "cidr", "comment"}}),
 	[]explainRule{
 		{Kind: "firewall_alias", Change: "added", AuditType: "firewall_alias", MatchKey: "details:rename", ActionRe: `^updated$`},
 		{Kind: "firewall_alias", Change: "removed", AuditType: "firewall_alias", MatchKey: "id", ActionRe: `^updated$`,
 			DetailKey: "rename"},
 	},
-	byAction("firewall_ipset", []string{"created"}, nil, []string{"deleted"}),
-	byAction("firewall_ipset_entry", []string{"created"}, nil, []string{"deleted"}),
-	byAction("firewall_security_group", []string{"created"}, nil, []string{"deleted"}),
+	byAction("firewall_ipset", []string{"created"}, []string{"deleted"}),
+	byAction("firewall_ipset_entry", []string{"created"}, []string{"deleted"}),
+	byAction("firewall_security_group", []string{"created"}, []string{"deleted"}),
 	ruleSetRules("firewall_security_group_rule", "firewall_security_group_rule", "^rules$",
 		"rule_created", "rule_updated", "rule_deleted"),
 
@@ -395,10 +436,10 @@ var observedChangeRules = slices.Concat(
 	// update takes only its comment (pve-access-control API2/Group.pm). A user
 	// joins or leaves a group by a user edit that set its groups, and leaves
 	// with its own delete or the group's.
-	byAction("pve_user", []string{"created"}, nil, []string{"deleted"}),
-	byAction("pve_token", []string{"created"}, nil, []string{"deleted"}),
-	byAction("pve_group", []string{"created"}, nil, []string{"deleted"}),
-	byAction("pve_role", []string{"created"}, nil, []string{"deleted"}),
+	byAction("pve_user", []string{"created"}, []string{"deleted"}),
+	byAction("pve_token", []string{"created"}, []string{"deleted"}),
+	byAction("pve_group", []string{"created"}, []string{"deleted"}),
+	byAction("pve_role", []string{"created"}, []string{"deleted"}),
 	[]explainRule{
 		{Kind: "pve_token", Change: "changed", AuditType: "pve_token", MatchKey: "id",
 			ActionRe: anyOf("updated", "regenerated"), FieldRe: `^comment$`},
@@ -474,12 +515,14 @@ var observedChangeRules = slices.Concat(
 
 	// ACME. An account registered or deactivated in the Proxmox GUI is a task
 	// whose UPID names no account.
-	byAction("acme_account", []string{"created"}, nil, []string{"deleted"}),
+	byAction("acme_account", []string{"created"}, []string{"deleted"}),
 	[]explainRule{
 		{Kind: "acme_account", Change: "added", MatchKey: "cluster", WorkerRe: `^acmeregister$`},
 		{Kind: "acme_account", Change: "removed", MatchKey: "cluster", WorkerRe: `^acmedeactivate$`},
 	},
-	crud("acme_plugin"),
+	// An ACME plugin's edit writes what it sent (pve-manager
+	// API2/ACMEPlugin.pm update_plugin).
+	sentFields("acme_plugin", "created", "updated", "deleted", nil),
 )
 
 // ruleSetRules is what a rule set's own rows explain, by count: a rule created

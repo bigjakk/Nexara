@@ -171,7 +171,7 @@ func (h *MetricServerHandler) UpdateServer(c fiber.Ctx, p *apischema.Params) err
 	if err := pxClient.UpdateMetricServer(c.Context(), serverID, req); err != nil {
 		return mapMetricServerError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"id": serverID})
+	details, _ := json.Marshal(map[string]any{"id": serverID, "fields": auditFieldNames(req)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", serverID, "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

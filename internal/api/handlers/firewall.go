@@ -526,7 +526,7 @@ func (h *NetworkHandler) UpdateFirewallAlias(c fiber.Ctx, p *apischema.Params) e
 	// A rename moves the alias to another key, so the row names where it went:
 	// without it the old name's History ends there and the new name's begins
 	// with no link between them.
-	detailMap := map[string]string{"name": name}
+	detailMap := map[string]any{"name": name, "fields": auditFieldNames(req)}
 	if req.Rename != "" {
 		detailMap["rename"] = auditkey.FirewallName(req.Rename)
 	}
