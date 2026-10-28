@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/handlers"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
@@ -958,6 +959,21 @@ func TestLCSLen(t *testing.T) {
 		rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
 		if got, want := lcsLenWithin(distinct, shuffled, 0), table(distinct, shuffled); got != want {
 			t.Fatalf("past the limit, %v, %v: %d, want %d", distinct, shuffled, got, want)
+		}
+	}
+}
+
+// Every type the observer files under is one a History reads, under that
+// type's view permission: a row of a type it lacks reaches no one.
+func TestObservedTypesHaveAReader(t *testing.T) {
+	t.Parallel()
+	types := []string{observedClusterType}
+	for kind := range observeKindSchemas {
+		types = append(types, removedObject(kind, "x", "").resourceType)
+	}
+	for _, resourceType := range types {
+		if _, ok := handlers.ObservedTypePermission(resourceType); !ok {
+			t.Errorf("%s: no History reads the observer's rows of it", resourceType)
 		}
 	}
 }

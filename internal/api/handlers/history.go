@@ -116,6 +116,7 @@ var observedTypePermission = map[string]string{
 	"firewall_ipset_entry":         "network",
 	"firewall_security_group":      "network",
 	"firewall_security_group_rule": "network",
+	"cluster":                      "cluster", // the observer's rows of the cluster as a whole
 	"cluster_options":              "cluster",
 	"metric_server":                "cluster",
 	"usb_mapping":                  "cluster",

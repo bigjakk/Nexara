@@ -83,6 +83,11 @@ const (
 	// under: no reading has it, so the next is a baseline.
 	observeUnsettled = "unsettled"
 
+	// observedClusterType is the type a change of the cluster as a whole is
+	// filed under, cluster / <cluster id>: the token's privileges moved, a
+	// kind that could not be compared. Its History reads it under view:cluster.
+	observedClusterType = "cluster"
+
 	// observeStateVersion is in every signature: a release that stores a field
 	// another way (a member list kept as ids, not one tag) re-baselines once,
 	// rather than reading the new form against the old as a change.
@@ -375,7 +380,7 @@ func (p *observePass) observeTokenPrivileges(ctx context.Context) {
 		p.o.logger.Warn("object observer: the cluster token's privileges on / changed; objects a filtered list shows may come and go",
 			"cluster_id", p.cluster.ID)
 		id := p.cluster.ID.String()
-		batch.record([]observedChangeRow{changeRow(observedObject{id: id, resourceType: "cluster", resourceID: id},
+		batch.record([]observedChangeRow{changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id},
 			"changed", tagDiff{fields: []string{kind}}, mark.lastRead, time.Now())})
 	}
 	readAt := time.Now()
@@ -593,7 +598,7 @@ func (p *observePass) collapse(kind string, rows []observedChangeRow) []observed
 	p.o.logger.Warn("object observer: more changes of a kind in one reading than are filed one by one; filed as one",
 		"cluster_id", p.cluster.ID, "kind", kind, "changes", len(rows))
 	id := p.cluster.ID.String()
-	row := changeRow(observedObject{id: id, resourceType: "cluster", resourceID: id}, "changed",
+	row := changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id}, "changed",
 		tagDiff{fields: []string{kind}}, first, last)
 	row.Detail["collapsed"] = len(rows)
 	return []observedChangeRow{row}
