@@ -640,6 +640,20 @@ func TestObserverOutcomes(t *testing.T) {
 		plugins("Q0RF")
 		e.expect("then an edit", "changed acme_plugin/dns01 [data]")
 	})
+	t.Run("a privilege change in an upgrade's pass is filed, and says so", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.expect("baseline")
+		e.mq.nodesByCluster[0].PveVersion = "pve-manager/9.2.21/0000bbbb"
+		e.client.set(pathPerms, `{"/":{"Sys.Audit":1,"VM.Audit":1,"Datastore.Audit":1,"Pool.Audit":1,"Mapping.Audit":1,"Sys.PowerMgmt":1}}`)
+		e.obs.ObserveAll(context.Background())
+		e.obs.Wait()
+		e.mq.observed.mu.Lock()
+		defer e.mq.observed.mu.Unlock()
+		if got := e.mq.observed.changes; len(got) != 1 || got[0].Fields[0] != "token_privileges" || got[0].Detail["during_upgrade"] != true {
+			t.Fatalf("filed %+v, want the token's privileges changed during an upgrade", got)
+		}
+	})
 	t.Run("a node down, or back and not read yet, re-baselines nothing", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)

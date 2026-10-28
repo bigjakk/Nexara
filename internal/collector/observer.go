@@ -302,9 +302,9 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 		return
 	}
 
-	p.observeTokenPrivileges(ctx)
 	p.forgetDepartedNodes(ctx, nodes)
-	versions, unread := p.nodeVersions(ctx, nodes)
+	versions, unread, upgraded := p.nodeVersions(ctx, nodes)
+	p.observeTokenPrivileges(ctx, upgraded)
 	p.noticeUnreadNodes(ctx, nodes, unread)
 	clusterSig := observeSignature("cluster", o.tags.keyID, observeStateVersion, versions)
 	// A new privilege can open a kind skipped as refused, so the skips go when
@@ -391,8 +391,10 @@ func (p *observePass) kindSig(kind, sig string) string {
 // taken away changes what Proxmox shows the observer — a filtered list gains or
 // loses objects — so the History says when that happened, under the cluster.
 // The first reading is a baseline. The mark is kept with the kinds'
-// (cluster_object_baselines), so a restart does not take a fresh one.
-func (p *observePass) observeTokenPrivileges(ctx context.Context) {
+// (cluster_object_baselines), so a restart does not take a fresh one. A change
+// in a pass whose node versions moved says so (detail.during_upgrade): an
+// upgrade can bring privileges with it, and that is still a change to show.
+func (p *observePass) observeTokenPrivileges(ctx context.Context, upgraded bool) {
 	const kind = "token_privileges"
 	mark, known := p.baselines[kind]
 	if known && mark.signature == p.privFP {
@@ -403,8 +405,12 @@ func (p *observePass) observeTokenPrivileges(ctx context.Context) {
 		p.o.logger.Warn("object observer: the cluster token's privileges on / changed; objects a filtered list shows may come and go",
 			"cluster_id", p.cluster.ID)
 		id := p.cluster.ID.String()
-		batch.record([]observedChangeRow{changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id},
-			"changed", tagDiff{fields: []string{kind}}, mark.lastRead, time.Now())})
+		row := changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id},
+			"changed", tagDiff{fields: []string{kind}}, mark.lastRead, time.Now())
+		if upgraded {
+			row.Detail["during_upgrade"] = true
+		}
+		batch.record([]observedChangeRow{row})
 	}
 	readAt := time.Now()
 	if p.write(ctx, kind, batch, readAt, p.privFP) {
@@ -1485,15 +1491,21 @@ func (p *observePass) forgetDepartedNodes(ctx context.Context, nodes []db.Node) 
 // out, so a member Nexara never reached holds nothing back; the day it is
 // read, a version none of the others runs re-baselines the cluster's kinds
 // once, as an upgrade would.
-func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (string, []string) {
+//
+// upgraded is whether a node runs another version than it last did.
+func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (string, []string, bool) {
 	const kind = "node_versions"
 	last := map[string]string{}
 	stored := p.baselines[kind].signature
 	_ = json.Unmarshal([]byte(stored), &last)
 	var unread []string
+	upgraded := false
 	vs := make([]string, 0, len(nodes))
 	for _, n := range nodes {
 		if n.PveVersion != "" {
+			if v, ok := last[n.Name]; ok && v != n.PveVersion {
+				upgraded = true
+			}
 			last[n.Name] = n.PveVersion
 		}
 		v, ok := last[n.Name]
@@ -1510,7 +1522,7 @@ func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (string
 		}
 	}
 	slices.Sort(vs)
-	return strings.Join(slices.Compact(vs), " "), unread
+	return strings.Join(slices.Compact(vs), " "), unread, upgraded
 }
 
 // noticeUnreadNodes counts the passes in a row each node has gone with no
