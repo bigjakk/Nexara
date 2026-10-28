@@ -15,6 +15,13 @@ import (
 // which the sidebar tree calls Discovered (frontend folder-tree.ts).
 const UnfiledFolderSegment = "unassigned"
 
+// folderHistoryGuestCap is the most guests a folder's History follows — the
+// ones with the lowest VMIDs — as the Tasks tab it replaced filtered at most
+// 500. Each guest costs its own rows and its lifecycle read, so a folder of
+// thousands, or Discovered on a big cluster, would cost thousands of guests'
+// Histories. The page says so past it (FolderHistoryTab).
+const folderHistoryGuestCap = 500
+
 // FolderHistory is the folder kind: what happened to the guests filed in a
 // folder or below it, and to those folders themselves. A member's whole
 // History is the folder's, from that guest's own cutoff, as on its own page: a
@@ -75,6 +82,10 @@ func selectFolder(ctx context.Context, r HistoryRequest) (HistorySelection, erro
 		}
 	}
 
+	slices.Sort(vmids)
+	if vmids = slices.Compact(vmids); len(vmids) > folderHistoryGuestCap {
+		vmids = vmids[:folderHistoryGuestCap]
+	}
 	sel := HistorySelection{Guests: make([]HistoryGuest, 0, len(vmids))}
 	if len(vmids) > 0 {
 		events, err := r.Queries.ListGuestLifecycleEvents(ctx, db.ListGuestLifecycleEventsParams{

@@ -17,6 +17,7 @@
     "folder": "Folders made, renamed, moved and deleted, and the guests filed into and out of them. A guest or subfolder that left is listed for moves made from this release on."
   },
   "empty": "Nothing has been recorded for this folder or its guests yet.",
+  "capped": "This folder holds {{guests}} guests: its History follows the {{cap}} with the lowest VMIDs. Each guest's own page has its full History.",
   "events": {
     "folderCreated": "Folder created",
     "folderRenamed": "Folder renamed",

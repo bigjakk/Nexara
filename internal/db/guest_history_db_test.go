@@ -961,6 +961,15 @@ func TestGuestHistory(t *testing.T) {
 				t.Errorf("the unfiled guests = %v and %d objects, want %v and none", vmids, len(unfiled.Objects), want)
 			}
 		}
+		// A folder of more than 500 guests follows the 500 lowest VMIDs.
+		big := mkFolder(historyClusterID, "B", nil)
+		exec("big folder", `INSERT INTO vm_folder_memberships (cluster_id, vmid, folder_id)
+			SELECT $1, g, $2 FROM generate_series(1000, 1500) g`, historyClusterID, big.ID)
+		if capped, err := selectFolder(historyClusterID, big.ID.String()); err != nil {
+			t.Fatal(err)
+		} else if n := len(capped.Guests); n != 500 || capped.Guests[n-1].VMID != 1499 {
+			t.Errorf("a folder of 501 guests: %d of them, the last %v; want 500, up to 1499", n, capped.Guests)
+		}
 		elsewhere := mkFolder(historyOtherID, "F", nil)
 		var notFound *fiber.Error
 		if _, err := selectFolder(historyClusterID, elsewhere.ID.String()); !errors.As(err, &notFound) || notFound.Code != fiber.StatusNotFound {

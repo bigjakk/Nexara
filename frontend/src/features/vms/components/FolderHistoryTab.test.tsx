@@ -42,6 +42,7 @@ describe("FolderHistoryTab", () => {
       <FolderHistoryTab
         clusterId="c1"
         folderId="f1"
+        guestCount={2}
         folderNames={
           new Map([
             ["f1", "folder01"],
@@ -63,5 +64,25 @@ describe("FolderHistoryTab", () => {
       "/inventory/qemu/c1/v1",
     );
     expect(screen.getByText("#102")).toBeInTheDocument();
+    expect(screen.queryByText(/lowest VMIDs/)).toBeNull();
+  });
+
+  // Past the cap the server follows the lowest VMIDs, and the tab says so.
+  it("says which guests a folder past the cap follows", async () => {
+    mockedPage.mockResolvedValue({ items: [], total: 0 });
+    renderWithProviders(
+      <FolderHistoryTab
+        clusterId="c1"
+        folderId="f1"
+        guestCount={1200}
+        folderNames={new Map()}
+        guestLinks={new Map()}
+      />,
+    );
+    expect(
+      await screen.findByText(
+        /holds 1,200 guests: its History follows the 500/,
+      ),
+    ).toBeInTheDocument();
   });
 });
