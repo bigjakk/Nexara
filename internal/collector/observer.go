@@ -2055,15 +2055,15 @@ func (p *observePass) write(ctx context.Context, kind string, b recordBatch, see
 	if b.empty() && mark == "" {
 		return true
 	}
-	changes, err := json.Marshal(b.changes)
+	changes, err := json.Marshal(nonNilRows(b.changes))
 	if err != nil {
 		return false
 	}
-	states, err := json.Marshal(b.states)
+	states, err := json.Marshal(nonNilRows(b.states))
 	if err != nil {
 		return false
 	}
-	presence, err := json.Marshal(nonNilPresence(b.presence))
+	presence, err := json.Marshal(nonNilRows(b.presence))
 	if err != nil {
 		return false
 	}
@@ -2108,9 +2108,11 @@ func (p *observePass) write(ctx context.Context, kind string, b recordBatch, see
 	return true
 }
 
-func nonNilPresence(rows []observedPresenceRow) []observedPresenceRow {
+// nonNilRows is rows, or an empty list for none: json.Marshal writes a nil slice
+// as null, which jsonb_to_recordset refuses, and the whole write with it.
+func nonNilRows[T any](rows []T) []T {
 	if rows == nil {
-		return []observedPresenceRow{}
+		return []T{}
 	}
 	return rows
 }

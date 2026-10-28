@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -87,6 +88,12 @@ func (m *mockQueries) RecordObservedObjects(_ context.Context, arg db.RecordObse
 		Node       string          `json:"node"`
 		Signature  string          `json:"signature"`
 		LastSeenAt time.Time       `json:"last_seen_at"`
+	}
+	for _, rows := range []json.RawMessage{arg.Changes, arg.States, arg.Presence} {
+		if !bytes.HasPrefix(rows, []byte("[")) {
+			// As Postgres refuses jsonb_to_recordset of anything but an array.
+			return errors.New("cannot call jsonb_to_recordset on a non-array")
+		}
 	}
 	if err := json.Unmarshal(arg.Changes, &changes); err != nil {
 		return err
@@ -699,6 +706,17 @@ func TestObserverOutcomes(t *testing.T) {
 		e.passRows()
 		if n := e.obs.tags.made.Load() - made; n != 0 {
 			t.Fatalf("a pass past the cap reading what the last read made %d tags, want none", n)
+		}
+	})
+	t.Run("a first pass stores what it read, though nothing in it changed", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.expect("baseline")
+		e.mq.observed.mu.Lock()
+		_, stored := e.mq.observed.state[e.cluster.ID.String()+"/storage/store01"]
+		e.mq.observed.mu.Unlock()
+		if !stored {
+			t.Fatal("the baseline stored no storage: its batch, states and no changes, was refused")
 		}
 	})
 	t.Run("an empty answer is held a pass", func(t *testing.T) {
