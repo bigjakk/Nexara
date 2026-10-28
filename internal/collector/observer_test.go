@@ -659,6 +659,25 @@ func TestObserverOutcomes(t *testing.T) {
 			t.Fatalf("after the failure: %+v, want one change whose window opens before it", got)
 		}
 	})
+	t.Run("a reading as stored touches nothing, and a change after it opens there", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.expect("baseline")
+		stored := func() time.Time {
+			e.mq.observed.mu.Lock()
+			defer e.mq.observed.mu.Unlock()
+			return e.mq.observed.state[e.cluster.ID.String()+"/storage/store01"].LastSeenAt
+		}
+		first, second := stored(), time.Now()
+		e.expect("as it was")
+		if !stored().Equal(first) {
+			t.Fatal("a reading as stored touched the object: the kind's mark is its time")
+		}
+		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","path":"/srv/store01","content":"images","nodes":"pve-01,pve-02"}]`)
+		if rows := e.passRows(); len(rows) != 1 || rows[0].LastSeenAt.Before(second) {
+			t.Fatalf("filed %+v, want one change whose window opens at the reading before it", rows)
+		}
+	})
 	t.Run("an empty answer is held a pass", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)

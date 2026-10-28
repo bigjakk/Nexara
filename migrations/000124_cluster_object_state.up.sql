@@ -32,9 +32,11 @@
 -- another signature is taken as a fresh baseline and records nothing: an
 -- upgrade changes what Proxmox reports without anyone editing anything.
 --
--- last_seen_at moves on every pass for every object, so the table is filled to
--- 70% to leave room for those updates on the page (no index covers the column,
--- so they can be heap-only).
+-- last_seen_at moves on every pass for a node's objects, and for those of a
+-- reading that left one of its kind unread (a cluster's kind read whole moves
+-- its mark instead, cluster_object_baselines), so the table is filled to 70% to
+-- leave room for those updates on the page (no index covers the column, so
+-- they can be heap-only).
 CREATE TABLE IF NOT EXISTS cluster_object_state (
     cluster_id    UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
     kind          TEXT NOT NULL,

@@ -676,7 +676,10 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		return scopes[rd.parentOf(id)]
 	}
 
-	var batch recordBatch
+	var (
+		batch     recordBatch
+		unchanged []string // read as stored, field by field
+	)
 	// Whether the kind is held wholly by presence: nothing held or read field
 	// by field.
 	presenceOnly := len(prev) == 0 && len(rd.objects) > 0
@@ -710,7 +713,7 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		seen[obj.id] = true
 		if s.byPresence() {
 			if d := diffTags(old.tags, tags); old.signature == sig && len(d.fields) > 0 && !allIn(d.fields, rd.quiet) {
-				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", d, old.lastSeen, doneAt), doneAt))
+				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", d, p.lastSeen(rd.kind, node, old), doneAt), doneAt))
 			}
 			continue
 		}
@@ -739,13 +742,13 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		default:
 			d := diffTags(old.tags, tags)
 			if len(d.fields) == 0 {
-				batch.touched = append(batch.touched, obj.id)
+				unchanged = append(unchanged, obj.id)
 				batch.record(p.o.quiet(p.objectKey(rd.kind, obj.id)))
 				continue
 			}
 			batch.save(obj, tags, sig, readAt)
 			if !allIn(d.fields, rd.quiet) {
-				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", d, old.lastSeen, doneAt), doneAt))
+				batch.record(p.o.pace(p.objectKey(rd.kind, obj.id), changeRow(obj, "changed", d, p.lastSeen(rd.kind, node, old), doneAt), doneAt))
 			}
 		}
 	}
@@ -764,7 +767,7 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		// gone included.
 		if old.signature == sig && !p.wasHardware(rd.kind, id, old) {
 			obj := removedObject(rd.kind, id, old.node)
-			row := changeRow(obj, "removed", tagDiff{left: allMembers(old.tags.members)}, old.lastSeen, doneAt)
+			row := changeRow(obj, "removed", tagDiff{left: allMembers(old.tags.members)}, p.lastSeen(rd.kind, node, old), doneAt)
 			if rd.childKind != "" {
 				if children == nil {
 					children = p.childrenOf(rd)
@@ -822,12 +825,16 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		}
 	}
 
-	// The kind's mark moves past the cap too, but a kind held wholly by
-	// presence writes nothing for a reading that moved nothing, its mark
-	// included: no object it holds reads that time.
+	// A cluster's kind read whole moves its mark, and the mark's time is when
+	// each object read as stored was last seen (lastSeen), so none is touched
+	// one by one; a node's reading, or one that left an object unread, touches
+	// each. A kind held wholly by presence writes nothing for a reading that
+	// moved nothing, its mark included: no object it holds reads that time.
 	mark := ""
 	if node == "" && len(rd.unread) == 0 {
 		mark = sig
+	} else {
+		batch.touched = unchanged
 	}
 	if presenceOnly && batch.empty() && len(notices) == 0 && len(gates) == 0 && p.baselines[rd.kind].signature == mark {
 		mark = ""
@@ -860,6 +867,16 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 	if mark != "" {
 		p.baselines[rd.kind] = storedBaseline{signature: mark, lastRead: readAt}
 	}
+}
+
+// lastSeen is when an object was last read as it is stored: its own time or,
+// for a cluster's kind, the kind's last reading whole if later, which read it
+// unchanged without touching it (apply).
+func (p *observePass) lastSeen(kind, node string, old storedObject) time.Time {
+	if node != "" {
+		return old.lastSeen
+	}
+	return maxTime(old.lastSeen, p.baselines[kind].lastRead)
 }
 
 // comparePresence compares a scope's objects with what is held of them, one tag

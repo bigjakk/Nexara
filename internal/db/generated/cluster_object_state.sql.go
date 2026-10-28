@@ -817,7 +817,10 @@ type RecordObservedObjectsParams struct {
 //	changes  the rows for cluster_object_changes, each with its window;
 //	states   the objects new or changed, or taken as a baseline, to store;
 //	removed  the objects gone, whose stored reading is dropped;
-//	touched  the objects read unchanged: only their last_seen_at moves;
+//	touched  the objects read unchanged by a reading that marks nothing (a
+//	         node's, or one that left an object unread): only their
+//	         last_seen_at moves. A cluster's kind read whole moves its mark
+//	         instead, whose time is theirs;
 //	baseline the signature the kind was read whole under, at seen_at, or ''
 //	         for a reading that marks nothing (a guest batch, a node's objects);
 //	presence the objects past a cap that appeared or changed, their whole tag
