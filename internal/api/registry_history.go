@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -30,6 +31,11 @@ type historyRoute struct {
 	// Exactly one of Resource and AuditOnly is set; a global kind sets
 	// Resource.
 	Resource string
+	// AlsoResources are the other view permissions its rows belong to, held
+	// with the rest, at the same scope: a PBS server's rows are mostly the
+	// backups' (snapshots, restores), which view:backup owns beside the
+	// server's own view:pbs. Only with Resource.
+	AlsoResources []string
 	// AuditOnly is why the gate is view:audit alone: the guest, whose own
 	// permission depends on its type (view:vm or view:container) and so
 	// filters what is the inventory's instead. A route that forgets Resource
@@ -106,7 +112,18 @@ func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 	audit := Check{Action: "view", Resource: "audit", Scope: scope}
 	perms := Permissions{Check: &audit}
 	if resource != "" {
-		perms = Permissions{AllOf: []Check{audit, {Action: "view", Resource: resource, Scope: scope}}}
+		checks := make([]Check, 0, 2+len(r.AlsoResources))
+		checks = append(checks, audit, Check{Action: "view", Resource: resource, Scope: scope})
+		for _, also := range r.AlsoResources {
+			also = strings.TrimSpace(also)
+			if also == "" || slices.ContainsFunc(checks, func(c Check) bool { return c.Resource == also }) {
+				panic(fmt.Sprintf("history route %s: AlsoResources %q is empty or already in the gate", r.Path, r.AlsoResources))
+			}
+			checks = append(checks, Check{Action: "view", Resource: also, Scope: scope})
+		}
+		perms = Permissions{AllOf: checks}
+	} else if len(r.AlsoResources) > 0 {
+		panic(fmt.Sprintf("history route %s: AlsoResources go with Resource, and this route is gated on view:audit alone", r.Path))
 	}
 	params := historyFilterParams(r.Kind)
 	if g := r.Kind.GuestToggle; g != "" {

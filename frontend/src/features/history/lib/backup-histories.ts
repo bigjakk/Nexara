@@ -276,10 +276,11 @@ export const backupHistories = {
     },
   }),
   /** A PBS server's, or one of its datastores'. A global History: it is read
-   *  in every cluster, and the server may belong to none. */
+   *  in every cluster, and the server may belong to none. Its rows are mostly
+   *  the backups' (snapshots, restores), so it takes view:backup as well. */
   pbsServer: (pbsId: string, datastore?: string): BackupHistory => ({
     kind: kinds.pbs,
-    permission: "pbs",
+    permission: ["pbs", "backup"],
     target: {
       clusterId: null,
       path: (query) => {

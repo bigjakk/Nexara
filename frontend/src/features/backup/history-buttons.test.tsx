@@ -61,6 +61,14 @@ const server = {
   updated_at: "2026-08-26T19:56:00Z",
 };
 
+const datastoreCards = (
+  <DatastoreCards
+    key="d"
+    pbsId="p1"
+    datastores={[{ store: "datastore01", total: 100, used: 10, avail: 90 }]}
+  />
+);
+
 // Each list row that has a History has a button for it: shown with the grants
 // the History takes, and reading the object's own route. One row for each
 // kind a list shows, the drawer being the host's.
@@ -68,11 +76,7 @@ describe("a list row's History button", () => {
   const rows: [string, ReactElement, string, string][] = [
     [
       "a datastore",
-      <DatastoreCards
-        key="d"
-        pbsId="p1"
-        datastores={[{ store: "datastore01", total: 100, used: 10, avail: 90 }]}
-      />,
+      datastoreCards,
       "datastore01",
       "/api/v1/pbs-servers/p1/history?limit=50&offset=0&datastore=datastore01",
     ],
@@ -163,4 +167,13 @@ describe("a list row's History button", () => {
       ).toBeNull();
     },
   );
+
+  // A backup server's rows are mostly the backups': view:pbs alone is not enough.
+  it("of a datastore is not offered without view:backup", () => {
+    signIn(["view:audit", "view:task", "view:pbs"]);
+    renderWithProviders(datastoreCards);
+    expect(
+      screen.queryByRole("button", { name: "History of datastore01" }),
+    ).toBeNull();
+  });
 });

@@ -94,7 +94,12 @@ func TestBackupHistoryRoutes(t *testing.T) {
 			}
 			dbtx := &backupRunDBTX{lookups: map[string]any{"GetCluster": db.Cluster{}}, lists: map[string][]any{"ListHistory": nil}}
 			ep := historyEndpoint(handlers.NewHistoryHandler(dbtx, db.New(dbtx)), route)
-			app := newRegistryApp(t, stubAuth(grantsOf("view:audit", "view:"+route.Resource)), ep)
+			grants := make([]string, 0, 2+len(route.AlsoResources))
+			grants = append(grants, "view:audit", "view:"+route.Resource)
+			for _, also := range route.AlsoResources {
+				grants = append(grants, "view:"+also)
+			}
+			app := newRegistryApp(t, stubAuth(grantsOf(grants...)), ep)
 			if status, env := send(t, app, authedRequest(fiber.MethodGet, row.url)); status != http.StatusOK {
 				t.Fatalf("%s answered %d (%q), want 200", row.url, status, env.Message)
 			}
@@ -109,6 +114,17 @@ func TestBackupHistoryRoutes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A PBS server's rows are mostly the backups', so its History takes global
+// view:backup beside global view:pbs: either alone leaves it closed.
+func TestPBSHistoryGate(t *testing.T) {
+	t.Parallel()
+	global := func(resource string) Check { return Check{Action: "view", Resource: resource, Scope: ScopeGlobal} }
+	ep := declaredEndpoint(t, fiber.MethodGet, pbsBackupScope+"/history")
+	if want := []Check{global("audit"), global("pbs"), global("backup")}; !slices.Equal(ep.Permissions.AllOf, want) {
+		t.Errorf("the PBS History is gated on %v, want %v", ep.Permissions.AllOf, want)
 	}
 }
 

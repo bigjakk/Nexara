@@ -33,7 +33,8 @@ var historyRoutesOutsideTheClusterCheckShape = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/backup-jobs/:job_id/history": "AllOf: view:audit for the rows, " +
 		"view:backup for the job that selects them",
 	"GET /api/v1/pbs-servers/:pbs_id/history": "AllOf: global view:audit for the rows, global view:pbs for " +
-		"the server that selects them, whose rows are in every cluster and in none",
+		"the server that selects them and global view:backup for the snapshots and restores that fill it, " +
+		"whose rows are in every cluster and in none",
 	"GET /api/v1/veeam-servers/:id/history": "AllOf: global view:audit for the rows, global view:veeam for " +
 		"the server that selects them, whose rows are in every cluster and in none",
 	"GET /api/v1/veeam-servers/:id/jobs/:job_id/history":         "as the server's: global view:audit and global view:veeam",
@@ -147,6 +148,10 @@ func TestHistoryEndpointRefusesAnUndecidedGate(t *testing.T) {
 			apischema.Properties{"vmid": {Type: apischema.String}}, "declares the path parameter"},
 		{"a global kind that declares one", historyRoute{Kind: global, Path: globalPath, Resource: "pbs"}, cluster,
 			"declares the path parameter"},
+		{"another permission on audit alone", historyRoute{Kind: handlers.GuestHistory(), Path: clusterPath, AuditOnly: "because",
+			AlsoResources: []string{"backup"}}, guest, "AlsoResources go with Resource"},
+		{"another permission already held", historyRoute{Kind: global, Path: globalPath, Resource: "pbs",
+			AlsoResources: []string{"pbs"}}, nil, "already in the gate"},
 	} {
 		tt.route.Parameters = tt.params
 		func() {

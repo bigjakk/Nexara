@@ -291,7 +291,9 @@ export const clusterHistoryKinds = {
  */
 export interface ClusterHistory {
   kind: HistoryKind;
-  permission: string;
+  /** One view permission, or every one of several when the object's rows
+   *  belong to more than one (a backup server's: pbs and backup). */
+  permission: string | readonly string[];
   target: HistoryTarget;
 }
 

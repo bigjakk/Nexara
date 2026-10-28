@@ -1500,7 +1500,7 @@ A storage, a backup server and a backup job have the same timeline as a guest: n
 
 Changes made directly in Proxmox that Nexara detects are listed too, as *Changed in Proxmox*.
 
-The tab and the buttons need `view:audit` and `view:task`, and the object's own permission: `view:storage` or `view:backup` on the cluster for a storage or a backup job. A backup server's rows are in any cluster, or none, so its History needs `view:audit` and `view:pbs` (or `view:veeam`) as instance-wide grants, not as grants on one cluster.
+The tab and the buttons need `view:audit` and `view:task`, and the object's own permission: `view:storage` or `view:backup` on the cluster for a storage or a backup job. A backup server's rows are in any cluster, or none, so its History needs instance-wide grants, not grants on one cluster: `view:audit` and `view:veeam` for a Veeam server, and `view:audit`, `view:pbs` and `view:backup` for a Proxmox Backup Server, most of whose rows are the backups' (snapshots, restores).
 
 ### Changes Made Directly in Proxmox
 

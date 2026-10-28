@@ -23,9 +23,13 @@ export function ClusterHistoryButton({
   rowsAbove?: HistoryDrawerRequest["rowsAbove"];
 }) {
   const { hasPermission } = usePermissions();
+  const permissions =
+    typeof history.permission === "string"
+      ? [history.permission]
+      : history.permission;
   if (
     unaddressableHint(title) !== null ||
-    !hasPermission("view", history.permission)
+    !permissions.every((resource) => hasPermission("view", resource))
   ) {
     return null;
   }

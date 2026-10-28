@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { Tabs } from "@/components/ui/tabs";
 import { renderWithProviders } from "@/test/test-utils";
 import { setupUser } from "@/test/user";
@@ -156,6 +156,21 @@ describe("a PBS server's History tab", () => {
 
     expect(await screen.findAllByTestId("pbs-live-task")).toHaveLength(1);
     expect(screen.getByText("Garbage collection started")).toBeInTheDocument();
+  });
+
+  // Most of a server's rows are the backups' (snapshots, restores), which
+  // view:backup owns beside the server's own view:pbs.
+  it("is not offered without view:backup", async () => {
+    useAuthStore.setState({
+      permissions: ["view:audit", "view:task", "view:pbs"],
+    });
+    mount();
+
+    await waitFor(() => {
+      expect(apiClient.list).toHaveBeenCalled();
+    });
+    expect(screen.queryByTestId("pbs-live-task")).toBeNull();
+    expect(apiClient.page).not.toHaveBeenCalled();
   });
 
   // TanStack keeps the last good data when a refetch fails, so the tasks it

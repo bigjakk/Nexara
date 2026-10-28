@@ -23,13 +23,13 @@ describe("backupHistories", () => {
     [
       backupHistories.pbsServer("p1"),
       null,
-      "pbs",
+      ["pbs", "backup"],
       "/api/v1/pbs-servers/p1/history",
     ],
     [
       backupHistories.pbsServer("p1", "datastore01"),
       null,
-      "pbs",
+      ["pbs", "backup"],
       "/api/v1/pbs-servers/p1/history?datastore=datastore01",
     ],
     [
@@ -59,7 +59,7 @@ describe("backupHistories", () => {
   ])("reads %#", (history, clusterId, permission, path) => {
     expect(history.target.clusterId).toBe(clusterId);
     // The view permission of the object's own page, which the route is gated on.
-    expect(history.permission).toBe(permission);
+    expect(history.permission).toEqual(permission);
     expect(String(history.target.path(new URLSearchParams()))).toBe(path);
   });
 });
