@@ -275,7 +275,8 @@ WITH rules AS MATERIALIZED (
                -- The fields a row says it set, when the rule takes them from it:
                -- a guest config edit's keys, those it deleted or reverted, and,
                -- when it named a disk, what replacing or deleting one moves
-               -- (unused<n>, boot); the datacenter options' settings and cleared.
+               -- (unused<n>, boot); the settings and cleared it lists; or each
+               -- key of its details, where an update records a field it set so.
                CASE k.fields_from
                    WHEN 'config' THEN ARRAY(
                        SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
@@ -290,6 +291,8 @@ WITH rules AS MATERIALIZED (
                        UNION
                        SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'cleared') = 'array'
                                                                     THEN k.details->'cleared' ELSE '[]' END) AS f)
+                   WHEN 'keys' THEN ARRAY(
+                       SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(k.details) = 'object' THEN k.details ELSE '{}' END))
                END AS fields_named
     ) n
     LEFT JOIN task_history th ON th.cluster_id = k.cluster_id AND th.upid = k.details->>'upid'

@@ -1022,6 +1022,12 @@ func TestObservedChangeRules(t *testing.T) {
 				t.Errorf("rule %+v: pattern %q", r, re)
 			}
 		}
+		// An object's own update explains the fields its row says it set, or
+		// its kind is one whose row records none (anyFieldUpdates).
+		if r.Change == "changed" && r.MatchKey == "id" && r.Member == "" && r.FieldRe == "" && r.FieldsFrom == "" &&
+			r.DetailKey == "" && r.Counts == "" && !slices.Contains(anyFieldUpdates, r.Kind) {
+			t.Errorf("rule %+v explains any field of its object, and %s is not in anyFieldUpdates", r, r.Kind)
+		}
 		// An ACL rule names its grantees, unless it is a path taken with its
 		// object: a grant explains no one it does not name.
 		if r.Kind == "pve_acl" && r.Member == "" && (r.Change != "removed" || r.Object == "") {
@@ -1043,6 +1049,14 @@ func TestObservedChangeRules(t *testing.T) {
 		t.Fatal("no rule reaches a kind's ids from elsewhere: the direction check reads nothing")
 	}
 }
+
+// anyFieldUpdates are the kinds whose own update explains any field of the
+// object changed in its window: its row records nothing of what it set
+// (storage, SDN, metric servers, ACME plugins, firewall aliases), or not all of
+// it (a backup job's; an interface's, whose address fields Proxmox derives from
+// each other). The admin guide lists them, with qmconfig's task.
+var anyFieldUpdates = []string{"storage", "backup", "metric_server", "network", "sdn_zone", "sdn_vnet", "sdn_subnet",
+	"sdn_controller", "sdn_ipam", "sdn_dns", "firewall_alias", "acme_plugin"}
 
 // memberFields are each kind's lists of other objects' ids (fieldSpec.withMembers
 // and the readers that build members).

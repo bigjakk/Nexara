@@ -62,7 +62,8 @@ type explainRule struct {
 	// FieldsFrom keeps a row to the fields its details name: config, a guest
 	// config edit's keys and the keys it deleted or reverted (and, if it named
 	// a disk, the unused<n> and boot a disk's change or removal moves);
-	// settings, the datacenter options' settings and cleared.
+	// settings, the settings and cleared it lists (the datacenter options, a
+	// node's ACME); keys, its details' own keys (an HA or pool update).
 	FieldsFrom string `json:"fields_from"`
 }
 
@@ -86,9 +87,32 @@ func byAction(kind string, added, changed, removed []string) []explainRule {
 }
 
 // crud is byAction for the kinds whose handlers file created, updated and
-// deleted.
+// deleted, an update whose row records no fields explaining any of them.
 func crud(kind string) []explainRule {
 	return byAction(kind, []string{"created"}, []string{"updated"}, []string{"deleted"})
+}
+
+// crudKeys is crud for a kind whose update row records each field it set as a
+// key of its details (ha.go, pools.go): the update explains only those.
+func crudKeys(kind string) []explainRule {
+	return append(byAction(kind, []string{"created"}, nil, []string{"deleted"}),
+		explainRule{Kind: kind, Change: "changed", AuditType: kind, MatchKey: "id", ActionRe: `^updated$`, FieldsFrom: "keys"})
+}
+
+// mappingRules is a resource mapping's own rows. Its update writes the whole
+// map, and records the description only when it set or removed one, and a PCI
+// mapping's mdev flag likewise (resource_mappings.go's update details).
+func mappingRules(kind string, mdev bool) []explainRule {
+	rule := func(detailKey, fieldRe string) explainRule {
+		return explainRule{Kind: kind, Change: "changed", AuditType: kind, MatchKey: "id", ActionRe: `^updated$`,
+			DetailKey: detailKey, FieldRe: fieldRe}
+	}
+	rules := append(byAction(kind, []string{"created"}, nil, []string{"deleted"}),
+		rule("", `^map$`), rule("description", `^description$`), rule("description_removed", `^description$`))
+	if mdev {
+		rules = append(rules, rule("mdev", `^mdev$`))
+	}
+	return rules
 }
 
 // sdnCRUD is crud for an SDN kind, whose actions carry the kind's name.
@@ -194,7 +218,7 @@ var observedChangeRules = slices.Concat(
 	// remove_storage_access). Each explains only the member it names: a
 	// guest's destroy that guest leaving, never another. A clone in the
 	// Proxmox GUI names its source in its UPID, so the clone's joining shows.
-	crud("pool"),
+	crudKeys("pool"),
 	[]explainRule{
 		{Kind: "pool", Change: "changed", MatchKey: "cluster", WorkerRe: `^(qm|vz)(create|restore)$`,
 			FieldRe: `^vms$`, Member: "joined", MemberOf: "upid:vms:%s"},
@@ -251,8 +275,8 @@ var observedChangeRules = slices.Concat(
 
 	// A mapping's delete that found it already gone is a no-op, which explains
 	// no removal.
-	crud("usb_mapping"),
-	crud("pci_mapping"),
+	mappingRules("usb_mapping", false),
+	mappingRules("pci_mapping", true),
 	crud("metric_server"),
 	// The datacenter options, which the rolling update also edits (it pauses
 	// and restores the CRS option). The notes and the tag settings have routes
@@ -265,7 +289,8 @@ var observedChangeRules = slices.Concat(
 		{Kind: "cluster_options", Change: "changed", AuditType: "cluster_options", MatchKey: "id",
 			ActionRe: `^tags_updated$`, FieldRe: `^(registered-tags|user-tag-access|tag-style)$`},
 	},
-	byAction("acme_config", nil, []string{"updated"}, nil),
+	[]explainRule{{Kind: "acme_config", Change: "changed", AuditType: "acme_config", MatchKey: "id",
+		ActionRe: `^updated$`, FieldsFrom: "settings"}},
 
 	// A node's interfaces: their own rows, and a revert of the pending
 	// changes, which is filed under the node and undoes any of them, in any
@@ -290,9 +315,9 @@ var observedChangeRules = slices.Concat(
 	// resource, and its place in every rule (HA/Config.pm
 	// delete_service_from_config). The rolling update disables and restores
 	// rules. A rule's delete that found it gone explains nothing.
-	crud("ha_resource"),
-	crud("ha_group"),
-	crud("ha_rule"),
+	crudKeys("ha_resource"),
+	crudKeys("ha_group"),
+	crudKeys("ha_rule"),
 	[]explainRule{
 		{Kind: "ha_resource", Change: "changed", MatchKey: "sid", WorkerRe: anyOf("hastart", "hastop"), FieldRe: `^state$`},
 		{Kind: "ha_resource", Change: "removed", MatchKey: "sid", WorkerRe: `^(qmdestroy|vzdestroy)$`},
@@ -333,7 +358,8 @@ var observedChangeRules = slices.Concat(
 	// through Nexara is filed under its old name with the new one in
 	// details.rename: the old name's removal and the new one's addition are
 	// both that update, and an update that renamed nothing removes nothing.
-	byAction("firewall_options", nil, []string{"firewall_options_updated"}, nil),
+	[]explainRule{{Kind: "firewall_options", Change: "changed", AuditType: "firewall_options", MatchKey: "id",
+		ActionRe: `^firewall_options_updated$`, FieldsFrom: "keys"}},
 	ruleSetRules("firewall_rule", "firewall_rule", "^rules$",
 		"firewall_rule_created", "firewall_rule_updated", "firewall_rule_deleted"),
 	[]explainRule{
@@ -361,7 +387,7 @@ var observedChangeRules = slices.Concat(
 	byAction("pve_user", []string{"created"}, nil, []string{"deleted"}),
 	byAction("pve_token", []string{"created"}, nil, []string{"deleted"}),
 	byAction("pve_group", []string{"created"}, nil, []string{"deleted"}),
-	crud("pve_role"),
+	byAction("pve_role", []string{"created"}, nil, []string{"deleted"}),
 	[]explainRule{
 		{Kind: "pve_token", Change: "changed", AuditType: "pve_token", MatchKey: "id",
 			ActionRe: anyOf("updated", "regenerated"), FieldRe: `^comment$`},
@@ -371,6 +397,8 @@ var observedChangeRules = slices.Concat(
 			ActionRe: anyOf("updated", "regenerated"), DetailKey: "privsep", FieldRe: `^privsep$`},
 		{Kind: "pve_group", Change: "changed", AuditType: "pve_group", MatchKey: "id",
 			ActionRe: `^updated$`, FieldRe: `^comment$`},
+		{Kind: "pve_role", Change: "changed", AuditType: "pve_role", MatchKey: "id",
+			ActionRe: `^updated$`, FieldRe: `^privs$`},
 		{Kind: "pve_user", Change: "changed", AuditType: "pve_group", MatchKey: "cluster",
 			ActionRe: `^deleted$`, FieldRe: `^groups$`, Member: "left", MemberOf: "audit:groups:%s"},
 		{Kind: "pve_group", Change: "changed", AuditType: "pve_user", MatchKey: "cluster", ActionRe: `^created$`,

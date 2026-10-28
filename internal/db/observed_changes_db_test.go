@@ -230,6 +230,10 @@ func TestObservedChanges(t *testing.T) {
 		182: {"delete": "net1"}, 183: {"description": "x"}} {
 		audit(observedCluster, in, "vm", uuid.NewString(), vmid, "config_update", map[string]any{"fields": fields})
 	}
+	haKeysSet := seed(observedCluster, "ha_rule", "rule01", 0, "changed", "", []string{"comment"}, at)
+	audit(observedCluster, in, "ha_rule", "rule01", 0, "updated", map[string]any{"rule": "rule01", "comment": "x"})
+	haKeysOther := seed(observedCluster, "ha_rule", "rule02", 0, "changed", "", []string{"comment", "nodes"}, at)
+	audit(observedCluster, in, "ha_rule", "rule02", 0, "updated", map[string]any{"rule": "rule02", "comment": "x"})
 	optionsSet := seed(observedCluster, "cluster_options", observedCluster.String(), 0, "changed", "", []string{"crs"}, at)
 	optionsOther := seed(observedCluster, "cluster_options", observedCluster.String(), 0, "changed", "", []string{"migration"}, at)
 	audit(observedCluster, in, "cluster_options", observedCluster.String(), 0, "updated",
@@ -383,6 +387,7 @@ func TestObservedChanges(t *testing.T) {
 		with(rule("vm", "changed", "vm", "vmid", true, "^config_update$", "", "", ""), "fields_from", "config"),
 		with(rule("cluster_options", "changed", "cluster_options", "id", false, "^updated$", "", "", ""),
 			"fields_from", "settings"),
+		with(rule("ha_rule", "changed", "ha_rule", "id", false, "^updated$", "", "", ""), "fields_from", "keys"),
 		with(rule("firewall_rule", "changed", "firewall_rule", "id", false, "^firewall_rule_updated$", "", "", "^rules$"),
 			"counts", "edit1"),
 		with(rule("firewall_security_group_rule", "changed", "firewall_security_group_rule", "id", false,
@@ -494,6 +499,8 @@ func TestObservedChanges(t *testing.T) {
 		{"a config edit that deleted the key", configDeleted, "explained"},
 		{"an options edit of that setting", optionsSet, "explained"},
 		{"an options edit, another setting", optionsOther, "shown"},
+		{"an update of the field its row records", haKeysSet, "explained"},
+		{"an update, and a field its row does not record", haKeysOther, "shown"},
 		{"a rule updated, one in and one out", ruleEdited, "explained"},
 		{"a rule updated, and another added", ruleEditedAndAdded, "shown"},
 		{"a rule created, one in", groupRuleAdded, "explained"},
