@@ -17,8 +17,11 @@ import {
   bottleneckLabel,
   processingRateLabel,
   resultVariant,
+  sessionResultLabel,
 } from "./veeam-format";
 import { VeeamSessionActions } from "./VeeamSessionActions";
+import { ScopedHistoryButton } from "@/features/history/components/ScopedHistoryButton";
+import { backupHistories } from "@/features/history/lib/backup-histories";
 import { VeeamSessionLog } from "./VeeamSessionLog";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamSession } from "../types/backup";
@@ -50,20 +53,6 @@ const SESSION_RESULT_RANK: Record<string, number> = {
   Warning: 2,
   Success: 3,
 };
-
-/**
- * The Result cell's own label.
- *
- * Named for sessions specifically: VeeamJobTable has its own `resultLabel`
- * taking a bare result string, and a job's last_result carries no
- * nexara_stopped flag to consult. Merging them would silently drop the
- * distinction between an operator's stop and a genuine backup failure.
- */
-function sessionResultLabel(session: VeeamSession): string | null {
-  if (session.result === "") return null;
-  if (session.result !== "Failed") return session.result;
-  return session.nexara_stopped ? "Stopped from Nexara" : "Failed or cancelled";
-}
 
 type SessionSortKey =
   | "expand"
@@ -167,7 +156,7 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 230,
+    width: 260,
     align: "right",
     fixed: true,
     // The action components render their mutation errors and notices inline
@@ -175,7 +164,14 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
     // failed start/stop ever gives.
     wrap: true,
     cell: (session, ctx) => (
-      <VeeamSessionActions serverId={ctx.serverId} session={session} />
+      <div className="flex items-center justify-end gap-1">
+        <ScopedHistoryButton
+          resource="veeam"
+          {...backupHistories.veeamSession(ctx.serverId, session.veeam_id)}
+          title={session.name}
+        />
+        <VeeamSessionActions serverId={ctx.serverId} session={session} />
+      </div>
     ),
   },
 ];

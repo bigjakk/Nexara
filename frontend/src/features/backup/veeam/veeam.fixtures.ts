@@ -65,6 +65,7 @@ export function session(over: Partial<VeeamSession> = {}): VeeamSession {
     nexara_initiated: false,
     nexara_stopped: false,
     cluster_id: null,
+    job_veeam_id: null,
     ...over,
   };
 }

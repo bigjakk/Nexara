@@ -14,6 +14,8 @@ import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
+import { ScopedHistoryButton } from "@/features/history/components/ScopedHistoryButton";
+import { backupHistories } from "@/features/history/lib/backup-histories";
 import { useTestVeeamServer } from "../api/backup-queries";
 import type { VeeamProbeResult, VeeamServer } from "../types/backup";
 import { VeeamProbeSummary } from "./VeeamProbeSummary";
@@ -182,7 +184,7 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 140,
+    width: 180,
     align: "right",
     fixed: true,
     // The row toggles expansion on click, so the buttons stop the event
@@ -193,6 +195,11 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
           e.stopPropagation();
         }}
       >
+        <ScopedHistoryButton
+          resource="veeam"
+          {...backupHistories.veeamServer(server.id)}
+          title={server.name}
+        />
         <VeeamServerTestButton
           server={server}
           onStart={ctx.onTestStart}

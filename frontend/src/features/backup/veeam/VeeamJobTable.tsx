@@ -18,6 +18,9 @@ import {
   resultVariant,
 } from "./veeam-format";
 import { VeeamJobActions } from "./VeeamJobActions";
+import { VeeamLiveRunRows } from "./VeeamLiveRunRows";
+import { ScopedHistoryButton } from "@/features/history/components/ScopedHistoryButton";
+import { backupHistories } from "@/features/history/lib/backup-histories";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamJob } from "../types/backup";
 
@@ -206,14 +209,30 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 230,
+    width: 260,
     align: "right",
     fixed: true,
     // The action components render their mutation errors and notices inline
     // beside the buttons; truncating this cell would clip the only feedback a
     // failed start/stop ever gives.
     wrap: true,
-    cell: (job, ctx) => <VeeamJobActions serverId={ctx.serverId} job={job} />,
+    cell: (job, ctx) => (
+      <div className="flex items-center justify-end gap-1">
+        <ScopedHistoryButton
+          resource="veeam"
+          {...backupHistories.veeamJob(ctx.serverId, job.veeam_id)}
+          title={job.name}
+          rowsAbove={(colSpan) => (
+            <VeeamLiveRunRows
+              serverId={ctx.serverId}
+              jobId={job.veeam_id}
+              colSpan={colSpan}
+            />
+          )}
+        />
+        <VeeamJobActions serverId={ctx.serverId} job={job} />
+      </div>
+    ),
   },
 ];
 

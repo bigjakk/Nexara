@@ -521,6 +521,8 @@ export interface VeeamSession {
    */
   nexara_stopped: boolean;
   cluster_id: string | null;
+  /** Veeam's id of the job the run belongs to; null for a run that names none. */
+  job_veeam_id: string | null;
 }
 
 /**
