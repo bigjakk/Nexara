@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"testing"
@@ -46,19 +47,20 @@ func realmSyncLines(users, groups []string) []string {
 		[]string{"successfully updated users and groups configuration", "TASK OK"})
 }
 
-// A sync's log names what it removed, purged and overwrote, each in its own
-// section of a sync that wrote it; a log with a line out of place — a
+// A sync's log names what it removed, purged, added and overwrote, each in its
+// own section of a sync that wrote it; a log with a line out of place — a
 // directory's value echoed in a warning may start one — or a warning whose
-// quoted value runs past its line, names nothing, as does one that never got
-// to write.
+// quoted value runs past its line, names nothing and is not whole, as is one
+// that never got to write.
 func TestParseRealmSyncLog(t *testing.T) {
 	t.Parallel()
 	users := []string{"remove user 'user01@ldap01'", "purge users 'o'brien@ldap01' ACL entries",
-		"overwriting user 'user02@ldap01'", "adding user 'user03@ldap01'"}
-	groups := []string{"remove group 'staff-ldap01'", "purge groups 'ops-ldap01' ACL entries"}
+		"overwriting user 'user02@ldap01'", "adding user 'user03@ldap01'", "updating user 'user05@ldap01'"}
+	groups := []string{"remove group 'staff-ldap01'", "purge groups 'ops-ldap01' ACL entries", "adding group 'dev-ldap01'"}
 	whole := realmSyncLog{Removed: map[string][]string{"users": {"user01@ldap01"}, "groups": {"staff-ldap01"}},
 		Purged:      map[string][]string{"users": {"o'brien@ldap01"}, "groups": {"ops-ldap01"}},
-		Overwritten: map[string][]string{"users": {"user02@ldap01"}}}
+		Overwritten: map[string][]string{"users": {"user02@ldap01"}},
+		Added:       map[string][]string{"users": {"user03@ldap01"}, "groups": {"dev-ldap01"}}}
 	forged := []string{"syncing users", "remove user 'user04@ldap01'", "successfully updated users configuration"}
 	for _, tc := range []struct {
 		name  string
@@ -78,32 +80,42 @@ func TestParseRealmSyncLog(t *testing.T) {
 		{"a warning's value past its line", slices.Insert(realmSyncLines(users, groups), 1,
 			"group name 'x", "' contains invalid characters"), newRealmSyncLog()},
 		{"a group in the users' section", realmSyncLines(append(slices.Clone(users), groups[0]), nil), newRealmSyncLog()},
+		{"a group added in the users' section", realmSyncLines(append(slices.Clone(users), groups[2]), nil), newRealmSyncLog()},
 	} {
-		if got := parseRealmSyncLog(tc.lines); !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("%s: %+v, want %+v", tc.name, got, tc.want)
+		got, ok := parseRealmSyncLog(tc.lines)
+		if !reflect.DeepEqual(got, tc.want) || ok != (tc.name == "a sync that wrote what it logged") {
+			t.Errorf("%s: %+v, whole %v, want %+v", tc.name, got, ok, tc.want)
 		}
 	}
 }
 
-// A finished sync's log is read once, and a realm once an observer interval;
-// one still running, or one that failed, names nothing; with the observer off
-// nothing is read. A realm maps enable, expire and keys only as its
+// A finished sync's log is kept once final, and a realm once an observer
+// interval; one still running, or one that failed, names nothing; with the
+// observer off nothing is read. A log read before its end, its row saying
+// completed too soon, is read again; one that cannot be read spends none of
+// the pass's reads; one a sync did not write whole is kept, and goes to no
+// classification. A realm maps enable, expire and keys only as its
 // sync_attributes say, and one that cannot be read maps none.
 func TestRealmSyncLogs(t *testing.T) {
 	t.Parallel()
-	const (
-		done    = "UPID:pve-01:00000001:00000001:00000001:auth-realm-sync:ldap01:root@pam:"
-		running = "UPID:pve-01:00000002:00000001:00000002:auth-realm-sync:ldap01:root@pam:"
-		failed  = "UPID:pve-01:00000003:00000001:00000003:auth-realm-sync:ldap01:root@pam:"
-		other   = "UPID:pve-01:00000004:00000001:00000004:auth-realm-sync:ldap02:root@pam:"
-	)
-	mq := &mockQueries{realmSyncTasks: []db.ListRealmSyncTasksRow{
+	upid := func(n int, realm string) string {
+		return fmt.Sprintf("UPID:pve-01:%08X:00000001:00000001:auth-realm-sync:%s:root@pam:", n, realm)
+	}
+	done, running, failed, early, forged := upid(1, "ldap01"), upid(2, "ldap01"), upid(3, "ldap01"), upid(4, "ldap01"), upid(5, "ldap02")
+	tasks := make([]db.ListRealmSyncTasksRow, 0, realmSyncLogsPerPass+5)
+	errs := map[string]error{}
+	for i := range realmSyncLogsPerPass {
+		tasks = append(tasks, db.ListRealmSyncTasksRow{Upid: upid(10+i, "ldap01"), Node: "pve-01", Status: "completed"})
+		errs[upid(10+i, "ldap01")] = errors.New("no such task")
+	}
+	mq := &mockQueries{realmSyncTasks: append(tasks, []db.ListRealmSyncTasksRow{
 		{Upid: done, Node: "pve-01", Status: "completed"}, {Upid: running, Node: "pve-01", Status: "running"},
-		{Upid: failed, Node: "pve-01", Status: "failed"}, {Upid: other, Node: "pve-01", Status: "completed"},
-	}}
+		{Upid: failed, Node: "pve-01", Status: "failed"}, {Upid: early, Node: "pve-01", Status: "completed"},
+		{Upid: forged, Node: "pve-01", Status: "completed"},
+	}...)}
 	synced := realmSyncLines([]string{"remove user 'user01@ldap01'"}, nil)
-	client := &realmSyncFakeClient{backupLogFakeClient: &backupLogFakeClient{logs: map[string][]string{
-		done: synced, running: synced, failed: synced, other: {},
+	client := &realmSyncFakeClient{backupLogFakeClient: &backupLogFakeClient{errs: errs, logs: map[string][]string{
+		done: synced, running: synced, failed: synced, early: synced[:5], forged: {"TASK OK"},
 	}}, syncAttributes: map[string]string{"ldap01": "email=mail,enable=accountActive; keys=sshPublicKey firstname=givenName"}}
 	s := &Syncer{queries: mq, logger: testLogger()}
 	cluster := db.Cluster{ID: uuid.New()}
@@ -112,18 +124,27 @@ func TestRealmSyncLogs(t *testing.T) {
 		t.Fatalf("with the observer off: %s %s, %d reads, want nothing read", logs, fields, client.realmReads+client.logReads)
 	}
 	s.objectObserveInterval = time.Hour
-	want := map[string]realmSyncLog{done: parseRealmSyncLog(synced), other: newRealmSyncLog()}
-	for pass := range 2 {
+	whole, _ := parseRealmSyncLog(synced)
+	for pass, want := range []struct {
+		logs     map[string]realmSyncLog
+		logReads int // in all
+	}{
+		// Four unreadable, then done, early (no end yet) and forged (no sync's).
+		{map[string]realmSyncLog{done: whole}, 7},
+		// The unreadable are tried again; early, read again, has its end now.
+		{map[string]realmSyncLog{done: whole, early: whole}, 12},
+		{map[string]realmSyncLog{done: whole, early: whole}, 16},
+	} {
 		logs, fields := s.readRealmSyncs(context.Background(), client, cluster)
 		var got map[string]realmSyncLog
-		if err := json.Unmarshal(logs, &got); err != nil || !reflect.DeepEqual(got, want) || len(got[done].Removed["users"]) != 1 {
-			t.Fatalf("pass %d: %+v (%v), want %+v", pass, got, err, want)
+		if err := json.Unmarshal(logs, &got); err != nil || !reflect.DeepEqual(got, want.logs) {
+			t.Fatalf("pass %d: %+v (%v), want %+v", pass, got, err, want.logs)
 		}
-		if string(fields) != `{"ldap01":["enable","keys"],"ldap02":[]}` || client.realmReads != 2 || client.logReads != 2 {
+		if string(fields) != `{"ldap01":["enable","keys"],"ldap02":[]}` || client.realmReads != 2 || client.logReads != want.logReads {
 			t.Fatalf("pass %d: realms map %s, %d realm and %d log reads, want ldap01's enable and keys, none of the "+
-				"unread ldap02, and each realm and finished log read once", pass, fields, client.realmReads, client.logReads)
+				"unread ldap02, each realm read once, and %d log reads", pass, fields, client.realmReads, client.logReads, want.logReads)
 		}
-		// Both are kept: the log, finished, and the realm, for the interval.
+		client.logs[early] = synced
 		client.logs[done], client.syncAttributes["ldap01"] = nil, "expire=accountExpires"
 	}
 }

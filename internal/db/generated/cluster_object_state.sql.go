@@ -339,10 +339,15 @@ WITH rules AS MATERIALIZED (
       AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
       AND (k.detail_key = '' OR COALESCE(k.details->>k.detail_key, '') <> '')
       AND (k.detail_value = '' OR k.details->>k.detail_key = k.detail_value)
-      -- A realm sync removes and overwrites only what its log says it did.
-      AND (strpos(k.log_names, ':') = 0 OR COALESCE(
-           $8::jsonb -> (k.details->>'upid') -> split_part(k.log_names, ':', 1)
-               -> split_part(k.log_names, ':', 2) ? k.resource_id, false))
+      -- A realm sync removes, adds and overwrites only what its log says it
+      -- did, and leaves alone what its log, read, says it did not.
+      AND (strpos(k.log_names, ':') = 0
+           OR left(k.log_names, 1) <> '!' AND COALESCE(
+               $8::jsonb -> (k.details->>'upid') -> split_part(k.log_names, ':', 1)
+                   -> split_part(k.log_names, ':', 2) ? k.resource_id, false)
+           OR left(k.log_names, 1) = '!' AND $8::jsonb ? (k.details->>'upid') AND NOT COALESCE(
+               $8::jsonb -> (k.details->>'upid') -> split_part(substr(k.log_names, 2), ':', 1)
+                   -> split_part(k.log_names, ':', 2) ? k.resource_id, false))
       -- A marker names no object, so it explains the one change of its kind
       -- and direction whose window holds it, and none when two do: the case
       -- it is written for is a create whose id could not be told apart.
@@ -542,8 +547,9 @@ type ClassifyObservedChangesParams struct {
 // names in detail.fields_appeared, absent from the object before; audit_id_is
 // to rows filed under that marker id; log_names to what the row's task logged
 // (task_logs, a realm sync's, by UPID): <what>:<users|groups> — removed,
-// overwritten — to the change's own object among those it logged so, purged
-// to an ACL's grantee leaving among those whose entries it purged.
+// overwritten, added — to the change's own object among those it logged so,
+// !<what>:<list> to one its log, read, does not name so, purged to an ACL's
+// grantee leaving among those whose entries it purged.
 //
 // A change is explained when everything it changed is: each member that joined
 // or left a list of ids (members_joined, members_left), each other field in
@@ -739,11 +745,12 @@ func (q *Queries) ListClusterObjectState(ctx context.Context, clusterID uuid.UUI
 }
 
 const listRealmSyncTasks = `-- name: ListRealmSyncTasks :many
-SELECT upid, node, status
-FROM task_history
-WHERE cluster_id = $1 AND task_type = 'auth-realm-sync'
-  AND started_at >= $2::timestamptz
-ORDER BY started_at DESC
+SELECT th.upid, th.node, th.status
+FROM task_history th
+WHERE th.cluster_id = $1 AND th.task_type = 'auth-realm-sync'
+  AND th.started_at >= $2::timestamptz
+  AND EXISTS (SELECT 1 FROM audit_log a WHERE a.cluster_id = th.cluster_id AND a.details->>'upid' = th.upid)
+ORDER BY th.started_at DESC
 `
 
 type ListRealmSyncTasksParams struct {
@@ -758,7 +765,11 @@ type ListRealmSyncTasksRow struct {
 }
 
 // ListRealmSyncTasks is a cluster's realm syncs since a time, newest first,
-// whose logs say what each removed, purged and overwrote (readRealmSyncs).
+// whose logs say what each removed, purged, added and overwrote
+// (readRealmSyncs). Only one an audit row carries — the task ingest's, or
+// Nexara's own dispatch — is a sync: anyone with manage:task may file a task
+// row of any type and UPID (POST /tasks), and rows naming no task Proxmox ran
+// would spend the pass's reads.
 func (q *Queries) ListRealmSyncTasks(ctx context.Context, arg ListRealmSyncTasksParams) ([]ListRealmSyncTasksRow, error) {
 	rows, err := q.db.Query(ctx, listRealmSyncTasks, arg.ClusterID, arg.Since)
 	if err != nil {

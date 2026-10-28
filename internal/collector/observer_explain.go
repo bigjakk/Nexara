@@ -69,8 +69,9 @@ type explainRule struct {
 	Counts string `json:"counts"`
 	// LogNames keeps a rule to what the row's task logged (a realm sync's log,
 	// readRealmSyncs): removed:users or removed:groups, the object it removed;
-	// overwritten:users, a user it replaced whole; purged, an ACL's grantee
-	// whose entries it purged.
+	// added:users or added:groups, one it added; overwritten:users, a user it
+	// replaced whole; !<what>:<list>, one its log, read, does not name so;
+	// purged, an ACL's grantee whose entries it purged.
 	LogNames string `json:"log_names"`
 	// Appeared keeps a rule to fields the object did not have before
 	// (detail.fields_appeared): a value Proxmox fills in where none was.
@@ -630,12 +631,13 @@ func aclDeleteRules(auditType, who, grants string) []explainRule {
 // worker auth-realm-sync and the scheduled job's, both naming the realm). It
 // adds that realm's users (user@realm) and the groups it syncs (name-realm,
 // LDAP.pm get_groups), and with remove-vanished removes them, or purges their
-// ACL entries, or both: what it removed and purged, its log says
-// (realm_sync_log.go), and only that is explained. A group's edit is its comment, which overwriting clears, and its
-// users, which it replaces whole (update_groups): that realm's users join it,
-// and whoever was in it may leave. So a user joins only a group the sync
-// makes, and may leave one whoever it is. A dry run (auth-realm-sync-test)
-// writes nothing.
+// ACL entries, or both: what it added, removed and purged, its log says
+// (realm_sync_log.go), and only that is explained. A group's edit is its
+// comment, which overwriting clears, and its users, which it replaces whole
+// (update_groups): that realm's users join it, and whoever was in it may leave.
+// So a user joins only a group the sync makes, and only a user its log says it
+// added or replaced whole, and may leave one whoever it is. A dry run
+// (auth-realm-sync-test) writes nothing.
 //
 // What a sync writes on a user it already has, transcribed (LDAP.pm get_users,
 // Domains.pm update_users): every attribute the directory returns that maps to
@@ -643,31 +645,38 @@ func aclDeleteRules(auditType, who, grants string) []explainRule {
 // overwrites it, and with remove-vanished=properties the record is replaced by
 // what it returned, so any but enable (kept from the old record; enable-new is
 // only for a user it creates) may be cleared: for a user its log says it
-// overwrote, every field but enable is its. The default map takes an LDAP
-// attribute of each of those names; the names, e-mail and comment are what a
-// directory has, enable, expire and keys a sync sets only where the realm's
-// sync_attributes maps them, so only then are they its (readRealmSyncs: an
-// unread realm maps none).
+// overwrote, every field but enable is its, and enable never is. The default
+// map takes an LDAP attribute of each of those names; the names, e-mail and
+// comment are what a directory has, enable, expire and keys a sync sets only
+// where the realm's sync_attributes maps them, so only then are they its
+// (readRealmSyncs: an unread realm maps none).
 var realmSyncRules = func() []explainRule {
 	const sync = `^auth-realm-sync$`
 	return slices.Concat(
 		[]explainRule{
-			{Kind: "pve_user", Change: "added", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s"},
+			{Kind: "pve_user", Change: "added", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
+				LogNames: "added:users"},
 			{Kind: "pve_user", Change: "removed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
 				LogNames: "removed:users"},
-			{Kind: "pve_group", Change: "added", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s"},
+			{Kind: "pve_group", Change: "added", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
+				LogNames: "added:groups"},
 			{Kind: "pve_group", Change: "removed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
 				LogNames: "removed:groups"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
 				FieldRe: `^(firstname|lastname|email|comment)$`},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
-				FieldRe: `^(enable|expire|keys)$`, FieldsFrom: "realm"},
+				FieldRe: `^(expire|keys)$`, FieldsFrom: "realm"},
+			// update_users keeps a replaced user's enable from its old record.
+			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
+				FieldRe: `^enable$`, FieldsFrom: "realm", LogNames: "!overwritten:users"},
 			// A user it replaced whole (its log: overwriting) keeps only its
 			// enable, and its tokens and groups, which live apart.
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
 				FieldRe: `^(firstname|lastname|email|comment|expire|keys)$`, LogNames: "overwritten:users"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
-				FieldRe: `^groups$`, Member: "joined", MemberOf: "upid:groups:*-%s"},
+				FieldRe: `^groups$`, Member: "joined", MemberOf: "upid:groups:*-%s", LogNames: "added:users"},
+			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
+				FieldRe: `^groups$`, Member: "joined", MemberOf: "upid:groups:*-%s", LogNames: "overwritten:users"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync,
 				FieldRe: `^groups$`, Member: "left", MemberOf: "upid:groups:*-%s"},
 			{Kind: "pve_group", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",

@@ -440,12 +440,23 @@ func TestObservedChanges(t *testing.T) {
 	// enable, expire and keys a sync sets only where its realm maps them.
 	syncMapped := seed(observedCluster, "pve_user", "user10@ldap01", 0, "changed", "", []string{"enable"}, at)
 	syncUnmapped := seed(observedCluster, "pve_user", "user11@ldap01", 0, "changed", "", []string{"keys"}, at)
-	realmFields := jsonOf(map[string][]string{"ldap01": {"enable"}})
+	realmFields := jsonOf(map[string][]string{"ldap01": {"enable"}, "ldap02": {"enable"}})
 	besideRealmSync := seed(observedCluster, "pve_user", "user05@pve", 0, "changed", "", []string{"email"}, at)
 	syncJoinedSynced := seed(observedCluster, "pve_user", "user08@ldap01", 0, "changed", "", []string{"groups"}, at)
 	members(syncJoinedSynced, []string{"groups:staff-ldap01"}, []string{})
 	syncJoinedOther := seed(observedCluster, "pve_user", "user09@ldap01", 0, "changed", "", []string{"groups"}, at)
 	members(syncJoinedOther, []string{"groups:admins"}, []string{})
+	// A user joins a group by a sync only if its log added or replaced it, and
+	// is added by one only if its log says so; a replaced user keeps its
+	// enable, whatever the realm maps, and with the log unread none is its.
+	syncJoinedUnlogged := seed(observedCluster, "pve_user", "user12@ldap01", 0, "changed", "", []string{"groups"}, at)
+	members(syncJoinedUnlogged, []string{"groups:staff-ldap01"}, []string{})
+	syncAdded := seed(observedCluster, "pve_user", "user13@ldap01", 0, "added", "", nil, at)
+	syncAddedUnlogged := seed(observedCluster, "pve_user", "user14@ldap01", 0, "added", "", nil, at)
+	syncEnableOverwritten := seed(observedCluster, "pve_user", "user20@ldap01", 0, "changed", "", []string{"enable"}, at)
+	syncLogUnread := seed(observedCluster, "pve_user", "user01@ldap02", 0, "changed", "", []string{"enable"}, at)
+	const unreadSyncUPID = "UPID:pve-01:0000000E:00000001:00000001:auth-realm-sync:ldap02:root@pam:"
+	audit(observedCluster, in, "proxmox_task", "ldap02", 0, "auth-realm-sync", map[string]any{"upid": unreadSyncUPID})
 	// A sync removes, and purges the ACL of, only what its log names: user15
 	// it removed and purged, user19 it purged and kept; user16's ACL and
 	// user17 went beside it.
@@ -453,7 +464,8 @@ func TestObservedChanges(t *testing.T) {
 	taskLogs := jsonOf(map[string]any{syncUPID: map[string]any{
 		"removed":     map[string][]string{"users": {"user15@ldap01"}},
 		"purged":      map[string][]string{"users": {"user15@ldap01", "user19@ldap01"}},
-		"overwritten": map[string][]string{"users": {"user20@ldap01"}}}})
+		"overwritten": map[string][]string{"users": {"user20@ldap01", "user08@ldap01", "user09@ldap01"}},
+		"added":       map[string][]string{"users": {"user13@ldap01"}}}})
 	// A user it replaced whole: its keys, which its realm does not map.
 	syncOverwritten := seed(observedCluster, "pve_user", "user20@ldap01", 0, "changed", "", []string{"keys"}, at)
 	syncACLRemoved := seed(observedCluster, "pve_acl", "/vms/175", 0, "changed", "", []string{"user_grants", "users"}, at)
@@ -560,9 +572,13 @@ func TestObservedChanges(t *testing.T) {
 		with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
 			"^(firstname|lastname|email|comment)$"), "object", "upid:*@%s"),
 		with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
-			"^(enable|expire|keys)$"), "object", "upid:*@%s"), "fields_from", "realm"),
-		with(with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", "^groups$"),
-			"object", "upid:*@%s"), "member", "joined"), "member_of", "upid:groups:*-%s"),
+			"^(expire|keys)$"), "object", "upid:*@%s"), "fields_from", "realm"),
+		with(with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
+			"^enable$"), "object", "upid:*@%s"), "fields_from", "realm"), "log_names", "!overwritten:users"),
+		with(with(with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", "^groups$"),
+			"object", "upid:*@%s"), "member", "joined"), "member_of", "upid:groups:*-%s"), "log_names", "overwritten:users"),
+		with(with(rule("pve_user", "added", "", "cluster", false, "", "", "^auth-realm-sync$", ""), "object", "upid:*@%s"),
+			"log_names", "added:users"),
 		with(with(with(rule("pve_acl", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
 			"^(users|user_grants)$"), "member", "left"), "member_of", "upid:users:*@%s|user_grants:*@%s"), "log_names", "purged"),
 		with(with(rule("pve_user", "removed", "", "cluster", false, "", "", "^auth-realm-sync$", ""), "object", "upid:*@%s"),
@@ -720,6 +736,11 @@ func TestObservedChanges(t *testing.T) {
 		{"a realm's sync, a user of another", besideRealmSync, "shown"},
 		{"a realm's sync, its user joining a group it syncs", syncJoinedSynced, "explained"},
 		{"a realm's sync, its user joining another group", syncJoinedOther, "shown"},
+		{"a realm's sync, a user it did not add or replace joining", syncJoinedUnlogged, "shown"},
+		{"a realm's sync, a user its log says it added", syncAdded, "explained"},
+		{"a realm's sync, a user added beside it", syncAddedUnlogged, "shown"},
+		{"a realm's sync, the enable of a user it replaced", syncEnableOverwritten, "shown"},
+		{"a realm's sync whose log is unread, a field its realm maps", syncLogUnread, "shown"},
 		{"a realm's sync, the ACL of a user it removed", syncACLRemoved, "explained"},
 		{"a realm's sync, a user its log says it removed", syncUserRemoved, "explained"},
 		{"a realm's sync, the ACL of a user it did not purge", syncACLKept, "shown"},
@@ -788,6 +809,16 @@ func TestObservedChanges(t *testing.T) {
 			Scan(&raw); err != nil || raw != nil && json.Unmarshal(raw, &got) != nil || fmt.Sprint(got) != fmt.Sprint(tc.want) {
 			t.Errorf("%s: explained_unnamed %s (%v), want %v", name, raw, err, tc.want)
 		}
+	}
+
+	// A sync is one an audit row carries: a task row anyone may file names
+	// no task Proxmox ran.
+	const forgedSyncUPID = "UPID:pve-01:0000000F:00000001:00000001:auth-realm-sync:ldap01:root@pam:"
+	task(observedCluster, syncUPID, 0, in, in.Add(time.Second))
+	task(observedCluster, forgedSyncUPID, 0, in, in.Add(time.Second))
+	if syncs, err := q.ListRealmSyncTasks(ctx, gen.ListRealmSyncTasksParams{ClusterID: observedCluster, Since: ago(600)}); err != nil ||
+		len(syncs) != 1 || syncs[0].Upid != syncUPID {
+		t.Errorf("realm syncs listed %+v (%v), want the one an audit row carries", syncs, err)
 	}
 
 	// What nothing could classify in a day and an hour is shown; another

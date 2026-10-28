@@ -75,6 +75,10 @@ var auditReadsExemptFromScope = map[string]string{
 	// And for the global kinds' rows, which name no cluster: audit rows of the
 	// object's own type and id.
 	"cluster_object_state.sql.ClassifyGlobalObjectChanges": "collector-internal; audit rows of the global object's own type and id, a verdict returned to no user",
+	// The realm syncs whose logs the observer reads (internal/collector/realm_sync_log.go):
+	// audit_log only decides which of one cluster's task rows count, by whether that
+	// cluster's own row carries the UPID, and nothing of it is returned.
+	"cluster_object_state.sql.ListRealmSyncTasks": "collector-internal; one cluster by a required arg, tests only that its own audit row carries the UPID, no user context",
 
 	// The collector marking the per-node reloads of an SDN apply: it reads and
 	// rewrites one cluster's own rows, named by a required argument, and returns

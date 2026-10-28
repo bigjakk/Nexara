@@ -1855,18 +1855,24 @@ func TestObservedChangeRules(t *testing.T) {
 		if r.Kind == "pve_role" && r.Change == "changed" && r.MemberOf == "" {
 			t.Errorf("rule %+v: a role's update explains only the privileges its row lists", r)
 		}
-		// A realm sync removes, and purges the ACL of, only what its log says.
-		if strings.Contains(r.WorkerRe, "auth-realm-sync") && (r.Kind == "pve_acl" && r.LogNames != "purged" ||
-			r.Change == "removed" && r.Kind != "pve_acl" && !strings.HasPrefix(r.LogNames, "removed:")) ||
+		// A realm sync adds, removes, and purges the ACL of, only what its log
+		// says, and a user joins its group only where its log added or replaced it.
+		sync := strings.Contains(r.WorkerRe, "auth-realm-sync")
+		if sync && (r.Kind == "pve_acl" && r.LogNames != "purged" ||
+			r.Change == "removed" && r.Kind != "pve_acl" && !strings.HasPrefix(r.LogNames, "removed:") ||
+			r.Change == "added" && !strings.HasPrefix(r.LogNames, "added:") ||
+			r.Kind == "pve_user" && r.Member == "joined" && r.LogNames != "added:users" && r.LogNames != "overwritten:users") ||
 			r.LogNames != "" && r.WorkerRe != `^auth-realm-sync$` {
-			t.Errorf("rule %+v: a realm sync's removals are what its log names, and only its log is read", r)
+			t.Errorf("rule %+v: a realm sync's additions, removals and joins are what its log names, and only its log is read", r)
 		}
 		// Of a user it has, a sync sets enable, expire and keys only where its
-		// realm maps them, or expire and keys where it replaced the user whole.
+		// realm maps them, or expire and keys where it replaced the user whole,
+		// and never the enable of one it replaced.
 		for _, f := range realmSyncFields {
-			if strings.Contains(r.WorkerRe, "auth-realm-sync") && r.Kind == "pve_user" && r.Change == "changed" &&
-				r.FieldsFrom != "realm" && regexp.MustCompile(r.FieldRe).MatchString(f) &&
-				(r.LogNames != "overwritten:users" || f == "enable") {
+			matches := regexp.MustCompile(r.FieldRe).MatchString(f)
+			if sync && r.Kind == "pve_user" && r.Change == "changed" && matches &&
+				(r.FieldsFrom != "realm" && (r.LogNames != "overwritten:users" || f == "enable") ||
+					r.FieldsFrom == "realm" && f == "enable" && r.LogNames != "!overwritten:users") {
 				t.Errorf("rule %+v: a realm sync explains a user's %s only as its realm maps it", r, f)
 			}
 		}
