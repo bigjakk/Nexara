@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { TabsContent, TabsTrigger } from "@/components/ui/tabs";
 import { useCanViewHistory } from "../hooks/useCanViewHistory";
 import type { ClusterHistory } from "../lib/cluster-histories";
@@ -25,14 +26,21 @@ export function HistoryTabTrigger({
 export function HistoryTabContent({
   history,
   value = "history",
+  placeholder,
 }: {
   history: ClusterHistory;
   value?: string;
+  /** Shown in place of the History while it cannot be read yet — or at all —
+   *  because the object's page does not know where to read it: nothing is
+   *  read meanwhile. */
+  placeholder?: ReactNode;
 }) {
   const can = useCanViewHistory(history.permission);
   return can ? (
     <TabsContent value={value} className="mt-4">
-      <HistoryTimeline kind={history.kind} target={history.target} />
+      {placeholder ?? (
+        <HistoryTimeline kind={history.kind} target={history.target} />
+      )}
     </TabsContent>
   ) : null;
 }
