@@ -93,6 +93,11 @@ type HistoryKind struct {
 	// against globalHistoryResourceTypes (Validate). ListParams refuses an
 	// object of any other type.
 	ObjectTypes []string
+	// KeyedObjectTypes are those of a global kind's ObjectTypes that are not
+	// in globalHistoryResourceTypes, read only by a details key whose values
+	// are (globalHistoryDetailKeys): their ids are unique only within a
+	// cluster, which the key makes no difference to.
+	KeyedObjectTypes []string
 	// ObservedTypes are those of ObjectTypes whose changes seen in Proxmox
 	// (cluster_object_changes) the kind shows beside their audit rows, each
 	// with the view permission it is read under (Validate). A request reads
@@ -314,6 +319,14 @@ func ObservedTypePermissions() map[string]string {
 // read in every cluster would mix the objects of the same name.
 var globalHistoryResourceTypes = []string{"pbs_server", "veeam_server", "veeam_job", "veeam_session", "firewall_template"}
 
+// globalHistoryDetailKeys are the details keys whose values are ids unique
+// across Nexara — a PBS server's uuid, Veeam's own ids — so a global kind may
+// select by one with no parent id to go with it (a datastore's name repeats on
+// every server, so that needs one), and in a type whose ids are not unique
+// (HistoryKind.KeyedObjectTypes): a restore from a PBS server is a `backup`
+// row of its guest's cluster that names the server.
+var globalHistoryDetailKeys = []string{"pbs_server_id", "veeam_server_id", "veeam_job_id"}
+
 // HistoryField is what a HistoryRule matches on.
 type HistoryField string
 
@@ -374,6 +387,13 @@ type HistorySelection struct {
 	// kind's: the tasks it ran, its status changes, the guests that arrived
 	// on it or left it (ListHistory's node arms).
 	Node string
+	// ObjectsOnNode, when set, drops the objects' rows that ran on another
+	// node: a row's node is its UPID's where it has one, its details.node
+	// otherwise (the node arms' meaning, then the audit row's own). A row that
+	// names no node (a configuration change, which is the cluster's) stays. A
+	// non-shared storage is a different storage on every node, and its History
+	// on one node's page is the one node's.
+	ObjectsOnNode string
 	// GuestsTotal is, for a selection that follows only some of the guests
 	// it chose from — a folder past folderHistoryGuestCap — how many there
 	// were: the caller's to open, as Guests are. Zero otherwise.
@@ -482,8 +502,13 @@ func (k HistoryKind) Validate() error {
 		}
 	}
 	for _, t := range k.ObjectTypes {
-		if k.Global && !slices.Contains(globalHistoryResourceTypes, t) {
+		if k.Global && !slices.Contains(globalHistoryResourceTypes, t) && !slices.Contains(k.KeyedObjectTypes, t) {
 			return fmt.Errorf("history kind %q is global and reads %q, whose ids are unique only within a cluster", k.Name, t)
+		}
+	}
+	for _, t := range k.KeyedObjectTypes {
+		if !k.Global || !slices.Contains(k.ObjectTypes, t) {
+			return fmt.Errorf("history kind %q reads %q by a unique key, but is not global or does not read the type", k.Name, t)
 		}
 	}
 	for i, h := range k.Hide {
@@ -755,10 +780,15 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		}
 		for _, o := range sel.Objects {
 			// A details value — a datastore's name — repeats on every server:
-			// only its parent's id is unique across Nexara.
-			if o.DetailKey != "" && o.ResourceID == "" {
+			// only its parent's id is unique across Nexara, unless the key is
+			// one whose values are ids (globalHistoryDetailKeys), as a type
+			// whose own ids are not (KeyedObjectTypes) is read by.
+			unique := slices.Contains(globalHistoryDetailKeys, o.DetailKey)
+			if (o.DetailKey != "" && o.ResourceID == "" && !unique) ||
+				(slices.Contains(k.KeyedObjectTypes, o.ResourceType) && !unique) {
 				return db.ListHistoryParams{}, fmt.Errorf("history kind %q is global and selected %+v by a "+
-					"details key with no resource id", k.Name, o)
+					"details key with no resource id, or a cluster's type by a key that is not an id unique "+
+					"across Nexara", k.Name, o)
 			}
 		}
 		clusterID = uuid.Nil
@@ -877,6 +907,7 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		params.ObjectInList = append(params.ObjectInList, o.InList)
 		params.ObjectWhole = append(params.ObjectWhole, o.WholeType)
 	}
+	params.ObjectsNode = sel.ObjectsOnNode
 	params.RuleCategories, params.RuleFields, params.RulePatterns = k.sqlRules()
 	return params, nil
 }

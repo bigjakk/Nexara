@@ -357,6 +357,8 @@ WITH guests AS MATERIALIZED (
                        AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest($1::int[]) AS v,
                                                                       unnest('{vm:,ct:}'::text[]) AS p))
                        AND history_worker_ok(a.upid, $20::text[]), false)
+      AND ($32::text = ''
+           OR COALESCE(NULLIF(split_part(a.upid, ':', 2), ''), a.node, '') IN ('', $32::text))
      ) o
      ORDER BY o.created_at DESC
      LIMIT NULLIF($24::int, 0))
@@ -364,7 +366,7 @@ WITH guests AS MATERIALIZED (
     (SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
             a.details->>'upid', a.details->>'node', a.details->>'status', NULL::int, 'cluster'::text
      FROM audit_log a
-     WHERE $32::bool
+     WHERE $33::bool
        AND ($25::text IS NULL OR a.source = $25::text
             OR $25::text = 'proxmox' AND a.details ? 'upid')
        AND (a.cluster_id, a.created_at)
@@ -376,7 +378,7 @@ WITH guests AS MATERIALIZED (
             OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = a.cluster_id AND v.vmid = a.vmid
                        AND v.type = ANY($30::text[]))))
      ORDER BY a.cluster_id DESC, a.created_at DESC
-     LIMIT CASE WHEN $32::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $33::bool THEN NULLIF($24::int, 0) ELSE 0 END)
 ), run_rows AS (
     SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.user_id,
            CASE WHEN a.created_at - lag(a.created_at) OVER w <= k.gap THEN 0 ELSE 1 END AS starts
@@ -384,7 +386,7 @@ WITH guests AS MATERIALIZED (
     CROSS JOIN LATERAL (
         SELECT b.id, b.cluster_id, b.created_at, b.source, b.action, b.resource_type, b.resource_id, b.user_id
         FROM audit_log b
-        WHERE $32::bool
+        WHERE $33::bool
           AND b.resource_type = k.resource_type AND b.action = k.action
           AND b.cluster_id = $21::uuid
           AND ($25::text IS NULL OR b.source = $25::text)
@@ -403,7 +405,7 @@ WITH guests AS MATERIALIZED (
     (SELECT 'guest_tasks'::text AS src, t.upid, t.cluster_id, t.started_at, t.source, t.task_type,
             t.vmid AS vmid, t.vmid AS subject, t.user_id, t.node
      FROM task_history t
-     WHERE $33::bool
+     WHERE $34::bool
        AND t.cluster_id = $21::uuid
        AND t.vmid IS NOT NULL
        AND t.vmid = ANY($1::int[])
@@ -418,7 +420,7 @@ WITH guests AS MATERIALIZED (
     UNION ALL
     (SELECT 'guest_archive', r.upid, r.cluster_id, r.started_at, r.source, r.task_type, r.vmid, r.vmid, r.user_id, r.node
      FROM task_history_archive r
-     WHERE $33::bool
+     WHERE $34::bool
        AND r.cluster_id = $21::uuid
        AND r.vmid = ANY($1::int[])
        AND history_worker_ok(r.upid, $20::text[])
@@ -433,7 +435,7 @@ WITH guests AS MATERIALIZED (
     (SELECT 'cluster_tasks', t.upid, t.cluster_id, t.started_at, t.source, t.task_type,
             CASE WHEN is_guest_upid(t.upid) THEN COALESCE(t.vmid, 0) ELSE 0 END, NULL::int, t.user_id, t.node
      FROM task_history t
-     WHERE $32::bool AND $33::bool
+     WHERE $33::bool AND $34::bool
        AND t.cluster_id = $21::uuid
        AND ($25::text IS NULL OR t.source = $25::text)
        AND t.started_at >= COALESCE($22::timestamptz, '-infinity'::timestamptz)
@@ -443,12 +445,12 @@ WITH guests AS MATERIALIZED (
             OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = t.cluster_id AND v.vmid = t.vmid
                        AND v.type = ANY($30::text[]))))
      ORDER BY t.started_at DESC
-     LIMIT CASE WHEN $32::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $33::bool THEN NULLIF($24::int, 0) ELSE 0 END)
     UNION ALL
     (SELECT 'cluster_archive', r.upid, r.cluster_id, r.started_at, r.source, r.task_type, COALESCE(r.vmid, 0), NULL::int,
             r.user_id, r.node
      FROM task_history_archive r
-     WHERE $32::bool AND $33::bool
+     WHERE $33::bool AND $34::bool
        AND r.cluster_id = $21::uuid
        AND ($25::text IS NULL OR r.source = $25::text)
        AND r.started_at >= COALESCE($22::timestamptz, '-infinity'::timestamptz)
@@ -458,12 +460,12 @@ WITH guests AS MATERIALIZED (
             OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = r.cluster_id AND v.vmid = r.vmid
                        AND v.type = ANY($30::text[]))))
      ORDER BY r.started_at DESC
-     LIMIT CASE WHEN $32::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $33::bool THEN NULLIF($24::int, 0) ELSE 0 END)
     UNION ALL
     (SELECT 'node_tasks', t.upid, t.cluster_id, t.started_at, t.source, t.task_type,
             CASE WHEN is_guest_upid(t.upid) THEN COALESCE(t.vmid, 0) ELSE 0 END, NULL::int, t.user_id, t.node
      FROM task_history t
-     WHERE $28::text <> '' AND $33::bool
+     WHERE $28::text <> '' AND $34::bool
        AND t.cluster_id = $21::uuid
        AND t.node = $28::text
        AND ($29::bool OR NOT is_guest_upid(t.upid))
@@ -479,7 +481,7 @@ WITH guests AS MATERIALIZED (
     UNION ALL
     (SELECT 'node_archive', r.upid, r.cluster_id, r.started_at, r.source, r.task_type, r.vmid, NULL::int, r.user_id, r.node
      FROM task_history_archive r
-     WHERE $28::text <> '' AND $33::bool
+     WHERE $28::text <> '' AND $34::bool
        AND $29::bool
        AND r.cluster_id = $21::uuid
        AND r.node = $28::text
@@ -540,7 +542,7 @@ WITH guests AS MATERIALIZED (
             b.source, 'vzdump', 'backup', '', b.vmid, b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL, 0,
             'guest_backups'::text
      FROM guest_backups b
-     WHERE $33::bool
+     WHERE $34::bool
        AND ($25::text IS NULL OR b.source = $25::text)
        AND b.cluster_id = $21::uuid
        AND b.vmid = ANY($1::int[])
@@ -558,7 +560,7 @@ WITH guests AS MATERIALIZED (
             'status', '', s.vmid, NULL::int, NULL::uuid, '', s.node, '', s.from_status, s.to_status, s.last_seen_at, 0,
             'cluster_status'::text
      FROM guest_status_changes s
-     WHERE $32::bool
+     WHERE $33::bool
        AND ($25::text IS NULL OR $25::text = 'detected')
        AND s.cluster_id = $21::uuid
        AND s.explained = false
@@ -566,13 +568,13 @@ WITH guests AS MATERIALIZED (
        AND s.observed_at >= COALESCE($22::timestamptz, '-infinity'::timestamptz)
        AND s.observed_at < COALESCE($23::timestamptz, 'infinity'::timestamptz)
      ORDER BY s.observed_at DESC
-     LIMIT CASE WHEN $32::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $33::bool THEN NULLIF($24::int, 0) ELSE 0 END)
     UNION ALL
     (SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.cluster_id, b.started_at, b.source,
             'vzdump', 'backup', '', b.vmid, NULL::int, b.user_id, b.upid, b.node, '', '', '', NULL, 0,
             'cluster_backups'::text
      FROM guest_backups b
-     WHERE $32::bool AND $33::bool
+     WHERE $33::bool AND $34::bool
        AND ($25::text IS NULL OR b.source = $25::text)
        AND b.cluster_id = $21::uuid
        AND b.started_at >= COALESCE($22::timestamptz, '-infinity'::timestamptz)
@@ -581,7 +583,7 @@ WITH guests AS MATERIALIZED (
             OR EXISTS (SELECT 1 FROM vms v WHERE v.cluster_id = b.cluster_id AND v.vmid = b.vmid
                        AND v.type = ANY($30::text[])))
      ORDER BY b.started_at DESC
-     LIMIT CASE WHEN $32::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $33::bool THEN NULLIF($24::int, 0) ELSE 0 END)
     -- What Nexara saw change in Proxmox that nothing on record explains
     -- (cluster_object_changes, explained = false), of the types the caller may
     -- view (observed_types, permittedObservedTypes): the guests' by vmid, from
@@ -597,7 +599,7 @@ WITH guests AS MATERIALIZED (
        AND ($25::text IS NULL OR $25::text = 'detected')
        AND o.vmid IS NOT NULL
        AND o.vmid = ANY($1::int[])
-       AND o.resource_type = ANY($34::text[])
+       AND o.resource_type = ANY($35::text[])
        AND o.explained = false
        AND history_worker_ok(NULL, $20::text[])
        AND o.observed_at >= GREATEST(COALESCE($26::timestamptz, '-infinity'::timestamptz),
@@ -655,7 +657,7 @@ WITH guests AS MATERIALIZED (
                 ORDER BY o.observed_at DESC
                 LIMIT NULLIF($24::int, 0))
            ) m
-           WHERE ob.resource_type = ANY($34::text[])
+           WHERE ob.resource_type = ANY($35::text[])
              AND ($25::text IS NULL OR $25::text = 'detected')
            ORDER BY m.id) x
      ORDER BY x.observed_at DESC
@@ -665,15 +667,15 @@ WITH guests AS MATERIALIZED (
             o.resource_type, o.resource_id, COALESCE(o.vmid, 0), NULL::int, NULL::uuid, '', o.node, '', '', '',
             o.last_seen_at, 0, 'cluster_observed'::text
      FROM cluster_object_changes o
-     WHERE $32::bool
+     WHERE $33::bool
        AND ($25::text IS NULL OR $25::text = 'detected')
        AND o.cluster_id = $21::uuid
-       AND o.resource_type = ANY($34::text[])
+       AND o.resource_type = ANY($35::text[])
        AND o.explained = false
        AND o.observed_at >= COALESCE($22::timestamptz, '-infinity'::timestamptz)
        AND o.observed_at < COALESCE($23::timestamptz, 'infinity'::timestamptz)
      ORDER BY o.observed_at DESC
-     LIMIT CASE WHEN $32::bool THEN NULLIF($24::int, 0) ELSE 0 END)
+     LIMIT CASE WHEN $33::bool THEN NULLIF($24::int, 0) ELSE 0 END)
     -- A node's: the tasks it ran with no audit row, its status changes, and
     -- the guests that arrived on it or left it.
     UNION ALL
@@ -834,7 +836,7 @@ WITH guests AS MATERIALIZED (
                                    WHEN 'worker' THEN k.worker
                                END LIKE r.pattern
                          ORDER BY r.ord
-                         LIMIT 1), $35::text)) AS categories
+                         LIMIT 1), $36::text)) AS categories
     FROM (SELECT DISTINCT e.kind, e.action, e.resource_type, split_part(e.upid, ':', 6) AS worker
           FROM entries e) k
 ), categorized AS (
@@ -862,18 +864,18 @@ WITH guests AS MATERIALIZED (
       AND ($22::timestamptz IS NULL OR c.occurred_at >= $22::timestamptz)
       AND ($23::timestamptz IS NULL OR c.occurred_at < $23::timestamptz)
       AND (h.at IS NULL OR c.occurred_at >= h.at)
-      AND ($36::text IS NULL OR c.category = $36::text)
-      AND NOT COALESCE(c.category = ANY($37::text[]), false)
+      AND ($37::text IS NULL OR c.category = $37::text)
+      AND NOT COALESCE(c.category = ANY($38::text[]), false)
       AND ($25::text IS NULL OR c.source = $25::text)
       -- A Proxmox row is its Nexara twin's only while the twin is on the page.
       AND NOT (c.source = 'proxmox' AND c.kind = 'audit' AND c.upid <> '' AND c.upid IN (
             SELECT w.upid FROM categorized w
             WHERE w.kind = 'audit' AND w.source <> 'proxmox' AND w.upid <> ''
-              AND ($36::text IS NULL OR w.category = $36::text)
-              AND NOT COALESCE(w.category = ANY($37::text[]), false)
+              AND ($37::text IS NULL OR w.category = $37::text)
+              AND NOT COALESCE(w.category = ANY($38::text[]), false)
               AND ($25::text IS NULL OR w.source = $25::text)))
     ORDER BY c.occurred_at DESC, c.entry_id DESC
-    LIMIT $39::int OFFSET $38::int
+    LIMIT $40::int OFFSET $39::int
 )
 SELECT p.entry_id, p.kind, p.cluster_id, p.occurred_at, p.source, p.action, p.resource_type, p.resource_id, p.vmid,
        COALESCE(p.subject, 0)::int AS subject_vmid,
@@ -949,6 +951,7 @@ type ListHistoryParams struct {
 	IncludeGuests       bool               `json:"include_guests"`
 	StatusGuestTypes    []string           `json:"status_guest_types"`
 	Global              bool               `json:"global"`
+	ObjectsNode         string             `json:"objects_node"`
 	WholeCluster        bool               `json:"whole_cluster"`
 	IncludeTasks        bool               `json:"include_tasks"`
 	ObservedTypes       []string           `json:"observed_types"`
@@ -1058,6 +1061,9 @@ type ListHistoryRow struct {
 //	                        (resource_type, created_at) within the cluster,
 //	                        so for a type of configuration objects, which
 //	                        are edited rarely.
+//	         objects_node, when set, drops the objects' rows that ran on
+//	         another node: a row's node is its UPID's where it has one, its
+//	         details.node otherwise, and a row naming none stays.
 //	         The keyed objects of one key and value are read in one scan,
 //	         whatever their types: a node's nine kinds of part all name it in
 //	         details.node, and the GIN lookup of a value that common costs the
@@ -1155,9 +1161,9 @@ type ListHistoryRow struct {
 // cluster-scoped gate authorized. The one exception is a global kind's objects
 // (global, HistoryKind.Global): read in every cluster and in none, because
 // their ids are unique across Nexara — a PBS server's, Veeam's, a firewall
-// template's — and their route's gate is all GLOBAL. A global kind has no
-// guests. Each entry carries its own cluster_id, which its task outcome is
-// joined on.
+// template's, or a details key whose values are such ids — and their route's
+// gate is all GLOBAL. A global kind has no guests. Each entry carries its own
+// cluster_id, which its task outcome is joined on.
 // ListHistory is the timeline.
 //
 // Entries, one per thing that happened:
@@ -1313,6 +1319,7 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 		arg.IncludeGuests,
 		arg.StatusGuestTypes,
 		arg.Global,
+		arg.ObjectsNode,
 		arg.WholeCluster,
 		arg.IncludeTasks,
 		arg.ObservedTypes,

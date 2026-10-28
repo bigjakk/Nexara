@@ -158,6 +158,7 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"a default the filter refuses", func(k *HistoryKind) { k.Default = "misc" }, "Default"},
 		{"a global kind with a guest", func(k *HistoryKind) { k.Global, k.GuestFromPath = true, "vmid" }, "global"},
 		{"a global kind reading a cluster's type", func(k *HistoryKind) { k.Global = true }, "unique only within a cluster"},
+		{"a keyed type on a cluster's kind", func(k *HistoryKind) { k.KeyedObjectTypes = []string{"pool"} }, "by a unique key"},
 		{"a hide with a key and no value", func(k *HistoryKind) {
 			k.Hide = []HistoryHide{{ResourceType: "pool", Action: "x", DetailKey: "task_type"}}
 		}, "hide 0"},
@@ -201,6 +202,12 @@ func TestHistoryKindValidate(t *testing.T) {
 	k.ObservedTypes = []HistoryObservedType{{Type: "pool", View: "pool"}}
 	if err := k.Validate(); err != nil {
 		t.Errorf("an observed type under its own view, spelled out: %v", err)
+	}
+	// A global kind may read a cluster's type, by a key that is an id.
+	k = valid()
+	k.Global, k.ObjectTypes, k.KeyedObjectTypes = true, []string{"pbs_server", "backup"}, []string{"backup"}
+	if err := k.Validate(); err != nil {
+		t.Errorf("a global kind with a keyed type: %v", err)
 	}
 }
 
@@ -296,6 +303,27 @@ func TestHistoryKindListParams(t *testing.T) {
 		if _, err := global.ListParams([16]byte{1}, sel); err == nil {
 			t.Errorf("a global kind selecting %s was accepted", name)
 		}
+	}
+	// A key that is an id needs no parent, and is the only way into a type
+	// whose own ids are not unique: a restore is its cluster's `backup` row.
+	keyed := HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true,
+		ObjectTypes: []string{"pbs_server", "backup"}, KeyedObjectTypes: []string{"backup"}}
+	for name, tt := range map[string]struct {
+		o  HistoryObject
+		ok bool
+	}{
+		"an id key, no parent":            {HistoryObject{ResourceType: "pbs_server", DetailKey: "pbs_server_id", Value: "s1"}, true},
+		"a cluster's type by an id key":   {HistoryObject{ResourceType: "backup", DetailKey: "pbs_server_id", Value: "s1"}, true},
+		"a cluster's type by another key": {HistoryObject{ResourceType: "backup", DetailKey: "datastore", Value: "datastore01"}, false},
+		"a cluster's type by its own id":  {HistoryObject{ResourceType: "backup", Value: "100/qemu"}, false},
+	} {
+		if _, err := keyed.ListParams([16]byte{1}, HistorySelection{Objects: []HistoryObject{tt.o}}); (err == nil) != tt.ok {
+			t.Errorf("a global kind selecting %s: err %v, want accepted %v", name, err, tt.ok)
+		}
+	}
+	// The node filter is carried to the query.
+	if p, _ := k.ListParams([16]byte{1}, HistorySelection{ObjectsOnNode: "pve-01"}); p.ObjectsNode != "pve-01" {
+		t.Errorf("ObjectsNode = %q, want the selection's node", p.ObjectsNode)
 	}
 }
 

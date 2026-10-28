@@ -1783,6 +1783,9 @@ type Querier interface {
 	//                           (resource_type, created_at) within the cluster,
 	//                           so for a type of configuration objects, which
 	//                           are edited rarely.
+	//            objects_node, when set, drops the objects' rows that ran on
+	//            another node: a row's node is its UPID's where it has one, its
+	//            details.node otherwise, and a row naming none stays.
 	//            The keyed objects of one key and value are read in one scan,
 	//            whatever their types: a node's nine kinds of part all name it in
 	//            details.node, and the GIN lookup of a value that common costs the
@@ -1880,9 +1883,9 @@ type Querier interface {
 	// cluster-scoped gate authorized. The one exception is a global kind's objects
 	// (global, HistoryKind.Global): read in every cluster and in none, because
 	// their ids are unique across Nexara — a PBS server's, Veeam's, a firewall
-	// template's — and their route's gate is all GLOBAL. A global kind has no
-	// guests. Each entry carries its own cluster_id, which its task outcome is
-	// joined on.
+	// template's, or a details key whose values are such ids — and their route's
+	// gate is all GLOBAL. A global kind has no guests. Each entry carries its own
+	// cluster_id, which its task outcome is joined on.
 	// ListHistory is the timeline.
 	//
 	// Entries, one per thing that happened:

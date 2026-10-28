@@ -146,7 +146,7 @@ func TestGuestHistory(t *testing.T) {
 	}
 	// The guest kind, reading the objects these cases name beside its guests.
 	withObjects := handlers.GuestHistory()
-	withObjects.ObjectTypes = []string{"vm", "ha_resource", "pbs_server", "ceph_osd", "pve_acl", "node", "network"}
+	withObjects.ObjectTypes = []string{"vm", "ha_resource", "pbs_server", "ceph_osd", "pve_acl", "node", "network", "storage"}
 	selection := func(sel handlers.HistorySelection) gen.ListHistoryParams {
 		cur.Helper()
 		p, err := withObjects.ListParams(historyClusterID, sel)
@@ -873,6 +873,16 @@ func TestGuestHistory(t *testing.T) {
 		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/vms/100", "updated", map[string]any{"users": "alice@pve, bob@pve"})
 		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/", "updated", map[string]any{"users": "jbob@pve, carol@pve"})
 		audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/storage", "updated", map[string]any{"users": "dave@pve;erin@pve frank@pve"})
+		// A storage's rows: its configuration names no node, an upload and a disk
+		// move onto it name the one they ran on.
+		audit(historyClusterID, minsAgo(6), "nexara", "storage", "store01", "update", map[string]any{})
+		audit(historyClusterID, minsAgo(5.5), "nexara", "storage", "store01", "upload", map[string]any{"node": "pve-01"})
+		audit(historyClusterID, minsAgo(5.2), "nexara", "storage", "store01", "upload", map[string]any{"node": "pve-02"})
+		diskMoveRow := uuid.NewString()
+		audit(historyClusterID, minsAgo(5), "nexara", "vm", diskMoveRow, "disk_move", map[string]any{"storage": "store01", "node": "pve-01"})
+		// A task ran on its UPID's node (pve-01), whatever the row's details.node says.
+		audit(historyClusterID, minsAgo(4.8), "proxmox", "storage", "store01", "imgdel",
+			map[string]any{"upid": historyUPID(61, "imgdel", "store01"), "node": "pve-02", "status": "OK"})
 		// VM 105's HA task, its plain start, and its HA resource, which names it
 		// only by its sid and has no task.
 		audit(historyClusterID, minsAgo(3), "proxmox", "proxmox_task", "105", "hastart", map[string]any{"upid": historyUPID(32, "hastart", "105"), "status": "OK"})
@@ -901,6 +911,11 @@ func TestGuestHistory(t *testing.T) {
 			{"one element of a comma list", handlers.HistorySelection{Objects: []handlers.HistoryObject{
 				{ResourceType: "pve_acl", DetailKey: "users", Value: "bob@pve", InList: true}}},
 				[]string{"audit updated /vms/100"}},
+			// A non-shared storage on one node's page: not what ran on another
+			// node, but its configuration, which names none.
+			{"the objects' rows on one node", handlers.HistorySelection{ObjectsOnNode: "pve-01", Objects: []handlers.HistoryObject{
+				{ResourceType: "storage", Value: "store01"}, {ResourceType: "vm", DetailKey: "storage", Value: "store01"}}},
+				[]string{"audit imgdel store01", "audit disk_move " + diskMoveRow, "audit upload store01", "audit update store01"}},
 			// Proxmox reads a list split on semicolons and white space too.
 			{"an element after a semicolon", handlers.HistorySelection{Objects: []handlers.HistoryObject{
 				{ResourceType: "pve_acl", DetailKey: "users", Value: "erin@pve", InList: true}}},
@@ -1963,6 +1978,27 @@ func TestGuestHistory(t *testing.T) {
 		if want := []string{"template_applied " + historyClusterID.String(), "template_applied " + historyOtherID.String(),
 			"template_created none"}; !slices.Equal(clusters, want) {
 			t.Errorf("a global kind's History = %v, want %v", clusters, want)
+		}
+
+		// …and a cluster's type by a key whose values are ids: a restore from a PBS
+		// server is a `backup` row of the cluster it restored into.
+		audit(historyClusterID, minsAgo(3), "nexara", "backup", "100/qemu", "backup_restored", map[string]any{"pbs_server_id": "srv-a"})
+		audit(historyOtherID, minsAgo(2), "nexara", "backup", "100/qemu", "backup_restored", map[string]any{"pbs_server_id": "srv-a"})
+		audit(historyOtherID, minsAgo(2), "nexara", "backup", "100/qemu", "backup_restored", map[string]any{"pbs_server_id": "srv-b"})
+		pbs := handlers.HistoryKind{Name: "pbs", Categories: []string{"other"}, Default: "other", Global: true,
+			ObjectTypes: []string{"backup"}, KeyedObjectTypes: []string{"backup"}}
+		pp, err := pbs.ListParams(uuid.Nil, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "backup", DetailKey: "pbs_server_id", Value: "srv-a"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pp.RowLimit = 50
+		restores, err := hq.ListHistory(ctx, pp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(restores) != 2 || restores[0].ClusterID.Bytes != historyOtherID || restores[1].ClusterID.Bytes != historyClusterID {
+			t.Errorf("a global kind's restores from one server = %d rows, want one from each cluster", len(restores))
 		}
 	})
 
