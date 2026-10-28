@@ -243,6 +243,11 @@ func TestObservedChanges(t *testing.T) {
 	ruleEditedAndAdded := seed(observedCluster, "firewall_rule", "cluster", 0, "changed", "", []string{"rules"}, at)
 	counted(ruleEditedAndAdded, map[string]int{"added": 2, "removed": 1})
 	audit(observedCluster, in, "firewall_rule", "cluster", 0, "firewall_rule_updated", nil)
+	ruleEditedTwice := seed(observedCluster, "firewall_rule", "node/pve-01", 0, "changed", "", []string{"rules"}, at)
+	counted(ruleEditedTwice, map[string]int{"added": 2, "removed": 2})
+	audit(observedCluster, in, "firewall_rule", "node/pve-01", 0, "firewall_rule_updated", nil)
+	ruleEditedTwiceBy := audit(observedCluster, in.Add(30*time.Second), "firewall_rule", "node/pve-01", 0,
+		"firewall_rule_updated", nil)
 	groupRuleAdded := seed(observedCluster, "firewall_security_group_rule", "web", 0, "changed", "", []string{"rules"}, at)
 	counted(groupRuleAdded, map[string]int{"added": 1, "removed": 0})
 	groupRuleMoved := seed(observedCluster, "firewall_security_group_rule", "web", 0, "changed", "", []string{"rules"}, at)
@@ -485,6 +490,7 @@ func TestObservedChanges(t *testing.T) {
 		"its own row":                       {byOwnRow, byOwnRowBy},
 		"the later of the two that explain": {bothCovered, bothCoveredBy},
 		"not a later row explaining none":   {byNexaraEdit, byNexaraEditBy},
+		"the later of a list's two":         {ruleEditedTwice, ruleEditedTwiceBy},
 	} {
 		var by uuid.UUID
 		if err := pool.QueryRow(ctx, `SELECT explained_by FROM cluster_object_changes WHERE id = $1`, tc.change).
@@ -636,19 +642,33 @@ func TestObservedGlobalChanges(t *testing.T) {
 	exec("settle", `UPDATE cluster_object_changes SET observed_at = now() - interval '1 hour',
 			last_seen_at = now() - interval '70 minutes'
 		WHERE cluster_id IS NULL AND resource_id = ANY($1)`, []string{observedPBS.String(), observedPBSGone.String()})
-	var byAudit uuid.UUID
-	if err := pool.QueryRow(ctx, `INSERT INTO audit_log (user_id, resource_type, resource_id, action, created_at)
-		VALUES ($1, 'pbs_server', $2, 'pbs_updated', now() - interval '65 minutes') RETURNING id`,
-		systemUserID, observedPBS.String()).Scan(&byAudit); err != nil {
-		t.Fatal(err)
+	serverRow := func(action string, minutesAgo int) uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx, `INSERT INTO audit_log (user_id, resource_type, resource_id, action, created_at)
+			VALUES ($1, 'pbs_server', $2, $3, now() - make_interval(mins => $4::int)) RETURNING id`,
+			systemUserID, observedPBS.String(), action, minutesAgo).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
 	}
-	rules, _ := json.Marshal([]map[string]any{{"kind": "pbs_server", "change": "", "audit_type": "pbs_server",
-		"match_key": "id", "untasked": false, "action_re": "", "except_re": "", "worker_re": "", "field_re": "^schedule$"}})
-	if _, err := q.ClassifyGlobalObjectChanges(ctx, gen.ClassifyGlobalObjectChangesParams{
-		Rules: rules, LookbackSeconds: 3600, SettledBefore: time.Now().Add(-5 * time.Minute), MaxRows: 1000,
-	}); err != nil {
-		t.Fatalf("classify: %v", err)
+	classify := func(actionAndFieldRes ...string) { // pairs: one 'id' rule each
+		t.Helper()
+		rules := make([]map[string]any, 0, len(actionAndFieldRes)/2)
+		for i := 0; i+1 < len(actionAndFieldRes); i += 2 {
+			rules = append(rules, map[string]any{"kind": "pbs_server", "change": "", "audit_type": "pbs_server",
+				"match_key": "id", "untasked": false, "action_re": actionAndFieldRes[i], "except_re": "",
+				"worker_re": "", "field_re": actionAndFieldRes[i+1]})
+		}
+		b, _ := json.Marshal(rules)
+		if _, err := q.ClassifyGlobalObjectChanges(ctx, gen.ClassifyGlobalObjectChangesParams{
+			Rules: b, LookbackSeconds: 3600, SettledBefore: time.Now().Add(-5 * time.Minute), MaxRows: 1000,
+		}); err != nil {
+			t.Fatalf("classify: %v", err)
+		}
 	}
+	byAudit := serverRow("pbs_updated", 65)
+	classify("", "^schedule$")
 	var explained, shown []string
 	if err := pool.QueryRow(ctx, `SELECT
 			coalesce(array_agg(change ORDER BY change) FILTER (WHERE explained AND resource_id = $1 AND explained_by = $3), '{}'),
@@ -661,5 +681,22 @@ func TestObservedGlobalChanges(t *testing.T) {
 	// the rule does not cover.
 	if fmt.Sprint(explained) != "[added removed]" || fmt.Sprint(shown) != "[added changed changed]" {
 		t.Fatalf("explained %v of the server's changes, shown %v of both servers'", explained, shown)
+	}
+
+	// explained_by: of the latest row explaining each field, the latest.
+	var twoFields, by uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO cluster_object_changes (resource_type, resource_id, change, fields,
+			observed_by, last_seen_at, observed_at)
+		VALUES ('pbs_server', $1, 'changed', '{comment,schedule}', 'trigger', now() - interval '70 minutes',
+			now() - interval '1 hour') RETURNING id`, observedPBS.String()).Scan(&twoFields); err != nil {
+		t.Fatal(err)
+	}
+	serverRow("schedule_set", 64)
+	serverRow("comment_set", 63)
+	latest := serverRow("schedule_set", 62)
+	classify("^schedule_set$", "^schedule$", "^comment_set$", "^comment$")
+	if err := pool.QueryRow(ctx, `SELECT explained_by FROM cluster_object_changes WHERE id = $1`, twoFields).
+		Scan(&by); err != nil || by != latest {
+		t.Errorf("explained by %s (%v), want the later of the schedule's two rows, %s", by, err, latest)
 	}
 }
