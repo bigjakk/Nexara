@@ -446,6 +446,9 @@ export function HistoryTimeline({
   // The live rows above the first page stand for some of its entries.
   const kept =
     page === 0 && absorbs ? shown.filter((entry) => !absorbs(entry)) : shown;
+  // The count is the server's, which still counts what `absorbs` leaves out of
+  // the first page; the footer says how many.
+  const absorbedHere = shown.length - kept.length;
   // Whole back to where the last stretch stopped, or, while it has more to
   // list, back to its top.
   const wholeFrom =
@@ -685,6 +688,9 @@ export function HistoryTimeline({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-muted-foreground">
               {error ? "" : shared("entries", { count: listed })}
+              {!error &&
+                absorbedHere > 0 &&
+                ` · ${shared("absorbed", { count: absorbedHere })}`}
             </p>
             {canShowOlder && (
               <Button

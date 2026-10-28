@@ -56,6 +56,8 @@
   "searchedFromStuck": "Complete back to {{when}}. Show older cannot go further: more entries of one kind share the instant just before it than one read holds.",
   "narrowingSearchesDeeper": "A read narrowed by type or source searches the newest {{narrowed}} entries of each kind of record instead of {{cap}}.",
   "showOlder": "Show older",
+  "absorbed_one": "{{count}} shown above as a live task",
+  "absorbed_other": "{{count}} shown above as live tasks",
   "page": "Page {{page}} of {{pages}}",
   "previousPage": "Previous page",
   "nextPage": "Next page",

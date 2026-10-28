@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { Tabs } from "@/components/ui/tabs";
 import { renderWithProviders } from "@/test/test-utils";
+import { setupUser } from "@/test/user";
 import { makeHistoryEntry } from "@/test/history.fixtures";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
@@ -38,6 +39,7 @@ afterEach(() => {
 // started is one row — named by who started it — rather than two.
 describe("a PBS server's History tab", () => {
   it("lists the server's tasks live and folds in the entries that record Nexara starting one", async () => {
+    const user = setupUser();
     useAuthStore.setState({
       user: {
         id: "u1",
@@ -58,28 +60,39 @@ describe("a PBS server's History tab", () => {
         starttime: 1_700_000_100,
       }),
     ]);
-    vi.mocked(apiClient.page).mockResolvedValue({
-      items: [
-        makeHistoryEntry({
-          id: "audit:1",
-          resource_type: "pbs_server",
-          action: "gc_triggered",
-          category: "maintenance",
-          user_display_name: "Alice",
-          details: JSON.stringify({
-            pbs_upid: GC_UPID,
-            datastore: "datastore01",
-          }),
+    const firstPage = [
+      makeHistoryEntry({
+        id: "audit:1",
+        resource_type: "pbs_server",
+        action: "gc_triggered",
+        category: "maintenance",
+        user_display_name: "Alice",
+        details: JSON.stringify({
+          pbs_upid: GC_UPID,
+          datastore: "datastore01",
         }),
-        makeHistoryEntry({
-          id: "audit:2",
-          resource_type: "pbs_server",
-          action: "snapshot_deleted",
-          category: "snapshots",
-        }),
-      ],
-      total: 2,
-    });
+      }),
+      makeHistoryEntry({
+        id: "audit:2",
+        resource_type: "pbs_server",
+        action: "snapshot_deleted",
+        category: "snapshots",
+      }),
+      makeHistoryEntry({
+        id: "audit:3",
+        resource_type: "pbs_server",
+        action: "snapshot_protected",
+        category: "snapshots",
+      }),
+    ];
+    // Sixty entries in all, so there is a second page for the footer to agree on.
+    vi.mocked(apiClient.page).mockImplementation((path) =>
+      Promise.resolve(
+        String(path).includes("offset=50")
+          ? { items: [], total: 60 }
+          : { items: firstPage, total: 60 },
+      ),
+    );
     renderWithProviders(
       <Tabs defaultValue="history">
         <PBSHistoryTabContent pbsId="p1" />
@@ -102,5 +115,13 @@ describe("a PBS server's History tab", () => {
     // …and its entry is not a second row; the one nothing lists is the page's.
     expect(screen.queryByText("Garbage collection started")).toBeNull();
     expect(screen.getByText("Snapshot deleted")).toBeInTheDocument();
+    // The footer keeps the server's total, and says how many of its entries
+    // are shown above as live tasks — on the first page, which has them.
+    expect(
+      screen.getByText(/^60 entries · 1 shown above as a live task$/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await screen.findByText("Page 2 of 2");
+    expect(screen.getByText("60 entries")).toBeInTheDocument();
   });
 });
