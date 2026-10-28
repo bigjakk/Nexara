@@ -514,21 +514,20 @@ var realmSyncRules = slices.Concat(
 	},
 )
 
-// observedActionsExplainingNothing are the actions handlers file under an
-// observed kind that change none of what the observer compares: a run, a
-// download, a read. TestObservedActionVocabulary holds every literal action to
-// a rule or to this list.
+// observedActionsExplainingNothing are the actions handlers and the task
+// ingest (proxmoxTaskMap) file under an observed kind that change none of what
+// the observer compares: a run, a download, a read. TestObservedActionVocabulary
+// holds every literal action to a rule or to this list. A PBS's datastore and
+// job actions are its server's (pbs_server), which observedGlobalRules decides.
 var observedActionsExplainingNothing = map[string][]string{
-	"storage": {"delete_content", "download", "download_appliance", "download_url", "image_copy", "pull_oci",
+	"storage": {"delete_content", "download_appliance", "download_url", "pull_oci",
 		"upload", "virtio_win_config_update", "virtio_win_download", "prune_backups"},
-	"backup": {"backup", "backup_job_run", "backup_job_run_requested", "backup_restored", "backup_triggered",
-		"datastore_pruned", "gc_triggered", "snapshot_deleted", "snapshot_notes_updated", "snapshot_protected",
-		"snapshot_unprotected", "sync_job_triggered", "verify_job_triggered"},
+	"backup":  {"backup", "backup_job_run", "backup_job_run_requested", "backup_restored", "backup_triggered"},
 	"network": {"network_applied"},
 	"node": {"acme_register", "apt_update", "create_directory", "create_lvm", "create_lvmthin", "create_zfs_pool",
-		"delete_lvm", "delete_lvmthin", "delete_zfs_pool", "download_report", "evacuate", "initialize_gpt",
-		"node_maintenance_enter", "node_maintenance_exit", "read_memory_modules", "reboot", "service_reload",
-		"shutdown", "start_all", "stop_all", "wipe_disk"},
+		"delete_lvm", "delete_lvmthin", "delete_zfs_pool", "download", "download_report", "evacuate", "image_copy",
+		"initialize_gpt", "node_maintenance_enter", "node_maintenance_exit", "read_memory_modules", "reboot",
+		"service_reload", "shutdown", "start_all", "stop_all", "wipe_disk"},
 	"usb_mapping": {"already_deleted"},
 	"pci_mapping": {"already_deleted"},
 	"ha_rule":     {"already_deleted"},

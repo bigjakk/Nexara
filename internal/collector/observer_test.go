@@ -1088,8 +1088,20 @@ func TestObservedActionVocabulary(t *testing.T) {
 			})
 		}
 	}
-	if checked < 60 || rolling == 0 {
-		t.Fatalf("checked %d call sites, %d of the rolling update's; the scan is not reading them", checked, rolling)
+	// The task ingest files from a table, which the scan cannot see.
+	ingested := 0
+	for worker, m := range proxmoxTaskMap {
+		if m.ResourceType != "vm" && m.ResourceType != "container" && observed[m.ResourceType] {
+			ingested++
+			if !explains(m.ResourceType, m.Action) {
+				t.Errorf("proxmoxTaskMap: %s files %s action %q, which is in no rule and not in observedActionsExplainingNothing",
+					worker, m.ResourceType, m.Action)
+			}
+		}
+	}
+	if checked < 60 || rolling == 0 || ingested == 0 {
+		t.Fatalf("checked %d call sites, %d of the rolling update's, %d ingest mappings; the scan is not reading them",
+			checked, rolling, ingested)
 	}
 }
 
