@@ -81,7 +81,7 @@ func TestAccessUpdateUserAuditRow(t *testing.T) {
 			user: testAccessUserID, query: "?force=true", body: accessUpdateEverything,
 			want: auditWant{
 				status: fiber.StatusOK, method: http.MethodPut, path: pveUserPath(accessUpdateSelf), form: accessUpdateEverythingForm,
-				audit: auditRow("pve_user", accessUpdateSelf, "updated", `{"enable":false,"expire":1767225600,"forced":true,"groups_changed":true,"userid":"nexara@pve"}`),
+				audit: auditRow("pve_user", accessUpdateSelf, "updated", `{"enable":false,"expire":1767225600,"forced":true,"groups_changed":true,"keys_changed":true,"userid":"nexara@pve"}`),
 			},
 		},
 		{

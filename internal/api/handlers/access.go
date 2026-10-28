@@ -315,7 +315,9 @@ func accessTokenUpdateAffectsAccess(req proxmox.UpdateAccessTokenParams) bool {
 // groups_changed is a bool rather than the list: it says a membership was set,
 // not what it became, and since the handler never reads the stored one, not that
 // it differs either. append is not recorded: the guard ignores it, as any groups
-// value is covered.
+// value is covered. keys_changed is the same kind of bool for keys, never the
+// value: the change observer explains a user's keys edited only by a row that
+// says it set them.
 //
 // forced is the key DeleteUser, UpdateToken and DeleteToken write, with the same
 // meaning: the caller sent force on an action the guard covers. It does not say
@@ -341,6 +343,9 @@ func accessUserUpdateDetails(userid string, force bool, req proxmox.UpdateAccess
 	}
 	if req.Groups != nil {
 		details["groups_changed"] = true
+	}
+	if req.Keys != nil {
+		details["keys_changed"] = true
 	}
 	return details
 }

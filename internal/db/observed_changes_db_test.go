@@ -343,6 +343,11 @@ func TestObservedChanges(t *testing.T) {
 	aclOtherRoleGone := seed(observedCluster, "pve_acl", "/vms/174", 0, "changed", "", []string{"user_grants"}, at)
 	members(aclOtherRoleGone, []string{}, []string{"user_grants:Role03:1:user14@pve"})
 	audit(observedCluster, in, "pve_role", "Role01", 0, "deleted", nil)
+	// A user's keys are explained only by an update that says it set them.
+	userKeysSet := seed(observedCluster, "pve_user", "user20@pve", 0, "changed", "", []string{"keys"}, at)
+	audit(observedCluster, in, "pve_user", "user20@pve", 0, "updated", map[string]any{"keys_changed": true})
+	userKeysOther := seed(observedCluster, "pve_user", "user21@pve", 0, "changed", "", []string{"keys"}, at)
+	audit(observedCluster, in, "pve_user", "user21@pve", 0, "updated", map[string]any{"enable": true})
 	// A role's update: the privileges it lists join; without append, those it
 	// does not list leave.
 	roleJoined := seed(observedCluster, "pve_role", "Role05", 0, "changed", "", []string{"privs"}, at)
@@ -471,6 +476,8 @@ func TestObservedChanges(t *testing.T) {
 		with(with(rule("pve_acl", "added", "pve_acl", "id", false, "^granted$", "", "", ""), "member", "joined"),
 			"member_of", "details-list.users:users:%s+grants.users:user_grants:%1$s:%2$s:%3$s+"+
 				"details-list.groups:groups:%s+grants.groups:group_grants:%1$s:%2$s:%3$s"),
+		rule("pve_user", "changed", "pve_user", "id", false, "^updated$", "", "", "^(firstname|lastname|email|comment)$"),
+		with(rule("pve_user", "changed", "pve_user", "id", false, "^updated$", "", "", "^keys$"), "detail_key", "keys_changed"),
 		with(with(rule("pve_role", "changed", "pve_role", "id", false, "^updated$", "", "", "^privs$"), "member", "joined"),
 			"member_of", "details-list.privs:privs:%s"),
 		with(with(with(with(rule("pve_role", "changed", "pve_role", "id", false, "^updated$", "", "", "^privs$"),
@@ -591,6 +598,8 @@ func TestObservedChanges(t *testing.T) {
 		{"a role's delete, and another role arriving", aclRoleBeside, "shown"},
 		{"a role's delete, another role's grant going", aclOtherRoleGone, "shown"},
 		{"a user created as *@pve, another user joining", groupBesideStar, "shown"},
+		{"a user's update that set its keys", userKeysSet, "explained"},
+		{"a user's update that did not, its keys changed", userKeysOther, "shown"},
 		{"a role's update, a privilege it lists joining", roleJoined, "explained"},
 		{"a role's update replacing its list, one it left out leaving", roleReplaced, "explained"},
 		{"a role's update appending, one leaving", roleAppended, "shown"},

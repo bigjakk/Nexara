@@ -495,10 +495,13 @@ func ruleSetRules(kind, auditType, fieldRe, created, updated, deleted string) []
 }
 
 // accessUserUpdates is what a user's update explains: the fields its row says
-// it set, and those it never records, which any update may have set.
+// it set (enable, expire, groups_changed, keys_changed), and the ones it never
+// records, its names, e-mail and comment, which any update may have set.
 var accessUserUpdates = []explainRule{
 	{Kind: "pve_user", Change: "changed", AuditType: "pve_user", MatchKey: "id", ActionRe: `^updated$`,
-		FieldRe: `^(firstname|lastname|email|comment|keys)$`},
+		FieldRe: `^(firstname|lastname|email|comment)$`},
+	{Kind: "pve_user", Change: "changed", AuditType: "pve_user", MatchKey: "id", ActionRe: `^updated$`,
+		DetailKey: "keys_changed", FieldRe: `^keys$`},
 	{Kind: "pve_user", Change: "changed", AuditType: "pve_user", MatchKey: "id", ActionRe: `^updated$`,
 		DetailKey: "enable", FieldRe: `^enable$`},
 	{Kind: "pve_user", Change: "changed", AuditType: "pve_user", MatchKey: "id", ActionRe: `^updated$`,

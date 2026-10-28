@@ -1412,6 +1412,10 @@ func TestObservedChangeRules(t *testing.T) {
 		if r.Kind == "pve_acl" && r.Member == "" && (r.Change != "removed" || r.Object == "") {
 			t.Errorf("rule %+v explains an ACL change without naming its grantees", r)
 		}
+		if r.Kind == "pve_user" && r.AuditType == "pve_user" && r.Change == "changed" &&
+			regexp.MustCompile(r.FieldRe).MatchString("keys") && r.DetailKey != "keys_changed" {
+			t.Errorf("rule %+v: Nexara's update explains a user's keys only by a row that says it set them", r)
+		}
 		if r.Kind == "pve_role" && r.Change == "changed" && r.MemberOf == "" {
 			t.Errorf("rule %+v: a role's update explains only the privileges its row lists", r)
 		}

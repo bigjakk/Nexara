@@ -387,9 +387,15 @@ func TestGuard_AccessAuditDetailsCarryNoSecrets(t *testing.T) {
 	}
 
 	// scanReads refuses a read of a credential anywhere under node, whatever key the
-	// value sits under: details{"x": created.Value} is the leak.
+	// value sits under: details{"x": created.Value} is the leak. A comparison with
+	// nil reads no value — req.Keys != nil records that keys were sent — so it is
+	// not looked into.
 	scanReads := func(node ast.Node) {
 		ast.Inspect(node, func(n ast.Node) bool {
+			if cmp, ok := n.(*ast.BinaryExpr); ok && (cmp.Op == token.EQL || cmp.Op == token.NEQ) &&
+				(types.ExprString(cmp.X) == "nil" || types.ExprString(cmp.Y) == "nil") {
+				return false
+			}
 			switch n := n.(type) {
 			case *ast.SelectorExpr:
 				switch strings.ToLower(n.Sel.Name) {
@@ -668,12 +674,14 @@ func TestAccessUserUpdateDetails(t *testing.T) {
 			proxmox.UpdateAccessUserParams{AccessUserFields: proxmox.AccessUserFields{Groups: accessPtr(accessSentinelGroups)}, Append: true},
 			`{"forced":true,"groups_changed":true,"userid":"nexara@pve"}`},
 		{"append without groups sets no groups", self, true, proxmox.UpdateAccessUserParams{Append: true}, `{"forced":false,"userid":"nexara@pve"}`},
+		{"setting keys records that, never the keys", self, false, edit(proxmox.AccessUserFields{Keys: accessPtr("sentinel-keys")}),
+			`{"forced":false,"keys_changed":true,"userid":"nexara@pve"}`},
 
 		{"the account named is the one edited", "alice@pve", false, edit(proxmox.AccessUserFields{Enable: accessPtr(false)}),
 			`{"enable":false,"forced":false,"userid":"alice@pve"}`},
-		{"every field at once carries only the three", self, true,
+		{"every field at once carries only the four", self, true,
 			proxmox.UpdateAccessUserParams{AccessUserFields: accessSentinelFields(), Append: true},
-			`{"enable":false,"expire":1767225600,"forced":true,"groups_changed":true,"userid":"nexara@pve"}`},
+			`{"enable":false,"expire":1767225600,"forced":true,"groups_changed":true,"keys_changed":true,"userid":"nexara@pve"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := accessDetailsJSON(t, accessUserUpdateDetails(tc.userid, tc.force, tc.req))
@@ -723,7 +731,7 @@ func fillAccessUserRequestField(t *testing.T, slot reflect.Value, name string) {
 // walk must still see the fields it exists for.
 func TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields(t *testing.T) {
 	const userid = "nexara@pve"
-	recorded := map[string]bool{"Enable": true, "Expire": true, "Groups": true}
+	recorded := map[string]bool{"Enable": true, "Expire": true, "Groups": true, "Keys": true}
 	build := func(t *testing.T, req proxmox.UpdateAccessUserParams) string {
 		return accessDetailsJSON(t, accessUserUpdateDetails(userid, false, req))
 	}
@@ -744,15 +752,15 @@ func TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields(t *testing.T) {
 			}
 			if got := build(t, req); got != empty {
 				t.Errorf("setting %s changed the audit details to %s, from %s — "+
-					"audit rows are readable by every Viewer, so only enable, expire and groups may be recorded", field.Name, got, empty)
+					"audit rows are readable by every Viewer, so only enable, expire, groups and keys (as set) may be recorded", field.Name, got, empty)
 			}
 		})
 	}
-	// The five fields that are never recorded, and Append, are the reason this test
+	// The four fields that are never recorded, and Append, are the reason this test
 	// exists; fewer means the walk stopped seeing them and every subtest is vacuous.
-	if visited < 6 {
-		t.Fatalf("visited %d fields of proxmox.UpdateAccessUserParams, want at least the six that are never "+
-			"recorded (comment, email, firstname, lastname, keys, append)", visited)
+	if visited < 5 {
+		t.Fatalf("visited %d fields of proxmox.UpdateAccessUserParams, want at least the five that are never "+
+			"recorded (comment, email, firstname, lastname, append)", visited)
 	}
 }
 
