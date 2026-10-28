@@ -11,6 +11,7 @@ import (
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auditkey"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // The Software Defined Networking routes: zones, VNets, subnets,
@@ -151,7 +152,7 @@ func (h *NetworkHandler) UpdateSDNZone(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]any{"zone": zone, "fields": auditSentOf(req).changed(before, nil)})
+	details, _ := json.Marshal(auditFields(map[string]any{"zone": zone}, auditSentOf(req), before, pvefield.SDNZone))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_zone", zone, "sdn_zone_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -270,7 +271,7 @@ func (h *NetworkHandler) UpdateSDNVNet(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]any{"vnet": vnet, "fields": auditSentOf(req).changed(before, nil)})
+	details, _ := json.Marshal(auditFields(map[string]any{"vnet": vnet}, auditSentOf(req), before, pvefield.SDNVNet))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_vnet", vnet, "sdn_vnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -430,7 +431,7 @@ func (h *NetworkHandler) UpdateSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]any{"vnet": vnet, "subnet": subnet, "fields": auditSentOf(req).changed(before, nil)})
+	details, _ := json.Marshal(auditFields(map[string]any{"vnet": vnet, "subnet": subnet}, auditSentOf(req), before, pvefield.SDNSubnet))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet", auditkey.SDNSubnet(vnet, subnet), "sdn_subnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -575,7 +576,7 @@ func (h *NetworkHandler) UpdateSDNController(c fiber.Ctx, p *apischema.Params) e
 	if err := pxClient.UpdateSDNController(c.Context(), controller, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"controller": controller, "fields": auditSentOf(req).changed(before, nil)})
+	details, _ := json.Marshal(auditFields(map[string]any{"controller": controller}, auditSentOf(req), before, pvefield.SDNController))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_controller", controller, "sdn_controller_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -695,7 +696,7 @@ func (h *NetworkHandler) UpdateSDNIPAM(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateSDNIPAM(c.Context(), ipam, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"ipam": ipam, "fields": auditSentOf(req).changed(before, nil)})
+	details, _ := json.Marshal(auditFields(map[string]any{"ipam": ipam}, auditSentOf(req), before, pvefield.SDNIPAM))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_ipam", ipam, "sdn_ipam_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -806,7 +807,7 @@ func (h *NetworkHandler) UpdateSDNDNS(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateSDNDNS(c.Context(), dns, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"dns": dns, "fields": auditSentOf(req).changed(before, nil)})
+	details, _ := json.Marshal(auditFields(map[string]any{"dns": dns}, auditSentOf(req), before, pvefield.SDNDNS))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_dns", dns, "sdn_dns_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

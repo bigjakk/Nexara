@@ -288,7 +288,9 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			bind: func(q *db.Queries) Handler { return net(q).UpdateSDNController },
 			replies: map[string]string{"GET /api2/json/cluster/sdn/controllers/evpn01": `{"controller":"evpn01","type":"evpn",` +
 				`"asn":65000,"peers":"192.0.2.21,192.0.2.22"}`},
-			wantType: "sdn_controller", wantID: "evpn01", wantAction: "sdn_controller_updated", wantFields: []string{"asn"},
+			// Proxmox keeps peers as sent, so a reorder is an edit, as the
+			// observer sees it (pvefield.SDNController).
+			wantType: "sdn_controller", wantID: "evpn01", wantAction: "sdn_controller_updated", wantFields: []string{"asn", "peers"},
 		},
 		{
 			name: "an SDN IPAM update", method: fiber.MethodPut, path: sdnScope + "/ipams/:ipam",

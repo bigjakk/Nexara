@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // auditFieldNames is the names, never the values, of the Proxmox fields an
@@ -44,7 +45,7 @@ func auditSentOf(params any, always ...string) auditSent {
 			switch key {
 			case "delete":
 				for _, v := range values {
-					s.cleared = append(s.cleared, auditSplitList(v)...)
+					s.cleared = append(s.cleared, pvefield.SplitList(v)...)
 				}
 			case "digest":
 			default:
@@ -84,7 +85,7 @@ func auditStructSent(v reflect.Value, forced map[string]bool, s *auditSent) {
 		switch {
 		case name == "" || name == "-" || name == "digest" || value.IsZero() && !forced[name]:
 		case name == "delete" && value.Kind() == reflect.String:
-			s.cleared = append(s.cleared, auditSplitList(value.String())...)
+			s.cleared = append(s.cleared, pvefield.SplitList(value.String())...)
 		case name == "delete" && value.Kind() == reflect.Slice:
 			for j := range value.Len() {
 				s.cleared = append(s.cleared, value.Index(j).String())
@@ -139,67 +140,34 @@ func (s auditSent) names(also ...string) []string {
 }
 
 // changed is the names of what the write changes, beside before, the object as
-// its handler read it just before writing it: a name sent whose value is not
-// the one read, and a name cleared that the object had, so a form sent whole
-// names only what it changes. absent is the value a field the object does not
-// list has (Proxmox's default). before nil — the read failed — is every name.
-func (s auditSent) changed(before map[string]json.RawMessage, absent map[string]string) []string {
+// its handler read it just before writing it: a name sent whose value Proxmox
+// stores otherwise than the one read, compared as the change observer compares
+// them (kind, pvefield.Kind.Changed), and a name cleared that the object had,
+// so a form sent whole names only what it changes. before nil — the read
+// failed — is every name.
+func (s auditSent) changed(before map[string]json.RawMessage, kind pvefield.Kind) []string {
 	if before == nil {
 		return s.names()
 	}
 	names := map[string]bool{}
-	for name, sent := range s.values {
-		read, listed := auditReadText(before[name])
-		if !listed {
-			read, listed = absent[name]
-		}
-		if !listed || auditNormal(read) != auditNormal(sent) {
+	for name := range s.values {
+		if kind.Changed(name, before, s.values) {
 			names[name] = true
 		}
 	}
 	for _, name := range s.cleared {
-		if _, had := auditReadText(before[name]); had {
+		if raw := before[name]; len(raw) > 0 && string(raw) != "null" {
 			names[name] = true
 		}
 	}
 	return slices.Sorted(maps.Keys(names))
 }
 
-// auditReadText is a field of a read as text: a string as it is, a number as
-// written, a flag as 1 or 0; false when the field is missing or null.
-func auditReadText(raw json.RawMessage) (string, bool) {
-	var v any
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.UseNumber()
-	if len(raw) == 0 || dec.Decode(&v) != nil || v == nil {
-		return "", false
-	}
-	switch t := v.(type) {
-	case string:
-		return t, true
-	case json.Number:
-		return t.String(), true
-	case bool:
-		if t {
-			return "1", true
-		}
-		return "0", true
-	}
-	return string(raw), true
-}
-
-// auditNormal is a value as compared: without the white space around it (a
-// read comment ends in a newline), and a comma list without white space in it
-// sorted, as Proxmox lists a node list in no order (Zones/Plugin.pm
-// encode_value).
-func auditNormal(v string) string {
-	v = strings.TrimSpace(v)
-	if !strings.Contains(v, ",") || strings.ContainsAny(v, " \t\n") {
-		return v
-	}
-	items := strings.Split(v, ",")
-	slices.Sort(items)
-	return strings.Join(items, ",")
+// auditFields is details with an update's fields: what its write changes
+// (changed).
+func auditFields(details map[string]any, sent auditSent, before map[string]json.RawMessage, kind pvefield.Kind) map[string]any {
+	details["fields"] = sent.changed(before, kind)
+	return details
 }
 
 // readBefore reads the object an update is about to write, raw, for
@@ -220,10 +188,4 @@ func readBefore(ctx context.Context, client *proxmox.Client) func(proxmox.Observ
 		}
 		return obj
 	}
-}
-
-// auditSplitList splits a list as Proxmox does (PVE::Tools::split_list): on
-// commas, semicolons and white space.
-func auditSplitList(s string) []string {
-	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n' })
 }

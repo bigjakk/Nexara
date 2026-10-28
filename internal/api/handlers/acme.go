@@ -13,6 +13,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // ACMEHandler handles ACME certificate management endpoints.
@@ -361,7 +362,7 @@ func (h *ACMEHandler) UpdatePlugin(c fiber.Ctx, p *apischema.Params) error {
 	if req.Data != "" {
 		sent.values["data"] = base64.StdEncoding.EncodeToString([]byte(req.Data))
 	}
-	details, _ := json.Marshal(map[string]any{"id": pluginID, "fields": sent.changed(before, nil)})
+	details, _ := json.Marshal(auditFields(map[string]any{"id": pluginID}, sent, before, pvefield.ACMEPlugin))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_plugin", pluginID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_plugin", pluginID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})

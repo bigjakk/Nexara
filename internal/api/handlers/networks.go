@@ -11,6 +11,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // NetworkHandler handles network, firewall, and SDN endpoints.
@@ -256,17 +257,14 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx, p *apischema.Params
 		return mapNamedOpError("update network interface", err)
 	}
 
-	details, _ := json.Marshal(map[string]any{
+	// The client sends autostart whatever its value (networkIfaceOptionsToForm).
+	details, _ := json.Marshal(auditFields(map[string]any{
 		"node":     nodeName,
 		"iface":    ifaceName,
 		"type":     req.Type,
 		"settings": networkAuditSettings(req.NetworkInterfaceOptions),
 		"cleared":  req.Delete,
-		// The client sends autostart whatever its value (networkIfaceOptionsToForm),
-		// and an interface lists it only when an auto line starts it on boot
-		// (pve-common Network/Interfaces.pm).
-		"fields": auditSentOf(req, "autostart").changed(before, map[string]string{"autostart": "0"}),
-	})
+	}, auditSentOf(req, "autostart"), before, pvefield.Network))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})

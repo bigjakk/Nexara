@@ -15,6 +15,7 @@ import (
 	"github.com/bigjakk/nexara/internal/auditkey"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // The kinds the observer (observer.go) reads, each with the fields it compares.
@@ -136,9 +137,9 @@ var observeClusterKinds = []observeKind{
 	{kind: "cluster_options", sysAudit: true, read: readClusterOptions},
 	{kind: "sdn_zone", read: sdnKind("sdn_zone", "zones", "zone", sdnZoneSpec)},
 	{kind: "sdn_vnet", read: readSDNVNets},
-	{kind: "sdn_controller", read: sdnKind("sdn_controller", "controllers", "controller", sdnSpec)},
-	{kind: "sdn_ipam", read: sdnKind("sdn_ipam", "ipams", "ipam", sdnSpec)},
-	{kind: "sdn_dns", read: sdnKind("sdn_dns", "dns", "dns", sdnSpec)},
+	{kind: "sdn_controller", read: sdnKind("sdn_controller", "controllers", "controller", sdnControllerSpec)},
+	{kind: "sdn_ipam", read: sdnKind("sdn_ipam", "ipams", "ipam", sdnIPAMSpec)},
+	{kind: "sdn_dns", read: sdnKind("sdn_dns", "dns", "dns", sdnDNSSpec)},
 	{kind: "firewall_options", read: readFirewallOptions},
 	{kind: "firewall_rule", read: readFirewallRules},
 	{kind: "firewall_alias", read: readFirewallAliases},
@@ -165,23 +166,13 @@ var (
 	// pve-storage Storage/Plugin.pm encode_value: content via
 	// content_hash_to_string and nodes via join(',', keys %$value), both unsorted.
 	storageSpec = newFieldSpec(nil, []string{"content", "nodes"})
-	// pve-manager API2/Backup.pm index: next-run is computed from now on every
-	// read. vmid and exclude are comma lists of guests, kept as members: a
-	// guest destroyed with purge leaves them (VZDump::Plugin
-	// remove_vmid_from_backup_jobs), and only that guest's destroy explains it.
-	backupSpec = newFieldSpec([]string{"next-run"}, nil).withMembers("vmid", "exclude")
 	// pve-manager API2/Cluster/Mapping/{PCI,USB}.pm index: checks appear only
 	// with check-node, never sent; map is one entry per node.
 	mappingSpec = newFieldSpec([]string{"checks"}, []string{"map"})
 	// pve-manager API2/Cluster.pm get_options: allowed-tags is derived per
 	// caller from the tag settings and the token's privileges.
 	clusterOptionsSpec = newFieldSpec([]string{"allowed-tags"}, nil)
-	// pve-manager API2/Network.pm index (read_file('interfaces', 1), so the
-	// pending interfaces.new): active and exists are the interface's run state,
-	// altnames come from `ip link`, priority is the stanza's place in the file
-	// and families is derived from method/method6.
-	networkSpec = newFieldSpec([]string{"active", "exists", "altnames", "priority", "families"}, nil)
-	nodeDNSSpec = newFieldSpec(nil, nil)
+	nodeDNSSpec        = newFieldSpec(nil, nil)
 	// pve-manager API2/Nodes.pm time: time and localtime are the clock.
 	nodeTimeSpec = newFieldSpec([]string{"time", "localtime"}, nil)
 	// pve-firewall: pos is the rule's place, errors is validation against the
@@ -211,11 +202,6 @@ var (
 	// API2/HA/Groups.pm: nodes is re-encoded join(',', keys %$value), unsorted
 	// (HA/Groups.pm encode_value).
 	haGroupSpec = newFieldSpec([]string{"type"}, []string{"nodes"})
-	// pve-network: the plain view carries no pending or state, which only the
-	// pending view does; dropped should a release add them.
-	sdnSpec = newFieldSpec([]string{"pending", "state"}, nil)
-	// Zones/Plugin.pm encode_value: nodes and exitnodes join(',', keys %$value).
-	sdnZoneSpec = newFieldSpec([]string{"pending", "state"}, []string{"nodes", "exitnodes"})
 	// pve-firewall Firewall.pm parse_alias: ipversion is derived from the cidr.
 	firewallAliasSpec = newFieldSpec([]string{"ipversion"}, nil)
 	firewallPlainSpec = newFieldSpec(nil, nil)
@@ -237,13 +223,27 @@ var (
 	acmeAccountSpec = newFieldSpec(nil, nil)
 	// listingSpec reads what a listing says of an object read object by
 	// object, its whole tag past the cap.
-	listingSpec      = newFieldSpec(nil, nil)
-	metricServerSpec = newFieldSpec(nil, nil)
-	nodeConfigSpec   = newFieldSpec(nil, nil)
-	// pve-manager API2/ACMEPlugin.pm: nodes is a list; data, the plugin's DNS
-	// API credentials, is a value like any other and is never stored.
-	acmePluginSpec = newFieldSpec(nil, []string{"nodes"})
+	listingSpec    = newFieldSpec(nil, nil)
+	nodeConfigSpec = newFieldSpec(nil, nil)
+
+	// The kinds an update handler diffs before it writes are pvefield's, so
+	// the observer and the handler read their fields alike.
+	backupSpec        = specOf(pvefield.Backup)
+	networkSpec       = specOf(pvefield.Network)
+	sdnZoneSpec       = specOf(pvefield.SDNZone)
+	sdnVNetSpec       = specOf(pvefield.SDNVNet)
+	sdnSubnetSpec     = specOf(pvefield.SDNSubnet)
+	sdnControllerSpec = specOf(pvefield.SDNController)
+	sdnIPAMSpec       = specOf(pvefield.SDNIPAM)
+	sdnDNSSpec        = specOf(pvefield.SDNDNS)
+	metricServerSpec  = specOf(pvefield.MetricServer)
+	acmePluginSpec    = specOf(pvefield.ACMEPlugin)
 )
+
+// specOf is the observer's spec of one of pvefield's kinds.
+func specOf(k pvefield.Kind) fieldSpec {
+	return newFieldSpec(k.Ignore, k.Sets).withMembers(k.Members...)
+}
 
 // observeKindSchemas names how each kind's fields are read — its fieldSpec's
 // digest, or how a reader builds the object — for the kind's signature
@@ -257,11 +257,11 @@ var observeKindSchemas = map[string]string{
 	"metric_server":                metricServerSpec.digest(),
 	"cluster_options":              clusterOptionsSpec.digest(),
 	"sdn_zone":                     sdnZoneSpec.digest(),
-	"sdn_vnet":                     sdnSpec.digest(),
-	"sdn_subnet":                   "subnet: members cidr; " + sdnSpec.digest(),
-	"sdn_controller":               sdnSpec.digest(),
-	"sdn_ipam":                     sdnSpec.digest(),
-	"sdn_dns":                      sdnSpec.digest(),
+	"sdn_vnet":                     sdnVNetSpec.digest(),
+	"sdn_subnet":                   "subnet: members cidr; " + sdnSubnetSpec.digest(),
+	"sdn_controller":               sdnControllerSpec.digest(),
+	"sdn_ipam":                     sdnIPAMSpec.digest(),
+	"sdn_dns":                      sdnDNSSpec.digest(),
 	"firewall_options":             firewallPlainSpec.digest(),
 	"firewall_rule":                "rules: list; " + firewallRuleSpec.digest(),
 	"firewall_alias":               firewallAliasSpec.digest(),
@@ -651,7 +651,7 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 			continue
 		}
 		vnets.objects = append(vnets.objects, observedObject{
-			id: vnet, resourceType: "sdn_vnet", resourceID: vnet, fields: sdnSpec.canonicalFields(item), shallow: true,
+			id: vnet, resourceType: "sdn_vnet", resourceID: vnet, fields: sdnVNetSpec.canonicalFields(item), shallow: true,
 		})
 		markChildren(subnets.unread, held, vnet)
 	}
@@ -662,7 +662,7 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 		}
 		listed[vnet] = true
 		vnets.objects = append(vnets.objects, observedObject{
-			id: vnet, resourceType: "sdn_vnet", resourceID: vnet, fields: sdnSpec.canonicalFields(item),
+			id: vnet, resourceType: "sdn_vnet", resourceID: vnet, fields: sdnVNetSpec.canonicalFields(item),
 		})
 		t, err := proxmox.ObserveSDNSubnets(vnet)
 		if err != nil {
@@ -682,12 +682,12 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 			obj := observedObject{id: id, resourceType: "sdn_subnet", resourceID: id}
 			// The subnet's CIDR, as Nexara files a create whose id it could
 			// not read back (<vnet>/<cidr>), so that row can name it.
-			if cidr := vnet + "/" + stringField(e, "cidr"); stringField(e, "cidr") != "" && memberID.MatchString(cidr) {
+			if cidr := vnet + "/" + stringField(e, "cidr"); stringField(e, "cidr") != "" && pvefield.IsMemberID(cidr) {
 				rest := maps.Clone(e)
 				delete(rest, "cidr")
-				obj.fields, obj.members = sdnSpec.canonicalFields(rest), map[string][]string{"cidr": {cidr}}
+				obj.fields, obj.members = sdnSubnetSpec.canonicalFields(rest), map[string][]string{"cidr": {cidr}}
 			} else {
-				obj.fields = sdnSpec.canonicalFields(e)
+				obj.fields = sdnSubnetSpec.canonicalFields(e)
 			}
 			subnets.objects = append(subnets.objects, obj)
 		}

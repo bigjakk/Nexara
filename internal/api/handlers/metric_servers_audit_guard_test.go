@@ -67,7 +67,15 @@ func TestGuard_MetricServerAuditOmitsTheToken(t *testing.T) {
 			if !isPkg || pkg.Name != "json" || len(call.Args) != 1 {
 				return true
 			}
-			lit, isLit := call.Args[0].(*ast.CompositeLit)
+			arg := call.Args[0]
+			// auditFields adds to the literal the names an update changed:
+			// names, never values.
+			if inner, isCall := arg.(*ast.CallExpr); isCall && len(inner.Args) > 0 {
+				if id, isIdent := inner.Fun.(*ast.Ident); isIdent && id.Name == "auditFields" {
+					arg = inner.Args[0]
+				}
+			}
+			lit, isLit := arg.(*ast.CompositeLit)
 			if !isLit {
 				t.Errorf("%s marshals something other than a literal map into an audit row; the audited "+
 					"fields have to be readable at the call site", fn.Name.Name)
@@ -115,7 +123,7 @@ func sortedAllowedAuditFields(allowed map[string]bool) []string {
 }
 
 // isAuditFieldNames is auditFieldNames(...) or auditSentOf(...).changed(...),
-// which give names, never values.
+// which give names, never values (auditFields wraps changed so).
 func isAuditFieldNames(e ast.Expr) bool {
 	call, ok := e.(*ast.CallExpr)
 	if !ok {

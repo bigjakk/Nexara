@@ -21,6 +21,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
@@ -1278,12 +1279,9 @@ func (r backupJobRequest) auditDetails(before map[string]json.RawMessage) json.R
 	if selection := r.selectionSummary(); selection != "" {
 		fields["selection"] = selection
 	}
-	// A job lists no enabled when it is: pve-manager API2/Backup.pm, enabled
-	// default 1.
 	sent := auditSentOf(r.toParams())
 	sent.cleared = append(sent.cleared, r.clearedProperties()...)
-	fields["fields"] = sent.changed(before, map[string]string{"enabled": "1"})
-	details, _ := json.Marshal(fields)
+	details, _ := json.Marshal(auditFields(fields, sent, before, pvefield.Backup))
 	return details
 }
 

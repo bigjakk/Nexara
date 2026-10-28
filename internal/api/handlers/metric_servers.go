@@ -10,6 +10,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // All five routes are declared in internal/api/registry_metric_servers.go,
@@ -172,7 +173,7 @@ func (h *MetricServerHandler) UpdateServer(c fiber.Ctx, p *apischema.Params) err
 	if err := pxClient.UpdateMetricServer(c.Context(), serverID, req); err != nil {
 		return mapMetricServerError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"id": serverID, "fields": auditSentOf(req).changed(before, nil)})
+	details, _ := json.Marshal(auditFields(map[string]any{"id": serverID}, auditSentOf(req), before, pvefield.MetricServer))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", serverID, "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

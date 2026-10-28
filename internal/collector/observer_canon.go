@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/crypto"
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // What the observer (observer.go) keeps of a reading, and how two readings are
@@ -36,107 +37,13 @@ var observeFieldName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 // observeOtherField is where keys of an unexpected shape are compared, together.
 const observeOtherField = "other"
 
-// canonicalValue renders one JSON value as the tag sees it: a string's text, a
-// number's digits, a boolean as 1 or 0 — Perl's JSON writes the same option as
-// "1", 1 or true depending on how the scalar was last used — and an array or
-// object as JSON with its keys sorted and its scalars rendered the same way.
-// A null is no value: the field is absent.
-func canonicalValue(raw json.RawMessage) (string, bool) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var v any
-	if err := dec.Decode(&v); err != nil || v == nil {
-		return "", false
-	}
-	return canonicalAny(v), true
-}
-
-func canonicalAny(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case json.Number:
-		return t.String()
-	case bool:
-		if t {
-			return "1"
-		}
-		return "0"
-	default:
-		b, err := json.Marshal(normalizeJSON(t))
-		if err != nil {
-			return ""
-		}
-		return string(b)
-	}
-}
-
-// normalizeJSON turns every scalar inside an array or object into its canonical
-// string and drops nulls; json.Marshal sorts the map keys.
-func normalizeJSON(v any) any {
-	switch t := v.(type) {
-	case map[string]any:
-		m := make(map[string]any, len(t))
-		for k, x := range t {
-			if x != nil {
-				m[k] = normalizeJSON(x)
-			}
-		}
-		return m
-	case []any:
-		out := make([]any, 0, len(t))
-		for _, x := range t {
-			if x != nil {
-				out = append(out, normalizeJSON(x))
-			}
-		}
-		return out
-	default:
-		return canonicalAny(t)
-	}
-}
-
-// canonicalSet renders a list whose order means nothing: a comma list, or a
-// JSON array, split, trimmed, deduplicated and sorted. Proxmox re-encodes many
-// of these from a Perl hash on every request — join(',', keys %h) — so their
-// order changes with nobody editing anything (HA group nodes, storage content
-// and nodes, SDN zone nodes: see the kinds in observer_kinds.go).
-func canonicalSet(raw json.RawMessage) (string, bool) {
-	var items []string
-	if arr, ok := decodeArray(raw); ok {
-		for _, item := range arr {
-			if s, ok := canonicalValue(item); ok {
-				items = append(items, s)
-			}
-		}
-	} else {
-		s, ok := canonicalValue(raw)
-		if !ok {
-			return "", false
-		}
-		for _, part := range strings.Split(s, ",") {
-			if part = strings.TrimSpace(part); part != "" {
-				items = append(items, part)
-			}
-		}
-	}
-	slices.Sort(items)
-	items = slices.Compact(items)
-	b, _ := json.Marshal(items)
-	return string(b), true
-}
-
-func decodeArray(raw json.RawMessage) ([]json.RawMessage, bool) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || trimmed[0] != '[' {
-		return nil, false
-	}
-	var arr []json.RawMessage
-	if err := json.Unmarshal(trimmed, &arr); err != nil {
-		return nil, false
-	}
-	return arr, true
-}
+// A field's canonical form, and a member list's ids, are pvefield's: an update
+// handler that reads its object before writing it compares the two the same
+// way (handlers' auditSent.changed).
+var (
+	canonicalValue = pvefield.Value
+	canonicalSet   = pvefield.Set
+)
 
 // fieldSpec says how one kind's fields are compared: which are dropped — run
 // state, derived values, and Proxmox's digest of the whole file — which are
@@ -208,40 +115,8 @@ func (spec fieldSpec) split(item map[string]json.RawMessage) (fields map[string]
 	return spec.canonicalFields(rest), members
 }
 
-// memberID is the shape a member must have to be kept as it is: a guest's
-// VMID, a storage, group or user id, an HA resource id, an SDN subnet's CIDR,
-// an ACL grant (its role and propagate, then its grantee) — no space, no list
-// separator, nothing a value could hide in at length. A user or a token, alone
-// or as a grantee, takes every name pve-access-control takes for one
-// (Auth/Plugin.pm user_regex [^\s:/]+ and realm_regex, AccessControl.pm
-// token_subid_regex) but one holding ',' or ';': Proxmox's own lists split on
-// those (PVE::Tools::split_list), so no list of Proxmox's can hold it either.
-var memberID = regexp.MustCompile(`^(?:[A-Za-z0-9_-][A-Za-z0-9@.:!/_-]{0,191}|` +
-	`(?:[A-Za-z0-9._-]{1,64}:[01]?:)?[^\s:/,;\p{Cc}\p{Cf}]{1,64}@[A-Za-z][A-Za-z0-9._-]{1,63}(?:![A-Za-z][A-Za-z0-9._-]{1,63})?)$`)
-
-// memberIDs is a member list's ids, sorted and once each: a JSON array, or a
-// list separated as Proxmox separates them (PVE::Tools::split_list).
-func memberIDs(raw json.RawMessage) ([]string, bool) {
-	s, ok := canonicalSet(raw)
-	if !ok {
-		return nil, false
-	}
-	var ids []string
-	if err := json.Unmarshal([]byte(s), &ids); err != nil {
-		return nil, false
-	}
-	out := []string{}
-	for _, id := range ids {
-		for _, part := range strings.FieldsFunc(id, func(r rune) bool { return r == ';' || r == ' ' }) {
-			if !memberID.MatchString(part) {
-				return nil, false
-			}
-			out = append(out, part)
-		}
-	}
-	slices.Sort(out)
-	return slices.Compact(out), true
-}
+// memberIDs is a member list's ids, sorted and once each (pvefield.MemberIDs).
+var memberIDs = pvefield.MemberIDs
 
 // canonicalFields is one object's compared fields, by name, in canonical form.
 // Keys of an unexpected shape are folded into observeOtherField, as one object.
@@ -387,14 +262,10 @@ func parseObjectTags(raw json.RawMessage) (objectTags, error) {
 			out.members[k] = sm.Members
 			continue
 		}
-		if arr, ok := decodeArray(v); ok {
-			list := make([]string, 0, len(arr))
-			for _, item := range arr {
-				var s string
-				if err := json.Unmarshal(item, &s); err != nil {
-					return objectTags{}, err
-				}
-				list = append(list, s)
+		if t := bytes.TrimSpace(v); len(t) > 0 && t[0] == '[' {
+			var list []string
+			if err := json.Unmarshal(t, &list); err != nil {
+				return objectTags{}, err
 			}
 			out.lists[k] = list
 			continue
