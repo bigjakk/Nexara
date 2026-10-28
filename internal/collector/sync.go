@@ -349,8 +349,10 @@ type Syncer struct {
 	// (classifyBatch).
 	observeBatches sync.Map
 	// realmSyncLogs is, per "<cluster>/<UPID>", what a finished realm sync's
-	// log says it did (readRealmSyncs).
-	realmSyncLogs sync.Map
+	// log says it did, and realmSyncRealms, per "<cluster>/<realm>", what a
+	// synced realm maps, as last read (readRealmSyncs).
+	realmSyncLogs   sync.Map
+	realmSyncRealms sync.Map
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.

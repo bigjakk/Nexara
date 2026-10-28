@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -88,15 +89,26 @@ const (
 // where the realm's sync_attributes maps them (realmSyncRules).
 var realmSyncFields = []string{"enable", "expire", "keys"}
 
+// realmRead is one realm's mapped realmSyncFields, and when they were read.
+type realmRead struct {
+	at     time.Time
+	fields []string
+}
+
 // readRealmSyncs reads, for the cluster's realm syncs a change waiting to be
 // classified may lie in the window of — the give-up's day and the look-back
 // before it — what ClassifyObservedChanges takes of them: taskLogs, each
 // finished sync's log by UPID, newest first, read once (s.realmSyncLogs), and
-// realmFields, each synced realm's mapped realmSyncFields, read each pass (one
-// that cannot be read maps none). A sync still running names nothing yet: its
-// log ends only once it wrote user.cfg. Nothing read is "{}".
+// realmFields, each synced realm's mapped realmSyncFields, read once an
+// observer interval (s.realmSyncRealms; one that cannot be read maps none).
+// A sync still running names nothing yet: its log ends only once it wrote
+// user.cfg. With the observer off there is nothing of it to classify, and
+// nothing is read. Nothing read is "{}".
 func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, cluster db.Cluster) (taskLogs, realmFields json.RawMessage) {
 	none := json.RawMessage(`{}`)
+	if s.objectObserveInterval <= 0 {
+		return none, none
+	}
 	since := time.Now().Add(-statusChangeGiveUp - observedLookback(s.objectObserveInterval) - time.Hour)
 	tasks, err := s.queries.ListRealmSyncTasks(ctx, db.ListRealmSyncTasksParams{ClusterID: cluster.ID, Since: since})
 	if err != nil {
@@ -113,12 +125,18 @@ func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, clust
 		if _, read := fields[realm]; read || !ok || realm == "" {
 			continue
 		}
+		listed[prefix+realm] = true
+		if v, ok := s.realmSyncRealms.Load(prefix + realm); ok && time.Since(v.(realmRead).at) < s.objectObserveInterval {
+			fields[realm] = v.(realmRead).fields
+			continue
+		}
 		fields[realm] = []string{}
 		if attrs, err := client.GetRealmSyncAttributes(ctx, realm); err != nil {
 			s.logger.Debug("read a synced realm's mapping", "cluster_id", cluster.ID, "realm", realm, "error", err)
 		} else {
 			fields[realm] = realmMappedFields(attrs)
 		}
+		s.realmSyncRealms.Store(prefix+realm, realmRead{at: time.Now(), fields: fields[realm]})
 	}
 	logs, reads := map[string]realmSyncLog{}, 0
 	for _, t := range tasks {
@@ -139,12 +157,14 @@ func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, clust
 			s.realmSyncLogs.Store(prefix+t.Upid, logs[t.Upid])
 		}
 	}
-	s.realmSyncLogs.Range(func(key, _ any) bool {
-		if k := key.(string); strings.HasPrefix(k, prefix) && !listed[k] {
-			s.realmSyncLogs.Delete(k)
-		}
-		return true
-	})
+	for _, m := range []*sync.Map{&s.realmSyncLogs, &s.realmSyncRealms} {
+		m.Range(func(key, _ any) bool {
+			if k := key.(string); strings.HasPrefix(k, prefix) && !listed[k] {
+				m.Delete(k)
+			}
+			return true
+		})
+	}
 	taskLogs, err = json.Marshal(logs)
 	if err != nil {
 		taskLogs = none

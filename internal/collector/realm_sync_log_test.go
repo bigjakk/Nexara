@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -84,8 +85,9 @@ func TestParseRealmSyncLog(t *testing.T) {
 	}
 }
 
-// A finished sync's log is read once; one still running, or one that failed,
-// names nothing. A realm maps enable, expire and keys only as its
+// A finished sync's log is read once, and a realm once an observer interval;
+// one still running, or one that failed, names nothing; with the observer off
+// nothing is read. A realm maps enable, expire and keys only as its
 // sync_attributes say, and one that cannot be read maps none.
 func TestRealmSyncLogs(t *testing.T) {
 	t.Parallel()
@@ -105,6 +107,11 @@ func TestRealmSyncLogs(t *testing.T) {
 	}}, syncAttributes: map[string]string{"ldap01": "email=mail,enable=accountActive; keys=sshPublicKey firstname=givenName"}}
 	s := &Syncer{queries: mq, logger: testLogger()}
 	cluster := db.Cluster{ID: uuid.New()}
+	if logs, fields := s.readRealmSyncs(context.Background(), client, cluster); string(logs)+string(fields) != "{}{}" ||
+		client.realmReads+client.logReads != 0 {
+		t.Fatalf("with the observer off: %s %s, %d reads, want nothing read", logs, fields, client.realmReads+client.logReads)
+	}
+	s.objectObserveInterval = time.Hour
 	want := map[string]realmSyncLog{done: parseRealmSyncLog(synced), other: newRealmSyncLog()}
 	for pass := range 2 {
 		logs, fields := s.readRealmSyncs(context.Background(), client, cluster)
@@ -112,11 +119,11 @@ func TestRealmSyncLogs(t *testing.T) {
 		if err := json.Unmarshal(logs, &got); err != nil || !reflect.DeepEqual(got, want) || len(got[done].Removed["users"]) != 1 {
 			t.Fatalf("pass %d: %+v (%v), want %+v", pass, got, err, want)
 		}
-		if string(fields) != `{"ldap01":["enable","keys"],"ldap02":[]}` || client.logReads != 2 {
-			t.Fatalf("pass %d: realms map %s, %d log reads, want ldap01's enable and keys, none of the unread ldap02, "+
-				"and each finished log read once", pass, fields, client.logReads)
+		if string(fields) != `{"ldap01":["enable","keys"],"ldap02":[]}` || client.realmReads != 2 || client.logReads != 2 {
+			t.Fatalf("pass %d: realms map %s, %d realm and %d log reads, want ldap01's enable and keys, none of the "+
+				"unread ldap02, and each realm and finished log read once", pass, fields, client.realmReads, client.logReads)
 		}
-		// The finished sync's log is kept.
-		client.logs[done] = nil
+		// Both are kept: the log, finished, and the realm, for the interval.
+		client.logs[done], client.syncAttributes["ldap01"] = nil, "expire=accountExpires"
 	}
 }
