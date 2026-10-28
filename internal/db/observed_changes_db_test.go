@@ -86,8 +86,9 @@ func TestObservedChanges(t *testing.T) {
 		return map[string]any{"object_id": id, "fields": map[string]any{"nodes": tag}, "node": "",
 			"signature": "sig1", "last_seen_at": seen}
 	}
+	changeID := uuid.New()
 	record(gen.RecordObservedObjectsParams{
-		Changes: jsonOf([]map[string]any{{"resource_type": "storage", "resource_id": "store01", "vmid": nil,
+		Changes: jsonOf([]map[string]any{{"id": changeID, "resource_type": "storage", "resource_id": "store01", "vmid": nil,
 			"change": "changed", "fields": []string{"nodes"}, "detail": map[string]any{}, "node": "",
 			"last_seen_at": ago(9), "observed_at": ago(4)}}),
 		States: jsonOf([]map[string]any{state("store01", "t1", ago(5)), state("store02", "t2", ago(5))}),
@@ -102,6 +103,16 @@ func TestObservedChanges(t *testing.T) {
 	}
 	if len(fields) != 1 || fields[0] != "nodes" || observedBy != "observer" || vmid.Valid {
 		t.Fatalf("change filed as %v %s %v", fields, observedBy, vmid)
+	}
+	// Filed under the id the observer gave it, which marks it a bulk after.
+	if err := q.MarkObservedBulk(ctx, gen.MarkObservedBulkParams{Ids: []uuid.UUID{changeID}, Bulk: "b1", BulkSize: 60}); err != nil {
+		t.Fatal(err)
+	}
+	var bulk string
+	var bulkSize int
+	if err := pool.QueryRow(ctx, `SELECT detail->>'bulk', (detail->>'bulk_size')::int FROM cluster_object_changes
+		WHERE id = $1`, changeID).Scan(&bulk, &bulkSize); err != nil || bulk != "b1" || bulkSize != 60 {
+		t.Fatalf("marked a bulk: %q of %d, %v", bulk, bulkSize, err)
 	}
 	marks, err := q.ListClusterObjectBaselines(ctx, observedCluster)
 	if err != nil || len(marks) != 1 || marks[0].Signature != "sig1" || !marks[0].LastReadAt.Equal(ago(5)) {

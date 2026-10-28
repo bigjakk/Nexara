@@ -35,14 +35,14 @@ WHERE cluster_id = $1;
 -- global kind's trigger writes a row with none (000125).
 -- name: RecordObservedObjects :exec
 WITH changes AS (
-    INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, vmid, change, fields, detail, node,
-                                        members_joined, members_left, observed_by, last_seen_at, observed_at)
-    SELECT sqlc.arg('cluster_id')::uuid, c.resource_type, c.resource_id, c.vmid, c.change,
-           COALESCE(c.fields, '{}'), COALESCE(c.detail, '{}'), COALESCE(c.node, ''),
+    INSERT INTO cluster_object_changes (id, cluster_id, resource_type, resource_id, vmid, change, fields, detail,
+                                        node, members_joined, members_left, observed_by, last_seen_at, observed_at)
+    SELECT COALESCE(c.id, gen_random_uuid()), sqlc.arg('cluster_id')::uuid, c.resource_type, c.resource_id, c.vmid,
+           c.change, COALESCE(c.fields, '{}'), COALESCE(c.detail, '{}'), COALESCE(c.node, ''),
            COALESCE(c.members_joined, '{}'), COALESCE(c.members_left, '{}'), 'observer',
            c.last_seen_at, c.observed_at
     FROM jsonb_to_recordset(sqlc.arg('changes')::jsonb) AS c(
-        resource_type text, resource_id text, vmid int, change text, fields text[], detail jsonb, node text,
+        id uuid, resource_type text, resource_id text, vmid int, change text, fields text[], detail jsonb, node text,
         members_joined text[], members_left text[], last_seen_at timestamptz, observed_at timestamptz)
 ), saved AS (
     INSERT INTO cluster_object_state (cluster_id, kind, object_id, fields, node, signature, last_seen_at)
@@ -71,6 +71,16 @@ SET last_seen_at = sqlc.arg('seen_at')::timestamptz
 WHERE cluster_id = sqlc.arg('cluster_id')::uuid
   AND kind = sqlc.arg('kind')::text
   AND object_id = ANY(sqlc.arg('touched')::text[]);
+
+-- MarkObservedBulk marks a pass's changes of one kind as one bulk, when there
+-- were more than a History shows one by one: the guests' are written a batch at
+-- a time, so whether they are a bulk is known only once the pass is done. By id,
+-- the observer's own rows only.
+-- name: MarkObservedBulk :exec
+UPDATE cluster_object_changes
+SET detail = detail || jsonb_build_object('bulk', sqlc.arg('bulk')::text, 'bulk_size', sqlc.arg('bulk_size')::int)
+WHERE id = ANY(sqlc.arg('ids')::uuid[])
+  AND observed_by = 'observer';
 
 -- DeleteClusterObjectState drops what the observer holds of a kind's objects —
 -- a guest that left the inventory, the HA groups Proxmox VE 9 migrated to

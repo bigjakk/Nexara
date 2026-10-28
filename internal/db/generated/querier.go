@@ -2278,6 +2278,11 @@ type Querier interface {
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	MarkNotificationDLQResolved(ctx context.Context, id uuid.UUID) error
+	// MarkObservedBulk marks a pass's changes of one kind as one bulk, when there
+	// were more than a History shows one by one: the guests' are written a batch at
+	// a time, so whether they are a bulk is known only once the pass is done. By id,
+	// the observer's own rows only.
+	MarkObservedBulk(ctx context.Context, arg MarkObservedBulkParams) error
 	// MarkPBSJobBaseline says a server's jobs of one type were just listed and
 	// written whole (migrations/000126): a job that appears after this is one made
 	// on the PBS, and its window starts here. Only syncPBSServer calls it, after a

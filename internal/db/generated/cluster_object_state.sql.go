@@ -577,16 +577,38 @@ func (q *Queries) ListClusterObjectState(ctx context.Context, clusterID uuid.UUI
 	return items, nil
 }
 
+const markObservedBulk = `-- name: MarkObservedBulk :exec
+UPDATE cluster_object_changes
+SET detail = detail || jsonb_build_object('bulk', $1::text, 'bulk_size', $2::int)
+WHERE id = ANY($3::uuid[])
+  AND observed_by = 'observer'
+`
+
+type MarkObservedBulkParams struct {
+	Bulk     string      `json:"bulk"`
+	BulkSize int32       `json:"bulk_size"`
+	Ids      []uuid.UUID `json:"ids"`
+}
+
+// MarkObservedBulk marks a pass's changes of one kind as one bulk, when there
+// were more than a History shows one by one: the guests' are written a batch at
+// a time, so whether they are a bulk is known only once the pass is done. By id,
+// the observer's own rows only.
+func (q *Queries) MarkObservedBulk(ctx context.Context, arg MarkObservedBulkParams) error {
+	_, err := q.db.Exec(ctx, markObservedBulk, arg.Bulk, arg.BulkSize, arg.Ids)
+	return err
+}
+
 const recordObservedObjects = `-- name: RecordObservedObjects :exec
 WITH changes AS (
-    INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, vmid, change, fields, detail, node,
-                                        members_joined, members_left, observed_by, last_seen_at, observed_at)
-    SELECT $2::uuid, c.resource_type, c.resource_id, c.vmid, c.change,
-           COALESCE(c.fields, '{}'), COALESCE(c.detail, '{}'), COALESCE(c.node, ''),
+    INSERT INTO cluster_object_changes (id, cluster_id, resource_type, resource_id, vmid, change, fields, detail,
+                                        node, members_joined, members_left, observed_by, last_seen_at, observed_at)
+    SELECT COALESCE(c.id, gen_random_uuid()), $2::uuid, c.resource_type, c.resource_id, c.vmid,
+           c.change, COALESCE(c.fields, '{}'), COALESCE(c.detail, '{}'), COALESCE(c.node, ''),
            COALESCE(c.members_joined, '{}'), COALESCE(c.members_left, '{}'), 'observer',
            c.last_seen_at, c.observed_at
     FROM jsonb_to_recordset($5::jsonb) AS c(
-        resource_type text, resource_id text, vmid int, change text, fields text[], detail jsonb, node text,
+        id uuid, resource_type text, resource_id text, vmid int, change text, fields text[], detail jsonb, node text,
         members_joined text[], members_left text[], last_seen_at timestamptz, observed_at timestamptz)
 ), saved AS (
     INSERT INTO cluster_object_state (cluster_id, kind, object_id, fields, node, signature, last_seen_at)

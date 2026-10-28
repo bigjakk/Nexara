@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"slices"
 	"sort"
@@ -139,6 +140,7 @@ type ObserverQueries interface {
 	ListClusterObjectState(ctx context.Context, clusterID uuid.UUID) ([]db.ListClusterObjectStateRow, error)
 	ListClusterObjectBaselines(ctx context.Context, clusterID uuid.UUID) ([]db.ListClusterObjectBaselinesRow, error)
 	RecordObservedObjects(ctx context.Context, arg db.RecordObservedObjectsParams) error
+	MarkObservedBulk(ctx context.Context, arg db.MarkObservedBulkParams) error
 	DeleteClusterObjectState(ctx context.Context, arg db.DeleteClusterObjectStateParams) error
 	ShowUnclassifiedObservedChanges(ctx context.Context, before time.Time) (int64, error)
 }
@@ -638,9 +640,9 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 }
 
 // markBulk marks the changes of one kind a reading found, when there are more
-// than observeMaxChanges, with one id in their detail (bulk): something
-// rewrote the lot, and a History can show them as one. Each is still filed,
-// and explained or not on its own.
+// than observeMaxChanges, with one id and their count in their detail (bulk,
+// bulk_size): something rewrote the lot, and a History can show them as one.
+// Each is still filed, and explained or not on its own.
 func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string) {
 	if len(rows) <= observeMaxChanges {
 		return
@@ -648,7 +650,7 @@ func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string)
 	p.o.logger.Info("object observer: more changes of a kind in one reading than are shown one by one; marked as one",
 		"cluster_id", p.cluster.ID, "kind", kind, "changes", len(rows))
 	for _, r := range rows {
-		r.Detail["bulk"] = id
+		r.Detail["bulk"], r.Detail["bulk_size"] = id, len(rows)
 	}
 }
 
@@ -897,9 +899,21 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 	}()
 
 	batches := map[string]*recordBatch{"vm": {}, "container": {}}
-	// A batch of guests is a reading for markBulk, and a pass's are one bulk.
-	bulkIDs := map[string]string{"vm": uuid.NewString(), "container": uuid.NewString()}
+	// A pass is the guests' reading for a bulk: its rows are written a batch at
+	// a time, and marked once it is done (MarkObservedBulk).
+	filed := map[string][]uuid.UUID{}
 	pending := map[string]int{}
+	flush := func(kind string) {
+		b := batches[kind]
+		if p.write(ctx, kind, *b, time.Now(), "") {
+			for _, c := range b.changes {
+				if id, err := uuid.Parse(c.ID); err == nil {
+					filed[kind] = append(filed[kind], id)
+				}
+			}
+		}
+		batches[kind], pending[kind] = &recordBatch{}, 0
+	}
 	refused := 0
 	for r := range results {
 		kind := guestKind(r.guest.Type)
@@ -917,15 +931,21 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 		p.applyGuest(batches[kind], kind, guestObject(r.guest, r.node, r.config), p.kindSig(kind, sig), r.readAt, r.doneAt)
 		pending[kind]++
 		if pending[kind] >= observeGuestBatch {
-			p.markBulk(kind, batches[kind].changes, bulkIDs[kind])
-			p.write(ctx, kind, *batches[kind], time.Now(), "")
-			batches[kind], pending[kind] = &recordBatch{}, 0
+			flush(kind)
 		}
 	}
-	for kind, b := range batches {
+	for kind := range batches {
 		if pending[kind] > 0 {
-			p.markBulk(kind, b.changes, bulkIDs[kind])
-			p.write(ctx, kind, *b, time.Now(), "")
+			flush(kind)
+		}
+		if ids := filed[kind]; len(ids) > observeMaxChanges {
+			p.o.logger.Info("object observer: more guest changes in one pass than are shown one by one; marked as one",
+				"cluster_id", p.cluster.ID, "kind", kind, "changes", len(ids))
+			if err := p.o.queries.MarkObservedBulk(ctx, db.MarkObservedBulkParams{
+				Ids: ids, Bulk: uuid.NewString(), BulkSize: int32(min(len(ids), math.MaxInt32)), //nolint:gosec // clamped on this line
+			}); err != nil {
+				p.o.logger.Debug("object observer: mark a bulk", "cluster_id", p.cluster.ID, "error", err)
+			}
 		}
 	}
 	if refused > 0 {
@@ -1244,6 +1264,7 @@ func (l *observeLimiter) acquire(ctx context.Context, gap time.Duration) (func()
 // how many items came and went. The members that joined or left a list of
 // other objects' ids go in columns no reader selects, for the classification.
 type observedChangeRow struct {
+	ID            string         `json:"id"` // the row's own, so a pass can mark its guests' rows a bulk after
 	ResourceType  string         `json:"resource_type"`
 	ResourceID    string         `json:"resource_id"`
 	Vmid          *int32         `json:"vmid"`
@@ -1280,6 +1301,7 @@ func (b *recordBatch) record(rows []observedChangeRow) { b.changes = append(b.ch
 
 func changeRow(obj observedObject, change string, d tagDiff, lastSeen, observed time.Time) observedChangeRow {
 	row := observedChangeRow{
+		ID:           uuid.NewString(),
 		ResourceType: obj.resourceType, ResourceID: obj.resourceID, Change: change, Fields: nonNil(d.fields),
 		Detail: map[string]any{}, Node: obj.node, MembersJoined: nonNil(d.joined), MembersLeft: nonNil(d.left),
 		LastSeenAt: lastSeen, ObservedAt: observed,
