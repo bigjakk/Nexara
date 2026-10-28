@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -44,6 +45,28 @@ func TestBackupHistoryCategories(t *testing.T) {
 	} {
 		if got := categoryOf(tt.kind, tt.entry, tt.action, tt.typ, tt.worker); got != tt.want {
 			t.Errorf("%s: %s %s %s %s is %q, want %q", tt.kind.Name, tt.entry, tt.typ, tt.action, tt.worker, got, tt.want)
+		}
+	}
+}
+
+// The changes Nexara sees made in Proxmox are shown by the kinds whose objects
+// they are — a storage's definition, a PBS server's jobs, a backup job — and by
+// no other: a Veeam server is not Proxmox's.
+func TestBackupHistoryObservedTypes(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		kind HistoryKind
+		want []HistoryObservedType
+	}{
+		{StorageHistory(), []HistoryObservedType{{Type: "storage"}}},
+		{PBSHistory(), []HistoryObservedType{{Type: "pbs_server"}}},
+		{BackupJobHistory(), []HistoryObservedType{{Type: "backup"}}},
+		{VeeamServerHistory(), nil},
+		{VeeamJobHistory(), nil},
+		{VeeamSessionHistory(), nil},
+	} {
+		if !reflect.DeepEqual(tt.kind.ObservedTypes, tt.want) {
+			t.Errorf("%s shows the observed changes of %v, want %v", tt.kind.Name, tt.kind.ObservedTypes, tt.want)
 		}
 	}
 }
