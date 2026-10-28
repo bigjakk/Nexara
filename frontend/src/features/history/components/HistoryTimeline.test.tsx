@@ -5,6 +5,7 @@ import { setupUser } from "@/test/user";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { historyKind } from "../lib/history";
+import type { HistoryPage } from "../types/history";
 import { HistoryTimeline } from "./HistoryTimeline";
 
 vi.mock("@/lib/api-client", async () =>
@@ -81,11 +82,12 @@ describe("HistoryTimeline", () => {
     async (_name, category, total, more, pages, searchedFrom) => {
       const user = setupUser();
       mockedPage.mockReset();
-      mockedPage.mockResolvedValue({
+      const response: HistoryPage = {
         items: [],
         total,
-        searched_from: searchedFrom,
-      });
+        ...(searchedFrom === undefined ? {} : { searched_from: searchedFrom }),
+      };
+      mockedPage.mockResolvedValue(response);
       const kind = historyKind(
         "probe",
         { categories: { other: "Other" } },

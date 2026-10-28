@@ -3,6 +3,7 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
 import { makeHistoryEntry } from "@/test/history.fixtures";
+import type { HistoryPage } from "@/features/history/types/history";
 import { FolderHistoryTab } from "./FolderHistoryTab";
 
 vi.mock("@/lib/api-client", async () =>
@@ -71,11 +72,12 @@ describe("FolderHistoryTab", () => {
   // Past its cap the server follows the most recently active guests, and
   // says of how many, which the tab shows.
   it("says which guests a folder past the cap follows", async () => {
-    mockedPage.mockResolvedValue({
+    const response: HistoryPage = {
       items: [],
       total: 0,
       guests: { followed: 500, total: 1200 },
-    });
+    };
+    mockedPage.mockResolvedValue(response);
     renderWithProviders(
       <FolderHistoryTab
         clusterId="c1"
