@@ -1,6 +1,7 @@
 package pvefield
 
 import (
+	"cmp"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -44,10 +45,13 @@ func TestKindChanged(t *testing.T) {
 		{"text as sent", SDNVNet, "alias", `"lab"`, "lab2", nil, true},
 		{"a field the observer drops", Network, "priority", `"3"`, "4", nil, false},
 		{"a plugin's nodes, a set", ACMEPlugin, "nodes", `"pve-01,pve-02"`, "pve-02,pve-01", nil, false},
+		// comments6 is read back folded into comments, and compared there.
+		{"comments6 re-sent, as read", Network, "comments6", `"uplink\nv6\n"`, "v6", map[string]string{"comments": "uplink"}, false},
+		{"comments6 changed", Network, "comments6", `"uplink\nv6\n"`, "v6b", map[string]string{"comments": "uplink"}, true},
 	} {
 		before := map[string]json.RawMessage{}
 		if tc.before != "" {
-			before[tc.field] = json.RawMessage(tc.before)
+			before[cmp.Or(tc.kind.ReadIn[tc.field], tc.field)] = json.RawMessage(tc.before)
 		}
 		update := map[string]string{tc.field: tc.sent}
 		for k, v := range tc.also {

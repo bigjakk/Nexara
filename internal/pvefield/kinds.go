@@ -15,9 +15,12 @@ import (
 // (Set); Members list other objects' ids, kept as the ids (MemberIDs). Stored
 // is, for a field an update sends, how Proxmox stores the value sent, as its
 // reading then gives it; one it does not name is stored as sent, as text.
+// ReadIn names a field the reading never shows on its own, by the one it is
+// read back folded into: what it is stored as is compared there.
 type Kind struct {
 	Ignore, Sets, Members []string
 	Stored                map[string]Store
+	ReadIn                map[string]string
 }
 
 // Store is how Proxmox stores sent, one field's value as an update's form
@@ -38,11 +41,15 @@ func (k Kind) Changed(name string, before map[string]json.RawMessage, update map
 		store = Text
 	}
 	after, listed := store(update[name], update)
-	was, had := k.canonical(name, before[name])
+	read := name
+	if in := k.ReadIn[name]; in != "" {
+		read = in
+	}
+	was, had := k.canonical(read, before[read])
 	if !listed || !had {
 		return listed != had
 	}
-	now, ok := k.canonical(name, after)
+	now, ok := k.canonical(read, after)
 	return !ok || now != was
 }
 
@@ -162,13 +169,18 @@ func netAutostart(sent string, update map[string]string) (json.RawMessage, bool)
 // netComments is an interface's comments: written a line at a time as
 // "#<line>" and read back each line without its trailing white space and with
 // a newline. comments6, written in the inet6 stanza, is read back folded into
-// comments, so the two sent are read back as one.
+// comments, so the two sent are read back as one: comments6 is compared there
+// (Network's ReadIn), as what the two make.
 func netComments(sent string, update map[string]string) (json.RawMessage, bool) {
 	read := commentLines(sent) + commentLines(update["comments6"])
 	if read == "" {
 		return nil, false
 	}
 	return text(read), true
+}
+
+func netComments6(_ string, update map[string]string) (json.RawMessage, bool) {
+	return netComments(update["comments"], update)
 }
 
 func commentLines(s string) string {
@@ -253,9 +265,10 @@ var (
 	// it.
 	Network = Kind{Ignore: []string{"active", "exists", "altnames", "priority", "families"},
 		Stored: map[string]Store{
-			"autostart": netAutostart, "comments": netComments, "netmask": netNetmask,
+			"autostart": netAutostart, "comments": netComments, "comments6": netComments6, "netmask": netNetmask,
 			"bridge_ports": netPorts, "slaves": netPorts, "bridge_stp": netSTP, "bridge_vlan_aware": netVLANAware,
-		}}
+		},
+		ReadIn: map[string]string{"comments6": "comments"}}
 	// Zones/Plugin.pm encode_value: nodes and exitnodes join(',', keys %$value).
 	SDNZone = Kind{Ignore: sdnIgnore, Sets: []string{"nodes", "exitnodes"},
 		Stored: with(with(numbers("tag", "mtu", "vrf-vxlan", "advertise-subnets", "disable-arp-nd-suppression"),
