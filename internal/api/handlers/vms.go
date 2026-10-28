@@ -1515,12 +1515,14 @@ func (h *VMHandler) SetVMConfig(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	before := readBefore(c.Context(), pxClient)(proxmox.ObserveGuestConfig(node.Name, "qemu", int(vm.Vmid)))
+	read := readBefore(c.Context(), pxClient)
+	before := read(proxmox.ObserveGuestConfig(node.Name, "qemu", int(vm.Vmid)))
 	if err := pxClient.SetVMConfig(c.Context(), node.Name, int(vm.Vmid), fields); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	configDetails, _ := json.Marshal(guestConfigDetails(fields, before, pvefield.QemuConfig))
+	after := read(proxmox.ObserveGuestConfig(node.Name, "qemu", int(vm.Vmid)))
+	configDetails, _ := json.Marshal(guestConfigDetails(fields, before, after, pvefield.QemuConfig))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "config_update", configDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "config_update")
 

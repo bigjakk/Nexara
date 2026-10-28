@@ -247,6 +247,19 @@ type accessUpdatePVE struct {
 	seen     []accessUpdatePVERequest
 	replies  map[string]string
 	statuses map[string]int
+	sequence map[string][]string // successive bodies for one key, before its reply
+}
+
+// replyEach answers successive requests for path (as reply takes it) with each
+// of bodies in turn, then with reply's body: an object read before a write and
+// again after it.
+func (p *accessUpdatePVE) replyEach(path string, bodies ...string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.sequence == nil {
+		p.sequence = map[string][]string{}
+	}
+	p.sequence[path] = append(p.sequence[path], bodies...)
 }
 
 // reply makes the stand-in answer requests for path (as the server sees it
@@ -281,10 +294,13 @@ func (p *accessUpdatePVE) serve(t *testing.T) string {
 		p.mu.Lock()
 		p.seen = append(p.seen, accessUpdatePVERequest{method: r.Method, path: r.URL.Path, form: r.PostForm})
 		key := r.Method + " " + r.URL.Path
-		if _, ok := p.replies[key]; !ok {
+		if _, ok := p.replies[key]; !ok && len(p.sequence[key]) == 0 {
 			key = r.URL.Path
 		}
 		body, ok := p.replies[key]
+		if queue := p.sequence[key]; len(queue) > 0 {
+			body, ok, p.sequence[key] = queue[0], true, queue[1:]
+		}
 		status := p.statuses[key]
 		p.mu.Unlock()
 		if !ok {
@@ -480,9 +496,10 @@ type auditWant struct {
 	message, body []string
 	// method and path are the one request that must reach Proxmox, with form; an
 	// empty path is a refusal made before anything is sent, which writes no audit row.
-	// read is a path the handler reads first, with a GET, the object it writes.
-	method, path, read string
-	form               url.Values
+	// read is a path the handler reads first, with a GET, the object it writes;
+	// after one it reads again once it has written it.
+	method, path, read, after string
+	form                      url.Values
 	// audit is the one row that must be written; empty, none (Proxmox refused).
 	audit auditRowWant
 	// never are values the row's details must not carry, whatever key they sit under.
@@ -532,6 +549,12 @@ func requireAudited(t *testing.T, app *fiber.App, pve *accessUpdatePVE, store *a
 			t.Fatalf("the handler made the Proxmox calls %+v, want a GET of %s first", sent, want.read)
 		}
 		sent = sent[1:]
+	}
+	if want.after != "" {
+		if n := len(sent); n == 0 || sent[n-1].method != http.MethodGet || sent[n-1].path != want.after {
+			t.Fatalf("the handler made the Proxmox calls %+v, want a GET of %s last", sent, want.after)
+		}
+		sent = sent[:len(sent)-1]
 	}
 	if len(sent) != 1 {
 		t.Fatalf("the handler made %d Proxmox calls, want exactly 1: %+v", len(sent), sent)

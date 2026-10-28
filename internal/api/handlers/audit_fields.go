@@ -183,20 +183,32 @@ func auditChanges(details map[string]any, key string, names []string, before map
 
 // guestConfigDetails is a guest config write's details: fields, the values it
 // sent, which a History shows (AuditLogAs records a secret among them as
-// "(set)"), and changed, what the write changes beside before, the config as
-// read just before (auditSent.changed), with what it reverts: a pending
-// change dropped, which the config is read with. The observer's config rule
-// explains only changed. skiplock is no key.
-func guestConfigDetails(fields map[string]string, before map[string]json.RawMessage, kind pvefield.Kind) map[string]any {
+// "(set)"), and changed, what the write moved: the config read just before and
+// just after the synchronous write, compared as the observer compares them
+// (movedFields). So a disk or a network device re-sent as it was names nothing,
+// whatever text qemu-server rewrites it to (print_drive, print_net, the boot
+// order, the tags, a cdrom's alias), nor does a revert that leaves its value;
+// what the write itself moves beside it (a disk replaced into unused<n>, a
+// vmgenid generated) is named. The observer's config rule explains only changed.
+// When either read fails, changed is every key it sent, deleted or reverted, and
+// fields_unverified, by which the rule explains none. skiplock is no key.
+func guestConfigDetails(fields map[string]string, before, after map[string]json.RawMessage, kind pvefield.Kind) map[string]any {
+	details := map[string]any{"fields": fields}
+	if moved, ok := movedFields(before, after, kind); ok {
+		details["changed"] = moved
+		return details
+	}
 	form := url.Values{}
 	for k, v := range fields {
 		if k != "revert" && k != "skiplock" {
 			form.Set(k, v)
 		}
 	}
-	changed := slices.Concat(auditSentOf(form).changed(before, kind), pvefield.SplitList(fields["revert"]))
-	slices.Sort(changed)
-	return auditChanges(map[string]any{"fields": fields}, "changed", slices.Compact(changed), before)
+	names := slices.Concat(auditSentOf(form).names(), pvefield.SplitList(fields["revert"]))
+	slices.Sort(names)
+	details["changed"] = slices.Compact(names)
+	details["fields_unverified"] = true
+	return details
 }
 
 // movedFields is what a synchronous write changed: the fields of its object

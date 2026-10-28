@@ -854,12 +854,14 @@ func (h *ContainerHandler) SetContainerConfig(c fiber.Ctx, p *apischema.Params) 
 		return err
 	}
 
-	before := readBefore(c.Context(), pxClient)(proxmox.ObserveGuestConfig(node.Name, "lxc", int(ct.Vmid)))
+	read := readBefore(c.Context(), pxClient)
+	before := read(proxmox.ObserveGuestConfig(node.Name, "lxc", int(ct.Vmid)))
 	if err := pxClient.SetContainerConfig(c.Context(), node.Name, int(ct.Vmid), fields); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	configDetails, _ := json.Marshal(guestConfigDetails(fields, before, pvefield.LXCConfig))
+	after := read(proxmox.ObserveGuestConfig(node.Name, "lxc", int(ct.Vmid)))
+	configDetails, _ := json.Marshal(guestConfigDetails(fields, before, after, pvefield.LXCConfig))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "container", ct.ID.String(), "config_update", configDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "config_update")
 
