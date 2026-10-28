@@ -1,9 +1,10 @@
 -- Automatic in-place upgrade — no manual steps, no operator action required.
 -- Purely additive: one new table, a column with a default on
--- cluster_object_baselines (000119), and two with a default on
--- cluster_object_changes (000119). Nothing existing is read, rewritten or
--- backfilled, so an interrupted run leaves nothing behind — the migration is
--- one transaction.
+-- cluster_object_baselines (000119), two with a default on
+-- cluster_object_changes (000119), and a partial index on task_history (built
+-- in the migration's transaction, a lock on that table for as long as the
+-- build takes). Nothing existing is read, rewritten or backfilled, so an
+-- interrupted run leaves nothing behind — the migration is one transaction.
 --
 -- The observer (internal/collector/observer.go) records edits made directly in
 -- Proxmox that reach no audit row: a guest's configuration, a pool, a storage
@@ -73,3 +74,9 @@ ALTER TABLE cluster_object_baselines
 ALTER TABLE cluster_object_changes
     ADD COLUMN IF NOT EXISTS members_joined TEXT[] NOT NULL DEFAULT '{}',
     ADD COLUMN IF NOT EXISTS members_left   TEXT[] NOT NULL DEFAULT '{}';
+
+-- A realm sync's removals are explained by its own log (ClassifyObservedChanges'
+-- task_logs), and the collector finds the syncs whose logs it reads by this:
+-- the day's tasks of one worker type, a handful among thousands.
+CREATE INDEX IF NOT EXISTS idx_task_history_realm_syncs
+    ON task_history (cluster_id, started_at) WHERE task_type = 'auth-realm-sync';

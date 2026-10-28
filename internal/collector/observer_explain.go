@@ -67,9 +67,10 @@ type explainRule struct {
 	// how many came and went: add1 one in, del1 one out, edit1 one in and one
 	// out or one moved, adds any number in, dels any number out; "" anything.
 	Counts string `json:"counts"`
-	// GranteeRemoved keeps a row's ACL grantees leaving to those whose own
-	// removal (pve_user, pve_group or pve_token removed) its task overlaps.
-	GranteeRemoved bool `json:"grantee_removed"`
+	// LogNames keeps a rule to what the row's task logged (a realm sync's log,
+	// readRealmSyncLogs): removed:users or removed:groups, the object it
+	// removed; purged, an ACL's grantee whose entries it purged.
+	LogNames string `json:"log_names"`
 	// Appeared keeps a rule to fields the object did not have before
 	// (detail.fields_appeared): a value Proxmox fills in where none was.
 	Appeared bool `json:"appeared"`
@@ -617,9 +618,10 @@ func aclDeleteRules(auditType, who, grants string) []explainRule {
 
 // realmSyncRules is a realm sync (pve-access-control API2/Domains.pm sync,
 // worker auth-realm-sync and the scheduled job's, both naming the realm). It
-// adds and removes that realm's users (user@realm) and the groups it syncs
-// (name-realm, LDAP.pm get_groups), and with remove-vanished takes their ACL
-// entries out. A group's edit is its comment, which overwriting clears, and its
+// adds that realm's users (user@realm) and the groups it syncs (name-realm,
+// LDAP.pm get_groups), and with remove-vanished removes them, or purges their
+// ACL entries, or both: what it removed and purged, its log says
+// (realm_sync_log.go), and only that is explained. A group's edit is its comment, which overwriting clears, and its
 // users, which it replaces whole (update_groups): that realm's users join it,
 // and whoever was in it may leave. So a user joins only a group the sync
 // makes, and may leave one whoever it is. A dry run (auth-realm-sync-test)
@@ -638,11 +640,13 @@ func aclDeleteRules(auditType, who, grants string) []explainRule {
 var realmSyncRules = func() []explainRule {
 	const sync = `^auth-realm-sync$`
 	return slices.Concat(
-		inDirections(explainRule{Kind: "pve_user", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s"},
-			"added", "removed"),
-		inDirections(explainRule{Kind: "pve_group", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s"},
-			"added", "removed"),
 		[]explainRule{
+			{Kind: "pve_user", Change: "added", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s"},
+			{Kind: "pve_user", Change: "removed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
+				LogNames: "removed:users"},
+			{Kind: "pve_group", Change: "added", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s"},
+			{Kind: "pve_group", Change: "removed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
+				LogNames: "removed:groups"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
 				FieldRe: `^(enable|expire|firstname|lastname|email|comment|keys)$`},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
@@ -657,12 +661,12 @@ var realmSyncRules = func() []explainRule {
 				FieldRe: `^users$`, Member: "left"},
 			// With remove-vanished acl a sync purges the ACL of what vanished
 			// from the directory: a grantee leaving is this sync's only when
-			// the same sync removed that user or group.
+			// its log says it purged that user's or group's entries.
 			{Kind: "pve_acl", Change: "changed", MatchKey: "cluster", WorkerRe: sync,
 				FieldRe: `^(users|user_grants|groups|group_grants)$`, Member: "left",
-				MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s", GranteeRemoved: true},
+				MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s", LogNames: "purged"},
 			{Kind: "pve_acl", Change: "removed", MatchKey: "cluster", WorkerRe: sync, Member: "sole",
-				MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s", GranteeRemoved: true},
+				MemberOf: "upid:users:*@%s|user_grants:*@%s|groups:*-%s|group_grants:*-%s", LogNames: "purged"},
 		},
 	)
 }()
@@ -727,7 +731,7 @@ func observedLookback(interval time.Duration) time.Duration {
 // so a task that explains a change made in the Proxmox GUI is on record first;
 // a change waits for a pass whose ingest listed every online node, the day at
 // most. A failure is only logged: the changes stay unclassified, and hidden.
-func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster, allNodesListed bool) {
+func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster, allNodesListed bool, taskLogs json.RawMessage) {
 	ctx, cancel := context.WithTimeout(ctx, observeClassifyTimeout)
 	defer cancel()
 	for ctx.Err() == nil {
@@ -740,6 +744,7 @@ func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster
 			AllNodesListed:  allNodesListed,
 			GiveUpBefore:    time.Now().Add(-statusChangeGiveUp),
 			MaxRows:         batch,
+			TaskLogs:        taskLogs,
 		})
 		s.settleBatch(cluster.ID, batch, err != nil && (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded)))
 		if err != nil {

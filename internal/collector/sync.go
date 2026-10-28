@@ -180,6 +180,7 @@ type SyncQueries interface {
 	ClassifyClusterObjectChanges(ctx context.Context, arg db.ClassifyClusterObjectChangesParams) (int64, error)
 	// Edits made directly in Proxmox, which the observer files (observer.go)
 	ClassifyObservedChanges(ctx context.Context, arg db.ClassifyObservedChangesParams) (int64, error)
+	ListRealmSyncTasks(ctx context.Context, arg db.ListRealmSyncTasksParams) ([]db.ListRealmSyncTasksRow, error)
 	ClassifyGlobalObjectChanges(ctx context.Context, arg db.ClassifyGlobalObjectChangesParams) (int64, error)
 	ShowUnclassifiedObservedChanges(ctx context.Context, before time.Time) (int64, error)
 	// Guest status changes and backup job logs (the History tab)
@@ -346,6 +347,9 @@ type Syncer struct {
 	// changes a classification statement decides when not observeClassifyBatch
 	// (classifyBatch).
 	observeBatches sync.Map
+	// realmSyncLogs is, per "<cluster>/<UPID>", what a finished realm sync's
+	// log says it removed and purged (readRealmSyncLogs).
+	realmSyncLogs sync.Map
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
@@ -834,7 +838,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// too long for theirs. Every pass, even one that listed no node.
 	s.classifyStatusChanges(ctx, cluster, listedNodes, offlineNodes)
 	s.classifyObjectChanges(ctx, cluster, listedNodes)
-	s.classifyObservedChanges(ctx, cluster, everyOnlineNodeListed(nodes, listedNodes))
+	s.classifyObservedChanges(ctx, cluster, everyOnlineNodeListed(nodes, listedNodes), s.readRealmSyncLogs(ctx, client, cluster))
 
 	// Only notify the frontend when inventory data actually changed
 	// (VM status transitions, VMs added/removed). This avoids triggering

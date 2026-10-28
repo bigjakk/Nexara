@@ -118,7 +118,8 @@ type mockQueries struct {
 	// classifications of its changes asked for.
 	observed          observeStore
 	classifyObserved  []db.ClassifyObservedChangesParams
-	classifyErrs      []error // the next ClassifyObservedChanges calls' errors, in turn
+	realmSyncTasks    []db.ListRealmSyncTasksRow // ListRealmSyncTasks answers these
+	classifyErrs      []error                    // the next ClassifyObservedChanges calls' errors, in turn
 	classifyGlobalObs int
 	pbsJobBaselines   []db.MarkPBSJobBaselineParams
 }
@@ -549,6 +550,10 @@ func (m *mockQueries) InsertClusterObjectChange(_ context.Context, arg db.Insert
 func (m *mockQueries) ClassifyClusterObjectChanges(_ context.Context, arg db.ClassifyClusterObjectChangesParams) (int64, error) {
 	m.classifyObjectCalls = append(m.classifyObjectCalls, arg)
 	return 0, nil
+}
+
+func (m *mockQueries) ListRealmSyncTasks(_ context.Context, _ db.ListRealmSyncTasksParams) ([]db.ListRealmSyncTasksRow, error) {
+	return m.realmSyncTasks, nil
 }
 
 func (m *mockQueries) ClassifyObservedChanges(_ context.Context, arg db.ClassifyObservedChangesParams) (int64, error) {

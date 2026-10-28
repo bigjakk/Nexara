@@ -129,9 +129,10 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- it to the fields its details say it set and, with derived, those Proxmox
 -- derives from them (fields_named, below); appeared to fields the change
 -- names in detail.fields_appeared, absent from the object before; audit_id_is
--- to rows filed under that marker id; grantee_removed (an ACL's grantee
--- leaving) to a grantee whose own removal, a user, group or token removed
--- change, the same row's task overlaps.
+-- to rows filed under that marker id; log_names to what the row's task logged
+-- (task_logs, a realm sync's, by UPID): removed:<users|groups> to the change's
+-- own object among those it removed, purged to an ACL's grantee leaving among
+-- those whose entries it purged.
 --
 -- A change is explained when everything it changed is: each member that joined
 -- or left a list of ids (members_joined, members_left), each other field in
@@ -174,7 +175,7 @@ WITH rules AS MATERIALIZED (
            e.value->>'counts'              AS counts,
            e.value->>'fields_from'         AS fields_from,
            e.value->>'audit_id_is'         AS audit_id_is,
-           COALESCE((e.value->>'grantee_removed')::bool, false) AS grantee_removed,
+           COALESCE(e.value->>'log_names', '') AS log_names,
            COALESCE(e.value->'derived', '{}')  AS derived,
            COALESCE((e.value->>'appeared')::bool, false) AS appeared
     FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
@@ -201,7 +202,7 @@ WITH rules AS MATERIALIZED (
     -- can use.
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
+           r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
            a.id AS audit_id, a.resource_id AS audit_resource_id, a.vmid AS audit_vmid, a.action, a.details,
            a.created_at
     FROM explainable p
@@ -212,7 +213,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
+           r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'node'
@@ -222,7 +223,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
+           r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'vmid'
@@ -232,7 +233,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
+           r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'sid'
@@ -243,7 +244,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
+           r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'cluster'
@@ -253,7 +254,7 @@ WITH rules AS MATERIALIZED (
     UNION ALL
     SELECT p.id, p.cluster_id, p.resource_id, p.win_from, p.win_to, r.untasked, r.action_re, r.except_re,
            r.worker_re, r.field_re, r.detail_key, r.object, r.member, r.member_of, r.counts, r.fields_from,
-           r.audit_id_is, r.grantee_removed, r.detail_value, r.derived, r.appeared,
+           r.audit_id_is, r.log_names, r.detail_value, r.derived, r.appeared,
            a.id, a.resource_id, a.vmid, a.action, a.details, a.created_at
     FROM explainable p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key LIKE 'details:_%'
@@ -262,10 +263,9 @@ WITH rules AS MATERIALIZED (
                     AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
 ), hits AS (
     SELECT k.id, k.field_re, k.member, k.member_of = '' AS any_member, n.member_names, k.counts, k.fields_from,
-           n.fields_named, k.audit_id, k.grantee_removed, k.appeared,
-           k.created_at,
-           COALESCE(th.started_at, k.created_at) AS task_start,
-           CASE WHEN th.upid IS NULL THEN k.created_at ELSE COALESCE(th.finished_at, now()) END AS task_end
+           n.fields_named, k.audit_id, k.log_names, k.appeared,
+           sqlc.arg('task_logs')::jsonb -> (k.details->>'upid') AS task_log,
+           k.created_at
     FROM candidates k
     CROSS JOIN LATERAL (
         -- The value the rule's object takes from the row.
@@ -350,6 +350,9 @@ WITH rules AS MATERIALIZED (
       AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
       AND (k.detail_key = '' OR COALESCE(k.details->>k.detail_key, '') <> '')
       AND (k.detail_value = '' OR k.details->>k.detail_key = k.detail_value)
+      -- A realm sync removes only what its log says it removed.
+      AND (k.log_names NOT LIKE 'removed:%' OR COALESCE(
+           sqlc.arg('task_logs')::jsonb -> (k.details->>'upid') -> 'removed' -> substr(k.log_names, 9) ? k.resource_id, false))
       -- A marker names no object, so it explains the one change of its kind
       -- and direction whose window holds it, and none when two do: the case
       -- it is written for is a create whose id could not be told apart.
@@ -405,12 +408,9 @@ WITH rules AS MATERIALIZED (
                   WHEN 'joined' THEN n.dir = 'joined' AND (h.any_member OR EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END))
                                   OR n.dir = '' AND p.change = 'added' AND (h.any_member OR cardinality(p.members_joined) > 0 AND
                                      NOT EXISTS (SELECT 1 FROM unnest(p.members_joined) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END)))
-                  WHEN 'left'   THEN n.dir = 'left' AND (NOT h.grantee_removed OR EXISTS (SELECT 1 FROM cluster_object_changes o
-                                     WHERE o.cluster_id = p.cluster_id AND o.change = 'removed' AND o.observed_by = 'observer'
-                                       AND o.resource_type = CASE split_part(n.member, ':', 1) WHEN 'users' THEN 'pve_user' WHEN 'user_grants' THEN 'pve_user' WHEN 'groups' THEN 'pve_group' WHEN 'group_grants' THEN 'pve_group' WHEN 'tokens' THEN 'pve_token' WHEN 'token_grants' THEN 'pve_token' END
-                                       AND o.resource_id = substring(n.member from '[^:]*$')
-                                       AND h.task_start <= o.observed_at + interval '30 seconds'
-                                       AND h.task_end >= GREATEST(LEAST(o.last_seen_at, o.observed_at) - interval '2 minutes', o.observed_at - make_interval(secs => sqlc.arg('lookback_seconds')::int))))
+                  WHEN 'left'   THEN n.dir = 'left' AND (h.log_names <> 'purged' OR COALESCE(h.task_log -> 'purged'
+                                     -> CASE split_part(n.member, ':', 1) WHEN 'users' THEN 'users' WHEN 'user_grants' THEN 'users' WHEN 'groups' THEN 'groups' WHEN 'group_grants' THEN 'groups' END
+                                     ? substring(n.member from '[^:]*$'), false))
                                  AND (h.any_member OR EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN n.member = nm ELSE starts_with(n.member, split_part(nm, '*', 1)) AND right(n.member, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(n.member) >= length(nm) END))
                                   OR n.dir = '' AND p.change = 'removed' AND (h.any_member OR cardinality(p.members_left) > 0 AND
                                      NOT EXISTS (SELECT 1 FROM unnest(p.members_left) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END)))
@@ -420,12 +420,9 @@ WITH rules AS MATERIALIZED (
                   -- An object removed with its last members: every one is named.
                   WHEN 'sole'   THEN n.dir = '' AND p.change = 'removed' AND cardinality(p.members_left) > 0
                                  AND NOT EXISTS (SELECT 1 FROM unnest(p.members_left) AS m WHERE NOT EXISTS (SELECT 1 FROM unnest(h.member_names) AS nm WHERE CASE WHEN strpos(nm, '*') = 0 THEN m = nm ELSE starts_with(m, split_part(nm, '*', 1)) AND right(m, length(split_part(nm, '*', 2))) = split_part(nm, '*', 2) AND length(m) >= length(nm) END))
-                                 AND (NOT h.grantee_removed OR NOT EXISTS (SELECT 1 FROM unnest(p.members_left) AS m WHERE NOT EXISTS (SELECT 1 FROM cluster_object_changes o
-                                     WHERE o.cluster_id = p.cluster_id AND o.change = 'removed' AND o.observed_by = 'observer'
-                                       AND o.resource_type = CASE split_part(m, ':', 1) WHEN 'users' THEN 'pve_user' WHEN 'user_grants' THEN 'pve_user' WHEN 'groups' THEN 'pve_group' WHEN 'group_grants' THEN 'pve_group' WHEN 'tokens' THEN 'pve_token' WHEN 'token_grants' THEN 'pve_token' END
-                                       AND o.resource_id = substring(m from '[^:]*$')
-                                       AND h.task_start <= o.observed_at + interval '30 seconds'
-                                       AND h.task_end >= GREATEST(LEAST(o.last_seen_at, o.observed_at) - interval '2 minutes', o.observed_at - make_interval(secs => sqlc.arg('lookback_seconds')::int)))))
+                                 AND (h.log_names <> 'purged' OR NOT EXISTS (SELECT 1 FROM unnest(p.members_left) AS m WHERE NOT COALESCE(h.task_log -> 'purged'
+                                     -> CASE split_part(m, ':', 1) WHEN 'users' THEN 'users' WHEN 'user_grants' THEN 'users' WHEN 'groups' THEN 'groups' WHEN 'group_grants' THEN 'groups' END
+                                     ? substring(m from '[^:]*$'), false)))
                   ELSE false
               END
         ORDER BY h.created_at DESC, h.audit_id
@@ -562,3 +559,12 @@ SET explained = false
 WHERE explained IS NULL
   AND (observed_by = 'observer' OR cluster_id IS NULL)
   AND observed_at < sqlc.arg('before')::timestamptz;
+
+-- ListRealmSyncTasks is a cluster's realm syncs since a time, whose logs say
+-- what each removed and whose ACL entries it purged (readRealmSyncLogs).
+-- name: ListRealmSyncTasks :many
+SELECT upid, node, status
+FROM task_history
+WHERE cluster_id = sqlc.arg('cluster_id') AND task_type = 'auth-realm-sync'
+  AND started_at >= sqlc.arg('since')::timestamptz
+ORDER BY started_at;

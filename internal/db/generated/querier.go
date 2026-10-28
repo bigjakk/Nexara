@@ -252,9 +252,10 @@ type Querier interface {
 	// it to the fields its details say it set and, with derived, those Proxmox
 	// derives from them (fields_named, below); appeared to fields the change
 	// names in detail.fields_appeared, absent from the object before; audit_id_is
-	// to rows filed under that marker id; grantee_removed (an ACL's grantee
-	// leaving) to a grantee whose own removal, a user, group or token removed
-	// change, the same row's task overlaps.
+	// to rows filed under that marker id; log_names to what the row's task logged
+	// (task_logs, a realm sync's, by UPID): removed:<users|groups> to the change's
+	// own object among those it removed, purged to an ACL's grantee leaving among
+	// those whose entries it purged.
 	//
 	// A change is explained when everything it changed is: each member that joined
 	// or left a list of ids (members_joined, members_left), each other field in
@@ -1907,6 +1908,9 @@ type Querier interface {
 	// The prune keep-set is built from this plus the newest release, so a pin held
 	// by one cluster protects that ISO on every cluster.
 	ListPinnedVirtioWinVersions(ctx context.Context) ([]string, error)
+	// ListRealmSyncTasks is a cluster's realm syncs since a time, whose logs say
+	// what each removed and whose ACL entries it purged (readRealmSyncLogs).
+	ListRealmSyncTasks(ctx context.Context, arg ListRealmSyncTasksParams) ([]ListRealmSyncTasksRow, error)
 	// ListRecentAuditLogEnriched backs the dashboard activity feed. It takes the
 	// caller's view:audit scope (see the accessible_cluster_ids note on
 	// ListAuditLogAdvanced) rather than trimming afterwards: LIMIT 50 applied

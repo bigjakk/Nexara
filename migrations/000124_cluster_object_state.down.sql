@@ -1,3 +1,4 @@
+DROP INDEX IF EXISTS idx_task_history_realm_syncs;
 ALTER TABLE cluster_object_changes
     DROP COLUMN IF EXISTS members_left,
     DROP COLUMN IF EXISTS members_joined;

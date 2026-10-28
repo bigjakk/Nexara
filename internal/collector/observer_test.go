@@ -1386,7 +1386,7 @@ func TestObservedClassifyBatchShrinksAfterATimeout(t *testing.T) {
 	s := &Syncer{queries: mq, logger: testLogger()}
 	cluster := db.Cluster{ID: uuid.New()}
 	for range 4 {
-		s.classifyObservedChanges(context.Background(), cluster, true)
+		s.classifyObservedChanges(context.Background(), cluster, true, json.RawMessage(`{}`))
 	}
 	got := make([]int32, 0, len(mq.classifyObserved))
 	for _, c := range mq.classifyObserved {
@@ -1555,8 +1555,11 @@ func TestObservedChangeRules(t *testing.T) {
 		if r.Kind == "pve_role" && r.Change == "changed" && r.MemberOf == "" {
 			t.Errorf("rule %+v: a role's update explains only the privileges its row lists", r)
 		}
-		if r.Kind == "pve_acl" && strings.Contains(r.WorkerRe, "auth-realm-sync") && !r.GranteeRemoved {
-			t.Errorf("rule %+v: a realm sync purges only the ACL of what it removed", r)
+		// A realm sync removes, and purges the ACL of, only what its log says.
+		if strings.Contains(r.WorkerRe, "auth-realm-sync") && (r.Kind == "pve_acl" && r.LogNames != "purged" ||
+			r.Change == "removed" && r.Kind != "pve_acl" && !strings.HasPrefix(r.LogNames, "removed:")) ||
+			r.LogNames != "" && r.WorkerRe != `^auth-realm-sync$` {
+			t.Errorf("rule %+v: a realm sync's removals are what its log names, and only its log is read", r)
 		}
 		if source, formats, _ := strings.Cut(r.MemberOf, ":"); r.Kind == "pve_acl" && source == "audit" {
 			pinned := map[string]*regexp.Regexp{
