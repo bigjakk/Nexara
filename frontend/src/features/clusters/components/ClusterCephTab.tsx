@@ -227,7 +227,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
           {filesystems.length > 0 && (
             <TabsTrigger value="fs">CephFS ({filesystems.length})</TabsTrigger>
           )}
-          <HistoryTabTrigger />
+          <HistoryTabTrigger history={clusterHistories.ceph(clusterId)} />
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">

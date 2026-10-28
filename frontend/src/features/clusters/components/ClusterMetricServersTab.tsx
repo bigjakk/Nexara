@@ -24,7 +24,6 @@ import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { useAuth } from "@/hooks/useAuth";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
-import { HistoryButton } from "@/features/history/components/HistoryDrawer";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import {
   type MetricServerConfig,
@@ -73,8 +72,8 @@ export function ClusterMetricServersTab({
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>
           Metric Servers
-          <HistoryButton
-            {...clusterHistories.metrics(clusterId)}
+          <ClusterHistoryButton
+            history={clusterHistories.metrics(clusterId)}
             title="metric servers"
           />
         </CardTitle>

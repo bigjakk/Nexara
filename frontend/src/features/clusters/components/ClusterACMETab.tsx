@@ -71,7 +71,7 @@ export function ClusterACMETab({ clusterId }: ClusterACMETabProps) {
         <TabsTrigger value="accounts">Accounts</TabsTrigger>
         <TabsTrigger value="plugins">Plugins</TabsTrigger>
         <TabsTrigger value="certificates">Node Certificates</TabsTrigger>
-        <HistoryTabTrigger />
+        <HistoryTabTrigger history={clusterHistories.certificates(clusterId)} />
       </TabsList>
       <TabsContent value="accounts" className="mt-4">
         <AccountsTab clusterId={clusterId} />

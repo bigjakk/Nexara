@@ -17,7 +17,7 @@ export function ClusterNetworksTab({ clusterId }: ClusterNetworksTabProps) {
       <TabsList>
         <TabsTrigger value="interfaces">Interfaces</TabsTrigger>
         <TabsTrigger value="sdn">SDN</TabsTrigger>
-        <HistoryTabTrigger />
+        <HistoryTabTrigger history={clusterHistories.networks(clusterId)} />
       </TabsList>
       <TabsContent value="interfaces" className="mt-4">
         <NetworkInterfaceTable clusterId={clusterId} />

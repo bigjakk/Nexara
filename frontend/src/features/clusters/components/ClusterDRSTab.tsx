@@ -21,7 +21,7 @@ export function ClusterDRSTab({ clusterId }: ClusterDRSTabProps) {
         <TabsTrigger value="configuration">Configuration</TabsTrigger>
         <TabsTrigger value="rules">Rules</TabsTrigger>
         <TabsTrigger value="migrations">Migrations</TabsTrigger>
-        <HistoryTabTrigger />
+        <HistoryTabTrigger history={clusterHistories.drs(clusterId)} />
       </TabsList>
 
       <TabsContent value="configuration" className="space-y-6">

@@ -107,8 +107,9 @@ func describeSelection(sel handlers.HistorySelection) string {
 // what it promises, one row per route (a few more for a spelling that needs
 // decoding): the rows its selector asks for, from the request's path as the
 // SPA sends it; and a gate that is view:audit and exactly the permission of the
-// object's own page, read off a route of that page — a History must not open to
-// someone its object's page is closed to.
+// page it belongs to, read off a route of that page — a tab's History off the
+// tab's list route, an object's off the object's page: a History must not open
+// to someone its page is closed to.
 func TestClusterPageHistoryRoutes(t *testing.T) {
 	t.Parallel()
 	const tmpl = "9d3a7c10-5f1e-4b8a-9c2d-0a1b2c3d4e5f"
@@ -120,7 +121,7 @@ func TestClusterPageHistoryRoutes(t *testing.T) {
 		{"ha/resources/:sid", "ha/resources/102", "", "ha_resource=102 ha_resource=vm:102 ha_resource=ct:102 guest 102 workers ha%"},
 		{"ha/groups/:group", "ha/groups/group01", haScope + "/groups", "ha_group=group01"},
 		{"ha/rules/:rule", "ha/rules/rule01", haScope + "/rules", "ha_rule=rule01"},
-		{"pools", "pools", clusterScope + "/pools/:pool_id", "pool*"},
+		{"pools", "pools", clusterScope + "/pools", "pool*"},
 		{"pools/:pool_id", "pools/pool01", clusterScope + "/pools/:pool_id", "pool=pool01 vm.old_pool=pool01 vm.new_pool=pool01"},
 		{"mappings", "mappings", clusterScope + "/usb-mappings", "usb_mapping* pci_mapping*"},
 		{"mappings/usb/:mapping_id", "mappings/usb/map01", clusterScope + "/usb-mappings", "usb_mapping=map01"},
@@ -218,28 +219,31 @@ func TestClusterPageHistoryRoutes(t *testing.T) {
 }
 
 // The SPA asks for these Histories at the paths in cluster-histories.ts, each
-// parameter an interpolation; a route renamed on one side only is a History
-// that answers 404. Compared by shape — the literal segments and where the
-// parameters are — one for one.
+// parameter an interpolation, and offers each to a caller who holds the view
+// permission written beside the path; a route renamed on one side only is a
+// History that answers 404, and a permission that differs is a button that
+// answers 403 or hides from someone who may read it. Compared by shape — the
+// literal segments and where the parameters are — and permission, one for one.
 func TestClusterPageHistoryPathsAreTheSPAs(t *testing.T) {
 	t.Parallel()
 	src, err := os.ReadFile("../../frontend/src/features/history/lib/cluster-histories.ts")
 	if err != nil {
 		t.Fatal(err)
 	}
-	templates := regexp.MustCompile("apiPath`(/api/v1/[^`?]+)").FindAllStringSubmatch(string(src), -1)
+	templates := regexp.MustCompile("placement\\(\\s*k\\.\\w+,\\s*(?:c|null),\\s*\"(\\w+)\",\\s*\\(q\\) =>\\s*apiPath`(/api/v1/[^`?]+)").
+		FindAllStringSubmatch(string(src), -1)
 	routes := clusterPageHistoryRoutes()
 	spa, server := make([]string, 0, len(templates)), make([]string, 0, len(routes))
 	for _, m := range templates {
-		spa = append(spa, regexp.MustCompile(`\$\{[^}]*\}`).ReplaceAllString(m[1], ":p"))
+		spa = append(spa, regexp.MustCompile(`\$\{[^}]*\}`).ReplaceAllString(m[2], ":p")+" view:"+m[1])
 	}
 	for _, r := range routes {
-		server = append(server, regexp.MustCompile(`:[a-z_]+`).ReplaceAllString(r.Path, ":p"))
+		server = append(server, regexp.MustCompile(`:[a-z_]+`).ReplaceAllString(r.Path, ":p")+" view:"+r.Resource)
 	}
 	slices.Sort(spa)
 	slices.Sort(server)
 	if !slices.Equal(spa, server) {
-		t.Errorf("the SPA reads %d History paths and the server declares %d; the SPA's:\n%s\nthe server's:\n%s",
+		t.Errorf("the SPA reads %d Histories and the server declares %d; the SPA's:\n%s\nthe server's:\n%s",
 			len(spa), len(server), strings.Join(spa, "\n"), strings.Join(server, "\n"))
 	}
 }

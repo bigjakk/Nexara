@@ -1923,7 +1923,7 @@ Every schedule carries `run_as`: the user whose grants its runs read under, stam
 | POST | `/audit-log/syslog-test` | Test syslog forwarding |
 | GET | `/clusters/:id/audit-log` | List audit entries for a cluster (supports `limit`/`offset`). `404` when the cluster does not exist: the entries of a removed cluster are read from `/audit-log` |
 | GET | `/clusters/:id/history/ha` | What happened to the cluster's HA resources, groups and rules (`view:audit` and `view:ha`) |
-| GET | `/clusters/:id/history/pools` | What happened to the cluster's resource pools (`view:pool`) |
+| GET | `/clusters/:id/history/pools` | What happened to the cluster's resource pools (`view:cluster`, as the pool list; one pool's, `view:pool`) |
 | GET | `/clusters/:id/history/mappings` | What happened to its USB and PCI resource mappings (`view:cluster`) |
 | GET | `/clusters/:id/history/access` | What happened to its Proxmox users, tokens, groups, roles and permissions (`view:access`) |
 | GET | `/clusters/:id/history/replication` | What happened to its replication jobs (`view:replication`) |

@@ -73,7 +73,6 @@ import {
 } from "@/features/clusters/api/cluster-queries";
 import { formatBytes } from "@/lib/format";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
-import { HistoryButton } from "@/features/history/components/HistoryDrawer";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface ClusterPoolsTabProps {
@@ -133,8 +132,8 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>
           Resource Pools
-          <HistoryButton
-            {...clusterHistories.pools(clusterId)}
+          <ClusterHistoryButton
+            history={clusterHistories.pools(clusterId)}
             title="resource pools"
           />
         </CardTitle>

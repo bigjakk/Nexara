@@ -341,7 +341,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         <TabsTrigger value="status">Status</TabsTrigger>
         <TabsTrigger value="resources">Resources</TabsTrigger>
         <TabsTrigger value="groups">Groups / Rules</TabsTrigger>
-        <HistoryTabTrigger />
+        <HistoryTabTrigger history={clusterHistories.ha(clusterId)} />
       </TabsList>
 
       <TabsContent value="status" className="mt-4 space-y-4">

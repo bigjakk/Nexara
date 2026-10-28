@@ -69,7 +69,7 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
         <TabsTrigger value="groups">Security Groups</TabsTrigger>
         <TabsTrigger value="log">Log</TabsTrigger>
         <TabsTrigger value="options">Options</TabsTrigger>
-        <HistoryTabTrigger />
+        <HistoryTabTrigger history={clusterHistories.firewall(clusterId)} />
       </TabsList>
       <TabsContent value="rules" className="mt-4">
         <FirewallRulesTable clusterId={clusterId} />

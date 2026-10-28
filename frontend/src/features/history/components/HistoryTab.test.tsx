@@ -39,27 +39,36 @@ afterEach(() => {
 });
 
 // The tab a cluster page tab strip gets, and the button a row gets: both only
-// for a caller who can read what they open, and neither reads before it is opened.
+// for a caller who can read what they open — the audit log, the task log and
+// the tab's or object's own view permission — and neither reads before it is
+// opened.
 describe("a cluster page tab's History", () => {
+  const ha = clusterHistories.ha("c1");
   const strip = (
     <Tabs defaultValue="history">
       <TabsList>
-        <HistoryTabTrigger />
+        <HistoryTabTrigger history={ha} />
       </TabsList>
-      <HistoryTabContent history={clusterHistories.ha("c1")} />
+      <HistoryTabContent history={ha} />
     </Tabs>
   );
+  const grants = ["view:audit", "view:task", "view:ha"];
 
-  it("is offered with view:audit and view:task, and reads its route", async () => {
+  it("is offered with all three grants, and reads its route", async () => {
     mockedPage.mockReset();
     mockedPage.mockResolvedValue({ items: [], total: 0 });
-    setPermissions(["view:audit"]);
-    const { unmount } = renderWithProviders(strip);
-    expect(screen.queryByRole("tab", { name: "History" })).toBeNull();
-    expect(mockedPage).not.toHaveBeenCalled();
-    unmount();
+    for (const missing of grants) {
+      setPermissions(grants.filter((g) => g !== missing));
+      const { unmount } = renderWithProviders(strip);
+      expect(
+        screen.queryByRole("tab", { name: "History" }),
+        `without ${missing}`,
+      ).toBeNull();
+      expect(mockedPage).not.toHaveBeenCalled();
+      unmount();
+    }
 
-    setPermissions(["view:audit", "view:task"]);
+    setPermissions(grants);
     renderWithProviders(strip);
     expect(screen.getByRole("tab", { name: "History" })).toBeInTheDocument();
     // It opens on the last week, as the server's default window does.
@@ -73,12 +82,14 @@ describe("a cluster page tab's History", () => {
 });
 
 describe("a row's History button", () => {
-  // A name no browser can send as a path segment has nothing to ask for.
+  // A name no browser can send as a path segment has nothing to ask for, and a
+  // caller without the object's view permission would be answered 403.
   it.each([
-    ["group01", true],
-    ["..", false],
-  ])("for %s is shown: %s", (name, shown) => {
-    setPermissions(["view:audit", "view:task"]);
+    ["group01", ["view:ha"], true],
+    ["..", ["view:ha"], false],
+    ["group01", [], false],
+  ])("for %s with %o is shown: %s", (name, extra, shown) => {
+    setPermissions(["view:audit", "view:task", ...extra]);
     renderWithProviders(
       <ClusterHistoryButton
         history={clusterHistories.haGroup("c1", name)}

@@ -56,7 +56,7 @@ export function ClusterAccessTab({ clusterId }: ClusterAccessTabProps) {
         <TabsTrigger value="roles">Roles</TabsTrigger>
         <TabsTrigger value="permissions">Permissions</TabsTrigger>
         <TabsTrigger value="realms">Realms</TabsTrigger>
-        <HistoryTabTrigger />
+        <HistoryTabTrigger history={clusterHistories.access(clusterId)} />
       </TabsList>
 
       <TabsContent value="users" className="mt-4">

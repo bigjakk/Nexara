@@ -20,7 +20,6 @@ import {
 import { QueryFailureNote } from "@/components/QueryStateNotice";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
-import { usePermissions } from "@/hooks/usePermissions";
 import { ApiClientError } from "@/lib/api-client";
 import {
   useDRSRules,
@@ -36,7 +35,6 @@ interface DRSRulesTableProps {
 }
 
 export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
-  const { canView } = usePermissions();
   const manualQuery = useDRSRules(clusterId);
   const haQuery = useHARules(clusterId);
   const manualRules = manualQuery.data;
@@ -180,18 +178,16 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {/* A Proxmox HA rule's History is the HA tab's, and so
-                        its permission's. */}
+                    {/* A Proxmox HA rule's History is the HA tab's, and needs
+                        its view permission. */}
                     {rule.ha_rule_name !== undefined ? (
-                      canView("ha") && (
-                        <ClusterHistoryButton
-                          history={clusterHistories.haRule(
-                            clusterId,
-                            rule.ha_rule_name,
-                          )}
-                          title={rule.ha_rule_name}
-                        />
-                      )
+                      <ClusterHistoryButton
+                        history={clusterHistories.haRule(
+                          clusterId,
+                          rule.ha_rule_name,
+                        )}
+                        title={rule.ha_rule_name}
+                      />
                     ) : (
                       <ClusterHistoryButton
                         history={clusterHistories.drsRule(clusterId, rule.id)}

@@ -282,18 +282,26 @@ export const clusterHistoryKinds = {
 
 // ── The placements ───────────────────────────────────────────────────────
 
-/** A kind and where to read it: what <HistoryTimeline> and <HistoryButton> take. */
+/**
+ * A kind, where to read it, and the view permission it takes beyond view:audit
+ * and view:task — a tab's list route's, an object's page's — which is the
+ * server's gate (Resource in internal/api/registry_cluster_page_history.go).
+ * Offered only to a caller who holds it, so nothing offered answers 403 for
+ * want of it; the server holds the scope (a template's is instance-wide).
+ */
 export interface ClusterHistory {
   kind: HistoryKind;
+  permission: string;
   target: HistoryTarget;
 }
 
 function placement(
   kind: HistoryKind,
-  clusterId: string,
+  clusterId: string | null,
+  permission: string,
   path: (query: URLSearchParams) => ApiPath,
 ): ClusterHistory {
-  return { kind, target: { clusterId, path } };
+  return { kind, permission, target: { clusterId, path } };
 }
 
 const k = clusterHistoryKinds;
@@ -306,125 +314,150 @@ const k = clusterHistoryKinds;
  */
 export const clusterHistories = {
   ha: (c: string) =>
-    placement(k.ha, c, (q) => apiPath`/api/v1/clusters/${c}/history/ha?${q}`),
+    placement(
+      k.ha,
+      c,
+      "ha",
+      (q) => apiPath`/api/v1/clusters/${c}/history/ha?${q}`,
+    ),
   haResource: (c: string, sid: string) =>
     placement(
       k.haResource,
       c,
+      "ha",
       (q) => apiPath`/api/v1/clusters/${c}/history/ha/resources/${sid}?${q}`,
     ),
   haGroup: (c: string, group: string) =>
     placement(
       k.haGroup,
       c,
+      "ha",
       (q) => apiPath`/api/v1/clusters/${c}/history/ha/groups/${group}?${q}`,
     ),
   haRule: (c: string, rule: string) =>
     placement(
       k.haRule,
       c,
+      "ha",
       (q) => apiPath`/api/v1/clusters/${c}/history/ha/rules/${rule}?${q}`,
     ),
   pools: (c: string) =>
     placement(
       k.pools,
       c,
+      "cluster",
       (q) => apiPath`/api/v1/clusters/${c}/history/pools?${q}`,
     ),
   pool: (c: string, id: string) =>
     placement(
       k.pool,
       c,
+      "pool",
       (q) => apiPath`/api/v1/clusters/${c}/history/pools/${id}?${q}`,
     ),
   mappings: (c: string) =>
     placement(
       k.mappings,
       c,
+      "cluster",
       (q) => apiPath`/api/v1/clusters/${c}/history/mappings?${q}`,
     ),
   usbMapping: (c: string, id: string) =>
     placement(
       k.usbMapping,
       c,
+      "cluster",
       (q) => apiPath`/api/v1/clusters/${c}/history/mappings/usb/${id}?${q}`,
     ),
   pciMapping: (c: string, id: string) =>
     placement(
       k.pciMapping,
       c,
+      "cluster",
       (q) => apiPath`/api/v1/clusters/${c}/history/mappings/pci/${id}?${q}`,
     ),
   access: (c: string) =>
     placement(
       k.access,
       c,
+      "access",
       (q) => apiPath`/api/v1/clusters/${c}/history/access?${q}`,
     ),
   accessUser: (c: string, userid: string) =>
     placement(
       k.accessUser,
       c,
+      "access",
       (q) => apiPath`/api/v1/clusters/${c}/history/access/users/${userid}?${q}`,
     ),
   accessGroup: (c: string, id: string) =>
     placement(
       k.accessGroup,
       c,
+      "access",
       (q) => apiPath`/api/v1/clusters/${c}/history/access/groups/${id}?${q}`,
     ),
   accessRole: (c: string, id: string) =>
     placement(
       k.accessRole,
       c,
+      "access",
       (q) => apiPath`/api/v1/clusters/${c}/history/access/roles/${id}?${q}`,
     ),
   replication: (c: string) =>
     placement(
       k.replication,
       c,
+      "replication",
       (q) => apiPath`/api/v1/clusters/${c}/history/replication?${q}`,
     ),
   replicationJob: (c: string, id: string) =>
     placement(
       k.replicationJob,
       c,
+      "replication",
       (q) => apiPath`/api/v1/clusters/${c}/history/replication/${id}?${q}`,
     ),
   ceph: (c: string) =>
     placement(
       k.ceph,
       c,
+      "ceph",
       (q) => apiPath`/api/v1/clusters/${c}/history/ceph?${q}`,
     ),
   cephOsd: (c: string, id: number) =>
     placement(
       k.cephOsd,
       c,
+      "ceph",
       (q) => apiPath`/api/v1/clusters/${c}/history/ceph/osds/${id}?${q}`,
     ),
   cephPool: (c: string, name: string) =>
     placement(
       k.cephPool,
       c,
+      "ceph",
       (q) => apiPath`/api/v1/clusters/${c}/history/ceph/pools/${name}?${q}`,
     ),
   cephMonitor: (c: string, name: string) =>
     placement(
       k.cephMonitor,
       c,
+      "ceph",
       (q) => apiPath`/api/v1/clusters/${c}/history/ceph/monitors/${name}?${q}`,
     ),
   networks: (c: string) =>
     placement(
       k.networks,
       c,
+      "network",
       (q) => apiPath`/api/v1/clusters/${c}/history/networks?${q}`,
     ),
   networkInterface: (c: string, node: string, iface: string) =>
     placement(
       k.networkInterface,
       c,
+      "network",
       (q) =>
         apiPath`/api/v1/clusters/${c}/history/networks/interfaces/${node}/${keepColons(iface)}?${q}`,
     ),
@@ -432,18 +465,21 @@ export const clusterHistories = {
     placement(
       k.sdnZone,
       c,
+      "network",
       (q) => apiPath`/api/v1/clusters/${c}/history/networks/zones/${id}?${q}`,
     ),
   sdnVnet: (c: string, id: string) =>
     placement(
       k.sdnVnet,
       c,
+      "network",
       (q) => apiPath`/api/v1/clusters/${c}/history/networks/vnets/${id}?${q}`,
     ),
   sdnSubnet: (c: string, vnet: string, id: string) =>
     placement(
       k.sdnSubnet,
       c,
+      "network",
       (q) =>
         apiPath`/api/v1/clusters/${c}/history/networks/vnets/${vnet}/subnets/${keepColons(id)}?${q}`,
     ),
@@ -451,6 +487,7 @@ export const clusterHistories = {
     placement(
       k.sdnController,
       c,
+      "network",
       (q) =>
         apiPath`/api/v1/clusters/${c}/history/networks/controllers/${id}?${q}`,
     ),
@@ -458,24 +495,28 @@ export const clusterHistories = {
     placement(
       k.sdnIpam,
       c,
+      "network",
       (q) => apiPath`/api/v1/clusters/${c}/history/networks/ipams/${id}?${q}`,
     ),
   sdnDns: (c: string, id: string) =>
     placement(
       k.sdnDns,
       c,
+      "network",
       (q) => apiPath`/api/v1/clusters/${c}/history/networks/dns/${id}?${q}`,
     ),
   firewall: (c: string) =>
     placement(
       k.firewall,
       c,
+      "network",
       (q) => apiPath`/api/v1/clusters/${c}/history/firewall?${q}`,
     ),
   firewallAlias: (c: string, name: string) =>
     placement(
       k.firewallAlias,
       c,
+      "network",
       (q) =>
         apiPath`/api/v1/clusters/${c}/history/firewall/aliases/${name}?${q}`,
     ),
@@ -483,6 +524,7 @@ export const clusterHistories = {
     placement(
       k.firewallIpset,
       c,
+      "network",
       (q) =>
         apiPath`/api/v1/clusters/${c}/history/firewall/ipsets/${name}?${q}`,
     ),
@@ -490,27 +532,30 @@ export const clusterHistories = {
     placement(
       k.firewallGroup,
       c,
+      "network",
       (q) =>
         apiPath`/api/v1/clusters/${c}/history/firewall/groups/${name}?${q}`,
     ),
   /** A template belongs to no cluster: its History is read across all. */
-  firewallTemplate: (id: string): ClusterHistory => ({
-    kind: k.firewallTemplate,
-    target: {
-      clusterId: null,
-      path: (q) => apiPath`/api/v1/history/firewall-templates/${id}?${q}`,
-    },
-  }),
+  firewallTemplate: (id: string) =>
+    placement(
+      k.firewallTemplate,
+      null,
+      "network",
+      (q) => apiPath`/api/v1/history/firewall-templates/${id}?${q}`,
+    ),
   certificates: (c: string) =>
     placement(
       k.certificates,
       c,
+      "certificate",
       (q) => apiPath`/api/v1/clusters/${c}/history/certificates?${q}`,
     ),
   acmeAccount: (c: string, name: string) =>
     placement(
       k.acmeAccount,
       c,
+      "certificate",
       (q) =>
         apiPath`/api/v1/clusters/${c}/history/certificates/accounts/${name}?${q}`,
     ),
@@ -518,6 +563,7 @@ export const clusterHistories = {
     placement(
       k.acmePlugin,
       c,
+      "certificate",
       (q) =>
         apiPath`/api/v1/clusters/${c}/history/certificates/plugins/${id}?${q}`,
     ),
@@ -525,6 +571,7 @@ export const clusterHistories = {
     placement(
       k.nodeCertificate,
       c,
+      "certificate",
       (q) =>
         apiPath`/api/v1/clusters/${c}/history/certificates/nodes/${node}?${q}`,
     ),
@@ -532,26 +579,35 @@ export const clusterHistories = {
     placement(
       k.metrics,
       c,
+      "cluster",
       (q) => apiPath`/api/v1/clusters/${c}/history/metric-servers?${q}`,
     ),
   metricServer: (c: string, id: string) =>
     placement(
       k.metricServer,
       c,
+      "cluster",
       (q) => apiPath`/api/v1/clusters/${c}/history/metric-servers/${id}?${q}`,
     ),
   drs: (c: string) =>
-    placement(k.drs, c, (q) => apiPath`/api/v1/clusters/${c}/history/drs?${q}`),
+    placement(
+      k.drs,
+      c,
+      "drs",
+      (q) => apiPath`/api/v1/clusters/${c}/history/drs?${q}`,
+    ),
   drsRule: (c: string, id: string) =>
     placement(
       k.drsRule,
       c,
+      "drs",
       (q) => apiPath`/api/v1/clusters/${c}/history/drs/rules/${id}?${q}`,
     ),
   options: (c: string) =>
     placement(
       k.options,
       c,
+      "cluster",
       (q) => apiPath`/api/v1/clusters/${c}/history/options?${q}`,
     ),
 } as const;

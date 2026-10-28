@@ -301,7 +301,7 @@ export function ClusterOptionsTab({
         <TabsTrigger value="general">General</TabsTrigger>
         <TabsTrigger value="tags">Tags</TabsTrigger>
         <TabsTrigger value="info">Cluster Info</TabsTrigger>
-        <HistoryTabTrigger />
+        <HistoryTabTrigger history={clusterHistories.options(clusterId)} />
       </TabsList>
 
       <TabsContent value="notes" className="mt-4">

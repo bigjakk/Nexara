@@ -39,7 +39,6 @@ import {
 } from "@/features/replication/api/replication-queries";
 import type { ReplicationJob } from "@/features/replication/api/replication-queries";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
-import { HistoryButton } from "@/features/history/components/HistoryDrawer";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import {
   useClusterVMs,
@@ -74,8 +73,8 @@ export function ClusterReplicationTab({
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>
           Replication Jobs
-          <HistoryButton
-            {...clusterHistories.replication(clusterId)}
+          <ClusterHistoryButton
+            history={clusterHistories.replication(clusterId)}
             title="replication jobs"
           />
         </CardTitle>

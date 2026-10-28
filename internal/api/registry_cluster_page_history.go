@@ -86,9 +86,11 @@ func haHistoryRoutes() []historyRoute {
 func poolHistoryRoutes() []historyRoute {
 	return []historyRoute{
 		{
-			Kind: handlers.PoolsHistory(), Path: historyPath("pools"), Resource: "pool",
+			// The tab's own list needs view:cluster; one pool's page needs view:pool.
+			Kind: handlers.PoolsHistory(), Path: historyPath("pools"), Resource: "cluster",
 			Description: historyDescription("the cluster's resource pools",
-				"pools created, changed and deleted. A guest moved into or out of a pool is that pool's own History", "pool"),
+				"pools created, changed and deleted. A guest moved into or out of a pool is that pool's own History, "+
+					"which needs view:pool", "cluster"),
 			Parameters: clusterParams(nil),
 		},
 		{

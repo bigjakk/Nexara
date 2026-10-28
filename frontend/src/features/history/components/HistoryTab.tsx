@@ -1,11 +1,20 @@
 import { TabsContent, TabsTrigger } from "@/components/ui/tabs";
 import { useCanViewHistory } from "../hooks/useCanViewHistory";
-import type { HistoryKind, HistoryTarget } from "../types/history";
+import type { ClusterHistory } from "../lib/cluster-histories";
 import { HistoryTimeline } from "./HistoryTimeline";
 
-/** A tab strip's History trigger: shown with the grants a History takes. */
-export function HistoryTabTrigger({ value = "history" }: { value?: string }) {
-  const can = useCanViewHistory();
+/**
+ * A tab strip's History trigger: shown with the grants a History takes, and
+ * the tab's own view permission.
+ */
+export function HistoryTabTrigger({
+  history,
+  value = "history",
+}: {
+  history: ClusterHistory;
+  value?: string;
+}) {
+  const can = useCanViewHistory(history.permission);
   return can ? <TabsTrigger value={value}>History</TabsTrigger> : null;
 }
 
@@ -17,10 +26,10 @@ export function HistoryTabContent({
   history,
   value = "history",
 }: {
-  history: { kind: HistoryKind; target: HistoryTarget };
+  history: ClusterHistory;
   value?: string;
 }) {
-  const can = useCanViewHistory();
+  const can = useCanViewHistory(history.permission);
   return can ? (
     <TabsContent value={value} className="mt-4">
       <HistoryTimeline kind={history.kind} target={history.target} />
