@@ -117,6 +117,15 @@ describe("a kind's Summary", () => {
       }),
       "platform01 → cluster01",
     ],
+    [
+      "veeamServer",
+      "history-veeam-server",
+      entry({
+        resource_type: "veeam_server",
+        details: JSON.stringify({ object: "linux01", guest_name: "linux02" }),
+      }),
+      "linux01 → linux02",
+    ],
   ] as const)("of the %s kind (%#)", (kind, ns, row, want) => {
     expect(backupHistoryKinds[kind].summary?.(row, t(ns))).toBe(want);
   });

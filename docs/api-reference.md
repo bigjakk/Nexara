@@ -2063,7 +2063,7 @@ Each answers one object's timeline, newest first, in the shape of a guest's Hist
 |--------|------|-------------|
 | GET | `/clusters/:id/storages/:storage/history` | A storage, by its name as Proxmox calls it (`view:storage`). `node` leaves out what ran on another node, for a storage that is not shared |
 | GET | `/pbs-servers/:id/history` | A PBS server: its configuration, datastore maintenance, jobs run from Nexara and the restores from it. `datastore` narrows it to what names that datastore (`view:pbs`, instance-wide) |
-| GET | `/veeam-servers/:id/history` | A Veeam server, with every job and run control action taken on it (`view:veeam`, instance-wide) |
+| GET | `/veeam-servers/:id/history` | A Veeam server, with its connection tests, its platform and backup-object mappings, and every job and run control action taken on it (`view:veeam`, instance-wide) |
 | GET | `/veeam-servers/:id/jobs/:job_id/history` | A Veeam job, by Veeam's own id, with its runs stopped (`view:veeam`, instance-wide) |
 | GET | `/veeam-servers/:id/sessions/:session_id/history` | A Veeam run, by Veeam's own id (`view:veeam`, instance-wide) |
 | GET | `/clusters/:id/backup-jobs/:job_id/history` | A Proxmox backup job, by the id Proxmox gave it (`view:backup`) |

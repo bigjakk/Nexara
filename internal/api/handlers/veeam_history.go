@@ -10,8 +10,9 @@ package handlers
 // done to it.
 
 // VeeamServerHistory is a Veeam server's: its own rows — added, changed,
-// removed, tested, a platform mapped to a cluster — and every job and session
-// control action taken on it, which name the server in details.
+// removed, tested, a platform mapped to a cluster, a backup object mapped to a
+// guest — and every job and session control action taken on it, which name the
+// server in details.
 func VeeamServerHistory() HistoryKind {
 	return HistoryKind{
 		Name:       "veeam-server",
@@ -22,7 +23,7 @@ func VeeamServerHistory() HistoryKind {
 				"veeam_server_created", "veeam_server_updated", "veeam_server_deleted"}},
 			{Category: "connection", Field: HistoryFieldAction, Equals: []string{
 				"veeam_server_tested", "veeam_server_connect_failed", "veeam_server_credential_redirect_refused"}},
-			{Category: "mapping", Field: HistoryFieldAction, Like: []string{`veeam\_platform\_%`}},
+			{Category: "mapping", Field: HistoryFieldAction, Like: []string{`veeam\_platform\_%`, `veeam\_object\_%`}},
 			{Category: "jobs", Field: HistoryFieldAction, Like: veeamControlActions},
 		},
 		Select: SelectObjects("id",

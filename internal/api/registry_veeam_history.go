@@ -18,8 +18,9 @@ func veeamServerHistoryRoute() historyRoute {
 		Path: veeamScope + "/:id/history",
 		Description: "List what happened to one Veeam Backup & Replication server, newest first: the server " +
 			"added, changed or removed, its connection tested, a platform mapped to a cluster or unmapped, " +
-			"and every job started, stopped, enabled or disabled and every run stopped on it. The runs " +
-			"themselves are in the server's run listing. Requires global view:audit and global view:veeam.",
+			"a backup object mapped to a guest or unmapped, and every job started, stopped, enabled or " +
+			"disabled and every run stopped on it. The runs themselves are in the server's run listing. " +
+			"Requires global view:audit and global view:veeam.",
 		Resource:   "veeam",
 		Parameters: veeamServerParams(nil),
 	}

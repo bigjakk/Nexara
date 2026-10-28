@@ -143,16 +143,19 @@ function pbsSummary(entry: HistoryEntry, t: TFunction): string | undefined {
 }
 
 /**
- * A Veeam row's Summary: the job or run it is about, and, of a platform
- * mapping, the cluster it was mapped to.
+ * A Veeam row's Summary: the job or run it is about, and, of a mapping, what
+ * was mapped to what — a platform to a cluster, a backup object to a guest.
  */
 function veeamSummary(entry: HistoryEntry, t: TFunction): string | undefined {
   if (entry.kind !== "audit") return undefined;
   const d = parseDetails(entry.details);
   const platform = str(d, "platform");
   const cluster = str(d, "cluster_name");
+  const object = str(d, "object");
+  const guest = str(d, "guest_name");
   return joined([
     platform !== "" && cluster !== "" ? `${platform} → ${cluster}` : platform,
+    object !== "" && guest !== "" ? `${object} → ${guest}` : object,
     firstOf(d, ["job_name", "session_name"]),
     str(d, "reason"),
     errorOf(d, t),

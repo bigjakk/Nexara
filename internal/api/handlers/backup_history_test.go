@@ -32,6 +32,7 @@ func TestBackupHistoryCategories(t *testing.T) {
 		{VeeamServerHistory(), "audit", "veeam_server_updated", "veeam_server", "", "server"},
 		{VeeamServerHistory(), "audit", "veeam_server_connect_failed", "veeam_server", "", "connection"},
 		{VeeamServerHistory(), "audit", "veeam_platform_unmapped", "veeam_server", "", "mapping"},
+		{VeeamServerHistory(), "audit", "veeam_object_mapped", "veeam_server", "", "mapping"},
 		{VeeamServerHistory(), "audit", "veeam_job_stop_failed", "veeam_job", "", "jobs"},
 		{VeeamServerHistory(), "audit", "veeam_session_stopped", "veeam_session", "", "jobs"},
 		{VeeamJobHistory(), "audit", "veeam_job_disabled_failed", "veeam_job", "", "schedule"},

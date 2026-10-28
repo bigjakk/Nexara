@@ -2,7 +2,7 @@
   "categories": {
     "server": "Server",
     "connection": "Connection",
-    "mapping": "Cluster mapping",
+    "mapping": "Mappings",
     "jobs": "Jobs and runs",
     "other": "Other"
   },
@@ -16,6 +16,8 @@
     "veeam_server_credential_redirect_refused": "Address change refused",
     "veeam_platform_mapped": "Platform mapped to a cluster",
     "veeam_platform_unmapped": "Platform unmapped",
+    "veeam_object_mapped": "Backup object mapped to a guest",
+    "veeam_object_unmapped": "Backup object unmapped",
     "veeam_job_started": "Job started",
     "veeam_job_start_requested": "Job start asked for",
     "veeam_job_start_failed": "Job start failed",
