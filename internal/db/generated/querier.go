@@ -215,7 +215,9 @@ type Querier interface {
 	// retention, so a recent change reads none of it.
 	ClassifyGuestStatusChanges(ctx context.Context, arg ClassifyGuestStatusChangesParams) (int64, error)
 	// ClassifyObservedChanges decides, once, whether something already on record
-	// explains each settled change the observer filed for a cluster. The window is
+	// explains each settled change the observer filed for a cluster, and which
+	// audit row does (explained_by: of the latest row explaining each thing it
+	// changed, the latest). The window is
 	// ClassifyGuestStatusChanges' and ClassifyClusterObjectChanges': an audit row
 	// counts when it was made (its task started) no later than the change was seen,
 	// plus 30 seconds of clock skew, and not before the object was last seen as it

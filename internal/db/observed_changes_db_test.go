@@ -133,11 +133,17 @@ func TestObservedChanges(t *testing.T) {
 		}
 		return id
 	}
-	audit := func(cluster uuid.UUID, at time.Time, rtype, rid string, guest int32, action string, details map[string]any) {
+	audit := func(cluster uuid.UUID, at time.Time, rtype, rid string, guest int32, action string, details map[string]any) uuid.UUID {
 		t.Helper()
 		v := pgtype.Int4{Int32: guest, Valid: guest != 0}
-		exec("audit", `INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, vmid, action, details, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, cluster, systemUserID, rtype, rid, v, action, jsonOf(details), at)
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx, `INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, vmid, action,
+				details, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`, cluster, systemUserID, rtype, rid, v, action,
+			jsonOf(details), at).Scan(&id); err != nil {
+			t.Fatalf("audit: %v", err)
+		}
+		return id
 	}
 	task := func(cluster uuid.UUID, upid string, guest int32, started, finished time.Time) {
 		t.Helper()
@@ -152,7 +158,7 @@ func TestObservedChanges(t *testing.T) {
 	at := ago(60)              // when each change below was seen
 	in := at.Add(-time.Minute) // inside its window
 	byOwnRow := seed(observedCluster, "storage", "store01", 0, "changed", "", []string{"nodes"}, at)
-	audit(observedCluster, in, "storage", "store01", 0, "update", nil)
+	byOwnRowBy := audit(observedCluster, in, "storage", "store01", 0, "update", nil)
 	byRunOnly := seed(observedCluster, "backup", "backup-01", 0, "changed", "", []string{"schedule"}, at)
 	audit(observedCluster, in, "backup", "backup-01", 0, "run", nil)
 	tooEarly := seed(observedCluster, "storage", "store02", 0, "changed", "", []string{"nodes"}, at)
@@ -169,11 +175,13 @@ func TestObservedChanges(t *testing.T) {
 	diskAndMemory := seed(observedCluster, "vm", "101", 101, "changed", "pve-01", []string{"memory", "scsi0"}, at)
 	audit(observedCluster, in, "proxmox_task", "101", 101, "qmmove", map[string]any{"upid": upid("qmmove", 2)})
 	bothCovered := seed(observedCluster, "vm", "102", 102, "changed", "pve-01", []string{"memory", "scsi0"}, at)
-	audit(observedCluster, in, "proxmox_task", "102", 102, "qmmove", map[string]any{"upid": upid("qmmove", 3)})
+	bothCoveredBy := audit(observedCluster, in.Add(30*time.Second), "proxmox_task", "102", 102, "qmmove",
+		map[string]any{"upid": upid("qmmove", 3)})
 	audit(observedCluster, in, "vm", "102", 102, "config_change", map[string]any{"upid": upid("qmconfig", 4)})
 	byNexaraEdit := seed(observedCluster, "vm", "103", 103, "changed", "pve-01", []string{"memory"}, at)
-	audit(observedCluster, in, "vm", uuid.NewString(), 103, "config_update",
+	byNexaraEditBy := audit(observedCluster, in, "vm", uuid.NewString(), 103, "config_update",
 		map[string]any{"fields": map[string]any{"memory": "4096"}})
+	audit(observedCluster, in.Add(30*time.Second), "proxmox_task", "103", 103, "qmmove", map[string]any{"upid": upid("qmmove", 11)})
 	byOtherUntasked := seed(observedCluster, "vm", "104", 104, "changed", "pve-01", []string{"memory"}, at)
 	audit(observedCluster, in, "vm", uuid.NewString(), 104, "drs_migrate", nil)
 	byTaskedEdit := seed(observedCluster, "vm", "107", 107, "changed", "pve-01", []string{"memory"}, at)
@@ -376,8 +384,13 @@ func TestObservedChanges(t *testing.T) {
 	explained := func(id uuid.UUID) string {
 		t.Helper()
 		var e pgtype.Bool
-		if err := pool.QueryRow(ctx, `SELECT explained FROM cluster_object_changes WHERE id = $1`, id).Scan(&e); err != nil {
+		var by pgtype.UUID
+		if err := pool.QueryRow(ctx, `SELECT explained, explained_by FROM cluster_object_changes WHERE id = $1`, id).
+			Scan(&e, &by); err != nil {
 			t.Fatalf("read explained: %v", err)
+		}
+		if by.Valid != (e.Valid && e.Bool) {
+			t.Errorf("change %s: explained %v, by %v", id, e, by)
 		}
 		switch {
 		case !e.Valid:
@@ -465,6 +478,18 @@ func TestObservedChanges(t *testing.T) {
 	} {
 		if got := explained(tc.id); got != tc.want {
 			t.Errorf("%s: %s, want %s", tc.name, got, tc.want)
+		}
+	}
+	// explained_by names, of the latest row explaining each thing, the latest.
+	for name, tc := range map[string]struct{ change, by uuid.UUID }{
+		"its own row":                       {byOwnRow, byOwnRowBy},
+		"the later of the two that explain": {bothCovered, bothCoveredBy},
+		"not a later row explaining none":   {byNexaraEdit, byNexaraEditBy},
+	} {
+		var by uuid.UUID
+		if err := pool.QueryRow(ctx, `SELECT explained_by FROM cluster_object_changes WHERE id = $1`, tc.change).
+			Scan(&by); err != nil || by != tc.by {
+			t.Errorf("%s: explained by %s (%v), want %s", name, by, err, tc.by)
 		}
 	}
 
@@ -611,8 +636,12 @@ func TestObservedGlobalChanges(t *testing.T) {
 	exec("settle", `UPDATE cluster_object_changes SET observed_at = now() - interval '1 hour',
 			last_seen_at = now() - interval '70 minutes'
 		WHERE cluster_id IS NULL AND resource_id = ANY($1)`, []string{observedPBS.String(), observedPBSGone.String()})
-	exec("audit", `INSERT INTO audit_log (user_id, resource_type, resource_id, action, created_at)
-		VALUES ($1, 'pbs_server', $2, 'pbs_updated', now() - interval '65 minutes')`, systemUserID, observedPBS.String())
+	var byAudit uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO audit_log (user_id, resource_type, resource_id, action, created_at)
+		VALUES ($1, 'pbs_server', $2, 'pbs_updated', now() - interval '65 minutes') RETURNING id`,
+		systemUserID, observedPBS.String()).Scan(&byAudit); err != nil {
+		t.Fatal(err)
+	}
 	rules, _ := json.Marshal([]map[string]any{{"kind": "pbs_server", "change": "", "audit_type": "pbs_server",
 		"match_key": "id", "untasked": false, "action_re": "", "except_re": "", "worker_re": "", "field_re": "^schedule$"}})
 	if _, err := q.ClassifyGlobalObjectChanges(ctx, gen.ClassifyGlobalObjectChangesParams{
@@ -622,10 +651,10 @@ func TestObservedGlobalChanges(t *testing.T) {
 	}
 	var explained, shown []string
 	if err := pool.QueryRow(ctx, `SELECT
-			coalesce(array_agg(change ORDER BY change) FILTER (WHERE explained AND resource_id = $1), '{}'),
-			coalesce(array_agg(change ORDER BY change) FILTER (WHERE NOT explained), '{}')
+			coalesce(array_agg(change ORDER BY change) FILTER (WHERE explained AND resource_id = $1 AND explained_by = $3), '{}'),
+			coalesce(array_agg(change ORDER BY change) FILTER (WHERE NOT explained AND explained_by IS NULL), '{}')
 		FROM cluster_object_changes WHERE cluster_id IS NULL AND resource_id = ANY($2)`,
-		observedPBS.String(), []string{observedPBS.String(), observedPBSGone.String()}).Scan(&explained, &shown); err != nil {
+		observedPBS.String(), []string{observedPBS.String(), observedPBSGone.String()}, byAudit).Scan(&explained, &shown); err != nil {
 		t.Fatal(err)
 	}
 	// The changed job names remote-store too, and the moved one store, which

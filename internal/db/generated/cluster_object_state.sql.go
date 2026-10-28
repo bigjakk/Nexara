@@ -26,7 +26,7 @@ WITH rules AS MATERIALIZED (
            e.value->>'field_re'            AS field_re
     FROM jsonb_array_elements($1::jsonb) AS e
 ), pending AS MATERIALIZED (
-    SELECT c.id, c.resource_type, c.resource_id, c.change,
+    SELECT c.id, c.resource_type, c.resource_id, c.change, c.fields,
            GREATEST(LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes',
                     c.observed_at - make_interval(secs => $2::int)) AS win_from,
            c.observed_at + interval '30 seconds'                                           AS win_to
@@ -37,7 +37,7 @@ WITH rules AS MATERIALIZED (
     ORDER BY c.observed_at, c.id
     LIMIT $4::int
 ), hits AS (
-    SELECT p.id, r.field_re
+    SELECT p.id, r.field_re, a.id AS audit_id, a.created_at
     FROM pending p
     JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
     JOIN audit_log a ON a.resource_type = r.audit_type AND a.resource_id = p.resource_id
@@ -49,18 +49,34 @@ WITH rules AS MATERIALIZED (
       AND (r.worker_re = '' OR COALESCE(split_part(a.details->>'upid', ':', 6) ~ r.worker_re, false))
       AND COALESCE(th.started_at, a.created_at) <= p.win_to
       AND CASE WHEN th.upid IS NULL THEN a.created_at ELSE COALESCE(th.finished_at, now()) END >= p.win_from
+), needs AS (
+    SELECT p.id, f.name
+    FROM pending p
+    CROSS JOIN LATERAL unnest(CASE WHEN p.change = 'changed' AND cardinality(p.fields) > 0
+                                   THEN p.fields ELSE ARRAY['']::text[] END) AS f(name)
+), covered AS (
+    SELECT n.id, x.audit_id, x.created_at
+    FROM needs n
+    JOIN pending p ON p.id = n.id
+    LEFT JOIN LATERAL (
+        SELECT h.audit_id, h.created_at
+        FROM hits h
+        WHERE h.id = n.id AND (p.change <> 'changed' OR h.field_re = '' OR n.name ~ h.field_re)
+        ORDER BY h.created_at DESC, h.audit_id
+        LIMIT 1
+    ) x ON true
+), verdict AS (
+    SELECT c.id, bool_and(c.audit_id IS NOT NULL) AS explained,
+           (array_agg(c.audit_id ORDER BY c.created_at DESC, c.audit_id) FILTER (WHERE c.audit_id IS NOT NULL))[1]
+               AS explained_by
+    FROM covered c
+    GROUP BY c.id
 )
 UPDATE cluster_object_changes c
-SET explained = NOT EXISTS (
-    SELECT 1
-    FROM unnest(CASE WHEN c.change = 'changed' AND cardinality(c.fields) > 0 THEN c.fields ELSE ARRAY['']::text[] END)
-         AS f(name)
-    WHERE NOT EXISTS (
-        SELECT 1 FROM hits h
-        WHERE h.id = c.id
-          AND (c.change <> 'changed' OR h.field_re = '' OR f.name ~ h.field_re)))
-FROM pending p
-WHERE c.id = p.id
+SET explained = v.explained,
+    explained_by = CASE WHEN v.explained THEN v.explained_by END
+FROM verdict v
+WHERE c.id = v.id
 `
 
 type ClassifyGlobalObjectChangesParams struct {
@@ -326,12 +342,16 @@ WITH rules AS MATERIALIZED (
     ) agg
     WHERE n.kind = 'list'
 ), verdict AS (
-    SELECT u.id, bool_and(u.ok) AS explained
-    FROM (SELECT id, ok FROM covered UNION ALL SELECT id, ok FROM listed) u
+    SELECT u.id, bool_and(u.ok) AS explained,
+           (array_agg(u.audit_id ORDER BY u.created_at DESC, u.audit_id) FILTER (WHERE u.audit_id IS NOT NULL))[1]
+               AS explained_by
+    FROM (SELECT id, ok, audit_id, created_at FROM covered
+          UNION ALL SELECT id, ok, audit_id, created_at FROM listed) u
     GROUP BY u.id
 )
 UPDATE cluster_object_changes c
-SET explained = v.explained
+SET explained = v.explained,
+    explained_by = CASE WHEN v.explained THEN v.explained_by END
 FROM verdict v
 WHERE c.id = v.id
 `
@@ -347,7 +367,9 @@ type ClassifyObservedChangesParams struct {
 }
 
 // ClassifyObservedChanges decides, once, whether something already on record
-// explains each settled change the observer filed for a cluster. The window is
+// explains each settled change the observer filed for a cluster, and which
+// audit row does (explained_by: of the latest row explaining each thing it
+// changed, the latest). The window is
 // ClassifyGuestStatusChanges' and ClassifyClusterObjectChanges': an audit row
 // counts when it was made (its task started) no later than the change was seen,
 // plus 30 seconds of clock skew, and not before the object was last seen as it
