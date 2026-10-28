@@ -105,7 +105,8 @@ describe("HistoryTimeline", () => {
   );
 
   // Its route reads a kind's default window when none is named, so All time
-  // asks for all of it.
+  // asks for all of it; an empty window says so, not that a filter matched
+  // nothing.
   it("asks for all time when the reader picks it", async () => {
     const user = setupUser();
     mockedPage.mockReset();
@@ -124,9 +125,9 @@ describe("HistoryTimeline", () => {
         }}
       />,
     );
-    await waitFor(() => {
-      expect(mockedPage).toHaveBeenCalled();
-    });
+    expect(
+      await screen.findByText(/^Nothing was recorded in this time/),
+    ).toBeInTheDocument();
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Time" }),
       "",

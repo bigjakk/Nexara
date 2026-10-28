@@ -534,9 +534,11 @@ export function HistoryTimeline({
                       colSpan={layout.columns.length}
                       className="px-4 py-8 text-center text-muted-foreground"
                     >
-                      {category || source || timeWindow
+                      {category || source
                         ? shared("noMatches")
-                        : t("empty", { defaultValue: shared("empty") })}
+                        : timeWindow
+                          ? shared("emptyWindow")
+                          : t("empty", { defaultValue: shared("empty") })}
                     </td>
                   </tr>
                 )}
@@ -550,7 +552,8 @@ export function HistoryTimeline({
                 ? ""
                 : capped
                   ? shared("entriesMore", {
-                      count: cap.toLocaleString(),
+                      count: cap,
+                      cap: cap.toLocaleString(),
                     })
                   : shared("entries", { count: total })}
             </p>
