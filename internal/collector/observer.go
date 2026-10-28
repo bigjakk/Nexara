@@ -80,6 +80,10 @@ const (
 	observeNoisyStreak = 12
 	observeNoisyEvery  = time.Hour
 
+	// A node with no version ever read for this many passes is filed in its
+	// cluster's History once (noticeUnreadNodes).
+	observeUnreadNodePasses = 12
+
 	// observeUnsettled is the signature a guest still being made is stored
 	// under: no reading has it, so the next is a baseline.
 	observeUnsettled = "unsettled"
@@ -147,6 +151,7 @@ type Observer struct {
 	held    map[string]bool         // hold key -> an empty reading has been held once
 	noisy   map[string]*noisyObject // object key -> how it has been changing
 	lastSig map[uuid.UUID]string    // the cluster signature a cluster's last pass saw
+	unread  map[string]int          // "cluster/node" -> passes in a row with no version ever read
 	haMove  map[uuid.UUID]int       // passes left in which an HA group migration is Proxmox's (observeHA)
 }
 
@@ -174,6 +179,7 @@ func NewObserver(queries ObserverQueries, encryptionKey string, clients Observer
 		held:     map[string]bool{},
 		noisy:    map[string]*noisyObject{},
 		lastSig:  map[uuid.UUID]string{},
+		unread:   map[string]int{},
 		haMove:   map[uuid.UUID]int{},
 	}, nil
 }
@@ -279,18 +285,15 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 
 	p.observeTokenPrivileges(ctx)
 	p.forgetDepartedNodes(ctx, nodes)
-	if versions, known := p.nodeVersions(ctx, nodes); known {
-		clusterSig := observeSignature("cluster", o.tags.keyID, observeStateVersion, versions)
-		// A new privilege can open a kind skipped as refused, so the skips go
-		// when the privileges move too.
-		o.noticeSignature(cluster.ID, observeSignature(clusterSig, p.privFP))
-		p.observeHA(ctx, clusterSig)
-		for _, k := range observeClusterKinds {
-			p.observeClusterKind(ctx, k, clusterSig)
-		}
-	} else {
-		o.logger.Debug("object observer: a node's Proxmox version is not known yet; the cluster's objects wait",
-			"cluster_id", cluster.ID)
+	versions, unread := p.nodeVersions(ctx, nodes)
+	p.noticeUnreadNodes(ctx, nodes, unread)
+	clusterSig := observeSignature("cluster", o.tags.keyID, observeStateVersion, versions)
+	// A new privilege can open a kind skipped as refused, so the skips go when
+	// the privileges move too.
+	o.noticeSignature(cluster.ID, observeSignature(clusterSig, p.privFP))
+	p.observeHA(ctx, clusterSig)
+	for _, k := range observeClusterKinds {
+		p.observeClusterKind(ctx, k, clusterSig)
 	}
 	for _, n := range online {
 		if n.PveVersion == "" || n.KernelVersion == "" {
@@ -1329,18 +1332,20 @@ func (p *observePass) forgetDepartedNodes(ctx context.Context, nodes []db.Node) 
 }
 
 // nodeVersions is the Proxmox versions the cluster's nodes run, for its
-// signature, and whether every node's is known. The collector writes a node it
+// signature, and the nodes none is known for. The collector writes a node it
 // cannot reach with no versions, so such a node counts with the versions it
 // last had, kept with the kinds' marks (cluster_object_baselines, kind
 // node_versions) to outlast a restart: a node going down or coming back is no
-// upgrade, and never re-baselines. A node never seen with versions holds the
-// cluster's objects back until it has.
-func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (string, bool) {
+// upgrade, and never re-baselines. A node never seen with versions is left
+// out, so a member Nexara never reached holds nothing back; the day it is
+// read, a version none of the others runs re-baselines the cluster's kinds
+// once, as an upgrade would.
+func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (string, []string) {
 	const kind = "node_versions"
 	last := map[string]string{}
 	stored := p.baselines[kind].signature
 	_ = json.Unmarshal([]byte(stored), &last)
-	known := true
+	var unread []string
 	vs := make([]string, 0, len(nodes))
 	for _, n := range nodes {
 		if n.PveVersion != "" {
@@ -1348,7 +1353,7 @@ func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (string
 		}
 		v, ok := last[n.Name]
 		if !ok {
-			known = false
+			unread = append(unread, n.Name)
 			continue
 		}
 		vs = append(vs, v)
@@ -1360,5 +1365,38 @@ func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (string
 		}
 	}
 	slices.Sort(vs)
-	return strings.Join(slices.Compact(vs), " "), known
+	return strings.Join(slices.Compact(vs), " "), unread
+}
+
+// noticeUnreadNodes counts the passes in a row each node has gone with no
+// version ever read, and once that is observeUnreadNodePasses warns and files
+// it in the cluster's History: what such a node holds is not compared, and a
+// node a few passes new is just not inventoried yet.
+func (p *observePass) noticeUnreadNodes(ctx context.Context, nodes []db.Node, unread []string) {
+	o := p.o
+	o.mu.Lock()
+	var due []string
+	for _, n := range nodes {
+		key := p.cluster.ID.String() + "/" + n.Name
+		if !slices.Contains(unread, n.Name) {
+			delete(o.unread, key)
+			continue
+		}
+		o.unread[key]++
+		if o.unread[key] == observeUnreadNodePasses {
+			due = append(due, n.Name)
+		}
+	}
+	o.mu.Unlock()
+	var batch recordBatch
+	id := p.cluster.ID.String()
+	for _, name := range due {
+		o.logger.Warn("object observer: a node of the cluster has never been read; what it holds is not compared",
+			"cluster_id", p.cluster.ID, "node", name, "passes", observeUnreadNodePasses)
+		row := changeRow(observedObject{id: id, resourceType: observedClusterType, resourceID: id}, "changed",
+			tagDiff{fields: []string{"nodes"}}, time.Now(), time.Now())
+		row.Detail["notice"], row.Detail["node"] = "node_never_read", name
+		batch.record([]observedChangeRow{row})
+	}
+	p.write(ctx, "node_versions", batch, time.Now(), "")
 }

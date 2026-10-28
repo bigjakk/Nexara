@@ -657,6 +657,20 @@ func TestObserverOutcomes(t *testing.T) {
 		back.PveVersion, back.KernelVersion = "pve-manager/9.2.20/0000aaaa", "6.14.8-2-pve"
 		e.expect("and read", "changed node/pve-01 [dns1]")
 	})
+	t.Run("a node never read holds nothing back, and is filed once a while on", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.mq.nodesByCluster = append(e.mq.nodesByCluster, db.Node{ID: uuid.New(), ClusterID: e.cluster.ID,
+			Name: "pve-02", Status: "offline"})
+		e.expect("baseline")
+		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","path":"/srv/store01","content":"images,iso","nodes":"pve-01"}]`)
+		e.expect("an edit beside it", "changed storage/store01 [nodes]")
+		for pass := 3; pass < observeUnreadNodePasses; pass++ {
+			e.expect("pass " + strconv.Itoa(pass))
+		}
+		e.expect("filed", "changed cluster/"+e.cluster.ID.String()+" [nodes]")
+		e.expect("once")
+	})
 	t.Run("IP set entries as the set lists them, one each", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
