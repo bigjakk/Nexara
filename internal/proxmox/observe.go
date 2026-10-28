@@ -20,20 +20,25 @@ import (
 // (validatePathSegment), so no caller can name an arbitrary path.
 type ObserveTarget struct {
 	path string
+	node string // the node a read under /nodes/{node} is proxied to; "" for the cluster's own
 }
 
 // String is the request path the target reads, query included.
 func (t ObserveTarget) String() string { return t.path }
 
+// Node is the node the read is answered by, through the endpoint that proxies
+// it: "" for a read the endpoint answers itself.
+func (t ObserveTarget) Node() string { return t.node }
+
 // ObservePermissionsRoot reads the cluster token's own privileges on "/". It
 // answers for any valid token (user => 'all'), so it doubles as the pass's
 // reachability probe.
 func ObservePermissionsRoot() ObserveTarget {
-	return ObserveTarget{"/access/permissions?" + url.Values{"path": {"/"}}.Encode()}
+	return ObserveTarget{path: "/access/permissions?" + url.Values{"path": {"/"}}.Encode()}
 }
 
 // ObservePools lists the resource pools the token may audit (poolid, comment).
-func ObservePools() ObserveTarget { return ObserveTarget{"/pools"} }
+func ObservePools() ObserveTarget { return ObserveTarget{path: "/pools"} }
 
 // ObservePool reads one pool with its members. The query form, not the
 // deprecated /pools/{poolid}, because a nested pool's id carries a "/".
@@ -41,24 +46,24 @@ func ObservePool(poolID string) (ObserveTarget, error) {
 	if poolID == "" || hasControlChar(poolID) {
 		return ObserveTarget{}, fmt.Errorf("%w: pool id %q", ErrInvalidInput, poolID)
 	}
-	return ObserveTarget{"/pools?" + url.Values{"poolid": {poolID}}.Encode()}, nil
+	return ObserveTarget{path: "/pools?" + url.Values{"poolid": {poolID}}.Encode()}, nil
 }
 
 // ObserveStorage lists the storage definitions (storage.cfg).
-func ObserveStorage() ObserveTarget { return ObserveTarget{"/storage"} }
+func ObserveStorage() ObserveTarget { return ObserveTarget{path: "/storage"} }
 
 // ObserveBackupJobs lists the scheduled backup jobs (jobs.cfg).
-func ObserveBackupJobs() ObserveTarget { return ObserveTarget{"/cluster/backup"} }
+func ObserveBackupJobs() ObserveTarget { return ObserveTarget{path: "/cluster/backup"} }
 
 // ObserveUSBMappings and ObservePCIMappings list the resource mappings, without
 // check-node: the per-node checks it adds are run state, not configuration.
-func ObserveUSBMappings() ObserveTarget { return ObserveTarget{"/cluster/mapping/usb"} }
+func ObserveUSBMappings() ObserveTarget { return ObserveTarget{path: "/cluster/mapping/usb"} }
 
 // ObservePCIMappings: see ObserveUSBMappings.
-func ObservePCIMappings() ObserveTarget { return ObserveTarget{"/cluster/mapping/pci"} }
+func ObservePCIMappings() ObserveTarget { return ObserveTarget{path: "/cluster/mapping/pci"} }
 
 // ObserveMetricServers lists the metric servers, five fields each.
-func ObserveMetricServers() ObserveTarget { return ObserveTarget{"/cluster/metrics/server"} }
+func ObserveMetricServers() ObserveTarget { return ObserveTarget{path: "/cluster/metrics/server"} }
 
 // ObserveMetricServer reads one metric server's whole configuration. Its token
 // is kept in /etc/pve/priv and never returned.
@@ -66,24 +71,24 @@ func ObserveMetricServer(id string) (ObserveTarget, error) {
 	if err := validatePathSegment("metric server id", id); err != nil {
 		return ObserveTarget{}, err
 	}
-	return ObserveTarget{"/cluster/metrics/server/" + url.PathEscape(id)}, nil
+	return ObserveTarget{path: "/cluster/metrics/server/" + url.PathEscape(id)}, nil
 }
 
 // ObserveClusterOptions reads datacenter.cfg. Without Sys.Audit on "/" Proxmox
 // answers with two of its keys only, which the caller must not take for the
 // whole file.
-func ObserveClusterOptions() ObserveTarget { return ObserveTarget{"/cluster/options"} }
+func ObserveClusterOptions() ObserveTarget { return ObserveTarget{path: "/cluster/options"} }
 
 // ObserveHAResources, ObserveHARules and ObserveHAGroups list the HA
 // configuration. Proxmox VE 8 has no rules (501); Proxmox VE 9 answers the
 // groups read with an error once its groups have been migrated to rules.
-func ObserveHAResources() ObserveTarget { return ObserveTarget{"/cluster/ha/resources"} }
+func ObserveHAResources() ObserveTarget { return ObserveTarget{path: "/cluster/ha/resources"} }
 
 // ObserveHARules: see ObserveHAResources.
-func ObserveHARules() ObserveTarget { return ObserveTarget{"/cluster/ha/rules"} }
+func ObserveHARules() ObserveTarget { return ObserveTarget{path: "/cluster/ha/rules"} }
 
 // ObserveHAGroups: see ObserveHAResources.
-func ObserveHAGroups() ObserveTarget { return ObserveTarget{"/cluster/ha/groups"} }
+func ObserveHAGroups() ObserveTarget { return ObserveTarget{path: "/cluster/ha/groups"} }
 
 // ObserveSDN lists one kind of the SDN configuration — zones, vnets,
 // controllers, ipams or dns — in its plain view: the configuration as edited,
@@ -92,7 +97,7 @@ func ObserveHAGroups() ObserveTarget { return ObserveTarget{"/cluster/ha/groups"
 func ObserveSDN(kind string) (ObserveTarget, error) {
 	switch kind {
 	case "zones", "vnets", "controllers", "ipams", "dns":
-		return ObserveTarget{"/cluster/sdn/" + kind}, nil
+		return ObserveTarget{path: "/cluster/sdn/" + kind}, nil
 	}
 	return ObserveTarget{}, fmt.Errorf("%w: SDN kind %q", ErrInvalidInput, kind)
 }
@@ -102,7 +107,7 @@ func ObserveSDNSubnets(vnet string) (ObserveTarget, error) {
 	if err := validatePathSegment("vnet", vnet); err != nil {
 		return ObserveTarget{}, err
 	}
-	return ObserveTarget{"/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets"}, nil
+	return ObserveTarget{path: "/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets"}, nil
 }
 
 // ObserveFirewall reads one part of the cluster firewall: its options, rules,
@@ -110,7 +115,7 @@ func ObserveSDNSubnets(vnet string) (ObserveTarget, error) {
 func ObserveFirewall(part string) (ObserveTarget, error) {
 	switch part {
 	case "options", "rules", "aliases", "ipset", "groups":
-		return ObserveTarget{"/cluster/firewall/" + part}, nil
+		return ObserveTarget{path: "/cluster/firewall/" + part}, nil
 	}
 	return ObserveTarget{}, fmt.Errorf("%w: firewall part %q", ErrInvalidInput, part)
 }
@@ -120,7 +125,7 @@ func ObserveFirewallIPSet(name string) (ObserveTarget, error) {
 	if err := validatePathSegment("IP set", name); err != nil {
 		return ObserveTarget{}, err
 	}
-	return ObserveTarget{"/cluster/firewall/ipset/" + url.PathEscape(name)}, nil
+	return ObserveTarget{path: "/cluster/firewall/ipset/" + url.PathEscape(name)}, nil
 }
 
 // ObserveFirewallGroup lists one security group's rules, in order.
@@ -128,32 +133,32 @@ func ObserveFirewallGroup(group string) (ObserveTarget, error) {
 	if err := validatePathSegment("security group", group); err != nil {
 		return ObserveTarget{}, err
 	}
-	return ObserveTarget{"/cluster/firewall/groups/" + url.PathEscape(group)}, nil
+	return ObserveTarget{path: "/cluster/firewall/groups/" + url.PathEscape(group)}, nil
 }
 
 // ObserveAccessUsers lists the users with their groups and API tokens
 // (full=1), which spares a token listing per user. A token's secret is never
 // returned.
 func ObserveAccessUsers() ObserveTarget {
-	return ObserveTarget{"/access/users?" + url.Values{"full": {"1"}}.Encode()}
+	return ObserveTarget{path: "/access/users?" + url.Values{"full": {"1"}}.Encode()}
 }
 
 // ObserveAccess lists the groups, the roles or the ACL.
 func ObserveAccess(part string) (ObserveTarget, error) {
 	switch part {
 	case "groups", "roles", "acl":
-		return ObserveTarget{"/access/" + part}, nil
+		return ObserveTarget{path: "/access/" + part}, nil
 	}
 	return ObserveTarget{}, fmt.Errorf("%w: access part %q", ErrInvalidInput, part)
 }
 
 // ObserveACMEAccounts lists the ACME accounts by name: an account's details
 // are root@pam's alone, which no API token is.
-func ObserveACMEAccounts() ObserveTarget { return ObserveTarget{"/cluster/acme/account"} }
+func ObserveACMEAccounts() ObserveTarget { return ObserveTarget{path: "/cluster/acme/account"} }
 
 // ObserveACMEPlugins lists the ACME challenge plugins, their DNS API
 // credentials among them; it needs Sys.Modify on "/".
-func ObserveACMEPlugins() ObserveTarget { return ObserveTarget{"/cluster/acme/plugins"} }
+func ObserveACMEPlugins() ObserveTarget { return ObserveTarget{path: "/cluster/acme/plugins"} }
 
 // ObserveNodeNetwork lists a node's network interfaces as they will be after
 // the pending changes are applied (interfaces.new, when there is one).
@@ -196,14 +201,14 @@ func ObserveGuestConfig(node, guestType string, vmid int) (ObserveTarget, error)
 	if guestType != "qemu" && guestType != "lxc" {
 		return ObserveTarget{}, fmt.Errorf("%w: guest type %q", ErrInvalidInput, guestType)
 	}
-	return ObserveTarget{"/nodes/" + url.PathEscape(node) + "/" + guestType + "/" + strconv.Itoa(vmid) + "/config"}, nil
+	return ObserveTarget{"/nodes/" + url.PathEscape(node) + "/" + guestType + "/" + strconv.Itoa(vmid) + "/config", node}, nil
 }
 
 func nodeTarget(node, rest string) (ObserveTarget, error) {
 	if err := validateNodeName(node); err != nil {
 		return ObserveTarget{}, err
 	}
-	return ObserveTarget{"/nodes/" + url.PathEscape(node) + rest}, nil
+	return ObserveTarget{"/nodes/" + url.PathEscape(node) + rest, node}, nil
 }
 
 // ObserveRead GETs the target and returns Proxmox's `data` exactly as it was

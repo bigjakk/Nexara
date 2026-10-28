@@ -64,7 +64,12 @@ const (
 	observeGuestShare  = 0.8 // the share of the interval the guest reads are spread over
 	observeSkipFor     = 24 * time.Hour
 	observeGuestBatch  = 100
-	observeAbortAfter  = 5 // consecutive reads unanswered — refused connections, timeouts — that end a pass
+	observeAbortAfter  = 5 // consecutive reads the endpoint left unanswered — refused, timed out — that end a pass
+	// observeNodeSkipAfter reads in a row a node leaves unanswered — the
+	// endpoint proxies /nodes/{node} to it, and a hung node times them out —
+	// skip that node for the rest of the pass, so one node cannot spend the
+	// pass's reads before any other node's guest is read.
+	observeNodeSkipAfter = 2
 
 	// What one reading may cost: of a kind listing more objects than this,
 	// only those already held are compared, with a notice in the cluster's
@@ -159,6 +164,7 @@ type Observer struct {
 	lastSig map[uuid.UUID]string    // the cluster signature a cluster's last pass saw
 	unread  map[string]int          // "cluster/node" -> passes in a row with no version ever read
 	notices map[string]time.Time    // notice key -> when it was last given (dueNotice)
+	hung    map[string]bool         // "cluster/node" -> it stopped answering a pass, and has not answered since
 	haMove  map[uuid.UUID]int       // passes left in which an HA group migration is Proxmox's (observeHA)
 }
 
@@ -189,6 +195,7 @@ func NewObserver(queries ObserverQueries, encryptionKey string, clients Observer
 		lastSig:    map[uuid.UUID]string{},
 		unread:     map[string]int{},
 		notices:    map[string]time.Time{},
+		hung:       map[string]bool{},
 		haMove:     map[uuid.UUID]int{},
 	}, nil
 }
@@ -246,6 +253,9 @@ type observePass struct {
 	changes   atomic.Int64
 	connFails atomic.Int64
 	aborted   atomic.Bool
+
+	nodeMu    sync.Mutex
+	nodeFails map[string]int // node -> reads in a row it left unanswered this pass
 }
 
 type storedObject struct {
@@ -774,7 +784,8 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 	go func() {
 		defer close(jobs)
 		for _, g := range walk {
-			if _, online := nodeByID[g.NodeID]; !online || p.o.skipped(p.skipKey("guest", guestID(g))) {
+			node, online := nodeByID[g.NodeID]
+			if !online || p.nodeSkipped(node) || p.o.skipped(p.skipKey("guest", guestID(g))) {
 				continue
 			}
 			if p.aborted.Load() || ctx.Err() != nil {
@@ -934,6 +945,10 @@ func (p *observePass) readWithError(ctx context.Context, target proxmox.ObserveT
 	if p.aborted.Load() {
 		return nil, readFailed, errors.New("pass ended")
 	}
+	node := target.Node()
+	if node != "" && p.nodeSkipped(node) {
+		return nil, readFailed, errors.New("the node is not answering this pass")
+	}
 	release, err := p.lim.acquire(ctx, gap)
 	if err != nil {
 		return nil, readFailed, err
@@ -943,13 +958,21 @@ func (p *observePass) readWithError(ctx context.Context, target proxmox.ObserveT
 	defer cancel()
 	p.calls.Add(1)
 	raw, err := p.client.ObserveRead(callCtx, target)
-	if observeUnanswered(err) && ctx.Err() == nil {
+	switch {
+	case !observeUnanswered(err) || ctx.Err() != nil:
+		p.connFails.Store(0)
+		if node != "" {
+			p.nodeAnswered(node)
+		}
+	case node != "" && !errors.Is(err, proxmox.ErrConnectionFailed):
+		// The endpoint took the read, and the node it proxies to did not
+		// answer: that node's reads stop, the pass goes on.
+		p.nodeUnanswered(node)
+	default:
 		if p.connFails.Add(1) >= observeAbortAfter && p.aborted.CompareAndSwap(false, true) {
 			p.o.logger.Debug("object observer: cluster stopped answering, pass ended",
 				"cluster_id", p.cluster.ID)
 		}
-	} else {
-		p.connFails.Store(0)
 	}
 	out := observeOutcomeOf(err)
 	if out != readOK {
@@ -957,6 +980,57 @@ func (p *observePass) readWithError(ctx context.Context, target proxmox.ObserveT
 		return nil, out, err
 	}
 	return raw, readOK, nil
+}
+
+// nodeSkipped reports whether node has left observeNodeSkipAfter reads in a
+// row unanswered this pass.
+func (p *observePass) nodeSkipped(node string) bool {
+	p.nodeMu.Lock()
+	defer p.nodeMu.Unlock()
+	return p.nodeFails[node] >= observeNodeSkipAfter
+}
+
+// nodeUnanswered counts a read node left unanswered, and at
+// observeNodeSkipAfter in a row skips it for the rest of the pass, warning
+// the first pass it stops answering.
+func (p *observePass) nodeUnanswered(node string) {
+	p.nodeMu.Lock()
+	if p.nodeFails == nil {
+		p.nodeFails = map[string]int{}
+	}
+	p.nodeFails[node]++
+	skipped := p.nodeFails[node] == observeNodeSkipAfter
+	p.nodeMu.Unlock()
+	if !skipped {
+		return
+	}
+	key := p.cluster.ID.String() + "/" + node
+	p.o.mu.Lock()
+	already := p.o.hung[key]
+	p.o.hung[key] = true
+	p.o.mu.Unlock()
+	log := p.o.logger.Warn
+	if already {
+		log = p.o.logger.Debug
+	}
+	log("object observer: a node is not answering; its objects and guests are not read this pass",
+		"cluster_id", p.cluster.ID, "node", node)
+}
+
+// nodeAnswered is a read node answered: its count starts again, and a node
+// that had stopped answering is logged as back.
+func (p *observePass) nodeAnswered(node string) {
+	p.nodeMu.Lock()
+	delete(p.nodeFails, node)
+	p.nodeMu.Unlock()
+	key := p.cluster.ID.String() + "/" + node
+	p.o.mu.Lock()
+	was := p.o.hung[key]
+	delete(p.o.hung, key)
+	p.o.mu.Unlock()
+	if was {
+		p.o.logger.Info("object observer: a node answers again", "cluster_id", p.cluster.ID, "node", node)
+	}
 }
 
 // readList reads a listing. An answer that is not a list — null, nothing —

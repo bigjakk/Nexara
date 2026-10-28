@@ -21,15 +21,19 @@ func TestObserveTargets(t *testing.T) {
 		target    ObserveTarget
 		wantPath  string
 		wantQuery string
+		wantNode  string // the node that answers it, through the endpoint
 	}{
-		{ObservePermissionsRoot(), "/api2/json/access/permissions", "path=%2F"},
-		{must(ObservePool("team/web")), "/api2/json/pools", "poolid=team%2Fweb"},
-		{must(ObserveMetricServer("influx01")), "/api2/json/cluster/metrics/server/influx01", ""},
-		{must(ObserveNodeNetwork("pve-01")), "/api2/json/nodes/pve-01/network", ""},
-		{must(ObserveGuestConfig("pve-01", "qemu", 100)), "/api2/json/nodes/pve-01/qemu/100/config", ""},
-		{must(ObserveGuestConfig("pve-01", "lxc", 101)), "/api2/json/nodes/pve-01/lxc/101/config", ""},
+		{ObservePermissionsRoot(), "/api2/json/access/permissions", "path=%2F", ""},
+		{must(ObservePool("team/web")), "/api2/json/pools", "poolid=team%2Fweb", ""},
+		{must(ObserveMetricServer("influx01")), "/api2/json/cluster/metrics/server/influx01", "", ""},
+		{must(ObserveNodeNetwork("pve-01")), "/api2/json/nodes/pve-01/network", "", "pve-01"},
+		{must(ObserveGuestConfig("pve-01", "qemu", 100)), "/api2/json/nodes/pve-01/qemu/100/config", "", "pve-01"},
+		{must(ObserveGuestConfig("pve-01", "lxc", 101)), "/api2/json/nodes/pve-01/lxc/101/config", "", "pve-01"},
 	}
 	for _, tc := range cases {
+		if tc.target.Node() != tc.wantNode {
+			t.Errorf("%s: answered by %q, want %q", tc.target, tc.target.Node(), tc.wantNode)
+		}
 		got := requireSentOnce(t, func(c *Client) error {
 			_, err := c.ObserveRead(context.Background(), tc.target)
 			return err

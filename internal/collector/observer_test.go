@@ -723,6 +723,48 @@ func TestObserverOutcomes(t *testing.T) {
 			t.Fatalf("%d reads of a cluster that answers none", reads)
 		}
 	})
+	t.Run("one hung node is skipped for the pass, and the others' objects and guests are read", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		hung := fmt.Errorf("read response body: %w", context.DeadlineExceeded)
+		for _, name := range []string{"pve-02", "pve-03"} {
+			n := db.Node{ID: uuid.New(), ClusterID: e.cluster.ID, Name: name, Status: "online",
+				PveVersion: e.node.PveVersion, KernelVersion: e.node.KernelVersion}
+			e.mq.nodesByCluster = append(e.mq.nodesByCluster, n)
+			for vmid := range 3 {
+				id := 200 + 10*len(e.mq.nodesByCluster) + vmid
+				e.mq.vmsByCluster = append(e.mq.vmsByCluster, db.Vm{ID: uuid.New(), ClusterID: e.cluster.ID, NodeID: n.ID,
+					Vmid: int32(id), Type: "qemu"})
+				e.client.set(fmt.Sprintf("/nodes/%s/qemu/%d/config", name, id), `{"memory":"1"}`)
+			}
+			for part, data := range map[string]string{"network": `[]`, "config": `{}`, "dns": `{}`, "time": `{}`,
+				"firewall/rules": `[]`} {
+				e.client.set("/nodes/"+name+"/"+part, data)
+			}
+		}
+		for path := range e.client.answers {
+			if strings.HasPrefix(path, "/nodes/pve-02/") {
+				e.client.fail(path, hung)
+			}
+		}
+		e.pass()
+		pve02 := 0
+		e.client.mu.Lock()
+		for path, n := range e.client.reads {
+			if strings.HasPrefix(path, "/nodes/pve-02/") {
+				pve02 += n
+			}
+		}
+		e.client.mu.Unlock()
+		if pve02 > observeNodeSkipAfter+observeMaxInFlight {
+			t.Errorf("the hung node was read %d times in a pass", pve02)
+		}
+		for _, path := range []string{pathStorage, "/nodes/pve-03/network", "/nodes/pve-03/qemu/231/config", pathGuest} {
+			if e.client.readsOf(path) != 1 {
+				t.Errorf("%s read %d times beside the hung node, want once", path, e.client.readsOf(path))
+			}
+		}
+	})
 	t.Run("more changes of a kind than are shown one by one", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
