@@ -624,7 +624,7 @@ func TestHistoryListSaysHowFarBackItSearched(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			dbtx := &auditRowsDBTX{rows: tt.rows}
+			dbtx := &auditRowsDBTX{rowsFor: map[string][]any{"ListHistory": tt.rows}}
 			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 			app.Use(func(c fiber.Ctx) error {
 				c.Locals("user_id", uuid.New())
@@ -732,15 +732,18 @@ func TestPermittedObservedTypes(t *testing.T) {
 	}
 }
 
-// A page is one read, and an audit entry names nothing beside its own fields:
-// which fields an edit covered without naming them only the observer can tell,
-// so the reader does not guess them from what the edit explained.
-func TestHistoryListReadsOnlyThePage(t *testing.T) {
+// A page reads what its audit rows covered unnamed once, by their ids and the
+// types the caller may view, and attaches it to the entry, object by object.
+func TestHistoryListAttachesAlsoChanged(t *testing.T) {
 	t.Parallel()
-	dbtx := &auditRowsDBTX{rowsFor: map[string][]any{"ListHistory": {db.ListHistoryRow{EntryID: "audit:" + uuid.NewString(),
-		Kind: "audit", Source: "nexara", Action: "config_update", ResourceType: "vm", ResourceID: "100", Vmid: 100,
-		SubjectVmid: 100, Category: "config", Total: 1, Details: json.RawMessage(`{"fields": {"memory": "4096"}}`),
-		Fields: []string{}}}}}
+	audit := uuid.New()
+	dbtx := &auditRowsDBTX{rowsFor: map[string][]any{
+		"ListHistory": {db.ListHistoryRow{EntryID: "audit:" + audit.String(), Kind: "audit", Source: "nexara",
+			Action: "config_update", ResourceType: "vm", ResourceID: "100", Vmid: 100, SubjectVmid: 100,
+			Category: "config", Total: 1, Details: json.RawMessage(`{"changed": ["memory"]}`), Fields: []string{}}},
+		"ListHistoryAlsoChanged": {db.ListHistoryAlsoChangedRow{AuditID: audit,
+			Objects: json.RawMessage(`[{"resource_type": "vm", "resource_id": "100", "node": "pve-01", "fields": ["boot"]}]`)}},
+	}}
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 	app.Use(func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.New())
@@ -757,19 +760,23 @@ func TestHistoryListReadsOnlyThePage(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var page struct {
-		Items []map[string]json.RawMessage `json:"items"`
+		Items []historyEntry `json:"items"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil || resp.StatusCode != http.StatusOK || len(page.Items) != 1 {
 		t.Fatalf("status %d, %d items (%v)", resp.StatusCode, len(page.Items), err)
 	}
 	var reads []string
+	var args []any
 	for _, c := range dbtx.calls {
 		if m := sqlcQueryName.FindStringSubmatch(c.sql); m != nil && strings.HasPrefix(m[1], "ListHistory") {
-			reads = append(reads, m[1])
+			reads, args = append(reads, m[1]), c.args
 		}
 	}
-	if _, named := page.Items[0]["also_changed"]; named || !slices.Equal(reads, []string{"ListHistory"}) {
-		t.Errorf("reads %v, also_changed served %v; want only ListHistory and no also_changed", reads, named)
+	want := []historyAlsoChanged{{ResourceType: "vm", ResourceID: "100", Node: "pve-01", Fields: []string{"boot"}}}
+	if !slices.Equal(reads, []string{"ListHistory", "ListHistoryAlsoChanged"}) || !reflect.DeepEqual(page.Items[0].AlsoChanged, want) ||
+		!reflect.DeepEqual(args[:2], []any{[]string{audit.String()}, []string{"vm"}}) {
+		t.Errorf("reads %v (last with %v), also changed %+v; want both reads, by the audit id and the granted type, and %+v",
+			reads, args, page.Items[0].AlsoChanged, want)
 	}
 }
 

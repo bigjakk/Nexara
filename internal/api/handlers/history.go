@@ -14,6 +14,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -606,6 +607,9 @@ type historyEntry struct {
 	// Fields is, for an observed change, the names of the fields that
 	// changed.
 	Fields []string `json:"fields,omitempty"`
+	// AlsoChanged is, for an audit entry, what its edit changed in Proxmox
+	// beyond the fields it names, object by object (attachAlsoChanged).
+	AlsoChanged []historyAlsoChanged `json:"also_changed,omitempty"`
 	// LogStart and LogEnd are, for a backup entry, the lines of the job's
 	// task log that are this guest's part, by Proxmox's line numbers.
 	LogStart int32 `json:"log_start,omitempty"`
@@ -1009,7 +1013,55 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 		page.Total = row.Total
 		page.Items = append(page.Items, toHistoryEntry(row, visible, includeTasks))
 	}
+	if err := r.attachAlsoChanged(ctx, &page, params); err != nil {
+		return err
+	}
 	return c.JSON(page)
+}
+
+// historyAlsoChanged is one object an audit entry's edit changed in Proxmox
+// beyond the fields the entry names, and those fields.
+type historyAlsoChanged struct {
+	ResourceType string   `json:"resource_type"`
+	ResourceID   string   `json:"resource_id"`
+	Node         string   `json:"node,omitempty"`
+	Fields       []string `json:"fields"`
+}
+
+// attachAlsoChanged names on each audit entry of the page what the changes it
+// explained covered without its naming them (explained_unnamed, recorded by the
+// observer's classifiers): one read for the page, of the types the caller may
+// view in its cluster.
+func (r *HistoryRoute) attachAlsoChanged(ctx context.Context, page *historyPage, params db.ListHistoryParams) error {
+	if len(params.ObservedTypes) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(page.Items))
+	at := make(map[string]int, len(page.Items))
+	for i, e := range page.Items {
+		if id, audit := strings.CutPrefix(e.ID, "audit:"); audit {
+			ids = append(ids, id)
+			at[id] = i
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.h.queries.ListHistoryAlsoChanged(ctx, db.ListHistoryAlsoChangedParams{
+		AuditIds: ids, ObservedTypes: params.ObservedTypes, Global: params.Global, ClusterID: params.ClusterID,
+	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
+	}
+	for _, row := range rows {
+		if i, ok := at[row.AuditID.String()]; ok {
+			var objects []historyAlsoChanged
+			if json.Unmarshal(row.Objects, &objects) == nil {
+				page.Items[i].AlsoChanged = objects
+			}
+		}
+	}
+	return nil
 }
 
 // historyPage is a History route's response: the list envelope every

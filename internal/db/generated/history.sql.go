@@ -1347,6 +1347,67 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 	return items, nil
 }
 
+const listHistoryAlsoChanged = `-- name: ListHistoryAlsoChanged :many
+SELECT x.audit_id::uuid AS audit_id,
+       jsonb_agg(jsonb_build_object('resource_type', x.resource_type, 'resource_id', x.resource_id,
+                                    'node', x.node, 'fields', x.fields)
+                 ORDER BY x.first_seen, x.resource_type, x.resource_id)::jsonb AS objects
+FROM (SELECT u.key AS audit_id, c.resource_type, c.resource_id, c.node,
+             array_agg(DISTINCT f.field ORDER BY f.field) AS fields, min(c.observed_at) AS first_seen
+      FROM cluster_object_changes c
+      CROSS JOIN LATERAL jsonb_each(c.explained_unnamed) AS u(key, value)
+      CROSS JOIN LATERAL jsonb_array_elements_text(u.value) AS f(field)
+      WHERE c.explained_unnamed ?| $1::text[]
+        AND u.key = ANY($1::text[])
+        AND c.resource_type = ANY($2::text[])
+        AND ($3::bool AND c.cluster_id IS NULL
+             OR NOT $3::bool AND c.cluster_id = $4::uuid)
+      GROUP BY u.key, c.resource_type, c.resource_id, c.node) x
+GROUP BY x.audit_id
+`
+
+type ListHistoryAlsoChangedParams struct {
+	AuditIds      []string  `json:"audit_ids"`
+	ObservedTypes []string  `json:"observed_types"`
+	Global        bool      `json:"global"`
+	ClusterID     uuid.UUID `json:"cluster_id"`
+}
+
+type ListHistoryAlsoChangedRow struct {
+	AuditID uuid.UUID       `json:"audit_id"`
+	Objects json.RawMessage `json:"objects"`
+}
+
+// ListHistoryAlsoChanged is, for one page of a History, what each of its audit
+// rows (audit_ids) covered in Proxmox without naming it (explained_unnamed,
+// 000124), object by object: only of the types the caller may view
+// (observed_types), in the History's own cluster, a row naming no cluster only
+// for a global kind. One row per audit row.
+func (q *Queries) ListHistoryAlsoChanged(ctx context.Context, arg ListHistoryAlsoChangedParams) ([]ListHistoryAlsoChangedRow, error) {
+	rows, err := q.db.Query(ctx, listHistoryAlsoChanged,
+		arg.AuditIds,
+		arg.ObservedTypes,
+		arg.Global,
+		arg.ClusterID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListHistoryAlsoChangedRow{}
+	for rows.Next() {
+		var i ListHistoryAlsoChangedRow
+		if err := rows.Scan(&i.AuditID, &i.Objects); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMostActiveGuests = `-- name: ListMostActiveGuests :many
 SELECT v.vmid::int AS vmid
 FROM unnest($1::int[]) AS v(vmid)

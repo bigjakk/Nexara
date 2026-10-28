@@ -1999,6 +1999,12 @@ type Querier interface {
 	// An empty page of a capped read still says how far back it searched: one
 	// row with no entry (entry_id ''), which the handler reads only for that.
 	ListHistory(ctx context.Context, arg ListHistoryParams) ([]ListHistoryRow, error)
+	// ListHistoryAlsoChanged is, for one page of a History, what each of its audit
+	// rows (audit_ids) covered in Proxmox without naming it (explained_unnamed,
+	// 000124), object by object: only of the types the caller may view
+	// (observed_types), in the History's own cluster, a row naming no cluster only
+	// for a global kind. One row per audit row.
+	ListHistoryAlsoChanged(ctx context.Context, arg ListHistoryAlsoChangedParams) ([]ListHistoryAlsoChangedRow, error)
 	// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).
 	ListIOErrorGuests(ctx context.Context) ([]ListIOErrorGuestsRow, error)
 	// Storage that is enabled but not currently active (unreachable). Shared pools

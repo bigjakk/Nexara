@@ -1870,6 +1870,65 @@ func TestGuestHistory(t *testing.T) {
 		})); len(whole) == 0 || !slices.Equal(walk(wp, 2, listed), whole) {
 			t.Errorf("a whole type's History capped at 2, page on page, is not its whole History %v", whole)
 		}
+
+		// What an audit row covered unnamed is read by its id, object by object,
+		// of the granted types, in the History's cluster — a row naming no
+		// cluster for a global kind alone.
+		covering, other := uuid.NewString(), uuid.NewString()
+		for _, x := range []struct {
+			cluster uuid.UUID
+			typ, id string
+			by      map[string][]string
+		}{
+			{historyClusterID, "vm", "100", map[string][]string{covering: {"unused0", "boot"}, other: {"tags"}}},
+			{historyClusterID, "pool", "pool2", map[string][]string{covering: {"vms"}}},
+			{historyOtherID, "vm", "100", map[string][]string{covering: {"cores"}}},
+			{uuid.Nil, "pbs_server", historyPBSID, map[string][]string{covering: {"notes"}}},
+		} {
+			unnamed, err := json.Marshal(x.by)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exec("covered "+x.typ, `INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, change,
+				fields, observed_by, last_seen_at, observed_at, explained, explained_unnamed)
+			VALUES ($1, $2, $3, 'changed', '{}', 'observer', $4, $4, true, $5)`,
+				pgtype.UUID{Bytes: x.cluster, Valid: x.cluster != uuid.Nil}, x.typ, x.id, minsAgo(3), unnamed)
+		}
+		for _, tt := range []struct {
+			name    string
+			cluster uuid.UUID
+			global  bool
+			types   []string
+			want    string
+		}{
+			{"of a granted type", historyClusterID, false, []string{"vm"}, "vm 100 [boot unused0]"},
+			{"of every granted type", historyClusterID, false, []string{"vm", "pool"}, "pool pool2 [vms]; vm 100 [boot unused0]"},
+			{"of no cluster, for a global kind", uuid.Nil, true, []string{"pbs_server", "vm"}, "pbs_server " + historyPBSID + " [notes]"},
+			{"of no cluster, never for a cluster's", historyClusterID, false, []string{"pbs_server"}, ""},
+		} {
+			rows, err := q.ListHistoryAlsoChanged(ctx, gen.ListHistoryAlsoChangedParams{AuditIds: []string{covering},
+				ObservedTypes: tt.types, Global: tt.global, ClusterID: tt.cluster})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, r := range rows {
+				var objects []struct {
+					ResourceType string   `json:"resource_type"`
+					ResourceID   string   `json:"resource_id"`
+					Fields       []string `json:"fields"`
+				}
+				if r.AuditID.String() != covering || json.Unmarshal(r.Objects, &objects) != nil {
+					t.Fatalf("%s: a row of %s: %s", tt.name, r.AuditID, r.Objects)
+				}
+				for _, o := range objects {
+					got = append(got, fmt.Sprintf("%s %s %v", o.ResourceType, o.ResourceID, o.Fields))
+				}
+			}
+			if strings.Join(got, "; ") != tt.want {
+				t.Errorf("also changed %s: %q, want %q", tt.name, strings.Join(got, "; "), tt.want)
+			}
+		}
 	})
 
 	run("global", func(t *testing.T) {

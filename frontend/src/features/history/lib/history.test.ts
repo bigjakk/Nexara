@@ -240,6 +240,19 @@ describe("an update's summary", () => {
     [{ details: '{"fields":["comment","nodes"]}' }, "comment, nodes"],
     [{ details: '{"fields":{"memory":"4096"}}' }, "memory"],
     [
+      {
+        resource_type: "vm",
+        resource_id: "100",
+        details:
+          '{"fields":{"memory":"4096","cipassword":"(set)"},"changed":["memory"]}',
+        also_changed: [
+          { resource_type: "vm", resource_id: "100", fields: ["boot"] },
+          { resource_type: "pool", resource_id: "pool01", fields: ["vms"] },
+        ],
+      },
+      "memory · Also changed in Proxmox: boot; Pool pool01 (vms)",
+    ],
+    [
       { details: '{"fields":["comment"],"fields_unverified":true}' },
       "comment · Fields not checked against Proxmox",
     ],

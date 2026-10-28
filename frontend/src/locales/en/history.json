@@ -80,6 +80,8 @@
     "source": "Detected in Proxmox",
     "noticeNote": "Nexara's observer filed this about how it reads the cluster. It is not a change made in Proxmox.",
     "noticeSource": "Nexara's observer",
+    "alsoChanged": "Also changed in Proxmox: {{objects}}",
+    "alsoChangedObject": "{{type}} {{id}} ({{fields}})",
     "addedPastCap": "Created in Proxmox while its kind was past the cap",
     "removedWithChildren_one": "Removed in Proxmox, with its {{n}} child",
     "removedWithChildren_other": "Removed in Proxmox, with its {{n}} children",

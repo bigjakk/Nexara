@@ -1149,3 +1149,26 @@ LEFT JOIN LATERAL (
 ) l ON true
 ORDER BY l.created_at DESC NULLS LAST, v.vmid
 LIMIT sqlc.arg('row_limit')::int;
+
+-- ListHistoryAlsoChanged is, for one page of a History, what each of its audit
+-- rows (audit_ids) covered in Proxmox without naming it (explained_unnamed,
+-- 000124), object by object: only of the types the caller may view
+-- (observed_types), in the History's own cluster, a row naming no cluster only
+-- for a global kind. One row per audit row.
+-- name: ListHistoryAlsoChanged :many
+SELECT x.audit_id::uuid AS audit_id,
+       jsonb_agg(jsonb_build_object('resource_type', x.resource_type, 'resource_id', x.resource_id,
+                                    'node', x.node, 'fields', x.fields)
+                 ORDER BY x.first_seen, x.resource_type, x.resource_id)::jsonb AS objects
+FROM (SELECT u.key AS audit_id, c.resource_type, c.resource_id, c.node,
+             array_agg(DISTINCT f.field ORDER BY f.field) AS fields, min(c.observed_at) AS first_seen
+      FROM cluster_object_changes c
+      CROSS JOIN LATERAL jsonb_each(c.explained_unnamed) AS u(key, value)
+      CROSS JOIN LATERAL jsonb_array_elements_text(u.value) AS f(field)
+      WHERE c.explained_unnamed ?| sqlc.arg('audit_ids')::text[]
+        AND u.key = ANY(sqlc.arg('audit_ids')::text[])
+        AND c.resource_type = ANY(sqlc.arg('observed_types')::text[])
+        AND (sqlc.arg('global')::bool AND c.cluster_id IS NULL
+             OR NOT sqlc.arg('global')::bool AND c.cluster_id = sqlc.arg('cluster_id')::uuid)
+      GROUP BY u.key, c.resource_type, c.resource_id, c.node) x
+GROUP BY x.audit_id;

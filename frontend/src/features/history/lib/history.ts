@@ -353,10 +353,32 @@ export function historySummary(
 ): string {
   return [
     entrySummary(kind, entry, t),
+    alsoChanged(entry, t),
     entry.kind === "audit" && unverifiedMark(entry, t),
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+/** What an audit entry's edit changed in Proxmox beyond what it names: its
+ *  own object by the fields alone, another by its type and id too. */
+function alsoChanged(entry: HistoryEntry, t: TFunction): string {
+  const objects = entry.also_changed ?? [];
+  if (objects.length === 0) return "";
+  return t("history:observed.alsoChanged", {
+    objects: objects
+      .map((o) =>
+        o.resource_type === entry.resource_type &&
+        o.resource_id === entry.resource_id
+          ? o.fields.join(", ")
+          : t("history:observed.alsoChangedObject", {
+              type: resourceTypeLabel(o.resource_type),
+              id: o.resource_id,
+              fields: o.fields.join(", "),
+            }),
+      )
+      .join("; "),
+  });
 }
 
 function entrySummary(
@@ -392,9 +414,14 @@ function entrySummary(
   }
   const snap = str(d, "snap_name");
   if (snap) parts.push(snap);
-  // The fields an update names: a list of names, or an object keyed by them.
+  // What a guest's config update moved (details.changed), else the fields an
+  // update names: a list of names, or an object keyed by them.
+  const changed = d["changed"];
   const fields = d["fields"];
-  if (Array.isArray(fields)) {
+  if (Array.isArray(changed)) {
+    const moved = changed.filter((f): f is string => typeof f === "string");
+    if (moved.length > 0) parts.push(moved.join(", "));
+  } else if (Array.isArray(fields)) {
     const named = fields.filter((f): f is string => typeof f === "string");
     if (named.length > 0) parts.push(named.join(", "));
   } else if (fields && typeof fields === "object") {
