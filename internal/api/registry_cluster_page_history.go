@@ -6,14 +6,18 @@ import (
 )
 
 // The Histories of the cluster page: one per tab, and one per object in a tab's
-// rows that has a stable identity. All of them live under the cluster's own
-// History, /clusters/:cluster_id/history/<tab>[/<objects>/<id>]: a tab's is the
-// cluster's History narrowed to the tab, an object's narrowed to the object. They
-// are not at the objects' own paths (<tab>/<objects>/<id>/history) for three
-// reasons: a tab's collection path would collide with its objects' (/pools/history
-// is a pool's id to /pools/:pool_id, and the collections' routes are declared
-// first), the tallies that read each domain's routes by prefix would count them as
-// the domain's own, and one namespace is one place to read what can be asked.
+// rows that has a stable identity. They live under the cluster's own History,
+// /clusters/:cluster_id/history/<tab>[/<objects>/<id>]: a tab's is the cluster's
+// History narrowed to the tab, an object's narrowed to the object. The one
+// exception is the firewall template's, which belongs to no cluster, at
+// /api/v1/history/firewall-templates/:id.
+//
+// They are not at the objects' own paths (<tab>/<objects>/<id>/history) for
+// three reasons: a tab's collection path would collide with its objects'
+// (/pools/history is a pool's id to /pools/:pool_id, and the collections'
+// routes are declared first), the tallies that read each domain's routes by
+// prefix would count them as the domain's own, and one namespace is one place
+// to read what can be asked.
 //
 // Each is gated on view:audit and the view permission of the tab's own routes,
 // which a test holds the two to: the History of an object must not open to
