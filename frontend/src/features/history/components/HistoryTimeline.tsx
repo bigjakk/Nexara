@@ -13,7 +13,6 @@ import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
 import { formatDateTime } from "@/lib/format";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { selectClass } from "@/features/tasks/lib/task-filters";
-import { detailPairs } from "@/features/events/lib/audit-details";
 import { useTaskLog, useTaskStatus } from "@/features/tasks/api/tasks-queries";
 import {
   HISTORY_PAGE_SIZE,
@@ -32,6 +31,7 @@ import {
   historyNamespace,
   historyNote,
   historySourceLabel,
+  historyDetailParts,
   historySummary,
   upidWorkerType,
   type HistoryCellCtx,
@@ -121,7 +121,8 @@ function HistoryRow({
     isBackup && logEnd > 0
       ? jobLogLines?.filter((line) => line.n <= logEnd)
       : jobLogLines;
-  const details = expanded ? detailPairs(entry.details) : null;
+  const parts = expanded ? historyDetailParts(entry.details) : null;
+  const details = parts?.pairs ?? null;
   const exitText = entry.exit_status || live?.exit_status || "";
 
   return (
@@ -270,6 +271,18 @@ function HistoryRow({
                 </div>
               </div>
             )}
+
+            {parts?.lists.map(({ key, items }) => (
+              <details key={key} className="mt-2 text-xs">
+                <summary className="cursor-pointer text-muted-foreground">
+                  {shared("row.list", {
+                    key: key.replace(/_/g, " "),
+                    count: items.length,
+                  })}
+                </summary>
+                <p className="mt-1 break-all font-mono">{items.join(", ")}</p>
+              </details>
+            ))}
 
             {hasTask && (
               <>

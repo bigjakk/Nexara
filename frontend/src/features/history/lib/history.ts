@@ -10,6 +10,7 @@ import {
   formatAction,
 } from "@/components/layout/activity-columns";
 import { formatTimestampLong, formatTimestampShort } from "@/lib/format";
+import { detailPairs } from "@/features/events/lib/audit-details";
 import {
   isOkExit,
   parseDetails,
@@ -120,36 +121,121 @@ function lookup(t: TFunction, group: string, key: string): string | undefined {
 }
 
 /** A list field's counts in an observed change's detail: the entries it
- *  gained and lost, as a rule set's rules. */
-function listCounts(v: unknown): { added: number; removed: number } | null {
+ *  gained and lost, and moved, as a rule set's rules. */
+function listCounts(
+  v: unknown,
+): { added: number; removed: number; moved: number } | null {
   if (v === null || typeof v !== "object") return null;
-  const { added, removed } = v as Record<string, unknown>;
+  const { added, removed, moved } = v as Record<string, unknown>;
   return typeof added === "number" && typeof removed === "number"
-    ? { added, removed }
+    ? { added, removed, moved: typeof moved === "number" ? moved : 0 }
     : null;
+}
+
+function num(d: Record<string, unknown>, key: string): number | undefined {
+  const v = d[key];
+  return typeof v === "number" ? v : undefined;
+}
+
+/** A kind of object as the observer names it (firewall_ipset_entry),
+ *  spelled out. */
+function kindName(kind: string): string {
+  return kind.replace(/_/g, " ");
+}
+
+/** An observer's notice (detail.notice): its own word on a cluster or a kind
+ *  of object — the token's privileges moved, a kind it cannot hold whole — a
+ *  point event rather than a change made between two readings. */
+function noticeLabel(
+  notice: string,
+  entry: HistoryEntry,
+  d: Record<string, unknown>,
+  t: TFunction,
+): string {
+  const where = [
+    str(d, "parent") &&
+      t("history:observed.notices.parent", { parent: str(d, "parent") }),
+    str(d, "node") &&
+      notice !== "node_never_read" &&
+      t("history:observed.notices.node", { node: str(d, "node") }),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const label = t(`history:observed.notices.${notice}`, {
+    defaultValue: t("history:observed.notices.other", { notice }),
+    kind: kindName(entry.fields?.[0] ?? ""),
+    objects: num(d, "objects") ?? 0,
+    cap: num(d, "cap") ?? 0,
+    appeared: num(d, "appeared") ?? 0,
+    node: str(d, "node"),
+    guests: num(d, "guests") ?? 0,
+    per_pass: num(d, "per_pass") ?? 0,
+    held_back: num(d, "held_back") ?? 0,
+    limit: num(d, "limit") ?? 0,
+    context:
+      notice === "back_under_cap" && d["baseline"] === true ? "baseline" : "",
+  });
+  const upgrade =
+    d["during_upgrade"] === true
+      ? t("history:observed.notices.duringUpgrade")
+      : "";
+  return [label, where, upgrade].filter(Boolean).join(" ");
 }
 
 /**
  * An observed change, every kind alike: "Created in Proxmox", "Removed in
- * Proxmox", or "Changed in Proxmox: " and what changed — a rule set by the
- * rules it gained and lost, when its detail counts them (at its top level, or
- * under the list's own field), any other field by name.
+ * Proxmox", or "Changed in Proxmox: " and what changed — a list by the items
+ * it gained and lost (detail.counts, or the older shapes at the detail's top
+ * level or under the list's own field), any other field by name. A parent
+ * removed says how many of its own objects went with it (children); a kind
+ * read past its cap is counted, not named (while_over_cap); a notice is the
+ * observer's own word.
  */
 function observedLabel(entry: HistoryEntry, t: TFunction): string {
-  if (entry.action === "added") return t("history:observed.added");
-  if (entry.action === "removed") return t("history:observed.removed");
   const detail = parseDetails(entry.details);
-  const ruleCounts = (c: { added: number; removed: number }) =>
-    t("history:observed.ruleCounts", { count: c.added, removed: c.removed });
+  const notice = str(detail, "notice");
+  if (notice) return noticeLabel(notice, entry, detail, t);
+  if (detail["while_over_cap"] === true) {
+    const added = num(detail, "added");
+    const removed = num(detail, "removed");
+    const changed = num(detail, "changed");
+    if (added !== undefined || removed !== undefined || changed !== undefined) {
+      return t("history:observed.pastCap", {
+        added: added ?? 0,
+        removed: removed ?? 0,
+        changed: changed ?? 0,
+      });
+    }
+    if (entry.action === "added") return t("history:observed.addedPastCap");
+    if (entry.action === "removed") return t("history:observed.removedPastCap");
+  }
+  if (entry.action === "added") return t("history:observed.added");
+  if (entry.action === "removed") {
+    const children = num(detail, "children");
+    return children
+      ? t("history:observed.removedWithChildren", { count: children })
+      : t("history:observed.removed");
+  }
+  const counts =
+    detail["counts"] !== null && typeof detail["counts"] === "object"
+      ? (detail["counts"] as Record<string, unknown>)
+      : {};
+  const listOf = (c: { added: number; removed: number; moved: number }) =>
+    c.moved > 0
+      ? t("history:observed.listCountsMoved", c)
+      : t("history:observed.listCountsBare", c);
+  const ruleCounts = (c: { added: number; removed: number; moved: number }) =>
+    t("history:observed.ruleCounts", { count: c.added, removed: c.removed }) +
+    (c.moved > 0 ? t("history:observed.moved", { count: c.moved }) : "");
   const top = listCounts(detail);
   const parts = top
     ? [ruleCounts(top)]
     : (entry.fields ?? []).map((field) => {
-        const c = listCounts(detail[field]);
+        const c = listCounts(counts[field]) ?? listCounts(detail[field]);
         if (c === null) return field;
         return field === "rules" || field.endsWith("_rules")
           ? ruleCounts(c)
-          : t("history:observed.listCounts", { field, ...c });
+          : `${field}: ${listOf(c)}`;
       });
   return parts.length > 0
     ? t("history:observed.changed", { fields: parts.join(", ") })
@@ -157,9 +243,12 @@ function observedLabel(entry: HistoryEntry, t: TFunction): string {
 }
 
 /** When an observed change was made: between the last sighting of the object
- *  as it was and the one that saw it changed — times alone on one day. */
+ *  as it was and the one that saw it changed — times alone on one day. A
+ *  notice is a point event, when it was filed, and has none. */
 function observedWindow(entry: HistoryEntry, t: TFunction): string {
-  if (!entry.last_seen_at) return "";
+  if (!entry.last_seen_at || str(parseDetails(entry.details), "notice")) {
+    return "";
+  }
   const from = new Date(entry.last_seen_at);
   const to = new Date(entry.occurred_at);
   const format =
@@ -170,6 +259,36 @@ function observedWindow(entry: HistoryEntry, t: TFunction): string {
     from: format(from.getTime()),
     to: format(to.getTime()),
   });
+}
+
+/** What an observed change's detail marks beside its fields: the fields
+ *  Proxmox filled in where there was none (fields_appeared), and the changes
+ *  of the same reading it was one of (bulk, bulk_size). */
+function observedMarks(entry: HistoryEntry, t: TFunction): string[] {
+  const d = parseDetails(entry.details);
+  const marks: string[] = [];
+  const appeared = d["fields_appeared"];
+  if (Array.isArray(appeared) && appeared.length > 0) {
+    marks.push(
+      t("history:observed.fieldsAppeared", { fields: appeared.join(", ") }),
+    );
+  }
+  const bulk = num(d, "bulk_size");
+  if (str(d, "bulk") && bulk !== undefined && bulk > 1) {
+    marks.push(t("history:observed.bulk", { count: bulk - 1 }));
+  }
+  return marks;
+}
+
+/** An audit row whose fields Nexara could not check against what Proxmox
+ *  stored (fields_unverified): all of them, or the ones it names. */
+function unverifiedMark(entry: HistoryEntry, t: TFunction): string {
+  const v = parseDetails(entry.details)["fields_unverified"];
+  if (v === true) return t("history:observed.unverified");
+  if (Array.isArray(v) && v.length > 0) {
+    return t("history:observed.unverifiedSome", { fields: v.join(", ") });
+  }
+  return "";
 }
 
 /**
@@ -227,6 +346,7 @@ export function historySummary(
     entrySummary(kind, entry, t),
     also.length > 0 &&
       t("history:observed.alsoChanged", { fields: also.join(", ") }),
+    entry.kind === "audit" && unverifiedMark(entry, t),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -239,7 +359,11 @@ function entrySummary(
 ): string {
   const own = kind.summary?.(entry, t);
   if (own !== undefined) return own;
-  if (entry.kind === "observed") return observedWindow(entry, t);
+  if (entry.kind === "observed") {
+    return [observedWindow(entry, t), ...observedMarks(entry, t)]
+      .filter(Boolean)
+      .join(" · ");
+  }
   const d = parseDetails(entry.details);
   // A run: between its first row and its last, and the last one's error.
   if (entry.kind === "run") {
@@ -292,6 +416,35 @@ function entrySummary(
   if (error) parts.push(`Error: ${error}`);
   if (parts.length === 0 && entry.kind === "task") return entry.description;
   return parts.join(" · ");
+}
+
+/** Longer than this, a list in an entry's details is shown collapsed. */
+const LONG_DETAIL_LIST = 10;
+
+/**
+ * An expanded entry's details: the label/value pairs, and apart from them the
+ * lists too long to read inline — the ids a kind read past its cap names, up
+ * to hundreds each way — which the row shows collapsed.
+ */
+export function historyDetailParts(details: string): {
+  pairs: Array<[string, string]> | null;
+  lists: Array<{ key: string; items: string[] }>;
+} {
+  const d = parseDetails(details);
+  const lists: Array<{ key: string; items: string[] }> = [];
+  const rest: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(d)) {
+    if (
+      Array.isArray(value) &&
+      value.length > LONG_DETAIL_LIST &&
+      value.every((v) => typeof v === "string")
+    ) {
+      lists.push({ key, items: value });
+    } else {
+      rest[key] = value;
+    }
+  }
+  return { pairs: detailPairs(JSON.stringify(rest)), lists };
 }
 
 /** The note under an expanded entry: the kind's, else the shared one for an

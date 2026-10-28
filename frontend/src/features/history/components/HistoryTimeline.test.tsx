@@ -143,6 +143,46 @@ describe("HistoryTimeline", () => {
     expect(mockedPage).toHaveBeenCalledTimes(4);
   });
 
+  // A kind read past its cap names its ids by the hundred: an expanded row
+  // shows them collapsed, apart from its details.
+  it("shows a long list of ids collapsed", async () => {
+    const user = setupUser();
+    mockedPage.mockReset();
+    const ids = Array.from({ length: 12 }, (_, i) => `vm-${String(i)}`);
+    mockedPage.mockResolvedValue({
+      items: [
+        makeHistoryEntry({
+          kind: "observed",
+          source: "detected",
+          action: "changed",
+          resource_type: "pool",
+          details: JSON.stringify({
+            while_over_cap: true,
+            added: 12,
+            added_ids: ids,
+          }),
+        }),
+      ],
+      total: 1,
+    });
+    const kind = historyKind(
+      "probe",
+      { categories: { other: "Other" } },
+      { icons: {} },
+    );
+    renderWithProviders(<HistoryTimeline kind={kind} target={probeTarget} />);
+    await user.click(
+      await screen.findByText(
+        "Changed in Proxmox past the cap: 12 added, 0 removed, 0 changed",
+      ),
+    );
+    const list = await screen.findByText("added ids: 12 items");
+    expect(list.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText(ids.join(", ")).closest("details")).toBe(
+      list.closest("details"),
+    );
+  });
+
   // While a page turn's read is in flight the previous page stands in for
   // the last one; Show older would hold that page's entries as the last's.
   it("offers Show older only once the last page itself has come", async () => {

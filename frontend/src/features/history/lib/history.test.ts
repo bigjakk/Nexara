@@ -6,6 +6,7 @@ import { makeHistoryEntry as entry } from "@/test/history.fixtures";
 import type { HistoryEntry } from "../types/history";
 import {
   historyActor,
+  historyDetailParts,
   historyDisplayStatus,
   historyExclusions,
   historyEventLabel,
@@ -107,8 +108,102 @@ describe("an observed change", () => {
       },
       "Changed in Proxmox: comment, 1 rule added, 0 removed, members: 0 added, 3 removed",
     ],
+    [
+      {
+        action: "changed",
+        fields: ["rules"],
+        details: '{"counts":{"rules":{"added":2,"removed":1,"moved":1}}}',
+      },
+      "Changed in Proxmox: 2 rules added, 1 removed, 1 moved",
+    ],
+    [
+      { action: "removed", details: '{"children":3}' },
+      "Removed in Proxmox, with its 3 children",
+    ],
+    [
+      { action: "added", details: '{"while_over_cap":true}' },
+      "Created in Proxmox while its kind was past the cap",
+    ],
+    [
+      {
+        action: "changed",
+        details: '{"while_over_cap":true,"added":3,"removed":1,"changed":12}',
+      },
+      "Changed in Proxmox past the cap: 3 added, 1 removed, 12 changed",
+    ],
+    [
+      {
+        fields: ["token_privileges"],
+        details: '{"notice":"token_privileges","during_upgrade":true}',
+      },
+      "The cluster token's privileges on / changed: objects Proxmox lists by privilege may come and go (during an upgrade)",
+    ],
+    [
+      {
+        fields: ["firewall_ipset_entry"],
+        details:
+          '{"notice":"too_many_objects","objects":12000,"cap":10000,"parent":"blocklist"}',
+      },
+      "firewall ipset entry: 12000 objects, more than the 10000 compared; past them, objects are compared by id alone of blocklist",
+    ],
+    [
+      {
+        fields: ["network"],
+        details: '{"notice":"back_under_cap","appeared":2,"node":"pve-01"}',
+      },
+      "network: back under the cap and compared whole again; 2 appeared while it was over on pve-01",
+    ],
+    [
+      {
+        fields: ["network"],
+        details: '{"notice":"back_under_cap","baseline":true}',
+      },
+      "network: back under the cap, this reading its first whole one",
+    ],
+    [
+      {
+        fields: ["nodes"],
+        details: '{"notice":"node_never_read","node":"pve-03"}',
+      },
+      "Node pve-03 has never been read: what it holds is not compared",
+    ],
+    [
+      {
+        fields: ["guests"],
+        details:
+          '{"notice":"guests_read_in_turns","guests":3200,"per_pass":3000}',
+      },
+      "3200 guests, more than one pass reads: read in turns, 3000 a pass",
+    ],
   ])("%o reads %s", (over, want) => {
     expect(historyEventLabel(kind, observed(over), t)).toBe(want);
+  });
+
+  // A notice is a point event, when it was filed; a change, between two
+  // readings, with what its detail marks beside its fields.
+  it.each<[Partial<HistoryEntry>, string]>([
+    [
+      {
+        last_seen_at: "2026-03-02T10:10:00Z",
+        details: '{"notice":"token_privileges"}',
+      },
+      "",
+    ],
+    [
+      {
+        last_seen_at: "2026-03-02T10:05:00Z",
+        details: '{"fields_appeared":["cores"],"bulk":"b1","bulk_size":41}',
+      },
+      `Between ${formatTimestampShort(Date.parse("2026-03-02T10:05:00Z"))} and ${formatTimestampShort(Date.parse("2026-03-02T10:10:00Z"))} · Filled in by Proxmox: cores · Changed together with 40 others`,
+    ],
+  ])("%o sums up as %s", (over, want) => {
+    expect(
+      historySummary(
+        kind,
+        observed({ occurred_at: "2026-03-02T10:10:00Z", ...over }),
+        t,
+      ),
+    ).toBe(want);
   });
 
   it.each<[Partial<HistoryEntry>, string]>([
@@ -156,6 +251,10 @@ describe("an update's summary", () => {
         also_changed: ["cores", "net0"],
       },
       "memory · Also changed in Proxmox: cores, net0",
+    ],
+    [
+      { details: '{"fields":["comment"],"fields_unverified":true}' },
+      "comment · Fields not checked against Proxmox",
     ],
   ])("%o sums up as %s", (over, want) => {
     expect(historySummary(kind, entry(over), t)).toBe(want);
@@ -207,4 +306,17 @@ describe("historyExclusions", () => {
       expect(historyExclusions(kind, show, category)).toEqual(want);
     },
   );
+});
+
+// A list too long to read inline — the ids a kind read past its cap names —
+// is set apart from the details' pairs, to be shown collapsed.
+describe("historyDetailParts", () => {
+  it("sets apart only the long lists of names", () => {
+    const ids = Array.from({ length: 12 }, (_, i) => `vm-${String(i)}`);
+    const parts = historyDetailParts(
+      JSON.stringify({ while_over_cap: true, added_ids: ids, fields: ["a"] }),
+    );
+    expect(parts.lists).toEqual([{ key: "added_ids", items: ids }]);
+    expect(parts.pairs?.map(([k]) => k)).toEqual(["While Over Cap", "Fields"]);
+  });
 });
