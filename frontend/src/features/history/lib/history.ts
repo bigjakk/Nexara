@@ -144,42 +144,42 @@ function kindName(kind: string): string {
 }
 
 /** An observer's notice (detail.notice): its own word on a cluster or a kind
- *  of object — the token's privileges moved, a kind it cannot hold whole — a
- *  point event rather than a change made between two readings. */
+ *  of object — the token's privileges moved, a kind it cannot hold whole and
+ *  what came, went and changed of it a pass past the cap — a point event
+ *  rather than a change made between two readings. The kind is named with
+ *  the parent and the node whose objects it counts. */
 function noticeLabel(
   notice: string,
   entry: HistoryEntry,
   d: Record<string, unknown>,
   t: TFunction,
 ): string {
-  const where = [
+  const kind = [
+    kindName(entry.fields?.[0] ?? ""),
     str(d, "parent") &&
       t("history:observed.notices.parent", { parent: str(d, "parent") }),
     str(d, "node") &&
-      notice !== "node_never_read" &&
       t("history:observed.notices.node", { node: str(d, "node") }),
   ]
     .filter(Boolean)
     .join(" ");
   const label = t(`history:observed.notices.${notice}`, {
     defaultValue: t("history:observed.notices.other", { notice }),
-    kind: kindName(entry.fields?.[0] ?? ""),
+    kind,
     objects: num(d, "objects") ?? 0,
     cap: num(d, "cap") ?? 0,
-    appeared: num(d, "appeared") ?? 0,
+    added: num(d, "added") ?? 0,
+    removed: num(d, "removed") ?? 0,
+    changed: num(d, "changed") ?? 0,
     node: str(d, "node"),
     guests: num(d, "guests") ?? 0,
     per_pass: num(d, "per_pass") ?? 0,
-    held_back: num(d, "held_back") ?? 0,
-    limit: num(d, "limit") ?? 0,
-    context:
-      notice === "back_under_cap" && d["baseline"] === true ? "baseline" : "",
   });
   const upgrade =
     d["during_upgrade"] === true
       ? t("history:observed.notices.duringUpgrade")
       : "";
-  return [label, where, upgrade].filter(Boolean).join(" ");
+  return [label, upgrade].filter(Boolean).join(" ");
 }
 
 /**
@@ -187,29 +187,19 @@ function noticeLabel(
  * Proxmox", or "Changed in Proxmox: " and what changed — a list by the items
  * it gained and lost (detail.counts, or the older shapes at the detail's top
  * level or under the list's own field), any other field by name. A parent
- * removed says how many of its own objects went with it (children); a kind
- * read past its cap is counted, not named (while_over_cap); a notice is the
- * observer's own word.
+ * removed says how many of its own objects went with it (children), and an
+ * object created while its kind was past the cap says so (while_over_cap); a
+ * notice is the observer's own word.
  */
 function observedLabel(entry: HistoryEntry, t: TFunction): string {
   const detail = parseDetails(entry.details);
   const notice = str(detail, "notice");
   if (notice) return noticeLabel(notice, entry, detail, t);
-  if (detail["while_over_cap"] === true) {
-    const added = num(detail, "added");
-    const removed = num(detail, "removed");
-    const changed = num(detail, "changed");
-    if (added !== undefined || removed !== undefined || changed !== undefined) {
-      return t("history:observed.pastCap", {
-        added: added ?? 0,
-        removed: removed ?? 0,
-        changed: changed ?? 0,
-      });
-    }
-    if (entry.action === "added") return t("history:observed.addedPastCap");
-    if (entry.action === "removed") return t("history:observed.removedPastCap");
+  if (entry.action === "added") {
+    return detail["while_over_cap"] === true
+      ? t("history:observed.addedPastCap")
+      : t("history:observed.added");
   }
-  if (entry.action === "added") return t("history:observed.added");
   if (entry.action === "removed") {
     const children = num(detail, "children");
     return children
@@ -281,14 +271,11 @@ function observedMarks(entry: HistoryEntry, t: TFunction): string[] {
 }
 
 /** An audit row whose fields Nexara could not check against what Proxmox
- *  stored (fields_unverified): all of them, or the ones it names. */
+ *  stored (fields_unverified). */
 function unverifiedMark(entry: HistoryEntry, t: TFunction): string {
-  const v = parseDetails(entry.details)["fields_unverified"];
-  if (v === true) return t("history:observed.unverified");
-  if (Array.isArray(v) && v.length > 0) {
-    return t("history:observed.unverifiedSome", { fields: v.join(", ") });
-  }
-  return "";
+  return parseDetails(entry.details)["fields_unverified"] === true
+    ? t("history:observed.unverified")
+    : "";
 }
 
 /**

@@ -126,10 +126,11 @@ describe("an observed change", () => {
     ],
     [
       {
-        action: "changed",
-        details: '{"while_over_cap":true,"added":3,"removed":1,"changed":12}',
+        fields: ["network"],
+        details:
+          '{"notice":"changed_past_cap","while_over_cap":true,"added":3,"added_ids":["a","b","c"],"removed":1,"removed_ids":["d"],"changed":12,"node":"pve-01"}',
       },
-      "Changed in Proxmox past the cap: 3 added, 1 removed, 12 changed",
+      "network on pve-01 past the cap: 3 added, 1 removed, 12 changed",
     ],
     [
       {
@@ -144,21 +145,14 @@ describe("an observed change", () => {
         details:
           '{"notice":"too_many_objects","objects":12000,"cap":10000,"parent":"blocklist"}',
       },
-      "firewall ipset entry: 12000 objects, more than the 10000 compared; past them, objects are compared by id alone of blocklist",
+      "firewall ipset entry of blocklist: 12000 objects, more than the 10000 compared field by field; until it is back under, what changes is counted",
     ],
     [
       {
         fields: ["network"],
-        details: '{"notice":"back_under_cap","appeared":2,"node":"pve-01"}',
+        details: '{"notice":"back_under_cap","node":"pve-01"}',
       },
-      "network: back under the cap and compared whole again; 2 appeared while it was over on pve-01",
-    ],
-    [
-      {
-        fields: ["network"],
-        details: '{"notice":"back_under_cap","baseline":true}',
-      },
-      "network: back under the cap, this reading its first whole one",
+      "network on pve-01: back under the cap and compared field by field again",
     ],
     [
       {

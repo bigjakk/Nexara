@@ -155,8 +155,10 @@ describe("HistoryTimeline", () => {
           kind: "observed",
           source: "detected",
           action: "changed",
-          resource_type: "pool",
+          resource_type: "cluster",
+          fields: ["pool"],
           details: JSON.stringify({
+            notice: "changed_past_cap",
             while_over_cap: true,
             added: 12,
             added_ids: ids,
@@ -173,7 +175,7 @@ describe("HistoryTimeline", () => {
     renderWithProviders(<HistoryTimeline kind={kind} target={probeTarget} />);
     await user.click(
       await screen.findByText(
-        "Changed in Proxmox past the cap: 12 added, 0 removed, 0 changed",
+        "pool past the cap: 12 added, 0 removed, 0 changed",
       ),
     );
     const list = await screen.findByText("added ids: 12 items");
