@@ -76,6 +76,8 @@
     "lastSeen": "Last seen as it was",
     "note": "Nexara saw this change in Proxmox, and nothing on record explains it: no task, and no change made in Nexara. It was made between the two times shown.",
     "source": "Detected in Proxmox",
+    "noticeNote": "Nexara's observer filed this about how it reads the cluster. It is not a change made in Proxmox.",
+    "noticeSource": "Nexara's observer",
     "addedPastCap": "Created in Proxmox while its kind was past the cap",
     "removedWithChildren_one": "Removed in Proxmox, with its {{count}} child",
     "removedWithChildren_other": "Removed in Proxmox, with its {{count}} children",

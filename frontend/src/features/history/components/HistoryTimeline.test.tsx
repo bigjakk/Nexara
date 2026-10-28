@@ -185,6 +185,44 @@ describe("HistoryTimeline", () => {
     );
   });
 
+  // A notice is the observer's word on how it reads the cluster, filed when it
+  // was written: expanded, it reads as that, not as a change between readings.
+  it("reads a notice as the observer's own, not as a change", async () => {
+    const user = setupUser();
+    mockedPage.mockReset();
+    mockedPage.mockResolvedValue({
+      items: [
+        makeHistoryEntry({
+          kind: "observed",
+          source: "detected",
+          action: "changed",
+          resource_type: "cluster",
+          fields: ["token_privileges"],
+          last_seen_at: "2026-03-02T10:10:00Z",
+          details: JSON.stringify({ notice: "token_privileges" }),
+        }),
+      ],
+      total: 1,
+    });
+    const kind = historyKind(
+      "probe",
+      { categories: { other: "Other" } },
+      { icons: {} },
+    );
+    renderWithProviders(<HistoryTimeline kind={kind} target={probeTarget} />);
+    await user.click(
+      await screen.findByText(/The cluster token's privileges on \/ changed/),
+    );
+    expect(
+      await screen.findByText(/Nexara's observer filed this/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Nexara's observer")).toBeInTheDocument();
+    expect(screen.queryByText("Last seen as it was")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Nexara saw this change in Proxmox/),
+    ).not.toBeInTheDocument();
+  });
+
   // While a page turn's read is in flight the previous page stands in for
   // the last one; Show older would hold that page's entries as the last's.
   it("offers Show older only once the last page itself has come", async () => {

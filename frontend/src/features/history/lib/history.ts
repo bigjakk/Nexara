@@ -236,9 +236,7 @@ function observedLabel(entry: HistoryEntry, t: TFunction): string {
  *  as it was and the one that saw it changed — times alone on one day. A
  *  notice is a point event, when it was filed, and has none. */
 function observedWindow(entry: HistoryEntry, t: TFunction): string {
-  if (!entry.last_seen_at || str(parseDetails(entry.details), "notice")) {
-    return "";
-  }
+  if (!entry.last_seen_at || isObservedNotice(entry)) return "";
   const from = new Date(entry.last_seen_at);
   const to = new Date(entry.occurred_at);
   const format =
@@ -439,12 +437,24 @@ export function historyNote(
 ): string | undefined {
   const own = kind.note?.(entry, t);
   if (own !== undefined) return own;
+  if (isObservedNotice(entry)) return t("history:observed.noticeNote");
   return entry.kind === "observed" ? t("history:observed.note") : undefined;
 }
 
+/** An observer's notice (detail.notice): its word on how it reads a cluster,
+ *  filed when it was written, rather than a change made in Proxmox. */
+export function isObservedNotice(entry: HistoryEntry): boolean {
+  return (
+    entry.kind === "observed" &&
+    str(parseDetails(entry.details), "notice") !== ""
+  );
+}
+
 /** Where an entry comes from, in the shared namespace: a change Nexara saw in
- *  Proxmox reads "Detected in Proxmox", the rest by their source. */
+ *  Proxmox reads "Detected in Proxmox", a notice is the observer's, the rest
+ *  read by their source. */
 export function historySourceLabel(entry: HistoryEntry, t: TFunction): string {
+  if (isObservedNotice(entry)) return t("history:observed.noticeSource");
   return entry.kind === "observed"
     ? t("history:observed.source")
     : t(`history:sources.${entry.source}`);

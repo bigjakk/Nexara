@@ -31,6 +31,7 @@ import {
   historyNamespace,
   historyNote,
   historySourceLabel,
+  isObservedNotice,
   historyDetailParts,
   historySummary,
   upidWorkerType,
@@ -99,6 +100,9 @@ function HistoryRow({
   const summary = historySummary(kind, entry, t);
   const actor = historyActor(entry);
   const note = expanded ? historyNote(kind, entry, t) : undefined;
+  // A notice is the observer's own word, filed when it was written: no
+  // reading before it to show.
+  const notice = isObservedNotice(entry);
   const guestVmid = historyGuestVmid(entry);
   const guest =
     guestVmid > 0 ? { vmid: guestVmid, link: guestLink?.(guestVmid) } : null;
@@ -168,16 +172,17 @@ function HistoryRow({
                 {shared(
                   hasTask
                     ? "row.started"
-                    : entry.kind === "status" ||
-                        entry.kind === "observed" ||
-                        entry.kind === "move"
+                    : !notice &&
+                        (entry.kind === "status" ||
+                          entry.kind === "observed" ||
+                          entry.kind === "move")
                       ? "row.seen"
                       : "row.when",
                 )}
               </span>
               <span>{formatDateTime(entry.occurred_at)}</span>
 
-              {entry.last_seen_at && (
+              {entry.last_seen_at && !notice && (
                 <>
                   <span className="text-muted-foreground">
                     {entry.kind === "observed"
