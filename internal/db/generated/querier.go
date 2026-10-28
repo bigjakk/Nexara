@@ -1737,9 +1737,9 @@ type Querier interface {
 	//   guest_backups        a guest's part of each backup JOB — a vzdump of
 	//                        several guests, whose task names none — read from the
 	//                        job's log by the collector (000116).
-	//   node_status_changes  a node's status changes, by trigger (000118).
+	//   node_status_changes  a node's status changes, by trigger (000128).
 	//   guest_node_changes   a guest seen on another node than before, by
-	//                        trigger (000119): a node's arrivals and departures.
+	//                        trigger (000129): a node's arrivals and departures.
 	//
 	// How to add a source keyed as audit_log is — cluster_id, resource_type,
 	// resource_id, and vmid for a guest — such as a table of the changes Nexara saw
@@ -1794,7 +1794,7 @@ type Querier interface {
 	// the subquery's whole condition) and no further back than an hour. Asked by
 	// VMID too, a generic plan read every row of the VMID for each move: a second
 	// for a busy node's week. A window is minutes long: a move is recorded only
-	// within minutes of the guest going (000119), and an hour is the bound for one
+	// within minutes of the guest going (000129), and an hour is the bound for one
 	// whose node stopped reporting it long before it showed up elsewhere. A move is
 	// a guest's arrival or departure only with a migration of its VMID on record —
 	// qmigrate, vzmigrate, an HA migrate or relocate, a remote migration's tunnel —
