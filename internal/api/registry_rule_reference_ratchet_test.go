@@ -35,7 +35,7 @@ import (
 // reaches 33 routes through pveObjectNameParam alone, a route count moves on every endpoint
 // change (a ratchet people learn to bump) and a tightened literal at one site cancels a new rule
 // reference at another. The list moves only when a route declares its OWN inline rule reference,
-// which 14 of the 51 entries do.
+// which 16 of the 53 entries do.
 var ruleReferenceSites = []string{
 	"registry_access.go accessNameParam = path-safe-dotted-name",
 	"registry_access.go createAccessUserParams [userid] = pve-userid",
@@ -72,12 +72,14 @@ var ruleReferenceSites = []string{
 	"registry_notification_dlq.go registerNotificationDLQEndpoints [channel_id] = uuid-or-empty",
 	"registry_oidc.go oidcConfigParams [default_role_id] = uuid-or-empty",
 	"registry_pbs.go pbsAttachedClusterParam = uuid-or-empty",
+	"registry_pbs_history.go pbsHistoryRoute [datastore] = pbs-safe-id-or-empty",
 	"registry_pools.go poolCreateIDParam = pve-poolid-new",
 	"registry_pools.go poolIDParam = path-safe-dotted-name",
 	"registry_reports.go createScheduleParams [email_channel_id] = uuid-or-empty",
 	"registry_rolling_update.go createRollingUpdateParams [notify_channel_id] = uuid-or-empty",
 	"registry_sdn.go sdnControllerSettings [node] = node-name-or-empty",
 	"registry_sdn.go sdnSubnetIDParam = pve-object-id-colon",
+	"registry_storage_history.go storageHistoryRoute [node] = node-name-or-empty",
 	"registry_tasks.go registerTaskEndpoints [node] = node-name-or-empty",
 	"registry_tasks.go taskFilterClusterParam = uuid-or-empty",
 	"registry_virtio_win.go registerVirtioWinEndpoints [node] = node-name-or-empty",

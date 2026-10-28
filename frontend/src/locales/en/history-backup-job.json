@@ -1,0 +1,21 @@
+{
+  "categories": {
+    "config": "Configuration",
+    "runs": "Runs",
+    "other": "Other"
+  },
+  "categoryNotes": {
+    "runs": "Runs asked for from Nexara. The runs Proxmox starts on the job's schedule are in the History of each guest they back up."
+  },
+  "empty": "Nothing has been recorded for this backup job yet.",
+  "actions": {
+    "backup_job_created": "Job created",
+    "backup_job_updated": "Job changed",
+    "backup_job_deleted": "Job deleted",
+    "backup_job_run": "Run",
+    "backup_job_run_requested": "Run asked for"
+  },
+  "taskTypes": {
+    "vzdump": "Back up"
+  }
+}

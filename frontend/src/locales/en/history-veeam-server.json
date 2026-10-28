@@ -1,0 +1,31 @@
+{
+  "categories": {
+    "server": "Server",
+    "connection": "Connection",
+    "mapping": "Cluster mapping",
+    "jobs": "Jobs and runs",
+    "other": "Other"
+  },
+  "empty": "Nothing has been recorded for this Veeam server yet.",
+  "actions": {
+    "veeam_server_created": "Server added",
+    "veeam_server_updated": "Server changed",
+    "veeam_server_deleted": "Server removed",
+    "veeam_server_tested": "Connection tested",
+    "veeam_server_connect_failed": "Connection failed",
+    "veeam_server_credential_redirect_refused": "Address change refused",
+    "veeam_platform_mapped": "Platform mapped to a cluster",
+    "veeam_platform_unmapped": "Platform unmapped",
+    "veeam_job_started": "Job started",
+    "veeam_job_start_requested": "Job start asked for",
+    "veeam_job_start_failed": "Job start failed",
+    "veeam_job_stopped": "Job stopped",
+    "veeam_job_stop_failed": "Job stop failed",
+    "veeam_job_enabled": "Job enabled",
+    "veeam_job_enabled_failed": "Job enable failed",
+    "veeam_job_disabled": "Job disabled",
+    "veeam_job_disabled_failed": "Job disable failed",
+    "veeam_session_stopped": "Run stopped",
+    "veeam_session_stop_failed": "Run stop failed"
+  }
+}

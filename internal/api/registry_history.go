@@ -47,7 +47,7 @@ func historyRoutes() []historyRoute {
 		folderHistoryRoute(),
 		clusterHistoryRoute(),
 		nodeHistoryRoute(),
-	}, clusterPageHistoryRoutes()...)
+	}, append(clusterPageHistoryRoutes(), backupHistoryRoutes()...)...)
 }
 
 // registerHistoryEndpoints declares every kind's History route.
@@ -84,6 +84,10 @@ func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 		panic(fmt.Sprintf("history route %s: a History route is %s/…/history or under %s/history/, and a global "+
 			"kind's is %s…/history or under %shistory/ outside it", r.Path, clusterScope, clusterScope, pathPrefix,
 			pathPrefix))
+	}
+	if _, declared := r.Parameters[handlers.HistoryClusterParam]; declared == r.Kind.Global {
+		panic(fmt.Sprintf("history route %s: a cluster's kind declares the path parameter %q and a global kind "+
+			"does not", r.Path, handlers.HistoryClusterParam))
 	}
 	if _, declared := r.Parameters[handlers.HistoryClusterParam]; declared == r.Kind.Global {
 		panic(fmt.Sprintf("history route %s: a cluster's kind declares the path parameter %q and a global kind "+

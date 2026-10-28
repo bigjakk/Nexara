@@ -1,0 +1,48 @@
+{
+  "categories": {
+    "lifecycle": "Added / removed",
+    "config": "Configuration",
+    "content": "Files",
+    "disks": "Disks",
+    "backup": "Backup",
+    "other": "Other"
+  },
+  "empty": "Nothing has been recorded for this storage yet.",
+  "actions": {
+    "create": "Storage added",
+    "update": "Storage changed",
+    "delete": "Storage removed",
+    "create_import_source": "Import source added",
+    "delete_import_source": "Import source removed",
+    "enable_import_content": "Import content enabled",
+    "create_lvm": "LVM volume group created",
+    "create_lvmthin": "LVM thin pool created",
+    "create_directory": "Directory created",
+    "virtio_win_config_update": "virtio-win settings changed",
+    "virtio_win_download": "virtio-win download",
+    "upload": "Upload",
+    "download_url": "Download from URL",
+    "download_appliance": "Appliance download",
+    "pull_oci": "OCI image pull",
+    "delete_content": "Volume deleted",
+    "prune_backups": "Backups pruned",
+    "image_copy": "Copy",
+    "disk_move": "Disk moved",
+    "disk_move_running": "Disk move",
+    "volume_move": "Volume moved",
+    "disk_attach": "Disk added",
+    "backup_restored": "Restore",
+    "backup_triggered": "Backup",
+    "backup_job_created": "Backup job created",
+    "backup_job_updated": "Backup job changed"
+  },
+  "taskTypes": {
+    "imgdel": "Volume deleted",
+    "prunebackups": "Backups pruned",
+    "imgcopy": "Copy",
+    "download": "Download",
+    "vzdump": "Back up",
+    "qmrestore": "Restore",
+    "vzrestore": "Restore"
+  }
+}

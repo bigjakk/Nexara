@@ -76,7 +76,8 @@ func (noHistoryRows) Conn() *pgx.Conn                              { return nil 
 
 // describeSelection writes a selection on one line: an object as type=id,
 // type.key=value, type.key∋value (a value in a comma list), type[id].key=value
-// or type* (every row), then the guests and the worker filter.
+// or type* (every row), then the guests, the worker filter and the node the
+// objects' rows are held to.
 func describeSelection(sel handlers.HistorySelection) string {
 	var parts []string
 	for _, o := range sel.Objects {
@@ -99,6 +100,9 @@ func describeSelection(sel handlers.HistorySelection) string {
 	}
 	if len(sel.GuestWorkers) > 0 {
 		parts = append(parts, "workers "+strings.Join(sel.GuestWorkers, ","))
+	}
+	if sel.ObjectsOnNode != "" {
+		parts = append(parts, "on "+sel.ObjectsOnNode)
 	}
 	return strings.Join(parts, " ")
 }

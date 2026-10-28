@@ -187,7 +187,8 @@ func TestEveryDeclaredStorageRouteIsInTheTally(t *testing.T) {
 			continue
 		}
 		seen++
-		if _, listed := storageLegacyPermissions[key]; listed {
+		_, inHistoryTally := historyRoutesOutsideTheClusterCheckShape[key]
+		if _, listed := storageLegacyPermissions[key]; listed || inHistoryTally {
 			continue
 		}
 		t.Errorf("%s is declared but is not in storageLegacyPermissions — a new storage route must be "+

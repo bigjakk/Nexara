@@ -36,7 +36,7 @@ import (
 // a number somebody has to update deliberately.
 const (
 	nodeNamePathRouteCount  = 67
-	nodeNameQueryRouteCount = 6
+	nodeNameQueryRouteCount = 7
 )
 
 // memberNode is the one node the membership fakes below hold.

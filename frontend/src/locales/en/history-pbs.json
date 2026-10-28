@@ -1,0 +1,42 @@
+{
+  "categories": {
+    "server": "Server",
+    "snapshots": "Snapshots",
+    "maintenance": "Maintenance",
+    "jobs": "Jobs",
+    "restore": "Restores",
+    "other": "Other"
+  },
+  "categoryNotes": {
+    "jobs": "Sync and verify jobs run from Nexara, and, once Nexara has seen them, jobs edited in the Proxmox Backup Server itself."
+  },
+  "empty": "Nothing has been recorded for this Proxmox Backup Server yet.",
+  "actions": {
+    "pbs_created": "Server added",
+    "pbs_updated": "Server changed",
+    "pbs_deleted": "Server removed",
+    "pbs_credential_redirect_refused": "Address change refused",
+    "gc_triggered": "Garbage collection started",
+    "datastore_pruned": "Datastore pruned",
+    "snapshot_deleted": "Snapshot deleted",
+    "snapshot_protected": "Snapshot protected",
+    "snapshot_unprotected": "Snapshot unprotected",
+    "snapshot_notes_updated": "Snapshot notes changed",
+    "sync_job_triggered": "Sync job run",
+    "verify_job_triggered": "Verify job run",
+    "backup_restored": "Restore"
+  },
+  "taskTypes": {
+    "qmrestore": "Restore",
+    "vzrestore": "Restore"
+  },
+  "live": {
+    "title": "Recent tasks on the server",
+    "note": "Read from the server itself, live; they are not part of the history below.",
+    "startedInNexara": "Started in Nexara by {{user}}",
+    "running": "Running",
+    "failed": "Failed",
+    "ok": "OK",
+    "error": "Could not read the server's tasks."
+  }
+}

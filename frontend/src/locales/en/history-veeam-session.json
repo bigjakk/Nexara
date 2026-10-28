@@ -1,0 +1,11 @@
+{
+  "categories": {
+    "stop": "Stop",
+    "other": "Other"
+  },
+  "empty": "Nothing has been done to this run from Nexara.",
+  "actions": {
+    "veeam_session_stopped": "Run stopped",
+    "veeam_session_stop_failed": "Run stop failed"
+  }
+}

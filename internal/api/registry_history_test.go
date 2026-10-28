@@ -17,7 +17,7 @@ import (
 	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
-const historyRouteCount = 45
+const historyRouteCount = 51
 
 // historyRoutesOutsideTheClusterCheckShape are the History routes gated on
 // AllOf view:audit and the kind's own view permission (historyRoute.Resource).
@@ -28,6 +28,16 @@ var historyRoutesOutsideTheClusterCheckShape = map[string]string{
 		"they are all filed under",
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/history": "AllOf: view:audit for the rows, view:node " +
 		"for the node that selects them",
+	"GET /api/v1/clusters/:cluster_id/storages/:storage/history": "AllOf: view:audit for the rows, " +
+		"view:storage for the storage that selects them",
+	"GET /api/v1/clusters/:cluster_id/backup-jobs/:job_id/history": "AllOf: view:audit for the rows, " +
+		"view:backup for the job that selects them",
+	"GET /api/v1/pbs-servers/:pbs_id/history": "AllOf: global view:audit for the rows, global view:pbs for " +
+		"the server that selects them, whose rows are in every cluster and in none",
+	"GET /api/v1/veeam-servers/:id/history": "AllOf: global view:audit for the rows, global view:veeam for " +
+		"the server that selects them, whose rows are in every cluster and in none",
+	"GET /api/v1/veeam-servers/:id/jobs/:job_id/history":         "as the server's: global view:audit and global view:veeam",
+	"GET /api/v1/veeam-servers/:id/sessions/:session_id/history": "as the server's: global view:audit and global view:veeam",
 }
 
 // The guest is the one kind gated on view:audit alone, and the one whose

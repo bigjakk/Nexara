@@ -1,0 +1,27 @@
+{
+  "categories": {
+    "runs": "Runs",
+    "schedule": "Schedule",
+    "other": "Other"
+  },
+  "empty": "Nothing has been done to this job from Nexara yet.",
+  "actions": {
+    "veeam_job_started": "Started",
+    "veeam_job_start_requested": "Start asked for",
+    "veeam_job_start_failed": "Start failed",
+    "veeam_job_stopped": "Stopped",
+    "veeam_job_stop_failed": "Stop failed",
+    "veeam_job_enabled": "Enabled",
+    "veeam_job_enabled_failed": "Enable failed",
+    "veeam_job_disabled": "Disabled",
+    "veeam_job_disabled_failed": "Disable failed",
+    "veeam_session_stopped": "Run stopped",
+    "veeam_session_stop_failed": "Run stop failed"
+  },
+  "live": {
+    "title": "Recent runs",
+    "note": "Read from the runs Nexara has collected; they are not part of the history below.",
+    "none": "No run of this job has been collected.",
+    "error": "Could not read the runs."
+  }
+}
