@@ -1239,6 +1239,30 @@ func TestObserverOutcomes(t *testing.T) {
 		e.passRows()
 		e.expect("the next pass, held as written")
 	})
+	t.Run("a gate a lost write wrote is read back before the next kind writes the gates", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 1
+		e.client.set("/pools", `[{"poolid":"web"}]`)
+		e.client.set("/pools?poolid=web", `[{"poolid":"web","members":[]}]`)
+		e.client.set(pathStorage, storages("s1"))
+		e.expect("baseline")
+		e.client.set("/pools", `[{"poolid":"web"},{"poolid":"p0"}]`)
+		e.client.set(pathStorage, storages("s1", "s2"))
+		e.mq.observed.mu.Lock()
+		e.mq.observed.lose = map[string]int{"pool": 1}
+		e.mq.observed.mu.Unlock()
+		e.passRows()
+		e.mq.observed.mu.Lock()
+		gates := e.mq.observed.marks[e.cluster.ID.String()+"/"+observedNoticesMark].Signature
+		e.mq.observed.mu.Unlock()
+		for _, key := range []string{"too_many_objects/pool/", "too_many_objects/storage/"} {
+			if !strings.Contains(gates, `"`+key+`"`) {
+				t.Errorf("gates %s, want %s among them", gates, key)
+			}
+		}
+		e.expect("and none filed again")
+	})
 	t.Run("past the cap a field change is counted, and an upgrade meanwhile changes nothing", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
@@ -1248,7 +1272,7 @@ func TestObserverOutcomes(t *testing.T) {
 		e.client.set(pathStorage, storages("s1", "s2", "s3"))
 		e.passRows()
 		e.mq.nodesByCluster[0].PveVersion = "pve-manager/9.2.21/0000bbbb"
-		e.expect("an upgrade: read again under another signature, nothing counted")
+		e.expect("an upgrade: compared across, nothing moved")
 		e.client.set(pathStorage, `[{"storage":"s1","type":"dir","nodes":"pve-02"},{"storage":"s2","type":"dir","nodes":"pve-02"},`+
 			`{"storage":"s3","type":"dir","nodes":"pve-01"}]`)
 		counted(t, pastCap(t, e.passRows()), nil, nil, []string{"s3"})

@@ -287,6 +287,9 @@ type observePass struct {
 	state     map[string]map[string]storedObject // kind -> object id -> stored reading
 	baselines map[string]storedBaseline          // kind -> its mark
 	notices   map[string]noticeGate              // notice key -> its gate (observedNoticesMark)
+	// noticesStale: a write failed, or lost its reply and may have written
+	// its gates, so notices may not be what is stored (noticesFresh).
+	noticesStale bool
 	// pastCap is what this pass read whole that its kind held past the cap,
 	// "<kind>/<id>" -> when the kind went over: a parent's own objects, read
 	// for the first time, appeared with it, while it could not be seen.
@@ -635,6 +638,9 @@ func (s *capScope) byPresence() bool { return s.over || s.wasOver }
 // under the cap (while_over_cap), the scope being small enough again to name
 // each.
 func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig string, readAt, doneAt time.Time) {
+	if !p.noticesFresh(ctx) {
+		return
+	}
 	sig = p.kindSig(rd.kind, sig)
 	prev := map[string]storedObject{}
 	for id, s := range p.state[rd.kind] {
@@ -1230,6 +1236,9 @@ func (p *observePass) noticeTarget(kind, node string) (resourceType, resourceID 
 // without its gate kept, so a restart does not file it again, nor a gate moved
 // without its notice filed, so a failed write is the next pass's to try again.
 func (p *observePass) saveNotices(ctx context.Context, changes map[string]*noticeGate, rows ...observedChangeRow) {
+	if !p.noticesFresh(ctx) {
+		return
+	}
 	gates := maps.Clone(p.notices)
 	if gates == nil {
 		gates = map[string]noticeGate{}
@@ -1245,6 +1254,28 @@ func (p *observePass) saveNotices(ctx context.Context, changes map[string]*notic
 	if err == nil && p.write(ctx, observedNoticesMark, recordBatch{changes: rows}, time.Now(), string(encoded)) {
 		p.notices = gates
 	}
+}
+
+// noticesFresh reads the notice gates again once a write failed or lost its
+// reply — which may have written its own — so the next write of them does not
+// undo that one's, and says whether it could; a reading that would write them
+// is left for the next pass when it cannot.
+func (p *observePass) noticesFresh(ctx context.Context) bool {
+	if !p.noticesStale {
+		return true
+	}
+	marks, err := p.o.queries.ListClusterObjectBaselines(ctx, p.cluster.ID)
+	if err != nil {
+		return false
+	}
+	notices := map[string]noticeGate{}
+	for _, m := range marks {
+		if m.ResourceType == observedNoticesMark {
+			_ = json.Unmarshal([]byte(m.Signature), &notices)
+		}
+	}
+	p.notices, p.noticesStale = notices, false
+	return true
 }
 
 // capListing keeps a listing whose every object costs a read of its own to the
@@ -1934,6 +1965,7 @@ func (p *observePass) write(ctx context.Context, kind string, b recordBatch, see
 		if len(b.presence) > 0 || len(b.presenceRemoved) > 0 {
 			p.o.forgetPresence(p.cluster.ID)
 		}
+		p.noticesStale = true
 		return false
 	}
 	p.changes.Add(int64(len(b.changes)))
