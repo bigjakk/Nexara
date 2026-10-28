@@ -254,6 +254,7 @@ type ProxmoxClient interface {
 	GetNodeTasks(ctx context.Context, node string, since int64, limit int) ([]proxmox.NodeTask, error)
 	GetTaskStatus(ctx context.Context, node string, upid string) (*proxmox.TaskStatus, error)
 	GetTaskLog(ctx context.Context, node string, upid string, start int) ([]proxmox.TaskLogEntry, error)
+	GetRealmSyncAttributes(ctx context.Context, realm string) (string, error)
 	GetVersion(ctx context.Context) (*proxmox.Version, error)
 	GetHAManagerStatus(ctx context.Context) (map[string]json.RawMessage, error)
 	ListVMSnapshots(ctx context.Context, node string, vmid int) ([]proxmox.Snapshot, error)
@@ -838,7 +839,8 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// too long for theirs. Every pass, even one that listed no node.
 	s.classifyStatusChanges(ctx, cluster, listedNodes, offlineNodes)
 	s.classifyObjectChanges(ctx, cluster, listedNodes)
-	s.classifyObservedChanges(ctx, cluster, everyOnlineNodeListed(nodes, listedNodes), s.readRealmSyncLogs(ctx, client, cluster))
+	taskLogs, realmFields := s.readRealmSyncs(ctx, client, cluster)
+	s.classifyObservedChanges(ctx, cluster, everyOnlineNodeListed(nodes, listedNodes), taskLogs, realmFields)
 
 	// Only notify the frontend when inventory data actually changed
 	// (VM status transitions, VMs added/removed). This avoids triggering

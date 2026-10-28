@@ -1386,7 +1386,7 @@ func TestObservedClassifyBatchShrinksAfterATimeout(t *testing.T) {
 	s := &Syncer{queries: mq, logger: testLogger()}
 	cluster := db.Cluster{ID: uuid.New()}
 	for range 4 {
-		s.classifyObservedChanges(context.Background(), cluster, true, json.RawMessage(`{}`))
+		s.classifyObservedChanges(context.Background(), cluster, true, json.RawMessage(`{}`), json.RawMessage(`{}`))
 	}
 	got := make([]int32, 0, len(mq.classifyObserved))
 	for _, c := range mq.classifyObserved {
@@ -1522,7 +1522,7 @@ func TestObservedChangeRules(t *testing.T) {
 			!regexp.MustCompile(`^[a-z_]*$`).MatchString(r.DetailKey) {
 			t.Errorf("rule %+v: object, member, counts or detail_key", r)
 		}
-		if !slices.Contains([]string{"", "config", "settings", "keys", "fields"}, r.FieldsFrom) ||
+		if !slices.Contains([]string{"", "config", "settings", "keys", "fields", "realm"}, r.FieldsFrom) ||
 			len(r.Derived) > 0 && r.FieldsFrom != "fields" || r.Appeared && r.FieldRe == "" {
 			t.Errorf("rule %+v: fields_from, derived without the fields it is derived from, or appeared naming no field", r)
 		}
@@ -1560,6 +1560,14 @@ func TestObservedChangeRules(t *testing.T) {
 			r.Change == "removed" && r.Kind != "pve_acl" && !strings.HasPrefix(r.LogNames, "removed:")) ||
 			r.LogNames != "" && r.WorkerRe != `^auth-realm-sync$` {
 			t.Errorf("rule %+v: a realm sync's removals are what its log names, and only its log is read", r)
+		}
+		// Of a user it has, a sync sets enable, expire and keys only where its
+		// realm maps them.
+		for _, f := range realmSyncFields {
+			if strings.Contains(r.WorkerRe, "auth-realm-sync") && r.Kind == "pve_user" && r.Change == "changed" &&
+				r.FieldsFrom != "realm" && regexp.MustCompile(r.FieldRe).MatchString(f) {
+				t.Errorf("rule %+v: a realm sync explains a user's %s only as its realm maps it", r, f)
+			}
 		}
 		if source, formats, _ := strings.Cut(r.MemberOf, ":"); r.Kind == "pve_acl" && source == "audit" {
 			pinned := map[string]*regexp.Regexp{

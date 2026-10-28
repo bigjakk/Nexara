@@ -91,6 +91,8 @@ var nonUPIDStringMethods = map[string]bool{
 
 	// returns the digest of a node's config file, read for the save check
 	"GetNodeConfigDigest": true,
+	// returns a realm's sync_attributes, read for what its sync maps
+	"GetRealmSyncAttributes": true,
 }
 
 // parseGoFiles parses every non-test .go file in dir into *ast.File. It uses

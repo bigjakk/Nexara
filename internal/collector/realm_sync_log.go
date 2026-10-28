@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -45,20 +47,41 @@ const (
 	realmSyncLogBudget   = 15 * time.Second
 )
 
-// readRealmSyncLogs is the logs of the cluster's realm syncs a change waiting to
-// be classified may lie in the window of — the give-up's day and the look-back
-// before it — as task_logs, by UPID. A finished sync's log is read once
-// (s.realmSyncLogs); a running one's each pass, as it logs a removal before it
-// writes it. Nothing read is "{}".
-func (s *Syncer) readRealmSyncLogs(ctx context.Context, client ProxmoxClient, cluster db.Cluster) json.RawMessage {
+// realmSyncFields are the user fields a realm sync writes on a user it has only
+// where the realm's sync_attributes maps them (realmSyncRules).
+var realmSyncFields = []string{"enable", "expire", "keys"}
+
+// readRealmSyncs reads, for the cluster's realm syncs a change waiting to be
+// classified may lie in the window of — the give-up's day and the look-back
+// before it — what ClassifyObservedChanges takes of them: taskLogs, each
+// sync's log by UPID, and realmFields, each synced realm's mapped
+// realmSyncFields. A finished sync's log is read once (s.realmSyncLogs), a
+// running one's each pass, as it logs a removal before it writes it; a realm
+// each pass, and one that cannot be read maps none. Nothing read is "{}".
+func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, cluster db.Cluster) (taskLogs, realmFields json.RawMessage) {
+	none := json.RawMessage(`{}`)
 	since := time.Now().Add(-statusChangeGiveUp - observedLookback(s.objectObserveInterval) - time.Hour)
 	tasks, err := s.queries.ListRealmSyncTasks(ctx, db.ListRealmSyncTasksParams{ClusterID: cluster.ID, Since: since})
 	if err != nil {
 		s.logger.Debug("list realm syncs", "cluster_id", cluster.ID, "error", err)
-		return json.RawMessage(`{}`)
+		return none, none
 	}
 	ctx, cancel := context.WithTimeout(ctx, realmSyncLogBudget)
 	defer cancel()
+	fields := map[string][]string{}
+	for _, t := range tasks {
+		_, realm, ok := upidTypeAndID(t.Upid)
+		if _, read := fields[realm]; read || !ok || realm == "" {
+			continue
+		}
+		fields[realm] = []string{}
+		attrs, err := client.GetRealmSyncAttributes(ctx, realm)
+		if err != nil {
+			s.logger.Debug("read a synced realm's mapping", "cluster_id", cluster.ID, "realm", realm, "error", err)
+			continue
+		}
+		fields[realm] = realmMappedFields(attrs)
+	}
 	prefix := cluster.ID.String() + "/"
 	logs, listed, reads := map[string]realmSyncLog{}, map[string]bool{}, 0
 	for _, t := range tasks {
@@ -84,11 +107,27 @@ func (s *Syncer) readRealmSyncLogs(ctx context.Context, client ProxmoxClient, cl
 		}
 		return true
 	})
-	b, err := json.Marshal(logs)
+	taskLogs, err = json.Marshal(logs)
 	if err != nil {
-		return json.RawMessage(`{}`)
+		taskLogs = none
 	}
-	return b
+	realmFields, err = json.Marshal(fields)
+	if err != nil {
+		realmFields = none
+	}
+	return taskLogs, realmFields
+}
+
+// realmMappedFields is which of realmSyncFields a realm's sync_attributes maps,
+// read as LDAP.pm get_users reads it: split_list, each "<ours>=<ldap>".
+func realmMappedFields(syncAttributes string) []string {
+	mapped := []string{}
+	for _, pair := range strings.FieldsFunc(syncAttributes, func(r rune) bool { return r == ',' || r == ';' || unicode.IsSpace(r) }) {
+		if ours, _, ok := strings.Cut(pair, "="); ok && slices.Contains(realmSyncFields, ours) && !slices.Contains(mapped, ours) {
+			mapped = append(mapped, ours)
+		}
+	}
+	return mapped
 }
 
 // readRealmSyncLog reads one sync's log for what it removed and purged.

@@ -685,6 +685,23 @@ func (c *Client) GetAccessDomain(ctx context.Context, realm string) (*AccessDoma
 	return &domain, nil
 }
 
+// GetRealmSyncAttributes returns an LDAP or AD realm's sync_attributes, the
+// mappings it adds onto the user fields a sync writes (pve-access-control
+// Auth/LDAP.pm get_users), and nothing else of its configuration, which holds
+// secrets (GetAccessDomain).
+func (c *Client) GetRealmSyncAttributes(ctx context.Context, realm string) (string, error) {
+	if err := validateRealm(realm); err != nil {
+		return "", err
+	}
+	var domain struct {
+		SyncAttributes string `json:"sync_attributes"`
+	}
+	if err := c.do(ctx, "/access/domains/"+url.PathEscape(realm), &domain); err != nil {
+		return "", fmt.Errorf("get access domain %s: %w", realm, err)
+	}
+	return domain.SyncAttributes, nil
+}
+
 // realmTFATypes are the two-factor types Proxmox has: the enum of the type key
 // in $tfa_format (pve-access-control, src/PVE/Auth/Plugin.pm). It is an
 // allowlist by design: a type Proxmox adds later reads as "" in both realm reads

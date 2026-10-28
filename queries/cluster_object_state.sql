@@ -315,7 +315,8 @@ WITH rules AS MATERIALIZED (
                -- (unused<n>, boot); the settings and cleared it lists; each key
                -- of its details, where an update records a field it set so; or
                -- the names its fields lists, with those the rule's derived says
-               -- Proxmox rewrites with each (and, at *, with any update).
+               -- Proxmox rewrites with each (and, at *, with any update); or
+               -- what the realm its task synced maps (realm_fields).
                CASE k.fields_from
                    WHEN 'config' THEN ARRAY(
                        SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
@@ -332,6 +333,9 @@ WITH rules AS MATERIALIZED (
                                                                     THEN k.details->'cleared' ELSE '[]' END) AS f)
                    WHEN 'keys' THEN ARRAY(
                        SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(k.details) = 'object' THEN k.details ELSE '{}' END))
+                   WHEN 'realm' THEN ARRAY(
+                       SELECT jsonb_array_elements_text(COALESCE(
+                           sqlc.arg('realm_fields')::jsonb -> split_part(k.details->>'upid', ':', 7), '[]')))
                    WHEN 'fields' THEN ARRAY(
                        SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'fields') = 'array'
                                                                     THEN k.details->'fields' ELSE '[]' END) AS f

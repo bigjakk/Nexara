@@ -79,7 +79,9 @@ type explainRule struct {
 	// a disk, the unused<n> and boot a disk's change or removal moves);
 	// settings, the settings and cleared it lists (the datacenter options, a
 	// node's ACME); keys, its details' own keys (an HA or pool update);
-	// fields, the names of the fields it sent (handlers' auditFieldNames).
+	// fields, the names of the fields it sent (handlers' auditFieldNames);
+	// realm, those its realm's sync_attributes map (a realm sync's,
+	// readRealmSyncs).
 	FieldsFrom string `json:"fields_from"`
 	// Derived, with FieldsFrom fields, is what Proxmox rewrites with a field
 	// sent, by its name, and with any update, at "*".
@@ -630,13 +632,13 @@ func aclDeleteRules(auditType, who, grants string) []explainRule {
 // What a sync writes on a user it already has, transcribed (LDAP.pm get_users,
 // Domains.pm update_users): every attribute the directory returns that maps to
 // one of enable, expire, firstname, lastname, email, comment and keys
-// overwrites it. The default map takes an LDAP attribute of each of those
-// names, and sync_attributes only adds mappings to the same seven, so the
-// realm's config could not narrow them. With remove-vanished=properties the
-// record is replaced by what the directory returned, so any of them but enable
-// (kept from the old record; enable-new is only for a user it creates) may be
-// cleared. All seven are its, enable too: verify_sync_attribute_value takes it
-// "for backwards compat".
+// overwrites it, and with remove-vanished=properties the record is replaced by
+// what it returned, so any but enable (kept from the old record; enable-new is
+// only for a user it creates) may be cleared. The default map takes an LDAP
+// attribute of each of those names; the names, e-mail and comment are what a
+// directory has, enable, expire and keys a sync sets only where the realm's
+// sync_attributes maps them, so only then are they its (readRealmSyncs: an
+// unread realm maps none).
 var realmSyncRules = func() []explainRule {
 	const sync = `^auth-realm-sync$`
 	return slices.Concat(
@@ -648,7 +650,9 @@ var realmSyncRules = func() []explainRule {
 			{Kind: "pve_group", Change: "removed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*-%s",
 				LogNames: "removed:groups"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
-				FieldRe: `^(enable|expire|firstname|lastname|email|comment|keys)$`},
+				FieldRe: `^(firstname|lastname|email|comment)$`},
+			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
+				FieldRe: `^(enable|expire|keys)$`, FieldsFrom: "realm"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
 				FieldRe: `^groups$`, Member: "joined", MemberOf: "upid:groups:*-%s"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync,
@@ -731,7 +735,7 @@ func observedLookback(interval time.Duration) time.Duration {
 // so a task that explains a change made in the Proxmox GUI is on record first;
 // a change waits for a pass whose ingest listed every online node, the day at
 // most. A failure is only logged: the changes stay unclassified, and hidden.
-func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster, allNodesListed bool, taskLogs json.RawMessage) {
+func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster, allNodesListed bool, taskLogs, realmFields json.RawMessage) {
 	ctx, cancel := context.WithTimeout(ctx, observeClassifyTimeout)
 	defer cancel()
 	for ctx.Err() == nil {
@@ -745,6 +749,7 @@ func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster
 			GiveUpBefore:    time.Now().Add(-statusChangeGiveUp),
 			MaxRows:         batch,
 			TaskLogs:        taskLogs,
+			RealmFields:     realmFields,
 		})
 		s.settleBatch(cluster.ID, batch, err != nil && (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded)))
 		if err != nil {

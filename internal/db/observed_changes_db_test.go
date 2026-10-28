@@ -382,6 +382,10 @@ func TestObservedChanges(t *testing.T) {
 	members(groupBesideStar, []string{"users:user07@pve"}, []string{})
 	audit(observedCluster, in, "pve_user", "*@pve", 0, "created", map[string]any{"groups_set": true})
 	byRealmSync := seed(observedCluster, "pve_user", "user04@ldap01", 0, "changed", "", []string{"email"}, at)
+	// enable, expire and keys a sync sets only where its realm maps them.
+	syncMapped := seed(observedCluster, "pve_user", "user10@ldap01", 0, "changed", "", []string{"enable"}, at)
+	syncUnmapped := seed(observedCluster, "pve_user", "user11@ldap01", 0, "changed", "", []string{"keys"}, at)
+	realmFields := jsonOf(map[string][]string{"ldap01": {"enable"}})
 	besideRealmSync := seed(observedCluster, "pve_user", "user05@pve", 0, "changed", "", []string{"email"}, at)
 	syncJoinedSynced := seed(observedCluster, "pve_user", "user08@ldap01", 0, "changed", "", []string{"groups"}, at)
 	members(syncJoinedSynced, []string{"groups:staff-ldap01"}, []string{})
@@ -494,7 +498,9 @@ func TestObservedChanges(t *testing.T) {
 		with(with(rule("pve_acl", "changed", "pve_acl", "id", false, "^granted$", "", "", "^user_grants$"),
 			"member", "left"), "member_of", "grants.users:user_grants:%1$s:*:%3$s"),
 		with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
-			"^(enable|expire|firstname|lastname|email|comment|keys)$"), "object", "upid:*@%s"),
+			"^(firstname|lastname|email|comment)$"), "object", "upid:*@%s"),
+		with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
+			"^(enable|expire|keys)$"), "object", "upid:*@%s"), "fields_from", "realm"),
 		with(with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$", "^groups$"),
 			"object", "upid:*@%s"), "member", "joined"), "member_of", "upid:groups:*-%s"),
 		with(with(with(rule("pve_acl", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
@@ -530,6 +536,7 @@ func TestObservedChanges(t *testing.T) {
 		n, err := q.ClassifyObservedChanges(ctx, gen.ClassifyObservedChangesParams{
 			Rules: rules, LookbackSeconds: 3600, ClusterID: observedCluster, SettledBefore: ago(5),
 			AllNodesListed: allListed, GiveUpBefore: now.Add(-24 * time.Hour), MaxRows: maxRows, TaskLogs: taskLogs,
+			RealmFields: realmFields,
 		})
 		if err != nil {
 			t.Fatalf("classify: %v", err)
@@ -637,6 +644,8 @@ func TestObservedChanges(t *testing.T) {
 		{"a role's update appending, one leaving", roleAppended, "shown"},
 		{"a role's update replacing its list, one it lists leaving", roleKeptListed, "shown"},
 		{"a realm's sync, a user of that realm", byRealmSync, "explained"},
+		{"a realm's sync, a field its realm maps", syncMapped, "explained"},
+		{"a realm's sync, a field its realm does not map", syncUnmapped, "shown"},
 		{"a realm's sync, a user of another", besideRealmSync, "shown"},
 		{"a realm's sync, its user joining a group it syncs", syncJoinedSynced, "explained"},
 		{"a realm's sync, its user joining another group", syncJoinedOther, "shown"},
