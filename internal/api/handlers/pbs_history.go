@@ -12,8 +12,8 @@ import "context"
 // in details — and a restore from it is filed under the guest it restored
 // (backup), whose cluster is not the server's, and names the server in
 // details. A datastore's History is the rows that name it within the server's,
-// which is its identity: two servers can each hold a datastore of one name.
-// The restore names the server, not the datastore, so it is the server's alone.
+// which is its identity: two servers can each hold a datastore of one name —
+// and the restores that name both the server and the datastore they read from.
 func PBSHistory() HistoryKind {
 	return HistoryKind{
 		Name:       "pbs",
@@ -41,12 +41,13 @@ var pbsHistoryRules = []HistoryRule{
 
 // selectPBS is the PBS kind's selector: the path's server — its own rows and
 // the restores that name it — or, with a datastore, the server's rows that
-// name the datastore.
+// name the datastore and the restores that name both.
 func selectPBS(_ context.Context, r HistoryRequest) (HistorySelection, error) {
 	server := r.Params.String("pbs_id")
 	if datastore := r.Params.String("datastore"); datastore != "" {
 		return HistorySelection{Objects: []HistoryObject{
 			{ResourceType: "pbs_server", ResourceID: server, DetailKey: "datastore", Value: datastore},
+			{ResourceType: "backup", DetailKey: "pbs_server_id", Value: server, AndKey: "datastore", AndValue: datastore},
 		}}, nil
 	}
 	return HistorySelection{Objects: []HistoryObject{

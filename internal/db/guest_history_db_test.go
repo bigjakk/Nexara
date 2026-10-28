@@ -2010,6 +2010,28 @@ func TestGuestHistory(t *testing.T) {
 		if len(restores) != 2 || restores[0].ClusterID.Bytes != historyOtherID || restores[1].ClusterID.Bytes != historyClusterID {
 			t.Errorf("a global kind's restores from one server = %d rows, want one from each cluster", len(restores))
 		}
+
+		// …by two keys at once: the restores from one datastore of one server, not
+		// another datastore's of it, nor another server's of that name.
+		audit(historyClusterID, minsAgo(1.5), "nexara", "backup", "100/qemu", "backup_restored",
+			map[string]any{"pbs_server_id": "srv-c", "datastore": "datastore01"})
+		audit(historyOtherID, minsAgo(1.4), "nexara", "backup", "100/qemu", "backup_restored",
+			map[string]any{"pbs_server_id": "srv-c", "datastore": "datastore02"})
+		audit(historyClusterID, minsAgo(1.3), "nexara", "backup", "100/qemu", "backup_restored",
+			map[string]any{"pbs_server_id": "srv-d", "datastore": "datastore01"})
+		dp, err := pbs.ListParams(uuid.Nil, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "backup", DetailKey: "pbs_server_id", Value: "srv-c", AndKey: "datastore", AndValue: "datastore01"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dp.RowLimit = 50
+		datastoreRestores, err := hq.ListHistory(ctx, dp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(datastoreRestores) != 1 || datastoreRestores[0].ClusterID.Bytes != historyClusterID {
+			t.Errorf("the restores from one datastore of one server = %d rows, want the one", len(datastoreRestores))
+		}
 	})
 
 	run("hide", func(t *testing.T) {

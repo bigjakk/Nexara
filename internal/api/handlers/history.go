@@ -439,6 +439,11 @@ type HistoryObject struct {
 	// and filed under the same resource type: a backup job's id, like a
 	// guest's VMID or a node's name, so the id alone is not an identity.
 	ActionLike string
+	// AndKey and AndValue, both or neither, are a second details key the rows
+	// of a keyed object must also hold, as one containment with the first: a
+	// Veeam run stopped is read by its job and the server it names, a restore
+	// by the PBS server and the datastore.
+	AndKey, AndValue string
 }
 
 // SelectObjects is the generic selector, for any object with a stable audit
@@ -816,6 +821,8 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		ObjectInList:        make([]bool, 0, len(sel.Objects)),
 		ObjectWhole:         make([]bool, 0, len(sel.Objects)),
 		ObjectActionLikes:   make([]string, 0, len(sel.Objects)),
+		ObjectAndKeys:       make([]string, 0, len(sel.Objects)),
+		ObjectAndValues:     make([]string, 0, len(sel.Objects)),
 		HideTypes:           make([]string, 0, len(k.Hide)),
 		HideActions:         make([]string, 0, len(k.Hide)),
 		HideKeys:            make([]string, 0, len(k.Hide)),
@@ -894,6 +901,11 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		if o.WholeType && (o.DetailKey != "" || o.ResourceID != "" || o.InList) {
 			return db.ListHistoryParams{}, fmt.Errorf("history object %+v is a whole type and names an id, key or list", o)
 		}
+		// ListHistory reads a second key only of a keyed object, with a value.
+		if (o.AndKey == "") != (o.AndValue == "") || o.AndKey != "" && (o.DetailKey == "" || o.InList || o.WholeType) {
+			return db.ListHistoryParams{}, fmt.Errorf("history object %+v names a second details key and not its value, "+
+				"or beside no single key", o)
+		}
 		// ListHistory holds only an object read by its resource id to an
 		// action: one with a details key, or a whole type, would be left unheld
 		// and look held.
@@ -922,6 +934,8 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		params.ObjectInList = append(params.ObjectInList, o.InList)
 		params.ObjectWhole = append(params.ObjectWhole, o.WholeType)
 		params.ObjectActionLikes = append(params.ObjectActionLikes, o.ActionLike)
+		params.ObjectAndKeys = append(params.ObjectAndKeys, o.AndKey)
+		params.ObjectAndValues = append(params.ObjectAndValues, o.AndValue)
 	}
 	params.ObjectsNode = sel.ObjectsOnNode
 	params.RuleCategories, params.RuleFields, params.RulePatterns = k.sqlRules()

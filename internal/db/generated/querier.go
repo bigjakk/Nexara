@@ -1783,6 +1783,11 @@ type Querier interface {
 	//                           (resource_type, created_at) within the cluster,
 	//                           so for a type of configuration objects, which
 	//                           are edited rarely.
+	//            A keyed object may name a second key and value its rows must
+	//            also hold (object_and_keys, object_and_values; '' for none): one
+	//            containment of two keys, such as the server and the job a Veeam
+	//            run was stopped for, or the server and the datastore a restore
+	//            read from.
 	//            An object read by its resource id can be held to an action
 	//            pattern (object_action_likes, '' for none): a backup job's id is a
 	//            string shaped like a guest's VMID or a node's name, all filed

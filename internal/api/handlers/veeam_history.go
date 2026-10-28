@@ -43,8 +43,9 @@ func VeeamServerHistory() HistoryKind {
 // VeeamJobHistory is a job's, within the server the path names: what was done
 // to it — started, stopped, put on or taken off its schedule — and to its runs.
 //
-// The runs' rows name the job but not the server's copy of it, so they are
-// read by the job's id alone; the job's own rows are held to the server.
+// A run's row names the job and the server, and a job's runs are read by both
+// (one containment of the two keys), as the job's own rows are held to the
+// server: a restored copy of a server that repeats the job's id adds neither.
 func VeeamJobHistory() HistoryKind {
 	return HistoryKind{
 		Name:       "veeam-job",
@@ -62,12 +63,13 @@ func VeeamJobHistory() HistoryKind {
 
 // selectVeeamJob is the job kind's selector. The job's own rows are the ones
 // filed under its id that name the path's server, so a second server that
-// repeats the id does not add its own; the stops of its runs name the job.
+// repeats the id does not add its own; the stops of its runs name the job and
+// the server, and are the ones that name both.
 func selectVeeamJob(_ context.Context, r HistoryRequest) (HistorySelection, error) {
 	server, job := r.Params.String("id"), r.Params.String("job_id")
 	return HistorySelection{Objects: []HistoryObject{
 		{ResourceType: "veeam_job", ResourceID: job, DetailKey: "veeam_server_id", Value: server},
-		{ResourceType: "veeam_session", DetailKey: "veeam_job_id", Value: job},
+		{ResourceType: "veeam_session", DetailKey: "veeam_job_id", Value: job, AndKey: "veeam_server_id", AndValue: server},
 	}}, nil
 }
 

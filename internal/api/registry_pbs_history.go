@@ -21,8 +21,8 @@ func pbsHistoryRoute() historyRoute {
 		Description: "List what happened to one Proxmox Backup Server, newest first: the server added, " +
 			"changed or removed, datastore garbage collections, prunes and snapshot changes, sync and " +
 			"verify jobs run from Nexara — and, in PBS, changed — and the restores from it, with each " +
-			"restore's outcome. With datastore, only what names that datastore: a restore names the " +
-			"server and not the datastore, so it is the server's alone. Rows are kept across the " +
+			"restore's outcome. With datastore, only what names that datastore in the server's rows, " +
+			"and the restores that name both the server and that datastore. Rows are kept across the " +
 			"server's moves between clusters, and read in every cluster. Requires global view:audit, " +
 			"global view:pbs and global view:backup; a task's exit text needs global view:task too.",
 		Resource:      "pbs",

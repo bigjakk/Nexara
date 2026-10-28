@@ -59,6 +59,11 @@
 --                           (resource_type, created_at) within the cluster,
 --                           so for a type of configuration objects, which
 --                           are edited rarely.
+--            A keyed object may name a second key and value its rows must
+--            also hold (object_and_keys, object_and_values; '' for none): one
+--            containment of two keys, such as the server and the job a Veeam
+--            run was stopped for, or the server and the datastore a restore
+--            read from.
 --            An object read by its resource id can be held to an action
 --            pattern (object_action_likes, '' for none): a backup job's id is a
 --            string shaped like a guest's VMID or a node's name, all filed
@@ -302,7 +307,8 @@ WITH guests AS MATERIALIZED (
                     '{}'::jsonb) AS m
     FROM guests g
 ), objects AS (
-    SELECT t.resource_type, r.resource_id, k.detail_key, v.value, l.in_list, w.whole, x.action_like
+    SELECT t.resource_type, r.resource_id, k.detail_key, v.value, l.in_list, w.whole, x.action_like,
+           ak.and_key, av.and_value
     FROM unnest(sqlc.arg('object_types')::text[]) WITH ORDINALITY AS t(resource_type, n)
     JOIN unnest(sqlc.arg('object_resource_ids')::text[]) WITH ORDINALITY AS r(resource_id, n) ON r.n = t.n
     JOIN unnest(sqlc.arg('object_keys')::text[]) WITH ORDINALITY AS k(detail_key, n) ON k.n = t.n
@@ -310,6 +316,8 @@ WITH guests AS MATERIALIZED (
     JOIN unnest(sqlc.arg('object_in_list')::bool[]) WITH ORDINALITY AS l(in_list, n) ON l.n = t.n
     JOIN unnest(sqlc.arg('object_whole')::bool[]) WITH ORDINALITY AS w(whole, n) ON w.n = t.n
     JOIN unnest(sqlc.arg('object_action_likes')::text[]) WITH ORDINALITY AS x(action_like, n) ON x.n = t.n
+    JOIN unnest(sqlc.arg('object_and_keys')::text[]) WITH ORDINALITY AS ak(and_key, n) ON ak.n = t.n
+    JOIN unnest(sqlc.arg('object_and_values')::text[]) WITH ORDINALITY AS av(and_value, n) ON av.n = t.n
 ), hidden AS (
     SELECT t.resource_type, a.action, k.detail_key, v.value AS detail_value
     FROM unnest(sqlc.arg('hide_types')::text[]) WITH ORDINALITY AS t(resource_type, n)
@@ -544,10 +552,11 @@ WITH guests AS MATERIALIZED (
           UNION ALL
           SELECT m.id, m.cluster_id, m.created_at, m.source, m.action, m.resource_type, m.resource_id, m.vmid, m.user_id,
                  m.upid, m.node, m.recorded_status, m.new_id
-          FROM (SELECT o.detail_key, o.value, o.resource_id, array_agg(o.resource_type) AS types
+          FROM (SELECT o.detail_key, o.value, o.resource_id, o.and_key, o.and_value,
+                       array_agg(o.resource_type) AS types
                 FROM objects o
                 WHERE o.detail_key <> '' AND NOT o.in_list
-                GROUP BY o.detail_key, o.value, o.resource_id) o
+                GROUP BY o.detail_key, o.value, o.resource_id, o.and_key, o.and_value) o
           CROSS JOIN LATERAL (
               SELECT b.id, b.cluster_id, b.created_at, b.source, b.action, b.resource_type, b.resource_id, b.vmid,
                      b.user_id, b.details->>'upid' AS upid, b.details->>'node' AS node,
@@ -557,6 +566,7 @@ WITH guests AS MATERIALIZED (
                      OR b.details @> CASE WHEN o.value ~ '^-?[0-9]{1,15}$'
                                           THEN jsonb_build_object(o.detail_key, o.value::bigint) END)
                 AND b.details->>o.detail_key = o.value
+                AND (o.and_key = '' OR b.details @> jsonb_build_object(o.and_key, o.and_value))
                 AND b.resource_type = ANY(o.types)
                 AND (o.resource_id = '' OR b.resource_id = o.resource_id)
                 AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
