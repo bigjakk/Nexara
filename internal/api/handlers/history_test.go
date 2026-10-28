@@ -158,6 +158,12 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"a default the filter refuses", func(k *HistoryKind) { k.Default = "misc" }, "Default"},
 		{"a global kind with a guest", func(k *HistoryKind) { k.Global, k.GuestFromPath = true, "vmid" }, "global"},
 		{"a global kind reading a cluster's type", func(k *HistoryKind) { k.Global = true }, "unique only within a cluster"},
+		{"a hide with a key and no value", func(k *HistoryKind) {
+			k.Hide = []HistoryHide{{ResourceType: "pool", Action: "x", DetailKey: "task_type"}}
+		}, "hide 0"},
+		{"a hide of a type it does not read", func(k *HistoryKind) {
+			k.Hide = []HistoryHide{{ResourceType: "network", Action: "reload"}}
+		}, "does not read"},
 		{"an observed type it does not read", func(k *HistoryKind) {
 			k.ObservedTypes = []HistoryObservedType{{Type: "replication"}}
 		}, "observed changes"},

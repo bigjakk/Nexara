@@ -1957,6 +1957,43 @@ func TestGuestHistory(t *testing.T) {
 			t.Errorf("a global kind's History = %v, want %v", clusters, want)
 		}
 	})
+
+	run("hide", func(t *testing.T) {
+		// A copy of Nexara's own SDN apply, which 000118 left at network/<node> as a
+		// reload, is neither the Networks tab's nor an interface's: Nexara's row of
+		// the apply says who asked, and the copy would list it twice.
+		audit(historyThirdID, minsAgo(8), "proxmox", "network", "pve-02", "reload", map[string]any{"task_type": "reloadnetworkall"})
+		audit(historyThirdID, minsAgo(8), "nexara", "network", "pve-02", "network_applied", map[string]any{})
+		audit(historyThirdID, minsAgo(8), "nexara", "network", "pve-02/vmbr0", "interface_updated", map[string]any{})
+		for _, tt := range []struct {
+			name string
+			kind handlers.HistoryKind
+			sel  handlers.HistorySelection
+		}{
+			{"the Networks tab", handlers.NetworksHistory(), handlers.HistorySelection{Objects: []handlers.HistoryObject{
+				{ResourceType: "network", WholeType: true}}}},
+			{"an interface", handlers.NetworkInterfaceHistory(), handlers.HistorySelection{Objects: []handlers.HistoryObject{
+				{ResourceType: "network", Value: "pve-02/vmbr0"}, {ResourceType: "network", Value: "pve-02"}}}},
+		} {
+			np, err := tt.kind.ListParams(historyThirdID, tt.sel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			np.RowLimit = 50
+			rows, err := hq.ListHistory(ctx, np)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, 0, len(rows))
+			for _, r := range rows {
+				got = append(got, r.Action+" "+r.ResourceID)
+			}
+			if slices.Contains(got, "reload pve-02") || !slices.Contains(got, "network_applied pve-02") ||
+				!slices.Contains(got, "interface_updated pve-02/vmbr0") {
+				t.Errorf("%s: %v, want the node's apply and the interface's update and not the apply's copy", tt.name, got)
+			}
+		}
+	})
 }
 
 func withFilter(p gen.ListHistoryParams, f func(*gen.ListHistoryParams)) gen.ListHistoryParams {

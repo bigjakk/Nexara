@@ -10,6 +10,15 @@ import (
 // interfaces and the SDN's objects, and the SDN apply.
 var networksTypes = []string{"network", "sdn", "sdn_zone", "sdn_vnet", "sdn_subnet", "sdn_controller", "sdn_ipam", "sdn_dns"}
 
+// networkReloadTwins are the copies of Nexara's own SDN applies that migration
+// 000118 left where the collector had filed them, at network/<node> as a reload
+// (reloadnetworkall): Nexara's own row of the apply, sdn_applied, is the one that
+// says who asked, and these would list every apply twice. 000118 moved every
+// other ingested apply to sdn/cluster, so only the twins have this shape.
+var networkReloadTwins = []HistoryHide{
+	{ResourceType: "network", Action: "reload", DetailKey: "task_type", DetailValue: "reloadnetworkall"},
+}
+
 // NetworksHistory is the Networks tab's kind: the nodes' interfaces and the
 // SDN's zones, VNets, subnets, controllers, IPAMs and DNS plugins, told apart
 // by type, and what was applied — a node's network configuration or the SDN.
@@ -31,6 +40,7 @@ func NetworksHistory() HistoryKind {
 		},
 		Select:        SelectTypes(networksTypes...),
 		ObjectTypes:   networksTypes,
+		Hide:          networkReloadTwins,
 		ObservedTypes: observedOf("network", "sdn_zone", "sdn_vnet", "sdn_subnet", "sdn_controller", "sdn_ipam", "sdn_dns"),
 	}
 }
@@ -57,6 +67,7 @@ func NetworkInterfaceHistory() HistoryKind {
 		},
 		ObjectTypes:   []string{"network"},
 		ObservedTypes: observedOf("network"),
+		Hide:          networkReloadTwins,
 	}
 }
 

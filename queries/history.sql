@@ -65,6 +65,11 @@
 --            by its id (DISTINCT ON): one read of each row, not its id and
 --            then the row.
 --
+-- A kind may hide shapes of row from what its objects select (hide_*,
+-- HistoryKind.Hide): the rows of a resource type with an action, and, when a
+-- details key is named, whose details hold the value under it. They are the
+-- objects' rows only — a copy of another row, which the kind would list twice.
+--
 -- A kind may also name a node (node_name, HistorySelection.Node), whose own
 -- records are then its: the tasks that ran on it — audit rows by the node in
 -- their UPID, over the expression index built after startup, and tasks with no
@@ -294,6 +299,12 @@ WITH guests AS MATERIALIZED (
     JOIN unnest(sqlc.arg('object_values')::text[]) WITH ORDINALITY AS v(value, n) ON v.n = t.n
     JOIN unnest(sqlc.arg('object_in_list')::bool[]) WITH ORDINALITY AS l(in_list, n) ON l.n = t.n
     JOIN unnest(sqlc.arg('object_whole')::bool[]) WITH ORDINALITY AS w(whole, n) ON w.n = t.n
+), hidden AS (
+    SELECT t.resource_type, a.action, k.detail_key, v.value AS detail_value
+    FROM unnest(sqlc.arg('hide_types')::text[]) WITH ORDINALITY AS t(resource_type, n)
+    JOIN unnest(sqlc.arg('hide_actions')::text[]) WITH ORDINALITY AS a(action, n) ON a.n = t.n
+    JOIN unnest(sqlc.arg('hide_keys')::text[]) WITH ORDINALITY AS k(detail_key, n) ON k.n = t.n
+    JOIN unnest(sqlc.arg('hide_values')::text[]) WITH ORDINALITY AS v(value, n) ON v.n = t.n
 ), rules AS (
     SELECT c.category, f.field, p.pattern, c.n AS ord
     FROM unnest(sqlc.arg('rule_categories')::text[]) WITH ORDINALITY AS c(category, n)
@@ -457,6 +468,8 @@ WITH guests AS MATERIALIZED (
                             AND v.type = ANY(sqlc.arg('status_guest_types')::text[])))
                  AND b.created_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
                  AND b.created_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+                 AND NOT EXISTS (SELECT 1 FROM hidden h WHERE h.resource_type = b.resource_type AND h.action = b.action
+                                   AND (h.detail_key = '' OR b.details->>h.detail_key = h.detail_value))
                ORDER BY b.created_at DESC
                LIMIT NULLIF(sqlc.arg('row_cap')::int, 0))
               UNION ALL
@@ -482,6 +495,8 @@ WITH guests AS MATERIALIZED (
                             AND v.type = ANY(sqlc.arg('status_guest_types')::text[])))
                  AND b.created_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
                  AND b.created_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+                 AND NOT EXISTS (SELECT 1 FROM hidden h WHERE h.resource_type = b.resource_type AND h.action = b.action
+                                   AND (h.detail_key = '' OR b.details->>h.detail_key = h.detail_value))
                ORDER BY b.created_at DESC
                LIMIT NULLIF(sqlc.arg('row_cap')::int, 0))
               UNION ALL
@@ -509,6 +524,8 @@ WITH guests AS MATERIALIZED (
                             AND v.type = ANY(sqlc.arg('status_guest_types')::text[])))
                  AND b.created_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
                  AND b.created_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+                 AND NOT EXISTS (SELECT 1 FROM hidden h WHERE h.resource_type = b.resource_type AND h.action = b.action
+                                   AND (h.detail_key = '' OR b.details->>h.detail_key = h.detail_value))
                ORDER BY b.created_at DESC
                LIMIT NULLIF(sqlc.arg('row_cap')::int, 0))
           ) m
@@ -546,6 +563,8 @@ WITH guests AS MATERIALIZED (
                             AND v.type = ANY(sqlc.arg('status_guest_types')::text[])))
                 AND b.created_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
                 AND b.created_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+                AND NOT EXISTS (SELECT 1 FROM hidden h WHERE h.resource_type = b.resource_type AND h.action = b.action
+                                  AND (h.detail_key = '' OR b.details->>h.detail_key = h.detail_value))
               -- No cap of its own: a bitmap read stops at no row count, and a
               -- LIMIT here turned the generic plan to the created_at index for
               -- its AND, 4x the heap rows. The arm's cap bounds what it keeps.

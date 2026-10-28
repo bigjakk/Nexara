@@ -1789,6 +1789,11 @@ type Querier interface {
 	//            by its id (DISTINCT ON): one read of each row, not its id and
 	//            then the row.
 	//
+	// A kind may hide shapes of row from what its objects select (hide_*,
+	// HistoryKind.Hide): the rows of a resource type with an action, and, when a
+	// details key is named, whose details hold the value under it. They are the
+	// objects' rows only — a copy of another row, which the kind would list twice.
+	//
 	// A kind may also name a node (node_name, HistorySelection.Node), whose own
 	// records are then its: the tasks that ran on it — audit rows by the node in
 	// their UPID, over the expression index built after startup, and tasks with no

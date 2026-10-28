@@ -153,6 +153,19 @@ type HistoryKind struct {
 	// server too, so a client naming none cannot read a busy object's whole
 	// trail by accident. Zero reads the whole History (the guest's).
 	DefaultWindow time.Duration
+	// Hide is shapes of row the kind never shows whatever its objects select:
+	// a row that is another row's copy, listed beside it otherwise. Only the
+	// objects' rows are hidden, and only of a type the kind reads.
+	Hide []HistoryHide
+}
+
+// HistoryHide is a shape of audit row: those of ResourceType with Action and,
+// when DetailKey is set, whose details hold DetailValue under it.
+type HistoryHide struct {
+	ResourceType string
+	Action       string
+	DetailKey    string
+	DetailValue  string
 }
 
 // HistoryCollapse is one kind of repeated row a whole-cluster History reads
@@ -472,6 +485,15 @@ func (k HistoryKind) Validate() error {
 			return fmt.Errorf("history kind %q is global and reads %q, whose ids are unique only within a cluster", k.Name, t)
 		}
 	}
+	for i, h := range k.Hide {
+		if h.ResourceType == "" || h.Action == "" || (h.DetailKey == "") != (h.DetailValue == "") {
+			return fmt.Errorf("history kind %q hide %d needs a resource type and an action, and a details key with "+
+				"its value or neither", k.Name, i)
+		}
+		if !slices.Contains(k.ObjectTypes, h.ResourceType) {
+			return fmt.Errorf("history kind %q hides rows of %q, which it does not read", k.Name, h.ResourceType)
+		}
+	}
 	for i, t := range k.ObservedTypes {
 		if slices.ContainsFunc(k.ObservedTypes[:i], func(o HistoryObservedType) bool { return o.Type == t.Type }) {
 			return fmt.Errorf("history kind %q lists the observed type %q twice", k.Name, t.Type)
@@ -755,6 +777,10 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		ObjectValues:        make([]string, 0, len(sel.Objects)),
 		ObjectInList:        make([]bool, 0, len(sel.Objects)),
 		ObjectWhole:         make([]bool, 0, len(sel.Objects)),
+		HideTypes:           make([]string, 0, len(k.Hide)),
+		HideActions:         make([]string, 0, len(k.Hide)),
+		HideKeys:            make([]string, 0, len(k.Hide)),
+		HideValues:          make([]string, 0, len(k.Hide)),
 		// The request's to grant (permittedObservedTypes): none until then.
 		ObservedTypes:     []string{},
 		ExcludeCategories: []string{},
@@ -773,6 +799,12 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		params.CollapseTypes = append(params.CollapseTypes, c.ResourceType)
 		params.CollapseActions = append(params.CollapseActions, c.Action)
 		params.CollapseGaps = append(params.CollapseGaps, safeconv.Int32(int(c.Gap/time.Second)))
+	}
+	for _, h := range k.Hide {
+		params.HideTypes = append(params.HideTypes, h.ResourceType)
+		params.HideActions = append(params.HideActions, h.Action)
+		params.HideKeys = append(params.HideKeys, h.DetailKey)
+		params.HideValues = append(params.HideValues, h.DetailValue)
 	}
 	for _, w := range sel.GuestWorkers {
 		if w == "" || !likePatternOK(w) {
