@@ -13,7 +13,9 @@ import (
 // whose answer it compares field by field with the last one. It reads raw JSON
 // rather than through the typed getters because a getter sees only the fields
 // Nexara decodes, and an edit made in Proxmox to any other field is exactly what
-// the observer exists to catch.
+// the observer exists to catch. An update handler reads its object so too just
+// before it writes it, to record which fields its write changes (the Object*
+// targets; handlers' auditSent.changed).
 //
 // A target is built only by the constructors below, which validate every
 // caller-supplied path segment the way the client's own getters do
@@ -100,6 +102,52 @@ func ObserveSDN(kind string) (ObserveTarget, error) {
 		return ObserveTarget{path: "/cluster/sdn/" + kind}, nil
 	}
 	return ObserveTarget{}, fmt.Errorf("%w: SDN kind %q", ErrInvalidInput, kind)
+}
+
+// ObjectBackupJob, ObjectNodeNetworkInterface, ObjectSDN, ObjectSDNSubnet
+// and ObjectACMEPlugin read the one object an update is about to write (one
+// metric server's is ObserveMetricServer).
+func ObjectBackupJob(id string) (ObserveTarget, error) {
+	if err := validatePathSegment("backup job ID", id); err != nil {
+		return ObserveTarget{}, err
+	}
+	return ObserveTarget{path: "/cluster/backup/" + url.PathEscape(id)}, nil
+}
+
+func ObjectNodeNetworkInterface(node, iface string) (ObserveTarget, error) {
+	if err := validatePathSegment("interface name", iface); err != nil {
+		return ObserveTarget{}, err
+	}
+	return nodeTarget(node, "/network/"+url.PathEscape(iface))
+}
+
+func ObjectSDN(kind, id string) (ObserveTarget, error) {
+	t, err := ObserveSDN(kind)
+	if err != nil {
+		return ObserveTarget{}, err
+	}
+	if err := validatePathSegment("SDN "+kind+" id", id); err != nil {
+		return ObserveTarget{}, err
+	}
+	return ObserveTarget{path: t.path + "/" + url.PathEscape(id)}, nil
+}
+
+func ObjectSDNSubnet(vnet, subnet string) (ObserveTarget, error) {
+	t, err := ObserveSDNSubnets(vnet)
+	if err != nil {
+		return ObserveTarget{}, err
+	}
+	if err := validatePathSegment("subnet", subnet); err != nil {
+		return ObserveTarget{}, err
+	}
+	return ObserveTarget{path: t.path + "/" + url.PathEscape(subnet)}, nil
+}
+
+func ObjectACMEPlugin(id string) (ObserveTarget, error) {
+	if err := validatePathSegment("ACME plugin id", id); err != nil {
+		return ObserveTarget{}, err
+	}
+	return ObserveTarget{path: "/cluster/acme/plugins/" + url.PathEscape(id)}, nil
 }
 
 // ObserveSDNSubnets lists one vnet's subnets.

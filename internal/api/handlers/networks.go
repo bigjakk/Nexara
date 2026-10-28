@@ -251,6 +251,7 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx, p *apischema.Params
 		return err
 	}
 
+	before := readBefore(c.Context(), pxClient)(proxmox.ObjectNodeNetworkInterface(nodeName, ifaceName))
 	if err := pxClient.UpdateNetworkInterface(c.Context(), nodeName, ifaceName, req); err != nil {
 		return mapNamedOpError("update network interface", err)
 	}
@@ -261,8 +262,10 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx, p *apischema.Params
 		"type":     req.Type,
 		"settings": networkAuditSettings(req.NetworkInterfaceOptions),
 		"cleared":  req.Delete,
-		// The client sends autostart whatever its value (networkIfaceOptionsToForm).
-		"fields": auditFieldNames(req, "autostart"),
+		// The client sends autostart whatever its value (networkIfaceOptionsToForm),
+		// and an interface lists it only when an auto line starts it on boot
+		// (pve-common Network/Interfaces.pm).
+		"fields": auditSentOf(req, "autostart").changed(before, map[string]string{"autostart": "0"}),
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_updated", details)
 

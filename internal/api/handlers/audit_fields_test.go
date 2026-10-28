@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/url"
 	"slices"
 	"testing"
@@ -34,5 +35,36 @@ func TestAuditFieldNames(t *testing.T) {
 		if got := auditFieldNames(tc.params, tc.also...); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// An update that read its object first names only what its write changes: a
+// field sent with another value than the one read, or one cleared that the
+// object had. A comma list is compared in any order, a read value without the
+// space around it, a field the object leaves out as Proxmox's default; with
+// nothing read, every name.
+func TestAuditSentChanged(t *testing.T) {
+	t.Parallel()
+	read := map[string]json.RawMessage{"mtu": json.RawMessage(`1450`), "nodes": json.RawMessage(`"pve-02,pve-01"`),
+		"comments": json.RawMessage(`"uplink\n"`), "gateway": json.RawMessage(`"192.0.2.1"`), "vlan-aware": json.RawMessage(`null`)}
+	sent := auditSent{values: map[string]string{"mtu": "1450", "nodes": "pve-01,pve-02", "comments": "uplink",
+		"bridge_ports": "eno1", "autostart": "0"}, cleared: []string{"gateway", "vlan-aware", "slaves"}}
+	for _, tc := range []struct {
+		name   string
+		before map[string]json.RawMessage
+		absent map[string]string
+		want   []string
+	}{
+		{"read", read, map[string]string{"autostart": "0"}, []string{"bridge_ports", "gateway"}},
+		{"no default for a field left out", read, nil, []string{"autostart", "bridge_ports", "gateway"}},
+		{"nothing read", nil, nil, []string{"autostart", "bridge_ports", "comments", "gateway", "mtu", "nodes", "slaves", "vlan-aware"}},
+	} {
+		if got := sent.changed(tc.before, tc.absent); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	if got := auditSentOf(proxmox.UpdateNetworkInterfaceParams{Type: "bridge"}, "autostart").values; got["autostart"] != "0" ||
+		got["type"] != "bridge" || len(got) != 2 {
+		t.Errorf("a field always sent: %v, want autostart 0 beside type", got)
 	}
 }

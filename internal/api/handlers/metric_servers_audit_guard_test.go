@@ -19,7 +19,7 @@ func TestGuard_MetricServerAuditOmitsTheToken(t *testing.T) {
 
 	// The fields a metric-server audit row may carry. Adding one is a
 	// deliberate edit here, which is the point. fields is the names the
-	// update sent, and only as auditFieldNames gives them.
+	// update sent, and only as auditFieldNames or auditSent gives them.
 	allowed := map[string]bool{"id": true, "type": true, "fields": true}
 
 	f, err := guardParsed(file)
@@ -91,12 +91,8 @@ func TestGuard_MetricServerAuditOmitsTheToken(t *testing.T) {
 						"because this body carries a credential and view:audit is a default Viewer grant",
 						fn.Name.Name, name, sortedAllowedAuditFields(allowed))
 				}
-				var fun *ast.Ident
-				if call, isCall := kv.Value.(*ast.CallExpr); isCall {
-					fun, _ = call.Fun.(*ast.Ident)
-				}
-				if name == "fields" && (fun == nil || fun.Name != "auditFieldNames") {
-					t.Errorf("%s records fields other than auditFieldNames gives them, names never values", fn.Name.Name)
+				if name == "fields" && !isAuditFieldNames(kv.Value) {
+					t.Errorf("%s records fields other than auditFieldNames or auditSent gives them, names never values", fn.Name.Name)
 				}
 			}
 			return true
@@ -116,4 +112,25 @@ func sortedAllowedAuditFields(allowed map[string]bool) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// isAuditFieldNames is auditFieldNames(...) or auditSentOf(...).changed(...),
+// which give names, never values.
+func isAuditFieldNames(e ast.Expr) bool {
+	call, ok := e.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		return fun.Name == "auditFieldNames"
+	case *ast.SelectorExpr:
+		inner, isCall := fun.X.(*ast.CallExpr)
+		if !isCall || fun.Sel.Name != "changed" && fun.Sel.Name != "names" {
+			return false
+		}
+		id, isIdent := inner.Fun.(*ast.Ident)
+		return isIdent && id.Name == "auditSentOf"
+	}
+	return false
 }

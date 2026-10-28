@@ -1258,7 +1258,7 @@ func (r backupJobRequest) selectionSummary() string {
 // ID on create, so without this the audit trail records only that "a job" was
 // created. Fields the request left unspecified are omitted rather than
 // defaulted, so a partial update is not recorded as having set them.
-func (r backupJobRequest) auditDetails() json.RawMessage {
+func (r backupJobRequest) auditDetails(before map[string]json.RawMessage) json.RawMessage {
 	fields := map[string]any{}
 	if r.Schedule != "" {
 		fields["schedule"] = r.Schedule
@@ -1278,7 +1278,11 @@ func (r backupJobRequest) auditDetails() json.RawMessage {
 	if selection := r.selectionSummary(); selection != "" {
 		fields["selection"] = selection
 	}
-	fields["fields"] = auditFieldNames(r.toParams(), r.clearedProperties()...)
+	// A job lists no enabled when it is: pve-manager API2/Backup.pm, enabled
+	// default 1.
+	sent := auditSentOf(r.toParams())
+	sent.cleared = append(sent.cleared, r.clearedProperties()...)
+	fields["fields"] = sent.changed(before, map[string]string{"enabled": "1"})
 	details, _ := json.Marshal(fields)
 	return details
 }
@@ -1312,7 +1316,7 @@ func (h *BackupHandler) CreateBackupJob(c fiber.Ctx, p *apischema.Params) error 
 			jobID = soleNewBackupJobID(before, after)
 		}
 	}
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_created", req.auditDetails())
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_created", req.auditDetails(nil))
 
 	return c.JSON(fiber.Map{"status": "created"})
 }
@@ -1364,11 +1368,12 @@ func (h *BackupHandler) UpdateBackupJob(c fiber.Ctx, p *apischema.Params) error 
 
 	params := req.toParams()
 	params.Delete = req.clearedProperties()
+	before := readBefore(c.Context(), client)(proxmox.ObjectBackupJob(jobID))
 	if err := client.UpdateBackupJob(c.Context(), jobID, params); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_updated", req.auditDetails())
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_updated", req.auditDetails(before))
 
 	return c.JSON(fiber.Map{"status": "updated"})
 }

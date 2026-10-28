@@ -146,11 +146,12 @@ func (h *NetworkHandler) UpdateSDNZone(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	before := readBefore(c.Context(), pxClient)(proxmox.ObjectSDN("zones", zone))
 	if err := pxClient.UpdateSDNZone(c.Context(), zone, req); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]any{"zone": zone, "fields": auditFieldNames(req)})
+	details, _ := json.Marshal(map[string]any{"zone": zone, "fields": auditSentOf(req).changed(before, nil)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_zone", zone, "sdn_zone_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -264,11 +265,12 @@ func (h *NetworkHandler) UpdateSDNVNet(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	before := readBefore(c.Context(), pxClient)(proxmox.ObjectSDN("vnets", vnet))
 	if err := pxClient.UpdateSDNVNet(c.Context(), vnet, req); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]any{"vnet": vnet, "fields": auditFieldNames(req)})
+	details, _ := json.Marshal(map[string]any{"vnet": vnet, "fields": auditSentOf(req).changed(before, nil)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_vnet", vnet, "sdn_vnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -423,11 +425,12 @@ func (h *NetworkHandler) UpdateSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 		return err
 	}
 
+	before := readBefore(c.Context(), pxClient)(proxmox.ObjectSDNSubnet(vnet, subnet))
 	if err := pxClient.UpdateSDNSubnet(c.Context(), vnet, subnet, req); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]any{"vnet": vnet, "subnet": subnet, "fields": auditFieldNames(req)})
+	details, _ := json.Marshal(map[string]any{"vnet": vnet, "subnet": subnet, "fields": auditSentOf(req).changed(before, nil)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_subnet", auditkey.SDNSubnet(vnet, subnet), "sdn_subnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -568,10 +571,11 @@ func (h *NetworkHandler) UpdateSDNController(c fiber.Ctx, p *apischema.Params) e
 	if err != nil {
 		return err
 	}
+	before := readBefore(c.Context(), pxClient)(proxmox.ObjectSDN("controllers", controller))
 	if err := pxClient.UpdateSDNController(c.Context(), controller, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"controller": controller, "fields": auditFieldNames(req)})
+	details, _ := json.Marshal(map[string]any{"controller": controller, "fields": auditSentOf(req).changed(before, nil)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_controller", controller, "sdn_controller_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -687,10 +691,11 @@ func (h *NetworkHandler) UpdateSDNIPAM(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	before := readBefore(c.Context(), pxClient)(proxmox.ObjectSDN("ipams", ipam))
 	if err := pxClient.UpdateSDNIPAM(c.Context(), ipam, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"ipam": ipam, "fields": auditFieldNames(req)})
+	details, _ := json.Marshal(map[string]any{"ipam": ipam, "fields": auditSentOf(req).changed(before, nil)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_ipam", ipam, "sdn_ipam_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -797,10 +802,11 @@ func (h *NetworkHandler) UpdateSDNDNS(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	before := readBefore(c.Context(), pxClient)(proxmox.ObjectSDN("dns", dns))
 	if err := pxClient.UpdateSDNDNS(c.Context(), dns, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"dns": dns, "fields": auditFieldNames(req)})
+	details, _ := json.Marshal(map[string]any{"dns": dns, "fields": auditSentOf(req).changed(before, nil)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn_dns", dns, "sdn_dns_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

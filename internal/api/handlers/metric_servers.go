@@ -168,10 +168,11 @@ func (h *MetricServerHandler) UpdateServer(c fiber.Ctx, p *apischema.Params) err
 	if err != nil {
 		return err
 	}
+	before := readBefore(c.Context(), pxClient)(proxmox.ObserveMetricServer(serverID))
 	if err := pxClient.UpdateMetricServer(c.Context(), serverID, req); err != nil {
 		return mapMetricServerError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"id": serverID, "fields": auditFieldNames(req)})
+	details, _ := json.Marshal(map[string]any{"id": serverID, "fields": auditSentOf(req).changed(before, nil)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", serverID, "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

@@ -213,7 +213,7 @@ func TestBackupJobRequestAuditDetails(t *testing.T) {
 	decode := func(t *testing.T, req backupJobRequest) map[string]any {
 		t.Helper()
 		var got map[string]any
-		if err := json.Unmarshal(req.auditDetails(), &got); err != nil {
+		if err := json.Unmarshal(req.auditDetails(nil), &got); err != nil {
 			t.Fatalf("auditDetails() is not valid JSON: %v", err)
 		}
 		return got
