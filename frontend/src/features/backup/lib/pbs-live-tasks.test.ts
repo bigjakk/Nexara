@@ -10,8 +10,8 @@ import {
 } from "./pbs-live-tasks";
 
 const task = (over: Partial<PBSTask>): PBSTask => ({
-  upid: "UPID:pbs:0000A1B2:00C0FFEE:00000001:66F1A2B3:garbage_collection:datastore01:root@pam!tok:",
-  node: "pbs",
+  upid: "UPID:pbs01:0000A1B2:00C0FFEE:00000001:66F1A2B3:garbage_collection:datastore01:root@pam!tok:",
+  node: "pbs01",
   pid: 1,
   starttime: 100,
   worker_type: "garbage_collection",
@@ -22,15 +22,15 @@ const task = (over: Partial<PBSTask>): PBSTask => ({
 describe("pbsWorkerId", () => {
   it.each([
     [
-      "UPID:pbs:1:2:3:4:garbage_collection:datastore01:root@pam:",
+      "UPID:pbs01:1:2:3:4:garbage_collection:datastore01:root@pam:",
       "datastore01",
     ],
     // PBS escapes a colon or a slash in the worker id as \xNN.
     [
-      "UPID:pbs:1:2:3:4:backup:datastore01\\x3avm\\x2f100:root@pam:",
+      "UPID:pbs01:1:2:3:4:backup:datastore01\\x3avm\\x2f100:root@pam:",
       "datastore01:vm/100",
     ],
-    ["UPID:pbs:1:2:3:4:logrotate::root@pam:", ""],
+    ["UPID:pbs01:1:2:3:4:logrotate::root@pam:", ""],
   ])("reads %s as %j", (upid, want) => {
     expect(pbsWorkerId(upid)).toBe(want);
   });
