@@ -55,9 +55,9 @@ func TestBackupHistoryRoutes(t *testing.T) {
 		{veeamScope + "/:id/history", "/api/v1/veeam-servers/" + server + "/history", "",
 			"veeam_server=" + server + " veeam_job.veeam_server_id=" + server + " veeam_session.veeam_server_id=" + server},
 		{veeamScope + "/:id/jobs/:job_id/history", "/api/v1/veeam-servers/" + server + "/jobs/" + job + "/history", "",
-			"veeam_job=" + job + " veeam_session.veeam_job_id=" + job},
+			"veeam_job[" + job + "].veeam_server_id=" + server + " veeam_session.veeam_job_id=" + job},
 		{veeamScope + "/:id/sessions/:session_id/history", "/api/v1/veeam-servers/" + server + "/sessions/" + session + "/history", "",
-			"veeam_session=" + session},
+			"veeam_session[" + session + "].veeam_server_id=" + server},
 		{clusterScope + "/backup-jobs/:job_id/history", base + "/backup-jobs/backup-1a2b3c4d/history",
 			clusterScope + "/backup-jobs", "backup=backup-1a2b3c4d"},
 	}

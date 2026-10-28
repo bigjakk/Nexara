@@ -31,9 +31,10 @@ func veeamJobHistoryRoute() historyRoute {
 	return historyRoute{
 		Kind: handlers.VeeamJobHistory(),
 		Path: veeamScope + "/:id/jobs/:job_id/history",
-		Description: "List what happened to one Veeam job, newest first: started, stopped, put on or taken " +
-			"off its schedule, and its runs stopped. The job is Veeam's own id for it. The runs themselves " +
-			"are in the server's run listing. Requires global view:audit and global view:veeam.",
+		Description: "List what happened to one Veeam job of the server, newest first: started, stopped, put " +
+			"on or taken off its schedule, and its runs stopped. The job is Veeam's own id for it, read " +
+			"within the server in the path: a second server that repeats the id is not this job. The runs " +
+			"themselves are in the server's run listing. Requires global view:audit and global view:veeam.",
 		Resource: "veeam",
 		Parameters: veeamServerParams(apischema.Properties{
 			"job_id": veeamUpstreamIDParam(
@@ -47,9 +48,9 @@ func veeamSessionHistoryRoute() historyRoute {
 	return historyRoute{
 		Kind: handlers.VeeamSessionHistory(),
 		Path: veeamScope + "/:id/sessions/:session_id/history",
-		Description: "List what happened to one Veeam run, newest first: a stop asked for from Nexara, and " +
-			"whether Veeam took it. The run is Veeam's own id for it. Requires global view:audit and " +
-			"global view:veeam.",
+		Description: "List what happened to one Veeam run of the server, newest first: a stop asked for from " +
+			"Nexara, and whether Veeam took it. The run is Veeam's own id for it, read within the server in " +
+			"the path. Requires global view:audit and global view:veeam.",
 		Resource:   "veeam",
 		Parameters: veeamSessionParams(),
 	}

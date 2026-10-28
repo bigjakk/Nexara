@@ -1,11 +1,16 @@
 package handlers
 
+import "context"
+
 // The Veeam kinds: a Veeam Backup & Replication server's History, a job's and
-// one run's. All global: a Veeam server is Nexara's own row, and the ids Veeam
-// gives its jobs and sessions are unique across the servers Nexara knows; their
-// rows carry the cluster the job's platform maps to, or none. A session is a
-// run of a job; it is stored in veeam_sessions, which is not a source of
-// ListHistory — a run is shown beside the job's History as a live row
+// one run's. All global: a Veeam server is Nexara's own row, and its job and
+// session rows carry the cluster the job's platform maps to, or none. The ids
+// Veeam gives its jobs and sessions are its own, not Nexara's: a restored copy
+// of one server, added as a second, repeats every one. So a job's and a run's
+// own rows are read within the server the path names (veeam_server_id, which
+// every one of them carries), and not by the id alone. A session is a run of a
+// job; it is stored in veeam_sessions, which is not a source of ListHistory — a
+// run is shown beside the job's History as a live row
 // (frontend/src/features/backup/veeam), and what is on record here is what was
 // done to it.
 
@@ -35,8 +40,11 @@ func VeeamServerHistory() HistoryKind {
 	}
 }
 
-// VeeamJobHistory is a job's: what was done to it — started, stopped, put on
-// or taken off its schedule — and to its runs.
+// VeeamJobHistory is a job's, within the server the path names: what was done
+// to it — started, stopped, put on or taken off its schedule — and to its runs.
+//
+// The runs' rows name the job but not the server's copy of it, so they are
+// read by the job's id alone; the job's own rows are held to the server.
 func VeeamJobHistory() HistoryKind {
 	return HistoryKind{
 		Name:       "veeam-job",
@@ -46,15 +54,25 @@ func VeeamJobHistory() HistoryKind {
 			{Category: "schedule", Field: HistoryFieldAction, Like: []string{`veeam\_job\_enabled%`, `veeam\_job\_disabled%`}},
 			{Category: "runs", Field: HistoryFieldAction, Like: veeamControlActions},
 		},
-		Select: SelectObjects("job_id",
-			HistoryObject{ResourceType: "veeam_job"},
-			HistoryObject{ResourceType: "veeam_session", DetailKey: "veeam_job_id"}),
+		Select:      selectVeeamJob,
 		Global:      true,
 		ObjectTypes: []string{"veeam_job", "veeam_session"},
 	}
 }
 
-// VeeamSessionHistory is one run's: what was done to it.
+// selectVeeamJob is the job kind's selector. The job's own rows are the ones
+// filed under its id that name the path's server, so a second server that
+// repeats the id does not add its own; the stops of its runs name the job.
+func selectVeeamJob(_ context.Context, r HistoryRequest) (HistorySelection, error) {
+	server, job := r.Params.String("id"), r.Params.String("job_id")
+	return HistorySelection{Objects: []HistoryObject{
+		{ResourceType: "veeam_job", ResourceID: job, DetailKey: "veeam_server_id", Value: server},
+		{ResourceType: "veeam_session", DetailKey: "veeam_job_id", Value: job},
+	}}, nil
+}
+
+// VeeamSessionHistory is one run's, within the server the path names: what was
+// done to it.
 func VeeamSessionHistory() HistoryKind {
 	return HistoryKind{
 		Name:       "veeam-session",
@@ -63,10 +81,19 @@ func VeeamSessionHistory() HistoryKind {
 		Rules: []HistoryRule{
 			{Category: "stop", Field: HistoryFieldAction, Like: []string{`veeam\_session\_stop%`}},
 		},
-		Select:      SelectObjects("session_id", HistoryObject{ResourceType: "veeam_session"}),
+		Select:      selectVeeamSession,
 		Global:      true,
 		ObjectTypes: []string{"veeam_session"},
 	}
+}
+
+// selectVeeamSession is the run kind's selector: the rows filed under the run's
+// id that name the path's server.
+func selectVeeamSession(_ context.Context, r HistoryRequest) (HistorySelection, error) {
+	server, session := r.Params.String("id"), r.Params.String("session_id")
+	return HistorySelection{Objects: []HistoryObject{
+		{ResourceType: "veeam_session", ResourceID: session, DetailKey: "veeam_server_id", Value: server},
+	}}, nil
 }
 
 // veeamControlActions are the job and session control actions, which a
