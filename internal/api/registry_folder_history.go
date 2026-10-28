@@ -28,7 +28,11 @@ func folderHistoryRoute() historyRoute {
 			"each guest's History from its own create, clone or restore, as on its own page — and to those " +
 			"folders: their creation, renames and moves, and the guests filed into and out of them. A guest's " +
 			"departure is listed for moves made from this release on. " + handlers.UnfiledFolderSegment +
-			" as the folder lists the guests in no folder. Requires view:audit and view:vm_folder; a guest is " +
+			" as the folder lists the guests in no folder. Of more than 500 guests the caller may open it " +
+			"follows the 500 most recently active, and guests gives how many of how many. Each source is read " +
+			"newest first up to 20,000 entries, all_time too; past that the total stops at 20,001, with no " +
+			"page past it, and searched_from gives how far back the read is whole. Requires view:audit and " +
+			"view:vm_folder; a guest is " +
 			"listed only with view:vm or view:container by its type, and tasks with no audit entry and " +
 			"backup-job entries need view:task.",
 		Resource:   "vm_folder",
