@@ -1311,6 +1311,29 @@ func TestGuestHistory(t *testing.T) {
 			t.Errorf("a node still unknown after two minutes: %v, want its change second", got)
 		}
 
+		// Twenty rows an hour a node, and a guest: a node flapping and a guest
+		// moved to and fro leave no more, the last ending where each now is.
+		for i := range 23 {
+			if _, err := q.UpsertNode(ctx, gen.UpsertNodeParams{ClusterID: historyThirdID, Name: "pve-02",
+				Status: []string{"offline", "online"}[i%2]}); err != nil {
+				t.Fatal(err)
+			}
+			place(330, []uuid.UUID{otherNode, thirdNode}[i%2])
+		}
+		var statusRows, moveRows int
+		var lastStatus, lastNode string
+		if err := pool.QueryRow(ctx, `SELECT count(*), (array_agg(to_status ORDER BY observed_at DESC, id DESC))[1]
+			FROM node_status_changes WHERE cluster_id = $1 AND node = 'pve-02'`, historyThirdID).Scan(&statusRows, &lastStatus); err != nil {
+			t.Fatal(err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT count(*), (array_agg(to_node ORDER BY observed_at DESC, id DESC))[1]
+			FROM guest_node_changes WHERE cluster_id = $1 AND vmid = 330`, historyThirdID).Scan(&moveRows, &lastNode); err != nil {
+			t.Fatal(err)
+		}
+		if statusRows > 20 || lastStatus != "offline" || moveRows > 20 || lastNode != "pve-02" {
+			t.Errorf("after 23 changes in an hour: %d status rows ending %s, %d moves ending %s; want at most 20 each, "+
+				"ending offline and on pve-02", statusRows, lastStatus, moveRows, lastNode)
+		}
 	})
 
 	run("global", func(t *testing.T) {

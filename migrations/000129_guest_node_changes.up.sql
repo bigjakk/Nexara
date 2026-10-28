@@ -48,6 +48,8 @@ CREATE INDEX IF NOT EXISTS idx_guest_node_changes_from
     ON guest_node_changes (cluster_id, from_node, observed_at);
 CREATE INDEX IF NOT EXISTS idx_guest_node_changes_to
     ON guest_node_changes (cluster_id, to_node, observed_at);
+CREATE INDEX IF NOT EXISTS idx_guest_node_changes_guest
+    ON guest_node_changes (cluster_id, vmid, observed_at);
 
 -- record_guest_node_change runs AFTER a vms row is inserted, or its node_id
 -- changes: it records a move when the guest's last node differs, and keeps the
@@ -61,19 +63,38 @@ CREATE INDEX IF NOT EXISTS idx_guest_node_changes_to
 -- node within one more such span — its new node's syncs failing meanwhile —
 -- moved, and a guest on the VMID any later is a new one: a destroy and a
 -- create or a clone into it, which Proxmox records as no move.
+--
+-- Twenty moves an hour a guest at most, as the observer caps its changes: past
+-- that, the hour's last row takes the move in — it ends where the guest now is
+-- — and a move straight back cancels it. A guest moved round and round writes
+-- no more than that.
 CREATE OR REPLACE FUNCTION record_guest_node_change()
 RETURNS TRIGGER AS $$
 DECLARE
     node_now text := COALESCE((SELECT n.name FROM nodes n
                                WHERE n.id = NEW.node_id AND n.cluster_id = NEW.cluster_id), '');
     was      guest_node_state%ROWTYPE;
+    last     guest_node_changes%ROWTYPE;
 BEGIN
     SELECT * INTO was FROM guest_node_state WHERE cluster_id = NEW.cluster_id AND vmid = NEW.vmid;
     IF FOUND AND was.node <> node_now AND was.node <> '' AND node_now <> ''
        AND (TG_OP = 'UPDATE' OR was.gone_at > now() - interval '5 minutes') THEN
-        INSERT INTO guest_node_changes (cluster_id, vmid, guest_type, from_node, to_node, last_seen_at)
-        VALUES (NEW.cluster_id, NEW.vmid, NEW.type, was.node, node_now,
-                CASE WHEN TG_OP = 'UPDATE' THEN OLD.last_seen_at ELSE was.last_seen_at END);
+        IF (SELECT count(*) FROM guest_node_changes c
+            WHERE c.cluster_id = NEW.cluster_id AND c.vmid = NEW.vmid
+              AND c.observed_at > now() - interval '1 hour') < 20 THEN
+            INSERT INTO guest_node_changes (cluster_id, vmid, guest_type, from_node, to_node, last_seen_at)
+            VALUES (NEW.cluster_id, NEW.vmid, NEW.type, was.node, node_now,
+                    CASE WHEN TG_OP = 'UPDATE' THEN OLD.last_seen_at ELSE was.last_seen_at END);
+        ELSE
+            SELECT * INTO last FROM guest_node_changes c
+            WHERE c.cluster_id = NEW.cluster_id AND c.vmid = NEW.vmid
+            ORDER BY c.observed_at DESC, c.id DESC LIMIT 1;
+            IF last.from_node = node_now THEN
+                DELETE FROM guest_node_changes WHERE id = last.id;
+            ELSE
+                UPDATE guest_node_changes SET to_node = node_now, observed_at = now() WHERE id = last.id;
+            END IF;
+        END IF;
     END IF;
     INSERT INTO guest_node_state (cluster_id, vmid, node, last_seen_at)
     VALUES (NEW.cluster_id, NEW.vmid, node_now, NEW.last_seen_at)
