@@ -19,11 +19,13 @@ import (
 // one for the groups it syncs, each opened by "syncing users" or "syncing
 // groups" (with the remove-vanished options it was given), and, once it has
 // written user.cfg, "successfully updated <what> configuration". In its
-// sections it logs each user and group it removes, and each whose ACL entries
-// it purges, as update_users and update_groups write them:
+// sections it logs each user and group it removes, each whose ACL entries it
+// purges, and each user it replaces whole (remove-vanished properties), as
+// update_users and update_groups write them:
 //
 //	remove user '<userid>'
 //	purge users '<userid>' ACL entries
+//	overwriting user '<userid>'
 //	remove group '<groupid>'
 //	purge groups '<groupid>' ACL entries
 //
@@ -42,7 +44,7 @@ var (
 	realmSyncData    = regexp.MustCompile(`^got data from server, updating (users|groups|users and groups)$`)
 	realmSyncSection = regexp.MustCompile(`^syncing (users|groups)(?: \(remove-vanished opts: .*\))?$`)
 	realmSyncDone    = regexp.MustCompile(`^successfully updated (users|groups|users and groups) configuration$`)
-	realmSyncLogLine = regexp.MustCompile(`^(?:(remove) (user|group) '(.+)'|(purge) (user|group)s '(.+)' ACL entries)$`)
+	realmSyncLogLine = regexp.MustCompile(`^(?:(remove) (user|group) '(.+)'|(purge) (user|group)s '(.+)' ACL entries|(overwriting) (user) '(.+)')$`)
 	// realmSyncWarnings are the warnings that quote a directory's value, by
 	// how each begins and the whole of it.
 	realmSyncWarnings = []struct {
@@ -62,12 +64,13 @@ var (
 // realmSyncLog is what one sync's log names, by list (users, groups): task_logs'
 // entry for its UPID.
 type realmSyncLog struct {
-	Removed map[string][]string `json:"removed"`
-	Purged  map[string][]string `json:"purged"`
+	Removed     map[string][]string `json:"removed"`
+	Purged      map[string][]string `json:"purged"`
+	Overwritten map[string][]string `json:"overwritten"`
 }
 
 func newRealmSyncLog() realmSyncLog {
-	return realmSyncLog{Removed: map[string][]string{}, Purged: map[string][]string{}}
+	return realmSyncLog{Removed: map[string][]string{}, Purged: map[string][]string{}, Overwritten: map[string][]string{}}
 }
 
 const (
@@ -224,8 +227,11 @@ func parseRealmSyncLog(lines []string) realmSyncLog {
 			continue
 		}
 		into, list, id := log.Removed, m[2]+"s", m[3]
-		if m[4] != "" {
+		switch {
+		case m[4] != "":
 			into, list, id = log.Purged, m[5]+"s", m[6]
+		case m[7] != "":
+			into, list, id = log.Overwritten, m[8]+"s", m[9]
 		}
 		if done || list != section {
 			return newRealmSyncLog()

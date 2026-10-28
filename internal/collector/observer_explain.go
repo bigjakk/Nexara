@@ -69,7 +69,8 @@ type explainRule struct {
 	Counts string `json:"counts"`
 	// LogNames keeps a rule to what the row's task logged (a realm sync's log,
 	// readRealmSyncs): removed:users or removed:groups, the object it removed;
-	// purged, an ACL's grantee whose entries it purged.
+	// overwritten:users, a user it replaced whole; purged, an ACL's grantee
+	// whose entries it purged.
 	LogNames string `json:"log_names"`
 	// Appeared keeps a rule to fields the object did not have before
 	// (detail.fields_appeared): a value Proxmox fills in where none was.
@@ -635,7 +636,8 @@ func aclDeleteRules(auditType, who, grants string) []explainRule {
 // one of enable, expire, firstname, lastname, email, comment and keys
 // overwrites it, and with remove-vanished=properties the record is replaced by
 // what it returned, so any but enable (kept from the old record; enable-new is
-// only for a user it creates) may be cleared. The default map takes an LDAP
+// only for a user it creates) may be cleared: for a user its log says it
+// overwrote, every field but enable is its. The default map takes an LDAP
 // attribute of each of those names; the names, e-mail and comment are what a
 // directory has, enable, expire and keys a sync sets only where the realm's
 // sync_attributes maps them, so only then are they its (readRealmSyncs: an
@@ -654,6 +656,10 @@ var realmSyncRules = func() []explainRule {
 				FieldRe: `^(firstname|lastname|email|comment)$`},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
 				FieldRe: `^(enable|expire|keys)$`, FieldsFrom: "realm"},
+			// A user it replaced whole (its log: overwriting) keeps only its
+			// enable, and its tokens and groups, which live apart.
+			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
+				FieldRe: `^(firstname|lastname|email|comment|expire|keys)$`, LogNames: "overwritten:users"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync, Object: "upid:*@%s",
 				FieldRe: `^groups$`, Member: "joined", MemberOf: "upid:groups:*-%s"},
 			{Kind: "pve_user", Change: "changed", MatchKey: "cluster", WorkerRe: sync,

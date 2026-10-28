@@ -417,8 +417,11 @@ func TestObservedChanges(t *testing.T) {
 	// user17 went beside it.
 	const syncUPID = "UPID:pve-01:0000000D:00000001:00000001:auth-realm-sync:ldap01:root@pam:"
 	taskLogs := jsonOf(map[string]any{syncUPID: map[string]any{
-		"removed": map[string][]string{"users": {"user15@ldap01"}},
-		"purged":  map[string][]string{"users": {"user15@ldap01", "user19@ldap01"}}}})
+		"removed":     map[string][]string{"users": {"user15@ldap01"}},
+		"purged":      map[string][]string{"users": {"user15@ldap01", "user19@ldap01"}},
+		"overwritten": map[string][]string{"users": {"user20@ldap01"}}}})
+	// A user it replaced whole: its keys, which its realm does not map.
+	syncOverwritten := seed(observedCluster, "pve_user", "user20@ldap01", 0, "changed", "", []string{"keys"}, at)
 	syncACLRemoved := seed(observedCluster, "pve_acl", "/vms/175", 0, "changed", "", []string{"user_grants", "users"}, at)
 	members(syncACLRemoved, []string{}, []string{"user_grants:Role01:1:user15@ldap01", "users:user15@ldap01"})
 	syncUserRemoved := seed(observedCluster, "pve_user", "user15@ldap01", 0, "removed", "", nil, at)
@@ -528,6 +531,8 @@ func TestObservedChanges(t *testing.T) {
 			"^(users|user_grants)$"), "member", "left"), "member_of", "upid:users:*@%s|user_grants:*@%s"), "log_names", "purged"),
 		with(with(rule("pve_user", "removed", "", "cluster", false, "", "", "^auth-realm-sync$", ""), "object", "upid:*@%s"),
 			"log_names", "removed:users"),
+		with(with(rule("pve_user", "changed", "", "cluster", false, "", "", "^auth-realm-sync$",
+			"^(firstname|lastname|email|comment|expire|keys)$"), "object", "upid:*@%s"), "log_names", "overwritten:users"),
 		with(with(rule("pve_acl", "added", "pve_acl", "id", false, "^granted$", "", "", ""), "member", "joined"),
 			"member_of", "details-list.users:users:%s+grants.users:user_grants:%1$s:%2$s:%3$s+"+
 				"details-list.groups:groups:%s+grants.groups:group_grants:%1$s:%2$s:%3$s"),
@@ -668,6 +673,7 @@ func TestObservedChanges(t *testing.T) {
 		{"a realm's sync, a user of that realm", byRealmSync, "explained"},
 		{"a realm's sync, a field its realm maps", syncMapped, "explained"},
 		{"a realm's sync, a field its realm does not map", syncUnmapped, "shown"},
+		{"a realm's sync, that field of a user it overwrote", syncOverwritten, "explained"},
 		{"a realm's sync, a user of another", besideRealmSync, "shown"},
 		{"a realm's sync, its user joining a group it syncs", syncJoinedSynced, "explained"},
 		{"a realm's sync, its user joining another group", syncJoinedOther, "shown"},

@@ -253,9 +253,9 @@ type Querier interface {
 	// derives from them (fields_named, below); appeared to fields the change
 	// names in detail.fields_appeared, absent from the object before; audit_id_is
 	// to rows filed under that marker id; log_names to what the row's task logged
-	// (task_logs, a realm sync's, by UPID): removed:<users|groups> to the change's
-	// own object among those it removed, purged to an ACL's grantee leaving among
-	// those whose entries it purged.
+	// (task_logs, a realm sync's, by UPID): <what>:<users|groups> — removed,
+	// overwritten — to the change's own object among those it logged so, purged
+	// to an ACL's grantee leaving among those whose entries it purged.
 	//
 	// A change is explained when everything it changed is: each member that joined
 	// or left a list of ids (members_joined, members_left), each other field in
@@ -1912,8 +1912,7 @@ type Querier interface {
 	// by one cluster protects that ISO on every cluster.
 	ListPinnedVirtioWinVersions(ctx context.Context) ([]string, error)
 	// ListRealmSyncTasks is a cluster's realm syncs since a time, newest first,
-	// whose logs say what each removed and whose ACL entries it purged
-	// (readRealmSyncs).
+	// whose logs say what each removed, purged and overwrote (readRealmSyncs).
 	ListRealmSyncTasks(ctx context.Context, arg ListRealmSyncTasksParams) ([]ListRealmSyncTasksRow, error)
 	// ListRecentAuditLogEnriched backs the dashboard activity feed. It takes the
 	// caller's view:audit scope (see the accessible_cluster_ids note on

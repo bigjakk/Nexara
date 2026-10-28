@@ -161,9 +161,9 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- derives from them (fields_named, below); appeared to fields the change
 -- names in detail.fields_appeared, absent from the object before; audit_id_is
 -- to rows filed under that marker id; log_names to what the row's task logged
--- (task_logs, a realm sync's, by UPID): removed:<users|groups> to the change's
--- own object among those it removed, purged to an ACL's grantee leaving among
--- those whose entries it purged.
+-- (task_logs, a realm sync's, by UPID): <what>:<users|groups> — removed,
+-- overwritten — to the change's own object among those it logged so, purged
+-- to an ACL's grantee leaving among those whose entries it purged.
 --
 -- A change is explained when everything it changed is: each member that joined
 -- or left a list of ids (members_joined, members_left), each other field in
@@ -387,9 +387,10 @@ WITH rules AS MATERIALIZED (
       AND (k.worker_re = '' OR COALESCE(split_part(k.details->>'upid', ':', 6) ~ k.worker_re, false))
       AND (k.detail_key = '' OR COALESCE(k.details->>k.detail_key, '') <> '')
       AND (k.detail_value = '' OR k.details->>k.detail_key = k.detail_value)
-      -- A realm sync removes only what its log says it removed.
-      AND (k.log_names NOT LIKE 'removed:%' OR COALESCE(
-           sqlc.arg('task_logs')::jsonb -> (k.details->>'upid') -> 'removed' -> substr(k.log_names, 9) ? k.resource_id, false))
+      -- A realm sync removes and overwrites only what its log says it did.
+      AND (strpos(k.log_names, ':') = 0 OR COALESCE(
+           sqlc.arg('task_logs')::jsonb -> (k.details->>'upid') -> split_part(k.log_names, ':', 1)
+               -> split_part(k.log_names, ':', 2) ? k.resource_id, false))
       -- A marker names no object, so it explains the one change of its kind
       -- and direction whose window holds it, and none when two do: the case
       -- it is written for is a create whose id could not be told apart.
@@ -598,8 +599,7 @@ WHERE explained IS NULL
   AND observed_at < sqlc.arg('before')::timestamptz;
 
 -- ListRealmSyncTasks is a cluster's realm syncs since a time, newest first,
--- whose logs say what each removed and whose ACL entries it purged
--- (readRealmSyncs).
+-- whose logs say what each removed, purged and overwrote (readRealmSyncs).
 -- name: ListRealmSyncTasks :many
 SELECT upid, node, status
 FROM task_history

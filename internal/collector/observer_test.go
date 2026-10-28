@@ -1767,10 +1767,11 @@ func TestObservedChangeRules(t *testing.T) {
 			t.Errorf("rule %+v: a realm sync's removals are what its log names, and only its log is read", r)
 		}
 		// Of a user it has, a sync sets enable, expire and keys only where its
-		// realm maps them.
+		// realm maps them, or expire and keys where it replaced the user whole.
 		for _, f := range realmSyncFields {
 			if strings.Contains(r.WorkerRe, "auth-realm-sync") && r.Kind == "pve_user" && r.Change == "changed" &&
-				r.FieldsFrom != "realm" && regexp.MustCompile(r.FieldRe).MatchString(f) {
+				r.FieldsFrom != "realm" && regexp.MustCompile(r.FieldRe).MatchString(f) &&
+				(r.LogNames != "overwritten:users" || f == "enable") {
 				t.Errorf("rule %+v: a realm sync explains a user's %s only as its realm maps it", r, f)
 			}
 		}
