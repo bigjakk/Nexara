@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/bigjakk/nexara/internal/redact"
 )
 
 func isPrivateOrReserved(ip net.IP) bool {
@@ -20,7 +23,7 @@ func isPrivateOrReserved(ip net.IP) bool {
 func validateExternalURL(ctx context.Context, rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
+		return fmt.Errorf("invalid URL: %w", targetErr(err))
 	}
 	if u.Scheme != "https" && u.Scheme != "http" {
 		return fmt.Errorf("URL scheme must be http or https")
@@ -71,6 +74,19 @@ func SafeHTTPClient(timeout time.Duration) *http.Client {
 			}).DialContext,
 		},
 	}
+}
+
+// targetErr is err with the URL a *url.Error in it carries kept as
+// redact.TargetURL, its scheme and host alone. A channel's URL is its secret —
+// a chat webhook's path, a bot's token — and a failed send's error goes where
+// the channel's configuration never does: the dead-letter row's last_error,
+// which every Viewer can read, the channel test's reply and the logs.
+func targetErr(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		ue.URL = redact.TargetURL(ue.URL)
+	}
+	return err
 }
 
 // sanitizeHeader removes CRLF characters from an SMTP header value.

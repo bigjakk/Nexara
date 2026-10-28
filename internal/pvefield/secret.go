@@ -28,18 +28,3 @@ var secretParams = map[string]bool{
 
 // Secret reports whether the Proxmox parameter name carries a secret.
 func Secret(name string) bool { return secretParams[name] }
-
-// What a record keeps in place of a secret's value.
-const (
-	RedactedSet     = "(set)"
-	RedactedCleared = "(cleared)"
-)
-
-// Redacted is what a record keeps in place of a secret value sent: Cleared for
-// an empty one, which clears the secret, and Set for any other.
-func Redacted(sent string) string {
-	if sent == "" {
-		return RedactedCleared
-	}
-	return RedactedSet
-}

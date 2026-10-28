@@ -23,6 +23,7 @@ import (
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/pvefield"
+	"github.com/bigjakk/nexara/internal/redact"
 )
 
 // VMHandler handles VM CRUD and lifecycle endpoints.
@@ -627,9 +628,12 @@ func (h *VMHandler) GetTaskStatus(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
+	// The exit status, like each log line GetTaskLog returns, is Proxmox's text
+	// passed to every view:task holder, Viewers included; a URL in it keeps no
+	// userinfo, query or fragment.
 	resp := taskStatusResponse{
 		Status:     status.Status,
-		ExitStatus: status.ExitStatus,
+		ExitStatus: redact.URLs(status.ExitStatus),
 		Type:       status.Type,
 		UPID:       status.UPID,
 		Node:       status.Node,
@@ -676,7 +680,9 @@ func (h *VMHandler) GetTaskStatus(c fiber.Ctx, p *apischema.Params) error {
 	return c.JSON(resp)
 }
 
-// GetTaskLog returns the log lines for a Proxmox task.
+// GetTaskLog returns the log lines for a Proxmox task, each URL in them without
+// its userinfo, query or fragment (redact.URLs): a download's log names its source
+// on every line it prints ("downloading <url> to …", "download of '<url>' …").
 func (h *VMHandler) GetTaskLog(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
@@ -703,7 +709,7 @@ func (h *VMHandler) GetTaskLog(c fiber.Ctx, p *apischema.Params) error {
 	}
 	result := make([]logLine, len(entries))
 	for i, e := range entries {
-		result[i] = logLine{N: e.N, T: e.T}
+		result[i] = logLine{N: e.N, T: redact.URLs(e.T)}
 	}
 
 	return RespondItems(c, result)

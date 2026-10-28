@@ -65,7 +65,7 @@ func (d *WebhookDispatcher) Send(ctx context.Context, config json.RawMessage, pa
 
 	req, err := http.NewRequestWithContext(ctx, cfg.Method, cfg.URL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create request: %w", targetErr(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range cfg.Headers {
@@ -75,7 +75,7 @@ func (d *WebhookDispatcher) Send(ctx context.Context, config json.RawMessage, pa
 	client := SafeHTTPClient(time.Duration(timeout) * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("send request: %w", err)
+		return fmt.Errorf("send request: %w", targetErr(err))
 	}
 	defer resp.Body.Close()
 

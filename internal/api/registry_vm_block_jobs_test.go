@@ -29,7 +29,7 @@ func (d blockJobsDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.
 	switch {
 	case strings.Contains(sql, "-- name: GetVM :one"), strings.Contains(sql, "-- name: GetContainer :one"):
 		return structRow{d.vm}
-	case strings.Contains(sql, "-- name: GetNode :one"):
+	case strings.Contains(sql, "-- name: GetNode :one"), strings.Contains(sql, "-- name: GetNodeByClusterAndName :one"):
 		return structRow{d.node}
 	}
 	return d.accessUpdateDB.QueryRow(ctx, sql, args...)

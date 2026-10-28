@@ -84,14 +84,14 @@ func postJSON(ctx context.Context, targetURL string, body interface{}) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(jsonBytes))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create request: %w", targetErr(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := SafeHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("send request: %w", err)
+		return fmt.Errorf("send request: %w", targetErr(err))
 	}
 	defer resp.Body.Close()
 
