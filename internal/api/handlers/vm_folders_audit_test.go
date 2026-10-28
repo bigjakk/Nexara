@@ -22,10 +22,11 @@ import (
 // one of the cluster's under parent (parent itself at the top level), the
 // folder a guest leaves (from, "" for none) — keeps each audit row's details,
 // and names each change to the tree made outside a transaction holding the
-// cluster's folder lock.
+// cluster's folder lock, which fails with lockErr when one is set.
 type folderAuditDBTX struct {
 	cluster, parent uuid.UUID
 	from            string
+	lockErr         error
 	details         []map[string]any
 	unlocked        []string
 }
@@ -49,8 +50,8 @@ func (t *folderAuditTx) Exec(ctx context.Context, sql string, args ...any) (pgco
 		return pgconn.CommandTag{}, nil
 	}
 	if strings.Contains(sql, "-- name: LockClusterFolders :exec") {
-		t.locked = t.timed
-		return pgconn.CommandTag{}, nil
+		t.locked = t.timed && t.d.lockErr == nil
+		return pgconn.CommandTag{}, t.d.lockErr
 	}
 	if t.locked {
 		return t.d.exec(sql, args)
@@ -179,5 +180,33 @@ func TestVMFolderAuditNamesTheFolderLeft(t *testing.T) {
 				t.Errorf("%s = %v (present %v), want %v", tt.key, got, ok, tt.want)
 			}
 		})
+	}
+}
+
+// A change that waits past its lock_timeout for the one before it answers 503,
+// which the client may retry, and changes nothing.
+func TestVMFolderChangeAnswers503PastTheLockTimeout(t *testing.T) {
+	t.Parallel()
+	cluster, folder := uuid.New(), uuid.New()
+	dbtx := &folderAuditDBTX{cluster: cluster, parent: uuid.New(), lockErr: &pgconn.PgError{Code: "55P03"}}
+	uuidParam := apischema.Property{Type: apischema.String, Format: "uuid"}
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", clusterGrantEngine{"manage", "vm_folder", cluster})
+		return c.Next()
+	})
+	app.Delete("/clusters/:cluster_id/vm-folders/:folder_id", withRequestParams(t, apischema.Properties{
+		"cluster_id": uuidParam, "folder_id": uuidParam,
+	}, []string{"cluster_id", "folder_id"}, NewVMFoldersHandler(dbtx, db.New(dbtx), nil).Delete))
+	resp, err := app.Test(httptest.NewRequest(http.MethodDelete,
+		"/clusters/"+cluster.String()+"/vm-folders/"+folder.String(), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || len(dbtx.details)+len(dbtx.unlocked) != 0 {
+		t.Errorf("status %d, %d audit rows, %v changed; want 503 and nothing", resp.StatusCode, len(dbtx.details),
+			dbtx.unlocked)
 	}
 }
