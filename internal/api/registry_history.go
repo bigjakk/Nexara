@@ -192,8 +192,7 @@ func historyFilterParams(kind handlers.HistoryKind) apischema.Properties {
 			MaxLength: apischema.Ptr(64),
 			Typetext:  "<RFC3339 timestamp>",
 			Description: "Newest entry to return, exclusive: entries before it. A read that stopped at " +
-				"searched_from reads its next stretch with end_time set to it. Later than start_time when both " +
-				"are given.",
+				"searched_from reads its next stretch with end_time set to it. " + historyEndText(kind),
 		},
 	}
 }
@@ -203,6 +202,16 @@ func historyFilterParams(kind handlers.HistoryKind) apischema.Properties {
 const historyStretchText = "A read in which a source reaches its cap lists only what it is whole for: " +
 	"searched_from gives that point, total counts the entries at or after it, and the same read with " +
 	"end_time set to searched_from lists the stretch before it."
+
+// historyEndText says what end_time must be later than: the window's start,
+// which a default window still sets when end_time is given.
+func historyEndText(kind handlers.HistoryKind) string {
+	if kind.DefaultWindow == 0 {
+		return "Later than start_time when both are given."
+	}
+	return fmt.Sprintf("The window still starts where it would without it — start_time, else the last %d days "+
+		"unless all_time is set — and end_time must be later than that start.", int(kind.DefaultWindow.Hours()/24))
+}
 
 // historyWindowText says what a read naming no start_time covers.
 func historyWindowText(kind handlers.HistoryKind) string {

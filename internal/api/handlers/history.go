@@ -805,16 +805,18 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	case r.kind.DefaultWindow > 0 && !p.Bool("all_time"):
 		since = pgtype.Timestamptz{Time: time.Now().Add(-r.kind.DefaultWindow), Valid: true}
 	}
-	// end_time lowers the window's top, the start kept: the next stretch of a
-	// read that stopped at searched_from.
+	// end_time lowers the window's top, the start kept — start_time's, or the
+	// default window's: the next stretch of a read that stopped at
+	// searched_from. One at or before that start is refused, either way.
 	var until pgtype.Timestamptz
 	if v := p.String("end_time"); v != "" {
 		t, parseErr := time.Parse(time.RFC3339, v)
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid end_time (use RFC3339)")
 		}
-		if p.String("start_time") != "" && !t.After(since.Time) {
-			return fiber.NewError(fiber.StatusBadRequest, "end_time must be later than start_time")
+		if since.Valid && !t.After(since.Time) {
+			return fiber.NewError(fiber.StatusBadRequest,
+				"end_time must be later than start_time, or than the default window's start without one")
 		}
 		until = pgtype.Timestamptz{Time: t, Valid: true}
 	}

@@ -455,7 +455,8 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 	}
 	at := func(v any) int { return slices.Index(probe.calls[0].args, v) }
 	atCap, atOffset, atLimit, atSince, atUntil := at(int32(11)), at(int32(22)), at(int32(33)), at(since), at(until)
-	end := time.Date(2026, 1, 2, 3, 4, 5, 6000, time.UTC)
+	// Inside the default week, to the microsecond.
+	end := time.Now().Add(-time.Hour).Truncate(time.Second).Add(6 * time.Microsecond).UTC()
 	cluster := uuid.New()
 	every := func() permissionEngine { return &recordingEngine{actions: map[string]bool{"view": true}} }
 	week := time.Now().Add(-7 * 24 * time.Hour)
@@ -538,24 +539,29 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 			}
 		})
 	}
-	// An end at or before the start is the caller's mistake, refused unread.
-	dbtx := &auditRowsDBTX{}
-	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
-	app.Use(func(c fiber.Ctx) error {
-		c.Locals("user_id", uuid.New())
-		c.Locals("rbac_engine", every())
-		return c.Next()
-	})
-	app.Get("/clusters/:cluster_id/history", withRequestParams(t, historyTestProps("cluster_id",
-		apischema.StdOption("cluster-id")), []string{"cluster_id"}, NewHistoryHandler(dbtx, db.New(dbtx)).Route(ClusterHistory()).List))
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+
-		"/history?start_time=2026-01-02T00:00:00Z&end_time=2026-01-02T00:00:00Z", nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest || len(dbtx.calls) != 0 {
-		t.Errorf("an end no later than the start: status %d after %d queries, want 400 before any", resp.StatusCode, len(dbtx.calls))
+	// An end at or before the start — start_time's, or the default week's
+	// without one — is the caller's mistake, refused unread.
+	for _, query := range []string{
+		"?start_time=2026-01-02T00:00:00Z&end_time=2026-01-02T00:00:00Z",
+		"?end_time=" + week.Add(-time.Hour).UTC().Format(time.RFC3339),
+	} {
+		dbtx := &auditRowsDBTX{}
+		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+		app.Use(func(c fiber.Ctx) error {
+			c.Locals("user_id", uuid.New())
+			c.Locals("rbac_engine", every())
+			return c.Next()
+		})
+		app.Get("/clusters/:cluster_id/history", withRequestParams(t, historyTestProps("cluster_id",
+			apischema.StdOption("cluster-id")), []string{"cluster_id"}, NewHistoryHandler(dbtx, db.New(dbtx)).Route(ClusterHistory()).List))
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+cluster.String()+"/history"+query, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || len(dbtx.calls) != 0 {
+			t.Errorf("%s: status %d after %d queries, want 400 before any", query, resp.StatusCode, len(dbtx.calls))
+		}
 	}
 }
 
