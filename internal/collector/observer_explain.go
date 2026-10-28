@@ -549,12 +549,22 @@ func aclDeleteRules(auditType, who, grants string) []explainRule {
 // worker auth-realm-sync and the scheduled job's, both naming the realm). It
 // adds and removes that realm's users (user@realm) and the groups it syncs
 // (name-realm, LDAP.pm get_groups), and with remove-vanished takes their ACL
-// entries out. A user's edit writes only the attributes a sync maps (LDAP.pm
-// get_users: enable, expire, names, e-mail, comment, keys); a group's only its
-// comment, which overwriting clears, and its users, which it replaces whole
-// (update_groups): that realm's users join it, and whoever was in it may leave.
-// So a user joins only a group the sync makes, and may leave one whoever it is.
-// A dry run (auth-realm-sync-test) writes nothing.
+// entries out. A group's edit is its comment, which overwriting clears, and its
+// users, which it replaces whole (update_groups): that realm's users join it,
+// and whoever was in it may leave. So a user joins only a group the sync
+// makes, and may leave one whoever it is. A dry run (auth-realm-sync-test)
+// writes nothing.
+//
+// What a sync writes on a user it already has, transcribed (LDAP.pm get_users,
+// Domains.pm update_users): every attribute the directory returns that maps to
+// one of enable, expire, firstname, lastname, email, comment and keys
+// overwrites it. The default map takes an LDAP attribute of each of those
+// names, and sync_attributes only adds mappings to the same seven, so the
+// realm's config could not narrow them. With remove-vanished=properties the
+// record is replaced by what the directory returned, so any of them but enable
+// (kept from the old record; enable-new is only for a user it creates) may be
+// cleared. All seven are its, enable too: verify_sync_attribute_value takes it
+// "for backwards compat".
 var realmSyncRules = func() []explainRule {
 	const sync = `^auth-realm-sync$`
 	return slices.Concat(
