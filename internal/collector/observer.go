@@ -968,7 +968,9 @@ func (p *observePass) readWithError(ctx context.Context, target proxmox.ObserveT
 	p.calls.Add(1)
 	raw, err := p.client.ObserveRead(callCtx, target)
 	switch {
-	case !observeUnanswered(err) || ctx.Err() != nil:
+	case ctx.Err() != nil:
+		// The pass is ending: no read of it says anything of the cluster.
+	case !observeUnanswered(err):
 		p.connFails.Store(0)
 		if node != "" {
 			p.nodeAnswered(node)
