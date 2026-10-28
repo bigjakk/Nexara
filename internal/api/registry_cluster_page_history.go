@@ -143,8 +143,8 @@ func accessHistoryRoutes() []historyRoute {
 		{
 			Kind: handlers.AccessGroupHistory(), Path: historyPath("access/groups/:groupid"), Resource: handlers.AccessResource,
 			Description: historyDescription("one Proxmox group",
-				"its creation, changes and removal, and the permissions granted to it or revoked from it",
-				handlers.AccessResource),
+				"its creation, changes and removal, and the permissions granted to it or revoked from it; its members "+
+					"are not listed, a user joining or leaving it is in that user's History", handlers.AccessResource),
 			Parameters: clusterParams(apischema.Properties{"groupid": accessNameParam("PVE group id.")}),
 		},
 		{
