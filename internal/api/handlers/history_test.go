@@ -274,6 +274,11 @@ func TestHistoryKindListParams(t *testing.T) {
 		t.Errorf("a tab's ListParams = types %v, values %v, whole %v (%v); want both types whole", p.ObjectTypes,
 			p.ObjectValues, p.ObjectWhole, err)
 	}
+	// …and a whole guest type says so, rather than failing to parse a value it has none of.
+	if _, err := k.ListParams([16]byte{1}, HistorySelection{Objects: []HistoryObject{{ResourceType: "vm", WholeType: true}}}); err == nil ||
+		!strings.Contains(err.Error(), "every guest") {
+		t.Errorf("a whole guest type was refused with %v, want it said to be every guest's", err)
+	}
 	// A global kind reads every cluster: never a guest, nor an object whose id
 	// is unique only within one.
 	global := HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true,
