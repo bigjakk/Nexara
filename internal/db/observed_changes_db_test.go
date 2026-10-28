@@ -220,12 +220,14 @@ func TestObservedChanges(t *testing.T) {
 	audit(observedCluster, in, "ha_resource", "vm:160", 160, "deleted", nil)
 
 	// A config edit explains the keys it set or deleted (and the unused<n> a
-	// disk's removal leaves), not another key; the options' edit its settings.
+	// disk's removal leaves, if it named a disk), not another key; the
+	// options' edit its settings.
 	configOther := seed(observedCluster, "vm", "180", 180, "changed", "pve-01", []string{"description", "hookscript"}, at)
-	configUnused := seed(observedCluster, "vm", "181", 181, "changed", "pve-01", []string{"description", "unused0"}, at)
+	configUnused := seed(observedCluster, "vm", "181", 181, "changed", "pve-01", []string{"scsi1", "unused0"}, at)
 	configDeleted := seed(observedCluster, "vm", "182", 182, "changed", "pve-01", []string{"net1"}, at)
-	for vmid, fields := range map[int32]map[string]any{180: {"description": "x"}, 181: {"description": "x"},
-		182: {"delete": "net1"}} {
+	configNoDisk := seed(observedCluster, "vm", "183", 183, "changed", "pve-01", []string{"description", "unused0"}, at)
+	for vmid, fields := range map[int32]map[string]any{180: {"description": "x"}, 181: {"delete": "scsi1"},
+		182: {"delete": "net1"}, 183: {"description": "x"}} {
 		audit(observedCluster, in, "vm", uuid.NewString(), vmid, "config_update", map[string]any{"fields": fields})
 	}
 	optionsSet := seed(observedCluster, "cluster_options", observedCluster.String(), 0, "changed", "", []string{"crs"}, at)
@@ -485,6 +487,7 @@ func TestObservedChanges(t *testing.T) {
 		{"an HA resource deleted, its sid leaving a rule", byResourceDelete, "explained"},
 		{"a config edit, another key changed too", configOther, "shown"},
 		{"a config edit, the disk it left unused", configUnused, "explained"},
+		{"a config edit naming no disk, a disk left unused", configNoDisk, "shown"},
 		{"a config edit that deleted the key", configDeleted, "explained"},
 		{"an options edit of that setting", optionsSet, "explained"},
 		{"an options edit, another setting", optionsOther, "shown"},

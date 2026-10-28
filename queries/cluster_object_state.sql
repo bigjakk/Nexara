@@ -273,9 +273,9 @@ WITH rules AS MATERIALIZED (
                           END) AS v
                      WHERE strpos(v, '*') = 0) AS member_names,
                -- The fields a row says it set, when the rule takes them from it:
-               -- a guest config edit's keys, those it deleted or reverted, and
-               -- what deleting a disk moves (unused<n>, boot); the datacenter
-               -- options' settings and cleared.
+               -- a guest config edit's keys, those it deleted or reverted, and,
+               -- when it named a disk, what replacing or deleting one moves
+               -- (unused<n>, boot); the datacenter options' settings and cleared.
                CASE k.fields_from
                    WHEN 'config' THEN ARRAY(
                        SELECT f FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details->'fields') = 'object'
@@ -332,7 +332,9 @@ WITH rules AS MATERIALIZED (
         WHERE h.id = n.id
           AND (n.field = '' OR h.field_re = '' OR n.field ~ h.field_re)
           AND (h.fields_from = '' OR n.field = ANY(h.fields_named)
-               OR (h.fields_from = 'config' AND n.field ~ '^(unused[0-9]+|boot)$'))
+               OR (h.fields_from = 'config' AND n.field ~ '^(unused[0-9]+|boot)$'
+                   AND EXISTS (SELECT 1 FROM unnest(h.fields_named) AS f
+                               WHERE f ~ '^((ide|sata|scsi|virtio)[0-9]+|efidisk0|tpmstate0|rootfs|mp[0-9]+)$')))
           AND CASE h.member
                   WHEN ''       THEN true
                   -- A member joining or leaving a list: the one the row names.

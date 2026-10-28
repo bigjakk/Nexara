@@ -60,9 +60,9 @@ type explainRule struct {
 	// out or one moved, adds any number in, dels any number out; "" anything.
 	Counts string `json:"counts"`
 	// FieldsFrom keeps a row to the fields its details name: config, a guest
-	// config edit's keys and the keys it deleted or reverted (and the
-	// unused<n> and boot a disk's removal moves); settings, the datacenter
-	// options' settings and cleared.
+	// config edit's keys and the keys it deleted or reverted (and, if it named
+	// a disk, the unused<n> and boot a disk's change or removal moves);
+	// settings, the datacenter options' settings and cleared.
 	FieldsFrom string `json:"fields_from"`
 }
 
