@@ -421,7 +421,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 		s.scheduleHandler = handlers.NewScheduleHandler(d.queries, d.eventPub)
 		s.auditHandler = handlers.NewAuditHandler(d.queries, d.eventPub)
 		s.historyHandler = handlers.NewHistoryHandler(d.queries)
-		s.vmFoldersHandler = handlers.NewVMFoldersHandler(d.queries, d.eventPub)
+		s.vmFoldersHandler = handlers.NewVMFoldersHandler(d.pool, d.queries, d.eventPub)
 		s.favoritesHandler = handlers.NewFavoritesHandler(d.queries)
 	}
 }

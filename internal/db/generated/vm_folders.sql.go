@@ -32,7 +32,9 @@ type AssignVMToFolderParams struct {
 // AssignVMToFolder returns the folder the guest was filed in before, ” when
 // none, for the audit row to name (from_folder_id): the folder it left has no
 // other record of it. The subquery reads the table as it stood when the
-// statement began, so it sees the row this upsert replaces.
+// statement began, so it sees the row this upsert replaces — under
+// LockClusterFolders, which it runs under, the row the last filing left; begun
+// beside a concurrent filing, it would see the one before that.
 func (q *Queries) AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) (string, error) {
 	row := q.db.QueryRow(ctx, assignVMToFolder, arg.ClusterID, arg.Vmid, arg.FolderID)
 	var from_folder_id string
@@ -229,20 +231,49 @@ func (q *Queries) ListVMFoldersByCluster(ctx context.Context, clusterID uuid.UUI
 	return items, nil
 }
 
+const lockClusterFolders = `-- name: LockClusterFolders :exec
+SELECT pg_advisory_xact_lock(1314408012, hashtext($1::uuid::text))
+`
+
+// LockClusterFolders takes the cluster's folder lock until the transaction
+// ends. Every move of a folder and filing of a guest takes it first, in a READ
+// COMMITTED transaction, so the statements after it read the tree as the last
+// one left it: without it two concurrent moves — A under B, B under A — each
+// pass their cycle check against the other's old tree and both commit, and two
+// concurrent filings of one guest record the same folder left. The two-key
+// form keeps its keys apart from the one-key locks elsewhere (0x4E58464C is
+// "NXFL").
+func (q *Queries) LockClusterFolders(ctx context.Context, clusterID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockClusterFolders, clusterID)
+	return err
+}
+
 const moveVMFolder = `-- name: MoveVMFolder :one
-UPDATE vm_folders
-SET parent_id = $2, updated_at = NOW()
-WHERE id = $1
-RETURNING id, cluster_id, parent_id, name, created_at, updated_at
+WITH RECURSIVE up AS (
+    SELECT p.id, p.parent_id, 1 AS depth FROM vm_folders p WHERE p.id = $1
+    UNION ALL
+    SELECT p.id, p.parent_id, up.depth + 1
+    FROM vm_folders p JOIN up ON p.id = up.parent_id
+    WHERE up.depth <= 1024
+)
+UPDATE vm_folders f
+SET parent_id = $1, updated_at = NOW()
+WHERE f.id = $2
+  AND NOT EXISTS (SELECT 1 FROM up WHERE up.id = f.id OR up.depth > 1024)
+RETURNING f.id, f.cluster_id, f.parent_id, f.name, f.created_at, f.updated_at
 `
 
 type MoveVMFolderParams struct {
-	ID       uuid.UUID   `json:"id"`
 	ParentID pgtype.UUID `json:"parent_id"`
+	ID       uuid.UUID   `json:"id"`
 }
 
+// MoveVMFolder moves the folder under parent_id (null for the top level),
+// unless that is the folder itself or below it, or the tree above it runs past
+// 1,024 levels (handlers.folderDepthCap): then no row. Run under
+// LockClusterFolders.
 func (q *Queries) MoveVMFolder(ctx context.Context, arg MoveVMFolderParams) (VmFolder, error) {
-	row := q.db.QueryRow(ctx, moveVMFolder, arg.ID, arg.ParentID)
+	row := q.db.QueryRow(ctx, moveVMFolder, arg.ParentID, arg.ID)
 	var i VmFolder
 	err := row.Scan(
 		&i.ID,

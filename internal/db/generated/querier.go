@@ -25,7 +25,9 @@ type Querier interface {
 	// AssignVMToFolder returns the folder the guest was filed in before, '' when
 	// none, for the audit row to name (from_folder_id): the folder it left has no
 	// other record of it. The subquery reads the table as it stood when the
-	// statement began, so it sees the row this upsert replaces.
+	// statement began, so it sees the row this upsert replaces — under
+	// LockClusterFolders, which it runs under, the row the last filing left; begun
+	// beside a concurrent filing, it would see the one before that.
 	AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) (string, error)
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
 	// Moves the user's auth_epoch to its next value and says how many rows it changed
@@ -2376,6 +2378,15 @@ type Querier interface {
 	ListVirtioWinDownloadsByCluster(ctx context.Context, arg ListVirtioWinDownloadsByClusterParams) ([]VirtioWinDownload, error)
 	ListVirtioWinReleases(ctx context.Context) ([]VirtioWinRelease, error)
 	ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVCInScanParams) ([]ListVulnsBySSVCInScanRow, error)
+	// LockClusterFolders takes the cluster's folder lock until the transaction
+	// ends. Every move of a folder and filing of a guest takes it first, in a READ
+	// COMMITTED transaction, so the statements after it read the tree as the last
+	// one left it: without it two concurrent moves — A under B, B under A — each
+	// pass their cycle check against the other's old tree and both commit, and two
+	// concurrent filings of one guest record the same folder left. The two-key
+	// form keeps its keys apart from the one-key locks elsewhere (0x4E58464C is
+	// "NXFL").
+	LockClusterFolders(ctx context.Context, clusterID uuid.UUID) error
 	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
 	// Changes to the cluster page's objects that reach no audit row (migrations/000119,
 	// 000120): a replication job edited in the Proxmox GUI, an OSD that went down, a
@@ -2415,6 +2426,10 @@ type Querier interface {
 	// statement. Splitting them would let a crash between the two leave a row whose
 	// next_check_at is still in the past, i.e. one that re-checks on every tick.
 	MarkVirtioWinConfigChecked(ctx context.Context, arg MarkVirtioWinConfigCheckedParams) error
+	// MoveVMFolder moves the folder under parent_id (null for the top level),
+	// unless that is the folder itself or below it, or the tree above it runs past
+	// 1,024 levels (handlers.folderDepthCap): then no row. Run under
+	// LockClusterFolders.
 	MoveVMFolder(ctx context.Context, arg MoveVMFolderParams) (VmFolder, error)
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	// Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still

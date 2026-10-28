@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -27,19 +28,62 @@ import (
 //
 // What stays here for all five is what a declaration cannot see: the
 // cluster-membership check on every folder and guest the request names, the
-// cycle check on a re-parent, and the unique-violation mapping onto 409.
+// cycle check on a re-parent, and the unique-violation mapping onto 409. Every
+// change to a cluster's tree — a move, a filing, a delete — runs under the
+// cluster's folder lock (inFolderTree).
 
 // VMFoldersHandler handles CRUD for the VM folder organisation layer
 // surfaced by the "VMs & Templates" tree perspective. Folders are pure
 // Nexara state — they never touch Proxmox.
 type VMFoldersHandler struct {
+	pool     txOptionsBeginner
 	queries  *db.Queries
 	eventPub *events.Publisher
 }
 
-// NewVMFoldersHandler constructs a VMFoldersHandler.
-func NewVMFoldersHandler(queries *db.Queries, eventPub *events.Publisher) *VMFoldersHandler {
-	return &VMFoldersHandler{queries: queries, eventPub: eventPub}
+// NewVMFoldersHandler constructs a VMFoldersHandler. pool begins the
+// transactions the tree changes run in (inFolderTree).
+func NewVMFoldersHandler(pool txOptionsBeginner, queries *db.Queries, eventPub *events.Publisher) *VMFoldersHandler {
+	return &VMFoldersHandler{pool: pool, queries: queries, eventPub: eventPub}
+}
+
+// inFolderTree runs fn in one READ COMMITTED transaction holding the cluster's
+// folder lock (LockClusterFolders), committed when fn succeeds. Every move,
+// filing and delete in the cluster's tree runs in one, so each reads the tree
+// as the last one left it: a move's cycle check, the folder a filing or a
+// move left. READ COMMITTED because each statement after the lock then reads
+// a snapshot taken after it; REPEATABLE READ's would date from the lock's own
+// statement, before the wait.
+func (h *VMFoldersHandler) inFolderTree(ctx context.Context, clusterID uuid.UUID, fn func(*db.Queries) error) error {
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to change the folder tree")
+	}
+	defer releaseTx(tx, "folder tree change")()
+	q := h.queries.WithTx(tx)
+	if err := q.LockClusterFolders(ctx, clusterID); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to change the folder tree")
+	}
+	if err := fn(q); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to change the folder tree")
+	}
+	return nil
+}
+
+// treeFolder is the folder as the transaction reads it: Not Found when it is
+// gone, or not the cluster's.
+func treeFolder(ctx context.Context, q *db.Queries, folderID, clusterID uuid.UUID) (db.VmFolder, error) {
+	folder, err := q.GetVMFolder(ctx, folderID)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && folder.ClusterID != clusterID {
+		return db.VmFolder{}, fiber.NewError(fiber.StatusNotFound, "Folder not found")
+	}
+	if err != nil {
+		return db.VmFolder{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to get folder")
+	}
+	return folder, nil
 }
 
 type vmFolderResponse struct {
@@ -213,7 +257,6 @@ func (h *VMFoldersHandler) Update(c fiber.Ctx) error {
 	}
 
 	auditFields := map[string]any{}
-	fromParent := folderParentID(folder)
 
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
@@ -240,30 +283,34 @@ func (h *VMFoldersHandler) Update(c fiber.Ctx) error {
 			if err := h.ensureFolderInCluster(c, req.ParentID.Value, clusterID); err != nil {
 				return err
 			}
-			cycle, err := h.wouldCreateCycle(c, folderID, req.ParentID.Value, clusterID)
-			if err != nil {
-				return err
-			}
-			if cycle {
-				return fiber.NewError(fiber.StatusBadRequest, "Cannot move folder into one of its descendants")
-			}
 			newParent = pgtype.UUID{Bytes: req.ParentID.Value, Valid: true}
 			auditFields["parent_id"] = req.ParentID.Value
 		} else {
 			auditFields["parent_id"] = nil
 		}
-		// The folder it left finds the move by from_parent_id, as it finds a
-		// guest's departure by from_folder_id.
-		auditFields["from_parent_id"] = fromParent
-
-		moved, moveErr := h.queries.MoveVMFolder(c.Context(), db.MoveVMFolderParams{ID: folderID, ParentID: newParent})
-		if moveErr != nil {
-			if isUniqueViolation(moveErr) {
-				return fiber.NewError(fiber.StatusConflict, "A folder with this name already exists at the new location")
+		ctx := c.Context()
+		if err := h.inFolderTree(ctx, clusterID, func(q *db.Queries) error {
+			current, err := treeFolder(ctx, q, folderID, clusterID)
+			if err != nil {
+				return err
 			}
-			return fiber.NewError(fiber.StatusInternalServerError, "Failed to move folder")
+			// The folder it left finds the move by from_parent_id, as it finds
+			// a guest's departure by from_folder_id.
+			auditFields["from_parent_id"] = folderParentID(current)
+			moved, err := q.MoveVMFolder(ctx, db.MoveVMFolderParams{ID: folderID, ParentID: newParent})
+			switch {
+			case errors.Is(err, pgx.ErrNoRows):
+				return fiber.NewError(fiber.StatusBadRequest, "Cannot move folder into one of its descendants")
+			case isUniqueViolation(err):
+				return fiber.NewError(fiber.StatusConflict, "A folder with this name already exists at the new location")
+			case err != nil:
+				return fiber.NewError(fiber.StatusInternalServerError, "Failed to move folder")
+			}
+			folder = moved
+			return nil
+		}); err != nil {
+			return err
 		}
-		folder = moved
 	}
 
 	if len(auditFields) > 0 {
@@ -299,8 +346,20 @@ func (h *VMFoldersHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusNotFound, "Folder not found")
 	}
 
-	if err := h.queries.DeleteVMFolder(c.Context(), folderID); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete folder")
+	ctx := c.Context()
+	if err := h.inFolderTree(ctx, clusterID, func(q *db.Queries) error {
+		// The parent it is deleted from, as the lock leaves it.
+		current, err := treeFolder(ctx, q, folderID, clusterID)
+		if err != nil {
+			return err
+		}
+		folder = current
+		if err := q.DeleteVMFolder(ctx, folderID); err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete folder")
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// parent_id, so the folder it was in finds the delete: it has no row left.
@@ -347,17 +406,20 @@ func (h *VMFoldersHandler) AssignVM(c fiber.Ctx, p *apischema.Params) error {
 
 	// from_folder_id names the folder the guest left, when it was in one: that
 	// folder's History finds the departure by it, having no other record.
+	ctx := c.Context()
 	if folderID == nil {
-		from, err := h.queries.UnassignVMFromFolder(c.Context(), db.UnassignVMFromFolderParams{
-			ClusterID: clusterID,
-			Vmid:      vm.Vmid,
-		})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusInternalServerError, "Failed to unassign VM")
-		}
 		fields := map[string]any{"vmid": vm.Vmid, "folder_id": nil}
-		if err == nil {
-			fields["from_folder_id"] = from
+		if err := h.inFolderTree(ctx, clusterID, func(q *db.Queries) error {
+			from, err := q.UnassignVMFromFolder(ctx, db.UnassignVMFromFolderParams{ClusterID: clusterID, Vmid: vm.Vmid})
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fiber.NewError(fiber.StatusInternalServerError, "Failed to unassign VM")
+			}
+			if err == nil {
+				fields["from_folder_id"] = from
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		details, _ := json.Marshal(fields)
 		AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm_folder_membership", vmID.String(), "unassign", details)
@@ -367,13 +429,16 @@ func (h *VMFoldersHandler) AssignVM(c fiber.Ctx, p *apischema.Params) error {
 	if err := h.ensureFolderInCluster(c, *folderID, clusterID); err != nil {
 		return err
 	}
-	from, err := h.queries.AssignVMToFolder(c.Context(), db.AssignVMToFolderParams{
-		ClusterID: clusterID,
-		Vmid:      vm.Vmid,
-		FolderID:  *folderID,
-	})
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to assign VM")
+	var from string
+	if err := h.inFolderTree(ctx, clusterID, func(q *db.Queries) error {
+		var err error
+		from, err = q.AssignVMToFolder(ctx, db.AssignVMToFolderParams{ClusterID: clusterID, Vmid: vm.Vmid, FolderID: *folderID})
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to assign VM")
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	fields := map[string]any{"vmid": vm.Vmid, "folder_id": *folderID}
@@ -413,36 +478,9 @@ func (h *VMFoldersHandler) ensureFolderInCluster(c fiber.Ctx, folderID, clusterI
 }
 
 // folderDepthCap is the deepest folder tree Nexara walks: a runaway guard, far
-// beyond any tree a person builds.
+// beyond any tree a person builds. MoveVMFolder's cycle check holds to the same
+// 1,024 levels, refusing a move above a deeper tree.
 const folderDepthCap = 1024
-
-// wouldCreateCycle reports whether re-parenting `folderID` under
-// `newParentID` would put `folderID` underneath one of its own descendants.
-// Walks up from the candidate parent toward the root; if we encounter
-// folderID, that's the cycle.
-func (h *VMFoldersHandler) wouldCreateCycle(c fiber.Ctx, folderID, newParentID, clusterID uuid.UUID) (bool, error) {
-	current := newParentID
-	for i := 0; i < folderDepthCap; i++ {
-		if current == folderID {
-			return true, nil
-		}
-		parent, err := h.queries.GetVMFolder(c.Context(), current)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return false, nil
-			}
-			return false, fiber.NewError(fiber.StatusInternalServerError, "Failed to walk folder tree")
-		}
-		if parent.ClusterID != clusterID {
-			return false, fiber.NewError(fiber.StatusNotFound, "Folder not found")
-		}
-		if !parent.ParentID.Valid {
-			return false, nil
-		}
-		current, _ = uuid.FromBytes(parent.ParentID.Bytes[:])
-	}
-	return true, nil
-}
 
 // isUniqueViolation reports whether err comes from a Postgres unique
 // constraint failure (SQLSTATE 23505). Keeps the dependency on pgconn out

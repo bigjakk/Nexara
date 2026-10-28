@@ -20,15 +20,65 @@ import (
 
 // folderAuditDBTX answers the folder routes' reads — the guest, any folder as
 // one of the cluster's under parent (parent itself at the top level), the
-// folder a guest leaves (from, "" for none) — and keeps each audit row's
-// details.
+// folder a guest leaves (from, "" for none) — keeps each audit row's details,
+// and names each change to the tree made outside a transaction holding the
+// cluster's folder lock.
 type folderAuditDBTX struct {
 	cluster, parent uuid.UUID
 	from            string
 	details         []map[string]any
+	unlocked        []string
+}
+
+// BeginTx begins a folderAuditTx: the transactions inFolderTree runs.
+func (d *folderAuditDBTX) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	return &folderAuditTx{d: d}, nil
+}
+
+// folderAuditTx runs its statements on the fake, noting whether the folder
+// lock was taken before a change to the tree.
+type folderAuditTx struct {
+	pgx.Tx
+	d      *folderAuditDBTX
+	locked bool
+}
+
+func (t *folderAuditTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "-- name: LockClusterFolders :exec") {
+		t.locked = true
+		return pgconn.CommandTag{}, nil
+	}
+	if t.locked {
+		return t.d.exec(sql, args)
+	}
+	return t.d.Exec(ctx, sql, args...)
+}
+
+func (t *folderAuditTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if !t.locked {
+		t.d.noteTreeChange(sql)
+	}
+	return t.d.row(sql, args)
+}
+
+func (*folderAuditTx) Commit(context.Context) error   { return nil }
+func (*folderAuditTx) Rollback(context.Context) error { return nil }
+
+// noteTreeChange names sql when it changes the tree.
+func (d *folderAuditDBTX) noteTreeChange(sql string) {
+	for _, name := range []string{"MoveVMFolder", "AssignVMToFolder", "UnassignVMFromFolder", "DeleteVMFolder"} {
+		if strings.Contains(sql, "-- name: "+name+" ") {
+			d.unlocked = append(d.unlocked, name)
+		}
+	}
 }
 
 func (d *folderAuditDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	d.noteTreeChange(sql)
+	return d.exec(sql, args)
+}
+
+func (d *folderAuditDBTX) exec(sql string, args []any) (pgconn.CommandTag, error) {
 	if strings.Contains(sql, "-- name: InsertAuditLog :exec") {
 		var m map[string]any
 		_ = json.Unmarshal(args[5].(json.RawMessage), &m)
@@ -42,6 +92,11 @@ func (*folderAuditDBTX) Query(context.Context, string, ...any) (pgx.Rows, error)
 }
 
 func (d *folderAuditDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	d.noteTreeChange(sql)
+	return d.row(sql, args)
+}
+
+func (d *folderAuditDBTX) row(sql string, args []any) pgx.Row {
 	folder := func(id uuid.UUID) db.VmFolder {
 		return db.VmFolder{ID: id, ClusterID: d.cluster, Name: "folder01",
 			ParentID: pgtype.UUID{Bytes: d.parent, Valid: id != d.parent}}
@@ -52,7 +107,7 @@ func (d *folderAuditDBTX) QueryRow(_ context.Context, sql string, args ...any) p
 	case strings.Contains(sql, "-- name: GetVMFolder :one"):
 		return replayRow{row: folder(args[0].(uuid.UUID))}
 	case strings.Contains(sql, "-- name: MoveVMFolder :one"):
-		return replayRow{row: folder(args[0].(uuid.UUID))}
+		return replayRow{row: folder(args[1].(uuid.UUID))}
 	case strings.Contains(sql, "-- name: AssignVMToFolder :one"):
 		return replayRow{row: struct{ From string }{d.from}}
 	case strings.Contains(sql, "-- name: UnassignVMFromFolder :one") && d.from != "":
@@ -64,7 +119,7 @@ func (d *folderAuditDBTX) QueryRow(_ context.Context, sql string, args ...any) p
 // What left a folder is found in its History by the folder each audit row says
 // it left: a guest moved or unfiled (from_folder_id), a subfolder moved
 // (from_parent_id) or deleted (parent_id). A guest filed from no folder names
-// none.
+// none. Each change runs under the cluster's folder lock.
 func TestVMFolderAuditNamesTheFolderLeft(t *testing.T) {
 	t.Parallel()
 	cluster, parent, left, folder := uuid.New(), uuid.New(), uuid.New(), uuid.New()
@@ -86,7 +141,7 @@ func TestVMFolderAuditNamesTheFolderLeft(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			dbtx := &folderAuditDBTX{cluster: cluster, parent: parent, from: tt.from}
-			h := NewVMFoldersHandler(db.New(dbtx), nil)
+			h := NewVMFoldersHandler(dbtx, db.New(dbtx), nil)
 			uuidParam := apischema.Property{Type: apischema.String, Format: "uuid"}
 			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 			app.Use(func(c fiber.Ctx) error {
@@ -111,6 +166,10 @@ func TestVMFolderAuditNamesTheFolderLeft(t *testing.T) {
 			_ = resp.Body.Close()
 			if resp.StatusCode >= 300 || len(dbtx.details) != 1 {
 				t.Fatalf("status %d, %d audit rows; want success and one", resp.StatusCode, len(dbtx.details))
+			}
+			// Under the cluster's folder lock, in the change's own transaction.
+			if len(dbtx.unlocked) > 0 {
+				t.Errorf("changed the tree without the folder lock: %v", dbtx.unlocked)
 			}
 			if got, ok := dbtx.details[0][tt.key]; got != tt.want || (tt.want == nil) == ok {
 				t.Errorf("%s = %v (present %v), want %v", tt.key, got, ok, tt.want)
