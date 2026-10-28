@@ -81,7 +81,7 @@ function filterKey(f: HistoryFilters): unknown[] {
  * apiPath refuses a value it cannot send; the queryFn then throws the same
  * error into the query's error state, so the key only has to differ.
  */
-function routeKey(target: HistoryTarget): string {
+export function routeKey(target: HistoryTarget): string {
   try {
     return String(target.path(new URLSearchParams()));
   } catch (err) {

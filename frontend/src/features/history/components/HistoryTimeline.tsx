@@ -17,6 +17,7 @@ import { detailPairs } from "@/features/events/lib/audit-details";
 import { useTaskLog, useTaskStatus } from "@/features/tasks/api/tasks-queries";
 import {
   HISTORY_PAGE_SIZE,
+  routeKey,
   useHistory,
   useOlderHistory,
 } from "../api/history-queries";
@@ -372,15 +373,16 @@ export function HistoryTimeline({
   // that point a stretch at a time. It reads from the page as it was when
   // clicked, held still: each new row of a capped source raises the page's
   // searched_from, which would leave a gap above the stretches read below
-  // the old one. A new page or filter goes live again.
-  const readKey = [
+  // the old one. A new page, filter or object goes live again.
+  const readKey = JSON.stringify([
+    routeKey(target),
     page,
     category,
     source,
     timeWindow,
     showRoutine,
     includeGuests,
-  ].join("|");
+  ]);
   const [held, setHeld] = useState<{ key: string; page: HistoryPage } | null>(
     null,
   );
@@ -423,9 +425,14 @@ export function HistoryTimeline({
       : left > 0
         ? last.at.end
         : last.searched_from;
+  // Not while the previous page stands in for this one (placeholderData): a
+  // click would hold that page's entries as this one's.
   const canShowOlder = olderOn
     ? older.isFetching || older.hasNextPage || older.isError
-    : atEnd && !error && data?.searched_from !== undefined;
+    : atEnd &&
+      !error &&
+      !live.isPlaceholderData &&
+      data?.searched_from !== undefined;
 
   // Snap back when a refetch shrinks the result below the current page, but
   // not while the fetch is failing — see TaskHistoryTable for why.

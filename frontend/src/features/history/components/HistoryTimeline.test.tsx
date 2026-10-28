@@ -7,7 +7,7 @@ import { apiPath } from "@/lib/api-path";
 import { formatDateTime } from "@/lib/format";
 import { makeHistoryEntry } from "@/test/history.fixtures";
 import { historyKind } from "../lib/history";
-import type { HistoryPage } from "../types/history";
+import type { HistoryPage, HistoryTarget } from "../types/history";
 import { HistoryTimeline } from "./HistoryTimeline";
 
 vi.mock("@/lib/api-client", async () =>
@@ -15,6 +15,11 @@ vi.mock("@/lib/api-client", async () =>
 );
 
 const mockedPage = vi.mocked(apiClient.page);
+
+const probeTarget: HistoryTarget = {
+  clusterId: "c1",
+  path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
+};
 
 describe("HistoryTimeline", () => {
   // A busy kind starts at its window, without its routine checks and its
@@ -38,15 +43,7 @@ describe("HistoryTimeline", () => {
           guestToggle: true,
         },
       );
-      renderWithProviders(
-        <HistoryTimeline
-          kind={kind}
-          target={{
-            clusterId: "c1",
-            path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
-          }}
-        />,
-      );
+      renderWithProviders(<HistoryTimeline kind={kind} target={probeTarget} />);
       await waitFor(() => {
         expect(mockedPage).toHaveBeenCalled();
       });
@@ -111,13 +108,7 @@ describe("HistoryTimeline", () => {
       { icons: {}, rowCap: 100, filteredRowCap: 1000 },
     );
     const { queryClient } = renderWithProviders(
-      <HistoryTimeline
-        kind={kind}
-        target={{
-          clusterId: "c1",
-          path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
-        }}
-      />,
+      <HistoryTimeline kind={kind} target={probeTarget} />,
     );
     // The note, with the hint a read that is not narrowed carries.
     const note = (when: string) =>
@@ -152,6 +143,45 @@ describe("HistoryTimeline", () => {
     expect(mockedPage).toHaveBeenCalledTimes(4);
   });
 
+  // While a page turn's read is in flight the previous page stands in for
+  // the last one; Show older would hold that page's entries as the last's.
+  it("offers Show older only once the last page itself has come", async () => {
+    const user = setupUser();
+    mockedPage.mockReset();
+    const page = (id: string, action: string): HistoryPage => ({
+      items: [makeHistoryEntry({ id, action, resource_type: "node" })],
+      total: 51,
+      searched_from: "2026-01-02T03:04:05.000001Z",
+    });
+    let land: (p: HistoryPage) => void = () => undefined;
+    mockedPage.mockImplementation((path) =>
+      new URL(String(path), "http://x").searchParams.get("offset") === "50"
+        ? new Promise<HistoryPage>((resolve) => {
+            land = resolve;
+          })
+        : Promise.resolve(page("audit:2", "reboot")),
+    );
+    const kind = historyKind(
+      "probe",
+      { categories: { other: "Other" } },
+      { icons: {} },
+    );
+    renderWithProviders(<HistoryTimeline kind={kind} target={probeTarget} />);
+    expect(await screen.findByText("Reboot")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => {
+      expect(mockedPage).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Reboot")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show older" })).toBeNull();
+    land(page("audit:1", "shutdown"));
+    expect(
+      await screen.findByRole("button", { name: "Show older" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Shutdown")).toBeInTheDocument();
+  });
+
   // Its route reads a kind's default window when none is named, so All time
   // asks for all of it; an empty window says so, not that a filter matched
   // nothing.
@@ -164,15 +194,7 @@ describe("HistoryTimeline", () => {
       { categories: { other: "Other" } },
       { icons: {}, defaultWindow: "7d" },
     );
-    renderWithProviders(
-      <HistoryTimeline
-        kind={kind}
-        target={{
-          clusterId: "c1",
-          path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
-        }}
-      />,
-    );
+    renderWithProviders(<HistoryTimeline kind={kind} target={probeTarget} />);
     expect(
       await screen.findByText(/^Nothing was recorded in this time/),
     ).toBeInTheDocument();
