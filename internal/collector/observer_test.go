@@ -715,7 +715,7 @@ func TestObserverOutcomes(t *testing.T) {
 			t.Fatalf("read the options %d times", n)
 		}
 	})
-	t.Run("an upgrade re-baselines; a privilege change is filed, and re-baselines only the kind it gates", func(t *testing.T) {
+	t.Run("an upgrade is compared across, what moved filed as one, during it; a privilege change is filed, and re-baselines only the kind it gates", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
 		plugins := func(data string) {
@@ -725,16 +725,28 @@ func TestObserverOutcomes(t *testing.T) {
 			e.client.set(pathPerms, `{"/":{"Sys.Audit":1,"VM.Audit":1,"Datastore.Audit":1,"Pool.Audit":1,"Mapping.Audit":1`+extra+`}}`)
 		}
 		plugins("QUJD")
+		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-01"},{"storage":"store02","type":"dir"}]`)
 		e.expect("baseline")
 		e.mq.nodesByCluster[0].PveVersion = "pve-manager/9.2.21/0000bbbb"
-		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-01"}]`)
+		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-02"},{"storage":"store02","type":"dir","shared":1}]`)
 		e.client.set(pathGuest, `{"name":"linux01","memory":"4096"}`)
-		// A guest's configuration is its raw file, so the version is not in its
-		// signature: its edit in the same pass is still recorded.
-		e.expect("upgraded", "changed vm/100 [cores memory]")
+		rows := e.passRows()
+		var bulk []any
+		for _, r := range rows {
+			if r.Detail["during_upgrade"] != true {
+				t.Errorf("upgraded: filed %+v, want each marked during_upgrade", r)
+			}
+			if r.ResourceType == "storage" {
+				bulk = append(bulk, r.Detail["bulk"])
+			}
+		}
+		if len(rows) != 3 || len(bulk) != 2 || bulk[0] == nil || bulk[0] != bulk[1] {
+			t.Fatalf("upgraded: filed %+v, want both storages' edits as one and the guest's", rows)
+		}
+		e.expect("and the pass after, as any other")
 		token := "changed cluster/" + e.cluster.ID.String() + " [token_privileges]"
 		perms(`,"Sys.PowerMgmt":1`)
-		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-02"}]`)
+		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-03"},{"storage":"store02","type":"dir","shared":1}]`)
 		e.expect("a privilege granted", token, "changed storage/store01 [nodes]")
 		perms(`,"Sys.PowerMgmt":1,"Sys.Modify":1`)
 		plugins("WllY")
@@ -820,6 +832,12 @@ func TestObserverOutcomes(t *testing.T) {
 		e.expect("skipped")
 		if n := e.client.readsOf("/pools"); n != 1 {
 			t.Fatalf("pools listed %d times, want once", n)
+		}
+		// An upgrade can bring what the release lacked: they are tried again.
+		e.mq.nodesByCluster[0].PveVersion = "pve-manager/9.2.21/0000bbbb"
+		e.expect("upgraded")
+		if n := e.client.readsOf("/pools"); n != 2 {
+			t.Fatalf("pools listed %d times by the pass after an upgrade, want twice", n)
 		}
 	})
 	t.Run("a node that left the cluster is forgotten", func(t *testing.T) {

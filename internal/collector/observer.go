@@ -293,6 +293,12 @@ type observePass struct {
 	pastCap map[string]time.Time
 	// presence is the cluster's, the observer's own (Observer.presence).
 	presence map[string]map[string]presenceEntry
+	// versions condenses the Proxmox VE versions the cluster's nodes run, which
+	// a cluster's kind's mark keeps beside its signature (markVersions), and
+	// upgraded names the nodes whose version or kernel moved since the last
+	// pass: what moves across either is filed during_upgrade (apply).
+	versions string
+	upgraded map[string]bool
 
 	calls     atomic.Int64
 	changes   atomic.Int64
@@ -349,21 +355,24 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 
 	p.forgetDepartedNodes(ctx, nodes)
 	versions, unread, upgraded := p.nodeVersions(ctx, nodes)
-	p.observeTokenPrivileges(ctx, upgraded)
+	p.versions, p.upgraded = observeSignature(versions), upgraded
+	p.observeTokenPrivileges(ctx, len(upgraded) > 0)
 	p.noticeUnreadNodes(ctx, nodes, unread)
-	clusterSig := observeSignature("cluster", o.tags.keyID, observeStateVersion, versions)
-	// A new privilege can open a kind skipped as refused, so the skips go when
-	// the privileges move too.
-	o.noticeSignature(cluster.ID, observeSignature(clusterSig, p.privFP))
+	// The Proxmox versions are no part of a signature: a tag taken before an
+	// upgrade compares with one taken after, and what moved is filed, marked
+	// (apply). An upgrade can bring a kind skipped as unsupported, and a new
+	// privilege one skipped as refused, so the skips go when either moves.
+	clusterSig := observeSignature("cluster", o.tags.keyID, observeStateVersion)
+	o.noticeSignature(cluster.ID, observeSignature(clusterSig, versions, p.privFP))
 	p.observeHA(ctx, clusterSig)
 	for _, k := range observeClusterKinds {
 		p.observeClusterKind(ctx, k, clusterSig)
 	}
+	nodeSig := observeSignature("node", o.tags.keyID, observeStateVersion)
 	for _, n := range online {
 		if n.PveVersion == "" || n.KernelVersion == "" {
 			continue // the inventory has not read this node since it came back
 		}
-		nodeSig := observeSignature("node", o.tags.keyID, observeStateVersion, n.PveVersion, n.KernelVersion)
 		for _, k := range observeNodeKinds {
 			p.observeNodeKind(ctx, k, n, nodeSig)
 		}
@@ -653,13 +662,17 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 		baselined         bool
 		addedSince, whole time.Time
 	)
+	var upgrading bool // read last under other Proxmox versions (markVersions, upgraded)
 	if node == "" {
 		mark, read := p.baselines[rd.kind]
-		baselined, addedSince = mark.signature == sig, mark.lastRead
+		base, versions := markVersions(mark.signature)
+		baselined, addedSince = base == sig, mark.lastRead
+		upgrading = baselined && versions != p.versions
 		if read {
 			whole = mark.lastRead
 		}
 	} else {
+		upgrading = p.upgraded[node]
 		for _, s := range prev {
 			whole = maxTime(whole, s.lastSeen)
 			if s.signature == sig {
@@ -877,14 +890,24 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 	// rows kept past the cap are compared back under from the crossing).
 	mark := ""
 	if node == "" && len(rd.unread) == 0 {
-		mark = sig
+		mark = sig + "/" + p.versions
 	} else {
 		batch.touched = unchanged
 	}
 	if allOver && batch.empty() && len(notices) == 0 && len(gates) == 0 && p.baselines[rd.kind].signature == mark {
 		mark = ""
 	}
-	p.markBulk(rd.kind, batch.changes, uuid.NewString())
+	if upgrading {
+		for _, r := range batch.changes {
+			r.Detail["during_upgrade"] = true
+		}
+		for _, r := range notices {
+			if r.Detail["notice"] == "changed_past_cap" {
+				r.Detail["during_upgrade"] = true
+			}
+		}
+	}
+	p.markBulk(rd.kind, batch.changes, uuid.NewString(), upgrading)
 	batch.record(notices)
 	next := p.notices
 	if len(gates) > 0 {
@@ -1129,13 +1152,14 @@ func maxTime(a, b time.Time) time.Time {
 // markBulk marks the changes of one kind a reading found, when there are more
 // than observeMaxChanges, with one id and their count in their detail (bulk,
 // bulk_size): something rewrote the lot, and a History can show them as one.
-// Each is still filed, and explained or not on its own.
-func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string) {
-	if len(rows) <= observeMaxChanges {
+// Across an upgrade (upgrading) any two are one. Each is still filed, and
+// explained or not on its own.
+func (p *observePass) markBulk(kind string, rows []observedChangeRow, id string, upgrading bool) {
+	if len(rows) <= observeMaxChanges && (!upgrading || len(rows) < 2) {
 		return
 	}
-	p.o.logger.Info("object observer: more changes of a kind in one reading than are shown one by one; marked as one",
-		"cluster_id", p.cluster.ID, "kind", kind, "changes", len(rows))
+	p.o.logger.Info("object observer: more changes of a kind in one reading than are shown one by one, or across an upgrade; marked as one",
+		"cluster_id", p.cluster.ID, "kind", kind, "changes", len(rows), "during_upgrade", upgrading)
 	for _, r := range rows {
 		r.Detail["bulk"], r.Detail["bulk_size"] = id, len(rows)
 	}
@@ -1473,7 +1497,11 @@ func (p *observePass) applyGuest(batch *recordBatch, kind string, obj observedOb
 			batch.record(p.o.quiet(p.objectKey(kind, obj.id)))
 			return
 		}
-		batch.record(p.o.pace(p.objectKey(kind, obj.id), changeRow(obj, "changed", d, old.lastSeen, doneAt), doneAt))
+		row := changeRow(obj, "changed", d, old.lastSeen, doneAt)
+		if p.upgraded[obj.node] {
+			row.Detail["during_upgrade"] = true
+		}
+		batch.record(p.o.pace(p.objectKey(kind, obj.id), row, doneAt))
 	}
 	batch.save(obj, tags, sig, readAt)
 }
@@ -2160,36 +2188,39 @@ func (p *observePass) forgetDepartedNodes(ctx context.Context, nodes []db.Node) 
 	}
 }
 
-// nodeVersions is the Proxmox versions the cluster's nodes run, for its
-// signature, and the nodes none is known for. The collector writes a node it
-// cannot reach with no versions, so such a node counts with the versions it
-// last had, kept with the kinds' marks (cluster_object_baselines, kind
-// node_versions) to outlast a restart: a node going down or coming back is no
-// upgrade, and never re-baselines. A node never seen with versions is left
-// out, so a member Nexara never reached holds nothing back; the day it is
-// read, a version none of the others runs re-baselines the cluster's kinds
-// once, as an upgrade would.
+// nodeVersions is the Proxmox versions the cluster's nodes run, which a
+// cluster's kind's mark keeps (markVersions), and the nodes none is known for.
+// The collector writes a node it cannot reach with no versions, so such a node
+// counts with the versions it last had, kept with the kinds' marks
+// (cluster_object_baselines, kind node_versions) to outlast a restart: a node
+// going down or coming back is no upgrade. A node never seen with versions is
+// left out, so a member Nexara never reached holds nothing back; the day it is
+// read, a version none of the others runs marks what the cluster's kinds then
+// find as during an upgrade, as an upgrade would.
 //
-// upgraded is whether a node runs another version than it last did.
-func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (versions string, unread []string, upgraded bool) {
+// upgraded names the nodes that run another version, or kernel, than they
+// last did.
+func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (versions string, unread []string, upgraded map[string]bool) {
 	const kind = "node_versions"
-	last := map[string]string{}
+	last := map[string]nodeVersion{}
 	stored := p.baselines[kind].signature
 	_ = json.Unmarshal([]byte(stored), &last)
 	vs := make([]string, 0, len(nodes))
+	upgraded = map[string]bool{}
 	for _, n := range nodes {
 		if n.PveVersion != "" {
-			if v, ok := last[n.Name]; ok && v != n.PveVersion {
-				upgraded = true
+			now := nodeVersion{PVE: n.PveVersion, Kernel: n.KernelVersion}
+			if v, ok := last[n.Name]; ok && v != now {
+				upgraded[n.Name] = true
 			}
-			last[n.Name] = n.PveVersion
+			last[n.Name] = now
 		}
 		v, ok := last[n.Name]
 		if !ok {
 			unread = append(unread, n.Name)
 			continue
 		}
-		vs = append(vs, v)
+		vs = append(vs, v.PVE)
 	}
 	if b, err := json.Marshal(last); err == nil && string(b) != stored && len(last) > 0 {
 		readAt := time.Now()
@@ -2199,6 +2230,19 @@ func (p *observePass) nodeVersions(ctx context.Context, nodes []db.Node) (versio
 	}
 	slices.Sort(vs)
 	return strings.Join(slices.Compact(vs), " "), unread, upgraded
+}
+
+// nodeVersion is what a node runs, as node_versions keeps it.
+type nodeVersion struct {
+	PVE    string `json:"pve"`
+	Kernel string `json:"kernel"`
+}
+
+// markVersions splits a cluster's kind's mark into its signature and the
+// Proxmox versions it was read under: "<signature>/<versions>".
+func markVersions(mark string) (signature, versions string) {
+	signature, versions, _ = strings.Cut(mark, "/")
+	return signature, versions
 }
 
 // noticeUnreadNodes counts the passes in a row each node has gone with no

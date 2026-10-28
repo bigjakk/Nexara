@@ -28,10 +28,13 @@
 -- "node_dns", "pve-01"), which is not always the audit identity a change is
 -- filed under (both of those are filed as resource_type node).
 --
--- signature names what the tags were taken under: the key, the Proxmox versions
--- that answered, and the privileges of the cluster's token. An object read under
--- another signature is taken as a fresh baseline and records nothing: an
--- upgrade changes what Proxmox reports without anyone editing anything.
+-- signature names what the tags were taken under: the key, how the kind's fields
+-- are read, and the privileges of the cluster's token that gate it. An object
+-- read under another signature is taken as a fresh baseline and records
+-- nothing. The Proxmox versions that answered are no part of it: what moves
+-- across an upgrade is compared and filed, marked during_upgrade, and a kind's
+-- mark in cluster_object_baselines keeps the versions it was read under beside
+-- its signature (<signature>/<versions>).
 --
 -- last_seen_at moves on every pass for a node's objects, and for those of a
 -- reading that left one of its kind unread (a cluster's kind read whole moves
