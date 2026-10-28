@@ -58,6 +58,31 @@ type kindReading struct {
 	forget  map[string]bool
 	quiet   map[string]bool
 	listed  int // past the cap, how many its listing held (capListing); 0 otherwise
+	// idsOnly are the ids a listing past the cap held that were not read on
+	// (capListing): compared, and filed, by their ids alone.
+	idsOnly []string
+	// parentOf, for a kind of a parent's objects (an IP set's entries, a
+	// group's rules, a vnet's subnets, a user's tokens), is the parent an id
+	// belongs to: the cap counts each parent's objects apart. parents are the
+	// parents listed, true for those whose objects were read; parentKind is
+	// theirs, so an object of a parent that appeared past that kind's cap
+	// appeared with it.
+	parentOf   func(id string) string
+	parents    map[string]bool
+	parentKind string
+}
+
+// beforeSep is the parent of an id that is "<parent><sep><rest>": up to the
+// first sep (an IP set or a vnet name holds no "/"), or with last up to the
+// last (a user name may hold a "!", a token's own id may not).
+func beforeSep(sep string, last bool) func(string) string {
+	return func(id string) string {
+		if i := strings.LastIndex(id, sep); last && i >= 0 {
+			return id[:i]
+		}
+		parent, _, _ := strings.Cut(id, sep)
+		return parent
+	}
 }
 
 // observeKind is one kind of a cluster's objects, read once per pass.
@@ -277,7 +302,7 @@ func readPools(ctx context.Context, p *observePass) ([]kindReading, readOutcome)
 		return nil, out
 	}
 	reading := kindReading{kind: "pool", unread: map[string]bool{}}
-	items, reading.listed = p.capListing("pool", items, func(it map[string]json.RawMessage) string { return stringField(it, "poolid") })
+	items, reading.idsOnly, reading.listed = p.capListing("pool", items, func(it map[string]json.RawMessage) string { return stringField(it, "poolid") })
 	for _, item := range items {
 		id := stringField(item, "poolid")
 		if !auditkey.ValidID(id) {
@@ -343,7 +368,7 @@ func readMetricServers(ctx context.Context, p *observePass) ([]kindReading, read
 	}
 	spec := metricServerSpec
 	reading := kindReading{kind: "metric_server", unread: map[string]bool{}}
-	items, reading.listed = p.capListing("metric_server", items, func(it map[string]json.RawMessage) string { return stringField(it, "id") })
+	items, reading.idsOnly, reading.listed = p.capListing("metric_server", items, func(it map[string]json.RawMessage) string { return stringField(it, "id") })
 	for _, item := range items {
 		id := stringField(item, "id")
 		if !auditkey.ValidID(id) {
@@ -576,15 +601,16 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 		return nil, out
 	}
 	vnets := kindReading{kind: "sdn_vnet"}
-	subnets := kindReading{kind: "sdn_subnet", unread: map[string]bool{}, forget: map[string]bool{}}
+	subnets := kindReading{kind: "sdn_subnet", unread: map[string]bool{}, forget: map[string]bool{},
+		parentOf: beforeSep("/", false), parents: map[string]bool{}, parentKind: "sdn_vnet"}
 	listed := map[string]bool{}
 	for _, item := range items {
 		listed[stringField(item, "vnet")] = true
+		subnets.parents[stringField(item, "vnet")] = false
 	}
-	// Past the cap only the vnets held are read on, and their subnets are
-	// compared as a reading past the cap too: a new vnet's are not read.
-	items, vnets.listed = p.capListing("sdn_vnet", items, func(it map[string]json.RawMessage) string { return stringField(it, "vnet") })
-	subnets.listed = vnets.listed
+	// Past the cap only the vnets held are read on: a new vnet's subnets are
+	// not read until it is.
+	items, vnets.idsOnly, vnets.listed = p.capListing("sdn_vnet", items, func(it map[string]json.RawMessage) string { return stringField(it, "vnet") })
 	for _, item := range items {
 		vnet := stringField(item, "vnet")
 		if !auditkey.ValidID(vnet) {
@@ -603,6 +629,7 @@ func readSDNVNets(ctx context.Context, p *observePass) ([]kindReading, readOutco
 			p.markChildren(subnets.unread, "sdn_subnet", vnet)
 			continue
 		}
+		subnets.parents[vnet] = true
 		for _, e := range entries {
 			id := auditkey.SDNSubnet(vnet, stringField(e, "subnet"))
 			if stringField(e, "subnet") == "" || !auditkey.ValidID(id) {
@@ -683,14 +710,15 @@ func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, rea
 		return nil, out
 	}
 	sets := kindReading{kind: "firewall_ipset"}
-	entries := kindReading{kind: "firewall_ipset_entry", unread: map[string]bool{}, forget: map[string]bool{}}
+	entries := kindReading{kind: "firewall_ipset_entry", unread: map[string]bool{}, forget: map[string]bool{},
+		parentOf: beforeSep("/", false), parents: map[string]bool{}, parentKind: "firewall_ipset"}
 	listed := map[string]bool{}
 	for _, item := range items {
 		listed[auditkey.FirewallName(stringField(item, "name"))] = true
+		entries.parents[auditkey.FirewallName(stringField(item, "name"))] = false
 	}
 	ipsetID := func(it map[string]json.RawMessage) string { return auditkey.FirewallName(stringField(it, "name")) }
-	items, sets.listed = p.capListing("firewall_ipset", items, ipsetID)
-	entries.listed = sets.listed
+	items, sets.idsOnly, sets.listed = p.capListing("firewall_ipset", items, ipsetID)
 	for _, item := range items {
 		name := stringField(item, "name")
 		id := auditkey.FirewallName(name)
@@ -710,6 +738,7 @@ func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, rea
 			p.markChildren(entries.unread, "firewall_ipset_entry", id)
 			continue
 		}
+		entries.parents[id] = true
 		for _, e := range list {
 			// Keyed as the set lists it (history-cluster's IPSetListed, how
 			// a delete names it): a hand-edited config keeps an entry's host
@@ -738,14 +767,16 @@ func readFirewallGroups(ctx context.Context, p *observePass) ([]kindReading, rea
 		return nil, out
 	}
 	groups := kindReading{kind: "firewall_security_group"}
-	rules := kindReading{kind: "firewall_security_group_rule", unread: map[string]bool{}, forget: map[string]bool{}}
+	// Each group's rules are one object, its own parent's.
+	rules := kindReading{kind: "firewall_security_group_rule", unread: map[string]bool{}, forget: map[string]bool{},
+		parentOf: func(id string) string { return id }, parents: map[string]bool{}, parentKind: "firewall_security_group"}
 	listed := map[string]bool{}
 	for _, item := range items {
 		listed[auditkey.FirewallName(stringField(item, "group"))] = true
+		rules.parents[auditkey.FirewallName(stringField(item, "group"))] = false
 	}
 	groupID := func(it map[string]json.RawMessage) string { return auditkey.FirewallName(stringField(it, "group")) }
-	items, groups.listed = p.capListing("firewall_security_group", items, groupID)
-	rules.listed = groups.listed
+	items, groups.idsOnly, groups.listed = p.capListing("firewall_security_group", items, groupID)
 	for _, item := range items {
 		name := stringField(item, "group")
 		id := auditkey.FirewallName(name)
@@ -765,6 +796,7 @@ func readFirewallGroups(ctx context.Context, p *observePass) ([]kindReading, rea
 			rules.unread[id] = true
 			continue
 		}
+		rules.parents[id] = true
 		rules.objects = append(rules.objects, observedObject{
 			id: id, resourceType: "firewall_security_group_rule", resourceID: id,
 			lists: map[string][]string{"rules": canonicalRules(list)},
@@ -786,7 +818,7 @@ func readAccessUsers(ctx context.Context, p *observePass) ([]kindReading, readOu
 		return nil, out
 	}
 	users := kindReading{kind: "pve_user"}
-	tokens := kindReading{kind: "pve_token"}
+	tokens := kindReading{kind: "pve_token", parentOf: beforeSep("!", true), parents: map[string]bool{}, parentKind: "pve_user"}
 	for _, item := range items {
 		userid := stringField(item, "userid")
 		if !auditkey.ValidID(userid) {
@@ -796,6 +828,7 @@ func readAccessUsers(ctx context.Context, p *observePass) ([]kindReading, readOu
 		users.objects = append(users.objects, observedObject{
 			id: userid, resourceType: "pve_user", resourceID: userid, fields: fields, members: members,
 		})
+		tokens.parents[userid] = true
 		var list []map[string]json.RawMessage
 		_ = json.Unmarshal(item["tokens"], &list)
 		for _, tok := range list {

@@ -868,46 +868,122 @@ func TestObserverOutcomes(t *testing.T) {
 		e.mq.observed.changes = nil
 		e.mq.observed.mu.Unlock()
 	})
-	t.Run("past the cap what is held is compared, gone included, and what appeared is filed back under it", func(t *testing.T) {
+	storages := func(ids ...string) string {
+		items := make([]string, 0, len(ids))
+		for _, id := range ids {
+			items = append(items, `{"storage":"`+id+`","type":"dir","nodes":"pve-02"}`)
+		}
+		return "[" + strings.Join(items, ",") + "]"
+	}
+	t.Run("past the cap what is held is compared, what appears is filed by its id, and what goes, gone", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
 		e.obs.maxObjects = 3
-		storages := func(first, n int) string {
-			items := make([]string, 0, n)
-			for i := first; i < first+n; i++ {
-				items = append(items, fmt.Sprintf(`{"storage":"s%05d","type":"dir","nodes":"pve-02"}`, i))
-			}
-			return "[" + strings.Join(items, ",") + "]"
-		}
 		cluster := "changed cluster/" + e.cluster.ID.String() + " [storage]"
-		e.client.set(pathStorage, `[{"storage":"s00000","type":"dir","nodes":"pve-01"}]`)
+		e.client.set(pathStorage, `[{"storage":"s0","type":"dir","nodes":"pve-01"}]`)
 		before := time.Now()
 		e.expect("baseline")
-		e.client.set(pathStorage, storages(0, 4))
+		e.client.set(pathStorage, storages("s0", "s1", "s2", "s3"))
 		overStart := time.Now()
-		e.expect("past the cap", cluster, "changed storage/s00000 [nodes]")
+		rows := e.passRows()
+		if len(rows) != 5 {
+			t.Fatalf("past the cap: filed %+v, want s0's edit, the three that appeared, a notice", rows)
+		}
+		for _, r := range rows {
+			if r.Change == "added" && (r.Detail["while_over_cap"] != true || len(r.Fields) != 0 ||
+				r.LastSeenAt.Before(before) || !r.LastSeenAt.Before(overStart)) {
+				t.Errorf("appeared past the cap: %+v, want while_over_cap by its id, its window from the last whole reading", r)
+			}
+		}
 		e.expect("still past it, the notice given")
 		e.restart()
 		e.expect("and after a restart")
-		e.client.set(pathStorage, storages(1, 4))
-		e.expect("a held one deleted past the cap", "removed storage/s00000 []")
-		e.client.set(pathStorage, storages(1, 2))
+		e.client.set(pathStorage, storages("s1", "s2", "s3", "s4"))
+		e.expect("a held one deleted, one made", "added storage/s4 []", "removed storage/s0 []")
+		e.client.set(pathStorage, storages("s1", "s2"))
+		e.expect("back under: what was filed by its id and went is gone", cluster, "removed storage/s3 []", "removed storage/s4 []")
+		e.client.set(pathStorage, storages("s1", "s2", "s3"))
+		e.expect("then an addition, no longer while over", "added storage/s3 []")
+	})
+	t.Run("past the cap a pass files a few by their ids, the ones it has not seen waiting first", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects, e.obs.addedCap = 2, 2
+		e.client.set(pathStorage, storages("s1"))
+		e.expect("baseline")
+		e.client.set(pathStorage, storages("s1", "s2", "s3", "s4", "s5", "s6"))
+		e.expect("a flood", "added storage/s2 []", "added storage/s3 []",
+			"changed cluster/"+e.cluster.ID.String()+" [storage]", "changed cluster/"+e.cluster.ID.String()+" [storage]")
+		e.client.set(pathStorage, storages("s1", "s2", "s3", "s4", "s5", "s6", "s9"))
 		rows := e.passRows()
-		if len(rows) != 3 {
-			t.Fatalf("back under: filed %+v, want the two that appeared and a notice", rows)
-		}
+		var added []string
 		for _, r := range rows {
 			switch {
 			case r.Change == "added":
-				if r.Detail["while_over_cap"] != true || r.LastSeenAt.Before(before) || !r.LastSeenAt.Before(overStart) {
-					t.Errorf("appeared while over: %+v, want while_over_cap, its window from the last whole reading", r)
-				}
-			case r.Detail["notice"] != "back_under_cap" || r.Detail["appeared"] != float64(2) || r.Detail["baseline"] != false:
-				t.Errorf("back under: %+v, want back_under_cap, 2 appeared, no baseline", r)
+				added = append(added, r.ResourceID)
+			case r.Detail["notice"] != "too_many_added" || r.Detail["held_back"] != float64(2):
+				t.Errorf("a pass that held two back gave %+v, want too_many_added, held_back 2", r)
 			}
 		}
-		e.client.set(pathStorage, storages(1, 3))
-		e.expect("then an addition, no longer while over", "added storage/s00003 []")
+		if !slices.Equal(added, []string{"s9", "s4"}) {
+			t.Errorf("filed %v, want the new s9 before s4, which waited", added)
+		}
+	})
+	t.Run("past the cap a parent's objects are counted apart, and its own History says which", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 2
+		entries := func(cidrs ...string) string {
+			items := make([]string, 0, len(cidrs))
+			for _, c := range cidrs {
+				items = append(items, `{"cidr":"`+c+`"}`)
+			}
+			return "[" + strings.Join(items, ",") + "]"
+		}
+		e.client.set("/cluster/firewall/ipset", `[{"name":"allow"},{"name":"block"}]`)
+		e.client.set("/cluster/firewall/ipset/allow", entries("192.0.2.1"))
+		e.client.set("/cluster/firewall/ipset/block", entries("192.0.2.10", "192.0.2.11"))
+		e.expect("baseline")
+		e.client.set("/cluster/firewall/ipset/allow", entries("192.0.2.1", "192.0.2.2"))
+		e.client.set("/cluster/firewall/ipset/block", entries("192.0.2.10", "192.0.2.11", "192.0.2.12"))
+		for _, r := range e.passRows() {
+			switch {
+			case r.ResourceID == "allow/192.0.2.2":
+				if r.Change != "added" || r.Detail["while_over_cap"] != nil {
+					t.Errorf("an entry added to a set under the cap: %+v, want it filed as any addition", r)
+				}
+			case r.ResourceID == "block/192.0.2.12":
+				if r.Detail["while_over_cap"] != true {
+					t.Errorf("an entry added to the set past the cap: %+v, want it filed by its id", r)
+				}
+			case r.Detail["notice"] != "too_many_objects" || r.Detail["parent"] != "block" || r.Detail["objects"] != float64(3):
+				t.Errorf("filed %+v, want only the two entries and block's notice", r)
+			}
+		}
+	})
+	t.Run("back under the cap what appeared is filed whatever the signature did meanwhile", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.obs.maxObjects = 2
+		e.client.set(pathStorage, storages("s1"))
+		e.expect("baseline")
+		e.client.set(pathStorage, storages("s1", "s2", "s3"))
+		e.passRows()
+		e.mq.nodesByCluster[0].PveVersion = "pve-manager/9.2.21/0000bbbb"
+		e.passRows()
+		e.client.set(pathStorage, storages("s1", "s4"))
+		var appeared, notice bool
+		for _, r := range e.passRows() {
+			switch {
+			case r.ResourceID == "s4":
+				appeared = r.Change == "added" && r.Detail["while_over_cap"] == true
+			case r.Detail["notice"] == "back_under_cap":
+				notice = r.Detail["baseline"] == false && r.Detail["appeared"] == float64(1)
+			}
+		}
+		if !appeared || !notice {
+			t.Fatalf("back under after an upgrade: appeared %v, notice %v; want s4 filed while_over_cap and no baseline", appeared, notice)
+		}
 	})
 	t.Run("a node's kind past the cap files what appeared from its last whole reading", func(t *testing.T) {
 		t.Parallel()
@@ -918,14 +994,20 @@ func TestObserverOutcomes(t *testing.T) {
 		e.expect("baseline")
 		e.client.set(pathNet, "["+strings.Join([]string{iface("vmbr0"), iface("vmbr1"), iface("vmbr2")}, ",")+"]")
 		overStart := time.Now()
-		e.expect("past the cap", "changed node/pve-01 [network]")
-		e.expect("still past it")
-		e.client.set(pathNet, "["+iface("vmbr0")+","+iface("vmbr1")+"]")
-		for _, r := range e.passRows() {
-			if r.Change == "added" && !r.LastSeenAt.Before(overStart) {
-				t.Errorf("appeared on a node while over: %+v, want its window from the last whole reading", r)
+		window := func(step string) {
+			for _, r := range e.passRows() {
+				if r.Change == "added" && (r.Detail["while_over_cap"] != true || !r.LastSeenAt.Before(overStart)) {
+					t.Errorf("%s: %+v, want while_over_cap, its window from the last whole reading", step, r)
+				}
+				if r.Detail["notice"] != nil && (r.ResourceType != "node" || r.ResourceID != "pve-01") {
+					t.Errorf("%s: %+v, want the notice under the node, whose History reads it", step, r)
+				}
 			}
 		}
+		window("appeared on a node while over")
+		e.expect("still past it")
+		e.client.set(pathNet, "["+iface("vmbr0")+","+iface("vmbr3")+"]")
+		window("appeared as the node went back under")
 	})
 	t.Run("a kind never read whole before the cap takes its first whole reading as its baseline", func(t *testing.T) {
 		t.Parallel()
@@ -944,20 +1026,18 @@ func TestObserverOutcomes(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
 		e.obs.maxObjects = 2
-		three := `[{"storage":"s1","type":"dir"},{"storage":"s2","type":"dir"},{"storage":"s3","type":"dir"}]`
-		jobs := `[{"id":"j1","type":"vzdump"},{"id":"j2","type":"vzdump"},{"id":"j3","type":"vzdump"}]`
-		e.client.set(pathStorage, `[{"storage":"s1","type":"dir"}]`)
+		e.client.set(pathStorage, storages("s1"))
 		e.expect("baseline")
-		e.client.set(pathStorage, three)
-		e.expect("past the cap", "changed cluster/"+e.cluster.ID.String()+" [storage]")
+		e.client.set(pathStorage, storages("s1", "s2", "s3"))
+		e.passRows()
 		// Storage back under, its notice refused; the backup jobs' notice,
 		// written next, may not take storage's gate with it.
-		e.client.set(pathStorage, `[{"storage":"s1","type":"dir"}]`)
-		e.client.set("/cluster/backup", jobs)
+		e.client.set(pathStorage, storages("s1"))
+		e.client.set("/cluster/backup", `[{"id":"j1","type":"vzdump"},{"id":"j2","type":"vzdump"},{"id":"j3","type":"vzdump"}]`)
 		e.mq.observed.mu.Lock()
 		e.mq.observed.fail = map[string]int{observedNoticesMark: 1}
 		e.mq.observed.mu.Unlock()
-		e.expect("back under, its notice refused", "changed cluster/"+e.cluster.ID.String()+" [backup]")
+		e.passRows()
 		rows := e.passRows()
 		if len(rows) != 1 || rows[0].Detail["notice"] != "back_under_cap" || rows[0].Fields[0] != "storage" {
 			t.Fatalf("the next pass filed %+v, want storage's back_under_cap", rows)
@@ -977,9 +1057,11 @@ func TestObserverOutcomes(t *testing.T) {
 		}
 		e.client.set("/pools", "["+strings.Join(append(pools, `{"poolid":"web"}`), ",")+"]")
 		e.client.set("/pools?poolid=web", `[{"poolid":"web","comment":"x","members":[]}]`)
-		e.expect("past the cap", "changed pool/"+e.cluster.ID.String()+" [pool]", "changed pool/web [comment]")
+		e.expect("past the cap", "added pool/p00000 []", "added pool/p00001 []", "added pool/p00002 []", "added pool/p00003 []",
+			"changed pool/"+e.cluster.ID.String()+" [pool]", "changed pool/web [comment]")
+		e.expect("still past it")
 		if n := e.client.readsOf("/pools?poolid=p00000"); n != 0 {
-			t.Fatalf("read a pool it never held %d times", n)
+			t.Fatalf("read a pool it held by its id alone %d times", n)
 		}
 
 		e.mq.vmsByCluster = nil
