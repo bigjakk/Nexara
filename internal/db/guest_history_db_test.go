@@ -179,6 +179,7 @@ func TestGuestHistory(t *testing.T) {
 	// lie above top: none may be listed, and an arm without its until bound
 	// would count them toward its cap and stop at them.
 	top := now.Add(time.Hour)
+	walkTypes := []string{"vm", "container", "node", "network", "pool"}
 	walk := func(p gen.ListHistoryParams, rowCap int32, entry func(gen.ListHistoryRow) string) []string {
 		cur.Helper()
 		for i, at := range []time.Time{top.Add(time.Minute), top.Add(2 * time.Minute)} {
@@ -229,7 +230,7 @@ func TestGuestHistory(t *testing.T) {
 			}
 		}()
 		p.RowCap, p.RowLimit, p.Until = rowCap, 200, pgtype.Timestamptz{Time: top, Valid: true}
-		p.ObservedTypes = []string{"vm", "container", "node", "network", "pool"}
+		p.ObservedTypes = walkTypes
 		var got []string
 		seen := map[string]bool{}
 		for range 50 {
@@ -1782,6 +1783,7 @@ func TestGuestHistory(t *testing.T) {
 		seen(historyThirdID, "pool", "pool1", "", nil, []string{"comment"}, minsAgo(2.1), false)
 		seen(historyClusterID, "pool", "pool2", "", nil, []string{"comment"}, minsAgo(2.1), false)
 		seen(uuid.Nil, "pbs_server", historyPBSID, "", nil, []string{"comment"}, minsAgo(2), false)
+		seen(historyOtherID, "pbs_server", historyPBSID, "", nil, []string{"name"}, minsAgo(2), false) // never a global kind's
 		observedOf := func(p gen.ListHistoryParams, types ...string) []string {
 			t.Helper()
 			p.RowLimit, p.ObservedTypes = 200, types
@@ -1831,7 +1833,8 @@ func TestGuestHistory(t *testing.T) {
 		pools := handlers.HistoryKind{Name: "pools", Categories: []string{"other"}, Default: "other",
 			ObjectTypes: []string{"pool", "pbs_server"}, Select: handlers.SelectTypes("pool")}
 		wp, err := pools.ListParams(historyThirdID, handlers.HistorySelection{Objects: []handlers.HistoryObject{
-			{ResourceType: "pool", WholeType: true}, {ResourceType: "pbs_server", Value: historyPBSID}}})
+			{ResourceType: "pool", WholeType: true}, {ResourceType: "pbs_server", Value: historyPBSID},
+			{ResourceType: "pbs_server", WholeType: true}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1859,6 +1862,13 @@ func TestGuestHistory(t *testing.T) {
 			if got := observedOf(tt.p, tt.types...); !slices.Equal(got, tt.want) {
 				t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
 			}
+		}
+		// Capped at 2 and paged on below each stop, a whole type's read is the
+		// whole read.
+		if whole, _ := list(withFilter(wp, func(p *gen.ListHistoryParams) {
+			p.RowLimit, p.ObservedTypes = 200, walkTypes
+		})); len(whole) == 0 || !slices.Equal(walk(wp, 2, listed), whole) {
+			t.Errorf("a whole type's History capped at 2, page on page, is not its whole History %v", whole)
 		}
 
 		// What an audit row explained is read by its id, of the granted types,
