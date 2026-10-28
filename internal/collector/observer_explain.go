@@ -281,17 +281,6 @@ var observedChangeRules = slices.Concat(
 		{Kind: "node", Change: "changed", AuditType: "node", MatchKey: "id",
 			ActionRe: `^set_options$`, FieldRe: `^(description|wakeonlan|startall-onboot-delay|ballooning-target)$`},
 	},
-	// A node's firewall rules, filed as firewall_rule / node/<node>, are
-	// edited through Nexara under the node (node_firewall.go), so its rows are
-	// found by the change's node.
-	[]explainRule{
-		{Kind: "firewall_rule", Change: "changed", AuditType: "node", MatchKey: "node",
-			ActionRe: `^create_firewall_rule$`, FieldRe: `^rules$`, Counts: "add1"},
-		{Kind: "firewall_rule", Change: "changed", AuditType: "node", MatchKey: "node",
-			ActionRe: `^update_firewall_rule$`, FieldRe: `^rules$`, Counts: "edit1"},
-		{Kind: "firewall_rule", Change: "changed", AuditType: "node", MatchKey: "node",
-			ActionRe: `^delete_firewall_rule$`, FieldRe: `^rules$`, Counts: "del1"},
-	},
 
 	// HA: a start or stop of an HA guest sets its resource's requested state,
 	// and a guest destroyed with purge leaves the HA configuration — its
@@ -335,7 +324,9 @@ var observedChangeRules = slices.Concat(
 	sdnCRUD("sdn_dns"),
 
 	// The cluster firewall. Its options and rule sets always exist, so they
-	// only change; a template applied adds to the rules. An alias renamed
+	// only change; a template applied adds to the rules. A node's rule set is
+	// the same kind under its scope, node/<node>, and Nexara files its edits
+	// there too (node_firewall.go), so one key serves both. An alias renamed
 	// through Nexara is filed under its old name with the new one in
 	// details.rename: the old name's removal and the new one's addition are
 	// both that update, and an update that renamed nothing removes nothing.
