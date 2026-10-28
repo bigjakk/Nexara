@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -463,11 +464,12 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 	since := pgtype.Timestamptz{Time: time.Unix(1_000_000, 0), Valid: true}
 	until := pgtype.Timestamptz{Time: time.Unix(2_000_000, 0), Valid: true}
 	if _, err := db.New(HistoryDBTX(probe)).ListHistory(context.Background(), db.ListHistoryParams{
-		RowCap: 11, RowOffset: 22, RowLimit: 33, Since: since, Until: until}); err != nil {
+		RowCap: 11, RowOffset: 22, RowLimit: 33, Since: since, Until: until, ObservedTypes: []string{"probe"}}); err != nil {
 		t.Fatal(err)
 	}
 	at := func(v any) int { return slices.Index(probe.calls[0].args, v) }
 	atCap, atOffset, atLimit, atSince, atUntil := at(int32(11)), at(int32(22)), at(int32(33)), at(since), at(until)
+	atObserved := slices.IndexFunc(probe.calls[0].args, func(a any) bool { return reflect.DeepEqual(a, []string{"probe"}) })
 	// Inside the default week, to the microsecond.
 	end := time.Now().Add(-time.Hour).Truncate(time.Second).Add(6 * time.Microsecond).UTC()
 	cluster := uuid.New()
@@ -487,18 +489,21 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 		cap, offset, limit int32
 		window             bool      // the last week; else no bound
 		until              time.Time // the window's top; zero for none
+		observed           []string  // the observed types granted; nil to skip
 	}{
-		{"unfiltered", "", clusterRoute, every(), 2_000, 0, 50, true, time.Time{}},
-		{"a category", "?category=sync", clusterRoute, every(), 20_000, 0, 50, true, time.Time{}},
-		{"categories left out", "?exclude_category=other", clusterRoute, every(), 20_000, 0, 50, true, time.Time{}},
-		{"a source", "?source=nexara", clusterRoute, every(), 20_000, 0, 50, true, time.Time{}},
+		{"unfiltered", "", clusterRoute, every(), 2_000, 0, 50, true, time.Time{}, nil},
+		{"a category", "?category=sync", clusterRoute, every(), 20_000, 0, 50, true, time.Time{}, nil},
+		{"categories left out", "?exclude_category=other", clusterRoute, every(), 20_000, 0, 50, true, time.Time{}, nil},
+		{"a source", "?source=nexara", clusterRoute, every(), 20_000, 0, 50, true, time.Time{}, nil},
+		// The cluster's grant of view:vm alone: of every type it reads, a VM's.
 		{"a caller without view:container", "", clusterRoute,
-			clusterGrantEngine{action: "view", resource: "vm", cluster: cluster}, 2_000, 0, 50, true, time.Time{}},
-		{"a page past the cap", "?offset=2050", clusterRoute, every(), 2_000, 2_050, 50, true, time.Time{}},
-		{"all time", "?all_time=true", clusterRoute, every(), 2_000, 0, 50, false, time.Time{}},
-		{"the next stretch", "?end_time=" + end.Format(time.RFC3339Nano), clusterRoute, every(), 2_000, 0, 50, true, end},
-		{"a node, all time", "?all_time=true", nodeRoute, every(), 20_000, 0, 50, false, time.Time{}},
-		{"a folder", "", folderRoute, every(), 20_000, 0, 50, true, time.Time{}},
+			clusterGrantEngine{action: "view", resource: "vm", cluster: cluster}, 2_000, 0, 50, true, time.Time{}, []string{"vm"}},
+		{"a page past the cap", "?offset=2050", clusterRoute, every(), 2_000, 2_050, 50, true, time.Time{}, nil},
+		{"all time", "?all_time=true", clusterRoute, every(), 2_000, 0, 50, false, time.Time{}, nil},
+		{"the next stretch", "?end_time=" + end.Format(time.RFC3339Nano), clusterRoute, every(), 2_000, 0, 50, true, end, nil},
+		{"a node, all time", "?all_time=true", nodeRoute, every(), 20_000, 0, 50, false, time.Time{},
+			[]string{"node", "network", "firewall_rule", "acme_config"}},
+		{"a folder", "", folderRoute, every(), 20_000, 0, 50, true, time.Time{}, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -549,6 +554,9 @@ func TestHistoryListBoundsACappedRead(t *testing.T) {
 			}
 			if top, _ := args[atUntil].(pgtype.Timestamptz); top.Valid != !tt.until.IsZero() || !top.Time.Equal(tt.until) {
 				t.Errorf("until %v, want %v", top, tt.until)
+			}
+			if got := args[atObserved]; tt.observed != nil && !reflect.DeepEqual(got, tt.observed) {
+				t.Errorf("observed types %v, want %v", got, tt.observed)
 			}
 		})
 	}
@@ -684,5 +692,29 @@ func TestHistoryListPassesTheGuestToggle(t *testing.T) {
 					dbtx.calls[0].args[at], tt.want)
 			}
 		})
+	}
+}
+
+// A request reads a declared type's observed changes only under the view it
+// is declared with, the type's own by default, and never a type with neither:
+// a node's firewall rules under view:network, not view:node.
+func TestPermittedObservedTypes(t *testing.T) {
+	t.Parallel()
+	node := HistoryKind{ObservedTypes: []HistoryObservedType{{Type: "node"}, {Type: "unmapped"},
+		{Type: "firewall_rule", View: "network"}, {Type: "acme_config"}}}
+	for _, tt := range []struct {
+		granted []string
+		want    []string
+	}{
+		{[]string{"node"}, []string{"node"}},
+		{[]string{"node", "network", "certificate", "unmapped"}, []string{"node", "firewall_rule", "acme_config"}},
+		{[]string{"firewall_rule"}, []string{}},
+	} {
+		got, err := permittedObservedTypes(node, func(_, resource string) (bool, error) {
+			return slices.Contains(tt.granted, resource), nil
+		})
+		if err != nil || !slices.Equal(got, tt.want) {
+			t.Errorf("granted %v: permitted observed types = %v (%v), want %v", tt.granted, got, err, tt.want)
+		}
 	}
 }

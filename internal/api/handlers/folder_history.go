@@ -43,6 +43,7 @@ func FolderHistory() HistoryKind {
 		}, guestHistoryRules...),
 		Select:         selectFolder,
 		ObjectTypes:    []string{"vm_folder", "vm_folder_membership"},
+		ObservedTypes:  guest.ObservedTypes,
 		DefaultWindow:  objectHistoryDefaultWindow,
 		RowCap:         objectHistoryRowCap,
 		FilteredRowCap: objectHistoryRowCap,

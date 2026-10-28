@@ -16,18 +16,23 @@
 --   node_status_changes  a node's status changes, by trigger (000128).
 --   guest_node_changes   a guest seen on another node than before, by
 --                        trigger (000129): a node's arrivals and departures.
+--   cluster_object_      a change Nexara saw in Proxmox — the replication
+--   changes (000119)     trigger, the Ceph pass, the observer — listed once
+--                        classified as explained by nothing on record, and
+--                        only of the types the caller may view
+--                        (observed_types). Entry kind observed. A row naming
+--                        no cluster (000125, a PBS server's) is a global
+--                        kind's alone.
 --
 -- How to add a source keyed as audit_log is — cluster_id, resource_type,
--- resource_id, and vmid for a guest — such as a table of the changes Nexara saw
--- in Proxmox: one arm in entries per family, under its own entry kind, and its
--- row joined in the final SELECT for what the page shows of it (fields is that
--- column's place). The guests' arm reads cluster_id = cluster_id AND vmid =
--- ANY(vmids) with the floor, since and guest_workers (no UPID:
--- history_worker_ok(NULL, ...)), subject the vmid; the objects' arm reads
--- (global OR cluster_id = cluster_id) AND (resource_type, resource_id) IN the
--- objects with no details key, with since, minus the rows the guests' arm keeps,
--- subject as the audit object arm's. TestGuestHistory's other-cluster block
--- then gets a row of it for each arm.
+-- resource_id, and vmid for a guest — as cluster_object_changes is: one arm in
+-- entries per family, under its own entry kind, each capped at row_cap and
+-- bounded by since and until, and its row joined in the final SELECT for what
+-- the page shows of it. The guests' arm reads cluster_id = cluster_id AND vmid
+-- = ANY(vmids) with the floor, since and guest_workers (no UPID:
+-- history_worker_ok(NULL, ...)), subject the vmid; the objects' arm reads each
+-- object by its own index, minus the rows the guests' arm keeps.
+-- TestGuestHistory's other-cluster block then gets a row of it for each arm.
 --
 -- A kind names its rows through two families of selector, either or both:
 --
@@ -780,6 +785,98 @@ WITH guests AS MATERIALIZED (
                        AND v.type = ANY(sqlc.arg('status_guest_types')::text[])))
      ORDER BY b.started_at DESC
      LIMIT CASE WHEN sqlc.arg('whole_cluster')::bool THEN NULLIF(sqlc.arg('row_cap')::int, 0) ELSE 0 END)
+    -- What Nexara saw change in Proxmox that nothing on record explains
+    -- (cluster_object_changes, explained = false), of the types the caller may
+    -- view (observed_types, permittedObservedTypes): the guests' by vmid, from
+    -- the floor; the objects' by id, by type (a whole type) or by the node a
+    -- node's part names; the whole cluster's. A row naming no cluster is a
+    -- global kind's alone (000125): every other read names its cluster.
+    UNION ALL
+    (SELECT ('observed:' || o.id::text)::text, 'observed', o.id, o.cluster_id, o.observed_at, 'detected', o.change,
+            o.resource_type, o.resource_id, o.vmid, o.vmid, NULL::uuid, '', o.node, '', '', '', o.last_seen_at, 0,
+            'guest_observed'::text
+     FROM cluster_object_changes o
+     WHERE o.cluster_id = sqlc.arg('cluster_id')::uuid
+       AND (sqlc.narg('source')::text IS NULL OR sqlc.narg('source')::text = 'detected')
+       AND o.vmid IS NOT NULL
+       AND o.vmid = ANY(sqlc.arg('vmids')::int[])
+       AND o.resource_type = ANY(sqlc.arg('observed_types')::text[])
+       AND o.explained = false
+       AND history_worker_ok(NULL, sqlc.arg('guest_workers')::text[])
+       AND o.observed_at >= GREATEST(COALESCE(sqlc.narg('cutoff_floor')::timestamptz, '-infinity'::timestamptz),
+                            COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz))
+       AND o.observed_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+     ORDER BY o.observed_at DESC
+     LIMIT NULLIF(sqlc.arg('row_cap')::int, 0))
+    UNION ALL
+    (SELECT ('observed:' || x.id::text)::text, 'observed', x.id, x.cluster_id, x.observed_at, 'detected', x.change,
+            x.resource_type, x.resource_id, 0, NULL::int, NULL::uuid, '', x.node, '', '', '', x.last_seen_at, 0,
+            'objects_observed'::text
+     FROM (SELECT DISTINCT ON (m.id) m.*
+           FROM objects ob
+           CROSS JOIN LATERAL (
+               (SELECT o.id, o.cluster_id, o.observed_at, o.change, o.resource_type, o.resource_id, o.node,
+                       o.last_seen_at
+                FROM cluster_object_changes o
+                WHERE ob.detail_key = '' AND NOT ob.whole
+                  AND o.resource_type = ob.resource_type AND o.resource_id = ob.value
+                  AND (sqlc.arg('global')::bool AND o.cluster_id IS NULL
+                       OR NOT sqlc.arg('global')::bool AND o.cluster_id = sqlc.arg('cluster_id')::uuid)
+                  AND o.vmid IS NULL
+                  AND o.explained = false
+                  AND o.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+                  AND o.observed_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+                ORDER BY o.observed_at DESC
+                LIMIT NULLIF(sqlc.arg('row_cap')::int, 0))
+               UNION ALL
+               (SELECT o.id, o.cluster_id, o.observed_at, o.change, o.resource_type, o.resource_id, o.node,
+                       o.last_seen_at
+                FROM cluster_object_changes o
+                WHERE ob.whole
+                  AND o.resource_type = ob.resource_type
+                  AND (sqlc.arg('global')::bool AND o.cluster_id IS NULL
+                       OR NOT sqlc.arg('global')::bool AND o.cluster_id = sqlc.arg('cluster_id')::uuid)
+                  AND o.vmid IS NULL
+                  AND o.explained = false
+                  AND o.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+                  AND o.observed_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+                ORDER BY o.observed_at DESC
+                LIMIT NULLIF(sqlc.arg('row_cap')::int, 0))
+               UNION ALL
+               -- A node's part by the node it names: audit rows carry it in
+               -- details.node, observed rows in their node column.
+               (SELECT o.id, o.cluster_id, o.observed_at, o.change, o.resource_type, o.resource_id, o.node,
+                       o.last_seen_at
+                FROM cluster_object_changes o
+                WHERE ob.detail_key = 'node' AND NOT ob.in_list AND ob.resource_id = ''
+                  AND o.resource_type = ob.resource_type AND o.node = ob.value
+                  AND NOT sqlc.arg('global')::bool AND o.cluster_id = sqlc.arg('cluster_id')::uuid
+                  AND o.vmid IS NULL
+                  AND o.explained = false
+                  AND o.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+                  AND o.observed_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+                ORDER BY o.observed_at DESC
+                LIMIT NULLIF(sqlc.arg('row_cap')::int, 0))
+           ) m
+           WHERE ob.resource_type = ANY(sqlc.arg('observed_types')::text[])
+             AND (sqlc.narg('source')::text IS NULL OR sqlc.narg('source')::text = 'detected')
+           ORDER BY m.id) x
+     ORDER BY x.observed_at DESC
+     LIMIT NULLIF(sqlc.arg('row_cap')::int, 0))
+    UNION ALL
+    (SELECT ('observed:' || o.id::text)::text, 'observed', o.id, o.cluster_id, o.observed_at, 'detected', o.change,
+            o.resource_type, o.resource_id, COALESCE(o.vmid, 0), NULL::int, NULL::uuid, '', o.node, '', '', '',
+            o.last_seen_at, 0, 'cluster_observed'::text
+     FROM cluster_object_changes o
+     WHERE sqlc.arg('whole_cluster')::bool
+       AND (sqlc.narg('source')::text IS NULL OR sqlc.narg('source')::text = 'detected')
+       AND o.cluster_id = sqlc.arg('cluster_id')::uuid
+       AND o.resource_type = ANY(sqlc.arg('observed_types')::text[])
+       AND o.explained = false
+       AND o.observed_at >= COALESCE(sqlc.narg('since')::timestamptz, '-infinity'::timestamptz)
+       AND o.observed_at < COALESCE(sqlc.narg('until')::timestamptz, 'infinity'::timestamptz)
+     ORDER BY o.observed_at DESC
+     LIMIT CASE WHEN sqlc.arg('whole_cluster')::bool THEN NULLIF(sqlc.arg('row_cap')::int, 0) ELSE 0 END)
     -- A node's: the tasks it ran with no audit row, its status changes, and
     -- the guests that arrived on it or left it.
     UNION ALL
@@ -985,8 +1082,8 @@ SELECT p.entry_id, p.kind, p.cluster_id, p.occurred_at, p.source, p.action, p.re
        COALESCE(p.subject, 0)::int AS subject_vmid,
        p.user_id, p.upid, p.node, p.recorded_status, p.from_status, p.to_status, p.last_seen_at,
        p.run_count::int AS run_count, p.category, p.total,
-       COALESCE(ad.details, '{}'::jsonb)                      AS details,
-       '{}'::text[]                                           AS fields,
+       COALESCE(ad.details, oc.detail, '{}'::jsonb)           AS details,
+       COALESCE(oc.fields, '{}'::text[])                      AS fields,
        COALESCE(u.email, '')::text                            AS user_email,
        COALESCE(u.display_name, '')::text                     AS user_display_name,
        COALESCE(gb.status, ar.status, th.status, '')::text               AS task_status,
@@ -1003,6 +1100,8 @@ SELECT p.entry_id, p.kind, p.cluster_id, p.occurred_at, p.source, p.action, p.re
 FROM page p
 LEFT JOIN audit_log ad
        ON p.kind IN ('audit', 'run') AND ad.id = p.ref_id
+LEFT JOIN cluster_object_changes oc
+       ON p.kind = 'observed' AND oc.id = p.ref_id
 LEFT JOIN task_history th
        ON p.upid <> '' AND th.upid = p.upid AND th.cluster_id = p.cluster_id
 LEFT JOIN task_history_archive ar

@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -179,6 +180,43 @@ func (t HistoryObservedType) observedView() (string, bool) {
 	}
 	view, mapped := observedTypePermission[t.Type]
 	return view, mapped
+}
+
+// permittedObservedTypes are the kind's ObservedTypes whose view the caller
+// holds, each under the permission it is declared with — its own, else the
+// type's in the map — in the request's scope (can): the observed changes a
+// request reads. A type with neither is not among them, whatever the kind
+// declares.
+func permittedObservedTypes(k HistoryKind, can func(action, resource string) (bool, error)) ([]string, error) {
+	permitted := []string{}
+	for _, t := range k.ObservedTypes {
+		view, viewed := t.observedView()
+		if !viewed || slices.Contains(permitted, t.Type) {
+			continue
+		}
+		allowed, err := can("view", view)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			permitted = append(permitted, t.Type)
+		}
+	}
+	return permitted, nil
+}
+
+// clusterObservedTypes is every type an observed row of a cluster may be
+// filed under, each under its own view: a whole cluster's History shows them
+// all, as its audit arm reads every row filed under the cluster. Not a global
+// kind's type, whose rows name no cluster.
+func clusterObservedTypes() []HistoryObservedType {
+	types := make([]HistoryObservedType, 0, len(observedTypePermission))
+	for _, t := range slices.Sorted(maps.Keys(observedTypePermission)) {
+		if !slices.Contains(globalHistoryResourceTypes, t) {
+			types = append(types, HistoryObservedType{Type: t})
+		}
+	}
+	return types
 }
 
 // observedTypePermission is the view permission of each resource type whose
@@ -417,7 +455,12 @@ func (k HistoryKind) Validate() error {
 		}
 	}
 	for _, t := range k.ObservedTypes {
-		if _, viewed := t.observedView(); !viewed || !slices.Contains(k.ObjectTypes, t.Type) {
+		// A guest's changes are read by its VMID, a whole cluster's by type:
+		// neither is an object the kind selects.
+		guestType := !k.Global && (t.Type == "vm" || t.Type == "container")
+		if _, viewed := t.observedView(); !viewed ||
+			!k.WholeCluster && !guestType && !slices.Contains(k.ObjectTypes, t.Type) ||
+			k.Global && !slices.Contains(globalHistoryResourceTypes, t.Type) {
 			return fmt.Errorf("history kind %q shows the observed changes of %q, which is not one of its ObjectTypes "+
 				"or has no view permission, its own or in observedTypePermission", k.Name, t.Type)
 		}
@@ -683,11 +726,13 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		ObjectValues:        make([]string, 0, len(sel.Objects)),
 		ObjectInList:        make([]bool, 0, len(sel.Objects)),
 		ObjectWhole:         make([]bool, 0, len(sel.Objects)),
-		ExcludeCategories:   []string{},
-		WholeCluster:        k.WholeCluster,
-		CollapseTypes:       make([]string, 0, len(k.Collapse)),
-		CollapseActions:     make([]string, 0, len(k.Collapse)),
-		CollapseGaps:        make([]int32, 0, len(k.Collapse)),
+		// The request's to grant (permittedObservedTypes): none until then.
+		ObservedTypes:     []string{},
+		ExcludeCategories: []string{},
+		WholeCluster:      k.WholeCluster,
+		CollapseTypes:     make([]string, 0, len(k.Collapse)),
+		CollapseActions:   make([]string, 0, len(k.Collapse)),
+		CollapseGaps:      make([]int32, 0, len(k.Collapse)),
 	}
 	if k.WholeCluster && len(sel.Guests)+len(sel.GuestWorkers)+len(sel.Objects) > 0 || (k.WholeCluster || k.Global) && sel.Node != "" {
 		return db.ListHistoryParams{}, fmt.Errorf("history kind %q reads its whole cluster, or every cluster, and "+
@@ -893,6 +938,9 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	}
 	params.IncludeTasks = includeTasks
 	params.StatusGuestTypes = statusTypes
+	if params.ObservedTypes, err = permittedObservedTypes(r.kind, can); err != nil {
+		return err
+	}
 	params.RowLimit = safeconv.Int32(int(p.Int("limit")))
 	params.RowOffset = safeconv.Int32(int(p.Int("offset")))
 	params.Since, params.Until = since, until

@@ -19,6 +19,9 @@ func ClusterHistory() HistoryKind {
 		Rules:        clusterHistoryRules,
 		Select:       selectCluster,
 		WholeCluster: true,
+		// Every change seen in Proxmox filed under the cluster, each type
+		// under its own view, as every audit row filed under it is read.
+		ObservedTypes: clusterObservedTypes(),
 		// An unreachable cluster files a sync failure every pass, five minutes
 		// apart; a quarter of an hour without one ends the run.
 		Collapse: []HistoryCollapse{

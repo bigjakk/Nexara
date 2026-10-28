@@ -23,6 +23,14 @@ func NodeHistory() HistoryKind {
 		Select:  selectNode,
 		ObjectTypes: []string{"node", "network", "firewall_rule", "apt_repository", "ceph_osd", "storage", "backup",
 			"auth", "rolling_update", "usb_mapping", "pci_mapping", "certificate", "acme_config"},
+		// What the observer files under the node (internal/collector
+		// observer_kinds.go, noticeTarget): its options, DNS and time and the
+		// notices of those and of its interfaces at node / <node>, its
+		// interfaces by the node they name, its firewall rule set at
+		// firewall_rule / node/<node> — read under view:network, as its
+		// firewall page is — and its ACME settings at acme_config / <node>.
+		ObservedTypes: []HistoryObservedType{{Type: "node"}, {Type: "network"},
+			{Type: "firewall_rule", View: "network"}, {Type: "acme_config"}},
 		// A task that ran on the node is the node's whoever held the VMID it
 		// names then: no guest's cutoff holds it.
 		ObjectsIgnoreGuestCutoff: true,
@@ -64,6 +72,9 @@ var nodeHistoryRules = []HistoryRule{
 	{Category: "certificates", Field: HistoryFieldResourceType, Equals: []string{"certificate", "acme_config"}},
 	{Category: "certificates", Field: HistoryFieldWorker, Like: []string{"acme%"}},
 	{Category: "options", Field: HistoryFieldAction, Equals: []string{"set_options", "set_dns", "set_timezone"}},
+	// An edit seen in Proxmox the rules above did not place: the node's
+	// options, DNS and time.
+	{Category: "options", Field: HistoryFieldEntry, Equals: []string{"observed"}},
 	{Category: "options", Field: HistoryFieldResourceType, Equals: []string{"usb_mapping", "pci_mapping"}},
 	{Category: "console", Field: HistoryFieldResourceType, Equals: []string{"auth"}},
 	{Category: "guests", Field: HistoryFieldWorker, Like: []string{"qm%", "vz%", "ha%"}},

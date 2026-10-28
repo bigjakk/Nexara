@@ -18,8 +18,8 @@ func nodeHistoryRoute() historyRoute {
 			"arrived on it or left it. A guest's task, and any other entry naming a guest but a move, is listed " +
 			"only with include_guests. A status change through unknown that is back within two minutes is not " +
 			"listed. Each source is read newest first up to 20,000 entries, all_time too. " + historyStretchText +
-			" Requires view:audit and view:node; a guest's entries need view:vm or view:container by its " +
-			"type, and tasks with no audit entry view:task.",
+			" " + historyObservedText + " Requires view:audit and view:node; a guest's entries need view:vm or " +
+			"view:container by its type, and tasks with no audit entry view:task.",
 		Resource:   "node",
 		Parameters: clusterParams(apischema.Properties{"node_name": apischema.StdOption("node-name")}),
 	}

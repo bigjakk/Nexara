@@ -29,7 +29,9 @@ var (
 	historyNodeID    = uuid.MustParse("115a0000-0000-4000-8000-0000000000d1")
 	// A firewall template's audit rows outlive any cluster: no cluster_id.
 	historyTemplateID = "115a0000-0000-4000-8000-0000000000f1"
-	systemUserID      = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	// A PBS server's changes seen in Proxmox name no cluster either (000125).
+	historyPBSID = "115a0000-0000-4000-8000-0000000000f2"
+	systemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 )
 
 func historyUPID(seq int, workerType, id string) string {
@@ -63,6 +65,7 @@ func TestGuestHistory(t *testing.T) {
 		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{historyClusterID, historyOtherID, historyThirdID})
 		_, _ = pool.Exec(pctx, `DELETE FROM users WHERE id = $1`, historyUserID)
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE resource_type = 'firewall_template' AND resource_id = $1`, historyTemplateID)
+		_, _ = pool.Exec(pctx, `DELETE FROM cluster_object_changes WHERE resource_type = 'pbs_server' AND resource_id = $1`, historyPBSID)
 	}
 	purge()
 	defer purge()
@@ -200,16 +203,32 @@ func TestGuestHistory(t *testing.T) {
 			exec("above: a run of moves", `INSERT INTO guest_node_changes (cluster_id, vmid, guest_type, from_node,
 				to_node, last_seen_at, observed_at, run_count, nodes)
 			VALUES ($1, 330, 'qemu', 'pve-01', 'pve-02', $2, $2, 2, '{pve-01,pve-02}')`, historyThirdID, at)
+			// Changes seen in Proxmox: the guest's, the node's and an
+			// interface it names, and the third cluster's pool.
+			for _, o := range []struct {
+				cluster       uuid.UUID
+				typ, id, node string
+				vmid          any
+			}{
+				{historyClusterID, "vm", "100", "pve-01", 100}, {historyThirdID, "node", "pve-01", "pve-01", nil},
+				{historyThirdID, "network", "pve-01/vmbr7", "pve-01", nil}, {historyThirdID, "pool", "pool9", "", nil},
+			} {
+				exec("above: a change seen", `INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id,
+					vmid, change, fields, node, observed_by, last_seen_at, observed_at, explained)
+				VALUES ($1, $2, $3, $4, 'changed', '{x}', $5, 'observer', $6, $6, false)`, o.cluster, o.typ, o.id, o.vmid,
+					o.node, at)
+			}
 		}
 		defer func() {
 			for _, dated := range []string{"audit_log.created_at", "guest_status_changes.observed_at",
 				"guest_backups.started_at", "task_history_archive.started_at", "node_status_changes.observed_at",
-				"guest_node_changes.observed_at"} {
+				"guest_node_changes.observed_at", "cluster_object_changes.observed_at"} {
 				table, column, _ := strings.Cut(dated, ".")
 				exec("above: gone", "DELETE FROM "+table+" WHERE "+column+" > $1", top)
 			}
 		}()
 		p.RowCap, p.RowLimit, p.Until = rowCap, 200, pgtype.Timestamptz{Time: top, Valid: true}
+		p.ObservedTypes = []string{"vm", "container", "node", "network", "pool"}
 		var got []string
 		seen := map[string]bool{}
 		for range 50 {
@@ -1192,6 +1211,14 @@ func TestGuestHistory(t *testing.T) {
 		VALUES ($1, 100, 'qemu', 'running', 'stopped', $2, $2, false)`, historyOtherID, minsAgo(5))
 		exec("other backup", `INSERT INTO guest_backups (cluster_id, upid, vmid, node, source, status, started_at, finished_at, log_start, log_end)
 		VALUES ($1, $2, 100, 'pve-02', 'proxmox', 'completed', $3, $3, 1, 2)`, historyOtherID, otherUPID(4, "vzdump", ""), minsAgo(5))
+		for _, o := range []struct {
+			typ, id string
+			vmid    any
+		}{{"vm", "100", 100}, {"node", "pve-01", nil}} {
+			exec("other change seen", `INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, vmid,
+				change, observed_by, last_seen_at, observed_at, explained)
+			VALUES ($1, $2, $3, $4, 'changed', 'observer', $5, $5, false)`, historyOtherID, o.typ, o.id, o.vmid, minsAgo(5))
+		}
 		ownRows := 0
 		for _, sel := range []handlers.HistorySelection{
 			{Guests: []handlers.HistoryGuest{{VMID: 100}}},
@@ -1208,6 +1235,7 @@ func TestGuestHistory(t *testing.T) {
 					t.Fatal(err)
 				}
 				p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 200, true, []string{"qemu"}
+				p.ObservedTypes = []string{"vm", "node"}
 				rows, err := hq.ListHistory(ctx, p)
 				if err != nil {
 					t.Fatal(err)
@@ -1222,10 +1250,11 @@ func TestGuestHistory(t *testing.T) {
 				}
 			}
 		}
-		// The vmid arm's start, the clone, HA, task, archive, status and backup;
-		// the node's reboot and the four other object shapes.
-		if ownRows != 12 {
-			t.Errorf("the other cluster's own History holds %d of its 12 rows", ownRows)
+		// The vmid arm's start, the clone, HA, task, archive, status, backup and
+		// change seen; the node's reboot, its change seen and the four other
+		// object shapes.
+		if ownRows != 14 {
+			t.Errorf("the other cluster's own History holds %d of its 14 rows", ownRows)
 		}
 	})
 
@@ -1714,6 +1743,113 @@ func TestGuestHistory(t *testing.T) {
 			}
 			if c.want == nil && (len(got) != 21 || got[0] != c.prefix) || c.want != nil && !slices.Equal(got, c.want) {
 				t.Errorf("the runs on %s's History: %v", c.node, got)
+			}
+		}
+	})
+
+	run("observed", func(t *testing.T) {
+		// ── What Nexara saw change in Proxmox, listed only where nothing on
+		// record explains it and only of the types the caller may view
+		// (observed_types): a guest's by its VMID, from its cutoff; a node's,
+		// its interfaces by the node they name; the whole cluster's; a global
+		// kind's, which alone name no cluster.
+		seen := func(cluster uuid.UUID, typ, id, node string, vmid any, fields []string, at time.Time, explained any) {
+			t.Helper()
+			exec("seen "+typ+" "+id, `INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, vmid,
+				change, fields, node, observed_by, last_seen_at, observed_at, explained)
+			VALUES ($1, $2, $3, $4, 'changed', $5, $6, 'observer', $7::timestamptz - interval '5 minutes', $7, $8)`,
+				pgtype.UUID{Bytes: cluster, Valid: cluster != uuid.Nil}, typ, id, vmid, fields, node, at, explained)
+		}
+		seen(historyClusterID, "vm", "100", "pve-01", 100, []string{"cores", "memory"}, minsAgo(6), false)
+		seen(historyClusterID, "vm", "100", "pve-01", 100, []string{"cores"}, hoursAgo(8.5), false) // the previous guest's
+		seen(historyClusterID, "vm", "100", "pve-01", 100, []string{"name"}, minsAgo(6), true)      // explained
+		seen(historyClusterID, "vm", "100", "pve-01", 100, []string{"tags"}, minsAgo(1), nil)       // not yet classified
+		seen(historyClusterID, "container", "120", "pve-01", 120, []string{"memory"}, minsAgo(6), false)
+		seen(historyThirdID, "node", "pve-01", "pve-01", nil, []string{"dns"}, minsAgo(2.5), false)
+		seen(historyThirdID, "node", "pve-01", "pve-01", nil, []string{"comment"}, minsAgo(2.5), true) // explained
+		seen(historyThirdID, "firewall_rule", "node/pve-01", "pve-01", nil, []string{"rules"}, minsAgo(2.4), false)
+		seen(historyThirdID, "network", "pve-01/vmbr7", "pve-01", nil, []string{"cidr"}, minsAgo(2.3), false)
+		seen(historyThirdID, "network", "pve-02/vmbr7", "pve-02", nil, []string{"cidr"}, minsAgo(2.3), false)
+		seen(historyThirdID, "acme_config", "pve-01", "pve-01", nil, []string{"domains"}, minsAgo(2.2), false)
+		seen(historyThirdID, "pool", "pool1", "", nil, []string{"comment"}, minsAgo(2.1), false)
+		seen(historyClusterID, "pool", "pool2", "", nil, []string{"comment"}, minsAgo(2.1), false)
+		seen(uuid.Nil, "pbs_server", historyPBSID, "", nil, []string{"comment"}, minsAgo(2), false)
+		observedOf := func(p gen.ListHistoryParams, types ...string) []string {
+			t.Helper()
+			p.RowLimit, p.ObservedTypes = 200, types
+			rows, err := hq.ListHistory(ctx, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := []string{}
+			for _, r := range rows {
+				if r.Kind == "observed" {
+					got = append(got, r.ResourceType+" "+r.ResourceID+" "+strings.Join(r.Fields, ","))
+				}
+			}
+			return got
+		}
+		for _, tt := range []struct {
+			name  string
+			p     gen.ListHistoryParams
+			types []string
+			want  []string
+		}{
+			{"a guest's, since its cutoff", guest(true), []string{"vm", "container"}, []string{"vm 100 cores,memory"}},
+			{"a guest's, without its type's view", guest(true), []string{"container"}, []string{}},
+		} {
+			if got := observedOf(tt.p, tt.types...); !slices.Equal(got, tt.want) {
+				t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
+			}
+		}
+		nodeReq, err := (apischema.Properties{"node_name": {Type: apischema.String}}).Validate(map[string]any{"node_name": "pve-01"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		nodeSel, err := handlers.NodeHistory().Select(ctx, handlers.HistoryRequest{Queries: q, ClusterID: historyThirdID, Params: nodeReq})
+		if err != nil {
+			t.Fatal(err)
+		}
+		np, err := handlers.NodeHistory().ListParams(historyThirdID, nodeSel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		np.IncludeTasks, np.StatusGuestTypes = true, []string{"qemu", "lxc"}
+		cp, err := handlers.ClusterHistory().ListParams(historyThirdID, handlers.HistorySelection{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp.IncludeTasks, cp.StatusGuestTypes = true, []string{"qemu", "lxc"}
+		pools := handlers.HistoryKind{Name: "pools", Categories: []string{"other"}, Default: "other",
+			ObjectTypes: []string{"pool", "pbs_server"}, Select: handlers.SelectTypes("pool")}
+		wp, err := pools.ListParams(historyThirdID, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "pool", WholeType: true}, {ResourceType: "pbs_server", Value: historyPBSID}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pbs := handlers.HistoryKind{Name: "pbs", Categories: []string{"other"}, Default: "other", Global: true,
+			ObjectTypes: []string{"pbs_server"}}
+		gp, err := pbs.ListParams(uuid.Nil, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "pbs_server", Value: historyPBSID}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tt := range []struct {
+			name  string
+			p     gen.ListHistoryParams
+			types []string
+			want  []string
+		}{
+			{"a node's", np, []string{"node", "network", "firewall_rule", "acme_config"}, []string{"acme_config pve-01 domains",
+				"network pve-01/vmbr7 cidr", "firewall_rule node/pve-01 rules", "node pve-01 dns"}},
+			{"a node's, without view:network", np, []string{"node", "acme_config"},
+				[]string{"acme_config pve-01 domains", "node pve-01 dns"}},
+			{"the whole cluster's", cp, []string{"node", "pool", "pbs_server"}, []string{"pool pool1 comment", "node pve-01 dns"}},
+			{"a whole type, in its cluster alone", wp, []string{"pool", "pbs_server"}, []string{"pool pool1 comment"}},
+			{"a global kind's, which name no cluster", gp, []string{"pbs_server"}, []string{"pbs_server " + historyPBSID + " comment"}},
+		} {
+			if got := observedOf(tt.p, tt.types...); !slices.Equal(got, tt.want) {
+				t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
 			}
 		}
 	})

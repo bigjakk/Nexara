@@ -17,8 +17,9 @@ func clusterHistoryRoute() historyRoute {
 			"and between when, and one on each side of searched_from when it spans it. Each source is read " +
 			"newest first up to 2,000 entries, or 20,000 narrowed by category or source, a source named " +
 			"counting only its own rows (proxmox's with the Nexara entries that may be their twins). " +
-			historyStretchText + " Requires view:audit and view:cluster; a guest's entries need view:vm or " +
-			"view:container by its type, and tasks with no audit entry and backup-job entries view:task.",
+			historyStretchText + " " + historyObservedText + " Requires view:audit and view:cluster; a guest's " +
+			"entries need view:vm or view:container by its type, and tasks with no audit entry and backup-job " +
+			"entries view:task.",
 		Resource:   "cluster",
 		Parameters: clusterParams(nil),
 	}

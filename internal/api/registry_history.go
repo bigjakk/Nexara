@@ -197,6 +197,11 @@ func historyFilterParams(kind handlers.HistoryKind) apischema.Properties {
 	}
 }
 
+// historyObservedText says how a History lists what Nexara saw change in
+// Proxmox.
+const historyObservedText = "Changes seen in Proxmox that nothing on record explains are entries of kind " +
+	"observed, each listed only to a caller holding its own type's view permission in the cluster."
+
 // historyStretchText says what a route that caps its sources returns once
 // one of them reaches its cap.
 const historyStretchText = "A read in which a source reaches its cap lists only what it is whole for: " +

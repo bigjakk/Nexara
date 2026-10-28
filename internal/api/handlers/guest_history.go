@@ -26,6 +26,8 @@ func GuestHistory() HistoryKind {
 		// The path names the guest; a status change, the inventory's part, is
 		// filtered on its type instead (historyScope).
 		GuestFromPath: "vmid",
+		// Its configuration edited in Proxmox, read by its VMID.
+		ObservedTypes: []HistoryObservedType{{Type: "vm"}, {Type: "container"}},
 	}
 }
 
