@@ -1852,6 +1852,53 @@ func TestGuestHistory(t *testing.T) {
 				t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
 			}
 		}
+
+		// What an audit row explained is read by its id, of the granted types,
+		// in the History's cluster — a row naming none for a global kind alone.
+		explainer := uuid.New()
+		for _, x := range []struct {
+			cluster uuid.UUID
+			typ, id string
+			fields  []string
+		}{
+			{historyClusterID, "vm", "100", []string{"net0", "cores"}}, {historyClusterID, "pool", "pool2", []string{"comment"}},
+			{historyOtherID, "vm", "100", []string{"tags"}}, {uuid.Nil, "pbs_server", historyPBSID, []string{"notes"}},
+		} {
+			exec("explained "+x.typ, `INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, change,
+				fields, observed_by, last_seen_at, observed_at, explained, explained_by)
+			VALUES ($1, $2, $3, 'changed', $4, 'observer', $5, $5, true, $6)`,
+				pgtype.UUID{Bytes: x.cluster, Valid: x.cluster != uuid.Nil}, x.typ, x.id, x.fields, minsAgo(3), explainer)
+		}
+		for _, tt := range []struct {
+			name    string
+			cluster uuid.UUID
+			global  bool
+			types   []string
+			want    []string
+		}{
+			{"of a granted type", historyClusterID, false, []string{"vm"}, []string{"net0,cores"}},
+			{"of every granted type", historyClusterID, false, []string{"vm", "pool"}, []string{"net0,cores", "comment"}},
+			{"of no cluster, for a global kind", uuid.Nil, true, []string{"pbs_server", "vm"}, []string{"notes"}},
+			{"of no cluster, never for a cluster's", historyClusterID, false, []string{"pbs_server"}, []string{}},
+		} {
+			rows, err := q.ListHistoryExplainedChanges(ctx, gen.ListHistoryExplainedChangesParams{AuditIds: []uuid.UUID{explainer},
+				ObservedTypes: tt.types, Global: tt.global, ClusterID: tt.cluster, RowLimit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := []string{}
+			for _, r := range rows {
+				if r.AuditID != explainer {
+					t.Errorf("%s: a row explained by %s", tt.name, r.AuditID)
+				}
+				got = append(got, strings.Join(r.Fields, ","))
+			}
+			slices.Sort(got)
+			slices.Sort(tt.want)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("explained changes %s: %v, want %v", tt.name, got, tt.want)
+			}
+		}
 	})
 
 	run("global", func(t *testing.T) {

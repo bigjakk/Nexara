@@ -718,3 +718,91 @@ func TestPermittedObservedTypes(t *testing.T) {
 		}
 	}
 }
+
+// An audit entry names the other fields its edit changed in Proxmox — the
+// changes seen there that it explained — less those its details name, whether
+// a list or keyed by field.
+func TestAlsoChanged(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		details string
+		fields  []string
+		want    []string
+	}{
+		{`{"fields": {"memory": "4096"}}`, []string{"net0", "memory", "cores", "net0"}, []string{"cores", "net0"}},
+		{`{"fields": ["comment"]}`, []string{"comment", "nodes"}, []string{"nodes"}},
+		{`{}`, []string{"tags"}, []string{"tags"}},
+		{`{"fields": ["comment"]}`, []string{"comment"}, nil},
+	} {
+		if got := alsoChanged(auditNamedFields(tt.details), tt.fields); !slices.Equal(got, tt.want) {
+			t.Errorf("alsoChanged(%s, %v) = %v, want %v", tt.details, tt.fields, got, tt.want)
+		}
+	}
+}
+
+// A page reads the changes its audit rows explained once, by their ids and
+// the types the caller may view, and attaches them; with no type granted it
+// reads none.
+func TestHistoryListAttachesExplainedChanges(t *testing.T) {
+	t.Parallel()
+	audit := uuid.New()
+	for _, tt := range []struct {
+		name   string
+		engine permissionEngine
+		reads  int
+		also   []string
+	}{
+		{"with view:vm", newGrantEngine("view:audit", "view:vm"), 2, []string{"cores", "net0"}},
+		{"without it", newGrantEngine("view:audit"), 1, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dbtx := &auditRowsDBTX{rowsFor: map[string][]any{
+				"ListHistory": {db.ListHistoryRow{EntryID: "audit:" + audit.String(), Kind: "audit", Source: "nexara",
+					Action: "config_update", ResourceType: "vm", ResourceID: "100", Vmid: 100, SubjectVmid: 100,
+					Category: "config", Total: 1, Details: json.RawMessage(`{"fields": {"memory": "4096"}}`),
+					Fields: []string{}}},
+				"ListHistoryExplainedChanges": {db.ListHistoryExplainedChangesRow{AuditID: audit,
+					Fields: []string{"memory", "net0", "cores"}}},
+			}}
+			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+			app.Use(func(c fiber.Ctx) error {
+				c.Locals("user_id", uuid.New())
+				c.Locals("rbac_engine", tt.engine)
+				return c.Next()
+			})
+			props := historyTestProps("cluster_id", apischema.StdOption("cluster-id"))
+			props["vmid"] = apischema.Property{Type: apischema.Integer}
+			app.Get("/clusters/:cluster_id/guests/:vmid/history", withRequestParams(t, props, []string{"cluster_id", "vmid"},
+				NewHistoryHandler(dbtx, db.New(dbtx)).Route(GuestHistory()).List))
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+uuid.NewString()+"/guests/100/history", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			var page struct {
+				Items []historyEntry `json:"items"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&page); err != nil || len(page.Items) != 1 {
+				t.Fatalf("status %d, %d items (%v)", resp.StatusCode, len(page.Items), err)
+			}
+			var reads []string
+			for _, c := range dbtx.calls {
+				for _, name := range []string{"ListHistory", "ListHistoryExplainedChanges"} {
+					if strings.Contains(c.sql, "-- name: "+name+" ") {
+						reads = append(reads, name)
+					}
+				}
+			}
+			if len(reads) != tt.reads || !slices.Equal(page.Items[0].AlsoChanged, tt.also) {
+				t.Errorf("reads %v, also changed %v; want %d reads, %v", reads, page.Items[0].AlsoChanged, tt.reads, tt.also)
+			}
+			if tt.reads == 2 {
+				args := dbtx.calls[len(dbtx.calls)-1].args
+				if !reflect.DeepEqual(args[0], []uuid.UUID{audit}) || !reflect.DeepEqual(args[1], []string{"vm"}) {
+					t.Errorf("explained read args %v, want the page's audit id and the granted type", args[:2])
+				}
+			}
+		})
+	}
+}

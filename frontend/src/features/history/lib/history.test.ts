@@ -138,6 +138,30 @@ describe("an observed change", () => {
   });
 });
 
+// An update sums up as the fields it names, a list or keyed by name, and the
+// changes seen in Proxmox it explained add the fields they name that it does
+// not.
+describe("an update's summary", () => {
+  const kind = historyKind(
+    "probe",
+    { categories: { other: "Other" } },
+    { icons: {} },
+  );
+  const t = i18n.getFixedT("en", "history-probe");
+  it.each<[Partial<HistoryEntry>, string]>([
+    [{ details: '{"fields":["comment","nodes"]}' }, "comment, nodes"],
+    [
+      {
+        details: '{"fields":{"memory":"4096"}}',
+        also_changed: ["cores", "net0"],
+      },
+      "memory · Also changed in Proxmox: cores, net0",
+    ],
+  ])("%o sums up as %s", (over, want) => {
+    expect(historySummary(kind, entry(over), t)).toBe(want);
+  });
+});
+
 // A run is its row's event and how many times, from its first to its last,
 // with the last one's error.
 describe("a run", () => {

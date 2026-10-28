@@ -1149,3 +1149,20 @@ LEFT JOIN LATERAL (
 ) l ON true
 ORDER BY l.created_at DESC NULLS LAST, v.vmid
 LIMIT sqlc.arg('row_limit')::int;
+
+-- ListHistoryExplainedChanges is, for one page of a History, the changes seen in
+-- Proxmox that the page's audit rows explained (explained_by, 000124): a
+-- History lists only the unexplained ones, and shows these on the row that
+-- explains them, as the other fields the same edit changed. Only of the types
+-- the caller may view (observed_types), in the History's own cluster — a row
+-- naming no cluster only for a global kind — and at most row_limit of them.
+-- name: ListHistoryExplainedChanges :many
+SELECT o.explained_by::uuid AS audit_id, o.fields
+FROM cluster_object_changes o
+WHERE o.explained_by = ANY(sqlc.arg('audit_ids')::uuid[])
+  AND o.explained = true
+  AND o.resource_type = ANY(sqlc.arg('observed_types')::text[])
+  AND (sqlc.arg('global')::bool AND o.cluster_id IS NULL
+       OR NOT sqlc.arg('global')::bool AND o.cluster_id = sqlc.arg('cluster_id')::uuid)
+ORDER BY o.explained_by, o.observed_at
+LIMIT sqlc.arg('row_limit')::int;

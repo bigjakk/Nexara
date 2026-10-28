@@ -74,7 +74,8 @@
     "window": "Between {{from}} and {{to}}",
     "lastSeen": "Last seen as it was",
     "note": "Nexara saw this change in Proxmox, and nothing on record explains it: no task, and no change made in Nexara. It was made between the two times shown.",
-    "source": "Detected in Proxmox"
+    "source": "Detected in Proxmox",
+    "alsoChanged": "Also changed in Proxmox: {{fields}}"
   },
   "run": {
     "label_one": "{{event}}, once",

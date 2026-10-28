@@ -111,8 +111,11 @@ func (*structRows) Conn() *pgx.Conn                              { return nil }
 // Query it was sent. The read-side counterpart to captureDBTX, which records
 // arguments but cannot hand a handler rows to filter.
 type auditRowsDBTX struct {
-	rows  []any
-	calls []capturedQuery
+	rows []any
+	// rowsFor, when it names a query (by its sqlc name), answers that query
+	// with its rows instead of rows.
+	rowsFor map[string][]any
+	calls   []capturedQuery
 	// missingCluster makes the cluster lookup answer that there is no such cluster;
 	// clusterLookups counts the lookups.
 	missingCluster bool
@@ -125,6 +128,11 @@ func (*auditRowsDBTX) Exec(context.Context, string, ...any) (pgconn.CommandTag, 
 
 func (d *auditRowsDBTX) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 	d.calls = append(d.calls, capturedQuery{sql: sql, args: args})
+	for name, rows := range d.rowsFor {
+		if strings.Contains(sql, "-- name: "+name+" ") {
+			return &structRows{rows: rows}, nil
+		}
+	}
 	return &structRows{rows: d.rows}, nil
 }
 

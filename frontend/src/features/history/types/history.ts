@@ -77,6 +77,9 @@ export interface HistoryEntry {
   last_seen_at?: string;
   /** An observed change: the names of the fields that changed. */
   fields?: string[];
+  /** An audit entry: the fields the same edit changed in Proxmox beyond those
+   *  it names — the changes seen there it explained. */
+  also_changed?: string[];
   /** A backup entry: the lines of the job's task log that are this guest's
    *  part, by Proxmox's line numbers. */
   log_start?: number;
