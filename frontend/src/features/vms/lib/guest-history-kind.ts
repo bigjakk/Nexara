@@ -78,7 +78,9 @@ function summary(entry: HistoryEntry, t: TFunction): string | undefined {
   if (entry.kind === "status") {
     const from = entry.from_status ?? "";
     const to = entry.to_status ?? "";
-    const onNode = entry.node ? t("summaries.onNode", { node: entry.node }) : "";
+    const onNode = entry.node
+      ? t("summaries.onNode", { node: entry.node })
+      : "";
     if (to === "unknown") return t("summaries.unknown", { from, onNode });
     if (from === "unknown") return t("summaries.reportedAgain", { to, onNode });
     // Only a stop has an everyday cause no task records.
