@@ -46,7 +46,8 @@ type explainRule struct {
 	// Object and MemberOf name what a row is about, "<source>:<format>": the
 	// UPID's id (upid), the row's resource_id (audit) or guest (vmid), or a
 	// details key (details.<k>, or details-list.<k> for a comma list), put into
-	// format at %s; a MemberOf may join several sources with +. With Object, the
+	// format at %s; or an ACL row's grants (grants.<list>: role, propagate and
+	// grantee as %1$s, %2$s, %3$s). A MemberOf may join several sources with +. With Object, the
 	// change's resource_id must be that name; with Member, the row explains
 	// only that member joining or leaving a list (joined, left), or an object
 	// removed with it as its last member (sole). Member with no MemberOf is any
@@ -503,32 +504,39 @@ var aclGrantees = []struct{ key, who, grants string }{
 	{"users", "users", "user_grants"}, {"groups", "groups", "group_grants"}, {"tokens", "tokens", "token_grants"},
 }
 
-// aclGrantRules is Nexara's own grant and revoke on a path, for the grantees
-// its row names: a grant brings them in and changes their grants any way, a
-// revoke only takes out, and a path that came or went with them is theirs only
-// if no one else came or went with it (all three lists, joined by +).
+// aclGrantRules is Nexara's own grant and revoke on a path, for what its row
+// names: each grantee of its lists (users, groups, tokens) with each of its
+// roles, at the propagate it sent or Proxmox's default (grants.<list>, ACL.pm
+// update_acl). A grant brings those grants in, and takes out the same role of
+// the same grantee at the other propagate; a revoke takes out that role of
+// that grantee whatever its propagate. A path that came or went with them is
+// theirs only if nothing else came or went with it (all three, joined by +).
 var aclGrantRules = func() []explainRule {
-	rules := make([]explainRule, 0, 3*len(aclGrantees)+2)
-	every := make([]string, 0, len(aclGrantees))
+	rules := make([]explainRule, 0, 5*len(aclGrantees)+2)
+	added := make([]string, 0, 2*len(aclGrantees))
+	removed := make([]string, 0, 2*len(aclGrantees))
 	for _, g := range aclGrantees {
-		who := "details-list." + g.key + ":" + g.who + ":%s|" + g.grants + ":*:%s"
-		every = append(every, who)
-		fields := "^(" + g.who + "|" + g.grants + ")$"
+		who := "details-list." + g.key + ":" + g.who + ":%s"
+		exact := "grants." + g.key + ":" + g.grants + ":%1$s:%2$s:%3$s"
+		anyPropagate := "grants." + g.key + ":" + g.grants + ":%1$s:*:%3$s"
+		added, removed = append(added, who, exact), append(removed, who, anyPropagate)
+		rule := func(action, field, member, memberOf string) explainRule {
+			return explainRule{Kind: "pve_acl", Change: "changed", AuditType: "pve_acl", MatchKey: "id",
+				ActionRe: "^" + action + "$", FieldRe: "^" + field + "$", Member: member, MemberOf: memberOf}
+		}
 		rules = append(rules,
-			explainRule{Kind: "pve_acl", Change: "changed", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^granted$`,
-				FieldRe: fields, Member: "joined", MemberOf: who},
-			explainRule{Kind: "pve_acl", Change: "changed", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^granted$`,
-				FieldRe: "^" + g.grants + "$", Member: "left", MemberOf: who},
-			explainRule{Kind: "pve_acl", Change: "changed", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^revoked$`,
-				FieldRe: fields, Member: "left", MemberOf: who},
+			rule("granted", g.who, "joined", who),
+			rule("granted", g.grants, "joined", exact),
+			rule("granted", g.grants, "left", anyPropagate),
+			rule("revoked", g.who, "left", who),
+			rule("revoked", g.grants, "left", anyPropagate),
 		)
 	}
-	all := strings.Join(every, "+")
 	return append(rules,
 		explainRule{Kind: "pve_acl", Change: "added", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^granted$`,
-			Member: "joined", MemberOf: all},
+			Member: "joined", MemberOf: strings.Join(added, "+")},
 		explainRule{Kind: "pve_acl", Change: "removed", AuditType: "pve_acl", MatchKey: "id", ActionRe: `^revoked$`,
-			Member: "left", MemberOf: all},
+			Member: "left", MemberOf: strings.Join(removed, "+")},
 	)
 }()
 

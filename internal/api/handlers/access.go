@@ -1162,16 +1162,32 @@ func (h *AccessHandler) UpdateACL(c fiber.Ctx, p *apischema.Params) error {
 	if req.Delete {
 		action = "revoked"
 	}
-	details, _ := json.Marshal(map[string]any{
+	details, _ := json.Marshal(accessACLDetails(req))
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_acl", auditkey.ACLPath(req.Path), action, details)
+	h.publishAccessChange(c.Context(), clusterID, "pve_acl", auditkey.ACLPath(req.Path), action)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// accessACLDetails builds the audit details of an ACL grant or revoke: the
+// path, roles and grantees as sent, and propagate only when the request sent
+// it — Proxmox's default, 1, applies otherwise — so the change observer
+// explains only the grants this row made. delete is the row's action.
+//
+// Pinned, as accessAuditBuilders requires, by
+// TestAccessACLDetailsRecordsTheGrant and, through the real route,
+// TestClusterObjectAuditRowsFileUnderOneKey in internal/api.
+func accessACLDetails(req proxmox.UpdateAccessACLParams) map[string]any {
+	details := map[string]any{
 		"path":   req.Path,
 		"roles":  req.Roles,
 		"users":  req.Users,
 		"groups": req.Groups,
 		"tokens": req.Tokens,
-	})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_acl", auditkey.ACLPath(req.Path), action, details)
-	h.publishAccessChange(c.Context(), clusterID, "pve_acl", auditkey.ACLPath(req.Path), action)
-	return c.JSON(fiber.Map{"status": "ok"})
+	}
+	if req.Propagate != nil {
+		details["propagate"] = *req.Propagate
+	}
+	return details
 }
 
 // ---------------------------------------------------------------------------

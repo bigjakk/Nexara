@@ -1369,11 +1369,14 @@ func TestObservedChangeRules(t *testing.T) {
 		named := func(s string) bool {
 			for _, part := range strings.Split(s, "+") {
 				source, format, ok := strings.Cut(part, ":")
-				if !ok || !regexp.MustCompile(`^(upid|audit|vmid|details\.[a-z_]+|details-list\.[a-z_]+)$`).MatchString(source) {
+				if !ok || !regexp.MustCompile(`^(upid|audit|vmid|details\.[a-z_]+|details-list\.[a-z_]+|grants\.(users|groups|tokens))$`).MatchString(source) {
 					return false
 				}
 				for _, alt := range strings.Split(format, "|") {
-					if strings.Count(alt, "%") != 1 || !strings.Contains(alt, "%s") || strings.Count(alt, "*") > 1 {
+					grants := regexp.MustCompile(`^[a-z]+_grants:%1\$s:(%2\$s|\*):%3\$s$`)
+					if strings.HasPrefix(source, "grants.") && !grants.MatchString(alt) ||
+						!strings.HasPrefix(source, "grants.") && (strings.Count(alt, "%") != 1 || !strings.Contains(alt, "%s")) ||
+						strings.Count(alt, "*") > 1 {
 						return false
 					}
 				}

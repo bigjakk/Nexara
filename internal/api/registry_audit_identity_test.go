@@ -203,6 +203,16 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			wantType: "pve_acl", wantID: "/vms/100", wantAction: "granted",
 		},
 		{
+			// The propagate a grant sent is recorded, so it explains only the
+			// grants it made.
+			name: "an ACL grant records the propagate it sent", method: fiber.MethodPut, path: accessScope + "/acl",
+			target: "/access/acl", body: `{"path":"/vms/100","roles":"PVEVMUser","users":"alice@pve","propagate":false}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewAccessHandler(q, haCreateEncKey, nil).UpdateACL
+			},
+			wantType: "pve_acl", wantID: "/vms/100", wantAction: "granted", wantDetails: map[string]any{"propagate": false},
+		},
+		{
 			// An account update or deactivation is a task too (acmeupdate,
 			// acmerefresh, acmedeactivate) whose UPID names no account.
 			name: "an ACME account update is a tracked task", method: fiber.MethodPut, path: acmeScope + "/accounts/:name",

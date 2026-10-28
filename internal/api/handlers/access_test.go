@@ -308,6 +308,7 @@ var accessAuditBuilders = map[string]bool{
 	"accessUserUpdateDetails":  true,
 	"accessUserCreateDetails":  true,
 	"accessTokenUpdateDetails": true,
+	"accessACLDetails":         true,
 }
 
 // isAccessAuditBuilderCall reports whether arg is a call to a function listed in
@@ -867,6 +868,23 @@ func TestAccessUserCreateDetails(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAccessACLDetailsRecordsTheGrant holds an ACL row's details to the request's
+// path, roles and grantees, and propagate only as sent: the change observer reads
+// them to explain only the grants the row made.
+func TestAccessACLDetailsRecordsTheGrant(t *testing.T) {
+	accessRequireDetailsClassified(t,
+		func(t *testing.T, req proxmox.UpdateAccessACLParams) string {
+			return accessDetailsJSON(t, accessACLDetails(req))
+		},
+		map[string]struct{ key, value string }{
+			"Path": {"path", `"sentinel-Path"`}, "Roles": {"roles", `"sentinel-Roles"`},
+			"Users": {"users", `"sentinel-Users"`}, "Groups": {"groups", `"sentinel-Groups"`},
+			"Tokens": {"tokens", `"sentinel-Tokens"`}, "Propagate": {"propagate", "true"},
+		},
+		map[string]bool{"Delete": true},
+		"the path, roles, grantees and propagate")
 }
 
 // TestAccessUserCreateDetailsRecordsOnlyTheAllowedFields is the allow-list checked

@@ -243,7 +243,20 @@ WITH rules AS MATERIALIZED (
                               WHEN src LIKE 'details.%'
                                   THEN ARRAY[k.details->>substr(split_part(src, ':', 1), 9)]
                           END) AS v
-                     WHERE strpos(v, '*') = 0) AS member_names,
+                     WHERE strpos(v, '*') = 0
+                     UNION ALL
+                     -- An ACL row's grants, grants.<list>: each of its roles
+                     -- for each grantee of the list, with the propagate it
+                     -- sent or Proxmox's default, 1, as %1$s, %2$s and %3$s.
+                     SELECT format(alt, r, CASE lower(COALESCE(k.details->>'propagate', '1'))
+                                               WHEN 'true' THEN '1' WHEN '1' THEN '1'
+                                               WHEN 'false' THEN '0' WHEN '0' THEN '0' END, g)
+                     FROM unnest(string_to_array(k.member_of, '+')) AS src,
+                          unnest(string_to_array(substr(src, strpos(src, ':') + 1), '|')) AS alt,
+                          unnest(array_remove(regexp_split_to_array(COALESCE(k.details->>'roles', ''), '[,; ]+'), '')) AS r,
+                          unnest(array_remove(regexp_split_to_array(
+                              COALESCE(k.details->>substr(split_part(src, ':', 1), 8), ''), '[,; ]+'), '')) AS g
+                     WHERE src LIKE 'grants.%' AND strpos(r, '*') = 0 AND strpos(g, '*') = 0) AS member_names,
                -- The fields a row says it set, when the rule takes them from it:
                -- a guest config edit's keys, those it deleted or reverted, and,
                -- when it named a disk, what replacing or deleting one moves
