@@ -357,14 +357,23 @@ func registerVeeamEndpoints(reg *Registry, h *handlers.VeeamHandler, connect, co
 		Path:   veeamScope + "/:id/sessions",
 		Description: "List the server's recent Proxmox backup runs. Filtered the same way the job " +
 			"listing is: view:veeam on the cluster the run's platform maps to, or instance-wide for an " +
-			"unattributable run.",
+			"unattributable run. With job_id, only that job's runs — its newest, however busy the " +
+			"server is.",
 		Group: "Backup",
 		Permissions: Permissions{Advisory: &AdvisoryCheck{
 			Check:  Check{Action: "view", Resource: "veeam", Scope: ScopeCluster},
 			Reason: veeamScopeReason,
 		}},
-		Parameters: veeamServerParams(nil),
-		Handler:    h.ListSessions,
+		Parameters: veeamServerParams(apischema.Properties{
+			"job_id": {
+				Type:        apischema.String,
+				Format:      "uuid",
+				Optional:    true,
+				Typetext:    "<uuid>",
+				Description: "Narrow to the runs of one job, by the id Veeam assigns it (veeam_id in the job listing).",
+			},
+		}),
+		Handler: h.ListSessions,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,

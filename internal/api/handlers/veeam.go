@@ -444,9 +444,19 @@ func (h *VeeamHandler) ListSessions(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// One job's runs, when the caller names it (the format has made it a uuid).
+	var jobID pgtype.UUID
+	if raw, named := p.OptString("job_id"); named {
+		parsed, parseErr := uuid.Parse(raw)
+		if parseErr != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "job_id must be a uuid")
+		}
+		jobID = pgtype.UUID{Bytes: parsed, Valid: true}
+	}
 	sessions, err := h.queries.ListVeeamSessionsByServer(c.Context(), db.ListVeeamSessionsByServerParams{
 		VeeamServerID: server.ID,
 		PlatformIds:   scope.scopedPlatforms(),
+		JobVeeamID:    jobID,
 		RowLimit:      maxVeeamSessionRows,
 	})
 	if err != nil {

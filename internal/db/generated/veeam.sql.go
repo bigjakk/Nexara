@@ -2024,13 +2024,15 @@ WHERE veeam_server_id = $1
     $2::uuid[] IS NULL
     OR (platform_id IS NOT NULL AND platform_id = ANY($2::uuid[]))
   )
+  AND ($3::uuid IS NULL OR job_veeam_id = $3::uuid)
 ORDER BY creation_time DESC
-LIMIT $3
+LIMIT $4
 `
 
 type ListVeeamSessionsByServerParams struct {
 	VeeamServerID uuid.UUID   `json:"veeam_server_id"`
 	PlatformIds   []uuid.UUID `json:"platform_ids"`
+	JobVeeamID    pgtype.UUID `json:"job_veeam_id"`
 	RowLimit      int32       `json:"row_limit"`
 }
 
@@ -2044,8 +2046,18 @@ type ListVeeamSessionsByServerParams struct {
 // all — an unattributable row could belong to any cluster, so it is
 // global-only. pgx sends a nil slice as NULL and a non-nil empty slice as
 // '{}', and that distinction is what makes both cases work.
+//
+// A job_veeam_id restricts the listing to that job's runs, before the LIMIT for
+// the reason above: a job that runs rarely would otherwise have no run among a
+// busy server's newest few hundred. NULL is every run. It is served by
+// idx_veeam_sessions_job.
 func (q *Queries) ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSessionsByServerParams) ([]VeeamSession, error) {
-	rows, err := q.db.Query(ctx, listVeeamSessionsByServer, arg.VeeamServerID, arg.PlatformIds, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listVeeamSessionsByServer,
+		arg.VeeamServerID,
+		arg.PlatformIds,
+		arg.JobVeeamID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

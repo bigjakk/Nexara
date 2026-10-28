@@ -267,6 +267,8 @@ type backupRunDBTX struct {
 	lists   map[string][]any
 	// asked is the sqlc name of each :one query the handler ran, in order.
 	asked []string
+	// queried is the arguments of the last :many query run, by its sqlc name.
+	queried map[string][]any
 }
 
 func (d *backupRunDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -280,11 +282,15 @@ func (d *backupRunDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
 }
 
-func (d *backupRunDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+func (d *backupRunDBTX) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for name, rows := range d.lists {
 		if strings.Contains(sql, "-- name: "+name+" :many") {
+			if d.queried == nil {
+				d.queried = map[string][]any{}
+			}
+			d.queried[name] = args
 			return &metricRows{rows: rows}, nil
 		}
 	}

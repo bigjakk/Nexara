@@ -420,12 +420,18 @@ WHERE veeam_server_id = $1 AND veeam_id = $2;
 -- all — an unattributable row could belong to any cluster, so it is
 -- global-only. pgx sends a nil slice as NULL and a non-nil empty slice as
 -- '{}', and that distinction is what makes both cases work.
+--
+-- A job_veeam_id restricts the listing to that job's runs, before the LIMIT for
+-- the reason above: a job that runs rarely would otherwise have no run among a
+-- busy server's newest few hundred. NULL is every run. It is served by
+-- idx_veeam_sessions_job.
 SELECT * FROM veeam_sessions
 WHERE veeam_server_id = $1
   AND (
     sqlc.narg(platform_ids)::uuid[] IS NULL
     OR (platform_id IS NOT NULL AND platform_id = ANY(sqlc.narg(platform_ids)::uuid[]))
   )
+  AND (sqlc.narg(job_veeam_id)::uuid IS NULL OR job_veeam_id = sqlc.narg(job_veeam_id)::uuid)
 ORDER BY creation_time DESC
 LIMIT sqlc.arg(row_limit);
 

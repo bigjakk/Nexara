@@ -1695,7 +1695,7 @@ IP** for job control and session logs.
 | POST | `/veeam-servers/:id/jobs/:job_id/stop` | Stop a Veeam job's running session. Recorded as Nexara-initiated so veeam_job_failed does not fire for it — Veeam itself records a cancelled run as "Failed" |
 | POST | `/veeam-servers/:id/jobs/:job_id/enable` | Put a Veeam job back on its schedule |
 | POST | `/veeam-servers/:id/jobs/:job_id/disable` | Take a Veeam job off its schedule. Protection stops accruing while existing restore points remain, and Veeam raises no alarm about it |
-| GET | `/veeam-servers/:id/sessions` | List recent Veeam Proxmox backup runs |
+| GET | `/veeam-servers/:id/sessions` | List recent Veeam Proxmox backup runs, the newest 500 of the server; `?job_id=<the job's Veeam id>` lists only that job's, newest first, so a job that runs rarely still shows its own |
 | GET | `/veeam-servers/:id/sessions/:session_id/tasks` | Per-guest breakdown of one run: which guests it processed and which failed, linked to their Nexara guest where the name resolves unambiguously. Empty while a run is still in flight — Veeam reports task rows only as tasks finish |
 | GET | `/veeam-servers/:id/sessions/:session_id/logs` | Read a session's log, live from Veeam. Empty is the NORMAL result for a stopped run — Veeam keeps no records for a killed session |
 | POST | `/veeam-servers/:id/sessions/:session_id/stop` | Stop one running Veeam session. Recorded as Nexara-initiated, as for the job stop |

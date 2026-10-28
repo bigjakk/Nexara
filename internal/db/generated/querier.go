@@ -2443,6 +2443,11 @@ type Querier interface {
 	// all — an unattributable row could belong to any cluster, so it is
 	// global-only. pgx sends a nil slice as NULL and a non-nil empty slice as
 	// '{}', and that distinction is what makes both cases work.
+	//
+	// A job_veeam_id restricts the listing to that job's runs, before the LIMIT for
+	// the reason above: a job that runs rarely would otherwise have no run among a
+	// busy server's newest few hundred. NULL is every run. It is served by
+	// idx_veeam_sessions_job.
 	ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSessionsByServerParams) ([]VeeamSession, error)
 	// ListVeeamSessionsForClusterInWindow is the cluster's Veeam job history for
 	// one reporting period, newest first. Scoped through the platform mapping,
