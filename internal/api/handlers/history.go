@@ -164,13 +164,18 @@ type HistoryCollapse struct {
 
 // HistoryObservedType is one type whose changes seen in Proxmox a kind shows,
 // read under View — or, when that is empty, the type's own permission in
-// observedTypePermission. Declared per kind, since one type is keyed for
-// several scopes whose pages need different permissions: firewall_rule is the
-// cluster's, a node's and a guest's, and a node's firewall rules are read
-// under view:network, as its firewall page is.
+// observedTypePermission. A View other than the type's own is refused unless
+// observedViewOverrides allows it for the kind (Validate), so no declaration
+// can read a type under a weaker permission than its own pages need.
 type HistoryObservedType struct {
 	Type, View string
 }
+
+// observedViewOverrides are the kinds allowed to read a type's observed
+// changes under another view than the type's own, keyed "kind/type", each with
+// that view. None yet: a type is read under its own everywhere, and a kind
+// that needs otherwise is reviewed here.
+var observedViewOverrides = map[string]string{}
 
 // observedView is the view permission t's changes are read under, and
 // whether there is one.
@@ -274,6 +279,12 @@ var observedTypePermission = map[string]string{
 func ObservedTypePermission(resourceType string) (permission string, observed bool) {
 	permission, observed = observedTypePermission[resourceType]
 	return permission, observed
+}
+
+// ObservedTypePermissions is every type's in observedTypePermission, a copy:
+// what the registry's test holds to the routes that show each type.
+func ObservedTypePermissions() map[string]string {
+	return maps.Clone(observedTypePermission)
 }
 
 // globalHistoryResourceTypes are the audit resource types whose ids are unique
@@ -454,7 +465,15 @@ func (k HistoryKind) Validate() error {
 			return fmt.Errorf("history kind %q is global and reads %q, whose ids are unique only within a cluster", k.Name, t)
 		}
 	}
-	for _, t := range k.ObservedTypes {
+	for i, t := range k.ObservedTypes {
+		if slices.ContainsFunc(k.ObservedTypes[:i], func(o HistoryObservedType) bool { return o.Type == t.Type }) {
+			return fmt.Errorf("history kind %q lists the observed type %q twice", k.Name, t.Type)
+		}
+		if own := observedTypePermission[t.Type]; t.View != "" && t.View != own &&
+			observedViewOverrides[k.Name+"/"+t.Type] != t.View {
+			return fmt.Errorf("history kind %q reads the observed changes of %q under view:%s, not the type's own "+
+				"(view:%s), which only observedViewOverrides allows", k.Name, t.Type, t.View, own)
+		}
 		// A guest's changes are read by its VMID, a whole cluster's by type:
 		// neither is an object the kind selects.
 		guestType := !k.Global && (t.Type == "vm" || t.Type == "container")

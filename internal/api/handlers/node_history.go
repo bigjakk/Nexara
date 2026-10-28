@@ -27,10 +27,10 @@ func NodeHistory() HistoryKind {
 		// observer_kinds.go, noticeTarget): its options, DNS and time and the
 		// notices of those and of its interfaces at node / <node>, its
 		// interfaces by the node they name, its firewall rule set at
-		// firewall_rule / node/<node> — read under view:network, as its
-		// firewall page is — and its ACME settings at acme_config / <node>.
-		ObservedTypes: []HistoryObservedType{{Type: "node"}, {Type: "network"},
-			{Type: "firewall_rule", View: "network"}, {Type: "acme_config"}},
+		// firewall_rule / node/<node> — under view:network, the type's own, as
+		// its firewall page is — and its ACME settings at acme_config / <node>.
+		ObservedTypes: []HistoryObservedType{{Type: "node"}, {Type: "network"}, {Type: "firewall_rule"},
+			{Type: "acme_config"}},
 		// A task that ran on the node is the node's whoever held the VMID it
 		// names then: no guest's cutoff holds it.
 		ObjectsIgnoreGuestCutoff: true,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -185,4 +186,51 @@ func jsonObjectKeys(path, field string) ([]string, error) {
 		}
 	}
 	return keys, nil
+}
+
+// Each observed type is read under the view its own page needs: the permission
+// of the route that shows its objects — the pool's page, not the list of pools,
+// which view:cluster gives without their members. A type the map gains without
+// a row here fails, and so does a route whose permission moves off its type's.
+func TestObservedTypeViewsAreTheirPagesOwn(t *testing.T) {
+	t.Parallel()
+	const c = clusterScope
+	pages := map[string]string{
+		"vm": c + "/vms", "container": c + "/containers", "ha_resource": c + "/ha/resources",
+		"ha_group": c + "/ha/groups", "ha_rule": c + "/ha/rules", "pool": c + "/pools/:pool_id",
+		"network": c + "/networks", "sdn_zone": c + "/sdn/zones", "sdn_vnet": c + "/sdn/vnets",
+		"sdn_subnet": c + "/sdn/vnets/:vnet/subnets", "sdn_controller": c + "/sdn/controllers",
+		"sdn_ipam": c + "/sdn/ipams", "sdn_dns": c + "/sdn/dns", "firewall_options": c + "/firewall/options",
+		"firewall_rule": c + "/firewall/rules", "firewall_alias": c + "/firewall/aliases",
+		"firewall_ipset": c + "/firewall/ipset", "firewall_ipset_entry": c + "/firewall/ipset/:name/entries",
+		"firewall_security_group": c + "/firewall/groups", "firewall_security_group_rule": c + "/firewall/groups/:group/rules",
+		"cluster": clusterByID, "cluster_options": c + "/options", "metric_server": c + "/metric-servers",
+		"usb_mapping": c + "/usb-mappings", "pci_mapping": c + "/pci-mappings", "pve_user": c + "/access/users",
+		"pve_token": c + "/access/users/:userid/tokens", "pve_group": c + "/access/groups",
+		"pve_role": c + "/access/roles", "pve_acl": c + "/access/acl", "acme_account": c + "/acme/accounts",
+		"acme_plugin": c + "/acme/plugins", "acme_config": c + "/nodes/:node/acme-config", "storage": c + "/storage",
+		"backup": c + "/backup-jobs", "node": c + "/nodes", "replication": c + "/replication",
+		"ceph_osd": c + "/ceph/osds", "ceph_pool": c + "/ceph/pools", "pbs_server": pbsScope,
+	}
+	views := handlers.ObservedTypePermissions()
+	for _, typ := range slices.Sorted(maps.Keys(views)) {
+		path, ok := pages[typ]
+		if !ok {
+			t.Errorf("observed type %q has no page here to hold its view to", typ)
+			continue
+		}
+		p := declaredEndpoint(t, fiber.MethodGet, path).Permissions
+		check := p.Check
+		if p.Advisory != nil {
+			check = &p.Advisory.Check
+		}
+		if check == nil || check.Action != "view" || check.Resource != views[typ] {
+			t.Errorf("observed type %q is read under view:%s, but GET %s is gated %+v", typ, views[typ], path, p)
+		}
+	}
+	for typ := range pages {
+		if _, ok := views[typ]; !ok {
+			t.Errorf("a page for %q, which observedTypePermission lacks", typ)
+		}
+	}
 }

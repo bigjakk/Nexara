@@ -164,6 +164,15 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"an observed type with no view", func(k *HistoryKind) {
 			k.ObjectTypes, k.ObservedTypes = []string{"pool", "probe"}, []HistoryObservedType{{Type: "probe"}}
 		}, "observed changes"},
+		{"an observed type twice", func(k *HistoryKind) {
+			k.ObservedTypes = []HistoryObservedType{{Type: "pool"}, {Type: "pool", View: "pool"}}
+		}, "observed type \"pool\" twice"},
+		{"an observed type under another view than its own", func(k *HistoryKind) {
+			k.ObservedTypes = []HistoryObservedType{{Type: "pool", View: "cluster"}}
+		}, "observedViewOverrides"},
+		{"a type the map lacks under a view of the kind's own", func(k *HistoryKind) {
+			k.ObjectTypes, k.ObservedTypes = []string{"pool", "probe"}, []HistoryObservedType{{Type: "probe", View: "network"}}
+		}, "observedViewOverrides"},
 		{"a whole-cluster kind naming objects", func(k *HistoryKind) { k.WholeCluster = true }, "whole cluster"},
 		{"runs outside a whole-cluster read", func(k *HistoryKind) {
 			k.Collapse = []HistoryCollapse{{ResourceType: "cluster", Action: "sync_failed", Gap: time.Minute}}
@@ -181,11 +190,11 @@ func TestHistoryKindValidate(t *testing.T) {
 			t.Errorf("%s: Validate() = %v, want an error naming %q", tt.name, err, tt.want)
 		}
 	}
-	// A type the map lacks is shown under a view of the kind's own.
+	// A view spelled out that is the type's own is no override.
 	k := valid()
-	k.ObjectTypes, k.ObservedTypes = []string{"pool", "probe"}, []HistoryObservedType{{Type: "probe", View: "network"}}
+	k.ObservedTypes = []HistoryObservedType{{Type: "pool", View: "pool"}}
 	if err := k.Validate(); err != nil {
-		t.Errorf("an observed type with its own view: %v", err)
+		t.Errorf("an observed type under its own view, spelled out: %v", err)
 	}
 }
 
