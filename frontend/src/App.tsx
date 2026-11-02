@@ -58,6 +58,16 @@ const StorageDetailPage = lazy(() =>
     default: m.StorageDetailPage,
   })),
 );
+const PowerPage = lazy(() =>
+  import("@/features/power/pages/PowerPage").then((m) => ({
+    default: m.PowerPage,
+  })),
+);
+const UpsDetailPage = lazy(() =>
+  import("@/features/power/pages/UpsDetailPage").then((m) => ({
+    default: m.UpsDetailPage,
+  })),
+);
 const BackupDashboardPage = lazy(() =>
   import("@/features/backup/pages/BackupDashboardPage").then((m) => ({
     default: m.BackupDashboardPage,
@@ -266,6 +276,26 @@ const router = createBrowserRouter([
               <LazyPage>
                 <SnapshotsPage />
               </LazyPage>
+            ),
+          },
+          {
+            path: "power",
+            element: (
+              <RequirePermission action="view" resource="ups" global>
+                <LazyPage>
+                  <PowerPage />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "power/:upsId",
+            element: (
+              <RequirePermission action="view" resource="ups" global>
+                <LazyPage>
+                  <UpsDetailPage />
+                </LazyPage>
+              </RequirePermission>
             ),
           },
           {

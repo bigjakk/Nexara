@@ -7,16 +7,23 @@ import { usePermissions } from "@/hooks/usePermissions";
 interface RequirePermissionProps {
   action: string;
   resource: string;
+  /**
+   * The grant must be install-wide, for a page whose API refuses a
+   * cluster-scoped one: otherwise such a holder would reach a page that
+   * cannot read anything.
+   */
+  global?: boolean;
   children: ReactNode;
 }
 
 export function RequirePermission({
   action,
   resource,
+  global = false,
   children,
 }: RequirePermissionProps) {
-  const { hasPermission } = usePermissions();
-  if (!hasPermission(action, resource)) {
+  const { hasPermission, hasGlobalPermission } = usePermissions();
+  if (!(global ? hasGlobalPermission : hasPermission)(action, resource)) {
     return <ForbiddenPage action={action} resource={resource} />;
   }
   return <>{children}</>;

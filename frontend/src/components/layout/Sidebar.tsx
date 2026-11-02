@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
+  BatteryCharging,
   LayoutDashboard,
   Network,
   Package,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSidebarStore } from "@/stores/sidebar-store";
 import { useBrandingStore } from "@/stores/branding-store";
 import { TreeView } from "./TreeView";
@@ -40,6 +42,8 @@ interface NavItem {
   to: string;
   icon: React.ComponentType<{ className?: string }>;
   requiredPermission?: string;
+  /** requiredPermission must be held install-wide (see RequirePermission). */
+  global?: boolean;
 }
 
 interface NavSection {
@@ -62,6 +66,13 @@ const navSections: NavSection[] = [
     items: [
       { labelKey: "backup", to: "/backup", icon: Shield },
       { labelKey: "snapshots", to: "/snapshots", icon: Camera },
+      {
+        labelKey: "power",
+        to: "/power",
+        icon: BatteryCharging,
+        requiredPermission: "view:ups",
+        global: true,
+      },
       {
         labelKey: "alerts",
         to: "/alerts",
@@ -125,6 +136,7 @@ interface SidebarProps {
 export function Sidebar({ drawer = false }: SidebarProps) {
   const { t } = useTranslation("navigation");
   const { hasPermission } = useAuth();
+  const { hasGlobalPermission } = usePermissions();
   const {
     collapsed: collapsedPref,
     toggleCollapsed,
@@ -174,7 +186,8 @@ export function Sidebar({ drawer = false }: SidebarProps) {
       items: section.items.filter((item) => {
         if (!item.requiredPermission) return true;
         const parts = item.requiredPermission.split(":");
-        return hasPermission(parts[0] ?? "", parts[1] ?? "");
+        const held = item.global === true ? hasGlobalPermission : hasPermission;
+        return held(parts[0] ?? "", parts[1] ?? "");
       }),
     }))
     .filter((section) => section.items.length > 0);

@@ -62,6 +62,21 @@ describe("RequirePermission", () => {
     expect(screen.getByText("protected content")).toBeInTheDocument();
   });
 
+  // A page whose API takes only an install-wide grant: a cluster-scoped one
+  // would reach a page that cannot read anything.
+  it("with global, refuses a grant held on one cluster only", () => {
+    setUser("user", ["view:ups"]);
+    useAuthStore.setState({ globalPermissions: [] });
+    render(
+      <MemoryRouter>
+        <RequirePermission action="view" resource="ups" global>
+          <div>protected content</div>
+        </RequirePermission>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Access denied")).toBeInTheDocument();
+  });
+
   it("denies access when there is no authenticated user", () => {
     renderGuarded();
     expect(screen.getByText("Access denied")).toBeInTheDocument();

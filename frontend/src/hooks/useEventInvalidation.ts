@@ -204,6 +204,17 @@ export function useEventInvalidation(clusterIds: string[]): void {
           }
           break;
 
+        case "ups_change":
+          // A UPS changed state or reachability, or the NUT server list
+          // moved. Readings that merely drift send nothing; the Power page
+          // polls for those.
+          scheduleInvalidation(
+            ["nut-servers"],
+            ["ups-devices"],
+            ["ups-device"],
+            ["ups-events"],
+          );
+          break;
         case "pbs_change":
           scheduleInvalidation(
             ["pbs-servers"],

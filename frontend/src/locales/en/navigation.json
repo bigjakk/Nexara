@@ -6,6 +6,7 @@
   "storage": "Storage",
   "backup": "Backup",
   "snapshots": "Snapshots",
+  "power": "Power",
   "alerts": "Alerts",
   "reports": "Reports",
   "security": "Security",

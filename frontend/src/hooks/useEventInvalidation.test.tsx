@@ -253,3 +253,35 @@ describe("useEventInvalidation — schedule_change", () => {
     }
   });
 });
+
+// The poller publishes ups_change when a UPS changes state or reachability, and
+// the NUT server routes when the server list moves. Every Power query re-reads.
+describe("useEventInvalidation — ups_change", () => {
+  it("marks the Power queries stale, and nothing else", () => {
+    vi.useFakeTimers();
+    const stale = {
+      "the NUT servers": ["nut-servers"],
+      "the UPS list": ["ups-devices"],
+      "a UPS": ["ups-device", "u1"],
+      "a UPS's chart": ["ups-device", "u1", "metrics", "1h"],
+      "the power events": ["ups-events", "all"],
+    };
+    const fresh = {
+      "the cluster's VM list": ["clusters", CLUSTER, "vms"],
+      "the PBS servers": ["pbs-servers"],
+    };
+    const client = mount([...Object.values(stale), ...Object.values(fresh)]);
+
+    act(() => {
+      deliver("system:events", { kind: "ups_change", action: "state_changed" });
+    });
+    flush();
+
+    for (const [name, key] of Object.entries(stale)) {
+      expect(client.getQueryState(key)?.isInvalidated, name).toBe(true);
+    }
+    for (const [name, key] of Object.entries(fresh)) {
+      expect(client.getQueryState(key)?.isInvalidated, name).toBe(false);
+    }
+  });
+});

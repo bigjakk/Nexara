@@ -686,7 +686,7 @@ export type HealthSeverity = "err" | "warn";
 export interface HealthIssue {
   type: string;
   severity: HealthSeverity;
-  scope: "cluster" | "node" | "storage" | "guest";
+  scope: "cluster" | "node" | "storage" | "guest" | "ups";
   /** Affected resource name; "" for cluster-scoped issues. */
   target: string;
   summary: string;

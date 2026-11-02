@@ -153,6 +153,7 @@ export type EventKind =
   | "migration_update"
   | "drs_action"
   | "pbs_change"
+  | "ups_change"
   | "cve_scan"
   | "alert_fired"
   | "alert_state_change"
