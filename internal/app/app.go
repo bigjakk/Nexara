@@ -156,6 +156,7 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 
 		a.AlertEngine = notifications.NewEngine(shutdownCtx, a.Queries,
 			logger.With("component", "alert-engine"), a.EventPub, a.NotifyRegistry, cfg.EncryptionKey)
+		a.AlertEngine.SetUpsPollInterval(cfg.NutPollInterval)
 
 		a.CVEScanner = scanner.NewEngine(a.Queries, cfg.EncryptionKey,
 			logger.With("component", "cve-scanner"), a.NotifyRegistry)

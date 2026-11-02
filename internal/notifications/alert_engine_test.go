@@ -356,6 +356,7 @@ func TestValidMetric(t *testing.T) {
 		// The PVE task metrics needed no new collection — task_history already
 		// carried the terminal status. What was missing was a trigger on it.
 		"pve_backup_failed", "pve_task_failed",
+		"ups_on_battery", "ups_battery_charge", "ups_runtime", "ups_load", "ups_unreachable", "ups_replace_battery",
 	} {
 		if !ValidMetric(m) {
 			t.Errorf("ValidMetric(%q) = false, want true", m)
@@ -389,6 +390,8 @@ func TestMetricScopes(t *testing.T) {
 		// threaded through. Cluster only until someone wants that stream.
 		{"pve_backup_failed", []string{"cluster"}},
 		{"pve_task_failed", []string{"cluster"}},
+		// A NUT server belongs to no cluster.
+		{"ups_on_battery", []string{"global"}},
 		// nil means "the ordinary node/vm/cluster set", which the caller
 		// distinguishes from a restricted list.
 		{"cpu_usage", nil},

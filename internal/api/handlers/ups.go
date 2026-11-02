@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -62,14 +60,6 @@ type upsDeviceResponse struct {
 	Issues             []healthIssueResponse `json:"issues"`
 	Vars               map[string]string     `json:"vars,omitempty"`
 	VarDescriptions    map[string]string     `json:"var_descriptions,omitempty"`
-}
-
-// upsStaleAfter is how old a reading may be before the device is reported as
-// not read: three poll intervals, and never under two minutes. Without it a
-// poller that stopped (lost leadership, a crash) would leave the last reading
-// on screen as if it were current.
-func (h *NutHandler) upsStaleAfter() time.Duration {
-	return max(3*h.pollInterval, 2*time.Minute)
 }
 
 // ListDevices handles GET /api/v1/ups-devices.
@@ -152,7 +142,7 @@ func (h *NutHandler) buildUpsDevice(r db.ListUpsDevicesRow, open map[string]time
 		InputVoltage:     upsVar(vars, "input.voltage"), InputFrequency: upsVar(vars, "input.frequency"),
 		InputTransferLow: upsVar(vars, "input.transfer.low"), InputTransferHigh: upsVar(vars, "input.transfer.high"),
 		OutputVoltage: upsVar(vars, "output.voltage"),
-		Temperature:   firstFloat(upsVar(vars, "ups.temperature"), upsVar(vars, "battery.temperature")),
+		Temperature:   upsVar(vars, "ups.temperature", "battery.temperature"),
 		TestResult:    vars["ups.test.result"],
 	}
 	if d.Flags == nil {
@@ -164,18 +154,17 @@ func (h *NutHandler) buildUpsDevice(r db.ListUpsDevicesRow, open map[string]time
 		w := math.Round(*d.Load * *d.RealpowerNominal / 100)
 		d.Realpower, d.RealpowerEstimated = &w, true
 	}
+	var readAt time.Time
 	if r.LastReadingAt.Valid {
-		t := r.LastReadingAt.Time
-		d.LastReadingAt = &t
-		d.ReadingStale = now.Sub(t) > h.upsStaleAfter()
-	} else {
-		d.ReadingStale = true
+		readAt = r.LastReadingAt.Time
+		d.LastReadingAt = &readAt
 	}
+	d.ReadingStale = readAt.IsZero() || now.Sub(readAt) > nut.StaleAfter(h.pollInterval)
 	// Only a fresh reading from a polled server says what the UPS is doing
 	// now. Anything else serves "unknown", with the last state kept apart, so
 	// no consumer can show a UPS Nexara cannot read as on battery or on mains.
 	d.LastKnownState = r.State
-	if d.ServerEnabled && d.Reachability == "ok" && !d.ReadingStale {
+	if nut.ReadingCurrent(d.ServerEnabled, d.Reachability, readAt, h.pollInterval, now) {
 		if t, ok := open["on_battery"]; ok {
 			d.OnBatterySince = &t
 		}
@@ -235,30 +224,10 @@ func upsIssues(d upsDeviceResponse) []healthIssueResponse {
 }
 
 func upsLeft(d upsDeviceResponse) string {
-	var parts []string
-	if d.BatteryCharge != nil {
-		parts = append(parts, strconv.FormatFloat(*d.BatteryCharge, 'f', 0, 64)+"%")
+	if left := nut.Remaining(d.BatteryCharge, d.BatteryRuntime); left != "" {
+		return " · " + left
 	}
-	if d.BatteryRuntime != nil {
-		parts = append(parts, formatRuntime(*d.BatteryRuntime)+" left")
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return " · " + strings.Join(parts, " · ")
-}
-
-// formatRuntime renders seconds as "9m 40s" or "1h 05m".
-func formatRuntime(sec float64) string {
-	s := int(math.Max(0, sec))
-	switch {
-	case s >= 3600:
-		return fmt.Sprintf("%dh %02dm", s/3600, (s%3600)/60)
-	case s >= 60:
-		return fmt.Sprintf("%dm %02ds", s/60, s%60)
-	default:
-		return fmt.Sprintf("%ds", s)
-	}
+	return ""
 }
 
 func has(flags []string, f string) bool {
@@ -270,23 +239,9 @@ func has(flags []string, f string) bool {
 	return false
 }
 
-func upsVar(vars map[string]string, key string) *float64 {
-	v, ok := vars[key]
-	if !ok {
-		return nil
-	}
-	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
-		return nil
-	}
-	return &f
-}
-
-func firstFloat(vals ...*float64) *float64 {
-	for _, v := range vals {
-		if v != nil {
-			return v
-		}
+func upsVar(vars map[string]string, keys ...string) *float64 {
+	if f, ok := nut.Number(vars, keys...); ok {
+		return &f
 	}
 	return nil
 }

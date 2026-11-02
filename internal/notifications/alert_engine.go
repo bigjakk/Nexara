@@ -62,6 +62,14 @@ var validMetrics = map[string]bool{
 	//                     that broke.
 	"pve_backup_failed": true,
 	"pve_task_failed":   true,
+	// The UPS metrics read the ups_devices rows the NUT poller keeps current;
+	// global scope only. See alert_ups.go.
+	MetricUPSOnBattery:      true,
+	MetricUPSBatteryCharge:  true,
+	MetricUPSRuntime:        true,
+	MetricUPSLoad:           true,
+	MetricUPSUnreachable:    true,
+	MetricUPSReplaceBattery: true,
 }
 
 // Veeam metric names, referenced by both the engine and the API's scope
@@ -118,7 +126,8 @@ func MetricScopes(metric string) []string {
 		return []string{"cluster"}
 	case MetricSnapshotAgeDays, MetricVeeamRPOHours, MetricVeeamMalware:
 		return []string{"cluster", "vm"}
-	case MetricVeeamRepoUsed:
+	case MetricVeeamRepoUsed, MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSRuntime,
+		MetricUPSLoad, MetricUPSUnreachable, MetricUPSReplaceBattery:
 		return []string{"global"}
 	case MetricVeeamJobFailed:
 		return []string{"cluster"}
@@ -191,6 +200,8 @@ type Engine struct {
 	// in-flight retries before the pgx pool is torn down — without this,
 	// a retry that finishes after pool shutdown would lose its DLQ row.
 	shutdownCtx context.Context
+	// upsPollInterval is NUT_POLL_INTERVAL, for judging a UPS reading's age.
+	upsPollInterval time.Duration
 }
 
 // NewEngine creates a new alert engine. shutdownCtx is the per-process
@@ -263,6 +274,11 @@ func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []
 	case MetricPVETaskFailed:
 		// "" = any worker type.
 		return e.evaluatePVETaskFailedRule(ctx, rule, windows, "")
+	case MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSRuntime,
+		MetricUPSLoad, MetricUPSUnreachable, MetricUPSReplaceBattery:
+		// Global, like the repository rule: no cluster maintenance window
+		// applies to a UPS.
+		return e.evaluateUPSRule(ctx, rule)
 	}
 
 	switch rule.ScopeType {

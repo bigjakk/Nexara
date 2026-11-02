@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -762,17 +761,8 @@ func decodeUpsReading(vars map[string]string) upsReading {
 }
 
 func varFloat(vars map[string]string, keys ...string) pgtype.Float8 {
-	for _, k := range keys {
-		v, ok := vars[k]
-		if !ok {
-			continue
-		}
-		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-		if err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
-			return pgtype.Float8{Float64: f, Valid: true}
-		}
-	}
-	return pgtype.Float8{}
+	f, ok := nut.Number(vars, keys...)
+	return pgtype.Float8{Float64: f, Valid: ok}
 }
 
 func floatOf(v pgtype.Float8) *float64 {

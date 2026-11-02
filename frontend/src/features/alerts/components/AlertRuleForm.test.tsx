@@ -144,6 +144,32 @@ describe("AlertRuleForm", () => {
     expect(screen.getByLabelText("Threshold")).toHaveValue(104857600);
   });
 
+  it("creates a UPS charge rule as global, below 50%", async () => {
+    const user = await openForm();
+    // "> 50" would fire on every healthy UPS, a NUT server belongs to no
+    // cluster, and an hour's cooldown would swallow a storm's second outage:
+    // all three snap with the metric.
+    await pickOption(user, "Metric", "UPS Lowest Battery Charge (%)");
+    expect(screen.getByRole("combobox", { name: "Scope" })).toHaveTextContent("Global (all UPS)");
+    await user.click(submitButton());
+
+    await waitFor(() => {
+      expect(mockedPost).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedPost).toHaveBeenCalledWith("/api/v1/alert-rules", {
+      ...commonFields,
+      metric: "ups_battery_charge",
+      operator: "<",
+      threshold: 50,
+      duration_seconds: 0,
+      cooldown_seconds: 0,
+      scope_type: "global",
+      cluster_id: undefined,
+      node_id: undefined,
+      vm_vmid: undefined,
+    });
+  });
+
   it("drops the chosen node when the cluster changes", async () => {
     const user = await openForm();
     await pickOption(user, "Cluster", "Lab");

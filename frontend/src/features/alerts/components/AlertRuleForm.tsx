@@ -40,7 +40,22 @@ const METRICS = [
   { value: "veeam_job_failed", label: "Veeam Failed Jobs (count)" },
   { value: "pve_backup_failed", label: "Proxmox Failed Backups (count)" },
   { value: "pve_task_failed", label: "Proxmox Failed Tasks (count)" },
+  { value: "ups_on_battery", label: "UPS on Battery (count)" },
+  { value: "ups_battery_charge", label: "UPS Lowest Battery Charge (%)" },
+  { value: "ups_runtime", label: "UPS Shortest Runtime (minutes)" },
+  { value: "ups_load", label: "UPS Highest Load (%)" },
+  { value: "ups_unreachable", label: "UPS Unreachable (count)" },
+  { value: "ups_replace_battery", label: "UPS Battery Needs Replacing (count)" },
 ];
+
+const UPS_METRICS = new Set([
+  "ups_on_battery",
+  "ups_battery_charge",
+  "ups_runtime",
+  "ups_load",
+  "ups_unreachable",
+  "ups_replace_battery",
+]);
 
 /**
  * Metrics whose value is "how many happened inside the Duration window", as
@@ -75,6 +90,14 @@ const METRIC_SCOPES: Record<string, string[]> = {
   // offers cluster scope only — see evaluatePVETaskFailedRule.
   pve_backup_failed: ["cluster"],
   pve_task_failed: ["cluster"],
+  // A NUT server belongs to no cluster, so a UPS rule judges every UPS and
+  // names the worst one.
+  ups_on_battery: ["global"],
+  ups_battery_charge: ["global"],
+  ups_runtime: ["global"],
+  ups_load: ["global"],
+  ups_unreachable: ["global"],
+  ups_replace_battery: ["global"],
 };
 
 const ALL_SCOPES = ["cluster", "node", "vm"];
@@ -108,6 +131,32 @@ const METRIC_DEFAULT_THRESHOLD: Record<string, string> = {
   veeam_job_failed: "0",
   pve_backup_failed: "0",
   pve_task_failed: "0",
+  ups_on_battery: "0",
+  ups_battery_charge: "50",
+  ups_runtime: "10",
+  ups_load: "80",
+  ups_unreachable: "0",
+  ups_replace_battery: "0",
+};
+
+/**
+ * The power rules start with no cooldown. The cooldown runs from when the
+ * previous alert resolved, so the form's hour would swallow the second outage
+ * of a storm, when the battery is already drained.
+ */
+const METRIC_DEFAULT_COOLDOWN: Record<string, string> = {
+  ups_on_battery: "0",
+  ups_battery_charge: "0",
+  ups_runtime: "0",
+};
+
+/**
+ * The UPS rules that watch a level running down: "> 50" on charge would fire
+ * on every healthy UPS, so the operator snaps to "<" with the threshold.
+ */
+const METRIC_DEFAULT_OPERATOR: Record<string, string> = {
+  ups_battery_charge: "<",
+  ups_runtime: "<",
 };
 
 /**
@@ -122,6 +171,12 @@ const METRIC_DEFAULT_THRESHOLD: Record<string, string> = {
 const METRIC_DEFAULT_DURATION: Record<string, string> = {
   pve_backup_failed: "86400",
   pve_task_failed: "86400",
+  // Power: seconds count. A blip of a few seconds is not an outage, and a
+  // UPS that stays unreadable for two polls' worth is.
+  ups_on_battery: "60",
+  ups_battery_charge: "0",
+  ups_runtime: "0",
+  ups_unreachable: "120",
 };
 
 /**
@@ -144,6 +199,11 @@ const SCOPE_LABELS: Record<string, string> = {
   vm: "VM",
   global: "Global (all Veeam servers)",
 };
+
+function scopeLabel(scope: string, metric: string): string {
+  if (scope === "global" && UPS_METRICS.has(metric)) return "Global (all UPS)";
+  return SCOPE_LABELS[scope] ?? scope;
+}
 
 const OPERATORS = [
   { value: ">", label: ">" },
@@ -332,6 +392,18 @@ export function AlertRuleForm() {
                   } else if (METRIC_DEFAULT_DURATION[metric] !== undefined) {
                     setDurationSeconds("300");
                   }
+                  const operatorPreset = METRIC_DEFAULT_OPERATOR[v];
+                  if (operatorPreset !== undefined) {
+                    setOperator(operatorPreset);
+                  } else if (METRIC_DEFAULT_OPERATOR[metric] !== undefined) {
+                    setOperator(">");
+                  }
+                  const cooldownPreset = METRIC_DEFAULT_COOLDOWN[v];
+                  if (cooldownPreset !== undefined) {
+                    setCooldownSeconds(cooldownPreset);
+                  } else if (METRIC_DEFAULT_COOLDOWN[metric] !== undefined) {
+                    setCooldownSeconds("3600");
+                  }
                 }}
               >
                 <SelectTrigger id="metric">
@@ -356,7 +428,7 @@ export function AlertRuleForm() {
                 <SelectContent>
                   {scopesFor(metric).map((sc) => (
                     <SelectItem key={sc} value={sc}>
-                      {SCOPE_LABELS[sc]}
+                      {scopeLabel(sc, metric)}
                     </SelectItem>
                   ))}
                 </SelectContent>
