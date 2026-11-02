@@ -22,6 +22,7 @@
   "disconnected": "Disconnected",
   "failedLoadDashboard": "Failed to load dashboard data. Please try again.",
   "unknownWidget": "Unknown widget: {{widgetId}}",
+  "upsWidgetNeedsPermission": "UPS status needs the view:ups permission.",
   "statsOverview": "Stats Overview",
   "clusterCards": "Cluster Cards",
   "cpuUsageChart": "CPU Usage Chart",

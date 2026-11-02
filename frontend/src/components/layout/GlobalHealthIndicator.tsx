@@ -16,6 +16,8 @@ import {
 import { cn } from "@/lib/utils";
 import { issueSig } from "@/lib/health-issues";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { useUpsDevices } from "@/features/power/api/ups-queries";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useHealthDismissStore } from "@/stores/health-dismiss-store";
 import { useHealthMuteStore } from "@/stores/health-mute-store";
 import {
@@ -40,12 +42,16 @@ function issueLink(clusterId: string, i: HealthIssue): string {
 /**
  * GlobalHealthIndicator is the always-visible header pill that surfaces
  * infrastructure problems (Ceph, HA, disks, storage, failed tasks, …) computed
- * server-side and attached to each cluster as issues[]. Each issue can be
- * dismissed (this occurrence, until it resolves) or its whole type muted
- * (suppressed everywhere until restored).
+ * server-side and attached to each cluster as issues[], and each UPS's power
+ * issues for view:ups holders. Each issue can be dismissed (this occurrence,
+ * until it resolves) or its whole type muted (suppressed everywhere until
+ * restored).
  */
 export function GlobalHealthIndicator() {
   const { data: clusters } = useClusters();
+  const { hasGlobalPermission } = usePermissions();
+  const canViewUps = hasGlobalPermission("view", "ups");
+  const { data: upsDevices } = useUpsDevices(canViewUps);
   const dismissed = useHealthDismissStore((s) => s.dismissed);
   const dismiss = useHealthDismissStore((s) => s.dismiss);
   const restoreDismissed = useHealthDismissStore((s) => s.restoreAll);
@@ -55,8 +61,8 @@ export function GlobalHealthIndicator() {
   const restoreMuted = useHealthMuteStore((s) => s.restoreAll);
 
   const allIssues = useMemo<FlatIssue[]>(
-    () =>
-      (clusters ?? []).flatMap((c) =>
+    () => [
+      ...(clusters ?? []).flatMap((c) =>
         (c.issues ?? []).map((iss) => ({
           ...iss,
           clusterId: c.id,
@@ -65,15 +71,29 @@ export function GlobalHealthIndicator() {
           to: issueLink(c.id, iss),
         })),
       ),
-    [clusters],
+      ...(canViewUps ? (upsDevices ?? []) : []).flatMap((d) =>
+        d.issues.map((iss) => ({
+          ...iss,
+          clusterId: `ups:${d.id}`,
+          clusterName: d.server_name,
+          // The detail carries the charge and runtime left, which change on
+          // every poll; signed on the summary instead, a dismissal holds until
+          // the issue resolves, and "Low battery" turning into "Shutting down"
+          // still shows.
+          sig: issueSig(`ups:${d.id}`, { ...iss, detail: iss.summary }),
+          to: `/power/${d.id}`,
+        })),
+      ),
+    ],
+    [clusters, canViewUps, upsDevices],
   );
 
   // Forget dismissals whose issue has resolved (so recurrences re-show). Only
-  // once clusters have loaded, to avoid wiping on the initial empty state.
+  // once every source has loaded, to avoid wiping on the initial empty state.
   useEffect(() => {
-    if (clusters === undefined) return;
+    if (clusters === undefined || (canViewUps && upsDevices === undefined)) return;
     syncActive(allIssues.map((i) => i.sig));
-  }, [clusters, allIssues, syncActive]);
+  }, [clusters, canViewUps, upsDevices, allIssues, syncActive]);
 
   const dismissedSet = useMemo(() => new Set(dismissed), [dismissed]);
   const mutedSet = useMemo(() => new Set(mutedTypes), [mutedTypes]);

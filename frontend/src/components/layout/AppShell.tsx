@@ -56,6 +56,7 @@ import { SearchBar } from "./SearchBar";
 import { CreateResourceMenu } from "./CreateResourceMenu";
 import { CreateResourceDialogs } from "./CreateResourceDialogs";
 import { GlobalHealthIndicator } from "./GlobalHealthIndicator";
+import { useUpsPowerToasts } from "@/features/power/hooks/useUpsPowerToasts";
 
 function getInitials(name: string): string {
   return name
@@ -74,6 +75,7 @@ export function AppShell() {
   const { user, logout, logoutAll } = useAuth();
   const { data: clusters } = useClusters();
   const brandingQuery = useLoadBranding();
+  useUpsPowerToasts();
 
   // For dev builds, append "-Dev" to the browser tab title
   const { data: versionInfo } = useQuery({

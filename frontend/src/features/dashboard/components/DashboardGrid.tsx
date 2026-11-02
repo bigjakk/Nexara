@@ -18,10 +18,12 @@ import {
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   getAllAvailableWidgets,
   getTemplate,
   getWidgetLabel,
+  widgetAllowed,
   type ClusterInfo,
   type DashboardPreset,
 } from "../lib/widget-registry";
@@ -50,6 +52,7 @@ export function DashboardGrid({
   editMode,
   children,
 }: DashboardGridProps) {
+  const { hasGlobalPermission } = usePermissions();
   const [currentLayouts, setCurrentLayouts] = useState<LayoutItem[]>(() =>
     preset.layouts.map((l) => ({ ...l })),
   );
@@ -145,9 +148,11 @@ export function DashboardGrid({
   const availableWidgets = useMemo(
     () =>
       getAllAvailableWidgets(clusters).filter(
-        (w) => !activeWidgetIds.includes(w.id),
+        (w) =>
+          !activeWidgetIds.includes(w.id) &&
+          widgetAllowed(w.template, hasGlobalPermission),
       ),
-    [activeWidgetIds, clusters],
+    [activeWidgetIds, clusters, hasGlobalPermission],
   );
 
   return (

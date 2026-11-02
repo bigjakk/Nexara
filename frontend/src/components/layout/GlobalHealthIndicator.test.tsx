@@ -4,6 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { GlobalHealthIndicator } from "./GlobalHealthIndicator";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { useUpsDevices } from "@/features/power/api/ups-queries";
+import { upsDevice } from "@/features/power/power.fixtures";
+import type { UpsDevice } from "@/features/power/types/ups";
+import { useAuthStore } from "@/stores/auth-store";
 import { useHealthDismissStore } from "@/stores/health-dismiss-store";
 import { useHealthMuteStore } from "@/stores/health-mute-store";
 import type { ClusterResponse, HealthIssue } from "@/types/api";
@@ -11,8 +15,17 @@ import type { ClusterResponse, HealthIssue } from "@/types/api";
 vi.mock("@/features/dashboard/api/dashboard-queries", () => ({
   useClusters: vi.fn(),
 }));
+vi.mock("@/features/power/api/ups-queries", () => ({
+  useUpsDevices: vi.fn(),
+}));
 
 const mockUseClusters = vi.mocked(useClusters);
+
+function setUps(devices: UpsDevice[] | undefined): void {
+  vi.mocked(useUpsDevices).mockReturnValue({
+    data: devices,
+  } as unknown as ReturnType<typeof useUpsDevices>);
+}
 
 function setClusters(clusters: ClusterResponse[] | undefined): void {
   mockUseClusters.mockReturnValue({
@@ -68,6 +81,8 @@ describe("GlobalHealthIndicator", () => {
     useHealthDismissStore.setState({ dismissed: [] });
     useHealthMuteStore.setState({ mutedTypes: [] });
     mockUseClusters.mockReset();
+    useAuthStore.setState({ globalPermissions: [] });
+    setUps(undefined);
   });
   afterEach(() => {
     localStorage.clear();
@@ -162,6 +177,40 @@ describe("GlobalHealthIndicator", () => {
 
     await user.click(screen.getByRole("button", { name: /restore/i }));
     expect(screen.getByText(MON_LOW)).toBeInTheDocument();
+  });
+
+  // A UPS issue's detail moves with every poll (the charge and runtime left),
+  // so its dismissal is keyed without it and holds until the outage ends.
+  it("merges UPS issues for view:ups holders, and a dismissal outlasts the next reading", async () => {
+    useAuthStore.setState({ globalPermissions: ["view:ups"] });
+    setClusters([]);
+    const onBattery = (detail: string): UpsDevice =>
+      upsDevice({
+        id: "u2",
+        name: "ups02",
+        issues: [
+          {
+            type: "ups_on_battery",
+            severity: "warn",
+            scope: "ups",
+            target: "ups02",
+            summary: "On battery",
+            detail,
+          },
+        ],
+      });
+    setUps([onBattery("ups02 is on battery · 52% · 9m 40s left")]);
+    const { rerender } = renderWithProviders(<GlobalHealthIndicator />);
+
+    const user = await openPopover();
+    expect(
+      screen.getByRole("link", { name: /ups02 is on battery/ }),
+    ).toHaveAttribute("href", "/power/u2");
+    await user.click(screen.getByRole("button", { name: /dismiss/i }));
+
+    setUps([onBattery("ups02 is on battery · 50% · 9m 10s left")]);
+    rerender(<GlobalHealthIndicator />);
+    expect(screen.queryByText(/ups02 is on battery/)).not.toBeInTheDocument();
   });
 
   it("mutes an alert type, hiding all issues of that type", async () => {

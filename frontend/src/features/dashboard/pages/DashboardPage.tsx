@@ -22,6 +22,8 @@ import { RefreshRateSelector } from "../components/RefreshRateSelector";
 import { LiveMetricCards } from "../components/LiveMetricCards";
 import { MetricChart } from "../components/MetricChart";
 import { TopConsumers } from "../components/TopConsumers";
+import { UpsStatusWidget } from "@/features/power/components/UpsStatusWidget";
+import { usePermissions } from "@/hooks/usePermissions";
 import { DashboardGrid } from "../components/DashboardGrid";
 import type { LayoutItem } from "react-grid-layout";
 import { DashboardPresetSelector } from "../components/DashboardPresetSelector";
@@ -59,6 +61,8 @@ function ConnectionDot({
 
 export function DashboardPage() {
   const { t } = useTranslation("dashboard");
+  const { hasGlobalPermission } = usePermissions();
+  const canViewUps = hasGlobalPermission("view", "ups");
   const [timeRange, setTimeRange] = useState<TimeRange>("live");
   const [editMode, setEditMode] = useState(false);
   const isMobile = useIsMobile();
@@ -366,6 +370,17 @@ export function DashboardPage() {
           );
         }
 
+        case "ups-status":
+          // A saved layout can keep the widget after its grant is gone; its
+          // reads would be refused, so say why instead.
+          return canViewUps ? (
+            <UpsStatusWidget />
+          ) : (
+            <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
+              {t("upsWidgetNeedsPermission")}
+            </div>
+          );
+
         default:
           return (
             <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -374,7 +389,7 @@ export function DashboardPage() {
           );
       }
     },
-    [data, clusterMap, isLoading, liveMetrics, seedMetrics, timeRange, t],
+    [data, clusterMap, isLoading, liveMetrics, seedMetrics, timeRange, t, canViewUps],
   );
 
   return (

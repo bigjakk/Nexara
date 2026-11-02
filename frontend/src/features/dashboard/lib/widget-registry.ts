@@ -8,6 +8,12 @@ export interface WidgetTemplate {
   category: "overview" | "metrics" | "cluster";
   /** If true, one instance is created per cluster */
   perCluster: boolean;
+  /**
+   * The global grant the widget's data needs, as "action:resource". The
+   * picker leaves the widget out without it, and the dashboard renders a note
+   * in its place, since its API would refuse the reads.
+   */
+  requiresGlobal?: string;
 }
 
 export const widgetTemplates: WidgetTemplate[] = [
@@ -75,7 +81,26 @@ export const widgetTemplates: WidgetTemplate[] = [
     category: "metrics",
     perCluster: false,
   },
+  {
+    type: "ups-status",
+    label: "UPS Status",
+    description: "Each UPS's status, charge and runtime left",
+    defaultLayout: { w: 6, h: 5, minW: 4, minH: 4 },
+    category: "overview",
+    perCluster: false,
+    requiresGlobal: "view:ups",
+  },
 ];
+
+/** Whether the caller may have a widget, by its template's requiresGlobal. */
+export function widgetAllowed(
+  template: WidgetTemplate,
+  hasGlobalPermission: (action: string, resource: string) => boolean,
+): boolean {
+  if (template.requiresGlobal === undefined) return true;
+  const [action = "", resource = ""] = template.requiresGlobal.split(":");
+  return hasGlobalPermission(action, resource);
+}
 
 /** Parse a widget ID like "cpu-chart:abc123" into { type, clusterId } */
 export function parseWidgetId(widgetId: string): {

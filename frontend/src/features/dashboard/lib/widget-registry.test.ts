@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   widgetTemplates,
+  widgetAllowed,
   parseWidgetId,
   buildWidgetId,
   getTemplate,
@@ -273,5 +274,22 @@ describe("defaultPreset (static fallback)", () => {
   it("has global widgets only (no clusters)", () => {
     expect(defaultPreset.widgetIds).toContain("stats-overview");
     expect(defaultPreset.widgetIds.every((id) => !id.includes(":"))).toBe(true);
+  });
+});
+
+describe("widgetAllowed", () => {
+  // The UPS widget reads routes that need a global view:ups; offering it
+  // without one would add a widget whose every read is refused.
+  it("needs a template's global grant, and nothing for the rest", () => {
+    const ups = widgetTemplates.find((t) => t.type === "ups-status");
+    const stats = widgetTemplates.find((t) => t.type === "stats-overview");
+    if (ups === undefined || stats === undefined) throw new Error("missing template");
+    const grants =
+      (...held: string[]) =>
+      (action: string, resource: string) =>
+        held.includes(`${action}:${resource}`);
+    expect(widgetAllowed(ups, grants())).toBe(false);
+    expect(widgetAllowed(ups, grants("view:ups"))).toBe(true);
+    expect(widgetAllowed(stats, grants())).toBe(true);
   });
 });
