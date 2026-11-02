@@ -123,6 +123,27 @@ func TestUpsQueries(t *testing.T) {
 		}
 	})
 
+	t.Run("disabling a server closes its open episodes as not observed", func(t *testing.T) {
+		exec(t, `DELETE FROM ups_events WHERE ups_id = ANY($1)`, []uuid.UUID{upsDevA, upsDevB})
+		if err := q.OpenUpsEvent(ctx, gen.OpenUpsEventParams{UpsID: upsDevA, Kind: "on_battery", StartedAt: time.Now(), Details: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := q.CloseUpsEventsOfDisabledServers(ctx); err != nil || n != 0 {
+			t.Fatalf("enabled server: closed %d, %v; want 0", n, err)
+		}
+		exec(t, `UPDATE nut_servers SET enabled = false WHERE id = $1`, upsServerID)
+		defer exec(t, `UPDATE nut_servers SET enabled = true WHERE id = $1`, upsServerID)
+		if n, err := q.CloseUpsEventsOfDisabledServers(ctx); err != nil || n != 1 {
+			t.Fatalf("disabled server: closed %d, %v; want 1", n, err)
+		}
+		var observed bool
+		var endedBy string
+		if err := pool.QueryRow(ctx, `SELECT end_observed, details->>'ended_by' FROM ups_events WHERE ups_id = $1 AND ended_at IS NOT NULL`,
+			upsDevA).Scan(&observed, &endedBy); err != nil || observed || endedBy != "polling_off" {
+			t.Fatalf("end_observed %v, ended_by %q, %v; want a closed, unobserved episode tagged polling_off", observed, endedBy, err)
+		}
+	})
+
 	t.Run("deleting a server takes its readings when they go first", func(t *testing.T) {
 		if err := q.DeleteUpsMetricsForServer(ctx, upsServerID); err != nil {
 			t.Fatal(err)

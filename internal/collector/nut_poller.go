@@ -61,6 +61,7 @@ type NutQueries interface {
 	OpenUpsEvent(ctx context.Context, arg db.OpenUpsEventParams) error
 	UpdateOpenUpsEvent(ctx context.Context, arg db.UpdateOpenUpsEventParams) error
 	CloseUpsEvent(ctx context.Context, arg db.CloseUpsEventParams) error
+	CloseUpsEventsOfDisabledServers(ctx context.Context) (int64, error)
 	InsertUpsPointEvent(ctx context.Context, arg db.InsertUpsPointEventParams) error
 	SetNutServerPolled(ctx context.Context, arg db.SetNutServerPolledParams) error
 	SetNutServerPollError(ctx context.Context, arg db.SetNutServerPollErrorParams) error
@@ -141,6 +142,15 @@ func (p *NutPoller) reconcile(ctx context.Context, workers map[uuid.UUID]*nutWor
 			w.stop()
 			delete(workers, id)
 		}
+	}
+	// Run after the stops, so no worker of a disabled server can open an
+	// episode behind it; a no-op once there are none.
+	if n, err := p.q.CloseUpsEventsOfDisabledServers(ctx); err != nil {
+		if ctx.Err() == nil {
+			p.logger.Warn("nut: closing a disabled server's episodes failed", "error", err)
+		}
+	} else if n > 0 && p.eventPub != nil {
+		p.eventPub.SystemEvent(ctx, events.KindUPSChange, "state_changed")
 	}
 	for id, s := range want {
 		if _, ok := workers[id]; !ok {
@@ -260,7 +270,28 @@ func (p *NutPoller) loadServerState(ctx context.Context, srv db.NutServer) *nutS
 			d.open[e.Kind] = det
 		}
 	}
+	// A loss of contact whose episode was closed meanwhile (polling was turned
+	// off) is forgotten, so one that persists opens a new episode instead of
+	// reading as already recorded.
+	for _, d := range st.devices {
+		if kind := reachEpisodeKind(d.prev.Reach); kind != "" {
+			if _, ok := d.open[kind]; !ok {
+				d.prev.Reach = upsReachUnknown
+			}
+		}
+	}
 	return st
+}
+
+// reachEpisodeKind is the episode a reachability other than ok keeps open.
+func reachEpisodeKind(reach string) string {
+	switch reach {
+	case upsReachUnreachable:
+		return "unreachable"
+	case upsReachStale, upsReachDriverDown:
+		return "stale"
+	}
+	return ""
 }
 
 func newUpsDeviceState(r db.UpsDevice) *upsDeviceState {
@@ -399,11 +430,13 @@ func (p *NutPoller) config(srv db.NutServer) (nut.Config, error) {
 func (p *NutPoller) serverUnreachable(ctx context.Context, st *nutServerState, cause error, now time.Time) bool {
 	st.closeConn()
 	st.failures++
-	backoff := nutBackoffBase << min(st.failures-1, 8)
-	st.retryAt = now.Add(min(backoff, nutBackoffMax))
+	// From when the attempt failed, not when the poll began: a timeout can
+	// take as long as the first backoff step.
+	backoff := min(nutBackoffBase<<min(st.failures-1, 8), nutBackoffMax)
+	st.retryAt = p.now().Add(backoff)
 	reason := clipText(cause.Error(), 500)
 	p.logger.Warn("nut: server unreachable", "server", st.srv.Name, "failures", st.failures,
-		"retry_in", st.retryAt.Sub(now), "error", reason)
+		"retry_in", backoff, "error", reason)
 	if err := p.q.SetNutServerPollError(ctx, db.SetNutServerPollErrorParams{ID: st.srv.ID, LastPollError: reason}); err != nil {
 		p.logger.Warn("nut: recording poll error failed", "server", st.srv.Name, "error", err)
 	}
@@ -444,6 +477,7 @@ func (p *NutPoller) syncDevices(ctx context.Context, st *nutServerState, list []
 		}
 		// Nobody saw the condition clear: the UPS stopped being reported.
 		for kind, det := range d.open {
+			det.EndedBy = "removed"
 			p.apply(ctx, d, []upsEventChange{{Kind: kind, Op: upsEventClose, Details: det, Unobserved: true}}, now)
 		}
 		delete(st.devices, name)
@@ -596,6 +630,9 @@ type upsEpisodeDetails struct {
 	Status        string   `json:"status,omitempty"`
 	Reason        string   `json:"reason,omitempty"`
 	Result        string   `json:"result,omitempty"`
+	// EndedBy says why an episode closed unobserved without contact being
+	// lost: "removed" here, "polling_off" from CloseUpsEventsOfDisabledServers.
+	EndedBy string `json:"ended_by,omitempty"`
 }
 
 type upsEventOp int

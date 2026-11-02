@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -177,6 +178,53 @@ func TestNutPoller_Polls(t *testing.T) {
 			t.Errorf("%s closed with end_observed=%v", e.kind, e.endObserved)
 		}
 	}
+
+	// Disabled mid-outage, upsd gone too: nothing watches it any more, so the
+	// episodes are closed as not observed instead of reading as ongoing.
+	fake.SetVar("ups01", "ups.status", "OB")
+	tick(time.Second)
+	fake.SetReachable(false)
+	tick(time.Minute)
+	setEnabled := func(on bool) { q.mu.Lock(); q.server.Enabled = on; q.mu.Unlock() }
+	setEnabled(false)
+	p.reconcile(ctx, map[uuid.UUID]*nutWorker{})
+	if got := q.openKinds(); len(got) != 0 {
+		t.Fatalf("after disabling: still open %q", got)
+	}
+
+	// Re-enabled with upsd still gone: the loss of contact is recorded again.
+	setEnabled(true)
+	st.closeConn()
+	st = p.loadServerState(ctx, q.server)
+	defer st.closeConn()
+	tick(time.Second)
+	if got := q.openKinds(); !slices.Equal(got, []string{"unreachable"}) {
+		t.Errorf("re-enabled while unreachable: open %q, want the loss recorded again", got)
+	}
+}
+
+// A failed attempt can take a whole timeout. The backoff runs from when it
+// failed, or a dead host would be redialled on every tick.
+func TestNutPoller_BacksOffFromTheFailure(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	q := newFakeNutQueries(db.NutServer{ID: uuid.New(), Name: "nut01", Host: "127.0.0.1", Port: 1, TlsMode: "off", Enabled: true})
+	p := NewNutPoller(q, "", NutPollerConfig{Interval: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	clock := time.Date(2026, 11, 2, 3, 12, 0, 0, time.UTC)
+	p.now = func() time.Time { return clock }
+	dials := 0
+	p.dial = func(context.Context, nut.Config) (*nut.Client, error) {
+		dials++
+		clock = clock.Add(nutBackoffBase) // the attempt times out
+		return nil, errors.New("i/o timeout")
+	}
+	st := p.loadServerState(ctx, q.server)
+	p.poll(ctx, st)
+	clock = clock.Add(nutBackoffBase / 2)
+	p.poll(ctx, st)
+	if dials != 1 {
+		t.Errorf("dialled %d times; the second poll falls inside the backoff", dials)
+	}
 }
 
 // fakeNutQueries is an in-memory NutQueries for one server.
@@ -230,7 +278,25 @@ func (f *fakeNutQueries) byID(id uuid.UUID) (string, db.UpsDevice) {
 }
 
 func (f *fakeNutQueries) ListEnabledNutServers(context.Context) ([]db.NutServer, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.server.Enabled {
+		return nil, nil
+	}
 	return []db.NutServer{f.server}, nil
+}
+
+func (f *fakeNutQueries) CloseUpsEventsOfDisabledServers(context.Context) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int64
+	for _, e := range f.events {
+		if e.open && !f.server.Enabled {
+			e.open, e.endObserved = false, false
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (f *fakeNutQueries) ListUpsDevicesByServer(context.Context, uuid.UUID) ([]db.UpsDevice, error) {

@@ -340,6 +340,10 @@ type Querier interface {
 	// copy. No version string is empty, so the <> holds nothing back.
 	ClearVirtioWinStableFlag(ctx context.Context, version string) error
 	CloseUpsEvent(ctx context.Context, arg CloseUpsEventParams) error
+	// Nothing watches a disabled server's UPSes, so an episode it left open is
+	// closed as not observed rather than left reading as ongoing, and tagged so
+	// the history says polling was turned off, not that contact was lost.
+	CloseUpsEventsOfDisabledServers(ctx context.Context) (int64, error)
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	// Terminal transitions set cleanup_pending: the job may still hold cluster
 	// state (DRS pause, native CRS pause, disabled HA rules, stopped passthrough
@@ -2342,6 +2346,9 @@ type Querier interface {
 	ListUpsDevices(ctx context.Context) ([]ListUpsDevicesRow, error)
 	ListUpsDevicesByServer(ctx context.Context, serverID uuid.UUID) ([]UpsDevice, error)
 	// Newest first, keyset-paged on (started_at, id). ups_id and kind filter when set.
+	// details is aliased so the handler never reads a field named Details: in
+	// package handlers that name means an audit row's, and
+	// TestGuard_AuditReadPathsRedact keys on it.
 	ListUpsEvents(ctx context.Context, arg ListUpsEventsParams) ([]ListUpsEventsRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)

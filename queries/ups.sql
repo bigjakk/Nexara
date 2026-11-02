@@ -172,6 +172,17 @@ SET ended_at = @ended_at,
     details = @details
 WHERE ups_id = @ups_id AND kind = @kind AND ended_at IS NULL;
 
+-- name: CloseUpsEventsOfDisabledServers :execrows
+-- Nothing watches a disabled server's UPSes, so an episode it left open is
+-- closed as not observed rather than left reading as ongoing, and tagged so
+-- the history says polling was turned off, not that contact was lost.
+UPDATE ups_events e
+SET ended_at = now(), end_observed = false,
+    details = e.details || '{"ended_by": "polling_off"}'::jsonb
+FROM ups_devices d
+JOIN nut_servers s ON s.id = d.server_id
+WHERE e.ups_id = d.id AND e.ended_at IS NULL AND NOT s.enabled;
+
 -- name: InsertUpsPointEvent :exec
 -- An event with no duration, such as a self-test result.
 INSERT INTO ups_events (ups_id, kind, started_at, ended_at, details)
@@ -179,7 +190,10 @@ VALUES (@ups_id, @kind, @at, @at, @details);
 
 -- name: ListUpsEvents :many
 -- Newest first, keyset-paged on (started_at, id). ups_id and kind filter when set.
-SELECT e.id, e.ups_id, e.kind, e.started_at, e.ended_at, e.end_observed, e.details,
+-- details is aliased so the handler never reads a field named Details: in
+-- package handlers that name means an audit row's, and
+-- TestGuard_AuditReadPathsRedact keys on it.
+SELECT e.id, e.ups_id, e.kind, e.started_at, e.ended_at, e.end_observed, e.details AS event_details,
        d.ups_name, d.description AS ups_description, s.name AS server_name
 FROM ups_events e
 JOIN ups_devices d ON d.id = e.ups_id

@@ -41,6 +41,26 @@ func (q *Queries) CloseUpsEvent(ctx context.Context, arg CloseUpsEventParams) er
 	return err
 }
 
+const closeUpsEventsOfDisabledServers = `-- name: CloseUpsEventsOfDisabledServers :execrows
+UPDATE ups_events e
+SET ended_at = now(), end_observed = false,
+    details = e.details || '{"ended_by": "polling_off"}'::jsonb
+FROM ups_devices d
+JOIN nut_servers s ON s.id = d.server_id
+WHERE e.ups_id = d.id AND e.ended_at IS NULL AND NOT s.enabled
+`
+
+// Nothing watches a disabled server's UPSes, so an episode it left open is
+// closed as not observed rather than left reading as ongoing, and tagged so
+// the history says polling was turned off, not that contact was lost.
+func (q *Queries) CloseUpsEventsOfDisabledServers(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, closeUpsEventsOfDisabledServers)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getUpsDevice = `-- name: GetUpsDevice :one
 SELECT d.id, d.server_id, d.ups_name, d.description, d.manufacturer, d.model, d.serial, d.firmware, d.driver, d.status, d.state, d.reachability, d.vars, d.var_descriptions, d.present, d.last_reading_at, d.created_at, d.updated_at,
        s.name AS server_name,
@@ -495,7 +515,7 @@ func (q *Queries) ListUpsDevicesByServer(ctx context.Context, serverID uuid.UUID
 }
 
 const listUpsEvents = `-- name: ListUpsEvents :many
-SELECT e.id, e.ups_id, e.kind, e.started_at, e.ended_at, e.end_observed, e.details,
+SELECT e.id, e.ups_id, e.kind, e.started_at, e.ended_at, e.end_observed, e.details AS event_details,
        d.ups_name, d.description AS ups_description, s.name AS server_name
 FROM ups_events e
 JOIN ups_devices d ON d.id = e.ups_id
@@ -523,13 +543,16 @@ type ListUpsEventsRow struct {
 	StartedAt      time.Time          `json:"started_at"`
 	EndedAt        pgtype.Timestamptz `json:"ended_at"`
 	EndObserved    bool               `json:"end_observed"`
-	Details        json.RawMessage    `json:"details"`
+	EventDetails   json.RawMessage    `json:"event_details"`
 	UpsName        string             `json:"ups_name"`
 	UpsDescription string             `json:"ups_description"`
 	ServerName     string             `json:"server_name"`
 }
 
 // Newest first, keyset-paged on (started_at, id). ups_id and kind filter when set.
+// details is aliased so the handler never reads a field named Details: in
+// package handlers that name means an audit row's, and
+// TestGuard_AuditReadPathsRedact keys on it.
 func (q *Queries) ListUpsEvents(ctx context.Context, arg ListUpsEventsParams) ([]ListUpsEventsRow, error) {
 	rows, err := q.db.Query(ctx, listUpsEvents,
 		arg.UpsID,
@@ -552,7 +575,7 @@ func (q *Queries) ListUpsEvents(ctx context.Context, arg ListUpsEventsParams) ([
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.EndObserved,
-			&i.Details,
+			&i.EventDetails,
 			&i.UpsName,
 			&i.UpsDescription,
 			&i.ServerName,
