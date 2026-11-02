@@ -211,7 +211,11 @@ func main() {
 	// the leader polling for servers with last_sync_at IS NULL).
 	veeamTrigger := collector.NewInventoryTrigger()
 	srv.SetVeeamSyncTrigger(veeamTrigger)
-	go runCollector(ctx, cfg, application, veeamTrigger, logger.With("component", "collector"))
+	// Fired when a NUT server is added, changed or removed, so the poller does
+	// not wait out its 30 s reconcile. Created here for the reason
+	// InventoryTrigger's comment gives.
+	nutTrigger := collector.NewInventoryTrigger()
+	go runCollector(ctx, cfg, application, veeamTrigger, nutTrigger, logger.With("component", "collector"))
 
 	// ---- Scheduler goroutine ----
 	go runScheduler(ctx, cfg, application, logger.With("component", "scheduler"))
@@ -448,7 +452,7 @@ func runWithLeaderRetry(ctx context.Context, pool *pgxpool.Pool, role string, lo
 
 // runCollector runs the metric collection loop. Uses leader election so only
 // one instance across the Swarm cluster runs the collector at any time.
-func runCollector(ctx context.Context, cfg *config.Config, application *app.App, veeamTrigger *collector.InventoryTrigger, logger *slog.Logger) {
+func runCollector(ctx context.Context, cfg *config.Config, application *app.App, veeamTrigger, nutTrigger *collector.InventoryTrigger, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("collector panic", "error", r)
@@ -759,6 +763,27 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 						return
 					}
 				}
+			}()
+		}
+
+		// NUT poller. Leader-gated like the loops above, with a goroutine per
+		// server inside, so a slow upsd delays neither the PVE sampling nor
+		// another server. Floored at 2s: upsd is cheap, but every poll writes a
+		// reading per UPS.
+		if cfg.NutPollInterval > 0 {
+			nutPoller := collector.NewNutPoller(queries, cfg.EncryptionKey, collector.NutPollerConfig{
+				Interval: max(cfg.NutPollInterval, 2*time.Second),
+			}, logger)
+			if application.EventPub != nil {
+				nutPoller.SetEventPublisher(application.EventPub)
+			}
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("nut poller panicked", "panic", r)
+					}
+				}()
+				nutPoller.Run(ctx, nutTrigger.C())
 			}()
 		}
 

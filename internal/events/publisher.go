@@ -38,6 +38,11 @@ const (
 	KindSnapshotChange    = "snapshot_change"
 	KindAccessChange      = "access_change"
 	KindVeeamChange       = "veeam_change"
+	// KindUPSChange announces that a UPS changed state or reachability, that a
+	// device appeared or vanished, or that a NUT server was added, changed or
+	// removed. Published as a system event; readings that merely move do not
+	// send one, the Power page polls for those.
+	KindUPSChange = "ups_change"
 	// KindScheduleChange announces that the scheduler settled a scheduled
 	// task's run from its Proxmox task (resource_id is the schedule, action
 	// its new last_status). Nothing else publishes it: the claim, the

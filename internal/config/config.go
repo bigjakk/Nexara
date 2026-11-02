@@ -106,6 +106,10 @@ type Config struct {
 	// a real server holds tens of thousands of them and Nexara deliberately
 	// keeps a recent window rather than the full history.
 	VeeamSessionRetention time.Duration `envconfig:"VEEAM_SESSION_RETENTION" default:"720h"`
+	// NutPollInterval is how often each NUT server is read for its UPS state
+	// and readings. Floored at 2s in the collector; 0 turns UPS polling off,
+	// and a negative value is refused (validate).
+	NutPollInterval time.Duration `envconfig:"NUT_POLL_INTERVAL" default:"10s"`
 	// TaskHistoryRetention bounds how far back /api/v1/tasks can answer. The
 	// hourly sweep deletes terminal rows older than this.
 	//
@@ -228,6 +232,9 @@ func (c *Config) validate() error {
 	// the observer off without a word. 0 is the off switch.
 	if c.ObjectObserveInterval < 0 {
 		return fmt.Errorf("OBJECT_OBSERVE_INTERVAL must not be negative (0 turns the observer off)")
+	}
+	if c.NutPollInterval < 0 {
+		return fmt.Errorf("NUT_POLL_INTERVAL must not be negative (0 turns UPS polling off)")
 	}
 	switch strings.ToLower(strings.TrimSpace(c.SecureCookies)) {
 	case "auto", "always", "never":
