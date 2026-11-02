@@ -106,6 +106,7 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 - Live migration with pre-flight checks — within a cluster or across clusters, with per-disk storage placement and network mapping
 - **Node evacuation** — bulk migrate all guests off a node
 - **Health rollup** — Ceph, disk S.M.A.R.T., quorum, storage, and task failures aggregated into one dismissible health indicator
+- **UPS monitoring** — the UPSes your Network UPS Tools (NUT) servers report, read-only: status, charge, runtime and load, power-event history, and on-battery alerts
 
 </td>
 <td width="50%">
@@ -235,6 +236,7 @@ All settings are environment variables. `docker-compose.yml` injects a curated s
 | `SNAPSHOT_SYNC_INTERVAL` | `5m` | How often the guest snapshot inventory (central Snapshots page + snapshot-age alerts) refreshes. One Proxmox call per guest per pass; floored at `60s`, `0` disables |
 | `NODE_MEMORY_READ_INTERVAL` | `24h` | How often each node's memory DIMM layout is re-read with `dmidecode` over the cluster's SSH credentials (as root). Clusters without SSH credentials are never dialed; `0` disables the background read |
 | `NODE_PRESSURE_SYNC_INTERVAL` | `5m` | How often each online node's pressure stall history (Proxmox VE 9) is copied from its RRD. Floored at `1m`; `0` disables it |
+| `NUT_POLL_INTERVAL` | `10s` | How often each NUT server is read for its UPSes' state (Power page + UPS alerts). Floored at `2s`; `0` disables, and every UPS then reads as unreachable |
 | `OBJECT_OBSERVE_INTERVAL` | `5m` | How often Nexara looks for edits made directly in Proxmox that ran no task — a guest's options, an HA resource, a firewall rule, a pool, a storage definition, a node's settings — and records the names of the fields that changed in the object's History. One Proxmox call per guest per pass, at most ten a second per cluster. Held between `1m` and `1h`; `0` disables it |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `PUID` / `PGID` | `1000` | Container user/group ID |

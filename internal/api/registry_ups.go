@@ -240,7 +240,8 @@ func registerUPSEndpoints(reg *Registry, h *handlers.NutHandler, connect fiber.H
 		Path:   "/api/v1/ups-events",
 		Description: "Power events, newest first: outages, low battery, overload, bypass, voltage " +
 			"correction, a battery needing replacement, lost contact and self-test results. An event " +
-			"closed after a gap in contact has end_observed false.",
+			"whose end Nexara did not see has end_observed false: after a gap in contact, or, with " +
+			"details.ended_by polling_off or removed, because Nexara stopped watching while it was still going.",
 		Group:       "Power",
 		Permissions: globalCheck("view", "ups"),
 		Parameters: apischema.Properties{

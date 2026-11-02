@@ -1742,6 +1742,61 @@ that sees a failure rather than waiting the window out. They also accept a
 the Tasks page; one whose status Proxmox can no longer report (`vanished`) is
 not counted at all, since that is lost track of rather than failed.
 
+### Power (NUT and UPS)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/nut-servers` | Add a NUT server. It is probed before it is stored, so a typo in the address is a failed create |
+| POST | `/nut-servers/probe` | Test a connection without saving it: upsd and protocol versions, the TLS fingerprint, and the UPSes it reports |
+| GET | `/nut-servers` | List NUT servers. The username is returned only to `manage:ups` holders, the password never |
+| GET | `/nut-servers/:id` | Get a NUT server |
+| PUT | `/nut-servers/:id` | Update a NUT server. Every field is optional; a change to how Nexara connects re-probes, a rename or `enabled` toggle does not |
+| DELETE | `/nut-servers/:id` | Remove a NUT server and the UPS readings and events collected from it |
+| POST | `/nut-servers/:id/test` | Test a saved server's connection. Persists nothing |
+| GET | `/ups-devices` | List UPSes with their state, readings and health issues |
+| GET | `/ups-devices/:id` | Get one UPS, with every variable upsd reports and its description |
+| GET | `/ups-devices/:id/metrics` | Readings over `range` = `1h`, `6h`, `24h`, `7d` or `30d`, in raw, 5-minute or hourly buckets, at most 360 points |
+| GET | `/ups-events` | Power events, newest first. Filter by `ups_id` and `kind`; page with `before` and `before_id` together, both taken from the last event of the previous page |
+
+All of them need a global grant: `view:ups`, `manage:ups` for adding, editing
+and testing, `delete:ups` for removing. Create, probe, update and test share a
+limit of 10 a minute per client IP, since each one makes Nexara connect to an
+address the caller names.
+
+**`state` is `"unknown"` unless the reading is current**: the server is polled,
+its last poll read the UPS, and the reading is younger than three poll
+intervals (and at least two minutes). `last_known_state` keeps the last state
+read. Why there is none: `server_enabled` false (polling turned off),
+`reading_stale` true (no reading for too long), or `reachability` (`unreachable`,
+`driver_down`, `stale`, or `unknown` for never read). Nexara never reports a UPS
+it cannot read as on mains or on battery.
+
+**Confirmations.** A request that needs one is refused with 422 and a code
+naming the field to resend it with: `private_address_confirm_required`
+(`allow_private_address`), `nut_cleartext_credentials_confirm_required`
+(`acknowledge_cleartext_credentials`) and `nut_insecure_tls_confirm_required`
+(`acknowledge_insecure_tls`). An edit asks only when it makes the stored
+password travel less protected than before. A failed probe is 422
+`nut_auth_failed`, 422 `nut_tls_unavailable` or 502 `nut_unreachable`.
+
+**Changing a server's host or port requires re-entering the password.** A
+stored credential is only ever sent to the address it was saved for; the
+refusal is audited as `nut_server_credential_redirect_refused`.
+
+**An event's end.** `end_observed` is false when Nexara did not see the
+condition clear. With no `details.ended_by`, contact was lost and the
+condition had cleared by the next reading. With `ended_by` set to
+`polling_off` or `removed`, Nexara stopped watching while it was still going:
+polling was turned off, or upsd stopped listing the UPS.
+
+Six global-scope alert metrics read the same readings: `ups_on_battery`,
+`ups_unreachable` and `ups_replace_battery` (counts), `ups_battery_charge` and
+`ups_load` (the lowest charge and the highest load, in %), and `ups_runtime`
+(the shortest runtime left, in **minutes**). Rules are judged on the UPSes
+Nexara can read; one it cannot read holds a rule, neither firing nor resolving,
+only while its last reading would meet the condition. A UPS on a server whose
+polling is turned off is left out of every rule.
+
 ### Migrations (Cross-Cluster)
 
 | Method | Path | Description |

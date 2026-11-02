@@ -23,6 +23,7 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 - [Backup Management](#backup-management)
 - [Veeam Backup & Replication](#veeam-backup--replication)
 - [Snapshots](#snapshots)
+- [Power (UPS monitoring)](#power-ups-monitoring)
 - [Windows Guest Tools](#windows-guest-tools)
 - [Alert Configuration](#alert-configuration)
 - [CVE Scanning](#cve-scanning)
@@ -115,6 +116,7 @@ Nexara aggregates health across everything it manages, server-side, and surfaces
 | Guest I/O errors | error |
 | Replication failures | error |
 | Ceph health checks | mirrors Ceph's own severity |
+| UPS on battery, low battery, overloaded, unreachable, or with a battery to replace — for holders of a global `view:ups` ([Power](#power-ups-monitoring)) | warning; error for low battery and overload |
 
 ### Dismissing and Muting
 
@@ -998,6 +1000,80 @@ Filter by cluster, guest type (VMs / containers), age bucket (older than 7 days,
 Proxmox has no bulk snapshot endpoint, so the collector walks one listing per guest on its own cadence — every **5 minutes** by default, tuned with `SNAPSHOT_SYNC_INTERVAL`. That pass is deliberately conservative about deleting rows: a guest on an offline node, a guest whose listing errored, or a listing that came back empty (which Proxmox never legitimately returns) leaves that guest's rows untouched, so a transient blip can never look like "all your snapshots vanished". Rows are only removed when the guest itself has left the inventory, or when a successful listing says the snapshot is gone.
 
 > Snapshot age is also an alertable metric — see the `snapshot_age_days` metric under [Alert Configuration](#alert-configuration) — and **Snapshot Inventory** is one of the [report](#reports) types.
+
+---
+
+## Power (UPS monitoring)
+
+Navigate to **Power** from the sidebar to watch the UPSes your Network UPS Tools (NUT) servers report: whether each one is on mains or on battery, how much charge and runtime it has left, its load, and a history of power events. Nexara reads upsd over its network protocol and only reads. It never sends a UPS command, never logs in as a monitor (NUT's `LOGIN`), and never asks for a shutdown, so adding it cannot change what your existing `upsmon` setup does.
+
+### Before You Add a Server
+
+- **upsd must be reachable from the Nexara container**, on TCP 3493 unless you changed the port. upsd listens on localhost only until told otherwise: add a `LISTEN` line for an address Nexara can reach to `upsd.conf` and restart upsd.
+- **Some NAS appliances run upsd for their attached UPS and answer only an allow-list of client addresses.** Add the address Nexara connects from to that list.
+- **No account is needed to read.** upsd serves status to any client that can connect, so leave the username and password empty. They are accepted for a later release that can run UPS commands. If you set them anyway, use a dedicated `upsd.users` entry with **no `upsmon` line**, so that account can never act as a monitor.
+
+### Adding a NUT Server
+
+**Add NUT server**, at the top of the Power page (needs `manage:ups`). Give it a name, the host (a hostname or IP address, with no scheme or port), the port, and the **Connection security**:
+
+- **Plain TCP** — the usual case for upsd on a LAN.
+- **STARTTLS (required)** — the connection is upgraded before anything else is sent. A server that does not offer STARTTLS is an error, never a silent fall-back to plain text. Verify its certificate against the system CA pool, or pin its SHA-256 fingerprint.
+
+**Test** connects before you save and lists the UPSes the server reports; saving tests again, so a typo in the address is a failed save rather than a server that never reads. Three things ask for confirmation instead of refusing:
+
+- a private address (a NUT server on your LAN is the usual case);
+- a password that would cross the network in plain text;
+- a password sent over TLS without a verified or pinned certificate, which would reach whoever answers on that address.
+
+Changing the host or port of a saved server requires re-entering its password: a stored password is only ever sent to the address it was saved for.
+
+### What the Power Page Shows
+
+- **Devices** — a card per UPS with its status, charge, runtime, load, power and input voltage. A power figure marked **≈** is estimated from load × the UPS's rated power, for a UPS that does not measure it. While any UPS is on battery, a banner names it and the shortest runtime left.
+- **NUT servers** — each server's upsd and protocol versions, when it was last read, and the last error, with a **Test** button that checks a saved server's connection.
+- **Power events** — outages, low battery, overloads, bypass, voltage correction, a battery that needs replacing, lost contact, stale driver data, and self-test results. Expand a row for the lowest charge and runtime and the peak load seen during it.
+
+Click a UPS for its detail page: charts of charge, runtime, load and input voltage over 1 hour to 7 days (the input's lowest and highest reading in each bucket show sags and surges, and shaded spans mark time on battery), every variable upsd reports with its description, and the UPS's own events.
+
+**A UPS Nexara cannot read shows that, never its last state.** **Unreachable** means upsd did not answer, **Driver down** that upsd answered but its driver for that UPS is not connected, and **Data stale** that the driver stopped updating. A reading older than three poll intervals (and at least two minutes), while upsd last answered, shows **No recent reading**: the poller stopped reading it. A server whose polling is turned off (**Poll this server**, in its Edit dialog) shows **Polling off**, keeps its history, and is left out of the alerts.
+
+An event's end that Nexara did not see is marked on its duration. **≤** means contact was lost and the condition had cleared by the next reading, so it lasted at most that long. **≥** means Nexara stopped watching while it was still going: polling was turned off, or upsd stopped listing the UPS.
+
+### Polling and History
+
+Every enabled server is read every **10 seconds**, tuned with `NUT_POLL_INTERVAL` (minimum `2s`). `0` stops polling every server, and within two minutes every UPS reads as unreachable and counts toward `ups_unreachable`; to stop watching one server, turn its polling off instead. A server that stops answering is retried after 10 seconds, doubling up to 5 minutes. Readings are kept at full resolution for 30 days; 5-minute and hourly rollups, which the longer chart ranges read, are kept without a limit.
+
+### Permissions
+
+| Permission | Allows | Granted to |
+|------------|--------|------------|
+| `view:ups` | The Power page, UPS issues in the health pill, the UPS dashboard widget | Viewer, Operator, Admin |
+| `manage:ups` | Adding, editing and testing NUT servers | Operator, Admin |
+| `delete:ups` | Removing a NUT server and the UPS history collected from it | Operator, Admin |
+
+All three must be held install-wide: the UPS routes refuse a grant held on one cluster, so the Power page and its sidebar link appear only with a global `view:ups`. Custom roles were given the same actions on `ups` as they hold on `pbs` when this arrived.
+
+### UPS Alerts
+
+Six metrics read the UPS readings and are configured like any other alert rule. They are **global scope only**: a NUT server belongs to no cluster, so a rule judges every UPS and its alert names the worst one, as `ups@server`.
+
+| Metric | Unit | Meaning |
+|--------|------|---------|
+| `ups_on_battery` | count | UPSes on battery |
+| `ups_battery_charge` | % | The lowest battery charge |
+| `ups_runtime` | **minutes** | The shortest runtime left |
+| `ups_load` | % | The highest load |
+| `ups_unreachable` | count | UPSes Nexara cannot read: unreachable, driver down, stale data, or a reading too old |
+| `ups_replace_battery` | count | UPSes reporting a battery that needs replacing |
+
+- **A UPS Nexara cannot read holds a rule only if it could tip it.** Rules are judged on the UPSes Nexara can read. If one it cannot read was last seen meeting the condition (the UPS that was on battery went silent), the rule neither fires nor resolves until it reads again; otherwise it is judged without that UPS, and the alert's text says how many were not read. So a broken `ups.conf` entry cannot silence the others. `ups_unreachable` is the rule that tells you a UPS cannot be read, so pair the others with it.
+- **A server with polling turned off is left out** of every rule, `ups_unreachable` included.
+- **A forced shutdown on mains is not an outage.** `ups_on_battery` counts UPSes on battery, so the FSD that `upsmon -c fsd` sets during a shutdown test does not trip it.
+- The form starts charge and runtime rules at **<**, since those watch a level running down, and the on-battery, charge and runtime rules with **no cooldown**: the cooldown runs from when the last alert resolved, and an hour of it would swallow the second outage of a storm.
+- Rules are evaluated every 60 seconds, so an on-battery alert arrives within about a minute of the switch, plus the rule's Duration.
+
+Two limits for now: there is no per-UPS rule, and maintenance windows belong to a cluster, so none can silence a UPS rule. Disable the rule during a battery swap instead.
 
 ---
 
