@@ -144,7 +144,7 @@ export function UpsCharts({
 }) {
   const bucketMs = bucketSeconds * 1000;
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <UpsChart
         title="Battery charge and runtime"
         subtitle="Lowest value in each bucket · shaded where the UPS was on battery"

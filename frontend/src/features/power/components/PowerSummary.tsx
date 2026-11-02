@@ -60,7 +60,7 @@ export function PowerSummary({ devices }: { devices: UpsDevice[] }) {
   const unreadNote = unread > 0 ? ` · ${String(unread)} not read` : "";
 
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <SummaryCard
         title="Mains power"
         icon={Plug}

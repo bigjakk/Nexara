@@ -172,7 +172,7 @@ export function NutServerTable({
                 </TableRow>
                 {expanded.has(s.id) && (
                   <ExpandedDetailRow colSpan={layout.columns.length} spacing="space-y-3">
-                    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                    <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
                       <DetailField label="Username" variant={s.username === "" ? "muted" : "mono"}>
                         {s.username !== "" ? s.username : s.has_password ? "Hidden — requires manage:ups" : "None"}
                       </DetailField>

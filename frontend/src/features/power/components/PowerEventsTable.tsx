@@ -120,7 +120,7 @@ export function PowerEventsTable({ events, showUps = false }: { events: UpsEvent
               </TableRow>
               {expanded.has(e.id) && (
                 <ExpandedDetailRow colSpan={layout.columns.length}>
-                  <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                  <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
                     <DetailField label="Started">{formatDateTime(e.started_at)}</DetailField>
                     {e.kind !== "self_test" && (
                       <DetailField label="Ended">

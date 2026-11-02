@@ -51,7 +51,7 @@ function Overview({ device }: { device: UpsDevice }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Battery charge"
           value={device.battery_charge == null ? "—" : `${String(Math.round(device.battery_charge))}%`}
@@ -93,11 +93,11 @@ function Overview({ device }: { device: UpsDevice }) {
         <QueryStateNotice query={metrics} subject="this UPS's readings" empty="No readings in this range yet." />
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Battery</CardTitle></CardHeader>
           <CardContent>
-            <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
               <DetailField label="Chemistry">{device.battery_type || "—"}</DetailField>
               <DetailField label="Voltage">{device.battery_voltage == null ? "—" : `${String(device.battery_voltage)} V`}</DetailField>
               <DetailField label="Installed">{device.battery_date || "—"}</DetailField>
@@ -114,7 +114,7 @@ function Overview({ device }: { device: UpsDevice }) {
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Device</CardTitle></CardHeader>
           <CardContent>
-            <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
               <DetailField label="Manufacturer">{device.manufacturer || "—"}</DetailField>
               <DetailField label="Model">{device.model || "—"}</DetailField>
               <DetailField label="Serial" variant="mono">{device.serial || "—"}</DetailField>
