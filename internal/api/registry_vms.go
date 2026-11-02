@@ -85,6 +85,10 @@ func (s *Server) buildRegistry() *Registry {
 		// exists to cap. See veeamConnectLimiter in middleware.go.
 		registerVeeamEndpoints(reg, s.veeamHandler, s.veeamConnectLimiter(), s.veeamControlLimiter())
 	}
+	if s.nutHandler != nil {
+		// One connect limiter shared by every route that dials a NUT server.
+		registerUPSEndpoints(reg, s.nutHandler, s.nutConnectLimiter())
+	}
 	if s.alertHandler != nil {
 		registerAlertEndpoints(reg, s.alertHandler)
 	}

@@ -97,6 +97,9 @@ var auditClusterExempt = map[string]string{
 	// action. Per-cluster Veeam data (jobs, sessions, restore points) is a
 	// different resource and audits with its cluster.
 	"veeam_servers.go.audit": "veeam_servers spans clusters and has no cluster_id column; gated on global manage/delete:veeam",
+	// A NUT server's UPS devices can power the nodes of several clusters, and
+	// every NUT route is gated on GLOBAL view/manage/delete:ups.
+	"nut_servers.go.audit": "nut_servers spans clusters and has no cluster_id column; gated on global manage/delete:ups",
 
 	"firewall_templates.go.CreateTemplate": "firewall_templates has no cluster_id column",
 	"firewall_templates.go.UpdateTemplate": "firewall_templates has no cluster_id column",

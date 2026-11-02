@@ -35,6 +35,7 @@ var canonicalGroups = map[string]string{
 	"Audit Log":           "The audit trail and its syslog forwarding.",
 	"Authentication":      "Login, sessions, profile, and the LDAP and OIDC identity providers.",
 	"Backup":              "Proxmox backup jobs, PBS servers and datastores, and Veeam.",
+	"Power":               "UPS monitoring: NUT servers, the UPS devices they report, readings and power events.",
 	"Ceph":                "A cluster's Ceph status, OSDs, pools, monitors, CephFS and CRUSH rules.",
 	"Certificates":        "ACME accounts and plugins, and per-node certificate ordering, renewal and revocation.",
 	"Clusters":            "Cluster registration, connection config, options, tags and description.",

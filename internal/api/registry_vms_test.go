@@ -346,6 +346,7 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 		backupRoutesOutsideTheClusterCheckShape,
 		reportRoutesOutsideTheClusterCheckShape,
 		veeamRoutesOutsideTheClusterCheckShape,
+		upsRoutesOutsideTheClusterCheckShape,
 		alertRoutesOutsideTheClusterCheckShape,
 		rbacRoutesOutsideTheClusterCheckShape,
 		userRoutesOutsideTheClusterCheckShape,
@@ -406,6 +407,7 @@ var registryDomainRouteCounts = map[string]int{
 	"registerVMImportEndpoints":       vmImportRouteCount,
 	"registerReportEndpoints":         reportRouteCount,
 	"registerVeeamEndpoints":          veeamRouteCount,
+	"registerUPSEndpoints":            upsRouteCount,
 	"registerAlertEndpoints":          alertRouteCount,
 	"registerAccessEndpoints":         accessRouteCount,
 	"registerACMEEndpoints":           acmeRouteCount,
@@ -478,6 +480,7 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 		"registerVMImportEndpoints":       0,
 		"registerReportEndpoints":         0,
 		"registerVeeamEndpoints":          0,
+		"registerUPSEndpoints":            0,
 		"registerAlertEndpoints":          0,
 		"registerAccessEndpoints":         0,
 		"registerACMEEndpoints":           0,
@@ -586,6 +589,10 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	before = reg.Len()
 	registerVeeamEndpoints(reg, s.veeamHandler, nil, nil)
 	declared["registerVeeamEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerUPSEndpoints(reg, s.nutHandler, nil)
+	declared["registerUPSEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
 	registerAlertEndpoints(reg, s.alertHandler)

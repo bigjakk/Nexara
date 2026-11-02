@@ -115,7 +115,9 @@ type auditRowsDBTX struct {
 	// rowsFor, when it names a query (by its sqlc name), answers that query
 	// with its rows instead of rows.
 	rowsFor map[string][]any
-	calls   []capturedQuery
+	// rowFor, when it names a query, answers that QueryRow with its row.
+	rowFor map[string]any
+	calls  []capturedQuery
 	// missingCluster makes the cluster lookup answer that there is no such cluster;
 	// clusterLookups counts the lookups.
 	missingCluster bool
@@ -143,6 +145,11 @@ func (d *auditRowsDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Ro
 			return failRow{err: pgx.ErrNoRows}
 		}
 		return replayRow{row: db.Cluster{}}
+	}
+	for name, row := range d.rowFor {
+		if strings.Contains(sql, "-- name: "+name+" ") {
+			return replayRow{row: row}
+		}
 	}
 	return failRow{err: errCaptured}
 }

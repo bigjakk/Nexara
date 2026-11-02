@@ -52,6 +52,7 @@ type Server struct {
 	clusterHandler         *handlers.ClusterHandler
 	pbsHandler             *handlers.PBSHandler
 	veeamHandler           *handlers.VeeamHandler
+	nutHandler             *handlers.NutHandler
 	nodeHandler            *handlers.NodeHandler
 	vmHandler              *handlers.VMHandler
 	containerHandler       *handlers.ContainerHandler
@@ -402,6 +403,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 		s.clusterHandler = handlers.NewClusterHandler(d.queries, d.encryptionKey, d.eventPub, d.rbacEngine)
 		s.pbsHandler = handlers.NewPBSHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.veeamHandler = handlers.NewVeeamHandler(d.queries, d.encryptionKey, d.eventPub)
+		s.nutHandler = handlers.NewNutHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.vmHandler = handlers.NewVMHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.containerHandler = handlers.NewContainerHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.nodeHandler = handlers.NewNodeHandler(d.queries, d.encryptionKey, d.eventPub)
@@ -557,6 +559,23 @@ func (s *Server) SetVeeamSyncTrigger(t handlers.VeeamSyncTrigger) {
 		return
 	}
 	s.veeamHandler.SetSyncTrigger(t)
+}
+
+// SetNutReloadTrigger lets the NUT server routes ask the poller to re-read
+// its server list at once, and SetNutPollInterval tells the device routes how
+// often readings arrive. Wired from main, like SetVeeamSyncTrigger; no-ops
+// without the handler (no encryption key).
+func (s *Server) SetNutReloadTrigger(t handlers.NutReloadTrigger) {
+	if s.nutHandler != nil {
+		s.nutHandler.SetReloadTrigger(t)
+	}
+}
+
+// SetNutPollInterval is the poller's NUT_POLL_INTERVAL, after its floor.
+func (s *Server) SetNutPollInterval(d time.Duration) {
+	if s.nutHandler != nil {
+		s.nutHandler.SetPollInterval(d)
+	}
 }
 
 // RBACEngine returns the API server's RBAC engine so other components

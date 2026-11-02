@@ -962,6 +962,20 @@ func (s *Server) veeamConnectLimiter() fiber.Handler {
 	})
 }
 
+// nutConnectLimiter caps the NUT routes that dial a server (create, probe,
+// update, test) at 10/min/IP, for veeamConnectLimiter's reason: each one can
+// send a stored or supplied upsd credential to an address of the caller's
+// choosing.
+func (s *Server) nutConnectLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() + ":nut-connect"
+		},
+	})
+}
+
 // veeamControlLimiter caps the Veeam job-control endpoints at 30/min/IP.
 //
 // A SEPARATE instance from veeamConnectLimiter, not a shared one, and that is

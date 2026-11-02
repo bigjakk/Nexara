@@ -215,6 +215,12 @@ func main() {
 	// not wait out its 30 s reconcile. Created here for the reason
 	// InventoryTrigger's comment gives.
 	nutTrigger := collector.NewInventoryTrigger()
+	srv.SetNutReloadTrigger(nutTrigger)
+	if cfg.NutPollInterval > 0 {
+		// The same floor runCollector applies, so the device routes judge a
+		// reading stale against the interval the poller really uses.
+		srv.SetNutPollInterval(max(cfg.NutPollInterval, 2*time.Second))
+	}
 	go runCollector(ctx, cfg, application, veeamTrigger, nutTrigger, logger.With("component", "collector"))
 
 	// ---- Scheduler goroutine ----

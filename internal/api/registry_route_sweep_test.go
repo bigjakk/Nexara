@@ -505,6 +505,8 @@ var sweepValueOverrides = map[string]any{
 	"end_time":   "2026-01-02T00:00:00Z",
 	"starts_at":  "2026-01-01T00:00:00Z",
 	"ends_at":    "2026-01-02T00:00:00Z",
+	// registry_ups.go's ups-events cursor: no Format, the handler parses RFC3339.
+	"before": "2026-01-01T00:00:00Z",
 	// registry_cve.go's own Description: "An EMPTY LIST is a real value
 	// that clears them" — cve.go's channel-existence check has nothing to
 	// look up against an empty list, and a synthesized UUID cannot name a

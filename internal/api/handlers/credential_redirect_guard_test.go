@@ -175,6 +175,7 @@ func TestGuard_CredentialRedirectGuardStillSeesKnownCarriers(t *testing.T) {
 		"ClusterHandler.Update",
 		"PBSHandler.Update",
 		"VeeamHandler.Update",
+		"NutHandler.Update",
 		"LDAPHandler.Update",
 		"OIDCHandler.Update",
 		"AlertHandler.UpdateChannel",
