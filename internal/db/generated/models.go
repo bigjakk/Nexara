@@ -821,6 +821,29 @@ type NotificationDlq struct {
 	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
+type NutServer struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	Host string    `json:"host"`
+	Port int32     `json:"port"`
+	// upsd account, if any. Reads are anonymous on most servers; a credential is only needed where upsd demands one
+	Username          string `json:"username"`
+	PasswordEncrypted string `json:"-"`
+	TlsMode           string `json:"tls_mode"`
+	VerifyTls         bool   `json:"verify_tls"`
+	// SHA-256 of the leaf certificate presented after STARTTLS, pinned when set. Empty with verify_tls means verify against the system CA pool
+	TlsFingerprint  string `json:"tls_fingerprint"`
+	Enabled         bool   `json:"enabled"`
+	NutVersion      string `json:"nut_version"`
+	ProtocolVersion string `json:"protocol_version"`
+	// Last fully successful poll. A failing poll leaves it alone, so the UI never shows a stale server as just polled
+	LastPollAt pgtype.Timestamptz `json:"last_poll_at"`
+	// Why the last poll failed, empty when it succeeded
+	LastPollError string    `json:"last_poll_error"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 type OidcConfig struct {
 	ID                    uuid.UUID       `json:"id"`
 	Name                  string          `json:"name"`
@@ -1183,6 +1206,97 @@ type TotpRecoveryCode struct {
 	UserID    uuid.UUID `json:"user_id"`
 	CodeHash  string    `json:"code_hash"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type UpsDevice struct {
+	ID       uuid.UUID `json:"id"`
+	ServerID uuid.UUID `json:"server_id"`
+	// NUT's own name for the UPS, from LIST UPS. With server_id it is the identity, so a device keeps its id and history across restarts
+	UpsName      string `json:"ups_name"`
+	Description  string `json:"description"`
+	Manufacturer string `json:"manufacturer"`
+	Model        string `json:"model"`
+	Serial       string `json:"serial"`
+	Firmware     string `json:"firmware"`
+	Driver       string `json:"driver"`
+	// ups.status as upsd sent it, for example "OB DISCHRG"
+	Status string `json:"status"`
+	// Derived from status the way upsmon reads it. Left at the last known value while reachability is not ok, never reset to online
+	State string `json:"state"`
+	// Whether the last poll could read the UPS: ok, stale (DATA-STALE), driver_down (DRIVER-NOT-CONNECTED) or unreachable (the server did not answer)
+	Reachability string `json:"reachability"`
+	// The latest LIST VAR reply, capped by the client
+	Vars            json.RawMessage `json:"vars"`
+	VarDescriptions json.RawMessage `json:"var_descriptions"`
+	// False once LIST UPS stops naming the device. Kept rather than deleted so its history survives a ups.conf edit
+	Present       bool               `json:"present"`
+	LastReadingAt pgtype.Timestamptz `json:"last_reading_at"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
+type UpsEvent struct {
+	ID        uuid.UUID `json:"id"`
+	UpsID     uuid.UUID `json:"ups_id"`
+	Kind      string    `json:"kind"`
+	StartedAt time.Time `json:"started_at"`
+	// NULL while the episode is open. self_test is a point event, started_at = ended_at
+	EndedAt pgtype.Timestamptz `json:"ended_at"`
+	// False when the episode was closed after a gap in contact: the condition had cleared by the next reading, but when is unknown
+	EndObserved bool            `json:"end_observed"`
+	Details     json.RawMessage `json:"details"`
+	CreatedAt   time.Time       `json:"created_at"`
+}
+
+type UpsMetric struct {
+	Time          time.Time     `json:"time"`
+	UpsID         uuid.UUID     `json:"ups_id"`
+	BatteryCharge pgtype.Float8 `json:"battery_charge"`
+	// Seconds, as battery.runtime reports it
+	BatteryRuntime pgtype.Float8 `json:"battery_runtime"`
+	BatteryVoltage pgtype.Float8 `json:"battery_voltage"`
+	UpsLoad        pgtype.Float8 `json:"ups_load"`
+	// Watts from ups.realpower. NULL when the UPS does not report it; the API estimates from load x nominal and says so
+	Realpower      pgtype.Float8 `json:"realpower"`
+	InputVoltage   pgtype.Float8 `json:"input_voltage"`
+	OutputVoltage  pgtype.Float8 `json:"output_voltage"`
+	InputFrequency pgtype.Float8 `json:"input_frequency"`
+	Temperature    pgtype.Float8 `json:"temperature"`
+	OnBattery      bool          `json:"on_battery"`
+}
+
+type UpsMetrics1h struct {
+	Bucket            interface{} `json:"bucket"`
+	UpsID             uuid.UUID   `json:"ups_id"`
+	ChargeMin         interface{} `json:"charge_min"`
+	RuntimeMin        interface{} `json:"runtime_min"`
+	BatteryVoltageAvg float64     `json:"battery_voltage_avg"`
+	LoadMax           interface{} `json:"load_max"`
+	LoadAvg           float64     `json:"load_avg"`
+	RealpowerAvg      float64     `json:"realpower_avg"`
+	InputVoltageMin   interface{} `json:"input_voltage_min"`
+	InputVoltageMax   interface{} `json:"input_voltage_max"`
+	OutputVoltageAvg  float64     `json:"output_voltage_avg"`
+	InputFrequencyAvg float64     `json:"input_frequency_avg"`
+	TemperatureMax    interface{} `json:"temperature_max"`
+	OnBattery         bool        `json:"on_battery"`
+}
+
+type UpsMetrics5m struct {
+	Bucket            interface{} `json:"bucket"`
+	UpsID             uuid.UUID   `json:"ups_id"`
+	ChargeMin         interface{} `json:"charge_min"`
+	RuntimeMin        interface{} `json:"runtime_min"`
+	BatteryVoltageAvg float64     `json:"battery_voltage_avg"`
+	LoadMax           interface{} `json:"load_max"`
+	LoadAvg           float64     `json:"load_avg"`
+	RealpowerAvg      float64     `json:"realpower_avg"`
+	InputVoltageMin   interface{} `json:"input_voltage_min"`
+	InputVoltageMax   interface{} `json:"input_voltage_max"`
+	OutputVoltageAvg  float64     `json:"output_voltage_avg"`
+	InputFrequencyAvg float64     `json:"input_frequency_avg"`
+	TemperatureMax    interface{} `json:"temperature_max"`
+	OnBattery         bool        `json:"on_battery"`
 }
 
 type User struct {

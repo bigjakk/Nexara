@@ -339,6 +339,7 @@ type Querier interface {
 	// name a stable version at all — a mirror has no stable-virtio/ redirect to
 	// copy. No version string is empty, so the <> holds nothing back.
 	ClearVirtioWinStableFlag(ctx context.Context, version string) error
+	CloseUpsEvent(ctx context.Context, arg CloseUpsEventParams) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	// Terminal transitions set cleanup_pending: the job may still hold cluster
 	// state (DRS pause, native CRS pause, disabled HA rules, stopped passthrough
@@ -491,6 +492,8 @@ type Querier interface {
 	CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigParams) (LdapConfig, error)
 	CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) (User, error)
 	CreateMigrationJob(ctx context.Context, arg CreateMigrationJobParams) (MigrationJob, error)
+	// NUT servers: the upsd instances Nexara reads UPS data from (000131).
+	CreateNutServer(ctx context.Context, arg CreateNutServerParams) (NutServer, error)
 	CreateOIDCConfig(ctx context.Context, arg CreateOIDCConfigParams) (OidcConfig, error)
 	CreateOIDCUser(ctx context.Context, arg CreateOIDCUserParams) (User, error)
 	CreatePBSServer(ctx context.Context, arg CreatePBSServerParams) (PbsServer, error)
@@ -657,6 +660,10 @@ type Querier interface {
 	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
 	DeleteNotificationChannel(ctx context.Context, id uuid.UUID) error
 	DeleteNotificationDLQ(ctx context.Context, id uuid.UUID) error
+	// Devices and their events go by cascade. Their readings do not (ups_metrics
+	// is a hypertable with no foreign key), so call DeleteUpsMetricsForServer
+	// first, in the same transaction.
+	DeleteNutServer(ctx context.Context, id uuid.UUID) error
 	DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error
 	// DeleteOldVirtioWinDownloads trims finished history, keeping the table bounded
 	// without touching anything still in flight.
@@ -759,6 +766,7 @@ type Querier interface {
 	DeleteStaleVeeamRepositories(ctx context.Context, arg DeleteStaleVeeamRepositoriesParams) error
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
+	DeleteUpsMetricsForServer(ctx context.Context, serverID uuid.UUID) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	DeleteVMFolder(ctx context.Context, id uuid.UUID) error
 	// DeleteVMsAbsentFromCluster removes guests that are no longer present in the
@@ -1090,6 +1098,7 @@ type Querier interface {
 	GetNotificationChannel(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
 	GetNotificationChannelEnabled(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
 	GetNotificationDLQ(ctx context.Context, id uuid.UUID) (NotificationDlq, error)
+	GetNutServer(ctx context.Context, id uuid.UUID) (NutServer, error)
 	GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, error)
 	// Downsampled in the database, deliberately. The raw hypertable holds one row
 	// per datastore per PBS sync — every METRICS_COLLECT_INTERVAL, but no more
@@ -1187,6 +1196,17 @@ type Querier interface {
 	GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error)
 	GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, error)
 	GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (int64, error)
+	// One device with its server. Absent devices are still readable by id, so a
+	// link to one keeps working after LIST UPS drops it.
+	GetUpsDevice(ctx context.Context, id uuid.UUID) (GetUpsDeviceRow, error)
+	// One UPS's readings from @since in buckets of @bucket_seconds, read from the
+	// raw rows (@source 'raw'), the 5-minute rollup ('5m') or the hourly one
+	// ('1h'); only the named branch returns rows. Each bucket keeps the
+	// conservative side, as the rollups do: the lowest charge and runtime, the
+	// input voltage's low and high, the highest load and temperature, and whether
+	// the UPS was on battery at any point. The values come through a LEFT JOIN to
+	// a CTE so that sqlc types them nullable (see GetNodePressure).
+	GetUpsMetricSeries(ctx context.Context, arg GetUpsMetricSeriesParams) ([]GetUpsMetricSeriesRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
@@ -1354,6 +1374,9 @@ type Querier interface {
 	// bound (VMIDs cap at 999999999) keeps a pathological all-numeric id from
 	// overflowing the ::int cast.
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
+	InsertUpsMetric(ctx context.Context, arg InsertUpsMetricParams) error
+	// An event with no duration, such as a self-test result.
+	InsertUpsPointEvent(ctx context.Context, arg InsertUpsPointEventParams) error
 	InsertVMImportJob(ctx context.Context, arg InsertVMImportJobParams) (VmImportJob, error)
 	InsertVeeamRepositoryMetric(ctx context.Context, arg InsertVeeamRepositoryMetricParams) error
 	// InsertVirtioWinDownload records the intent to fetch, before the node is asked
@@ -1587,6 +1610,7 @@ type Querier interface {
 	ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error)
 	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
+	ListEnabledNutServers(ctx context.Context) ([]NutServer, error)
 	// ListExistingAuditLogUPIDs asks about ONE cluster's entries. Audit entries
 	// outlive a removed cluster (under its old id, since 000122), and a cluster added
 	// again has a new id but the same nodes and so the same UPIDs: matching the UPID
@@ -2087,8 +2111,14 @@ type Querier interface {
 	// channel_id is optional. Pass NULL via sqlc.narg to match all channels;
 	// otherwise filter to the given channel.
 	ListNotificationDLQ(ctx context.Context, arg ListNotificationDLQParams) ([]NotificationDlq, error)
+	ListNutServers(ctx context.Context) ([]NutServer, error)
 	ListOIDCConfigs(ctx context.Context) ([]OidcConfig, error)
 	ListOIDCUsers(ctx context.Context) ([]ListOIDCUsersRow, error)
+	// Every open episode, so the device list can say "on battery since 03:12"
+	// without a query per device. Served by idx_ups_events_one_open.
+	ListOpenUpsEvents(ctx context.Context) ([]ListOpenUpsEventsRow, error)
+	// Open episodes of one server's devices, for the poller to resume after a restart.
+	ListOpenUpsEventsByServer(ctx context.Context, serverID uuid.UUID) ([]UpsEvent, error)
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
 	ListPBSServersByCluster(ctx context.Context, clusterID pgtype.UUID) ([]PbsServer, error)
 	ListPBSSnapshotsByBackupID(ctx context.Context, backupID string) ([]PbsSnapshot, error)
@@ -2307,6 +2337,12 @@ type Querier interface {
 	// keep failing; then newest first, so a job that just ended is read in the
 	// pass after it ends.
 	ListUnreadBackupJobs(ctx context.Context, arg ListUnreadBackupJobsParams) ([]ListUnreadBackupJobsRow, error)
+	// Every present device with its server, for the Power page, the health pill
+	// and the alert engine.
+	ListUpsDevices(ctx context.Context) ([]ListUpsDevicesRow, error)
+	ListUpsDevicesByServer(ctx context.Context, serverID uuid.UUID) ([]UpsDevice, error)
+	// Newest first, keyset-paged on (started_at, id). ups_id and kind filter when set.
+	ListUpsEvents(ctx context.Context, arg ListUpsEventsParams) ([]ListUpsEventsRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
@@ -2515,6 +2551,10 @@ type Querier interface {
 	// on the PBS, and its window starts here. Only syncPBSServer calls it, after a
 	// listing whose every row was written.
 	MarkPBSJobBaseline(ctx context.Context, arg MarkPBSJobBaselineParams) error
+	// Devices LIST UPS no longer names. Kept, not deleted, so their history stays.
+	// A nil Go slice reaches SQL as NULL, which ANY would match against nothing;
+	// COALESCE makes it the empty list it means, so every device is marked absent.
+	MarkUpsDevicesAbsent(ctx context.Context, arg MarkUpsDevicesAbsentParams) error
 	// Records that Nexara asked this session to stop.
 	//
 	// POST /sessions/{id}/stop answers 200 with an empty envelope — no session
@@ -2531,11 +2571,14 @@ type Querier interface {
 	// statement. Splitting them would let a crash between the two leave a row whose
 	// next_check_at is still in the past, i.e. one that re-checks on every tick.
 	MarkVirtioWinConfigChecked(ctx context.Context, arg MarkVirtioWinConfigCheckedParams) error
+	MergeUpsVarDescriptions(ctx context.Context, arg MergeUpsVarDescriptionsParams) error
 	// MoveVMFolder moves the folder under parent_id (null for the top level),
 	// unless that is the folder itself or below it, or the tree above it runs past
 	// 1,024 levels (handlers.folderDepthCap): then no row. Run under
 	// LockClusterFolders.
 	MoveVMFolder(ctx context.Context, arg MoveVMFolderParams) (VmFolder, error)
+	// At most one open episode per (UPS, kind); a second open is a no-op.
+	OpenUpsEvent(ctx context.Context, arg OpenUpsEventParams) error
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	// Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still
 	// holds must not disappear from Nexara because it is old, or every RPO and
@@ -2650,6 +2693,7 @@ type Querier interface {
 	// The sets are disjoint by construction. cluster_id is never NULL here: only a
 	// global kind's trigger writes a row with none (000125).
 	RecordObservedObjects(ctx context.Context, arg RecordObservedObjectsParams) error
+	RecordUpsReading(ctx context.Context, arg RecordUpsReadingParams) error
 	RemoveFavorite(ctx context.Context, arg RemoveFavoriteParams) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)
@@ -2826,8 +2870,16 @@ type Querier interface {
 	// SSH goroutine) so the absolute upgrade timeout in advanceUpgrading
 	// measures from the first launch attempt, not the most recent.
 	SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error
+	// Deliberately leaves last_poll_at alone: a server that has failed for an
+	// hour must not read "polled 5 seconds ago" beside its error.
+	SetNutServerPollError(ctx context.Context, arg SetNutServerPollErrorParams) error
+	SetNutServerPolled(ctx context.Context, arg SetNutServerPolledParams) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error
+	// state is left as it was. A UPS Nexara cannot read is neither on mains nor
+	// on battery as far as Nexara knows, and the UI and the alert engine read the
+	// two columns together.
+	SetUpsReachability(ctx context.Context, arg SetUpsReachabilityParams) error
 	SetVMConfigOSType(ctx context.Context, arg SetVMConfigOSTypeParams) error
 	SetVMImportJobUPID(ctx context.Context, arg SetVMImportJobUPIDParams) error
 	SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error
@@ -2931,8 +2983,10 @@ type Querier interface {
 	UpdateNodeStatusFast(ctx context.Context, arg UpdateNodeStatusFastParams) (int64, error)
 	UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (NotificationChannel, error)
 	UpdateNotificationDLQState(ctx context.Context, arg UpdateNotificationDLQStateParams) error
+	UpdateNutServer(ctx context.Context, arg UpdateNutServerParams) (NutServer, error)
 	UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error)
 	UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserProfileParams) (User, error)
+	UpdateOpenUpsEvent(ctx context.Context, arg UpdateOpenUpsEventParams) error
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)
 	// A compare-and-swap on the password hash the caller verified, not a plain
 	// overwrite: it sets the new hash only on a row whose current hash is
@@ -3121,6 +3175,11 @@ type Querier interface {
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error)
 	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (UpsertStoragePoolRow, error)
 	UpsertTaskSyncState(ctx context.Context, arg UpsertTaskSyncStateParams) error
+	// UPS devices, their readings and their power events (000131).
+	// Keyed on (server_id, ups_name), NUT's own identity, so a device keeps its id
+	// and history across polls, restarts and a ups.conf edit that drops and then
+	// restores it.
+	UpsertUpsDevice(ctx context.Context, arg UpsertUpsDeviceParams) (UpsDevice, error)
 	// A write that changes status also records the change in guest_status_changes,
 	// by trigger (trg_vms_status_change, migrations/000115), for the guest's
 	// History; so does UpdateVMStatus.
