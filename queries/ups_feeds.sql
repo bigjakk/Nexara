@@ -74,12 +74,14 @@ VALUES (@ups_id, @cluster_id::uuid, @node_name::text, 'found')
 ON CONFLICT (ups_id, cluster_id, node_name) DO NOTHING;
 
 -- name: InsertManualUpsFeed :one
--- A node or a label added by hand. A removed node comes back; one already fed
--- returns no row, and a label already there is a unique violation.
+-- A node or a label added by hand. A removed node comes back as a fresh claim,
+-- so an old "protected another way" does not silently carry over; one already
+-- fed returns no row, and a label already there is a unique violation.
 INSERT INTO ups_feeds (ups_id, cluster_id, node_name, label, source, created_by)
 VALUES (@ups_id, sqlc.narg(cluster_id), sqlc.narg(node_name), @label, 'manual', @created_by::uuid)
 ON CONFLICT (ups_id, cluster_id, node_name) DO UPDATE
 SET dismissed = FALSE,
+    protected_elsewhere = FALSE,
     source = 'manual',
     created_by = EXCLUDED.created_by,
     created_at = EXCLUDED.created_at
@@ -125,3 +127,25 @@ UPDATE nut_servers
 SET host_cluster_id = @cluster_id::uuid,
     host_node_name = @node_name::text
 WHERE id = @id AND host_cluster_id IS NULL AND host = @host AND port = @port;
+
+-- name: GetUpsFeed :one
+-- One feed a UPS has, removed ones aside, so a handler can authorize on its
+-- cluster before it acts.
+SELECT * FROM ups_feeds WHERE id = @id AND ups_id = @ups_id AND NOT dismissed;
+
+-- name: SetUpsFeedProtectedElsewhere :one
+-- The operator says a node shuts down some way Nexara cannot see (P11), or
+-- takes that back.
+UPDATE ups_feeds
+SET protected_elsewhere = @protected_elsewhere
+WHERE id = @id AND ups_id = @ups_id AND cluster_id IS NOT NULL AND NOT dismissed
+RETURNING *;
+
+-- name: SetNutServerHostNodeByHand :one
+-- The node a NUT server runs on, as the operator says; NULLs hand it back to
+-- the poller, which finds it again from the address it reaches.
+UPDATE nut_servers
+SET host_cluster_id = sqlc.narg(cluster_id),
+    host_node_name = sqlc.narg(node_name)
+WHERE id = @id
+RETURNING *;

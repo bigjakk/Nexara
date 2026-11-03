@@ -72,6 +72,35 @@ func (q *Queries) DismissUpsNodeFeed(ctx context.Context, arg DismissUpsNodeFeed
 	return i, err
 }
 
+const getUpsFeed = `-- name: GetUpsFeed :one
+SELECT id, ups_id, cluster_id, node_name, label, source, dismissed, created_at, created_by, protected_elsewhere FROM ups_feeds WHERE id = $1 AND ups_id = $2 AND NOT dismissed
+`
+
+type GetUpsFeedParams struct {
+	ID    uuid.UUID `json:"id"`
+	UpsID uuid.UUID `json:"ups_id"`
+}
+
+// One feed a UPS has, removed ones aside, so a handler can authorize on its
+// cluster before it acts.
+func (q *Queries) GetUpsFeed(ctx context.Context, arg GetUpsFeedParams) (UpsFeed, error) {
+	row := q.db.QueryRow(ctx, getUpsFeed, arg.ID, arg.UpsID)
+	var i UpsFeed
+	err := row.Scan(
+		&i.ID,
+		&i.UpsID,
+		&i.ClusterID,
+		&i.NodeName,
+		&i.Label,
+		&i.Source,
+		&i.Dismissed,
+		&i.CreatedAt,
+		&i.CreatedBy,
+		&i.ProtectedElsewhere,
+	)
+	return i, err
+}
+
 const insertFoundUpsFeed = `-- name: InsertFoundUpsFeed :execrows
 INSERT INTO ups_feeds (ups_id, cluster_id, node_name, source)
 VALUES ($1, $2::uuid, $3::text, 'found')
@@ -99,6 +128,7 @@ INSERT INTO ups_feeds (ups_id, cluster_id, node_name, label, source, created_by)
 VALUES ($1, $2, $3, $4, 'manual', $5::uuid)
 ON CONFLICT (ups_id, cluster_id, node_name) DO UPDATE
 SET dismissed = FALSE,
+    protected_elsewhere = FALSE,
     source = 'manual',
     created_by = EXCLUDED.created_by,
     created_at = EXCLUDED.created_at
@@ -114,8 +144,9 @@ type InsertManualUpsFeedParams struct {
 	CreatedBy uuid.UUID   `json:"created_by"`
 }
 
-// A node or a label added by hand. A removed node comes back; one already fed
-// returns no row, and a label already there is a unique violation.
+// A node or a label added by hand. A removed node comes back as a fresh claim,
+// so an old "protected another way" does not silently carry over; one already
+// fed returns no row, and a label already there is a unique violation.
 func (q *Queries) InsertManualUpsFeed(ctx context.Context, arg InsertManualUpsFeedParams) (UpsFeed, error) {
 	row := q.db.QueryRow(ctx, insertManualUpsFeed,
 		arg.UpsID,
@@ -365,6 +396,48 @@ func (q *Queries) SetNutServerHostNode(ctx context.Context, arg SetNutServerHost
 	return err
 }
 
+const setNutServerHostNodeByHand = `-- name: SetNutServerHostNodeByHand :one
+UPDATE nut_servers
+SET host_cluster_id = $1,
+    host_node_name = $2
+WHERE id = $3
+RETURNING id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at, host_cluster_id, host_node_name
+`
+
+type SetNutServerHostNodeByHandParams struct {
+	ClusterID pgtype.UUID `json:"cluster_id"`
+	NodeName  pgtype.Text `json:"node_name"`
+	ID        uuid.UUID   `json:"id"`
+}
+
+// The node a NUT server runs on, as the operator says; NULLs hand it back to
+// the poller, which finds it again from the address it reaches.
+func (q *Queries) SetNutServerHostNodeByHand(ctx context.Context, arg SetNutServerHostNodeByHandParams) (NutServer, error) {
+	row := q.db.QueryRow(ctx, setNutServerHostNodeByHand, arg.ClusterID, arg.NodeName, arg.ID)
+	var i NutServer
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Host,
+		&i.Port,
+		&i.Username,
+		&i.PasswordEncrypted,
+		&i.TlsMode,
+		&i.VerifyTls,
+		&i.TlsFingerprint,
+		&i.Enabled,
+		&i.NutVersion,
+		&i.ProtocolVersion,
+		&i.LastPollAt,
+		&i.LastPollError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HostClusterID,
+		&i.HostNodeName,
+	)
+	return i, err
+}
+
 const setUpsClientsListed = `-- name: SetUpsClientsListed :exec
 UPDATE ups_devices SET clients_listed_at = $1 WHERE id = $2
 `
@@ -379,6 +452,39 @@ type SetUpsClientsListedParams struct {
 func (q *Queries) SetUpsClientsListed(ctx context.Context, arg SetUpsClientsListedParams) error {
 	_, err := q.db.Exec(ctx, setUpsClientsListed, arg.ListedAt, arg.ID)
 	return err
+}
+
+const setUpsFeedProtectedElsewhere = `-- name: SetUpsFeedProtectedElsewhere :one
+UPDATE ups_feeds
+SET protected_elsewhere = $1
+WHERE id = $2 AND ups_id = $3 AND cluster_id IS NOT NULL AND NOT dismissed
+RETURNING id, ups_id, cluster_id, node_name, label, source, dismissed, created_at, created_by, protected_elsewhere
+`
+
+type SetUpsFeedProtectedElsewhereParams struct {
+	ProtectedElsewhere bool      `json:"protected_elsewhere"`
+	ID                 uuid.UUID `json:"id"`
+	UpsID              uuid.UUID `json:"ups_id"`
+}
+
+// The operator says a node shuts down some way Nexara cannot see (P11), or
+// takes that back.
+func (q *Queries) SetUpsFeedProtectedElsewhere(ctx context.Context, arg SetUpsFeedProtectedElsewhereParams) (UpsFeed, error) {
+	row := q.db.QueryRow(ctx, setUpsFeedProtectedElsewhere, arg.ProtectedElsewhere, arg.ID, arg.UpsID)
+	var i UpsFeed
+	err := row.Scan(
+		&i.ID,
+		&i.UpsID,
+		&i.ClusterID,
+		&i.NodeName,
+		&i.Label,
+		&i.Source,
+		&i.Dismissed,
+		&i.CreatedAt,
+		&i.CreatedBy,
+		&i.ProtectedElsewhere,
+	)
+	return i, err
 }
 
 const upsertUpsClients = `-- name: UpsertUpsClients :exec

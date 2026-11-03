@@ -148,6 +148,9 @@ func (d *auditRowsDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Ro
 	}
 	for name, row := range d.rowFor {
 		if strings.Contains(sql, "-- name: "+name+" ") {
+			if err, ok := row.(error); ok {
+				return failRow{err: err} // a canned answer can be an error, such as pgx.ErrNoRows
+			}
 			return replayRow{row: row}
 		}
 	}

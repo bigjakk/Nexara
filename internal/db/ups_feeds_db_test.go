@@ -121,13 +121,17 @@ func TestUpsFeedsAndClients(t *testing.T) {
 		t.Fatal(err)
 	}
 	pve01 := all[slices.IndexFunc(all, func(f gen.ListUpsFeedsRow) bool { return f.NodeName.String == "pve-01" })]
+	if _, err := q.SetUpsFeedProtectedElsewhere(ctx, gen.SetUpsFeedProtectedElsewhereParams{ID: pve01.ID, UpsID: upsFeedDevice, ProtectedElsewhere: true}); err != nil {
+		t.Fatalf("protected elsewhere: %v", err)
+	}
 	if _, err := q.DismissUpsNodeFeed(ctx, gen.DismissUpsNodeFeedParams{ID: pve01.ID, UpsID: upsFeedDevice}); err != nil {
 		t.Fatalf("dismiss: %v", err)
 	}
 	if n, err := q.InsertFoundUpsFeed(ctx, found); err != nil || n != 0 || !slices.Equal(listed(), []string{"pve-02:manual"}) {
 		t.Errorf("found after removal = %d, %v, listed %v; want it to stay removed", n, err, listed())
 	}
-	if f, err := manual("pve-01", ""); err != nil || f.Dismissed || f.Source != "manual" || !slices.Equal(listed(), []string{"pve-01:manual", "pve-02:manual"}) {
+	// Re-added, it is a fresh claim: "protected another way" does not carry over.
+	if f, err := manual("pve-01", ""); err != nil || f.Dismissed || f.ProtectedElsewhere || f.Source != "manual" || !slices.Equal(listed(), []string{"pve-01:manual", "pve-02:manual"}) {
 		t.Errorf("added back by hand = %+v, %v, listed %v", f, err, listed())
 	}
 	// A cluster Nexara cannot reach keeps its nodes' last status: one no full

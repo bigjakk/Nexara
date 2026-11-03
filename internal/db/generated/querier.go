@@ -1206,6 +1206,9 @@ type Querier interface {
 	// One device with its server. Absent devices are still readable by id, so a
 	// link to one keeps working after LIST UPS drops it.
 	GetUpsDevice(ctx context.Context, id uuid.UUID) (GetUpsDeviceRow, error)
+	// One feed a UPS has, removed ones aside, so a handler can authorize on its
+	// cluster before it acts.
+	GetUpsFeed(ctx context.Context, arg GetUpsFeedParams) (UpsFeed, error)
 	// One UPS's readings from @since in buckets of @bucket_seconds, read from the
 	// raw rows (@source 'raw'), the 5-minute rollup ('5m') or the hourly one
 	// ('1h'); only the named branch returns rows. Each bucket keeps the
@@ -1362,8 +1365,9 @@ type Querier interface {
 	InsertFoundUpsFeed(ctx context.Context, arg InsertFoundUpsFeedParams) (int64, error)
 	// Maintenance Windows
 	InsertMaintenanceWindow(ctx context.Context, arg InsertMaintenanceWindowParams) (MaintenanceWindow, error)
-	// A node or a label added by hand. A removed node comes back; one already fed
-	// returns no row, and a label already there is a unique violation.
+	// A node or a label added by hand. A removed node comes back as a fresh claim,
+	// so an old "protected another way" does not silently carry over; one already
+	// fed returns no row, and a label already there is a unique violation.
 	InsertManualUpsFeed(ctx context.Context, arg InsertManualUpsFeedParams) (UpsFeed, error)
 	// One RRD step. A step already stored is left as it is: the pass rereads the
 	// last hour each time, and a completed RRD step does not change.
@@ -2914,6 +2918,9 @@ type Querier interface {
 	// the poller or by hand, is kept, and so is the server's address: a worker
 	// still connected to an address an edit replaced must not store that old host.
 	SetNutServerHostNode(ctx context.Context, arg SetNutServerHostNodeParams) error
+	// The node a NUT server runs on, as the operator says; NULLs hand it back to
+	// the poller, which finds it again from the address it reaches.
+	SetNutServerHostNodeByHand(ctx context.Context, arg SetNutServerHostNodeByHandParams) (NutServer, error)
 	// Deliberately leaves last_poll_at alone: a server that has failed for an
 	// hour must not read "polled 5 seconds ago" beside its error.
 	SetNutServerPollError(ctx context.Context, arg SetNutServerPollErrorParams) error
@@ -2923,6 +2930,9 @@ type Querier interface {
 	// A listing of the UPS's logins was taken on mains, so the nodes it powers can
 	// be judged from it.
 	SetUpsClientsListed(ctx context.Context, arg SetUpsClientsListedParams) error
+	// The operator says a node shuts down some way Nexara cannot see (P11), or
+	// takes that back.
+	SetUpsFeedProtectedElsewhere(ctx context.Context, arg SetUpsFeedProtectedElsewhereParams) (UpsFeed, error)
 	// state is left as it was. A UPS Nexara cannot read is neither on mains nor
 	// on battery as far as Nexara knows, and the UI and the alert engine read the
 	// two columns together.

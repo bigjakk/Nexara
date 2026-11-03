@@ -267,4 +267,91 @@ func registerUPSEndpoints(reg *Registry, h *handlers.NutHandler, connect fiber.H
 		},
 		Handler: h.ListEvents,
 	})
+
+	// What a UPS powers, by hand. Deferred: the global manage:ups and, for a
+	// node, view:node on its cluster are checked in the handler, so a node is
+	// looked up only for a caller allowed to know whether it exists.
+	feedReason := "manage:ups, and for a node view:node on its cluster, checked in the handler before the node is looked up"
+	nodeParam := func(description string) apischema.Property {
+		p := apischema.StdOption("node-name")
+		p.Optional, p.Description = true, description
+		return p
+	}
+	clusterParam := func(description string) apischema.Property {
+		return apischema.Property{Type: apischema.String, Optional: true, Format: "uuid", Typetext: "<uuid>", Description: description}
+	}
+	feedIDParam := apischema.Property{
+		Type: apischema.String, Format: "uuid", Source: apischema.SourcePath, Typetext: "<uuid>",
+		Description: "A feed's identifier, as the device lists it.",
+	}
+	reg.Register(Endpoint{
+		Method: fiber.MethodPost,
+		Path:   upsDeviceScope + "/:id/feeds",
+		Description: "Add something the UPS powers by hand: a node (feed_cluster_id and node_name), or a load that is not " +
+			"a node (label), such as a switch. A node is found on its own once a upsmon on it logs in. A node " +
+			"already powered is a 409. Requires manage:ups, and view:node on the node's cluster.",
+		Group:       "Power",
+		Permissions: Permissions{Deferred: feedReason},
+		NodesCheckedByHandler: map[string]string{
+			"node_name": "checked against feed_cluster_id after view:node on that cluster is authorized",
+		},
+		Parameters: apischema.Properties{
+			"id":              upsDeviceIDParam,
+			"feed_cluster_id": clusterParam("The node's cluster."),
+			"node_name":       nodeParam("The node the UPS powers."),
+			"label": {
+				Type: apischema.String, Optional: true, MinLength: apischema.Ptr(1), MaxLength: apischema.Ptr(64),
+				Typetext: "<text>", Description: "A load that is not a node, such as a switch.",
+			},
+		},
+		Handler: h.AddFeed,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPut,
+		Path:   upsDeviceScope + "/:id/feeds/:feed_id",
+		Description: "Say whether a node the UPS powers shuts down some way Nexara cannot see: its upsmon is behind " +
+			"NAT or a proxy, or another tool shuts it down. Its verdict then reads checked elsewhere instead of a " +
+			"warning. Requires manage:ups, and view:node on the node's cluster.",
+		Group:       "Power",
+		Permissions: Permissions{Deferred: feedReason},
+		Parameters: apischema.Properties{
+			"id":      upsDeviceIDParam,
+			"feed_id": feedIDParam,
+			"protected_elsewhere": {
+				Type: apischema.Boolean, Typetext: "<boolean>",
+				Description: "True when the node shuts down some way Nexara cannot see.",
+			},
+		},
+		Handler: h.UpdateFeed,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodDelete,
+		Path:   upsDeviceScope + "/:id/feeds/:feed_id",
+		Description: "Remove something the UPS powers. A node is kept as removed, so a login from it does not add it " +
+			"again; only adding it back by hand does. Requires manage:ups, and view:node on the node's cluster.",
+		Group:       "Power",
+		Permissions: Permissions{Deferred: feedReason},
+		Parameters:  apischema.Properties{"id": upsDeviceIDParam, "feed_id": feedIDParam},
+		Handler:     h.RemoveFeed,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPut,
+		Path:   nutServerScope + "/:id/host-node",
+		Description: "Say which node the NUT server runs on, so its own upsmon (a loopback login) counts for that " +
+			"node; or set detect to hand it back to the poller, which finds it from the address it reaches. A " +
+			"change of the server's address forgets it. Requires manage:ups, and view:node on every cluster: a " +
+			"server has one host node, which may be in any cluster.",
+		Group:       "Power",
+		Permissions: Permissions{Deferred: feedReason},
+		NodesCheckedByHandler: map[string]string{
+			"node_name": "checked against host_cluster_id after view:node on that cluster is authorized",
+		},
+		Parameters: apischema.Properties{
+			"id":              nutServerIDParam,
+			"host_cluster_id": clusterParam("The node's cluster."),
+			"node_name":       nodeParam("The node the NUT server runs on."),
+			"detect":          optFlag("Forget the host node and let the poller find it."),
+		},
+		Handler: h.SetHostNode,
+	})
 }

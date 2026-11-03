@@ -39,7 +39,7 @@ import (
 // has to update deliberately.
 const (
 	bodyNodeServeRouteCount   = 27
-	bodyNodeHandlerRouteCount = 5
+	bodyNodeHandlerRouteCount = 7
 )
 
 // bodyNodeExempt lists the body parameters spelled like a node that nothing checks
@@ -325,6 +325,24 @@ var handlerNodeChecks = map[string]handlerNodeCheck{
 		clusterOf: map[string]string{"target_node": "cluster_id"},
 		// The PBS server is read, and must be visible, before the node is checked.
 		rows: map[string]any{"GetPBSServer": db.PbsServer{ID: uuid.MustParse(testPBSServerID)}},
+	},
+	"POST " + upsDeviceScope + "/:id/feeds": {
+		handler: func(q *db.Queries) Handler {
+			return handlers.NewNutHandler(q, "", nil).AddFeed
+		},
+		grants:    []string{"manage:ups", "view:node"},
+		clusterOf: map[string]string{"node_name": "feed_cluster_id"},
+		// The UPS is read, and must exist, before the node is checked.
+		rows: map[string]any{"GetUpsDevice": db.GetUpsDeviceRow{ID: uuid.New()}},
+	},
+	"PUT " + nutServerScope + "/:id/host-node": {
+		handler: func(q *db.Queries) Handler {
+			return handlers.NewNutHandler(q, "", nil).SetHostNode
+		},
+		grants:    []string{"manage:ups", "view:node"},
+		clusterOf: map[string]string{"node_name": "host_cluster_id"},
+		// The NUT server is read, and must exist, before the node is checked.
+		rows: map[string]any{"GetNutServer": db.NutServer{ID: uuid.New()}},
 	},
 }
 
