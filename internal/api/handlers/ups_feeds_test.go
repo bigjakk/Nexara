@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -58,6 +60,7 @@ func TestUpsFeedRoutes(t *testing.T) {
 		"host":   {http.MethodPut, "/nut/:id/host-node", apischema.Properties{"id": str, "host_cluster_id": str, "node_name": str, "detect": flag}, func(h *NutHandler) func(fiber.Ctx, *apischema.Params) error { return h.SetHostNode }},
 	}
 	nodeFeed, hiddenFeed := node(seen), node(hidden)
+	audited := 0
 	for _, tc := range []struct {
 		name, route, target string
 		body                map[string]any
@@ -99,7 +102,8 @@ func TestUpsFeedRoutes(t *testing.T) {
 			map[string]any{"GetNutServer": server}, fiber.StatusBadRequest, true},
 	} {
 		r := routes[tc.route]
-		h := NewNutHandler(db.New(&auditRowsDBTX{rowFor: tc.rows}), testEncryptionKey, nil)
+		dbtx := &auditRowsDBTX{rowFor: tc.rows, execOK: map[string]bool{"InsertAuditLog": true}}
+		h := NewNutHandler(db.New(dbtx), testEncryptionKey, nil)
 		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 		var engine permissionEngine = upsCaller{clusterGrantEngine{"view", "node", seen}, []string{"manage:ups"}}
 		if tc.everywhere {
@@ -125,5 +129,16 @@ func TestUpsFeedRoutes(t *testing.T) {
 		if resp.StatusCode != tc.want {
 			t.Errorf("%s: status %d, want %d", tc.name, resp.StatusCode, tc.want)
 		}
+		// Every row these routes audit names its UPS or NUT server, which the
+		// activity feed shows in place of an id.
+		for _, a := range dbtx.execsOf("InsertAuditLog") {
+			audited++
+			if !strings.Contains(fmt.Sprintf("%s", a[5]), `"resource_name":"`) {
+				t.Errorf("%s: %v names nothing: %s", tc.name, a[4], a[5])
+			}
+		}
+	}
+	if audited == 0 {
+		t.Error("no route wrote an audit row")
 	}
 }

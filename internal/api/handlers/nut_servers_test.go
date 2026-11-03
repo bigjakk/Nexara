@@ -31,6 +31,10 @@ import (
 func newNutTestApp(t *testing.T, h *NutHandler) *fiber.App {
 	t.Helper()
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New()) // signed in, so a change is audited
+		return c.Next()
+	})
 	props := apischema.Properties{
 		"name":                              {Type: apischema.String, Optional: true},
 		"host":                              {Type: apischema.String},
@@ -148,8 +152,9 @@ func TestNutUpdate_RefusesBeforeDialing(t *testing.T) {
 	}
 	stored := db.NutServer{ID: uuid.New(), Name: "nut01", Host: "192.0.2.40", Port: 3493, Username: "u",
 		PasswordEncrypted: pw, TlsMode: "starttls", Enabled: true}
-	h := NewNutHandler(db.New(&auditRowsDBTX{rowFor: map[string]any{"GetNutServer": stored, "UpdateNutServer": stored}}),
-		testEncryptionKey, nil)
+	dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetNutServer": stored, "UpdateNutServer": stored},
+		execOK: map[string]bool{"InsertAuditLog": true}}
+	h := NewNutHandler(db.New(dbtx), testEncryptionKey, nil)
 	var dials atomic.Int32
 	h.dial = func(context.Context, nut.Config) (*nut.Client, error) {
 		dials.Add(1)
@@ -173,11 +178,23 @@ func TestNutUpdate_RefusesBeforeDialing(t *testing.T) {
 			t.Errorf("%s: %d %s, want %d containing %q", tc.name, status, body, tc.status, tc.want)
 		}
 	}
+	// Each refusal and the rename is audited naming the server, for the
+	// activity feed to show.
+	audits := dbtx.execsOf("InsertAuditLog")
+	if len(audits) == 0 {
+		t.Error("no audit rows")
+	}
+	for _, a := range audits {
+		if !strings.Contains(fmt.Sprintf("%s", a[5]), `"resource_name":"nut01"`) {
+			t.Errorf("%v: details %s do not name nut01", a[4], a[5])
+		}
+	}
 	// A pinned server: a new pin scores as protected, yet it is the caller's
 	// choice of certificate, so the stored password goes to it only re-entered.
 	pinned := stored
 	pinned.TlsFingerprint = strings.Repeat("ab", 32)
-	ph := NewNutHandler(db.New(&auditRowsDBTX{rowFor: map[string]any{"GetNutServer": pinned}}), testEncryptionKey, nil)
+	ph := NewNutHandler(db.New(&auditRowsDBTX{rowFor: map[string]any{"GetNutServer": pinned}, execOK: map[string]bool{"InsertAuditLog": true}}),
+		testEncryptionKey, nil)
 	ph.dial = h.dial
 	status, body := doVeeamRequest(t, newNutTestApp(t, ph), http.MethodPut, "/nut-servers/"+pinned.ID.String(), "",
 		fmt.Sprintf(`{"tls_fingerprint":%q}`, strings.Repeat("cd", 32)))

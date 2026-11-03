@@ -226,10 +226,11 @@ func (h *NutHandler) SetHostNode(c fiber.Ctx, p *apischema.Params) error {
 	}
 	// On the node's cluster, like a feed, and on the cluster that lost its host
 	// as well when that is another one; each row names only its own cluster's node.
-	details, _ := json.Marshal(map[string]any{"name": server.Name, "host_node": node, "detect": p.Bool("detect")})
+	named := auditTruncate(server.Name, maxAuditResourceNameLen)
+	details, _ := json.Marshal(map[string]any{"name": server.Name, "resource_name": named, "host_node": node, "detect": p.Bool("detect")})
 	AuditLog(c, h.queries, h.eventPub, arg.ClusterID, "nut_server", server.ID.String(), "nut_server_host_node_set", details)
 	if server.HostClusterID.Valid && server.HostClusterID != arg.ClusterID {
-		was, _ := json.Marshal(map[string]any{"name": server.Name, "host_node_removed": server.HostNodeName.String, "detect": p.Bool("detect")})
+		was, _ := json.Marshal(map[string]any{"name": server.Name, "resource_name": named, "host_node_removed": server.HostNodeName.String, "detect": p.Bool("detect")})
 		AuditLog(c, h.queries, h.eventPub, server.HostClusterID, "nut_server", server.ID.String(), "nut_server_host_node_set", was)
 	}
 	if h.eventPub != nil {

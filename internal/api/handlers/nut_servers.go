@@ -628,7 +628,8 @@ func (h *NutHandler) changed(c fiber.Ctx) {
 // a per-cluster resource. Details never carry the password, nor the username,
 // because view:audit is every Viewer's and audit details are readable there.
 func (h *NutHandler) audit(c fiber.Ctx, server db.NutServer, action string, extra map[string]any) {
-	details := map[string]any{"name": server.Name, "host": server.Host, "port": server.Port}
+	details := map[string]any{"name": server.Name, "host": server.Host, "port": server.Port,
+		"resource_name": auditTruncate(server.Name, maxAuditResourceNameLen)}
 	for k, v := range extra {
 		details[k] = v
 	}
