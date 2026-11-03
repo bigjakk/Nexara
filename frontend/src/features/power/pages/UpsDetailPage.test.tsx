@@ -5,7 +5,7 @@ import { Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
-import { upsDevice, upsFeed } from "../power.fixtures";
+import { nutServer, upsDevice, upsFeed } from "../power.fixtures";
 import { UpsDetailPage } from "./UpsDetailPage";
 
 vi.mock("@/lib/api-client", async () => (await import("@/test/mocks")).apiClientMock());
@@ -41,6 +41,42 @@ describe("UpsDetailPage", () => {
 
   beforeEach(() => {
     useAuthStore.setState({ globalPermissions: [] });
+  });
+
+  // Set shows where the server would take it: for manage:ups alone, a variable
+  // that only describes the UPS, not one that can change its power.
+  it("offers Set where the caller may set a variable, and opens its dialog", async () => {
+    useAuthStore.setState({ globalPermissions: ["view:ups", "manage:ups"] });
+    vi.mocked(apiClient.get).mockImplementation((path: unknown) =>
+      Promise.resolve(
+        String(path).includes("/metrics")
+          ? { range: "1h", bucket_seconds: 10, points: [] }
+          : upsDevice({
+              vars: { "device.location": "", "battery.charge.low": "10" },
+              writable: [
+                { name: "device.location", value: "", type: "string", max_len: 32, editable: true, affects_power: false, confirm: "" },
+                { name: "battery.charge.low", value: "10", type: "string", max_len: 10, editable: true, affects_power: true, confirm: "plain" },
+              ],
+            }),
+      ),
+    );
+    vi.mocked(apiClient.list).mockImplementation((path: unknown) =>
+      Promise.resolve(String(path).includes("nut-servers") ? [nutServer({ has_password: true })] : []),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/power/:upsId" element={<UpsDetailPage />} />
+      </Routes>,
+      { router: { initialEntries: ["/power/u1"] } },
+    );
+
+    await user.click(await screen.findByRole("tab", { name: "Variables (2)" }));
+    const set = await screen.findByRole("button", { name: "Set device.location" });
+    // Before the dialog opens: a modal hides the page from these queries.
+    expect(screen.queryByRole("button", { name: "Set battery.charge.low" })).not.toBeInTheDocument();
+    await user.click(set);
+    expect(await screen.findByRole("dialog")).toHaveTextContent("device.location");
   });
 
   // The Powers tab judges each node, and removing one says what it costs: its

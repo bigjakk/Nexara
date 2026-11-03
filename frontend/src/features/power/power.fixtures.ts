@@ -1,4 +1,4 @@
-import type { NutServer, UpsDevice, UpsFeed } from "./types/ups";
+import type { NutServer, UpsCommandRun, UpsDevice, UpsFeed } from "./types/ups";
 
 /**
  * Shared NUT server and UPS fixtures for the Power tests and the components
@@ -26,6 +26,7 @@ export function nutServer(over: Partial<NutServer> = {}): NutServer {
     protocol_version: "1.3",
     last_poll_at: "2026-11-02T03:19:00Z",
     last_poll_error: "",
+    commands_verified_at: null,
     created_at: "2026-11-01T00:00:00Z",
     updated_at: "2026-11-01T00:00:00Z",
     ...over,
@@ -96,6 +97,24 @@ export function upsFeed(over: Partial<UpsFeed> = {}): UpsFeed {
     protection: "protected",
     login_address: "192.0.2.11",
     created_at: new Date().toISOString(),
+    ...over,
+  };
+}
+
+/** A command run still waiting on its driver. */
+export function upsCommandRun(over: Partial<UpsCommandRun> = {}): UpsCommandRun {
+  return {
+    id: "r1",
+    kind: "command",
+    name: "beeper.mute",
+    argument: "",
+    previous: null,
+    status: "pending",
+    result: "",
+    requested_at: "2026-11-03T12:00:00Z",
+    finished_at: null,
+    user_email: "",
+    user_display_name: "",
     ...over,
   };
 }

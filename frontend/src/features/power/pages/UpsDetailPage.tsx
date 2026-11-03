@@ -10,7 +10,7 @@ import { Sparkline } from "@/components/Sparkline";
 import { TimeRangeSelector } from "@/features/dashboard/components/TimeRangeSelector";
 import { formatDateTime } from "@/lib/format";
 import type { TimeRange } from "@/types/api";
-import { useUpsDevice, useUpsEvents, useUpsMetrics } from "../api/ups-queries";
+import { useNutServers, useUpsDevice, useUpsEvents, useUpsMetrics } from "../api/ups-queries";
 import type { UpsDevice, UpsMetricPoint, UpsRange } from "../types/ups";
 import { formatRuntime, formatWatts, upsOnBattery, upsStatus } from "../lib/ups-state";
 import { UpsStatusBadges } from "../components/UpsBadges";
@@ -18,6 +18,10 @@ import { UpsCharts } from "../components/UpsCharts";
 import { UpsVariablesTable } from "../components/UpsVariablesTable";
 import { LatestEventsNote, PowerEventsTable } from "../components/PowerEventsTable";
 import { UpsPowers } from "../components/UpsPowers";
+import { UpsCommands } from "../components/UpsCommands";
+import { UpsVariableDialog } from "../components/UpsVariableDialog";
+import { usePermissions } from "@/hooks/usePermissions";
+import type { UpsWritableVar } from "../types/ups";
 
 function series(points: UpsMetricPoint[], key: keyof UpsMetricPoint): number[] {
   return points.map((p) => p[key]).filter((v): v is number => typeof v === "number");
@@ -140,6 +144,20 @@ export function UpsDetailPage() {
   const device = useUpsDevice(upsId);
   const events = useUpsEvents(upsId);
   const d = device.data;
+  const { hasGlobalPermission, canManage } = usePermissions();
+  const [setting, setSetting] = useState<UpsWritableVar | null>(null);
+  const hasAccount = useNutServers().data?.find((s) => s.id === d?.server_id)?.has_password === true;
+  // As the server gates it: one that can change the power also takes
+  // execute:ups, and manage:node on the clusters the UPS powers.
+  const whyNotSet = (v: UpsWritableVar): string | null => {
+    if (!v.editable) return v.reason ?? "Nexara does not offer it for editing";
+    if (!hasGlobalPermission("manage", "ups")) return "Setting it takes manage:ups";
+    if (v.affects_power && !(hasGlobalPermission("execute", "ups") && canManage("node"))) {
+      return "It can change the power the UPS supplies, so setting it also takes execute:ups and manage:node";
+    }
+    if (!hasAccount) return "Setting it takes an account from upsd.users, stored on the NUT server";
+    return null;
+  };
 
   return (
     <div className="space-y-6">
@@ -189,6 +207,7 @@ export function UpsDetailPage() {
                 )}
               </TabsTrigger>
               <TabsTrigger value="variables">Variables ({Object.keys(d.vars ?? {}).length})</TabsTrigger>
+              <TabsTrigger value="commands">Commands ({d.commands?.length ?? 0})</TabsTrigger>
               <TabsTrigger value="events">Power events</TabsTrigger>
             </TabsList>
             <TabsContent value="overview">
@@ -198,7 +217,25 @@ export function UpsDetailPage() {
               <UpsPowers device={d} />
             </TabsContent>
             <TabsContent value="variables">
-              <UpsVariablesTable vars={d.vars ?? {}} descriptions={d.var_descriptions ?? {}} />
+              <UpsVariablesTable
+                vars={d.vars ?? {}}
+                descriptions={d.var_descriptions ?? {}}
+                writable={d.writable ?? []}
+                whyNotSet={whyNotSet}
+                onSet={setSetting}
+              />
+              {setting !== null && (
+                <UpsVariableDialog
+                  device={d}
+                  variable={setting}
+                  onClose={() => {
+                    setSetting(null);
+                  }}
+                />
+              )}
+            </TabsContent>
+            <TabsContent value="commands">
+              <UpsCommands device={d} />
             </TabsContent>
             <TabsContent value="events">
               {(events.data?.length ?? 0) > 0 ? (

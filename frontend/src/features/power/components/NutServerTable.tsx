@@ -82,10 +82,11 @@ const COLUMNS: ColumnDef<NutServer, SortKey, Ctx>[] = [
     key: "access",
     label: "Access",
     width: 170,
-    sortValue: (s) => (s.has_password ? 1 : 0),
+    sortValue: (s) => (s.commands_verified_at !== null ? 2 : s.has_password ? 1 : 0),
     cell: (s) => (
       <span className="text-sm">
-        {s.has_password ? "With credentials" : "Anonymous"} · {s.tls_mode === "starttls" ? "STARTTLS" : "no TLS"}
+        {s.commands_verified_at !== null ? "Commands" : s.has_password ? "With credentials" : "Anonymous"} ·{" "}
+        {s.tls_mode === "starttls" ? "STARTTLS" : "no TLS"}
       </span>
     ),
   },

@@ -17,6 +17,11 @@ export interface NutServer {
   protocol_version: string;
   last_poll_at: string | null;
   last_poll_error: string;
+  /**
+   * When upsd last took a command from the stored account: upsd checks an
+   * account only when a command runs, so this is the only proof it may.
+   */
+  commands_verified_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -162,6 +167,54 @@ export interface UpsDevice {
   issues: HealthIssue[];
   vars?: Record<string, string>;
   var_descriptions?: Record<string, string>;
+  /** On the detail only, once the poller has listed them. */
+  commands?: UpsCommand[];
+  writable?: UpsWritableVar[];
+  commands_listed_at?: string;
+}
+
+/** How much a command can disturb what the UPS powers (decision P6). */
+export type UpsCommandTier = "everyday" | "test" | "powers_on" | "driver" | "cuts_power";
+
+/** What running a command or setting a variable asks first: nothing, a confirm, or the UPS's name typed. */
+export type UpsConfirm = "" | "plain" | "typed";
+
+export interface UpsCommand {
+  name: string;
+  description: string;
+  tier: UpsCommandTier;
+  confirm: UpsConfirm;
+}
+
+export interface UpsWritableVar {
+  name: string;
+  value: string;
+  /** "" until the poller has read its type; nothing sets it until then. */
+  type: "" | "string" | "number" | "enum" | "range";
+  max_len?: number;
+  enum?: string[];
+  ranges?: [number, number][];
+  editable: boolean;
+  /** Why it is not editable. */
+  reason?: string;
+  /** Setting it is gated as cutting power is: execute:ups, and manage:node on the clusters the UPS powers. */
+  affects_power: boolean;
+  confirm: UpsConfirm;
+}
+
+/** One command run or variable set, with what upsd and the driver answered. */
+export interface UpsCommandRun {
+  id: string;
+  kind: "command" | "set";
+  name: string;
+  argument: string;
+  previous: string | null;
+  status: "sent" | "pending" | "succeeded" | "failed" | "unconfirmed";
+  result: string;
+  requested_at: string;
+  finished_at: string | null;
+  user_email: string;
+  user_display_name: string;
 }
 
 export type UpsRange = "1h" | "6h" | "24h" | "7d";

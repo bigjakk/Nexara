@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { reportUpsRun } from "../lib/ups-runs";
 import type {
   NutProbeResult,
   NutServer,
   NutServerRequest,
+  UpsCommandRun,
   UpsDevice,
   UpsEvent,
   UpsFeed,
@@ -23,6 +25,8 @@ export const upsKeys = {
   servers: ["nut-servers"] as const,
   devices: ["ups-devices"] as const,
   device: (id: string) => ["ups-device", id] as const,
+  // Under the device's key, so the ups_change event that ends a run refreshes it.
+  runs: (id: string) => ["ups-device", id, "runs"] as const,
   metrics: (id: string, range: UpsRange) => ["ups-device", id, "metrics", range] as const,
   events: (upsId?: string) => ["ups-events", upsId ?? "all"] as const,
 };
@@ -60,6 +64,21 @@ export function useUpsMetrics(id: string, range: UpsRange) {
         apiPath`/api/v1/ups-devices/${id}/metrics?range=${range}`,
       ),
     refetchInterval: 60_000,
+    enabled: id !== "",
+  });
+}
+
+/**
+ * A UPS's newest command runs and variable sets. A run still waiting on its
+ * driver is asked about every few seconds as well, in case the event that
+ * ends it is missed.
+ */
+export function useUpsCommandRuns(id: string) {
+  return useQuery({
+    queryKey: upsKeys.runs(id),
+    queryFn: () => apiClient.list<UpsCommandRun>(apiPath`/api/v1/ups-devices/${id}/command-runs`),
+    refetchInterval: (query) =>
+      query.state.data?.some((r) => r.status === "sent" || r.status === "pending") === true ? 3_000 : false,
     enabled: id !== "",
   });
 }
@@ -190,6 +209,42 @@ export function useSetNutHostNode(serverId: string, upsId: string) {
     mutationFn: (body: { host_cluster_id: string; node_name: string } | { detect: true }) =>
       apiClient.put<never>(apiPath`/api/v1/nut-servers/${serverId}/host-node`, body),
     onSuccess: invalidate,
+  });
+}
+
+function useInvalidateRuns(upsId: string) {
+  const queryClient = useQueryClient();
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: upsKeys.runs(upsId) });
+    void queryClient.invalidateQueries({ queryKey: upsKeys.servers });
+  };
+}
+
+/**
+ * Runs an instant command. The answer is the run, which may already have
+ * failed: upsd's refusal is a run's outcome, not an HTTP error. It is reported
+ * here, not by the caller, so a tab switch before upsd answers loses nothing.
+ */
+export function useRunUpsCommand(upsId: string) {
+  const invalidate = useInvalidateRuns(upsId);
+  return useMutation({
+    mutationFn: (req: { command: string; confirm?: string }) =>
+      apiClient.post<UpsCommandRun>(apiPath`/api/v1/ups-devices/${upsId}/commands`, req),
+    onSuccess: (run) => {
+      invalidate();
+      reportUpsRun(run);
+    },
+  });
+}
+
+/** Sets a variable; its dialog shows the failure, so it skips the global toast. */
+export function useSetUpsVariable(upsId: string) {
+  const invalidate = useInvalidateRuns(upsId);
+  return useMutation({
+    mutationFn: ({ name, value, confirm }: { name: string; value: string; confirm?: string }) =>
+      apiClient.put<UpsCommandRun>(apiPath`/api/v1/ups-devices/${upsId}/vars/${name}`, { value, confirm }),
+    onSuccess: invalidate,
+    ...errorsHandledLocally,
   });
 }
 
