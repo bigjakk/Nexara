@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { setupUser } from "@/test/user";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
 import { nutServer, upsDevice, upsFeed } from "../power.fixtures";
@@ -46,6 +47,7 @@ describe("NodePowerCard", () => {
     expect(screen.getByText(/MONITOR ups02@192\.0\.2\.40 1 <user> <password> secondary/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Shut down pve-03 now/ })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "ups03" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 
   // As the Power page's outage banner reads it: a second supply on mains keeps the node up.
@@ -56,5 +58,17 @@ describe("NodePowerCard", () => {
 
     expect(await screen.findByText(/ups03 also powers it and is on mains/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Shut down/ })).not.toBeInTheDocument();
+  });
+
+  it("lets a manage:ups holder mark the node protected another way", async () => {
+    useAuthStore.setState({ globalPermissions: ["view:ups", "manage:ups"] });
+    serve([outage([unprotected])]);
+    vi.mocked(apiClient.put).mockResolvedValue(unprotected);
+    const user = setupUser();
+    renderWithProviders(<NodePowerCard clusterId="c1" nodeName="pve-03" online />);
+
+    await user.click(await screen.findByRole("switch", { name: "pve-03 shuts down another way when ups02 runs out" }));
+
+    expect(apiClient.put).toHaveBeenCalledWith("/api/v1/ups-devices/u1/feeds/f1", { protected_elsewhere: true });
   });
 });

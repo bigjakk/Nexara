@@ -2,10 +2,11 @@ import { Link } from "react-router-dom";
 import { BatteryCharging, Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { NodeShutdownConfirm } from "@/features/clusters/components/node/NodeShutdownConfirm";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
-import { useNutServers, useUpsDevices } from "../api/ups-queries";
+import { useNutServers, useSetUpsFeedProtectedElsewhere, useUpsDevices } from "../api/ups-queries";
 import { feedName, protectionView, upsmonSystem } from "../lib/ups-feeds";
 import { formatRuntime, upsOnBattery } from "../lib/ups-state";
 import type { NutServer, UpsDevice, UpsFeed } from "../types/ups";
@@ -85,7 +86,8 @@ function FedBy({ device, feed, server, clusterId, nodeName, online, stillFedBy }
   online: boolean;
   stillFedBy: string[];
 }) {
-  const { canManage } = usePermissions();
+  const { canManage, hasGlobalPermission } = usePermissions();
+  const elsewhere = useSetUpsFeedProtectedElsewhere(device.id);
   const others = device.feeds.filter((f) => f.id !== feed.id).map(feedName);
   const onBattery = upsOnBattery(device);
   const unprotected = feed.protection === "not_protected";
@@ -115,6 +117,20 @@ function FedBy({ device, feed, server, clusterId, nodeName, online, stillFedBy }
           <ProtectionBadge feed={feed} />
           <span className="text-xs text-muted-foreground">{protectionView(feed).hint}</span>
         </div>
+        {hasGlobalPermission("manage", "ups") && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Switch
+              checked={feed.protected_elsewhere}
+              aria-label={`${nodeName} shuts down another way when ${device.name} runs out`}
+              disabled={elsewhere.isPending}
+              onCheckedChange={(on) => { elsewhere.mutate({ feedId: feed.id, protectedElsewhere: on }); }}
+            />
+            <span>
+              Protected another way: {nodeName} shuts down some way Nexara cannot see, such as a upsmon behind NAT or a
+              proxy, or another tool, so it is not warned about.
+            </span>
+          </div>
+        )}
         {unprotected && (
           <div className="space-y-1.5 text-xs">
             <p className="text-muted-foreground">
