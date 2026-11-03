@@ -3,6 +3,7 @@ package nut
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -60,6 +61,16 @@ func TestClient_Reads(t *testing.T) {
 	}
 	if _, err := c.ListVars(ctx, "nosuch"); !IsUnknownUPS(err) {
 		t.Errorf("unknown ListVars err = %v", err)
+	}
+	// Asked as UPS01, upsd answers with its own spelling; a 2.7 upsd listening
+	// on :: shows an IPv4 client IPv6-mapped.
+	s.SetClients("ups01", "::ffff:192.0.2.12", "2001:db8::12", "2001:db8::12")
+	want := []netip.Addr{netip.MustParseAddr("192.0.2.12"), netip.MustParseAddr("2001:db8::12"), netip.MustParseAddr("2001:db8::12")}
+	if got, err := c.ListClients(ctx, "UPS01"); err != nil || !slices.Equal(got, want) {
+		t.Errorf("ListClients = %v, %v; want %v", got, err, want)
+	}
+	if _, err := c.ListClients(ctx, "nosuch"); !IsUnknownUPS(err) {
+		t.Errorf("unknown ListClients err = %v", err)
 	}
 	if d, err := c.VarDescription(ctx, "ups01", "battery.charge"); err != nil || d != "Battery charge (percent of full)" {
 		t.Errorf("VarDescription = %q, %v", d, err)
@@ -141,6 +152,7 @@ func TestClient_SendsOnlyReads(t *testing.T) {
 	_, _, _ = c.Versions(ctx)
 	_, _ = c.ListUPS(ctx)
 	_, _ = c.ListVars(ctx, "ups01")
+	_, _ = c.ListClients(ctx, "ups01")
 	_, _ = c.VarDescription(ctx, "ups01", "battery.charge")
 	_ = c.Close()
 	got := s.Received()

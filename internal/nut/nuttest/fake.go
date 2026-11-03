@@ -38,6 +38,9 @@ type Device struct {
 	// Descs holds GET DESC answers. A variable missing here gets upsd's own
 	// "Description unavailable".
 	Descs map[string]string
+	// Clients are the addresses logged in to the UPS, one per connection, as
+	// LIST CLIENT lists them.
+	Clients []string
 }
 
 // Server is a fake upsd on 127.0.0.1.
@@ -88,7 +91,29 @@ func (s *Server) SetDevice(name string, d Device) {
 		vars[k] = v
 	}
 	d.Vars = vars
+	d.Clients = slices.Clone(d.Clients)
 	s.devices[name] = d
+}
+
+// SetClients replaces the logins LIST CLIENT reports for a UPS.
+func (s *Server) SetClients(ups string, addrs ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if d, ok := s.devices[ups]; ok {
+		d.Clients = slices.Clone(addrs)
+		s.devices[ups] = d
+	}
+}
+
+// device finds a UPS the way upsd does, ignoring case, and returns its name
+// as configured.
+func (s *Server) device(name string) (string, Device, bool) {
+	for n, d := range s.devices {
+		if strings.EqualFold(n, name) {
+			return n, d, true
+		}
+	}
+	return "", Device{}, false
 }
 
 // SetVar changes one variable of a UPS that SetDevice added.
@@ -255,7 +280,7 @@ func (s *Server) answer(line string) (reply string, startTLS, quit bool) {
 		return s.list(f[1:]), false, false
 	case "GET":
 		if len(f) == 4 && f[1] == "DESC" {
-			d, ok := s.devices[f[2]]
+			_, d, ok := s.device(f[2])
 			if !ok {
 				return "ERR UNKNOWN-UPS\n", false, false
 			}
@@ -299,7 +324,7 @@ func (s *Server) list(args []string) string {
 		}
 		b.WriteString("END LIST UPS\n")
 	case len(args) == 2 && args[0] == "VAR":
-		d, ok := s.devices[args[1]]
+		_, d, ok := s.device(args[1])
 		if !ok {
 			return "ERR UNKNOWN-UPS\n"
 		}
@@ -308,6 +333,17 @@ func (s *Server) list(args []string) string {
 			b.WriteString("VAR " + args[1] + " " + k + " " + quote(d.Vars[k]) + "\n")
 		}
 		b.WriteString("END LIST VAR " + args[1] + "\n")
+	case len(args) == 2 && args[0] == "CLIENT":
+		name, d, ok := s.device(args[1])
+		if !ok {
+			return "ERR UNKNOWN-UPS\n"
+		}
+		// Unlike LIST VAR, the lines name the UPS as configured, not as asked.
+		b.WriteString("BEGIN LIST CLIENT " + args[1] + "\n")
+		for _, addr := range d.Clients {
+			b.WriteString("CLIENT " + name + " " + addr + "\n")
+		}
+		b.WriteString("END LIST CLIENT " + args[1] + "\n")
 	default:
 		return "ERR INVALID-ARGUMENT\n"
 	}

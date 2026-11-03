@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -341,6 +342,34 @@ func (c *Client) ListVars(ctx context.Context, ups string) (map[string]string, e
 			return nil, fmt.Errorf("nut: unexpected LIST VAR line %q", clip(strings.Join(r, " "), 64))
 		}
 		out[r[2]] = r[3]
+	}
+	return out, nil
+}
+
+// ListClients returns the address of every connection logged in to a UPS,
+// which is how upsmon attaches, primary and secondary alike. upsd asks no
+// credentials for it and answers while the driver is down. Two connections
+// from one address (NAT, or two upsmons on one host) are two entries, and an
+// IPv4 address upsd shows IPv6-mapped comes back as IPv4.
+func (c *Client) ListClients(ctx context.Context, ups string) ([]netip.Addr, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rows, err := c.list(ctx, "CLIENT", ups)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]netip.Addr, 0, len(rows))
+	for _, r := range rows {
+		// upsd finds the UPS case-insensitively and names it its own way here,
+		// unlike LIST VAR, which echoes the name as asked.
+		if len(r) != 3 || r[0] != "CLIENT" || !strings.EqualFold(r[1], ups) {
+			return nil, fmt.Errorf("nut: unexpected LIST CLIENT line %q", clip(strings.Join(r, " "), 64))
+		}
+		addr, err := netip.ParseAddr(r[2])
+		if err != nil {
+			return nil, fmt.Errorf("nut: unexpected LIST CLIENT address %q", clip(r[2], 64))
+		}
+		out = append(out, addr.Unmap())
 	}
 	return out, nil
 }

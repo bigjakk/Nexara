@@ -15,6 +15,8 @@ import (
 // LIST VAR carried more variables; the framing, quoting and sort order are
 // what clients rely on. DRIVER-NOT-CONNECTED was captured with the driver
 // stopped and is injected here; ups03 was captured with no desc in ups.conf.
+// LIST CLIENT was captured on 2026-11-03 with two upsmon logins from one
+// host, whose address is replaced with TEST-NET here.
 func TestFake_MatchesRealUpsd(t *testing.T) {
 	t.Parallel()
 	s := NewServer(t)
@@ -22,6 +24,7 @@ func TestFake_MatchesRealUpsd(t *testing.T) {
 		Description: "Rack UPS",
 		Vars:        map[string]string{"ups.status": "OL", "battery.charge": "100", "device.mfr": "Dummy Manufacturer"},
 		Descs:       map[string]string{"battery.charge": "Battery charge (percent of full)"},
+		Clients:     []string{"192.0.2.12", "192.0.2.12"},
 	})
 	s.SetDevice("ups02", Device{Description: "Closet UPS"})
 	s.SetDevice("ups03", Device{})
@@ -55,7 +58,22 @@ func TestFake_MatchesRealUpsd(t *testing.T) {
 			`VAR ups01 ups.status "OL"`,
 			"END LIST VAR ups01",
 		}},
+		{"LIST VAR UPS01", []string{
+			"BEGIN LIST VAR UPS01",
+			`VAR UPS01 battery.charge "100"`,
+			`VAR UPS01 device.mfr "Dummy Manufacturer"`,
+			`VAR UPS01 ups.status "OL"`,
+			"END LIST VAR UPS01",
+		}},
 		{"LIST VAR nosuch", []string{"ERR UNKNOWN-UPS"}},
+		{"LIST CLIENT ups01", []string{
+			"BEGIN LIST CLIENT ups01", "CLIENT ups01 192.0.2.12", "CLIENT ups01 192.0.2.12", "END LIST CLIENT ups01",
+		}},
+		{"LIST CLIENT UPS01", []string{
+			"BEGIN LIST CLIENT UPS01", "CLIENT ups01 192.0.2.12", "CLIENT ups01 192.0.2.12", "END LIST CLIENT UPS01",
+		}},
+		{"LIST CLIENT ups02", []string{"BEGIN LIST CLIENT ups02", "END LIST CLIENT ups02"}},
+		{"LIST CLIENT nosuch", []string{"ERR UNKNOWN-UPS"}},
 		{"LIST VAR ups02", []string{"ERR DRIVER-NOT-CONNECTED"}},
 		{"GET DESC ups01 battery.charge", []string{`DESC ups01 battery.charge "Battery charge (percent of full)"`}},
 		{"GET DESC ups01 no.such.var", []string{`DESC ups01 no.such.var "Description unavailable"`}},
