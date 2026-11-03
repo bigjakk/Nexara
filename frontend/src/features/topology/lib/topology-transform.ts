@@ -5,6 +5,7 @@ import type {
   VMResponse,
   StorageResponse,
 } from "@/types/api";
+import type { UpsTone } from "@/features/power/lib/ups-state";
 
 // --- Node data payloads ---
 
@@ -42,6 +43,8 @@ export interface HostNodeData {
   /** Injected live metrics (0-100); undefined until the first WS message. */
   cpuPercent?: number;
   memPercent?: number;
+  /** Injected by the power overlay: the UPSes that power it with no upsmon on it. */
+  noUpsmon?: string[];
   [key: string]: unknown;
 }
 
@@ -75,11 +78,26 @@ export interface StorageNodeData {
   [key: string]: unknown;
 }
 
+/** A UPS on the power overlay, which topology-power.ts places outside the layout. */
+export interface UpsNodeData {
+  kind: "ups";
+  label: string;
+  deviceId: string;
+  serverName: string;
+  status: string;
+  tone: UpsTone;
+  batteryCharge: number | null;
+  batteryRuntime: number | null;
+  direction: "TB" | "LR";
+  [key: string]: unknown;
+}
+
 export type TopologyNodeData =
   | ClusterNodeData
   | HostNodeData
   | GuestNodeData
-  | StorageNodeData;
+  | StorageNodeData
+  | UpsNodeData;
 
 export interface TopologyInput {
   clusters: ClusterResponse[];

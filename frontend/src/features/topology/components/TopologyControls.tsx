@@ -8,6 +8,9 @@ interface TopologyControlsProps {
   onFiltersChange: (filters: TopologyFilters) => void;
   direction: "TB" | "LR";
   onDirectionChange: (dir: "TB" | "LR") => void;
+  /** The power overlay's toggle, shown only with its handler (global view:ups). */
+  showPower?: boolean;
+  onShowPowerChange?: ((on: boolean) => void) | undefined;
 }
 
 export const TopologyControls = memo(function TopologyControls({
@@ -16,6 +19,8 @@ export const TopologyControls = memo(function TopologyControls({
   onFiltersChange,
   direction,
   onDirectionChange,
+  showPower = false,
+  onShowPowerChange,
 }: TopologyControlsProps) {
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3 text-sm">
@@ -71,6 +76,20 @@ export const TopologyControls = memo(function TopologyControls({
         />
         Storage
       </label>
+
+      {onShowPowerChange !== undefined && (
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showPower}
+            onChange={(e) => {
+              onShowPowerChange(e.target.checked);
+            }}
+            className="rounded"
+          />
+          Power
+        </label>
+      )}
 
       <div className="h-4 w-px bg-border" />
 

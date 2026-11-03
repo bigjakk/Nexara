@@ -6,12 +6,17 @@ import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDial
 import { useDashboardMetrics } from "@/hooks/useMetrics";
 import { useRecentActivity } from "@/features/audit/api/audit-queries";
 import { parseDetails } from "@/components/layout/task-status";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useUpsDevices } from "@/features/power/api/ups-queries";
+import type { UpsDevice } from "@/features/power/types/ups";
 import { useTopologyData } from "../api/topology-queries";
 import { TopologyCanvas } from "../components/TopologyCanvas";
 import type { MigrationFlight } from "../components/TopologyCanvas";
 import { TopologyControls } from "../components/TopologyControls";
 import { TopologyLegend } from "../components/TopologyLegend";
 import type { TopologyFilters } from "../lib/topology-transform";
+
+const NO_UPS: UpsDevice[] = [];
 
 export function TopologyPage() {
   const { t } = useTranslation("topology");
@@ -25,6 +30,14 @@ export function TopologyPage() {
   });
 
   const [direction, setDirection] = useState<"TB" | "LR">("TB");
+
+  // The power overlay: offered to global view:ups holders, and fetched only
+  // while it is on.
+  const { hasGlobalPermission } = usePermissions();
+  const canViewUps = hasGlobalPermission("view", "ups");
+  const [showPower, setShowPower] = useState(false);
+  const ups = useUpsDevices(canViewUps && showPower);
+  const power = canViewUps && showPower ? (ups.data ?? NO_UPS) : null;
 
   const clusterIds = useMemo(
     () => input.clusters.map((c) => c.id),
@@ -101,7 +114,7 @@ export function TopologyPage() {
     <div className="flex h-[calc(100vh-5rem)] flex-col gap-3 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight">{t("topology")}</h1>
-        <TopologyLegend />
+        <TopologyLegend power={power !== null} />
       </div>
 
       <TopologyControls
@@ -110,6 +123,8 @@ export function TopologyPage() {
         onFiltersChange={setFilters}
         direction={direction}
         onDirectionChange={setDirection}
+        showPower={showPower}
+        onShowPowerChange={canViewUps ? setShowPower : undefined}
       />
 
       <div className="min-h-0 flex-1">
@@ -119,6 +134,7 @@ export function TopologyPage() {
           direction={direction}
           liveMetrics={liveMetrics}
           migrations={migrations}
+          power={power}
         />
       </div>
     </div>

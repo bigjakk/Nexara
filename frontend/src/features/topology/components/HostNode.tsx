@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Handle, Position } from "@xyflow/react";
+import { AlertTriangle } from "lucide-react";
 import type { NodeProps } from "@xyflow/react";
 import {
   getStatusColor,
@@ -49,6 +50,16 @@ export const HostNode = memo(function HostNode({ data }: NodeProps) {
         position={Position.Top}
         className="h-2! w-2! bg-muted-foreground!"
       />
+      {/* Where the power overlay's edges land: off the centre, so they do not
+          run into the cluster's edge, and hidden until one does. */}
+      <Handle
+        id="power"
+        type="target"
+        position={Position.Top}
+        isConnectable={false}
+        style={{ left: "25%" }}
+        className="h-2! w-2! border-0! bg-transparent!"
+      />
       <div className="flex items-center gap-2">
         <div
           className="h-2 w-2 shrink-0 rounded-full"
@@ -65,6 +76,16 @@ export const HostNode = memo(function HostNode({ data }: NodeProps) {
           {d.cpuCount} vCPU · {formatBytes(d.memTotal)}
         </span>
       </div>
+
+      {d.noUpsmon !== undefined && d.noUpsmon.length > 0 && (
+        <div
+          className="mt-1.5 flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+          title={`No upsmon on ${d.label} is logged in to ${d.noUpsmon.join(", ")}, so it would lose power without shutting down`}
+        >
+          <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+          No upsmon
+        </div>
+      )}
 
       <div className="mt-2 flex items-start justify-center gap-5">
         <UtilRing

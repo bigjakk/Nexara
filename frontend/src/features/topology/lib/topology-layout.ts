@@ -2,15 +2,15 @@ import type { Node } from "@xyflow/react";
 import type { TopologyNodeData } from "./topology-transform";
 
 const CLUSTER_WIDTH = 220;
-const HOST_WIDTH = 200;
+export const HOST_WIDTH = 200;
 const GUEST_WIDTH = 160;
 const STORAGE_WIDTH = 160;
 
-const HOST_HEIGHT = 150;
+export const HOST_HEIGHT = 150;
 const GUEST_HEIGHT = 60;
 const STORAGE_HEIGHT = 60;
 
-const HORIZONTAL_GAP = 60;
+export const HORIZONTAL_GAP = 60;
 const VERTICAL_GAP = 80;
 
 interface LayoutOptions {

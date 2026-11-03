@@ -16,6 +16,8 @@ import { HostNode } from "./HostNode";
 import { GuestNode } from "./GuestNode";
 import { StorageNode } from "./StorageNode";
 import { MigrationEdge } from "./MigrationEdge";
+import { UpsNode } from "./UpsNode";
+import type { UpsDevice } from "@/features/power/types/ups";
 import type {
   TopologyNodeData,
   TopologyInput,
@@ -24,12 +26,14 @@ import type {
 } from "../lib/topology-transform";
 import { buildTopologyGraph } from "../lib/topology-transform";
 import { applyHierarchicalLayout } from "../lib/topology-layout";
+import { buildPowerOverlay, withPower } from "../lib/topology-power";
 
 const nodeTypes = {
   clusterNode: ClusterNode,
   hostNode: HostNode,
   guestNode: GuestNode,
   storageNode: StorageNode,
+  upsNode: UpsNode,
 };
 
 const edgeTypes = {
@@ -52,6 +56,8 @@ interface TopologyCanvasProps {
   direction: "TB" | "LR";
   liveMetrics: Map<string, AggregatedMetrics>;
   migrations: MigrationFlight[];
+  /** The UPSes for the power overlay, or null while it is off. */
+  power: UpsDevice[] | null;
 }
 
 function minimapColor(node: Node): string {
@@ -63,6 +69,8 @@ function minimapColor(node: Node): string {
       return "#38bdf8";
     case "storage":
       return "#a78bfa";
+    case "ups":
+      return "#f59e0b";
     default:
       return "#6b7280";
   }
@@ -74,6 +82,7 @@ export function TopologyCanvas({
   direction,
   liveMetrics,
   migrations,
+  power,
 }: TopologyCanvasProps) {
   const navigate = useNavigate();
 
@@ -114,12 +123,30 @@ export function TopologyCanvas({
     return out;
   }, [migrations, hostIdByName]);
 
+  // The power overlay sits outside the layout, as migrations do, so a UPS
+  // never becomes a host's parent.
+  const onCanvas = useMemo(
+    () =>
+      new Set(
+        layoutNodes.filter((n) => n.type === "hostNode").map((n) => n.id),
+      ),
+    [layoutNodes],
+  );
+  const overlay = useMemo(
+    () =>
+      power === null
+        ? null
+        : buildPowerOverlay(power, hostIdByName, onCanvas, direction),
+    [power, hostIdByName, onCanvas, direction],
+  );
+
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
 
-  // Edges are fully derived (layout + in-flight migrations) — no edit state.
+  // Edges are fully derived (layout + in-flight migrations + power) — no
+  // edit state.
   const flowEdges = useMemo(
-    () => [...layoutEdges, ...migrationEdges],
-    [layoutEdges, migrationEdges],
+    () => [...layoutEdges, ...migrationEdges, ...(overlay?.edges ?? [])],
+    [layoutEdges, migrationEdges, overlay],
   );
 
   // Sync with new data when the graph actually changes, carrying over any
@@ -144,6 +171,13 @@ export function TopologyCanvas({
       });
     });
   }, [layoutNodes, setNodes]);
+
+  // After the sync above, which drops the overlay with every re-layout (the
+  // overlay follows layoutNodes, so this runs again): applied to the nodes as
+  // live metrics are, so a UPS poll never moves a dragged node.
+  useEffect(() => {
+    setNodes((current) => withPower(current, overlay, direction));
+  }, [overlay, direction, setNodes]);
 
   // Inject live CPU/memory into host node data without disturbing positions
   // (users may have dragged nodes around).
@@ -191,6 +225,9 @@ export function TopologyCanvas({
           break;
         case "storage":
           void navigate(`/storage/${data.clusterId}/${data.storageId}`);
+          break;
+        case "ups":
+          void navigate(`/power/${data.deviceId}`);
           break;
       }
     },
