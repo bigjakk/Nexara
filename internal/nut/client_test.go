@@ -67,6 +67,17 @@ func TestClient_Reads(t *testing.T) {
 	if d, err := c.VarDescription(ctx, "ups01", "no.such.var"); err != nil || d != "" {
 		t.Errorf("VarDescription(no text) = %q, %v; want \"\"", d, err)
 	}
+	// upsd cuts a reply past 512 bytes and drops its newline. Waiting for it
+	// stalled to the deadline and broke the connection, so the poller redialled
+	// and retried the variable every poll.
+	for _, n := range []int{474, 475} { // the reply fits exactly, then is cut at exactly 512
+		if d, err := c.VarDescription(ctx, "ups01", strings.Repeat("a", n)); err != nil || d != "" {
+			t.Errorf("VarDescription(%d-byte name) = %q, %v; want \"\"", n, d, err)
+		}
+		if _, protocol, err := c.Versions(ctx); err != nil || protocol != "1.3" {
+			t.Errorf("Versions after a %d-byte name = %q, %v", n, protocol, err)
+		}
+	}
 }
 
 func TestClient_StartTLS(t *testing.T) {

@@ -35,6 +35,8 @@ func TestFake_MatchesRealUpsd(t *testing.T) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	r := bufio.NewReader(conn)
+	long := strings.Repeat("a", 480)
+	cut := ("DESC ups01 " + long + ` "Description unavailable"`)[:512]
 
 	for _, tc := range []struct {
 		send string
@@ -57,6 +59,10 @@ func TestFake_MatchesRealUpsd(t *testing.T) {
 		{"LIST VAR ups02", []string{"ERR DRIVER-NOT-CONNECTED"}},
 		{"GET DESC ups01 battery.charge", []string{`DESC ups01 battery.charge "Battery charge (percent of full)"`}},
 		{"GET DESC ups01 no.such.var", []string{`DESC ups01 no.such.var "Description unavailable"`}},
+		// A reply past upsd's 512-byte buffer goes out cut, without its newline,
+		// so the next reply runs on from the cut (captured 2026-11-03).
+		{"GET DESC ups01 " + long, nil},
+		{"NETVER", []string{cut + "1.3"}},
 		{"FOOBAR", []string{"ERR UNKNOWN-COMMAND"}},
 		{"STARTTLS", []string{"ERR FEATURE-NOT-CONFIGURED"}},
 		{"USERNAME nexara", []string{"OK"}},

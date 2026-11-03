@@ -42,6 +42,10 @@ const (
 	// row or wedge a poll. A large ePDU lists a few hundred variables.
 	maxLineBytes = 4096
 	maxListLines = 4096
+	// upsdReplyCap is upsd's reply buffer: sendback() formats each reply line
+	// into 512 bytes, so a longer one arrives cut to exactly that, without its
+	// newline, and nothing follows until the next command.
+	upsdReplyCap = 512
 	// maxVersionLen caps the release string kept from VER's banner.
 	maxVersionLen = 32
 )
@@ -117,6 +121,9 @@ var (
 
 	errLineTooLong = errors.New("nut: reply line longer than 4 KiB")
 	errListTooLong = errors.New("nut: list reply longer than 4096 lines")
+	// errReplyCut is a one-line reply upsd cut at upsdReplyCap. The text past
+	// the cut is lost, but the connection is still in step.
+	errReplyCut = errors.New("nut: reply cut at upsd's 512-byte limit")
 )
 
 // Dial connects to upsd, upgrades to TLS when cfg asks for it, and sends the
@@ -343,11 +350,15 @@ func (c *Client) ListVars(ctx context.Context, ups string) (map[string]string, e
 // no desc in ups.conf.
 const noDescription = "Description unavailable"
 
-// VarDescription returns upsd's description of a variable, "" when it has none.
+// VarDescription returns upsd's description of a variable, "" when it has none
+// or its reply did not fit upsd's buffer and arrived cut.
 func (c *Client) VarDescription(ctx context.Context, ups, name string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	line, err := c.roundTrip(ctx, "GET", "DESC", ups, name)
+	if errors.Is(err, errReplyCut) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
@@ -388,7 +399,10 @@ func (c *Client) roundTrip(ctx context.Context, verb string, args ...string) (st
 	if err := c.write(ctx, verb, args...); err != nil {
 		return "", err
 	}
-	line, err := c.readLine()
+	line, err := c.readReply()
+	if errors.Is(err, errReplyCut) {
+		return "", err // nothing follows a cut reply, so the connection stays usable
+	}
 	if err != nil {
 		return "", c.fail(ctx, verb, err)
 	}
@@ -516,6 +530,28 @@ func (c *Client) readLine() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return cleanLine(line)
+}
+
+// readReply reads a one-line reply. Waiting for a newline upsd cut off would
+// stall until the deadline and break the connection, so it stops at
+// upsdReplyCap bytes: a complete reply, newline included, always fits.
+func (c *Client) readReply() (string, error) {
+	line := make([]byte, 0, 64)
+	for len(line) < upsdReplyCap {
+		b, err := c.r.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		if b == '\n' {
+			return cleanLine(line)
+		}
+		line = append(line, b)
+	}
+	return "", errReplyCut
+}
+
+func cleanLine(line []byte) (string, error) {
 	s := strings.TrimRight(string(line), "\r\n")
 	if strings.IndexByte(s, 0) >= 0 {
 		return "", errors.New("reply holds a NUL byte")

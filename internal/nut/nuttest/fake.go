@@ -215,7 +215,7 @@ func (s *Server) handle(raw net.Conn) {
 		}
 		line = strings.TrimRight(line, "\r\n")
 		reply, upgrade, quit := s.answer(line)
-		if _, err := io.WriteString(rw, reply); err != nil || quit {
+		if _, err := io.WriteString(rw, upsdCut(reply)); err != nil || quit {
 			return
 		}
 		if upgrade {
@@ -310,6 +310,19 @@ func (s *Server) list(args []string) string {
 		b.WriteString("END LIST VAR " + args[1] + "\n")
 	default:
 		return "ERR INVALID-ARGUMENT\n"
+	}
+	return b.String()
+}
+
+// upsdCut applies upsd's reply buffer to each line: sendback() formats a line
+// into 512 bytes, so a longer one goes out as its first 512, newline lost.
+func upsdCut(reply string) string {
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(reply, "\n") {
+		if len(line) > 512 {
+			line = line[:512]
+		}
+		b.WriteString(line)
 	}
 	return b.String()
 }
