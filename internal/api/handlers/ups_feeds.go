@@ -149,7 +149,8 @@ func (h *NutHandler) authorizedFeed(c fiber.Ctx, p *apischema.Params) (db.ListUp
 // auditFeed records a change to what a UPS powers, on the node's cluster, so
 // only those who may audit that cluster read it; a label's row is global.
 func (h *NutHandler) auditFeed(c fiber.Ctx, dev db.ListUpsDevicesRow, feed db.UpsFeed, action string, extra map[string]any) {
-	details := map[string]any{"ups": dev.UpsName, "server": dev.ServerName, "feed_id": feed.ID}
+	details := map[string]any{"ups": dev.UpsName, "server": dev.ServerName, "feed_id": feed.ID,
+		"resource_name": auditTruncate(dev.UpsName, maxAuditResourceNameLen)}
 	if feed.ClusterID.Valid {
 		details["node"] = feed.NodeName.String
 	} else {

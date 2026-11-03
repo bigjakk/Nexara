@@ -276,6 +276,8 @@ func (h *NutHandler) dispatch(c fiber.Ctx, dev db.ListUpsDevicesRow, kind, name,
 	details := map[string]any{
 		"run_id": run.ID, "ups": dev.UpsName, "server": dev.ServerName, "kind": kind, "name": name,
 		"tier": upscontrol.CommandTier(name), "status": run.Status,
+		// What the activity feed names the row by, rather than the device's id.
+		"resource_name": auditTruncate(dev.UpsName, maxAuditResourceNameLen),
 	}
 	if kind == "set" {
 		delete(details, "tier") // a variable's values stay in ups_commands, read on view:ups
