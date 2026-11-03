@@ -160,6 +160,10 @@ func TestUpsCommandRoutes(t *testing.T) {
 		if len(audits) != 1 || audits[0][4] != "ups_command_sent" {
 			t.Errorf("%s: audit rows %v; want one ups_command_sent", tc.name, audits)
 		}
+		// Only a command upsd took proves the account may run commands.
+		if verified := len(dbtx.execsOf("SetNutServerCommandsVerified")) == 1; verified != (tc.method == http.MethodPost) {
+			t.Errorf("%s: account marked verified = %v", tc.name, verified)
+		}
 	}
 }
 

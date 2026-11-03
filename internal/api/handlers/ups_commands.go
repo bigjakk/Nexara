@@ -262,7 +262,9 @@ func (h *NutHandler) dispatch(c fiber.Ctx, dev db.ListUpsDevicesRow, kind, name,
 		run.FinishedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	}
 	h.recordRun(c.Context(), run)
-	if out.accepted || out.denied {
+	// Only a command proves the account may run commands: a variable answers
+	// to actions = SET, and an account can hold instcmds without it.
+	if kind == "command" && (out.accepted || out.denied) {
 		if err := h.queries.SetNutServerCommandsVerified(c.Context(), db.SetNutServerCommandsVerifiedParams{ID: server.ID, Verified: out.accepted}); err != nil {
 			slog.Warn("ups: recording the account's check failed", "server", server.Name, "error", err)
 		}
