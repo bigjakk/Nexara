@@ -97,14 +97,15 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
             </CardHeader>
             <CardContent className="divide-y">
               {inTier.map((cmd) => (
-                <div key={cmd.name} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                  <div className="min-w-0">
+                <div key={cmd.name} className="flex items-start justify-between gap-3 py-2">
+                  <div className="min-w-0 flex-1">
                     <p className="break-all font-mono text-sm">{cmd.name}</p>
                     {cmd.description !== "" && <p className="text-xs text-muted-foreground">{cmd.description}</p>}
                   </div>
                   {(tier === "cuts_power" ? canCutPower : canRun) && (
                     <Button
                       size="sm"
+                      className="shrink-0"
                       variant={tier === "cuts_power" ? "destructive" : "outline"}
                       disabled={!hasAccount || run.isPending}
                       aria-label={`Run ${cmd.name}`}
