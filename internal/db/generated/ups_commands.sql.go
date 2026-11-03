@@ -186,18 +186,32 @@ func (q *Queries) MarkUnfinishedUpsCommandsUnconfirmed(ctx context.Context, arg 
 
 const setNutServerCommandsVerified = `-- name: SetNutServerCommandsVerified :exec
 UPDATE nut_servers
-SET commands_verified_at = CASE WHEN $1::boolean THEN now() END
-WHERE id = $2
+SET commands_verified_at = now()
+WHERE id = $1 AND host = $2 AND port = $3 AND username = $4
+    AND password_encrypted = $5
 `
 
 type SetNutServerCommandsVerifiedParams struct {
-	Verified bool      `json:"verified"`
-	ID       uuid.UUID `json:"id"`
+	ID                uuid.UUID `json:"id"`
+	Host              string    `json:"host"`
+	Port              int32     `json:"port"`
+	Username          string    `json:"username"`
+	PasswordEncrypted string    `json:"-"`
 }
 
-// upsd took a command from the stored account, or refused the account.
+// upsd took a command from the stored account. Only while the server still
+// holds the address and account the command went to: an edit saved meanwhile
+// cleared the mark for an account upsd has not checked. A refusal leaves the
+// mark as it is: upsd refuses a command the account lacks and a wrong
+// password alike.
 func (q *Queries) SetNutServerCommandsVerified(ctx context.Context, arg SetNutServerCommandsVerifiedParams) error {
-	_, err := q.db.Exec(ctx, setNutServerCommandsVerified, arg.Verified, arg.ID)
+	_, err := q.db.Exec(ctx, setNutServerCommandsVerified,
+		arg.ID,
+		arg.Host,
+		arg.Port,
+		arg.Username,
+		arg.PasswordEncrypted,
+	)
 	return err
 }
 

@@ -22,9 +22,10 @@ var (
 
 // Cutting a UPS's power needs manage:node on every cluster it is known to
 // power: a removed feed still counts, or removing it would lift the check, and
-// so does the cluster of the node its NUT server runs on. Skipped unless
+// so does the cluster of the node its NUT server runs on. A command upsd took
+// marks the account only while the server still holds it. Skipped unless
 // NEXARA_TEST_DB_URL names a throwaway database.
-func TestListUpsFedClusters(t *testing.T) {
+func TestUpsCommandQueries(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
 	ctx, pool := env.Ctx, env.Pool
@@ -56,8 +57,28 @@ func TestListUpsFedClusters(t *testing.T) {
 		}
 	}
 
-	got, err := gen.New(pool).ListUpsFedClusters(ctx, upsCmdDevice)
+	q := gen.New(pool)
+	got, err := q.ListUpsFedClusters(ctx, upsCmdDevice)
 	if want := []uuid.UUID{upsCmdHostCluster, upsCmdFedCluster}; err != nil || !slices.Equal(got, want) {
 		t.Errorf("ListUpsFedClusters = %v, %v; want the host's cluster and the removed feed's", got, err)
+	}
+
+	// The fixture's server stores no account. One saved while the command was
+	// out is an account upsd has not checked.
+	for _, tc := range []struct {
+		name, username string
+		want           bool
+	}{
+		{"an account saved while the command was out", "someone-else", false},
+		{"the account the command went to", "", true},
+	} {
+		arg := gen.SetNutServerCommandsVerifiedParams{ID: upsCmdServer, Host: "192.0.2.40", Port: 3493, Username: tc.username}
+		if err := q.SetNutServerCommandsVerified(ctx, arg); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		var marked bool
+		if err := pool.QueryRow(ctx, `SELECT commands_verified_at IS NOT NULL FROM nut_servers WHERE id = $1`, upsCmdServer).Scan(&marked); err != nil || marked != tc.want {
+			t.Errorf("%s: marked = %v (%v), want %v", tc.name, marked, err, tc.want)
+		}
 	}
 }

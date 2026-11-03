@@ -2925,7 +2925,11 @@ type Querier interface {
 	// SSH goroutine) so the absolute upgrade timeout in advanceUpgrading
 	// measures from the first launch attempt, not the most recent.
 	SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error
-	// upsd took a command from the stored account, or refused the account.
+	// upsd took a command from the stored account. Only while the server still
+	// holds the address and account the command went to: an edit saved meanwhile
+	// cleared the mark for an account upsd has not checked. A refusal leaves the
+	// mark as it is: upsd refuses a command the account lacks and a wrong
+	// password alike.
 	SetNutServerCommandsVerified(ctx context.Context, arg SetNutServerCommandsVerifiedParams) error
 	// The node a NUT server runs on, as the poller found it. One already set, by
 	// the poller or by hand, is kept, and so is the server's address: a worker

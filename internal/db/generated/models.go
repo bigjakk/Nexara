@@ -844,7 +844,7 @@ type NutServer struct {
 	UpdatedAt     time.Time   `json:"updated_at"`
 	HostClusterID pgtype.UUID `json:"host_cluster_id"`
 	HostNodeName  pgtype.Text `json:"host_node_name"`
-	// When upsd last took a command or variable set from the stored account. upsd checks an account only when a command runs, so this is the only proof it may run them; cleared when upsd refuses it, and when the address, username or password changes
+	// When upsd last took a command from the stored account: upsd checks an account only when a command runs, so this is the only proof it may run them
 	CommandsVerifiedAt pgtype.Timestamptz `json:"commands_verified_at"`
 }
 

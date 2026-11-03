@@ -45,10 +45,15 @@ SET status = 'unconfirmed',
 WHERE ups_id = @ups_id AND status IN ('sent', 'pending') AND requested_at < @before;
 
 -- name: SetNutServerCommandsVerified :exec
--- upsd took a command from the stored account, or refused the account.
+-- upsd took a command from the stored account. Only while the server still
+-- holds the address and account the command went to: an edit saved meanwhile
+-- cleared the mark for an account upsd has not checked. A refusal leaves the
+-- mark as it is: upsd refuses a command the account lacks and a wrong
+-- password alike.
 UPDATE nut_servers
-SET commands_verified_at = CASE WHEN @verified::boolean THEN now() END
-WHERE id = @id;
+SET commands_verified_at = now()
+WHERE id = @id AND host = @host AND port = @port AND username = @username
+    AND password_encrypted = @password_encrypted;
 
 -- name: ListUpsFedClusters :many
 -- The clusters of every node a UPS powers or has powered, a removed feed

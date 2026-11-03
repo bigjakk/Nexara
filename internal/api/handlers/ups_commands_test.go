@@ -27,7 +27,7 @@ import (
 // needs execute:ups and manage:node on every cluster it powers (everywhere when
 // none is known), and the typed name where its confirm says so; a refusal
 // records and sends nothing; a run sent is audited and watched to the driver's
-// answer.
+// answer; a command upsd refuses leaves the account's mark alone.
 func TestUpsCommandRoutes(t *testing.T) {
 	t.Parallel()
 	fake := nuttest.NewServer(t)
@@ -38,7 +38,7 @@ func TestUpsCommandRoutes(t *testing.T) {
 			"driver.flag.allow_killpower": "RW NUMBER"},
 		Commands: []string{"beeper.mute", "load.off", "shutdown.stop"},
 	})
-	fake.SetUser("nexara", nuttest.User{Password: "pw", SET: true, Instcmds: []string{"ALL"}})
+	fake.SetUser("nexara", nuttest.User{Password: "pw", SET: true, Instcmds: []string{"load.off", "shutdown.stop"}}) // not beeper.mute
 	fake.SetPendingReads(1) // so the watch asks more than once
 	host, port := fake.Addr()
 	password, err := crypto.Encrypt("pw", testEncryptionKey)
@@ -80,6 +80,8 @@ func TestUpsCommandRoutes(t *testing.T) {
 			fiber.StatusTooManyRequests, "", ""},
 		{"a stop, every watch taken", http.MethodPost, "/commands", map[string]any{"command": "shutdown.stop"}, everywhere, false, true,
 			fiber.StatusAccepted, "INSTCMD ups01 shutdown.stop", "unconfirmed"},
+		{"a command the account lacks", http.MethodPost, "/commands", map[string]any{"command": "beeper.mute"}, everywhere, false, false,
+			fiber.StatusAccepted, "INSTCMD ups01 beeper.mute", "failed"},
 		{"a value past STRING:10", http.MethodPut, "/vars/battery.charge.low", map[string]any{"value": "01234567890"}, everywhere, false, false, fiber.StatusBadRequest, "", ""},
 		{"a power setting without execute:ups", http.MethodPut, "/vars/battery.charge.low", map[string]any{"value": "20"},
 			newGrantEngine("manage:ups", "manage:node"), false, false, fiber.StatusForbidden, "", ""},
@@ -157,11 +159,17 @@ func TestUpsCommandRoutes(t *testing.T) {
 		if !slices.Contains(changes, tc.sent) || len(updates) == 0 || updates[len(updates)-1][0] != tc.outcome {
 			t.Errorf("%s: upsd received %q, run updates %v; want %q ending %s", tc.name, changes, updates, tc.sent, tc.outcome)
 		}
-		if len(audits) != 1 || audits[0][4] != "ups_command_sent" {
-			t.Errorf("%s: audit rows %v; want one ups_command_sent", tc.name, audits)
+		// upsd's refusal is the only failure here, and is audited as one.
+		wantAudit := "ups_command_sent"
+		if tc.outcome == "failed" {
+			wantAudit = "ups_command_failed"
 		}
-		// Only a command upsd took proves the account may run commands.
-		if verified := len(dbtx.execsOf("SetNutServerCommandsVerified")) == 1; verified != (tc.method == http.MethodPost) {
+		if len(audits) != 1 || audits[0][4] != wantAudit {
+			t.Errorf("%s: audit rows %v; want one %s", tc.name, audits, wantAudit)
+		}
+		// Only a command upsd took proves the account may run commands, and a
+		// refused one disproves nothing: the account may lack only that one.
+		if verified := len(dbtx.execsOf("SetNutServerCommandsVerified")) == 1; verified != (tc.method == http.MethodPost && tc.outcome != "failed") {
 			t.Errorf("%s: account marked verified = %v", tc.name, verified)
 		}
 	}

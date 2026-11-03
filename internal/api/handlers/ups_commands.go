@@ -263,9 +263,11 @@ func (h *NutHandler) dispatch(c fiber.Ctx, dev db.ListUpsDevicesRow, kind, name,
 	}
 	h.recordRun(c.Context(), run)
 	// Only a command proves the account may run commands: a variable answers
-	// to actions = SET, and an account can hold instcmds without it.
-	if kind == "command" && (out.accepted || out.denied) {
-		if err := h.queries.SetNutServerCommandsVerified(c.Context(), db.SetNutServerCommandsVerifiedParams{ID: server.ID, Verified: out.accepted}); err != nil {
+	// to actions = SET, and an account can hold instcmds without it. A refused
+	// command disproves nothing: the account may lack only that one.
+	if kind == "command" && out.accepted {
+		if err := h.queries.SetNutServerCommandsVerified(c.Context(), db.SetNutServerCommandsVerifiedParams{ID: server.ID,
+			Host: server.Host, Port: server.Port, Username: server.Username, PasswordEncrypted: server.PasswordEncrypted}); err != nil {
 			slog.Warn("ups: recording the account's check failed", "server", server.Name, "error", err)
 		}
 	}
@@ -298,9 +300,8 @@ func (h *NutHandler) dispatch(c fiber.Ctx, dev db.ListUpsDevicesRow, kind, name,
 // upsSendOutcome is how far a run got with upsd.
 type upsSendOutcome struct {
 	status, trackingID, result string
-	// accepted: upsd took the command, so the account may run commands;
-	// denied: upsd refused the account.
-	accepted, denied bool
+	// accepted: upsd took the command, so the account may run commands.
+	accepted bool
 	// code is upsd's ERR code, or "unreachable", for the audit row.
 	code string
 }
@@ -369,10 +370,11 @@ func refusal(err error, kind string) upsSendOutcome {
 	out := upsSendOutcome{status: "failed", code: auditSafe(pe.Code)}
 	switch pe.Code {
 	case "ACCESS-DENIED":
-		out.denied = true
-		out.result = "upsd refused the stored account: give it instcmds in upsd.users to run commands"
+		// upsd's answer to an account without this command (or without SET)
+		// and to a wrong username or password alike.
+		out.result = "upsd refused this command for the stored account: add it to the account's instcmds in upsd.users, or check the username and password"
 		if kind == "set" {
-			out.result = "upsd refused the stored account: give it actions = SET in upsd.users to set variables"
+			out.result = "upsd refused the stored account: give it actions = SET in upsd.users, or check the username and password"
 		}
 	case "CMD-NOT-SUPPORTED":
 		out.result = "The UPS no longer offers this command"
