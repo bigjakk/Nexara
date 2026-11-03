@@ -241,6 +241,7 @@ type fakeNutQueries struct {
 	nodeAddrs []db.ListNodeLoginAddressesRow
 	listings  map[string][][]string
 	marked    map[string]int
+	listedAt  map[string]time.Time
 	feeds     map[string][]string
 	feedCalls int
 }
@@ -255,7 +256,7 @@ type fakeUpsEvent struct {
 
 func newFakeNutQueries(s db.NutServer) *fakeNutQueries {
 	return &fakeNutQueries{server: s, devices: map[string]db.UpsDevice{}, listings: map[string][][]string{},
-		marked: map[string]int{}, feeds: map[string][]string{}}
+		marked: map[string]int{}, listedAt: map[string]time.Time{}, feeds: map[string][]string{}}
 }
 
 func (f *fakeNutQueries) device(name string) db.UpsDevice {
@@ -440,7 +441,7 @@ func (f *fakeNutQueries) GetNutServer(context.Context, uuid.UUID) (db.NutServer,
 func (f *fakeNutQueries) SetNutServerHostNode(_ context.Context, a db.SetNutServerHostNodeParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !f.server.HostClusterID.Valid {
+	if !f.server.HostClusterID.Valid && a.Host == f.server.Host && a.Port == f.server.Port {
 		f.server.HostClusterID = pgtype.UUID{Bytes: a.ClusterID, Valid: true}
 		f.server.HostNodeName = pgtype.Text{String: a.NodeName, Valid: true}
 	}
@@ -483,4 +484,12 @@ func (f *fakeNutQueries) InsertFoundUpsFeed(_ context.Context, a db.InsertFoundU
 	}
 	f.feeds[name] = append(f.feeds[name], a.NodeName)
 	return 1, nil
+}
+
+func (f *fakeNutQueries) SetUpsClientsListed(_ context.Context, a db.SetUpsClientsListedParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	name, _ := f.byID(a.ID)
+	f.listedAt[name] = a.ListedAt.Time
+	return nil
 }

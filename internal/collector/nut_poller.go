@@ -18,6 +18,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/nut"
+	"github.com/bigjakk/nexara/internal/upsfeed"
 )
 
 // Reachability of a UPS on the last poll, as stored in ups_devices.reachability.
@@ -72,6 +73,7 @@ type NutQueries interface {
 	MarkUpsClientsMissed(ctx context.Context, arg db.MarkUpsClientsMissedParams) error
 	PruneUpsClients(ctx context.Context, arg db.PruneUpsClientsParams) error
 	InsertFoundUpsFeed(ctx context.Context, arg db.InsertFoundUpsFeedParams) (int64, error)
+	SetUpsClientsListed(ctx context.Context, arg db.SetUpsClientsListedParams) error
 }
 
 // NutPollerConfig configures the NUT poller.
@@ -253,7 +255,7 @@ type upsDeviceState struct {
 	// clients is the last LIST CLIENT, connections per address; fed holds the
 	// nodes a found feed was already stored or refused for.
 	clients map[netip.Addr]int16
-	fed     map[nodeRef]bool
+	fed     map[upsfeed.Node]bool
 }
 
 // loadServerState seeds a worker from what the database already holds, so a
@@ -312,7 +314,7 @@ func newUpsDeviceState(r db.UpsDevice) *upsDeviceState {
 		name:      r.UpsName,
 		open:      map[string]upsEpisodeDetails{},
 		described: map[string]bool{},
-		fed:       map[nodeRef]bool{},
+		fed:       map[upsfeed.Node]bool{},
 	}
 	var vars map[string]string
 	_ = json.Unmarshal(r.Vars, &vars)

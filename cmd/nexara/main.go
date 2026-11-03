@@ -221,6 +221,7 @@ func main() {
 		// reading stale against the interval the poller really uses.
 		srv.SetNutPollInterval(max(cfg.NutPollInterval, 2*time.Second))
 	}
+	srv.SetNodeSyncInterval(cfg.MetricsCollectInterval)
 	go runCollector(ctx, cfg, application, veeamTrigger, nutTrigger, logger.With("component", "collector"))
 
 	// ---- Scheduler goroutine ----

@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"net/netip"
 	"slices"
 	"testing"
 	"time"
@@ -15,57 +14,6 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/nut/nuttest"
 )
-
-func TestNodeAddrs(t *testing.T) {
-	t.Parallel()
-	a, b := uuid.New(), uuid.New()
-	nodes := newNodeAddrs([]db.ListNodeLoginAddressesRow{
-		{ClusterID: a, NodeName: "pve-01", Address: "192.0.2.11"},    // its cluster address
-		{ClusterID: a, NodeName: "pve-01", Address: "198.51.100.11"}, // an interface
-		{ClusterID: a, NodeName: "pve-02", Address: "2001:db8::12"},  // a cluster address over IPv6
-		{ClusterID: a, NodeName: "pve-02", Address: "192.0.2.50"},    // shared with
-		{ClusterID: b, NodeName: "pve-03", Address: "192.0.2.50"},    // a node of another cluster
-		{ClusterID: b, NodeName: "pve-01", Address: "192.0.2.21"},    // the same name, another cluster
-		{ClusterID: a, NodeName: "pve-04", Address: "pve-04.example.com"},
-		{ClusterID: a, NodeName: "pve-04", Address: "127.0.1.1"}, // Debian's hostname address
-	})
-	pve01, pve02, otherPve01 := nodeRef{a, "pve-01"}, nodeRef{a, "pve-02"}, nodeRef{b, "pve-01"}
-	for _, tc := range []struct {
-		login string
-		host  *nodeRef
-		want  *nodeRef
-	}{
-		{"192.0.2.11", nil, &pve01},
-		{"198.51.100.11", nil, &pve01},
-		{"::ffff:192.0.2.11", nil, &pve01},
-		{"2001:db8::12", nil, &pve02},
-		{"192.0.2.21", nil, &otherPve01},
-		{"192.0.2.50", nil, nil}, // shared: names neither
-		{"192.0.2.99", nil, nil},
-		{"127.0.0.1", &pve01, &pve01}, // the NUT host's own upsmon
-		{"::1", &pve01, &pve01},
-		{"127.0.0.1", nil, nil}, // and no host known
-	} {
-		got, ok := nodes.loginNode(netip.MustParseAddr(tc.login), tc.host)
-		if ok != (tc.want != nil) || ok && got != *tc.want {
-			t.Errorf("loginNode(%s, host %v) = %v, %v; want %v", tc.login, tc.host, got, ok, tc.want)
-		}
-	}
-	for _, tc := range []struct {
-		remote netip.Addr
-		want   *nodeRef
-	}{
-		{netip.MustParseAddr("192.0.2.11"), &pve01},
-		{netip.MustParseAddr("192.0.2.50"), nil},
-		{netip.MustParseAddr("127.0.1.1"), nil}, // a loopback address names no node
-		{netip.Addr{}, nil},
-	} {
-		got, ok := nodes.hostNode(tc.remote)
-		if ok != (tc.want != nil) || ok && got != *tc.want {
-			t.Errorf("hostNode(%v) = %v, %v; want %v", tc.remote, got, ok, tc.want)
-		}
-	}
-}
 
 // Logins are listed once a minute, and only for a UPS read fresh on mains: the
 // logouts of an outage must not count. A login from a node's address, or the
@@ -117,5 +65,9 @@ func TestNutPoller_FindsWhatEachUpsPowers(t *testing.T) {
 	tick(time.Minute)
 	if n := len(q.listings["ups01"]); n != 2 {
 		t.Errorf("stale ups01 was listed: %d listings, want still 2", n)
+	}
+	// The verdicts are judged as of the last listing, so each one is stamped.
+	if got := q.listedAt["ups01"]; !got.Equal(clock.Add(-time.Minute)) {
+		t.Errorf("ups01 listed at %v, want the previous minute's listing", got)
 	}
 }

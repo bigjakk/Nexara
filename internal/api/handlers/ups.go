@@ -15,51 +15,59 @@ import (
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/nut"
+	"github.com/bigjakk/nexara/internal/upsfeed"
 )
 
 // upsDeviceResponse is one UPS as the Power page shows it: identity, state,
 // the readings it lives on, and the health issues it raises.
 type upsDeviceResponse struct {
-	ID                 uuid.UUID             `json:"id"`
-	ServerID           uuid.UUID             `json:"server_id"`
-	ServerName         string                `json:"server_name"`
-	ServerEnabled      bool                  `json:"server_enabled"`
-	Name               string                `json:"name"`
-	Description        string                `json:"description"`
-	Manufacturer       string                `json:"manufacturer"`
-	Model              string                `json:"model"`
-	Serial             string                `json:"serial"`
-	Firmware           string                `json:"firmware"`
-	Driver             string                `json:"driver"`
-	Status             string                `json:"status"`
-	Flags              []string              `json:"flags"`
-	State              string                `json:"state"`
-	LastKnownState     string                `json:"last_known_state"`
-	Reachability       string                `json:"reachability"`
-	ReadingStale       bool                  `json:"reading_stale"`
-	LastReadingAt      *time.Time            `json:"last_reading_at"`
-	OnBatterySince     *time.Time            `json:"on_battery_since"`
-	BatteryCharge      *float64              `json:"battery_charge"`
-	BatteryChargeLow   *float64              `json:"battery_charge_low"`
-	BatteryRuntime     *float64              `json:"battery_runtime"`
-	BatteryRuntimeLow  *float64              `json:"battery_runtime_low"`
-	BatteryVoltage     *float64              `json:"battery_voltage"`
-	BatteryType        string                `json:"battery_type"`
-	BatteryDate        string                `json:"battery_date"`
-	Load               *float64              `json:"load"`
-	Realpower          *float64              `json:"realpower"`
-	RealpowerEstimated bool                  `json:"realpower_estimated"`
-	RealpowerNominal   *float64              `json:"realpower_nominal"`
-	InputVoltage       *float64              `json:"input_voltage"`
-	InputFrequency     *float64              `json:"input_frequency"`
-	InputTransferLow   *float64              `json:"input_transfer_low"`
-	InputTransferHigh  *float64              `json:"input_transfer_high"`
-	OutputVoltage      *float64              `json:"output_voltage"`
-	Temperature        *float64              `json:"temperature"`
-	TestResult         string                `json:"test_result"`
-	Issues             []healthIssueResponse `json:"issues"`
-	Vars               map[string]string     `json:"vars,omitempty"`
-	VarDescriptions    map[string]string     `json:"var_descriptions,omitempty"`
+	ID                 uuid.UUID  `json:"id"`
+	ServerID           uuid.UUID  `json:"server_id"`
+	ServerName         string     `json:"server_name"`
+	ServerEnabled      bool       `json:"server_enabled"`
+	Name               string     `json:"name"`
+	Description        string     `json:"description"`
+	Manufacturer       string     `json:"manufacturer"`
+	Model              string     `json:"model"`
+	Serial             string     `json:"serial"`
+	Firmware           string     `json:"firmware"`
+	Driver             string     `json:"driver"`
+	Status             string     `json:"status"`
+	Flags              []string   `json:"flags"`
+	State              string     `json:"state"`
+	LastKnownState     string     `json:"last_known_state"`
+	Reachability       string     `json:"reachability"`
+	ReadingStale       bool       `json:"reading_stale"`
+	LastReadingAt      *time.Time `json:"last_reading_at"`
+	OnBatterySince     *time.Time `json:"on_battery_since"`
+	BatteryCharge      *float64   `json:"battery_charge"`
+	BatteryChargeLow   *float64   `json:"battery_charge_low"`
+	BatteryRuntime     *float64   `json:"battery_runtime"`
+	BatteryRuntimeLow  *float64   `json:"battery_runtime_low"`
+	BatteryVoltage     *float64   `json:"battery_voltage"`
+	BatteryType        string     `json:"battery_type"`
+	BatteryDate        string     `json:"battery_date"`
+	Load               *float64   `json:"load"`
+	Realpower          *float64   `json:"realpower"`
+	RealpowerEstimated bool       `json:"realpower_estimated"`
+	RealpowerNominal   *float64   `json:"realpower_nominal"`
+	InputVoltage       *float64   `json:"input_voltage"`
+	InputFrequency     *float64   `json:"input_frequency"`
+	InputTransferLow   *float64   `json:"input_transfer_low"`
+	InputTransferHigh  *float64   `json:"input_transfer_high"`
+	OutputVoltage      *float64   `json:"output_voltage"`
+	Temperature        *float64   `json:"temperature"`
+	TestResult         string     `json:"test_result"`
+	// What the UPS powers and who is logged in to it, as far as the caller may
+	// see: node feeds, logins and the host node only for clusters whose nodes
+	// the caller can view.
+	Feeds           []upsFeedResponse     `json:"feeds"`
+	Clients         []upsClientResponse   `json:"clients"`
+	ClientsListedAt *time.Time            `json:"clients_listed_at"`
+	HostNode        *upsNodeRef           `json:"host_node"`
+	Issues          []healthIssueResponse `json:"issues"`
+	Vars            map[string]string     `json:"vars,omitempty"`
+	VarDescriptions map[string]string     `json:"var_descriptions,omitempty"`
 }
 
 // ListDevices handles GET /api/v1/ups-devices.
@@ -72,10 +80,16 @@ func (h *NutHandler) ListDevices(c fiber.Ctx, _ *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	var pw *upsPower
+	if len(rows) > 0 { // the pill polls this for every view:ups holder, NUT servers or not
+		if pw, err = h.loadPower(c); err != nil {
+			return err
+		}
+	}
 	now := time.Now()
 	resp := make([]upsDeviceResponse, 0, len(rows))
 	for _, r := range rows {
-		resp = append(resp, h.buildUpsDevice(r, open[r.ID], now, false))
+		resp = append(resp, h.buildUpsDevice(r, open[r.ID], pw, now, false))
 	}
 	return RespondItems(c, resp)
 }
@@ -90,7 +104,11 @@ func (h *NutHandler) GetDevice(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(h.buildUpsDevice(row, open[row.ID], time.Now(), true))
+	pw, err := h.loadPower(c)
+	if err != nil {
+		return err
+	}
+	return c.JSON(h.buildUpsDevice(row, open[row.ID], pw, time.Now(), true))
 }
 
 func (h *NutHandler) fetchDevice(c fiber.Ctx, p *apischema.Params) (db.ListUpsDevicesRow, error) {
@@ -124,7 +142,7 @@ func (h *NutHandler) openEpisodes(c fiber.Ctx) (map[uuid.UUID]map[string]time.Ti
 	return out, nil
 }
 
-func (h *NutHandler) buildUpsDevice(r db.ListUpsDevicesRow, open map[string]time.Time, now time.Time, detail bool) upsDeviceResponse {
+func (h *NutHandler) buildUpsDevice(r db.ListUpsDevicesRow, open map[string]time.Time, pw *upsPower, now time.Time, detail bool) upsDeviceResponse {
 	var vars map[string]string
 	_ = json.Unmarshal(r.Vars, &vars)
 	status := nut.ParseStatus(r.Status)
@@ -171,6 +189,10 @@ func (h *NutHandler) buildUpsDevice(r db.ListUpsDevicesRow, open map[string]time
 	} else {
 		d.State = string(nut.StateUnknown)
 	}
+	d.Feeds, d.Clients = []upsFeedResponse{}, []upsClientResponse{}
+	if pw != nil {
+		pw.apply(&d, r)
+	}
 	d.Issues = upsIssues(d)
 	if detail {
 		d.Vars = vars
@@ -194,31 +216,53 @@ func upsIssues(d upsDeviceResponse) []healthIssueResponse {
 			Type: kind, Severity: sev, Scope: "ups", Target: d.Name, Summary: summary, Detail: detail,
 		})
 	}
-	if d.Reachability != "ok" || d.ReadingStale {
-		add("ups_unreachable", healthSevWarn, "UPS unreachable", fmt.Sprintf("Nexara cannot read %s from %s", d.Name, d.ServerName))
-		return issues
-	}
+	unreadable := d.Reachability != "ok" || d.ReadingStale
 	left := upsLeft(d)
-	switch d.State {
-	case string(nut.StateLowBattery):
-		// FSD lands here whatever the line power, as upsmon treats it; say
-		// which it is rather than "on battery" during a shutdown test on mains.
-		switch {
-		case !has(d.Flags, "FSD"):
-			add("ups_low_battery", healthSevErr, "Low battery", d.Name+" is on battery and low"+left)
-		case has(d.Flags, "OB"):
-			add("ups_low_battery", healthSevErr, "Shutting down", d.Name+" is on battery and shutting down (FSD)"+left)
-		default:
-			add("ups_low_battery", healthSevErr, "Shutting down", d.Name+" is shutting down (FSD)")
+	if unreadable {
+		add("ups_unreachable", healthSevWarn, "UPS unreachable", fmt.Sprintf("Nexara cannot read %s from %s", d.Name, d.ServerName))
+	} else {
+		switch d.State {
+		case string(nut.StateLowBattery):
+			// FSD lands here whatever the line power, as upsmon treats it; say
+			// which it is rather than "on battery" during a shutdown test on mains.
+			switch {
+			case !has(d.Flags, "FSD"):
+				add("ups_low_battery", healthSevErr, "Low battery", d.Name+" is on battery and low"+left)
+			case has(d.Flags, "OB"):
+				add("ups_low_battery", healthSevErr, "Shutting down", d.Name+" is on battery and shutting down (FSD)"+left)
+			default:
+				add("ups_low_battery", healthSevErr, "Shutting down", d.Name+" is shutting down (FSD)")
+			}
+		case string(nut.StateOnBattery):
+			add("ups_on_battery", healthSevWarn, "On battery", d.Name+" is on battery"+left)
 		}
-	case string(nut.StateOnBattery):
-		add("ups_on_battery", healthSevWarn, "On battery", d.Name+" is on battery"+left)
+		if has(d.Flags, "OVER") {
+			add("ups_overload", healthSevErr, "UPS overload", d.Name+" reports an overload")
+		}
+		if has(d.Flags, "RB") {
+			add("ups_replace_battery", healthSevWarn, "Replace battery", d.Name+" reports that its battery needs replacing")
+		}
 	}
-	if has(d.Flags, "OVER") {
-		add("ups_overload", healthSevErr, "UPS overload", d.Name+" reports an overload")
-	}
-	if has(d.Flags, "RB") {
-		add("ups_replace_battery", healthSevWarn, "Replace battery", d.Name+" reports that its battery needs replacing")
+	// One per node the UPS powers that would lose power without shutting down:
+	// a warning, and an error once the UPS is read on battery. The verdict holds
+	// while the UPS cannot be read (P4), so the warning does too, but a stale
+	// reading never says "on battery". The target names the cluster, so two
+	// nodes of one name never share a row or a dismissal in the pill.
+	for _, f := range d.Feeds {
+		if f.Protection != string(upsfeed.NotProtected) {
+			continue
+		}
+		node := f.NodeName
+		if f.ClusterName != "" {
+			node += " (" + f.ClusterName + ")"
+		}
+		sev, detail := healthSevWarn, node+" is powered by "+d.Name+", but no upsmon on it is logged in"
+		if !unreadable && has(d.Flags, "OB") {
+			sev, detail = healthSevErr, node+" is powered by "+d.Name+", which is on battery, and no upsmon on it is logged in"+left
+		}
+		issues = append(issues, healthIssueResponse{
+			Type: "ups_node_unprotected", Severity: sev, Scope: "ups", Target: node, Summary: "Not protected", Detail: detail,
+		})
 	}
 	return issues
 }

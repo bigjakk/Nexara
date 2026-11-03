@@ -19,10 +19,15 @@ SELECT * FROM nut_servers ORDER BY name;
 SELECT * FROM nut_servers WHERE enabled ORDER BY name;
 
 -- name: UpdateNutServer :one
+-- A new address forgets the host node, which the poller then finds again:
+-- kept, it would credit the new host's own upsmon (a loopback login) to the
+-- node upsd ran on before. The CASEs read the row as it was.
 UPDATE nut_servers
 SET name = $2,
     host = $3,
     port = $4,
+    host_cluster_id = CASE WHEN host = $3 AND port = $4 THEN host_cluster_id END,
+    host_node_name = CASE WHEN host = $3 AND port = $4 THEN host_node_name END,
     username = $5,
     password_encrypted = $6,
     tls_mode = $7,

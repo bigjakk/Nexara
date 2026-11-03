@@ -1247,6 +1247,8 @@ type UpsDevice struct {
 	LastReadingAt pgtype.Timestamptz `json:"last_reading_at"`
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
+	// When the poller last listed who is logged in to the UPS, which it does only while the UPS is read on mains. NULL until the first listing; until then no node the UPS powers has a verdict
+	ClientsListedAt pgtype.Timestamptz `json:"clients_listed_at"`
 }
 
 type UpsEvent struct {
@@ -1276,6 +1278,8 @@ type UpsFeed struct {
 	CreatedAt time.Time `json:"created_at"`
 	// Who added a manual feed; NULL for a found one
 	CreatedBy pgtype.UUID `json:"created_by"`
+	// The operator says the node shuts down some way Nexara cannot see: its upsmon is behind NAT or a proxy, or another tool runs the shutdown. Its verdict reads checked elsewhere
+	ProtectedElsewhere bool `json:"protected_elsewhere"`
 }
 
 type UpsMetric struct {

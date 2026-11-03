@@ -69,7 +69,9 @@ SELECT d.*,
        s.name AS server_name,
        s.host AS server_host,
        s.port AS server_port,
-       s.enabled AS server_enabled
+       s.enabled AS server_enabled,
+       s.host_cluster_id AS server_host_cluster_id,
+       s.host_node_name AS server_host_node_name
 FROM ups_devices d
 JOIN nut_servers s ON s.id = d.server_id
 WHERE d.present
@@ -82,7 +84,9 @@ SELECT d.*,
        s.name AS server_name,
        s.host AS server_host,
        s.port AS server_port,
-       s.enabled AS server_enabled
+       s.enabled AS server_enabled,
+       s.host_cluster_id AS server_host_cluster_id,
+       s.host_node_name AS server_host_node_name
 FROM ups_devices d
 JOIN nut_servers s ON s.id = d.server_id
 WHERE d.id = $1;

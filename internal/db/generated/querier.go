@@ -2103,9 +2103,10 @@ type Querier interface {
 	// Every address a node can log in to upsd from, to match LIST CLIENT against:
 	// its cluster (corosync) address, which may be IPv6, and its interfaces' IPv4
 	// addresses. Node rows are never deleted, so a node its cluster stopped
-	// listing well before the cluster's latest sync (an hour, or three sync
-	// intervals if longer) is left out; otherwise a removed node's address would
-	// shadow the node that took it over.
+	// listing an hour before the cluster's latest sync is left out; otherwise a
+	// removed node's address would shadow the node that took it over. Every full
+	// sync (METRICS_COLLECT_INTERVAL) refreshes all of a cluster's rows at once,
+	// so an hour spares a node that missed a few.
 	ListNodeLoginAddresses(ctx context.Context) ([]ListNodeLoginAddressesRow, error)
 	// The nodes of a cluster with a good memory read, for the capacity forecast,
 	// with the memory the node's kernel reports: a firmware table that lists less
@@ -2369,8 +2370,12 @@ type Querier interface {
 	// TestGuard_AuditReadPathsRedact keys on it.
 	ListUpsEvents(ctx context.Context, arg ListUpsEventsParams) ([]ListUpsEventsRow, error)
 	// Every feed of every present device, removed ones aside: nodes first, then
-	// other loads.
-	ListUpsFeeds(ctx context.Context) ([]UpsFeed, error)
+	// other loads. A node feed carries the node's row, when it has one, for its
+	// status and a link, and its cluster's name. node_status_current is false
+	// once no full sync has reached the node since node_seen_after: a cluster
+	// Nexara cannot reach, as in a power cut, keeps its nodes' last status for a
+	// while, and that must not read as online.
+	ListUpsFeeds(ctx context.Context, nodeSeenAfter time.Time) ([]ListUpsFeedsRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
@@ -2610,8 +2615,10 @@ type Querier interface {
 	// At most one open episode per (UPS, kind); a second open is a no-op.
 	OpenUpsEvent(ctx context.Context, arg OpenUpsEventParams) error
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
-	// Logins not seen since before, so a host that changed address does not stay
-	// listed forever.
+	// Logins not seen since before go, so a host that changed address does not
+	// stay listed forever, and so does all but the newest 256: upsd output is
+	// untrusted, and a server listing thousands of made-up addresses a minute
+	// must not grow the table without bound.
 	PruneUpsClients(ctx context.Context, arg PruneUpsClientsParams) error
 	// Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still
 	// holds must not disappear from Nexara because it is old, or every RPO and
@@ -2904,7 +2911,8 @@ type Querier interface {
 	// measures from the first launch attempt, not the most recent.
 	SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error
 	// The node a NUT server runs on, as the poller found it. One already set, by
-	// the poller or by hand, is kept.
+	// the poller or by hand, is kept, and so is the server's address: a worker
+	// still connected to an address an edit replaced must not store that old host.
 	SetNutServerHostNode(ctx context.Context, arg SetNutServerHostNodeParams) error
 	// Deliberately leaves last_poll_at alone: a server that has failed for an
 	// hour must not read "polled 5 seconds ago" beside its error.
@@ -2912,6 +2920,9 @@ type Querier interface {
 	SetNutServerPolled(ctx context.Context, arg SetNutServerPolledParams) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error
+	// A listing of the UPS's logins was taken on mains, so the nodes it powers can
+	// be judged from it.
+	SetUpsClientsListed(ctx context.Context, arg SetUpsClientsListedParams) error
 	// state is left as it was. A UPS Nexara cannot read is neither on mains nor
 	// on battery as far as Nexara knows, and the UI and the alert engine read the
 	// two columns together.
@@ -3019,6 +3030,9 @@ type Querier interface {
 	UpdateNodeStatusFast(ctx context.Context, arg UpdateNodeStatusFastParams) (int64, error)
 	UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (NotificationChannel, error)
 	UpdateNotificationDLQState(ctx context.Context, arg UpdateNotificationDLQStateParams) error
+	// A new address forgets the host node, which the poller then finds again:
+	// kept, it would credit the new host's own upsmon (a loopback login) to the
+	// node upsd ran on before. The CASEs read the row as it was.
 	UpdateNutServer(ctx context.Context, arg UpdateNutServerParams) (NutServer, error)
 	UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error)
 	UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserProfileParams) (User, error)

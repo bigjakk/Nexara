@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -201,6 +203,19 @@ func TestUpsIssues(t *testing.T) {
 		{"server disabled", with(func(d *upsDeviceResponse) { d.ServerEnabled, d.Reachability = false, "unreachable" }), nil},
 		{"replace battery and overload", with(func(d *upsDeviceResponse) { d.Flags = []string{"OL", "RB", "OVER"} }),
 			[]string{"ups_overload err ups02 reports an overload", "ups_replace_battery warn ups02 reports that its battery needs replacing"}},
+		{"a node not protected, on mains", with(func(d *upsDeviceResponse) {
+			d.Feeds = []upsFeedResponse{{Kind: "node", NodeName: "pve-03", Protection: "not_protected"}, {Kind: "node", NodeName: "pve-01", Protection: "protected"}}
+		}), []string{"ups_node_unprotected warn pve-03 is powered by ups02, but no upsmon on it is logged in"}},
+		{"a node not protected, UPS unreadable", with(func(d *upsDeviceResponse) {
+			d.Reachability, d.Flags = "unreachable", []string{"OB"}
+			d.Feeds = []upsFeedResponse{{Kind: "node", NodeName: "pve-03", ClusterName: "cluster01", Protection: "not_protected"}}
+		}), []string{"ups_unreachable warn Nexara cannot read ups02 from nut01",
+			"ups_node_unprotected warn pve-03 (cluster01) is powered by ups02, but no upsmon on it is logged in"}},
+		{"a node not protected, on battery", with(func(d *upsDeviceResponse) {
+			d.State, d.Flags, d.BatteryCharge, d.BatteryRuntime = "on_battery", []string{"OB"}, pf(52), pf(580)
+			d.Feeds = []upsFeedResponse{{Kind: "node", NodeName: "pve-03", Protection: "not_protected"}}
+		}), []string{"ups_on_battery warn ups02 is on battery · 52% · 9m 40s left",
+			"ups_node_unprotected err pve-03 is powered by ups02, which is on battery, and no upsmon on it is logged in · 52% · 9m 40s left"}},
 	} {
 		var got []string
 		for _, i := range upsIssues(tc.dev) {
@@ -221,7 +236,7 @@ func TestBuildUpsDevice_EstimatesPowerAndFlagsStaleReadings(t *testing.T) {
 	open := map[string]time.Time{"on_battery": now.Add(-time.Hour)}
 	row := upsTestRow(`{"ups.load":"38","ups.realpower.nominal":"900","ups.status":"OB"}`, now.Add(-time.Minute))
 	row.State = "on_battery"
-	d := h.buildUpsDevice(row, open, now, false)
+	d := h.buildUpsDevice(row, open, nil, now, false)
 	if d.Realpower == nil || *d.Realpower != 342 || !d.RealpowerEstimated || d.ReadingStale ||
 		d.State != "on_battery" || d.OnBatterySince == nil {
 		t.Errorf("fresh: realpower %v estimated %v stale %v state %s since %v",
@@ -229,11 +244,97 @@ func TestBuildUpsDevice_EstimatesPowerAndFlagsStaleReadings(t *testing.T) {
 	}
 	row = upsTestRow(`{"ups.realpower":"300"}`, now.Add(-10*time.Minute))
 	row.State = "on_battery"
-	d = h.buildUpsDevice(row, open, now, false)
+	d = h.buildUpsDevice(row, open, nil, now, false)
 	if d.Realpower == nil || *d.Realpower != 300 || d.RealpowerEstimated || !d.ReadingStale ||
 		d.State != "unknown" || d.LastKnownState != "on_battery" || d.OnBatterySince != nil {
 		t.Errorf("stale: realpower %v estimated %v stale %v state %s (last %s) since %v",
 			d.Realpower, d.RealpowerEstimated, d.ReadingStale, d.State, d.LastKnownState, d.OnBatterySince)
+	}
+}
+
+// Through the real handler, the device list shows what a UPS powers only
+// where the caller holds view:node on the cluster: a node feed, a login placed
+// on a node and the host node (its loopback login too) elsewhere are left out,
+// and so is every login a scoped caller cannot place, lest the gaps say which
+// addresses are hidden nodes. A UPS never listed judges nobody.
+func TestListDevices_ShowsWhatItPowersOnlyWhereTheCallerMaySee(t *testing.T) {
+	t.Parallel()
+	seen, hidden := uuid.New(), uuid.New()
+	listed := upsTestRow(`{"ups.status":"OL"}`, time.Now())
+	listed.ClientsListedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	listed.ServerHostClusterID = pgtype.UUID{Bytes: hidden, Valid: true}
+	listed.ServerHostNodeName = pgtype.Text{String: "pve-09", Valid: true}
+	unlisted := upsTestRow(`{"ups.status":"OL"}`, time.Now())
+	node := func(ups, cluster uuid.UUID, name string) db.ListUpsFeedsRow {
+		return db.ListUpsFeedsRow{ID: uuid.New(), UpsID: ups, Source: "found",
+			ClusterID: pgtype.UUID{Bytes: cluster, Valid: true}, NodeName: pgtype.Text{String: name, Valid: true},
+			NodeStatus: pgtype.Text{String: "online", Valid: true}, NodeStatusCurrent: true,
+			ClusterName: pgtype.Text{String: "cluster01", Valid: true}}
+	}
+	stale := func(f db.ListUpsFeedsRow) db.ListUpsFeedsRow { f.NodeStatusCurrent = false; return f } // a cluster out of reach
+	login := func(addr string) db.UpsClient { return db.UpsClient{UpsID: listed.ID, Address: addr, Connections: 1} }
+	addr := func(cluster uuid.UUID, name, a string) db.ListNodeLoginAddressesRow {
+		return db.ListNodeLoginAddressesRow{ClusterID: cluster, NodeName: name, Address: a}
+	}
+	dbtx := &auditRowsDBTX{rowsFor: map[string][]any{
+		"ListUpsDevices": {listed, unlisted},
+		"ListUpsFeeds": {
+			node(listed.ID, seen, "pve-01"), node(listed.ID, seen, "pve-02"), node(listed.ID, hidden, "pve-09"),
+			stale(node(listed.ID, seen, "pve-04")),
+			db.ListUpsFeedsRow{ID: uuid.New(), UpsID: listed.ID, Label: "Core switch", Source: "manual"},
+			node(unlisted.ID, seen, "pve-03"),
+		},
+		"ListUpsClients": {login("192.0.2.11"), login("192.0.2.19"), login("127.0.0.1"), login("192.0.2.99")},
+		"ListNodeLoginAddresses": {
+			addr(seen, "pve-01", "192.0.2.11"), addr(seen, "pve-02", "192.0.2.12"),
+			addr(seen, "pve-03", "192.0.2.13"), addr(seen, "pve-04", "192.0.2.14"), addr(hidden, "pve-09", "192.0.2.19"),
+		},
+	}}
+	h := NewNutHandler(db.New(dbtx), testEncryptionKey, nil)
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", clusterGrantEngine{"view", "node", seen})
+		return c.Next()
+	})
+	app.Get("/ups-devices", func(c fiber.Ctx) error { return h.ListDevices(c, nil) })
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/ups-devices", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var got struct {
+		Items []upsDeviceResponse `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || len(got.Items) != 2 {
+		t.Fatalf("status %d, %d devices, %v", resp.StatusCode, len(got.Items), err)
+	}
+	feeds := func(d upsDeviceResponse) (out []string) {
+		for _, f := range d.Feeds {
+			out = append(out, f.Kind+" "+f.NodeName+f.Label+" "+f.Protection)
+		}
+		return out
+	}
+	d := got.Items[0]
+	clients := make([]string, 0, len(d.Clients))
+	for _, c := range d.Clients {
+		clients = append(clients, c.Address+" "+c.NodeName)
+	}
+	issues := make([]string, 0, len(d.Issues))
+	for _, i := range d.Issues {
+		issues = append(issues, i.Type+" "+i.Target)
+	}
+	if want := []string{"node pve-01 protected", "node pve-02 not_protected", "node pve-04 unchecked", "label Core switch "}; !slices.Equal(feeds(d), want) {
+		t.Errorf("feeds = %q, want %q", feeds(d), want)
+	}
+	if want := []string{"192.0.2.11 pve-01"}; !slices.Equal(clients, want) {
+		t.Errorf("logins = %q, want %q", clients, want)
+	}
+	if want := []string{"ups_node_unprotected pve-02 (cluster01)"}; !slices.Equal(issues, want) || d.HostNode != nil {
+		t.Errorf("issues = %q, host node %v; want %q and no host node", issues, d.HostNode, want)
+	}
+	if want := []string{"node pve-03 unchecked"}; !slices.Equal(feeds(got.Items[1]), want) {
+		t.Errorf("never listed: feeds = %q, want %q", feeds(got.Items[1]), want)
 	}
 }
 

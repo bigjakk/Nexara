@@ -62,39 +62,44 @@ func (q *Queries) CloseUpsEventsOfDisabledServers(ctx context.Context) (int64, e
 }
 
 const getUpsDevice = `-- name: GetUpsDevice :one
-SELECT d.id, d.server_id, d.ups_name, d.description, d.manufacturer, d.model, d.serial, d.firmware, d.driver, d.status, d.state, d.reachability, d.vars, d.var_descriptions, d.present, d.last_reading_at, d.created_at, d.updated_at,
+SELECT d.id, d.server_id, d.ups_name, d.description, d.manufacturer, d.model, d.serial, d.firmware, d.driver, d.status, d.state, d.reachability, d.vars, d.var_descriptions, d.present, d.last_reading_at, d.created_at, d.updated_at, d.clients_listed_at,
        s.name AS server_name,
        s.host AS server_host,
        s.port AS server_port,
-       s.enabled AS server_enabled
+       s.enabled AS server_enabled,
+       s.host_cluster_id AS server_host_cluster_id,
+       s.host_node_name AS server_host_node_name
 FROM ups_devices d
 JOIN nut_servers s ON s.id = d.server_id
 WHERE d.id = $1
 `
 
 type GetUpsDeviceRow struct {
-	ID              uuid.UUID          `json:"id"`
-	ServerID        uuid.UUID          `json:"server_id"`
-	UpsName         string             `json:"ups_name"`
-	Description     string             `json:"description"`
-	Manufacturer    string             `json:"manufacturer"`
-	Model           string             `json:"model"`
-	Serial          string             `json:"serial"`
-	Firmware        string             `json:"firmware"`
-	Driver          string             `json:"driver"`
-	Status          string             `json:"status"`
-	State           string             `json:"state"`
-	Reachability    string             `json:"reachability"`
-	Vars            json.RawMessage    `json:"vars"`
-	VarDescriptions json.RawMessage    `json:"var_descriptions"`
-	Present         bool               `json:"present"`
-	LastReadingAt   pgtype.Timestamptz `json:"last_reading_at"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
-	ServerName      string             `json:"server_name"`
-	ServerHost      string             `json:"server_host"`
-	ServerPort      int32              `json:"server_port"`
-	ServerEnabled   bool               `json:"server_enabled"`
+	ID                  uuid.UUID          `json:"id"`
+	ServerID            uuid.UUID          `json:"server_id"`
+	UpsName             string             `json:"ups_name"`
+	Description         string             `json:"description"`
+	Manufacturer        string             `json:"manufacturer"`
+	Model               string             `json:"model"`
+	Serial              string             `json:"serial"`
+	Firmware            string             `json:"firmware"`
+	Driver              string             `json:"driver"`
+	Status              string             `json:"status"`
+	State               string             `json:"state"`
+	Reachability        string             `json:"reachability"`
+	Vars                json.RawMessage    `json:"vars"`
+	VarDescriptions     json.RawMessage    `json:"var_descriptions"`
+	Present             bool               `json:"present"`
+	LastReadingAt       pgtype.Timestamptz `json:"last_reading_at"`
+	CreatedAt           time.Time          `json:"created_at"`
+	UpdatedAt           time.Time          `json:"updated_at"`
+	ClientsListedAt     pgtype.Timestamptz `json:"clients_listed_at"`
+	ServerName          string             `json:"server_name"`
+	ServerHost          string             `json:"server_host"`
+	ServerPort          int32              `json:"server_port"`
+	ServerEnabled       bool               `json:"server_enabled"`
+	ServerHostClusterID pgtype.UUID        `json:"server_host_cluster_id"`
+	ServerHostNodeName  pgtype.Text        `json:"server_host_node_name"`
 }
 
 // One device with its server. Absent devices are still readable by id, so a
@@ -121,10 +126,13 @@ func (q *Queries) GetUpsDevice(ctx context.Context, id uuid.UUID) (GetUpsDeviceR
 		&i.LastReadingAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ClientsListedAt,
 		&i.ServerName,
 		&i.ServerHost,
 		&i.ServerPort,
 		&i.ServerEnabled,
+		&i.ServerHostClusterID,
+		&i.ServerHostNodeName,
 	)
 	return i, err
 }
@@ -390,11 +398,13 @@ func (q *Queries) ListOpenUpsEventsByServer(ctx context.Context, serverID uuid.U
 }
 
 const listUpsDevices = `-- name: ListUpsDevices :many
-SELECT d.id, d.server_id, d.ups_name, d.description, d.manufacturer, d.model, d.serial, d.firmware, d.driver, d.status, d.state, d.reachability, d.vars, d.var_descriptions, d.present, d.last_reading_at, d.created_at, d.updated_at,
+SELECT d.id, d.server_id, d.ups_name, d.description, d.manufacturer, d.model, d.serial, d.firmware, d.driver, d.status, d.state, d.reachability, d.vars, d.var_descriptions, d.present, d.last_reading_at, d.created_at, d.updated_at, d.clients_listed_at,
        s.name AS server_name,
        s.host AS server_host,
        s.port AS server_port,
-       s.enabled AS server_enabled
+       s.enabled AS server_enabled,
+       s.host_cluster_id AS server_host_cluster_id,
+       s.host_node_name AS server_host_node_name
 FROM ups_devices d
 JOIN nut_servers s ON s.id = d.server_id
 WHERE d.present
@@ -402,28 +412,31 @@ ORDER BY s.name, d.ups_name
 `
 
 type ListUpsDevicesRow struct {
-	ID              uuid.UUID          `json:"id"`
-	ServerID        uuid.UUID          `json:"server_id"`
-	UpsName         string             `json:"ups_name"`
-	Description     string             `json:"description"`
-	Manufacturer    string             `json:"manufacturer"`
-	Model           string             `json:"model"`
-	Serial          string             `json:"serial"`
-	Firmware        string             `json:"firmware"`
-	Driver          string             `json:"driver"`
-	Status          string             `json:"status"`
-	State           string             `json:"state"`
-	Reachability    string             `json:"reachability"`
-	Vars            json.RawMessage    `json:"vars"`
-	VarDescriptions json.RawMessage    `json:"var_descriptions"`
-	Present         bool               `json:"present"`
-	LastReadingAt   pgtype.Timestamptz `json:"last_reading_at"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
-	ServerName      string             `json:"server_name"`
-	ServerHost      string             `json:"server_host"`
-	ServerPort      int32              `json:"server_port"`
-	ServerEnabled   bool               `json:"server_enabled"`
+	ID                  uuid.UUID          `json:"id"`
+	ServerID            uuid.UUID          `json:"server_id"`
+	UpsName             string             `json:"ups_name"`
+	Description         string             `json:"description"`
+	Manufacturer        string             `json:"manufacturer"`
+	Model               string             `json:"model"`
+	Serial              string             `json:"serial"`
+	Firmware            string             `json:"firmware"`
+	Driver              string             `json:"driver"`
+	Status              string             `json:"status"`
+	State               string             `json:"state"`
+	Reachability        string             `json:"reachability"`
+	Vars                json.RawMessage    `json:"vars"`
+	VarDescriptions     json.RawMessage    `json:"var_descriptions"`
+	Present             bool               `json:"present"`
+	LastReadingAt       pgtype.Timestamptz `json:"last_reading_at"`
+	CreatedAt           time.Time          `json:"created_at"`
+	UpdatedAt           time.Time          `json:"updated_at"`
+	ClientsListedAt     pgtype.Timestamptz `json:"clients_listed_at"`
+	ServerName          string             `json:"server_name"`
+	ServerHost          string             `json:"server_host"`
+	ServerPort          int32              `json:"server_port"`
+	ServerEnabled       bool               `json:"server_enabled"`
+	ServerHostClusterID pgtype.UUID        `json:"server_host_cluster_id"`
+	ServerHostNodeName  pgtype.Text        `json:"server_host_node_name"`
 }
 
 // Every present device with its server, for the Power page, the health pill
@@ -456,10 +469,13 @@ func (q *Queries) ListUpsDevices(ctx context.Context) ([]ListUpsDevicesRow, erro
 			&i.LastReadingAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ClientsListedAt,
 			&i.ServerName,
 			&i.ServerHost,
 			&i.ServerPort,
 			&i.ServerEnabled,
+			&i.ServerHostClusterID,
+			&i.ServerHostNodeName,
 		); err != nil {
 			return nil, err
 		}
@@ -472,7 +488,7 @@ func (q *Queries) ListUpsDevices(ctx context.Context) ([]ListUpsDevicesRow, erro
 }
 
 const listUpsDevicesByServer = `-- name: ListUpsDevicesByServer :many
-SELECT id, server_id, ups_name, description, manufacturer, model, serial, firmware, driver, status, state, reachability, vars, var_descriptions, present, last_reading_at, created_at, updated_at FROM ups_devices WHERE server_id = $1 AND present ORDER BY ups_name
+SELECT id, server_id, ups_name, description, manufacturer, model, serial, firmware, driver, status, state, reachability, vars, var_descriptions, present, last_reading_at, created_at, updated_at, clients_listed_at FROM ups_devices WHERE server_id = $1 AND present ORDER BY ups_name
 `
 
 func (q *Queries) ListUpsDevicesByServer(ctx context.Context, serverID uuid.UUID) ([]UpsDevice, error) {
@@ -503,6 +519,7 @@ func (q *Queries) ListUpsDevicesByServer(ctx context.Context, serverID uuid.UUID
 			&i.LastReadingAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ClientsListedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -736,7 +753,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (server_id, ups_name) DO UPDATE
 SET description = EXCLUDED.description,
     present = TRUE
-RETURNING id, server_id, ups_name, description, manufacturer, model, serial, firmware, driver, status, state, reachability, vars, var_descriptions, present, last_reading_at, created_at, updated_at
+RETURNING id, server_id, ups_name, description, manufacturer, model, serial, firmware, driver, status, state, reachability, vars, var_descriptions, present, last_reading_at, created_at, updated_at, clients_listed_at
 `
 
 type UpsertUpsDeviceParams struct {
@@ -771,6 +788,7 @@ func (q *Queries) UpsertUpsDevice(ctx context.Context, arg UpsertUpsDeviceParams
 		&i.LastReadingAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ClientsListedAt,
 	)
 	return i, err
 }

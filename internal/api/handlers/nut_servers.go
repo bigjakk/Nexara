@@ -33,7 +33,11 @@ type NutHandler struct {
 	eventPub      *events.Publisher
 	reload        NutReloadTrigger
 	pollInterval  time.Duration
-	dial          func(context.Context, nut.Config) (*nut.Client, error)
+	// nodeSyncInterval is how often a full sync refreshes the node rows
+	// (METRICS_COLLECT_INTERVAL), so a node status older than a few passes is
+	// not taken as current.
+	nodeSyncInterval time.Duration
+	dial             func(context.Context, nut.Config) (*nut.Client, error)
 }
 
 // NewNutHandler creates the handler.
@@ -43,7 +47,9 @@ func NewNutHandler(queries *db.Queries, encryptionKey string, eventPub *events.P
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
 		pollInterval:  10 * time.Second,
-		dial:          nut.Dial,
+		// config.MetricsCollectInterval's default.
+		nodeSyncInterval: 30 * time.Second,
+		dial:             nut.Dial,
 	}
 }
 
@@ -56,6 +62,13 @@ func (h *NutHandler) SetReloadTrigger(t NutReloadTrigger) { h.reload = t }
 func (h *NutHandler) SetPollInterval(d time.Duration) {
 	if d > 0 {
 		h.pollInterval = d
+	}
+}
+
+// SetNodeSyncInterval is METRICS_COLLECT_INTERVAL, the full sync's cadence.
+func (h *NutHandler) SetNodeSyncInterval(d time.Duration) {
+	if d > 0 {
+		h.nodeSyncInterval = d
 	}
 }
 

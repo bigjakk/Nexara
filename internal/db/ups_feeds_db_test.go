@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -57,6 +58,8 @@ func TestUpsFeedsAndClients(t *testing.T) {
 	exec("server", `INSERT INTO nut_servers (id, name, host, host_cluster_id, host_node_name)
 		VALUES ($1, 'ups-feeds-fixture', '192.0.2.40', $2, 'pve-01')`, upsFeedServer, upsFeedCluster)
 	exec("device", `INSERT INTO ups_devices (id, server_id, ups_name) VALUES ($1, $2, 'ups01')`, upsFeedDevice, upsFeedServer)
+	exec("nodes", `INSERT INTO nodes (cluster_id, name, status, last_seen_at) VALUES
+		($1, 'pve-01', 'online', now()), ($1, 'pve-02', 'online', now() - interval '10 minutes')`, upsFeedCluster)
 	q := gen.New(pool)
 
 	found := gen.InsertFoundUpsFeedParams{UpsID: upsFeedDevice, ClusterID: upsFeedCluster, NodeName: "pve-01"}
@@ -102,7 +105,7 @@ func TestUpsFeedsAndClients(t *testing.T) {
 	// adding it by hand brings it back.
 	listed := func() (nodes []string) {
 		t.Helper()
-		rows, err := q.ListUpsFeeds(ctx)
+		rows, err := q.ListUpsFeeds(ctx, time.Now().Add(-2*time.Minute))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,11 +116,11 @@ func TestUpsFeedsAndClients(t *testing.T) {
 		}
 		return nodes
 	}
-	all, err := q.ListUpsFeeds(ctx)
+	all, err := q.ListUpsFeeds(ctx, time.Now().Add(-2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	pve01 := all[slices.IndexFunc(all, func(f gen.UpsFeed) bool { return f.NodeName.String == "pve-01" })]
+	pve01 := all[slices.IndexFunc(all, func(f gen.ListUpsFeedsRow) bool { return f.NodeName.String == "pve-01" })]
 	if _, err := q.DismissUpsNodeFeed(ctx, gen.DismissUpsNodeFeedParams{ID: pve01.ID, UpsID: upsFeedDevice}); err != nil {
 		t.Fatalf("dismiss: %v", err)
 	}
@@ -126,6 +129,21 @@ func TestUpsFeedsAndClients(t *testing.T) {
 	}
 	if f, err := manual("pve-01", ""); err != nil || f.Dismissed || f.Source != "manual" || !slices.Equal(listed(), []string{"pve-01:manual", "pve-02:manual"}) {
 		t.Errorf("added back by hand = %+v, %v, listed %v", f, err, listed())
+	}
+	// A cluster Nexara cannot reach keeps its nodes' last status: one no full
+	// sync has reached since the cutoff is not current, whatever it says.
+	feeds, err := q.ListUpsFeeds(ctx, time.Now().Add(-2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := map[string]bool{}
+	for _, f := range feeds {
+		if f.UpsID == upsFeedDevice && f.NodeName.Valid {
+			current[f.NodeName.String] = f.NodeStatusCurrent
+		}
+	}
+	if !current["pve-01"] || current["pve-02"] {
+		t.Errorf("node status current = %v; want pve-01 only", current)
 	}
 
 	// Four listings: two connections from one address, one address gone,
@@ -171,6 +189,55 @@ func TestUpsFeedsAndClients(t *testing.T) {
 			t.Fatal(err)
 		}
 		return n
+	}
+	// upsd output is untrusted: a listing of made-up addresses keeps only the
+	// newest 256 logins per UPS.
+	flood := make([]string, 300)
+	for i := range flood {
+		flood[i] = fmt.Sprintf("198.51.100.%d", i%250) + fmt.Sprintf("%c", 'a'+rune(i/250))
+	}
+	if err := q.UpsertUpsClients(ctx, gen.UpsertUpsClientsParams{UpsID: upsFeedDevice, Addresses: flood, SeenAt: time.Now().Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.PruneUpsClients(ctx, gen.PruneUpsClientsParams{UpsID: upsFeedDevice, Before: time.Now().Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(`SELECT count(*) FROM ups_clients WHERE ups_id = $1`); n != 256 {
+		t.Errorf("after a flood: %d logins stored, want 256", n)
+	}
+
+	// A new address forgets the host node, so the poller finds it again; the
+	// same address keeps it.
+	hostSet := func() bool {
+		t.Helper()
+		var set bool
+		if err := pool.QueryRow(ctx, `SELECT host_cluster_id IS NOT NULL FROM nut_servers WHERE id = $1`, upsFeedServer).Scan(&set); err != nil {
+			t.Fatal(err)
+		}
+		return set
+	}
+	update := func(addr string) {
+		t.Helper()
+		if _, err := q.UpdateNutServer(ctx, gen.UpdateNutServerParams{ID: upsFeedServer, Name: "ups-feeds-fixture", Host: addr, Port: 3493, TlsMode: "off", VerifyTls: true, Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if update("192.0.2.40"); !hostSet() {
+		t.Error("the same address forgot the host node")
+	}
+	if update("192.0.2.41"); hostSet() {
+		t.Error("a new address kept the host node")
+	}
+	setHost := func(addr string) error {
+		return q.SetNutServerHostNode(ctx, gen.SetNutServerHostNodeParams{
+			ID: upsFeedServer, ClusterID: upsFeedCluster, NodeName: "pve-01", Host: addr, Port: 3493})
+	}
+	// A worker still on the replaced address must not store the old host.
+	if err := setHost("192.0.2.40"); err != nil || hostSet() {
+		t.Errorf("a worker on the old address stored a host: %v", err)
+	}
+	if err := setHost("192.0.2.41"); err != nil || !hostSet() {
+		t.Fatalf("finding the host again: %v", err)
 	}
 	exec("delete cluster", `DELETE FROM clusters WHERE id = $1`, upsFeedCluster)
 	if n := count(`SELECT count(*) FROM ups_feeds WHERE ups_id = $1`); n != 1 {

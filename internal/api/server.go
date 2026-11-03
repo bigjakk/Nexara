@@ -578,6 +578,14 @@ func (s *Server) SetNutPollInterval(d time.Duration) {
 	}
 }
 
+// SetNodeSyncInterval is METRICS_COLLECT_INTERVAL: how often a full sync
+// refreshes the node rows the UPS routes judge node status by.
+func (s *Server) SetNodeSyncInterval(d time.Duration) {
+	if s.nutHandler != nil {
+		s.nutHandler.SetNodeSyncInterval(d)
+	}
+}
+
 // RBACEngine returns the API server's RBAC engine so other components
 // in the unified binary (e.g. the WebSocket server) can perform their
 // own permission checks against the same engine instance. May be nil

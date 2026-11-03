@@ -15,7 +15,7 @@ import (
 
 const deleteUpsLabelFeed = `-- name: DeleteUpsLabelFeed :one
 DELETE FROM ups_feeds WHERE id = $1 AND ups_id = $2 AND cluster_id IS NULL
-RETURNING id, ups_id, cluster_id, node_name, label, source, dismissed, created_at, created_by
+RETURNING id, ups_id, cluster_id, node_name, label, source, dismissed, created_at, created_by, protected_elsewhere
 `
 
 type DeleteUpsLabelFeedParams struct {
@@ -36,6 +36,7 @@ func (q *Queries) DeleteUpsLabelFeed(ctx context.Context, arg DeleteUpsLabelFeed
 		&i.Dismissed,
 		&i.CreatedAt,
 		&i.CreatedBy,
+		&i.ProtectedElsewhere,
 	)
 	return i, err
 }
@@ -44,7 +45,7 @@ const dismissUpsNodeFeed = `-- name: DismissUpsNodeFeed :one
 UPDATE ups_feeds
 SET dismissed = TRUE
 WHERE id = $1 AND ups_id = $2 AND cluster_id IS NOT NULL AND NOT dismissed
-RETURNING id, ups_id, cluster_id, node_name, label, source, dismissed, created_at, created_by
+RETURNING id, ups_id, cluster_id, node_name, label, source, dismissed, created_at, created_by, protected_elsewhere
 `
 
 type DismissUpsNodeFeedParams struct {
@@ -66,6 +67,7 @@ func (q *Queries) DismissUpsNodeFeed(ctx context.Context, arg DismissUpsNodeFeed
 		&i.Dismissed,
 		&i.CreatedAt,
 		&i.CreatedBy,
+		&i.ProtectedElsewhere,
 	)
 	return i, err
 }
@@ -101,7 +103,7 @@ SET dismissed = FALSE,
     created_by = EXCLUDED.created_by,
     created_at = EXCLUDED.created_at
 WHERE ups_feeds.dismissed
-RETURNING id, ups_id, cluster_id, node_name, label, source, dismissed, created_at, created_by
+RETURNING id, ups_id, cluster_id, node_name, label, source, dismissed, created_at, created_by, protected_elsewhere
 `
 
 type InsertManualUpsFeedParams struct {
@@ -133,6 +135,7 @@ func (q *Queries) InsertManualUpsFeed(ctx context.Context, arg InsertManualUpsFe
 		&i.Dismissed,
 		&i.CreatedAt,
 		&i.CreatedBy,
+		&i.ProtectedElsewhere,
 	)
 	return i, err
 }
@@ -140,18 +143,14 @@ func (q *Queries) InsertManualUpsFeed(ctx context.Context, arg InsertManualUpsFe
 const listNodeLoginAddresses = `-- name: ListNodeLoginAddresses :many
 SELECT n.cluster_id, n.name AS node_name, n.address
 FROM nodes n
-JOIN clusters c ON c.id = n.cluster_id
 WHERE n.address <> ''
-  AND n.last_seen_at > (SELECT max(m.last_seen_at) FROM nodes m WHERE m.cluster_id = n.cluster_id)
-                       - greatest(interval '1 hour', c.sync_interval_seconds * interval '3 seconds')
+  AND n.last_seen_at > (SELECT max(m.last_seen_at) FROM nodes m WHERE m.cluster_id = n.cluster_id) - interval '1 hour'
 UNION
 SELECT n.cluster_id, n.name AS node_name, i.address
 FROM node_network_interfaces i
 JOIN nodes n ON n.id = i.node_id
-JOIN clusters c ON c.id = n.cluster_id
 WHERE i.address <> ''
-  AND n.last_seen_at > (SELECT max(m.last_seen_at) FROM nodes m WHERE m.cluster_id = n.cluster_id)
-                       - greatest(interval '1 hour', c.sync_interval_seconds * interval '3 seconds')
+  AND n.last_seen_at > (SELECT max(m.last_seen_at) FROM nodes m WHERE m.cluster_id = n.cluster_id) - interval '1 hour'
 ORDER BY 1, 2, 3
 `
 
@@ -164,9 +163,10 @@ type ListNodeLoginAddressesRow struct {
 // Every address a node can log in to upsd from, to match LIST CLIENT against:
 // its cluster (corosync) address, which may be IPv6, and its interfaces' IPv4
 // addresses. Node rows are never deleted, so a node its cluster stopped
-// listing well before the cluster's latest sync (an hour, or three sync
-// intervals if longer) is left out; otherwise a removed node's address would
-// shadow the node that took it over.
+// listing an hour before the cluster's latest sync is left out; otherwise a
+// removed node's address would shadow the node that took it over. Every full
+// sync (METRICS_COLLECT_INTERVAL) refreshes all of a cluster's rows at once,
+// so an hour spares a node that missed a few.
 func (q *Queries) ListNodeLoginAddresses(ctx context.Context) ([]ListNodeLoginAddressesRow, error) {
 	rows, err := q.db.Query(ctx, listNodeLoginAddresses)
 	if err != nil {
@@ -224,24 +224,51 @@ func (q *Queries) ListUpsClients(ctx context.Context) ([]UpsClient, error) {
 }
 
 const listUpsFeeds = `-- name: ListUpsFeeds :many
-SELECT f.id, f.ups_id, f.cluster_id, f.node_name, f.label, f.source, f.dismissed, f.created_at, f.created_by
+SELECT f.id, f.ups_id, f.cluster_id, f.node_name, f.label, f.source, f.dismissed, f.created_at, f.created_by, f.protected_elsewhere,
+       n.id AS node_id,
+       n.status AS node_status,
+       COALESCE(n.last_seen_at > $1::timestamptz, FALSE)::boolean AS node_status_current,
+       c.name AS cluster_name
 FROM ups_feeds f
 JOIN ups_devices d ON d.id = f.ups_id
+LEFT JOIN nodes n ON n.cluster_id = f.cluster_id AND n.name = f.node_name
+LEFT JOIN clusters c ON c.id = f.cluster_id
 WHERE d.present AND NOT f.dismissed
-ORDER BY f.ups_id, f.cluster_id IS NULL, f.node_name, lower(f.label)
+ORDER BY f.ups_id, f.cluster_id IS NULL, f.node_name, c.name, lower(f.label)
 `
 
+type ListUpsFeedsRow struct {
+	ID                 uuid.UUID   `json:"id"`
+	UpsID              uuid.UUID   `json:"ups_id"`
+	ClusterID          pgtype.UUID `json:"cluster_id"`
+	NodeName           pgtype.Text `json:"node_name"`
+	Label              string      `json:"label"`
+	Source             string      `json:"source"`
+	Dismissed          bool        `json:"dismissed"`
+	CreatedAt          time.Time   `json:"created_at"`
+	CreatedBy          pgtype.UUID `json:"created_by"`
+	ProtectedElsewhere bool        `json:"protected_elsewhere"`
+	NodeID             pgtype.UUID `json:"node_id"`
+	NodeStatus         pgtype.Text `json:"node_status"`
+	NodeStatusCurrent  bool        `json:"node_status_current"`
+	ClusterName        pgtype.Text `json:"cluster_name"`
+}
+
 // Every feed of every present device, removed ones aside: nodes first, then
-// other loads.
-func (q *Queries) ListUpsFeeds(ctx context.Context) ([]UpsFeed, error) {
-	rows, err := q.db.Query(ctx, listUpsFeeds)
+// other loads. A node feed carries the node's row, when it has one, for its
+// status and a link, and its cluster's name. node_status_current is false
+// once no full sync has reached the node since node_seen_after: a cluster
+// Nexara cannot reach, as in a power cut, keeps its nodes' last status for a
+// while, and that must not read as online.
+func (q *Queries) ListUpsFeeds(ctx context.Context, nodeSeenAfter time.Time) ([]ListUpsFeedsRow, error) {
+	rows, err := q.db.Query(ctx, listUpsFeeds, nodeSeenAfter)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []UpsFeed{}
+	items := []ListUpsFeedsRow{}
 	for rows.Next() {
-		var i UpsFeed
+		var i ListUpsFeedsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.UpsID,
@@ -252,6 +279,11 @@ func (q *Queries) ListUpsFeeds(ctx context.Context) ([]UpsFeed, error) {
 			&i.Dismissed,
 			&i.CreatedAt,
 			&i.CreatedBy,
+			&i.ProtectedElsewhere,
+			&i.NodeID,
+			&i.NodeStatus,
+			&i.NodeStatusCurrent,
+			&i.ClusterName,
 		); err != nil {
 			return nil, err
 		}
@@ -283,7 +315,11 @@ func (q *Queries) MarkUpsClientsMissed(ctx context.Context, arg MarkUpsClientsMi
 }
 
 const pruneUpsClients = `-- name: PruneUpsClients :exec
-DELETE FROM ups_clients WHERE ups_id = $1 AND last_seen_at < $2
+DELETE FROM ups_clients c
+WHERE c.ups_id = $1
+  AND (c.last_seen_at < $2
+       OR c.address NOT IN (SELECT k.address FROM ups_clients k WHERE k.ups_id = $1
+                            ORDER BY k.last_seen_at DESC, k.address LIMIT 256))
 `
 
 type PruneUpsClientsParams struct {
@@ -291,8 +327,10 @@ type PruneUpsClientsParams struct {
 	Before time.Time `json:"before"`
 }
 
-// Logins not seen since before, so a host that changed address does not stay
-// listed forever.
+// Logins not seen since before go, so a host that changed address does not
+// stay listed forever, and so does all but the newest 256: upsd output is
+// untrusted, and a server listing thousands of made-up addresses a minute
+// must not grow the table without bound.
 func (q *Queries) PruneUpsClients(ctx context.Context, arg PruneUpsClientsParams) error {
 	_, err := q.db.Exec(ctx, pruneUpsClients, arg.UpsID, arg.Before)
 	return err
@@ -302,19 +340,44 @@ const setNutServerHostNode = `-- name: SetNutServerHostNode :exec
 UPDATE nut_servers
 SET host_cluster_id = $1::uuid,
     host_node_name = $2::text
-WHERE id = $3 AND host_cluster_id IS NULL
+WHERE id = $3 AND host_cluster_id IS NULL AND host = $4 AND port = $5
 `
 
 type SetNutServerHostNodeParams struct {
 	ClusterID uuid.UUID `json:"cluster_id"`
 	NodeName  string    `json:"node_name"`
 	ID        uuid.UUID `json:"id"`
+	Host      string    `json:"host"`
+	Port      int32     `json:"port"`
 }
 
 // The node a NUT server runs on, as the poller found it. One already set, by
-// the poller or by hand, is kept.
+// the poller or by hand, is kept, and so is the server's address: a worker
+// still connected to an address an edit replaced must not store that old host.
 func (q *Queries) SetNutServerHostNode(ctx context.Context, arg SetNutServerHostNodeParams) error {
-	_, err := q.db.Exec(ctx, setNutServerHostNode, arg.ClusterID, arg.NodeName, arg.ID)
+	_, err := q.db.Exec(ctx, setNutServerHostNode,
+		arg.ClusterID,
+		arg.NodeName,
+		arg.ID,
+		arg.Host,
+		arg.Port,
+	)
+	return err
+}
+
+const setUpsClientsListed = `-- name: SetUpsClientsListed :exec
+UPDATE ups_devices SET clients_listed_at = $1 WHERE id = $2
+`
+
+type SetUpsClientsListedParams struct {
+	ListedAt pgtype.Timestamptz `json:"listed_at"`
+	ID       uuid.UUID          `json:"id"`
+}
+
+// A listing of the UPS's logins was taken on mains, so the nodes it powers can
+// be judged from it.
+func (q *Queries) SetUpsClientsListed(ctx context.Context, arg SetUpsClientsListedParams) error {
+	_, err := q.db.Exec(ctx, setUpsClientsListed, arg.ListedAt, arg.ID)
 	return err
 }
 
