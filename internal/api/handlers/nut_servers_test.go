@@ -137,8 +137,9 @@ func TestNutUpdateTransportAck(t *testing.T) {
 }
 
 // Update refuses before it dials: a move that would carry the stored password
-// to a new address, and a move to plain text this server was never confirmed
-// for (it was saved with unverified TLS). A rename saves without dialing.
+// to a new address, a weaker transport for it unless it is re-entered, and a
+// move to plain text this server was never confirmed for (it was saved with
+// unverified TLS). A rename saves without dialing.
 func TestNutUpdate_RefusesBeforeDialing(t *testing.T) {
 	t.Parallel()
 	pw, err := crypto.Encrypt("pw", testEncryptionKey)
@@ -163,13 +164,25 @@ func TestNutUpdate_RefusesBeforeDialing(t *testing.T) {
 	}{
 		{"host moved", `{"host":"192.0.2.41","allow_private_address":true}`, http.StatusBadRequest, "re-entering the password"},
 		{"port moved", `{"port":3494}`, http.StatusBadRequest, "re-entering the password"},
-		{"unverified TLS to plain text", `{"tls_mode":"off"}`, http.StatusUnprocessableEntity, "nut_cleartext_credentials_confirm_required"},
+		{"unverified TLS to plain text, password kept", `{"tls_mode":"off","acknowledge_cleartext_credentials":true}`, http.StatusBadRequest, "re-entering the password"},
+		{"unverified TLS to plain text, password re-entered", `{"tls_mode":"off","password":"pw"}`, http.StatusUnprocessableEntity, "nut_cleartext_credentials_confirm_required"},
 		{"renamed", `{"name":"nut02"}`, http.StatusOK, `"id"`},
 	} {
 		status, body := doVeeamRequest(t, app, http.MethodPut, "/nut-servers/"+stored.ID.String(), "", tc.body)
 		if status != tc.status || !strings.Contains(body, tc.want) {
 			t.Errorf("%s: %d %s, want %d containing %q", tc.name, status, body, tc.status, tc.want)
 		}
+	}
+	// A pinned server: a new pin scores as protected, yet it is the caller's
+	// choice of certificate, so the stored password goes to it only re-entered.
+	pinned := stored
+	pinned.TlsFingerprint = strings.Repeat("ab", 32)
+	ph := NewNutHandler(db.New(&auditRowsDBTX{rowFor: map[string]any{"GetNutServer": pinned}}), testEncryptionKey, nil)
+	ph.dial = h.dial
+	status, body := doVeeamRequest(t, newNutTestApp(t, ph), http.MethodPut, "/nut-servers/"+pinned.ID.String(), "",
+		fmt.Sprintf(`{"tls_fingerprint":%q}`, strings.Repeat("cd", 32)))
+	if status != http.StatusBadRequest || !strings.Contains(body, "re-entering the password") {
+		t.Errorf("a new pin with the password kept: %d %s, want 400 asking for the password", status, body)
 	}
 	if n := dials.Load(); n != 0 {
 		t.Errorf("dialed %d times: every refusal must come before the probe", n)

@@ -496,6 +496,20 @@ func (h *NutHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	}
 	was := nutTarget{password: boolStr(existing.PasswordEncrypted != ""), tlsMode: existing.TlsMode,
 		verifyTLS: existing.VerifyTls, fingerprint: existing.TlsFingerprint}
+	// The redirect gate's sibling: an acknowledgement alone must not send the
+	// stored password over a weaker connection (TLS off, or no longer
+	// verified), where whoever can watch the wire reads an account that may
+	// run UPS commands; nor to a certificate the caller just pinned, which
+	// scores as protected but is whichever one they chose. Re-entering it
+	// shows the caller holds it already.
+	pinChanged := params.TlsFingerprint != "" && params.TlsFingerprint != existing.TlsFingerprint
+	if supplied == "" && params.PasswordEncrypted != "" &&
+		(nutTransportRisk(target) > nutTransportRisk(was) || pinChanged && nutTransportRisk(was) == 0) {
+		h.audit(c, existing, "nut_server_credential_downgrade_refused", map[string]any{"tls_mode": params.TlsMode})
+		return fiber.NewError(fiber.StatusBadRequest,
+			"Sending the password over a less protected connection requires re-entering the password. "+
+				"The stored one is only ever sent as protected as when it was saved.")
+	}
 	if err := nutUpdateTransportAck(was, target, p.Bool("acknowledge_cleartext_credentials"), p.Bool("acknowledge_insecure_tls")); err != nil {
 		return renderConfirmRequired(c, err)
 	}
