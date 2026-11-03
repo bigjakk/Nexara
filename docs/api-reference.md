@@ -1754,18 +1754,24 @@ not counted at all, since that is lost track of rather than failed.
 | DELETE | `/nut-servers/:id` | Remove a NUT server and the UPS readings and events collected from it |
 | POST | `/nut-servers/:id/test` | Test a saved server's connection. Persists nothing |
 | GET | `/ups-devices` | List UPSes with their state, readings and health issues |
-| GET | `/ups-devices/:id` | Get one UPS, with every variable upsd reports and its description |
+| GET | `/ups-devices/:id` | Get one UPS, with every variable upsd reports and its description; and, once listed (`commands_listed_at`), its `commands` (with `tier` and the `confirm` each needs) and `writable` variables (type, limits, `editable` and `reason`, `affects_power`, `confirm`) |
 | GET | `/ups-devices/:id/metrics` | Readings over `range` = `1h`, `6h`, `24h`, `7d` or `30d`, in raw, 5-minute or hourly buckets, at most 360 points |
 | GET | `/ups-events` | Power events, newest first. Filter by `ups_id` and `kind`; page with `before` and `before_id` together, both taken from the last event of the previous page |
 | POST | `/ups-devices/:id/feeds` | Add something the UPS powers by hand: a node (`feed_cluster_id` and `node_name`) or a load that is not a node (`label`). A node already powered is a 409 |
 | PUT | `/ups-devices/:id/feeds/:feed_id` | Set `protected_elsewhere`: the node shuts down some way Nexara cannot see, and its verdict reads `checked_elsewhere` |
 | DELETE | `/ups-devices/:id/feeds/:feed_id` | Remove something the UPS powers. A node is kept as removed, so its next login does not add it again; only adding it back by hand does |
 | PUT | `/nut-servers/:id/host-node` | Say which node the NUT server runs on (`host_cluster_id` and `node_name`), so its own loopback login counts for that node; or `detect` to let the poller find it |
+| POST | `/ups-devices/:id/commands` | Run an instant command (`command`, and an optional `parameter`) through the server's stored account (`execute:ups`). Answers 202 with the run; one whose `confirm` is `typed` (it cuts the UPS's power) needs `confirm` set to the UPS's name, and `manage:node` on every cluster with a node the UPS powers or has powered and on its NUT server's host node's cluster (everywhere when Nexara knows none) |
+| PUT | `/ups-devices/:id/vars/:name` | Set a writable variable (`value`), checked as upsd checks it (`manage:ups`; one with `affects_power` also needs `execute:ups` and `manage:node` on those clusters, and one whose `confirm` is `typed`, `driver.flag.allow_killpower`, `confirm` set to the UPS's name). Answers 202 with the run |
+| GET | `/ups-devices/:id/command-runs` | The newest 50 command runs and variable sets, with who asked and the outcome: `sent`, `pending`, `succeeded`, `failed` or `unconfirmed` |
 
 All of them need a global grant: `view:ups`, `manage:ups` for adding, editing
-and testing, `delete:ups` for removing. Create, probe, update and test share a
-limit of 10 a minute per client IP, since each one makes Nexara connect to an
-address the caller names.
+and testing and for variables, `delete:ups` for removing, `execute:ups` for
+commands. Create, probe, update and test share a limit of 10 a minute per
+client IP, since each one makes Nexara connect to an address the caller names;
+commands and variables share their own, 30 a minute per user, and answer 429
+while Nexara is already waiting on 16 drivers' answers (4 on one NUT server),
+except a `*.stop` command, which goes out untracked.
 
 **`state` is `"unknown"` unless the reading is current**: the server is polled,
 its last poll read the UPS, and the reading is younger than three poll
@@ -1785,7 +1791,10 @@ password travel less protected than before. A failed probe is 422
 
 **Changing a server's host or port requires re-entering the password.** A
 stored credential is only ever sent to the address it was saved for; the
-refusal is audited as `nut_server_credential_redirect_refused`.
+refusal is audited as `nut_server_credential_redirect_refused`. So does an edit
+that keeps the stored password while making its connection less protected
+(TLS off, the certificate no longer verified) or pinning a different
+certificate: a 400, audited as `nut_server_credential_downgrade_refused`.
 
 **An event's end.** `end_observed` is false when Nexara did not see the
 condition clear. With no `details.ended_by`, contact was lost and the

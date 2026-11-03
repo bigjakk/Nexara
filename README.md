@@ -106,7 +106,7 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 - Live migration with pre-flight checks — within a cluster or across clusters, with per-disk storage placement and network mapping
 - **Node evacuation** — bulk migrate all guests off a node
 - **Health rollup** — Ceph, disk S.M.A.R.T., quorum, storage, and task failures aggregated into one dismissible health indicator
-- **UPS monitoring** — the UPSes your Network UPS Tools (NUT) servers report, read-only: status, charge, runtime and load, power-event history, and on-battery alerts; which nodes each UPS powers, and a warning for any node with no `upsmon` to shut it down before the battery runs out
+- **UPS monitoring** — the UPSes your Network UPS Tools (NUT) servers report: status, charge, runtime and load, power-event history, and on-battery alerts; which nodes each UPS powers, and a warning for any node with no `upsmon` to shut it down before the battery runs out; and, through an account you give it, instant commands and settings, with the UPS's name typed for any that cuts its power
 
 </td>
 <td width="50%">

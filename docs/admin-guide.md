@@ -1006,13 +1006,13 @@ Proxmox has no bulk snapshot endpoint, so the collector walks one listing per gu
 
 ## Power (UPS monitoring)
 
-Navigate to **Power** from the sidebar to watch the UPSes your Network UPS Tools (NUT) servers report: whether each one is on mains or on battery, how much charge and runtime it has left, its load, and a history of power events. Nexara reads upsd over its network protocol and only reads. It never sends a UPS command, never logs in as a monitor (NUT's `LOGIN`), and never asks for a shutdown, so adding it cannot change what your existing `upsmon` setup does.
+Navigate to **Power** from the sidebar to watch the UPSes your Network UPS Tools (NUT) servers report: whether each one is on mains or on battery, how much charge and runtime it has left, its load, and a history of power events. Nexara reads upsd over its network protocol. It sends a UPS command or changes a setting only when someone runs one from a UPS's page, through an account you give it (see [UPS Commands and Settings](#ups-commands-and-settings)). It never logs in as a monitor (NUT's `LOGIN`) and never asks for a forced shutdown (`FSD`), so reading cannot change what your existing `upsmon` setup does. A setting changed from Nexara can: the battery-low point is when `upsmon` shuts machines down.
 
 ### Before You Add a Server
 
 - **upsd must be reachable from the Nexara container**, on TCP 3493 unless you changed the port. upsd listens on localhost only until told otherwise: add a `LISTEN` line for an address Nexara can reach to `upsd.conf` and restart upsd.
 - **Some NAS appliances run upsd for their attached UPS and answer only an allow-list of client addresses.** Add the address Nexara connects from to that list.
-- **No account is needed to read.** upsd serves status to any client that can connect, so leave the username and password empty. They are accepted for a later release that can run UPS commands. If you set them anyway, use a dedicated `upsd.users` entry with **no `upsmon` line**, so that account can never act as a monitor.
+- **No account is needed to read.** upsd serves status to any client that can connect, so leave the username and password empty unless you want to run UPS commands from Nexara. For that, give it a dedicated `upsd.users` entry with **no `upsmon` line**, so that account can never act as a monitor (see [UPS Commands and Settings](#ups-commands-and-settings)).
 
 ### Adding a NUT Server
 
@@ -1027,7 +1027,7 @@ Navigate to **Power** from the sidebar to watch the UPSes your Network UPS Tools
 - a password that would cross the network in plain text;
 - a password sent over TLS without a verified or pinned certificate, which would reach whoever answers on that address.
 
-Changing the host or port of a saved server requires re-entering its password: a stored password is only ever sent to the address it was saved for.
+Changing the host or port of a saved server requires re-entering its password: a stored password is only ever sent to the address it was saved for. So does making the connection less protected (turning TLS off, or no longer verifying the certificate) or pinning a different certificate: a stored password is only ever sent as protected as when it was saved, since the account can run UPS commands.
 
 ### What the Power Page Shows
 
@@ -1083,6 +1083,39 @@ During an outage, a node that is not protected and that no UPS still on mains po
 
 **upsmon over IPv6.** Interfaces are matched by their IPv4 addresses, so a login over IPv6 is found only when it comes from the node's cluster address. Point the node's `MONITOR` line at upsd's IPv4 address, or switch on **Protected another way** for it.
 
+### UPS Commands and Settings
+
+A UPS's page has a **Commands** tab with the instant commands upsd offers for it (NUT's `INSTCMD`), and its **Variables** tab marks the variables upsd lets clients set (`SET VAR`), with a **Set** button on those you may change. Nexara lists both every 10 minutes, and again when the driver changes.
+
+**The account.** upsd runs a command or sets a variable only for an account in its `upsd.users`, and checks the account only when a command runs. Add one for Nexara, and enter it on the NUT server in Nexara:
+
+```
+[nexara]
+  password = <pick one>
+  actions = SET
+  instcmds = ALL
+```
+
+`actions = SET` is for variables and `instcmds` for commands. To keep Nexara from ever cutting a UPS's power, list only the commands you want (one `instcmds = <command>` line each) instead of `ALL`, and leave out `actions = SET`, since upsd cannot limit SET to some variables and most of them can change the power (below); upsd enforces both itself. Leave out `upsmon`. The NUT servers table's Access column reads **Commands** once upsd has taken a command from the account; until then the first command is its test.
+
+**What a command can do.** Commands are grouped by what they can do to what the UPS powers, and each group asks for a different confirmation:
+
+| Group | Commands | To run one |
+|-------|----------|------------|
+| Everyday | the beeper, the front-panel test, and every `*.stop` (stopping a battery test, cancelling a shutdown in progress) | A click |
+| Tests | battery tests (`test.battery.*`) and calibration: they drain the battery, a deep test down to low | A confirmation |
+| Powers on | `load.on*`, `outlet.*.load.on*` | A confirmation |
+| Driver | `driver.reload*` | A confirmation |
+| Cuts power | `load.off*`, `outlet.*.load.off*`, `shutdown.*` but `shutdown.stop`, `bypass.start`, `driver.killpower`, and **any command Nexara does not recognise** | The UPS's name typed |
+
+A command that cuts power also takes `manage:node` on every cluster with a node the UPS powers or has powered (one removed from its Powers tab still counts), and on the cluster of the node its NUT server runs on; when Nexara knows none of these, `manage:node` everywhere. Its dialog lists those nodes with the guests running on each, and warns when the NUT server runs on one of them: cutting the power stops it too, and Nexara may not hear how the command went.
+
+**Settings.** A variable is set only to a value upsd will take: one of the values it lists for an ENUM, a number within a range it lists, at most its `STRING:n` characters. Most variables can change the power the UPS supplies or when `upsmon` shuts machines down (`battery.charge.low` set to 0 means no low-battery warning before the battery is flat), so setting any of them is gated as cutting power is: `execute:ups` too, `manage:node` on the clusters the UPS powers, and a confirmation; `driver.flag.allow_killpower` takes the UPS's name typed. Only those that describe the UPS (`device.contact`, `device.description`, `device.location`, `ups.id`, `battery.date`, `battery.mfr.date`), the beeper's status and the driver's debug level need `manage:ups` alone. upsd's own placeholder lists (one value, such as snmp-ups's `battery.date`) are not offered for editing.
+
+**Outcomes.** upsd answering a command only means it passed it to the driver. On NUT 2.8 Nexara asks for the driver's own answer for up to a minute, and the run reads **succeeded**, **failed** (with what the driver or upsd said), or **unconfirmed** when no answer came; NUT 2.7 cannot say, so its runs read unconfirmed. A variable that took is read back. The Commands tab lists the runs with who asked for each. The audit log records each command and variable by name, never a variable's value, as `ups_command_sent` (upsd took it) or `ups_command_failed` (upsd refused it, or could not be reached); the driver's later answer is in the run list only.
+
+**Limits.** Running commands and setting variables is limited to 30 a minute per user. Nexara waits on at most 16 drivers' answers at once, 4 on one NUT server; past that a command or setting is refused (429) until one finishes, except a cancel (`*.stop`), which always goes out, without waiting for the driver's answer, and reads unconfirmed.
+
 ### Polling and History
 
 Every enabled server is read every **10 seconds**, tuned with `NUT_POLL_INTERVAL` (minimum `2s`). `0` stops polling every server, and within two minutes every UPS reads as unreachable and counts toward `ups_unreachable`; to stop watching one server, turn its polling off instead. A server that stops answering is retried after 10 seconds, doubling up to 5 minutes. Readings are kept at full resolution for 30 days; 5-minute and hourly rollups, which the longer chart ranges read, are kept without a limit.
@@ -1092,10 +1125,11 @@ Every enabled server is read every **10 seconds**, tuned with `NUT_POLL_INTERVAL
 | Permission | Allows | Granted to |
 |------------|--------|------------|
 | `view:ups` | The Power page, UPS issues in the health pill, the UPS dashboard widget, a node's Power card, the topology's Power overlay | Viewer, Operator, Admin |
-| `manage:ups` | Adding, editing and testing NUT servers; adding and removing what a UPS powers, and marking a node protected another way (with `view:node` on the node's cluster); setting the node a NUT server runs on (with a global `view:node`) | Operator, Admin |
+| `manage:ups` | Adding, editing and testing NUT servers; adding and removing what a UPS powers, and marking a node protected another way (with `view:node` on the node's cluster); setting the node a NUT server runs on (with a global `view:node`); setting a UPS's variables (with `execute:ups` and `manage:node` too for one that can change its power) | Operator, Admin |
+| `execute:ups` | Running a UPS's instant commands (with `manage:node` too for one that cuts its power) | Operator, Admin |
 | `delete:ups` | Removing a NUT server and the UPS history collected from it | Operator, Admin |
 
-All three must be held install-wide: the UPS routes refuse a grant held on one cluster, so the Power page and its sidebar link appear only with a global `view:ups`. Custom roles were given the same actions on `ups` as they hold on `pbs` when this arrived.
+All four must be held install-wide: the UPS routes refuse a grant held on one cluster, so the Power page and its sidebar link appear only with a global `view:ups`. Custom roles were given the same `view`, `manage` and `delete` actions on `ups` as they hold on `pbs` when UPS monitoring arrived, and no `execute:ups`. Built-in roles cannot be edited, so every Operator can run every UPS command; to keep someone from that, give them a custom role.
 
 ### UPS Alerts
 
