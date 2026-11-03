@@ -401,7 +401,7 @@ UPDATE nut_servers
 SET host_cluster_id = $1,
     host_node_name = $2
 WHERE id = $3
-RETURNING id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at, host_cluster_id, host_node_name
+RETURNING id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at, host_cluster_id, host_node_name, commands_verified_at
 `
 
 type SetNutServerHostNodeByHandParams struct {
@@ -434,6 +434,7 @@ func (q *Queries) SetNutServerHostNodeByHand(ctx context.Context, arg SetNutServ
 		&i.UpdatedAt,
 		&i.HostClusterID,
 		&i.HostNodeName,
+		&i.CommandsVerifiedAt,
 	)
 	return i, err
 }

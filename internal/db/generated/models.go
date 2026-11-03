@@ -844,6 +844,8 @@ type NutServer struct {
 	UpdatedAt     time.Time   `json:"updated_at"`
 	HostClusterID pgtype.UUID `json:"host_cluster_id"`
 	HostNodeName  pgtype.Text `json:"host_node_name"`
+	// When upsd last took a command or variable set from the stored account. upsd checks an account only when a command runs, so this is the only proof it may run them; cleared when upsd refuses it, and when the address, username or password changes
+	CommandsVerifiedAt pgtype.Timestamptz `json:"commands_verified_at"`
 }
 
 type OidcConfig struct {
@@ -1222,6 +1224,27 @@ type UpsClient struct {
 	LastSeenAt  time.Time `json:"last_seen_at"`
 }
 
+// Every instant command run and variable set through Nexara, with the outcome the driver reported
+type UpsCommand struct {
+	ID     uuid.UUID   `json:"id"`
+	UpsID  uuid.UUID   `json:"ups_id"`
+	UserID pgtype.UUID `json:"user_id"`
+	Kind   string      `json:"kind"`
+	// The instant command (kind command) or the variable (kind set)
+	Name string `json:"name"`
+	// The command's parameter, or the value set. Never a credential
+	Argument string `json:"argument"`
+	// For kind set, the value Nexara last read before the change
+	Previous pgtype.Text `json:"previous"`
+	// sent while Nexara talks to upsd; pending once upsd tracks it; succeeded or failed by the driver's answer, or upsd's refusal; unconfirmed when upsd took it but no answer came (NUT 2.7 has no tracking, the driver stayed pending for 60 s, the connection dropped, or Nexara stopped)
+	Status     string `json:"status"`
+	TrackingID string `json:"tracking_id"`
+	// What came back, in words for the UI: why a run failed, or what a variable reads after it
+	Result      string             `json:"result"`
+	RequestedAt time.Time          `json:"requested_at"`
+	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
+}
+
 type UpsDevice struct {
 	ID       uuid.UUID `json:"id"`
 	ServerID uuid.UUID `json:"server_id"`
@@ -1249,6 +1272,14 @@ type UpsDevice struct {
 	UpdatedAt     time.Time          `json:"updated_at"`
 	// When the poller last listed who is logged in to the UPS, which it does only while the UPS is read on mains. NULL until the first listing; until then no node the UPS powers has a verdict
 	ClientsListedAt pgtype.Timestamptz `json:"clients_listed_at"`
+	// LIST CMD, with each command's GET CMDDESC text once read: [{"name", "description"}]
+	Commands json.RawMessage `json:"commands"`
+	// LIST RW, with each variable's GET TYPE, LIST ENUM and LIST RANGE once read: {name: {"type", "max_len", "enum", "ranges"}}. type is "" until read
+	RwVars json.RawMessage `json:"rw_vars"`
+	// When the poller last listed commands and rw_vars. NULL until the first listing, and until then nothing can be run
+	CommandsListedAt pgtype.Timestamptz `json:"commands_listed_at"`
+	// The driver, name and version, the lists were read under: a different one, seen after a restart too, reads them all again
+	CommandsDriver string `json:"commands_driver"`
 }
 
 type UpsEvent struct {

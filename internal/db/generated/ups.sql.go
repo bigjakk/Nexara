@@ -62,7 +62,7 @@ func (q *Queries) CloseUpsEventsOfDisabledServers(ctx context.Context) (int64, e
 }
 
 const getUpsDevice = `-- name: GetUpsDevice :one
-SELECT d.id, d.server_id, d.ups_name, d.description, d.manufacturer, d.model, d.serial, d.firmware, d.driver, d.status, d.state, d.reachability, d.vars, d.var_descriptions, d.present, d.last_reading_at, d.created_at, d.updated_at, d.clients_listed_at,
+SELECT d.id, d.server_id, d.ups_name, d.description, d.manufacturer, d.model, d.serial, d.firmware, d.driver, d.status, d.state, d.reachability, d.vars, d.var_descriptions, d.present, d.last_reading_at, d.created_at, d.updated_at, d.clients_listed_at, d.commands, d.rw_vars, d.commands_listed_at, d.commands_driver,
        s.name AS server_name,
        s.host AS server_host,
        s.port AS server_port,
@@ -94,6 +94,10 @@ type GetUpsDeviceRow struct {
 	CreatedAt           time.Time          `json:"created_at"`
 	UpdatedAt           time.Time          `json:"updated_at"`
 	ClientsListedAt     pgtype.Timestamptz `json:"clients_listed_at"`
+	Commands            json.RawMessage    `json:"commands"`
+	RwVars              json.RawMessage    `json:"rw_vars"`
+	CommandsListedAt    pgtype.Timestamptz `json:"commands_listed_at"`
+	CommandsDriver      string             `json:"commands_driver"`
 	ServerName          string             `json:"server_name"`
 	ServerHost          string             `json:"server_host"`
 	ServerPort          int32              `json:"server_port"`
@@ -127,6 +131,10 @@ func (q *Queries) GetUpsDevice(ctx context.Context, id uuid.UUID) (GetUpsDeviceR
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ClientsListedAt,
+		&i.Commands,
+		&i.RwVars,
+		&i.CommandsListedAt,
+		&i.CommandsDriver,
 		&i.ServerName,
 		&i.ServerHost,
 		&i.ServerPort,
@@ -398,7 +406,7 @@ func (q *Queries) ListOpenUpsEventsByServer(ctx context.Context, serverID uuid.U
 }
 
 const listUpsDevices = `-- name: ListUpsDevices :many
-SELECT d.id, d.server_id, d.ups_name, d.description, d.manufacturer, d.model, d.serial, d.firmware, d.driver, d.status, d.state, d.reachability, d.vars, d.var_descriptions, d.present, d.last_reading_at, d.created_at, d.updated_at, d.clients_listed_at,
+SELECT d.id, d.server_id, d.ups_name, d.description, d.manufacturer, d.model, d.serial, d.firmware, d.driver, d.status, d.state, d.reachability, d.vars, d.var_descriptions, d.present, d.last_reading_at, d.created_at, d.updated_at, d.clients_listed_at, d.commands, d.rw_vars, d.commands_listed_at, d.commands_driver,
        s.name AS server_name,
        s.host AS server_host,
        s.port AS server_port,
@@ -431,6 +439,10 @@ type ListUpsDevicesRow struct {
 	CreatedAt           time.Time          `json:"created_at"`
 	UpdatedAt           time.Time          `json:"updated_at"`
 	ClientsListedAt     pgtype.Timestamptz `json:"clients_listed_at"`
+	Commands            json.RawMessage    `json:"commands"`
+	RwVars              json.RawMessage    `json:"rw_vars"`
+	CommandsListedAt    pgtype.Timestamptz `json:"commands_listed_at"`
+	CommandsDriver      string             `json:"commands_driver"`
 	ServerName          string             `json:"server_name"`
 	ServerHost          string             `json:"server_host"`
 	ServerPort          int32              `json:"server_port"`
@@ -470,6 +482,10 @@ func (q *Queries) ListUpsDevices(ctx context.Context) ([]ListUpsDevicesRow, erro
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ClientsListedAt,
+			&i.Commands,
+			&i.RwVars,
+			&i.CommandsListedAt,
+			&i.CommandsDriver,
 			&i.ServerName,
 			&i.ServerHost,
 			&i.ServerPort,
@@ -488,7 +504,7 @@ func (q *Queries) ListUpsDevices(ctx context.Context) ([]ListUpsDevicesRow, erro
 }
 
 const listUpsDevicesByServer = `-- name: ListUpsDevicesByServer :many
-SELECT id, server_id, ups_name, description, manufacturer, model, serial, firmware, driver, status, state, reachability, vars, var_descriptions, present, last_reading_at, created_at, updated_at, clients_listed_at FROM ups_devices WHERE server_id = $1 AND present ORDER BY ups_name
+SELECT id, server_id, ups_name, description, manufacturer, model, serial, firmware, driver, status, state, reachability, vars, var_descriptions, present, last_reading_at, created_at, updated_at, clients_listed_at, commands, rw_vars, commands_listed_at, commands_driver FROM ups_devices WHERE server_id = $1 AND present ORDER BY ups_name
 `
 
 func (q *Queries) ListUpsDevicesByServer(ctx context.Context, serverID uuid.UUID) ([]UpsDevice, error) {
@@ -520,6 +536,10 @@ func (q *Queries) ListUpsDevicesByServer(ctx context.Context, serverID uuid.UUID
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ClientsListedAt,
+			&i.Commands,
+			&i.RwVars,
+			&i.CommandsListedAt,
+			&i.CommandsDriver,
 		); err != nil {
 			return nil, err
 		}
@@ -753,7 +773,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (server_id, ups_name) DO UPDATE
 SET description = EXCLUDED.description,
     present = TRUE
-RETURNING id, server_id, ups_name, description, manufacturer, model, serial, firmware, driver, status, state, reachability, vars, var_descriptions, present, last_reading_at, created_at, updated_at, clients_listed_at
+RETURNING id, server_id, ups_name, description, manufacturer, model, serial, firmware, driver, status, state, reachability, vars, var_descriptions, present, last_reading_at, created_at, updated_at, clients_listed_at, commands, rw_vars, commands_listed_at, commands_driver
 `
 
 type UpsertUpsDeviceParams struct {
@@ -789,6 +809,10 @@ func (q *Queries) UpsertUpsDevice(ctx context.Context, arg UpsertUpsDeviceParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ClientsListedAt,
+		&i.Commands,
+		&i.RwVars,
+		&i.CommandsListedAt,
+		&i.CommandsDriver,
 	)
 	return i, err
 }

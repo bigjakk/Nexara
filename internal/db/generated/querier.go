@@ -1391,6 +1391,7 @@ type Querier interface {
 	// bound (VMIDs cap at 999999999) keeps a pathological all-numeric id from
 	// overflowing the ::int cast.
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
+	InsertUpsCommand(ctx context.Context, arg InsertUpsCommandParams) (UpsCommand, error)
 	InsertUpsMetric(ctx context.Context, arg InsertUpsMetricParams) error
 	// An event with no duration, such as a self-test result.
 	InsertUpsPointEvent(ctx context.Context, arg InsertUpsPointEventParams) error
@@ -2364,6 +2365,8 @@ type Querier interface {
 	ListUnreadBackupJobs(ctx context.Context, arg ListUnreadBackupJobsParams) ([]ListUnreadBackupJobsRow, error)
 	// Every login of every present device.
 	ListUpsClients(ctx context.Context) ([]UpsClient, error)
+	// One UPS's newest runs, with who ran each.
+	ListUpsCommands(ctx context.Context, arg ListUpsCommandsParams) ([]ListUpsCommandsRow, error)
 	// Every present device with its server, for the Power page, the health pill
 	// and the alert engine.
 	ListUpsDevices(ctx context.Context) ([]ListUpsDevicesRow, error)
@@ -2588,6 +2591,9 @@ type Querier interface {
 	// on the PBS, and its window starts here. Only syncPBSServer calls it, after a
 	// listing whose every row was written.
 	MarkPBSJobBaseline(ctx context.Context, arg MarkPBSJobBaselineParams) error
+	// Runs nothing watches any more: asked for before this process started, while
+	// a previous one was watching them.
+	MarkUnfinishedUpsCommandsUnconfirmed(ctx context.Context, before time.Time) (int64, error)
 	// Every other address of the UPS missed this listing.
 	MarkUpsClientsMissed(ctx context.Context, arg MarkUpsClientsMissedParams) error
 	// Devices LIST UPS no longer names. Kept, not deleted, so their history stays.
@@ -2914,6 +2920,8 @@ type Querier interface {
 	// SSH goroutine) so the absolute upgrade timeout in advanceUpgrading
 	// measures from the first launch attempt, not the most recent.
 	SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error
+	// upsd took a command from the stored account, or refused the account.
+	SetNutServerCommandsVerified(ctx context.Context, arg SetNutServerCommandsVerifiedParams) error
 	// The node a NUT server runs on, as the poller found it. One already set, by
 	// the poller or by hand, is kept, and so is the server's address: a worker
 	// still connected to an address an edit replaced must not store that old host.
@@ -2930,6 +2938,10 @@ type Querier interface {
 	// A listing of the UPS's logins was taken on mains, so the nodes it powers can
 	// be judged from it.
 	SetUpsClientsListed(ctx context.Context, arg SetUpsClientsListedParams) error
+	// UPS command runs and variable sets, and the lists they are checked against (000134).
+	// The commands and writable variables the poller read for a UPS, and the
+	// driver it read them under.
+	SetUpsDeviceControls(ctx context.Context, arg SetUpsDeviceControlsParams) error
 	// The operator says a node shuts down some way Nexara cannot see (P11), or
 	// takes that back.
 	SetUpsFeedProtectedElsewhere(ctx context.Context, arg SetUpsFeedProtectedElsewhereParams) (UpsFeed, error)
@@ -3042,7 +3054,10 @@ type Querier interface {
 	UpdateNotificationDLQState(ctx context.Context, arg UpdateNotificationDLQStateParams) error
 	// A new address forgets the host node, which the poller then finds again:
 	// kept, it would credit the new host's own upsmon (a loopback login) to the
-	// node upsd ran on before. The CASEs read the row as it was.
+	// node upsd ran on before. A new address or account forgets that upsd took a
+	// command from the account: the proof is per upsd and per account (a
+	// re-entered password is encrypted afresh, so it is forgotten too). The CASEs
+	// read the row as it was.
 	UpdateNutServer(ctx context.Context, arg UpdateNutServerParams) (NutServer, error)
 	UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error)
 	UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserProfileParams) (User, error)
@@ -3106,6 +3121,10 @@ type Querier interface {
 	// last_seen_at as UpsertVM does, and records the change in
 	// guest_status_changes too, by trigger.
 	UpdateUnreportedVM(ctx context.Context, arg UpdateUnreportedVMParams) error
+	// A run's progress. Only an unfinished run moves, so neither a late answer nor
+	// the sweep below overwrites an outcome already recorded; an empty tracking id
+	// keeps the one recorded.
+	UpdateUpsCommand(ctx context.Context, arg UpdateUpsCommandParams) (int64, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
 	// A PARTIAL update: a field the caller does not supply (NULL) is left as it is

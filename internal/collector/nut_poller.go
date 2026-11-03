@@ -74,6 +74,7 @@ type NutQueries interface {
 	PruneUpsClients(ctx context.Context, arg db.PruneUpsClientsParams) error
 	InsertFoundUpsFeed(ctx context.Context, arg db.InsertFoundUpsFeedParams) (int64, error)
 	SetUpsClientsListed(ctx context.Context, arg db.SetUpsClientsListedParams) error
+	SetUpsDeviceControls(ctx context.Context, arg db.SetUpsDeviceControlsParams) error
 }
 
 // NutPollerConfig configures the NUT poller.
@@ -256,6 +257,10 @@ type upsDeviceState struct {
 	// nodes a found feed was already stored or refused for.
 	clients map[netip.Addr]int16
 	fed     map[upsfeed.Node]bool
+	// driver is the last reading's driver name and version; controls are its
+	// commands and writable variables (nut_controls.go).
+	driver   string
+	controls upsControls
 }
 
 // loadServerState seeds a worker from what the database already holds, so a
@@ -315,6 +320,8 @@ func newUpsDeviceState(r db.UpsDevice) *upsDeviceState {
 		open:      map[string]upsEpisodeDetails{},
 		described: map[string]bool{},
 		fed:       map[upsfeed.Node]bool{},
+		driver:    r.Driver,
+		controls:  loadControls(r),
 	}
 	var vars map[string]string
 	_ = json.Unmarshal(r.Vars, &vars)
@@ -417,6 +424,7 @@ func (p *NutPoller) pollOnce(ctx context.Context, st *nutServerState, now time.T
 	}
 	changed = p.listClients(ctx, st, now) || changed
 	p.describe(ctx, st)
+	changed = p.listControls(ctx, st, now) || changed
 	return changed, nil
 }
 
@@ -506,6 +514,7 @@ func (p *NutPoller) recordReading(ctx context.Context, d *upsDeviceState, vars m
 	status := nut.ParseStatus(vars["ups.status"])
 	r := decodeUpsReading(vars)
 	stored, _ := json.Marshal(capVars(vars))
+	driver := clipText(strings.TrimSpace(vars["driver.name"]+" "+vars["driver.version"]), 128)
 	if err := p.q.RecordUpsReading(ctx, db.RecordUpsReadingParams{
 		ID:           d.id,
 		Status:       clipText(vars["ups.status"], maxStoredValue),
@@ -515,7 +524,7 @@ func (p *NutPoller) recordReading(ctx context.Context, d *upsDeviceState, vars m
 		Model:        clipText(firstVar(vars, "device.model", "ups.model"), 128),
 		Serial:       clipText(firstVar(vars, "device.serial", "ups.serial"), 128),
 		Firmware:     clipText(firstVar(vars, "ups.firmware", "device.firmware"), 128),
-		Driver:       clipText(strings.TrimSpace(vars["driver.name"]+" "+vars["driver.version"]), 128),
+		Driver:       driver,
 		ReadAt:       pgtype.Timestamptz{Time: now, Valid: true},
 	}); err != nil {
 		p.logger.Warn("nut: storing reading failed", "ups", d.name, "error", err)
@@ -538,7 +547,7 @@ func (p *NutPoller) recordReading(ctx context.Context, d *upsDeviceState, vars m
 	gap := !d.lastFresh.IsZero() && now.Sub(d.lastFresh) > 3*p.cfg.Interval
 	p.apply(ctx, d, upsTransitions(d.open, next, gap), now)
 	changed := d.prev.Reach != next.Reach || d.prev.State != next.State || !sameFlags(d.prev.Flags, next.Flags)
-	d.prev, d.lastFresh = next, now
+	d.prev, d.lastFresh, d.driver = next, now, driver
 	d.varNames = sortedVarNames(vars)
 	return changed
 }

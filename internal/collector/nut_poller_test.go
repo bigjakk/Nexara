@@ -363,6 +363,15 @@ func (f *fakeNutQueries) MergeUpsVarDescriptions(_ context.Context, a db.MergeUp
 	return nil
 }
 
+func (f *fakeNutQueries) SetUpsDeviceControls(_ context.Context, a db.SetUpsDeviceControlsParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, d := f.byID(a.ID)
+	d.Commands, d.RwVars, d.CommandsListedAt, d.CommandsDriver = a.Commands, a.RwVars, a.ListedAt, a.Driver
+	f.devices[n] = d
+	return nil
+}
+
 func (f *fakeNutQueries) InsertUpsMetric(context.Context, db.InsertUpsMetricParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
