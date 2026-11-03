@@ -165,6 +165,26 @@ func TestClient_SendsOnlyReads(t *testing.T) {
 	}
 }
 
+// upsd's tokenizer makes an unquoted = a word of its own, wherever it falls
+// (a password "ab=cd" arrived as three words): one holding = must still reach
+// upsd as one unchanged word.
+func TestClient_SendsCredentialsAsUpsdReadsThem(t *testing.T) {
+	t.Parallel()
+	for _, password := range []string{"ab=cd", "=ab"} {
+		s, cfg := newFake(t)
+		cfg.Username, cfg.Password = "nexara", password
+		c, err := Dial(context.Background(), cfg)
+		if err != nil {
+			t.Errorf("%q: Dial: %v", password, err)
+			continue
+		}
+		_ = c.Close()
+		if got := s.Passwords(); !slices.Equal(got, []string{password}) {
+			t.Errorf("%q: upsd would read %q", password, got)
+		}
+	}
+}
+
 func TestSplitLine(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

@@ -60,6 +60,10 @@ func TestFake_MatchesRealUpsd(t *testing.T) {
 		{"FOOBAR", []string{"ERR UNKNOWN-COMMAND"}},
 		{"STARTTLS", []string{"ERR FEATURE-NOT-CONFIGURED"}},
 		{"USERNAME nexara", []string{"OK"}},
+		// An unquoted = is a word of its own, so this PASSWORD has three
+		// arguments; nothing is set, and the next PASSWORD is accepted.
+		{"PASSWORD ab=cd", []string{"ERR INVALID-ARGUMENT"}},
+		{"PASSWORD", []string{"ERR INVALID-ARGUMENT"}},
 		{`PASSWORD "pa ss\"\\wo\#rd"`, []string{"OK"}},
 		{"LOGOUT", []string{"OK Goodbye"}},
 	} {

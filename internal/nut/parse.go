@@ -103,8 +103,10 @@ func splitLine(line string) ([]string, error) {
 // split it or read part of it as syntax. upsd's parser (parseconf.c) takes an
 // unescaped # as the start of a comment, and as a parse error inside quotes,
 // so it is escaped along with \ and ", the set upsclient's pconf_encode uses.
+// An unquoted = is a word of its own there (a password "ab=cd" arrived as
+// three words), so it forces quotes too; inside them it is literal.
 func quoteArg(a string) string {
-	if a != "" && !strings.ContainsAny(a, " \t\"\\#") {
+	if a != "" && !strings.ContainsAny(a, " \t\"\\#=") {
 		return a
 	}
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `#`, `\#`)

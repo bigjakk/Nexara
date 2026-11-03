@@ -20,6 +20,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -50,6 +51,8 @@ type Server struct {
 	down     bool
 	conns    map[net.Conn]struct{}
 	received []string
+	// passwords is each PASSWORD argument as upsd's tokenizer reads it.
+	passwords []string
 }
 
 // NewServer starts a fake upsd that stops when the test ends.
@@ -134,6 +137,13 @@ func (s *Server) Received() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.received...)
+}
+
+// Passwords is every PASSWORD argument received, as upsd would parse it.
+func (s *Server) Passwords() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.passwords)
 }
 
 // EnableTLS makes STARTTLS succeed with a fresh self-signed certificate for
@@ -229,7 +239,10 @@ func (s *Server) answer(line string) (reply string, startTLS, quit bool) {
 	if code, ok := s.failures[line]; ok {
 		return "ERR " + code + "\n", false, false
 	}
-	f := fields(line)
+	f, ok := fields(line)
+	if !ok {
+		return "", false, false // upsd logs a parse error and answers nothing
+	}
 	if len(f) == 0 {
 		return "ERR UNKNOWN-COMMAND\n", false, false
 	}
@@ -259,6 +272,12 @@ func (s *Server) answer(line string) (reply string, startTLS, quit bool) {
 		}
 		return "OK STARTTLS\n", true, false
 	case "USERNAME", "PASSWORD":
+		if len(f) != 2 {
+			return "ERR INVALID-ARGUMENT\n", false, false
+		}
+		if f[0] == "PASSWORD" {
+			s.passwords = append(s.passwords, f[1])
+		}
 		return "OK\n", false, false
 	case "LOGOUT":
 		return "OK Goodbye\n", false, true
@@ -308,40 +327,97 @@ func quote(v string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
 }
 
-// fields splits a command line the way upsd does: spaces separate words, and
-// a double-quoted word may hold spaces and the escapes \" and \\.
-func fields(line string) []string {
-	var (
-		out     []string
-		cur     strings.Builder
-		inWord  bool
-		quoted  bool
-		escaped bool
+// fields splits a request line the way upsd's tokenizer does
+// (common/parseconf.c): whitespace separates words, a word starting with "
+// runs to the next unescaped ", a \ takes the next byte literally, an
+// unquoted = is a word of its own, an unquoted # starts a comment, and only
+// bytes 0x20-0x7F are kept. ok is false where upsd answers nothing: an
+// unescaped # inside quotes is a parse error, and a quote or a \ left open
+// at the end of the line runs on into the next one, which the fake does not
+// model. The client sends neither: quoteArg closes every quote it opens.
+func fields(line string) (words []string, ok bool) {
+	const (
+		findStart = iota
+		bare
+		bareLiteral
+		quoted
+		quotedLiteral
 	)
-	for i := 0; i < len(line); i++ {
-		ch := line[i]
-		switch {
-		case escaped:
+	var cur strings.Builder
+	state := findStart
+	end := func() {
+		words = append(words, cur.String())
+		cur.Reset()
+	}
+	add := func(ch byte) {
+		if ch >= 0x20 && ch <= 0x7f {
 			cur.WriteByte(ch)
-			escaped = false
-		case quoted && ch == '\\':
-			escaped = true
-		case ch == '"':
-			quoted = !quoted
-			inWord = true
-		case !quoted && ch == ' ':
-			if inWord {
-				out = append(out, cur.String())
-				cur.Reset()
-				inWord = false
-			}
-		default:
-			cur.WriteByte(ch)
-			inWord = true
 		}
 	}
-	if inWord {
-		out = append(out, cur.String())
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		switch state {
+		case findStart:
+			switch {
+			case ch == '#':
+				return words, true
+			case isSpace(ch):
+			case ch == '\\':
+				state = bareLiteral
+			case ch == '"':
+				state = quoted
+			case ch == '=':
+				words = append(words, "=")
+			default:
+				add(ch)
+				state = bare
+			}
+		case bare:
+			switch {
+			case ch == '#':
+				end()
+				return words, true
+			case isSpace(ch):
+				end()
+				state = findStart
+			case ch == '=':
+				end()
+				words = append(words, "=")
+				state = findStart
+			case ch == '\\':
+				state = bareLiteral
+			default:
+				add(ch)
+			}
+		case bareLiteral:
+			add(ch)
+			state = bare
+		case quoted:
+			switch ch {
+			case '#':
+				return nil, false
+			case '"':
+				end()
+				state = findStart
+			case '\\':
+				state = quotedLiteral
+			default:
+				add(ch)
+			}
+		case quotedLiteral:
+			add(ch)
+			state = quoted
+		}
 	}
-	return out
+	switch state {
+	case bare:
+		end()
+	case bareLiteral, quoted, quotedLiteral:
+		return nil, false
+	}
+	return words, true
+}
+
+func isSpace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\v' || ch == '\f' || ch == '\r'
 }
