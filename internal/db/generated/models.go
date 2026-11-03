@@ -839,9 +839,11 @@ type NutServer struct {
 	// Last fully successful poll. A failing poll leaves it alone, so the UI never shows a stale server as just polled
 	LastPollAt pgtype.Timestamptz `json:"last_poll_at"`
 	// Why the last poll failed, empty when it succeeded
-	LastPollError string    `json:"last_poll_error"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	LastPollError string      `json:"last_poll_error"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
+	HostClusterID pgtype.UUID `json:"host_cluster_id"`
+	HostNodeName  pgtype.Text `json:"host_node_name"`
 }
 
 type OidcConfig struct {
@@ -1208,6 +1210,18 @@ type TotpRecoveryCode struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type UpsClient struct {
+	UpsID uuid.UUID `json:"ups_id"`
+	// A logged-in connection's address as upsd reports it, with an IPv6-mapped IPv4 address unmapped. upsmon only appears here once its LOGIN succeeds
+	Address string `json:"address"`
+	// How many lines the address had in the latest listing, 0 when it was missing: upsd lists each connection, so two upsmons behind one NAT, or a primary and a secondary on one host, are two
+	Connections int16 `json:"connections"`
+	// Listings in a row the address has been missing from. A node turns unprotected only at 2: a vanished host stays listed up to 60 s, and a restarting upsmon is briefly absent
+	Missed      int16     `json:"missed"`
+	FirstSeenAt time.Time `json:"first_seen_at"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+}
+
 type UpsDevice struct {
 	ID       uuid.UUID `json:"id"`
 	ServerID uuid.UUID `json:"server_id"`
@@ -1246,6 +1260,22 @@ type UpsEvent struct {
 	EndObserved bool            `json:"end_observed"`
 	Details     json.RawMessage `json:"details"`
 	CreatedAt   time.Time       `json:"created_at"`
+}
+
+// What a UPS powers. Keyed on the node's name, like node_status_changes, so a node row that is re-created keeps its feeds
+type UpsFeed struct {
+	ID        uuid.UUID   `json:"id"`
+	UpsID     uuid.UUID   `json:"ups_id"`
+	ClusterID pgtype.UUID `json:"cluster_id"`
+	NodeName  pgtype.Text `json:"node_name"`
+	Label     string      `json:"label"`
+	// found: a upsmon login came from the node's address. Never removed automatically, so a node that stops logging in reads not protected rather than not fed. manual: added by hand
+	Source string `json:"source"`
+	// A node feed the operator removed. Kept so a login from the node does not find it again; adding the node by hand revives it. Label feeds are deleted instead
+	Dismissed bool      `json:"dismissed"`
+	CreatedAt time.Time `json:"created_at"`
+	// Who added a manual feed; NULL for a found one
+	CreatedBy pgtype.UUID `json:"created_by"`
 }
 
 type UpsMetric struct {

@@ -770,6 +770,7 @@ type Querier interface {
 	DeleteStaleVeeamRepositories(ctx context.Context, arg DeleteStaleVeeamRepositoriesParams) error
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
+	DeleteUpsLabelFeed(ctx context.Context, arg DeleteUpsLabelFeedParams) (UpsFeed, error)
 	DeleteUpsMetricsForServer(ctx context.Context, serverID uuid.UUID) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	DeleteVMFolder(ctx context.Context, id uuid.UUID) error
@@ -824,6 +825,8 @@ type Querier interface {
 	// last_error.
 	DisableScheduledTaskForBadSchedule(ctx context.Context, arg DisableScheduledTaskForBadScheduleParams) error
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
+	// Removing a node feed keeps the row, so the node's login does not find it again.
+	DismissUpsNodeFeed(ctx context.Context, arg DismissUpsNodeFeedParams) (UpsFeed, error)
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) (int64, error)
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) (int64, error)
 	// FailStaleCVEScans abandons scans stuck in running/pending — a panic, hard
@@ -1354,8 +1357,14 @@ type Querier interface {
 	// fully-formed (and a still-running one as status='running'). Attributed to the
 	// system user; ON CONFLICT keeps it idempotent across sync ticks.
 	InsertExternalTaskHistory(ctx context.Context, arg InsertExternalTaskHistoryParams) error
+	// A node a login came from. A feed that already exists is left as it is: one
+	// added by hand, and one the operator removed, which stays removed.
+	InsertFoundUpsFeed(ctx context.Context, arg InsertFoundUpsFeedParams) (int64, error)
 	// Maintenance Windows
 	InsertMaintenanceWindow(ctx context.Context, arg InsertMaintenanceWindowParams) (MaintenanceWindow, error)
+	// A node or a label added by hand. A removed node comes back; one already fed
+	// returns no row, and a label already there is a unique violation.
+	InsertManualUpsFeed(ctx context.Context, arg InsertManualUpsFeedParams) (UpsFeed, error)
 	// One RRD step. A step already stored is left as it is: the pass rereads the
 	// last hour each time, and a completed RRD step does not change.
 	InsertNodePressure(ctx context.Context, arg InsertNodePressureParams) error
@@ -2091,6 +2100,10 @@ type Querier interface {
 	// so the clusters list can attach a generic issues[] without per-cluster calls.
 	// Offline nodes and HA-fenced nodes.
 	ListNodeHealthProblems(ctx context.Context) ([]ListNodeHealthProblemsRow, error)
+	// Every address a node can log in to upsd from, to match LIST CLIENT against:
+	// its cluster (corosync) address, which may be IPv6, and its interfaces' IPv4
+	// addresses.
+	ListNodeLoginAddresses(ctx context.Context) ([]ListNodeLoginAddressesRow, error)
 	// The nodes of a cluster with a good memory read, for the capacity forecast,
 	// with the memory the node's kernel reports: a firmware table that lists less
 	// (a virtual node's hot-plugged memory) is incomplete.
@@ -2341,6 +2354,8 @@ type Querier interface {
 	// keep failing; then newest first, so a job that just ended is read in the
 	// pass after it ends.
 	ListUnreadBackupJobs(ctx context.Context, arg ListUnreadBackupJobsParams) ([]ListUnreadBackupJobsRow, error)
+	// Every login of every present device.
+	ListUpsClients(ctx context.Context) ([]UpsClient, error)
 	// Every present device with its server, for the Power page, the health pill
 	// and the alert engine.
 	ListUpsDevices(ctx context.Context) ([]ListUpsDevicesRow, error)
@@ -2350,6 +2365,9 @@ type Querier interface {
 	// package handlers that name means an audit row's, and
 	// TestGuard_AuditReadPathsRedact keys on it.
 	ListUpsEvents(ctx context.Context, arg ListUpsEventsParams) ([]ListUpsEventsRow, error)
+	// Every feed of every present device, removed ones aside: nodes first, then
+	// other loads.
+	ListUpsFeeds(ctx context.Context) ([]UpsFeed, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
@@ -2558,6 +2576,8 @@ type Querier interface {
 	// on the PBS, and its window starts here. Only syncPBSServer calls it, after a
 	// listing whose every row was written.
 	MarkPBSJobBaseline(ctx context.Context, arg MarkPBSJobBaselineParams) error
+	// Every other address of the UPS missed this listing.
+	MarkUpsClientsMissed(ctx context.Context, arg MarkUpsClientsMissedParams) error
 	// Devices LIST UPS no longer names. Kept, not deleted, so their history stays.
 	// A nil Go slice reaches SQL as NULL, which ANY would match against nothing;
 	// COALESCE makes it the empty list it means, so every device is marked absent.
@@ -2587,6 +2607,9 @@ type Querier interface {
 	// At most one open episode per (UPS, kind); a second open is a no-op.
 	OpenUpsEvent(ctx context.Context, arg OpenUpsEventParams) error
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	// Logins not seen since before, so a host that changed address does not stay
+	// listed forever.
+	PruneUpsClients(ctx context.Context, arg PruneUpsClientsParams) error
 	// Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still
 	// holds must not disappear from Nexara because it is old, or every RPO and
 	// coverage figure derived from it silently becomes wrong. This deletes only
@@ -2877,6 +2900,9 @@ type Querier interface {
 	// SSH goroutine) so the absolute upgrade timeout in advanceUpgrading
 	// measures from the first launch attempt, not the most recent.
 	SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error
+	// The node a NUT server runs on, as the poller found it. One already set, by
+	// the poller or by hand, is kept.
+	SetNutServerHostNode(ctx context.Context, arg SetNutServerHostNodeParams) error
 	// Deliberately leaves last_poll_at alone: a server that has failed for an
 	// hour must not read "polled 5 seconds ago" beside its error.
 	SetNutServerPollError(ctx context.Context, arg SetNutServerPollErrorParams) error
@@ -3182,6 +3208,12 @@ type Querier interface {
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error)
 	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (UpsertStoragePoolRow, error)
 	UpsertTaskSyncState(ctx context.Context, arg UpsertTaskSyncStateParams) error
+	// What each UPS powers, and the upsmon logins that say whether it is
+	// protected (000132).
+	// One LIST CLIENT reply, one address per connection as upsd lists them: the
+	// repeats are counted here. seen_at is the poller's clock, like the other
+	// times it writes, so PruneUpsClients compares like with like.
+	UpsertUpsClients(ctx context.Context, arg UpsertUpsClientsParams) error
 	// UPS devices, their readings and their power events (000131).
 	// Keyed on (server_id, ups_name), NUT's own identity, so a device keeps its id
 	// and history across polls, restarts and a ups.conf edit that drops and then

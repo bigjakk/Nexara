@@ -19,7 +19,7 @@ INSERT INTO nut_servers (
     nut_version, protocol_version
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at
+RETURNING id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at, host_cluster_id, host_node_name
 `
 
 type CreateNutServerParams struct {
@@ -69,6 +69,8 @@ func (q *Queries) CreateNutServer(ctx context.Context, arg CreateNutServerParams
 		&i.LastPollError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HostClusterID,
+		&i.HostNodeName,
 	)
 	return i, err
 }
@@ -96,7 +98,7 @@ func (q *Queries) DeleteUpsMetricsForServer(ctx context.Context, serverID uuid.U
 }
 
 const getNutServer = `-- name: GetNutServer :one
-SELECT id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at FROM nut_servers WHERE id = $1
+SELECT id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at, host_cluster_id, host_node_name FROM nut_servers WHERE id = $1
 `
 
 func (q *Queries) GetNutServer(ctx context.Context, id uuid.UUID) (NutServer, error) {
@@ -119,12 +121,14 @@ func (q *Queries) GetNutServer(ctx context.Context, id uuid.UUID) (NutServer, er
 		&i.LastPollError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HostClusterID,
+		&i.HostNodeName,
 	)
 	return i, err
 }
 
 const listEnabledNutServers = `-- name: ListEnabledNutServers :many
-SELECT id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at FROM nut_servers WHERE enabled ORDER BY name
+SELECT id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at, host_cluster_id, host_node_name FROM nut_servers WHERE enabled ORDER BY name
 `
 
 func (q *Queries) ListEnabledNutServers(ctx context.Context) ([]NutServer, error) {
@@ -153,6 +157,8 @@ func (q *Queries) ListEnabledNutServers(ctx context.Context) ([]NutServer, error
 			&i.LastPollError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.HostClusterID,
+			&i.HostNodeName,
 		); err != nil {
 			return nil, err
 		}
@@ -165,7 +171,7 @@ func (q *Queries) ListEnabledNutServers(ctx context.Context) ([]NutServer, error
 }
 
 const listNutServers = `-- name: ListNutServers :many
-SELECT id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at FROM nut_servers ORDER BY name
+SELECT id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at, host_cluster_id, host_node_name FROM nut_servers ORDER BY name
 `
 
 func (q *Queries) ListNutServers(ctx context.Context) ([]NutServer, error) {
@@ -194,6 +200,8 @@ func (q *Queries) ListNutServers(ctx context.Context) ([]NutServer, error) {
 			&i.LastPollError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.HostClusterID,
+			&i.HostNodeName,
 		); err != nil {
 			return nil, err
 		}
@@ -255,7 +263,7 @@ SET name = $2,
     nut_version = $11,
     protocol_version = $12
 WHERE id = $1
-RETURNING id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at
+RETURNING id, name, host, port, username, password_encrypted, tls_mode, verify_tls, tls_fingerprint, enabled, nut_version, protocol_version, last_poll_at, last_poll_error, created_at, updated_at, host_cluster_id, host_node_name
 `
 
 type UpdateNutServerParams struct {
@@ -306,6 +314,8 @@ func (q *Queries) UpdateNutServer(ctx context.Context, arg UpdateNutServerParams
 		&i.LastPollError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HostClusterID,
+		&i.HostNodeName,
 	)
 	return i, err
 }
