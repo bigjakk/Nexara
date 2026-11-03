@@ -100,6 +100,8 @@ var auditClusterExempt = map[string]string{
 	// A NUT server's UPS devices can power the nodes of several clusters, and
 	// every NUT route is gated on GLOBAL view/manage/delete:ups.
 	"nut_servers.go.audit": "nut_servers spans clusters and has no cluster_id column; gated on global manage/delete:ups",
+	"ups_commands.go.dispatch": "a UPS can power the nodes of several clusters and ups_devices has no cluster_id column; " +
+		"its commands and variables are gated on global execute/manage:ups",
 
 	"firewall_templates.go.CreateTemplate": "firewall_templates has no cluster_id column",
 	"firewall_templates.go.UpdateTemplate": "firewall_templates has no cluster_id column",

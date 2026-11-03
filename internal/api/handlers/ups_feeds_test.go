@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -18,12 +19,15 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// upsFeedCaller holds global manage:ups and view:node on one cluster only, the
-// caller the feed routes must tell from one who may see every cluster.
-type upsFeedCaller struct{ clusterGrantEngine }
+// upsCaller holds the global grants it names and one grant on one cluster
+// only, the caller the UPS routes must tell from one who holds it everywhere.
+type upsCaller struct {
+	clusterGrantEngine
+	global []string
+}
 
-func (upsFeedCaller) HasGlobalPermission(_ context.Context, _ uuid.UUID, action, resource string) (bool, error) {
-	return action == "manage" && resource == "ups", nil
+func (u upsCaller) HasGlobalPermission(_ context.Context, _ uuid.UUID, action, resource string) (bool, error) {
+	return slices.Contains(u.global, action+":"+resource), nil
 }
 
 // What each feed route does with what it is asked, past the node-membership
@@ -97,7 +101,7 @@ func TestUpsFeedRoutes(t *testing.T) {
 		r := routes[tc.route]
 		h := NewNutHandler(db.New(&auditRowsDBTX{rowFor: tc.rows}), testEncryptionKey, nil)
 		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
-		var engine permissionEngine = upsFeedCaller{clusterGrantEngine{"view", "node", seen}}
+		var engine permissionEngine = upsCaller{clusterGrantEngine{"view", "node", seen}, []string{"manage:ups"}}
 		if tc.everywhere {
 			engine = newGrantEngine("manage:ups", "view:node")
 		}

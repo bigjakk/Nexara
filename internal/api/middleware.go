@@ -976,6 +976,24 @@ func (s *Server) nutConnectLimiter() fiber.Handler {
 	})
 }
 
+// upsCommandLimiter caps the UPS command and variable routes at 30 a minute
+// per user. Not nutConnectLimiter: that bucket is per address and spent before
+// the permission check, so anyone signed in, or every client behind a proxy
+// while TRUSTED_PROXIES is unset, could drain it and refuse an operator the
+// command that cancels a shutdown. Each run dials upsd once.
+func (s *Server) upsCommandLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:        30,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
+				return "user:" + uid.String() + ":ups-command"
+			}
+			return c.IP() + ":ups-command"
+		},
+	})
+}
+
 // veeamControlLimiter caps the Veeam job-control endpoints at 30/min/IP.
 //
 // A SEPARATE instance from veeamConnectLimiter, not a shared one, and that is

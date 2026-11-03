@@ -404,6 +404,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 		s.pbsHandler = handlers.NewPBSHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.veeamHandler = handlers.NewVeeamHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.nutHandler = handlers.NewNutHandler(d.queries, d.encryptionKey, d.eventPub)
+		s.nutHandler.SetShutdownContext(d.shutdownCtx)
 		s.vmHandler = handlers.NewVMHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.containerHandler = handlers.NewContainerHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.nodeHandler = handlers.NewNodeHandler(d.queries, d.encryptionKey, d.eventPub)

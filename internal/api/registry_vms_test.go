@@ -591,7 +591,7 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	declared["registerVeeamEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
-	registerUPSEndpoints(reg, s.nutHandler, nil)
+	registerUPSEndpoints(reg, s.nutHandler, nil, nil)
 	declared["registerUPSEndpoints"] = reg.Len() - before
 
 	before = reg.Len()

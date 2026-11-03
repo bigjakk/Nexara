@@ -125,18 +125,59 @@ func (q *Queries) ListUpsCommands(ctx context.Context, arg ListUpsCommandsParams
 	return items, nil
 }
 
+const listUpsFedClusters = `-- name: ListUpsFedClusters :many
+SELECT f.cluster_id::uuid AS cluster_id
+FROM ups_feeds f
+WHERE f.ups_id = $1 AND f.cluster_id IS NOT NULL
+UNION
+SELECT s.host_cluster_id::uuid
+FROM ups_devices d
+JOIN nut_servers s ON s.id = d.server_id
+WHERE d.id = $1 AND s.host_cluster_id IS NOT NULL
+ORDER BY 1
+`
+
+// The clusters of every node a UPS powers or has powered, a removed feed
+// included (removing one must not lift the check), and of the node its NUT
+// server runs on: cutting its power needs manage:node on each.
+func (q *Queries) ListUpsFedClusters(ctx context.Context, upsID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listUpsFedClusters, upsID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var cluster_id uuid.UUID
+		if err := rows.Scan(&cluster_id); err != nil {
+			return nil, err
+		}
+		items = append(items, cluster_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markUnfinishedUpsCommandsUnconfirmed = `-- name: MarkUnfinishedUpsCommandsUnconfirmed :execrows
 UPDATE ups_commands
 SET status = 'unconfirmed',
-    result = 'Nexara stopped before the driver answered',
+    result = 'Nexara stopped watching before the driver answered',
     finished_at = now()
-WHERE status IN ('sent', 'pending') AND requested_at < $1
+WHERE ups_id = $1 AND status IN ('sent', 'pending') AND requested_at < $2
 `
 
-// Runs nothing watches any more: asked for before this process started, while
-// a previous one was watching them.
-func (q *Queries) MarkUnfinishedUpsCommandsUnconfirmed(ctx context.Context, before time.Time) (int64, error) {
-	result, err := q.db.Exec(ctx, markUnfinishedUpsCommandsUnconfirmed, before)
+type MarkUnfinishedUpsCommandsUnconfirmedParams struct {
+	UpsID  uuid.UUID `json:"ups_id"`
+	Before time.Time `json:"before"`
+}
+
+// A UPS's runs nothing watches any more: unfinished well past the longest a
+// run is watched, so the process that watched it stopped, or could not record
+// the outcome. By age, not by process: every Nexara instance serves the API.
+func (q *Queries) MarkUnfinishedUpsCommandsUnconfirmed(ctx context.Context, arg MarkUnfinishedUpsCommandsUnconfirmedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markUnfinishedUpsCommandsUnconfirmed, arg.UpsID, arg.Before)
 	if err != nil {
 		return 0, err
 	}

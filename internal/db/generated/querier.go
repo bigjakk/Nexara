@@ -2376,6 +2376,10 @@ type Querier interface {
 	// package handlers that name means an audit row's, and
 	// TestGuard_AuditReadPathsRedact keys on it.
 	ListUpsEvents(ctx context.Context, arg ListUpsEventsParams) ([]ListUpsEventsRow, error)
+	// The clusters of every node a UPS powers or has powered, a removed feed
+	// included (removing one must not lift the check), and of the node its NUT
+	// server runs on: cutting its power needs manage:node on each.
+	ListUpsFedClusters(ctx context.Context, upsID uuid.UUID) ([]uuid.UUID, error)
 	// Every feed of every present device, removed ones aside: nodes first, then
 	// other loads. A node feed carries the node's row, when it has one, for its
 	// status and a link, and its cluster's name. node_status_current is false
@@ -2591,9 +2595,10 @@ type Querier interface {
 	// on the PBS, and its window starts here. Only syncPBSServer calls it, after a
 	// listing whose every row was written.
 	MarkPBSJobBaseline(ctx context.Context, arg MarkPBSJobBaselineParams) error
-	// Runs nothing watches any more: asked for before this process started, while
-	// a previous one was watching them.
-	MarkUnfinishedUpsCommandsUnconfirmed(ctx context.Context, before time.Time) (int64, error)
+	// A UPS's runs nothing watches any more: unfinished well past the longest a
+	// run is watched, so the process that watched it stopped, or could not record
+	// the outcome. By age, not by process: every Nexara instance serves the API.
+	MarkUnfinishedUpsCommandsUnconfirmed(ctx context.Context, arg MarkUnfinishedUpsCommandsUnconfirmedParams) (int64, error)
 	// Every other address of the UPS missed this listing.
 	MarkUpsClientsMissed(ctx context.Context, arg MarkUpsClientsMissedParams) error
 	// Devices LIST UPS no longer names. Kept, not deleted, so their history stays.

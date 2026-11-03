@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -122,10 +124,46 @@ type auditRowsDBTX struct {
 	// clusterLookups counts the lookups.
 	missingCluster bool
 	clusterLookups int
+	// execOK names the exec queries that succeed, affecting one row; each is
+	// recorded in execs, which mu guards since a handler's goroutine can
+	// write while the test reads. Any other exec fails with errCaptured.
+	execOK map[string]bool
+	mu     sync.Mutex
+	execs  []capturedQuery
+	// rowCalls records every QueryRow, so a test can show a write never ran.
+	rowCalls []capturedQuery
 }
 
-func (*auditRowsDBTX) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (d *auditRowsDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	for name := range d.execOK {
+		if strings.Contains(sql, "-- name: "+name+" ") {
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			d.execs = append(d.execs, capturedQuery{sql: sql, args: args})
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		}
+	}
 	return pgconn.CommandTag{}, errCaptured
+}
+
+// queriedRow reports whether a QueryRow was sent the named query.
+func (d *auditRowsDBTX) queriedRow(name string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.ContainsFunc(d.rowCalls, func(q capturedQuery) bool { return strings.Contains(q.sql, "-- name: "+name+" ") })
+}
+
+// execsOf returns the arguments of every recorded call of one exec query.
+func (d *auditRowsDBTX) execsOf(name string) [][]any {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out [][]any
+	for _, q := range d.execs {
+		if strings.Contains(q.sql, "-- name: "+name+" ") {
+			out = append(out, q.args)
+		}
+	}
+	return out
 }
 
 func (d *auditRowsDBTX) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -138,7 +176,10 @@ func (d *auditRowsDBTX) Query(_ context.Context, sql string, args ...any) (pgx.R
 	return &structRows{rows: d.rows}, nil
 }
 
-func (d *auditRowsDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+func (d *auditRowsDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	d.mu.Lock()
+	d.rowCalls = append(d.rowCalls, capturedQuery{sql: sql, args: args})
+	d.mu.Unlock()
 	if strings.Contains(sql, "-- name: GetCluster :one") {
 		d.clusterLookups++
 		if d.missingCluster {

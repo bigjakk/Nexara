@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -15,6 +17,7 @@ import (
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/nut"
+	"github.com/bigjakk/nexara/internal/upscontrol"
 	"github.com/bigjakk/nexara/internal/upsfeed"
 )
 
@@ -68,6 +71,36 @@ type upsDeviceResponse struct {
 	Issues          []healthIssueResponse `json:"issues"`
 	Vars            map[string]string     `json:"vars,omitempty"`
 	VarDescriptions map[string]string     `json:"var_descriptions,omitempty"`
+	// The commands and settings the poller listed, on the detail only; nil
+	// until the first listing.
+	Commands         []upsCommandResponse  `json:"commands,omitempty"`
+	Writable         []upsVariableResponse `json:"writable,omitempty"`
+	CommandsListedAt *time.Time            `json:"commands_listed_at,omitempty"`
+}
+
+// upsCommandResponse is one instant command, with what running it asks for.
+type upsCommandResponse struct {
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Tier        upscontrol.Tier    `json:"tier"`
+	Confirm     upscontrol.Confirm `json:"confirm"`
+}
+
+// upsVariableResponse is one writable variable: its value, its type, whether
+// Nexara offers it for editing and why not, and what setting it asks for.
+type upsVariableResponse struct {
+	Name     string   `json:"name"`
+	Value    string   `json:"value"`
+	Type     string   `json:"type"`
+	MaxLen   int      `json:"max_len,omitempty"`
+	Enum     []string `json:"enum,omitempty"`
+	Ranges   [][2]int `json:"ranges,omitempty"`
+	Editable bool     `json:"editable"`
+	Reason   string   `json:"reason,omitempty"`
+	// AffectsPower: setting it is gated as cutting power is (execute:ups, and
+	// manage:node on every cluster the UPS powers).
+	AffectsPower bool               `json:"affects_power"`
+	Confirm      upscontrol.Confirm `json:"confirm"`
 }
 
 // ListDevices handles GET /api/v1/ups-devices.
@@ -197,8 +230,34 @@ func (h *NutHandler) buildUpsDevice(r db.ListUpsDevicesRow, open map[string]time
 	if detail {
 		d.Vars = vars
 		_ = json.Unmarshal(r.VarDescriptions, &d.VarDescriptions)
+		if r.CommandsListedAt.Valid {
+			d.CommandsListedAt = &r.CommandsListedAt.Time
+			d.Commands, d.Writable = upsControlsResponse(r, vars)
+		}
 	}
 	return d
+}
+
+func upsControlsResponse(r db.ListUpsDevicesRow, vars map[string]string) ([]upsCommandResponse, []upsVariableResponse) {
+	var cmds []upscontrol.Command
+	_ = json.Unmarshal(r.Commands, &cmds)
+	commands := make([]upsCommandResponse, 0, len(cmds))
+	for _, c := range cmds {
+		commands = append(commands, upsCommandResponse{
+			Name: c.Name, Description: c.Description, Tier: upscontrol.CommandTier(c.Name), Confirm: upscontrol.CommandConfirm(c.Name),
+		})
+	}
+	rw := writableVars(r)
+	writable := make([]upsVariableResponse, 0, len(rw))
+	for _, name := range slices.Sorted(maps.Keys(rw)) {
+		v := rw[name]
+		editable, reason := v.Editable()
+		writable = append(writable, upsVariableResponse{
+			Name: name, Value: vars[name], Type: v.Type, MaxLen: v.MaxLen, Enum: v.Enum, Ranges: v.Ranges,
+			Editable: editable, Reason: reason, AffectsPower: upscontrol.VarAffectsPower(name), Confirm: upscontrol.VarConfirm(name),
+		})
+	}
+	return commands, writable
 }
 
 // upsIssues are the health-pill entries a UPS raises. A UPS Nexara cannot

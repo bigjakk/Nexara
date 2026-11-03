@@ -309,7 +309,9 @@ func (c *Client) change(ctx context.Context, verb string, args ...string) (strin
 	if line == "OK" {
 		return "", nil
 	}
-	if id, ok := strings.CutPrefix(line, "OK TRACKING "); ok && id != "" && len(id) <= 64 && !strings.ContainsAny(id, " \t") {
+	// The id goes back to upsd and into the database: printable ASCII only.
+	if id, ok := strings.CutPrefix(line, "OK TRACKING "); ok && id != "" && len(id) <= 64 &&
+		!strings.ContainsFunc(id, func(r rune) bool { return r <= ' ' || r > '~' }) {
 		return id, nil
 	}
 	return "", fmt.Errorf("nut: unexpected %s reply %q", verb, clip(line, 64))

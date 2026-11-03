@@ -87,7 +87,7 @@ func (s *Server) buildRegistry() *Registry {
 	}
 	if s.nutHandler != nil {
 		// One connect limiter shared by every route that dials a NUT server.
-		registerUPSEndpoints(reg, s.nutHandler, s.nutConnectLimiter())
+		registerUPSEndpoints(reg, s.nutHandler, s.nutConnectLimiter(), s.upsCommandLimiter())
 	}
 	if s.alertHandler != nil {
 		registerAlertEndpoints(reg, s.alertHandler)

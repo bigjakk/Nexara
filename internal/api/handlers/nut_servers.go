@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -38,6 +39,15 @@ type NutHandler struct {
 	// not taken as current.
 	nodeSyncInterval time.Duration
 	dial             func(context.Context, nut.Config) (*nut.Client, error)
+	// shutdownCtx ends the watch of a tracked command run when Nexara stops
+	// (SetShutdownContext); runSlots caps the runs being watched; a run waits
+	// trackingWait for the driver's answer, asking every trackingPoll (P8).
+	shutdownCtx  context.Context
+	runSlots     chan struct{}
+	runMu        sync.Mutex
+	serverRuns   map[uuid.UUID]int
+	trackingWait time.Duration
+	trackingPoll time.Duration
 }
 
 // NewNutHandler creates the handler.
@@ -50,8 +60,16 @@ func NewNutHandler(queries *db.Queries, encryptionKey string, eventPub *events.P
 		// config.MetricsCollectInterval's default.
 		nodeSyncInterval: 30 * time.Second,
 		dial:             nut.Dial,
+		shutdownCtx:      context.Background(),
+		runSlots:         make(chan struct{}, upsRunsInFlight),
+		serverRuns:       map[uuid.UUID]int{},
+		trackingWait:     time.Minute,
+		trackingPoll:     time.Second,
 	}
 }
+
+// SetShutdownContext ends the watch of tracked command runs when ctx ends.
+func (h *NutHandler) SetShutdownContext(ctx context.Context) { h.shutdownCtx = ctx }
 
 // SetReloadTrigger wires the poller's reload. Without one, a change is picked
 // up on the poller's next reconcile, within 30 s.
@@ -92,8 +110,12 @@ type nutServerResponse struct {
 	ProtocolVersion string     `json:"protocol_version"`
 	LastPollAt      *time.Time `json:"last_poll_at"`
 	LastPollError   string     `json:"last_poll_error"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	// CommandsVerifiedAt is when upsd last took a command from the stored
+	// account: the only proof it may run them, since upsd checks an account
+	// only when a command runs.
+	CommandsVerifiedAt *time.Time `json:"commands_verified_at"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 func toNutServerResponse(s db.NutServer, includeUsername bool) nutServerResponse {
@@ -110,6 +132,10 @@ func toNutServerResponse(s db.NutServer, includeUsername bool) nutServerResponse
 	if s.LastPollAt.Valid {
 		t := s.LastPollAt.Time
 		resp.LastPollAt = &t
+	}
+	if s.CommandsVerifiedAt.Valid {
+		t := s.CommandsVerifiedAt.Time
+		resp.CommandsVerifiedAt = &t
 	}
 	return resp
 }

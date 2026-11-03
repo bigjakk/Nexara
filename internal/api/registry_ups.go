@@ -114,9 +114,10 @@ func nutServerNameParam(optional bool) apischema.Property {
 }
 
 // registerUPSEndpoints declares the routes served by NutHandler. connect is
-// one limiter instance shared by every route that dials a NUT server, so the
-// budget is per caller across all of them.
-func registerUPSEndpoints(reg *Registry, h *handlers.NutHandler, connect fiber.Handler) {
+// one limiter instance shared by every route that adds, probes or tests a NUT
+// server, so the budget is per caller across all of them; commands is the
+// command routes' own, per user (upsCommandLimiter).
+func registerUPSEndpoints(reg *Registry, h *handlers.NutHandler, connect, commands fiber.Handler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   nutServerScope,
@@ -353,5 +354,77 @@ func registerUPSEndpoints(reg *Registry, h *handlers.NutHandler, connect fiber.H
 			"detect":          optFlag("Forget the host node and let the poller find it."),
 		},
 		Handler: h.SetHostNode,
+	})
+
+	// Commands and settings (2b). A run answers 202: upsd's answer is in the
+	// run, and a run NUT 2.8 tracks stays pending until the driver answers.
+	confirmParam := apischema.Property{
+		Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(255), Typetext: "<the UPS's name>",
+		Description: "The UPS's name, exactly as upsd lists it, for one that cuts the power the UPS supplies " +
+			"(the run's confirm is \"typed\" in the UPS's commands or variables). Without it that is a 400 and nothing is sent.",
+	}
+	reg.Register(Endpoint{
+		Method: fiber.MethodPost,
+		Path:   upsDeviceScope + "/:id/commands",
+		Description: "Run an instant command the UPS offers, through its NUT server's stored account, which needs " +
+			"instcmds in upsd.users. Answers 202 with the run: a refusal by upsd reads as a failed run, and a run upsd " +
+			"tracks (NUT 2.8) stays pending until the driver answers or a minute passes (GET …/command-runs). " +
+			"Requires execute:ups; a command that cuts the UPS's power also needs confirm, and manage:node on every " +
+			"cluster with a node the UPS powers.",
+		Group: "Power",
+		Permissions: Permissions{Deferred: "execute:ups, and for a command that cuts the UPS's power manage:node on " +
+			"every cluster the UPS powers a node of, checked in the handler: the tier is the body's command"},
+		RateLimiter: commands,
+		Parameters: apischema.Properties{
+			"id": upsDeviceIDParam,
+			"command": {
+				Type: apischema.String, MaxLength: apischema.Ptr(512),
+				Description: "The instant command, as the UPS's commands list names it.",
+			},
+			"parameter": {
+				Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(255),
+				Description: "A parameter for a command that takes one, such as a delay in seconds. upsd passes it " +
+					"on unquoted, so it may not hold a space or an =.",
+			},
+			"confirm": confirmParam,
+		},
+		Handler: h.RunCommand,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPut,
+		Path:   upsDeviceScope + "/:id/vars/:name",
+		Description: "Set a variable the UPS lets clients set, through its NUT server's stored account, which needs " +
+			"actions = SET in upsd.users. The value is checked as upsd checks it: one of the listed values for an " +
+			"ENUM, within a listed range for a RANGE, at most STRING:n characters for a string. Answers 202 with the " +
+			"run, as running a command does; a run that took reads the variable back. Requires manage:ups; a variable " +
+			"that can change the power the UPS supplies (affects_power, every one but those that only describe it) " +
+			"also needs execute:ups and manage:node on every cluster with a node the UPS powers, as cutting it does.",
+		Group: "Power",
+		Permissions: Permissions{Deferred: "manage:ups, and for a variable that can change the power the UPS supplies " +
+			"execute:ups and manage:node on every cluster the UPS powers a node of, checked in the handler: the variable is in the path"},
+		RateLimiter: commands,
+		Parameters: apischema.Properties{
+			"id": upsDeviceIDParam,
+			"name": {
+				Type: apischema.String, Source: apischema.SourcePath, MaxLength: apischema.Ptr(512), Typetext: "<variable>",
+				Description: "The variable, as the UPS's writable variables list names it.",
+			},
+			"value": {
+				Type: apischema.String, MaxLength: apischema.Ptr(255),
+				Description: "The new value.",
+			},
+			"confirm": confirmParam,
+		},
+		Handler: h.SetVariable,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodGet,
+		Path:   upsDeviceScope + "/:id/command-runs",
+		Description: "The UPS's newest 50 command runs and variable sets, newest first, with who asked for each and " +
+			"its outcome: sent, pending, succeeded, failed or unconfirmed.",
+		Group:       "Power",
+		Permissions: globalCheck("view", "ups"),
+		Parameters:  apischema.Properties{"id": upsDeviceIDParam},
+		Handler:     h.ListCommandRuns,
 	})
 }
