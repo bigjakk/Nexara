@@ -22,13 +22,13 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  useShutdownNode,
   useRebootNode,
   useEvacuateNode,
   useSetNodeMaintenance,
   type EvacuateMigration,
 } from "../../api/cluster-queries";
 import { useSSHCredentials } from "@/features/rolling-updates/api/rolling-update-queries";
+import { NodeShutdownConfirm } from "./NodeShutdownConfirm";
 import { useTaskLogStore } from "@/stores/task-log-store";
 
 export function NodePowerActions({
@@ -42,7 +42,6 @@ export function NodePowerActions({
   otherNodes: string[];
   inMaintenance: boolean;
 }) {
-  const shutdown = useShutdownNode(clusterId, nodeName);
   const reboot = useRebootNode(clusterId, nodeName);
   const evacuate = useEvacuateNode(clusterId, nodeName);
   const maintenance = useSetNodeMaintenance(clusterId, nodeName);
@@ -330,37 +329,18 @@ export function NodePowerActions({
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
+      <NodeShutdownConfirm
+        clusterId={clusterId}
+        nodeName={nodeName}
+        onConfirm={() => { setActionError(null); }}
+        onError={handleError}
+        trigger={
           <Button variant="destructive" size="sm" className="gap-1.5">
             <Power className="h-4 w-4" />
             Shutdown
           </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Shutdown {nodeName}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will shut down the node. It will go offline and all running
-              guests will be stopped. You will need physical or out-of-band
-              access to power it back on.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setActionError(null);
-                shutdown.mutate(undefined, { onError: handleError });
-              }}
-              disabled={shutdown.isPending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Shutdown
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        }
+      />
     </>
   );
 }

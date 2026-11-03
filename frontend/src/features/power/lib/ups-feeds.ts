@@ -1,4 +1,4 @@
-import type { UpsDevice, UpsFeed } from "../types/ups";
+import type { NutServer, UpsDevice, UpsFeed } from "../types/ups";
 
 export type ProtectionTone = "ok" | "warn" | "muted";
 
@@ -41,6 +41,20 @@ export function protectionView(f: UpsFeed): ProtectionView {
 export function feedName(f: UpsFeed): string {
   if (f.kind === "label") return f.label;
   return f.cluster_name === "" ? f.node_name : `${f.node_name} (${f.cluster_name})`;
+}
+
+/**
+ * The system a upsmon.conf MONITOR line names, ups@host[:port]. An IPv6 host
+ * goes in brackets, as NUT's upscli_splitaddr reads a bare one's first colon
+ * as the start of the port. A loopback host, which Nexara running on the NUT
+ * box may use, would be the node itself, so it is left for the operator.
+ */
+export function upsmonSystem(upsName: string, server: NutServer | undefined): string {
+  if (server === undefined) return `${upsName}@<nut server>`;
+  const h = server.host;
+  const loopback = /^127\.\d+\.\d+\.\d+$/.test(h) || h === "::1" || /(^|\.)localhost$/i.test(h);
+  const host = loopback ? `<address of ${server.name}>` : h.includes(":") ? `[${h}]` : h;
+  return server.port === 3493 ? `${upsName}@${host}` : `${upsName}@${host}:${String(server.port)}`;
 }
 
 /**

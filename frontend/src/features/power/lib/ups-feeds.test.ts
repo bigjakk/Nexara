@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { upsDevice, upsFeed } from "../power.fixtures";
-import { feedName, protectionSummary, protectionView } from "./ups-feeds";
+import { nutServer, upsDevice, upsFeed } from "../power.fixtures";
+import { feedName, protectionSummary, protectionView, upsmonSystem } from "./ups-feeds";
+
+describe("upsmonSystem", () => {
+  it.each([
+    ["192.0.2.40", 3493, "ups01@192.0.2.40"],
+    ["nut01.example.com", 3494, "ups01@nut01.example.com:3494"],
+    ["2001:db8::40", 3493, "ups01@[2001:db8::40]"],
+    ["2001:db8::40", 3494, "ups01@[2001:db8::40]:3494"],
+    ["127.0.0.1", 3493, "ups01@<address of nut01>"],
+    ["::1", 3493, "ups01@<address of nut01>"],
+    ["localhost", 3494, "ups01@<address of nut01>:3494"],
+  ])("%s port %d is %s", (host, port, want) => {
+    expect(upsmonSystem("ups01", nutServer({ host, port }))).toBe(want);
+  });
+});
 
 describe("protectionView", () => {
   it.each([

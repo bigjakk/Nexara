@@ -114,6 +114,7 @@ import { NodeMetricsPanel } from "../components/node/NodeMetricsPanel";
 import { NodeNotesCard } from "../components/node/NodeNotesCard";
 import { NodeOptionsCard } from "../components/node/NodeOptionsCard";
 import { NodeTemperatures } from "../components/node/NodeTemperatures";
+import { NodePowerCard } from "@/features/power/components/NodePowerCard";
 import { NodeMemoryModules } from "../components/node/NodeMemoryModules";
 import {
   DNSReadNote,
@@ -434,6 +435,14 @@ export function NodeDetailPage() {
               online={node.status === "online"}
               canEdit={canManage("node")}
               className="lg:col-span-2"
+            />
+            {/* The UPSes that power the node, for view:ups holders: full width,
+                as it can hold several. */}
+            <NodePowerCard
+              clusterId={clusterId}
+              nodeName={node.name}
+              online={node.status === "online"}
+              className="sm:col-span-2 lg:col-span-4"
             />
             {/* Full-width under the hardware cards: the reading count varies
                 with the host, so a fixed grid slot would either crop a
