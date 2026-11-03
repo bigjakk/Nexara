@@ -12,7 +12,7 @@ export const UpsNode = memo(function UpsNode({ data }: NodeProps) {
   const color = TONE_COLOR[d.tone];
 
   return (
-    <div className="min-w-[180px] cursor-pointer rounded-xl border bg-card px-3 py-2 shadow-xs transition-colors hover:border-muted-foreground/30 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+    <div className="w-[220px] cursor-pointer rounded-xl border bg-card px-3 py-2 shadow-xs transition-colors hover:border-muted-foreground/30 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
       <div className="flex items-center gap-2">
         <BatteryCharging className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="truncate text-sm font-semibold tracking-tight">{d.label}</span>

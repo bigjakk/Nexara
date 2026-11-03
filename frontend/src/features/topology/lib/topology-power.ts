@@ -2,13 +2,15 @@ import type { Edge, Node } from "@xyflow/react";
 import { upsOnBattery, upsStatus } from "@/features/power/lib/ups-state";
 import type { UpsTone } from "@/features/power/lib/ups-state";
 import type { UpsDevice } from "@/features/power/types/ups";
-import { HORIZONTAL_GAP, HOST_HEIGHT, HOST_WIDTH } from "./topology-layout";
+import { CLUSTER_WIDTH, HORIZONTAL_GAP, HOST_HEIGHT, HOST_WIDTH } from "./topology-layout";
 import type { HostNodeData, UpsNodeData } from "./topology-transform";
 
-const UPS_WIDTH = 180;
+// UpsNode is a fixed 220 px wide; ClusterNode is 220 px (CLUSTER_WIDTH) by two fixed lines.
+const UPS_WIDTH = 220;
 const UPS_HEIGHT = 64;
 const UPS_GAP = 40;
-const LANE_GAP = 24;
+const CLUSTER_CARD_HEIGHT = 64;
+const CLEARANCE = 12;
 
 export const TONE_COLOR: Record<UpsTone, string> = {
   ok: "#10b981",
@@ -52,7 +54,9 @@ export function buildPowerOverlay(
         source: id,
         target: host,
         targetHandle: "power",
-        type: "smoothstep",
+        // A curve, unlike the tree's right-angled edges, and one that needs
+        // no room for corners in the short drop to the host.
+        type: "default",
         style: {
           stroke: TONE_COLOR[status.tone],
           strokeWidth: 1.5,
@@ -128,13 +132,21 @@ function placeInLane(
   if (ups.length === 0 || nodes.length === 0) return out;
   const tb = direction === "TB";
   const pos = new Map(nodes.map((n) => [n.id, n.position]));
-  // Top-down, in the band under the cluster row: the layout gives a cluster a
-  // host's height, which its card does not fill, so a UPS sits just above the
-  // hosts it powers and its edges never cross a cluster. Left-right the depth
-  // step leaves no such room, so the lane goes before the cluster column.
-  const lane = tb
-    ? Math.min(...ups.flatMap((u) => u.hosts.map((h) => pos.get(h)?.y ?? 0))) - UPS_HEIGHT - LANE_GAP
-    : Math.min(...nodes.map((n) => n.position.x)) - UPS_WIDTH - HORIZONTAL_GAP * 2;
+  const clusters = nodes.filter((n) => n.type === "clusterNode");
+  // Top-down, just under the cluster cards: the layout gives a cluster a
+  // host's height, which its card does not fill, and the tree's edges turn
+  // towards the hosts halfway down, below this lane. So no tree edge runs
+  // behind a UPS, once each UPS also steps clear of the line a cluster drops
+  // from its foot. Left-right the depth step leaves no such room, so the lane
+  // goes before the cluster column. (Without a cluster, which the graph never
+  // has, just above the hosts.)
+  const hostTop = Math.min(...ups.flatMap((u) => u.hosts.map((h) => pos.get(h)?.y ?? 0)));
+  const lane = !tb
+    ? Math.min(...nodes.map((n) => n.position.x)) - UPS_WIDTH - HORIZONTAL_GAP * 2
+    : clusters.length > 0
+      ? Math.min(...clusters.map((c) => c.position.y)) + CLUSTER_CARD_HEIGHT + CLEARANCE
+      : hostTop - UPS_HEIGHT - CLEARANCE;
+  const drops = tb ? clusters.map((c) => c.position.x + CLUSTER_WIDTH / 2).sort((a, b) => a - b) : [];
   const size = tb ? UPS_WIDTH : UPS_HEIGHT;
   const wanted = ups
     .map((u) => {
@@ -147,7 +159,10 @@ function placeInLane(
     .sort((a, b) => a.at - b.at);
   let next = -Infinity;
   for (const w of wanted) {
-    const at = Math.max(w.at, next);
+    let at = Math.max(w.at, next);
+    for (const x of drops) {
+      if (at - CLEARANCE < x && x < at + size + CLEARANCE) at = x + CLEARANCE;
+    }
     next = at + size + UPS_GAP;
     out.set(w.id, tb ? { x: at, y: lane } : { x: lane, y: at });
   }

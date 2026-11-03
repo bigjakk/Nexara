@@ -1,7 +1,7 @@
 import type { Node } from "@xyflow/react";
 import type { TopologyNodeData } from "./topology-transform";
 
-const CLUSTER_WIDTH = 220;
+export const CLUSTER_WIDTH = 220;
 export const HOST_WIDTH = 200;
 const GUEST_WIDTH = 160;
 const STORAGE_WIDTH = 160;

@@ -12,7 +12,10 @@ export const ClusterNode = memo(function ClusterNode({ data }: NodeProps) {
   return (
     <div
       className={cn(
-        "min-w-[220px] cursor-pointer rounded-xl border px-4 py-2.5 shadow-xs transition-colors",
+        // A fixed width, as the layout centres it, so its foot (where its
+        // edges leave and the power overlay steps aside) is where the layout
+        // puts it; a long name truncates.
+        "w-[220px] cursor-pointer rounded-xl border px-4 py-2.5 shadow-xs transition-colors",
         d.status === "online"
           ? "border-emerald-500/30 bg-emerald-500/[0.05] hover:border-emerald-500/50"
           : d.status === "degraded"
@@ -31,7 +34,9 @@ export const ClusterNode = memo(function ClusterNode({ data }: NodeProps) {
               d.status === "online" ? `0 0 8px ${statusColor}` : undefined,
           }}
         />
-        <span className="text-sm font-semibold tracking-tight">{d.label}</span>
+        <span className="min-w-0 truncate text-sm font-semibold tracking-tight" title={d.label}>
+          {d.label}
+        </span>
         {d.pveVersion && (
           <span className="ml-auto shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
             PVE {d.pveVersion}

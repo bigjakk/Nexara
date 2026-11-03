@@ -61,11 +61,12 @@ describe("withPower", () => {
     upsDevice({ id: "u2", name: "ups02", feeds: [upsFeed({ id: "f3", node_name: "pve-02" })] }),
   ];
 
-  // Just above the hosts top-down, before the cluster column left-right;
-  // centred on the hosts each powers, and pushed apart.
+  // Under the cluster cards top-down, before the cluster column left-right;
+  // centred on the hosts each powers, pushed apart, and top-down stepped
+  // right of the line cluster-c1 drops to its hosts (x 230).
   it.each([
-    ["TB", { x: 140, y: 142 }, { x: 360, y: 142 }],
-    ["LR", { x: -300, y: 273 }, { x: -300, y: 377 }],
+    ["TB", { x: 242, y: 76 }, { x: 502, y: 76 }],
+    ["LR", { x: -340, y: 273 }, { x: -340, y: 377 }],
   ] as const)("places new UPS nodes in a lane %s", (direction, first, second) => {
     const nodes = withPower(canvas, overlayOf(two, direction), direction);
     expect(nodes.find((n) => n.id === "ups-u1")?.position).toEqual(first);
