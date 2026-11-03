@@ -8,6 +8,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useDeleteNutServer, useNutServers, useUpsDevices, useUpsEvents } from "../api/ups-queries";
 import type { NutServer, UpsDevice } from "../types/ups";
 import { formatRuntime, upsOnBattery } from "../lib/ups-state";
+import { feedName, protectionSummary } from "../lib/ups-feeds";
 import { UpsCard } from "../components/UpsCard";
 import { PowerSummary } from "../components/PowerSummary";
 import { NutServerTable } from "../components/NutServerTable";
@@ -21,6 +22,11 @@ function OutageBanner({ devices }: { devices: UpsDevice[] }) {
   const shortest = onBattery.reduce((a, b) =>
     (b.battery_runtime ?? Infinity) < (a.battery_runtime ?? Infinity) ? b : a,
   );
+  // A node another UPS, still on mains, also powers does not lose power.
+  const stillFed = new Set(
+    devices.filter((d) => d.state === "online").flatMap((d) => d.feeds.map(feedName)),
+  );
+  const unprotected = protectionSummary(onBattery).unprotected.filter((n) => !stillFed.has(n));
   const since = onBattery
     .map((d) => d.on_battery_since)
     .filter((s): s is string => s !== null)
@@ -36,6 +42,11 @@ function OutageBanner({ devices }: { devices: UpsDevice[] }) {
         <div className="mt-0.5 text-muted-foreground">
           Shortest runtime: {shortest.name}, {formatRuntime(shortest.battery_runtime)} at the current load.
         </div>
+        {unprotected.length > 0 && (
+          <div className="mt-0.5 font-medium text-amber-700 dark:text-amber-400">
+            Will lose power without shutting down: {unprotected.join(", ")}.
+          </div>
+        )}
       </div>
     </div>
   );

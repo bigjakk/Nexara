@@ -1,8 +1,9 @@
-import { Clock, Plug, Zap } from "lucide-react";
+import { Clock, Plug, ShieldCheck, Zap } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { UpsDevice } from "../types/ups";
 import { formatRuntime, upsOnBattery } from "../lib/ups-state";
+import { protectionSummary } from "../lib/ups-feeds";
 
 function isLive(d: UpsDevice): boolean {
   return d.server_enabled && d.reachability === "ok" && !d.reading_stale;
@@ -38,9 +39,10 @@ function SummaryCard({
 }
 
 /**
- * The three figures that answer "how much power and time do I have": whether
- * the mains are up, the shortest runtime, and the total load. Only UPSes read
- * just now count; an unreadable one is called out rather than averaged in.
+ * The figures that answer "how much power and time do I have": whether the
+ * mains are up, the shortest runtime and the total load, from UPSes read just
+ * now (an unreadable one is called out rather than averaged in), and whether
+ * the nodes they power would shut down with them.
  */
 export function PowerSummary({ devices }: { devices: UpsDevice[] }) {
   const live = devices.filter(isLive);
@@ -58,9 +60,10 @@ export function PowerSummary({ devices }: { devices: UpsDevice[] }) {
   const estimated = live.some((d) => d.realpower_estimated);
 
   const unreadNote = unread > 0 ? ` · ${String(unread)} not read` : "";
+  const protection = protectionSummary(devices);
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <SummaryCard
         title="Mains power"
         icon={Plug}
@@ -80,6 +83,19 @@ export function PowerSummary({ devices }: { devices: UpsDevice[] }) {
         icon={Zap}
         value={watts > 0 ? `${estimated ? "≈" : ""}${String(Math.round(watts))} W` : "—"}
         sub={nominal > 0 ? `of ${String(Math.round(nominal))} W across ${String(live.length)} UPS` : "No power reported"}
+      />
+      <SummaryCard
+        title="Shutdown protection"
+        icon={ShieldCheck}
+        value={protection.judged === 0 ? "—" : `${String(protection.protected)} of ${String(protection.judged)} nodes`}
+        sub={
+          protection.judged === 0
+            ? "No node it powers is checked yet"
+            : protection.unprotected.length > 0
+              ? `Not protected: ${protection.unprotected.join(", ")}`
+              : "run upsmon against the UPS that powers them"
+        }
+        warn={protection.unprotected.length > 0}
       />
     </div>
   );

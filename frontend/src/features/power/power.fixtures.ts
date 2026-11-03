@@ -1,4 +1,4 @@
-import type { NutServer, UpsDevice } from "./types/ups";
+import type { NutServer, UpsDevice, UpsFeed } from "./types/ups";
 
 /**
  * Shared NUT server and UPS fixtures for the Power tests and the components
@@ -72,7 +72,30 @@ export function upsDevice(over: Partial<UpsDevice> = {}): UpsDevice {
     output_voltage: 230,
     temperature: null,
     test_result: "",
+    feeds: [],
+    clients: [],
+    clients_listed_at: null,
+    host_node: null,
     issues: [],
+    ...over,
+  };
+}
+
+/** A node feed found from a login and judged protected. */
+export function upsFeed(over: Partial<UpsFeed> = {}): UpsFeed {
+  return {
+    id: "f1",
+    kind: "node",
+    cluster_id: "c1",
+    cluster_name: "cluster01",
+    node_name: "pve-01",
+    node_id: "n1",
+    label: "",
+    source: "found",
+    protected_elsewhere: false,
+    protection: "protected",
+    login_address: "192.0.2.11",
+    created_at: new Date().toISOString(),
     ...over,
   };
 }

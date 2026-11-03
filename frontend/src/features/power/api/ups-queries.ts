@@ -7,6 +7,7 @@ import type {
   NutServerRequest,
   UpsDevice,
   UpsEvent,
+  UpsFeed,
   UpsMetrics,
   UpsRange,
 } from "../types/ups";
@@ -134,6 +135,61 @@ export function useProbeNutServer() {
     mutationFn: (req: NutServerRequest) =>
       apiClient.post<NutProbeResult>(apiPath`/api/v1/nut-servers/probe`, req),
     ...errorsHandledLocally,
+  });
+}
+
+/** Something a UPS powers, added by hand: a node, or a label for another load. */
+export interface UpsFeedRequest {
+  feed_cluster_id?: string;
+  node_name?: string;
+  label?: string;
+}
+
+function useInvalidateDevice(upsId: string) {
+  const queryClient = useQueryClient();
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: upsKeys.devices });
+    void queryClient.invalidateQueries({ queryKey: upsKeys.device(upsId) });
+  };
+}
+
+/** Its failure is shown in the dialog that adds it, so it skips the global toast. */
+export function useAddUpsFeed(upsId: string) {
+  const invalidate = useInvalidateDevice(upsId);
+  return useMutation({
+    mutationFn: (req: UpsFeedRequest) => apiClient.post<UpsFeed>(apiPath`/api/v1/ups-devices/${upsId}/feeds`, req),
+    onSuccess: invalidate,
+    ...errorsHandledLocally,
+  });
+}
+
+export function useRemoveUpsFeed(upsId: string) {
+  const invalidate = useInvalidateDevice(upsId);
+  return useMutation({
+    mutationFn: (feedId: string) => apiClient.delete<never>(apiPath`/api/v1/ups-devices/${upsId}/feeds/${feedId}`),
+    onSuccess: invalidate,
+  });
+}
+
+/** Whether a node shuts down some way Nexara cannot see (decision P11). */
+export function useSetUpsFeedProtectedElsewhere(upsId: string) {
+  const invalidate = useInvalidateDevice(upsId);
+  return useMutation({
+    mutationFn: ({ feedId, protectedElsewhere }: { feedId: string; protectedElsewhere: boolean }) =>
+      apiClient.put<UpsFeed>(apiPath`/api/v1/ups-devices/${upsId}/feeds/${feedId}`, {
+        protected_elsewhere: protectedElsewhere,
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+/** The node a NUT server runs on, or detect to hand it back to the poller. */
+export function useSetNutHostNode(serverId: string, upsId: string) {
+  const invalidate = useInvalidateDevice(upsId);
+  return useMutation({
+    mutationFn: (body: { host_cluster_id: string; node_name: string } | { detect: true }) =>
+      apiClient.put<never>(apiPath`/api/v1/nut-servers/${serverId}/host-node`, body),
+    onSuccess: invalidate,
   });
 }
 

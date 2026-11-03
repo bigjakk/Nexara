@@ -17,6 +17,7 @@ import { UpsStatusBadges } from "../components/UpsBadges";
 import { UpsCharts } from "../components/UpsCharts";
 import { UpsVariablesTable } from "../components/UpsVariablesTable";
 import { LatestEventsNote, PowerEventsTable } from "../components/PowerEventsTable";
+import { UpsPowers } from "../components/UpsPowers";
 
 function series(points: UpsMetricPoint[], key: keyof UpsMetricPoint): number[] {
   return points.map((p) => p[key]).filter((v): v is number => typeof v === "number");
@@ -181,11 +182,20 @@ export function UpsDetailPage() {
           <Tabs defaultValue="overview">
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="powers">
+                Powers ({d.feeds.length})
+                {d.feeds.some((f) => f.protection === "not_protected") && (
+                  <span role="img" className="ml-1.5 h-2 w-2 rounded-full bg-amber-500" aria-label="a node is not protected" />
+                )}
+              </TabsTrigger>
               <TabsTrigger value="variables">Variables ({Object.keys(d.vars ?? {}).length})</TabsTrigger>
               <TabsTrigger value="events">Power events</TabsTrigger>
             </TabsList>
             <TabsContent value="overview">
               <Overview device={d} />
+            </TabsContent>
+            <TabsContent value="powers">
+              <UpsPowers device={d} />
             </TabsContent>
             <TabsContent value="variables">
               <UpsVariablesTable vars={d.vars ?? {}} descriptions={d.var_descriptions ?? {}} />

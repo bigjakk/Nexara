@@ -60,6 +60,56 @@ export type UpsReachability =
   | "unreachable"
   | "unknown";
 
+/**
+ * Whether a node a UPS powers would shut down cleanly with it: a upsmon on it
+ * is logged in (protected) or not. The others give no verdict: the operator
+ * says it shuts down another way, the node is offline, or Nexara cannot tell
+ * yet (never listed, a cluster out of reach, or a login it cannot place).
+ */
+export type UpsProtection =
+  | "protected"
+  | "not_protected"
+  | "checked_elsewhere"
+  | "node_offline"
+  | "unchecked";
+
+/** Something a UPS powers: a node, or a load that is not one, such as a switch. */
+export interface UpsFeed {
+  id: string;
+  kind: "node" | "label";
+  cluster_id: string | null;
+  cluster_name: string;
+  node_name: string;
+  node_id: string | null;
+  label: string;
+  /** found: a upsmon login came from the node; manual: added by hand. */
+  source: "found" | "manual";
+  protected_elsewhere: boolean;
+  /** "" for a label. */
+  protection: UpsProtection | "";
+  /** The login that makes the node protected, when it is. */
+  login_address: string;
+  created_at: string;
+}
+
+/** An address logged in to the UPS, as upsd's LIST CLIENT showed it. */
+export interface UpsClient {
+  address: string;
+  connections: number;
+  /** Listings in a row this address has been missing from; 0 when listed. */
+  missed: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  cluster_id: string | null;
+  /** The node the login comes from, when Nexara can tell. */
+  node_name: string;
+}
+
+export interface UpsNodeRef {
+  cluster_id: string;
+  node_name: string;
+}
+
 export interface UpsDevice {
   id: string;
   server_id: string;
@@ -102,6 +152,13 @@ export interface UpsDevice {
   output_voltage: number | null;
   temperature: number | null;
   test_result: string;
+  /** What the UPS powers and who is logged in to it, as far as the caller may see. */
+  feeds: UpsFeed[];
+  clients: UpsClient[];
+  /** The last listing of logins, taken only on mains; null until the first. */
+  clients_listed_at: string | null;
+  /** The node the NUT server runs on, when Nexara knows it. */
+  host_node: UpsNodeRef | null;
   issues: HealthIssue[];
   vars?: Record<string, string>;
   var_descriptions?: Record<string, string>;

@@ -6,6 +6,7 @@ import { formatRelativeTime } from "@/lib/format";
 import type { UpsDevice } from "../types/ups";
 import { formatRuntime, formatWatts, upsOnBattery, upsStatus, type UpsTone } from "../lib/ups-state";
 import { UpsStatusBadges } from "./UpsBadges";
+import { ProtectionBadge } from "./UpsPowers";
 
 const BAR: Record<UpsTone, string> = {
   ok: "bg-emerald-500",
@@ -113,6 +114,25 @@ export function UpsCard({ device }: { device: UpsDevice }) {
           tone={onBattery ? tone : live ? "ok" : "idle"}
         />
       </div>
+
+      {device.feeds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3 text-xs">
+          <span className="text-muted-foreground">Powers</span>
+          {device.feeds.slice(0, 6).map((f) =>
+            f.kind === "node" && f.protection === "not_protected" ? (
+              <span key={f.id} className="inline-flex items-center gap-1">
+                {f.node_name}
+                <ProtectionBadge feed={f} />
+              </span>
+            ) : (
+              <span key={f.id} className="rounded border px-1.5 py-0.5">
+                {f.kind === "node" ? f.node_name : f.label}
+              </span>
+            ),
+          )}
+          {device.feeds.length > 6 && <span className="text-muted-foreground">+{device.feeds.length - 6} more</span>}
+        </div>
+      )}
 
       <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2.5 text-xs text-muted-foreground">
         {device.test_result !== "" && <span>Self-test: {device.test_result}</span>}
