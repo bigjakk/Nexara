@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,6 +65,13 @@ type NutQueries interface {
 	InsertUpsPointEvent(ctx context.Context, arg db.InsertUpsPointEventParams) error
 	SetNutServerPolled(ctx context.Context, arg db.SetNutServerPolledParams) error
 	SetNutServerPollError(ctx context.Context, arg db.SetNutServerPollErrorParams) error
+	GetNutServer(ctx context.Context, id uuid.UUID) (db.NutServer, error)
+	SetNutServerHostNode(ctx context.Context, arg db.SetNutServerHostNodeParams) error
+	ListNodeLoginAddresses(ctx context.Context) ([]db.ListNodeLoginAddressesRow, error)
+	UpsertUpsClients(ctx context.Context, arg db.UpsertUpsClientsParams) error
+	MarkUpsClientsMissed(ctx context.Context, arg db.MarkUpsClientsMissedParams) error
+	PruneUpsClients(ctx context.Context, arg db.PruneUpsClientsParams) error
+	InsertFoundUpsFeed(ctx context.Context, arg db.InsertFoundUpsFeedParams) (int64, error)
 }
 
 // NutPollerConfig configures the NUT poller.
@@ -222,6 +230,7 @@ type nutServerState struct {
 	failures          int
 	retryAt           time.Time
 	listedAt          time.Time
+	clientsAt         time.Time
 	devices           map[string]*upsDeviceState
 }
 
@@ -241,6 +250,10 @@ type upsDeviceState struct {
 	open      map[string]upsEpisodeDetails
 	varNames  []string
 	described map[string]bool
+	// clients is the last LIST CLIENT, connections per address; fed holds the
+	// nodes a found feed was already stored or refused for.
+	clients map[netip.Addr]int16
+	fed     map[nodeRef]bool
 }
 
 // loadServerState seeds a worker from what the database already holds, so a
@@ -299,6 +312,7 @@ func newUpsDeviceState(r db.UpsDevice) *upsDeviceState {
 		name:      r.UpsName,
 		open:      map[string]upsEpisodeDetails{},
 		described: map[string]bool{},
+		fed:       map[nodeRef]bool{},
 	}
 	var vars map[string]string
 	_ = json.Unmarshal(r.Vars, &vars)
@@ -399,6 +413,7 @@ func (p *NutPoller) pollOnce(ctx context.Context, st *nutServerState, now time.T
 			return changed, err
 		}
 	}
+	changed = p.listClients(ctx, st, now) || changed
 	p.describe(ctx, st)
 	return changed, nil
 }

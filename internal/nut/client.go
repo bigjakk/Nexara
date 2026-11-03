@@ -262,6 +262,17 @@ func NormalizeFingerprint(s string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), ":", ""))
 }
 
+// RemoteAddr is the address the connection reached, so a caller can tell which
+// host upsd runs on; the zero Addr if it is not a TCP connection.
+func (c *Client) RemoteAddr() netip.Addr {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a, ok := c.conn.RemoteAddr().(*net.TCPAddr); ok {
+		return a.AddrPort().Addr().Unmap()
+	}
+	return netip.Addr{}
+}
+
 // PeerFingerprint is the leaf certificate's fingerprint after STARTTLS, or ""
 // on a plain connection, so a probe can offer it for pinning.
 func (c *Client) PeerFingerprint() string {

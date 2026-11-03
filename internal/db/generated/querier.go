@@ -2102,7 +2102,10 @@ type Querier interface {
 	ListNodeHealthProblems(ctx context.Context) ([]ListNodeHealthProblemsRow, error)
 	// Every address a node can log in to upsd from, to match LIST CLIENT against:
 	// its cluster (corosync) address, which may be IPv6, and its interfaces' IPv4
-	// addresses.
+	// addresses. Node rows are never deleted, so a node its cluster stopped
+	// listing well before the cluster's latest sync (an hour, or three sync
+	// intervals if longer) is left out; otherwise a removed node's address would
+	// shadow the node that took it over.
 	ListNodeLoginAddresses(ctx context.Context) ([]ListNodeLoginAddressesRow, error)
 	// The nodes of a cluster with a good memory read, for the capacity forecast,
 	// with the memory the node's kernel reports: a firmware table that lists less

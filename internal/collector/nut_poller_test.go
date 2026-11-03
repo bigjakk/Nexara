@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -235,6 +236,13 @@ type fakeNutQueries struct {
 	metrics   int
 	events    []*fakeUpsEvent
 	pollError string
+	// The login queries only record what they were given; the SQL that
+	// counts and marks logins is tested in internal/db.
+	nodeAddrs []db.ListNodeLoginAddressesRow
+	listings  map[string][][]string
+	marked    map[string]int
+	feeds     map[string][]string
+	feedCalls int
 }
 
 type fakeUpsEvent struct {
@@ -246,7 +254,8 @@ type fakeUpsEvent struct {
 }
 
 func newFakeNutQueries(s db.NutServer) *fakeNutQueries {
-	return &fakeNutQueries{server: s, devices: map[string]db.UpsDevice{}}
+	return &fakeNutQueries{server: s, devices: map[string]db.UpsDevice{}, listings: map[string][][]string{},
+		marked: map[string]int{}, feeds: map[string][]string{}}
 }
 
 func (f *fakeNutQueries) device(name string) db.UpsDevice {
@@ -420,4 +429,58 @@ func (f *fakeNutQueries) SetNutServerPollError(_ context.Context, a db.SetNutSer
 	defer f.mu.Unlock()
 	f.pollError = a.LastPollError
 	return nil
+}
+
+func (f *fakeNutQueries) GetNutServer(context.Context, uuid.UUID) (db.NutServer, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.server, nil
+}
+
+func (f *fakeNutQueries) SetNutServerHostNode(_ context.Context, a db.SetNutServerHostNodeParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.server.HostClusterID.Valid {
+		f.server.HostClusterID = pgtype.UUID{Bytes: a.ClusterID, Valid: true}
+		f.server.HostNodeName = pgtype.Text{String: a.NodeName, Valid: true}
+	}
+	return nil
+}
+
+func (f *fakeNutQueries) ListNodeLoginAddresses(context.Context) ([]db.ListNodeLoginAddressesRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.nodeAddrs, nil
+}
+
+func (f *fakeNutQueries) UpsertUpsClients(_ context.Context, a db.UpsertUpsClientsParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	name, _ := f.byID(a.UpsID)
+	f.listings[name] = append(f.listings[name], a.Addresses)
+	return nil
+}
+
+func (f *fakeNutQueries) MarkUpsClientsMissed(_ context.Context, a db.MarkUpsClientsMissedParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	name, _ := f.byID(a.UpsID)
+	f.marked[name]++
+	return nil
+}
+
+func (f *fakeNutQueries) PruneUpsClients(context.Context, db.PruneUpsClientsParams) error {
+	return nil
+}
+
+func (f *fakeNutQueries) InsertFoundUpsFeed(_ context.Context, a db.InsertFoundUpsFeedParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.feedCalls++
+	name, _ := f.byID(a.UpsID)
+	if slices.Contains(f.feeds[name], a.NodeName) {
+		return 0, nil
+	}
+	f.feeds[name] = append(f.feeds[name], a.NodeName)
+	return 1, nil
 }

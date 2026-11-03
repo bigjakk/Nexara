@@ -185,3 +185,58 @@ func TestUpsFeedsAndClients(t *testing.T) {
 		t.Errorf("after the server went: %d feeds and logins left, want 0", n)
 	}
 }
+
+// Node rows are never deleted, so the login matcher leaves out a node its
+// cluster stopped listing; staleness is judged against the cluster's own
+// latest sync, so a cluster Nexara cannot reach keeps its nodes. Without the
+// filter, a removed node's address shadows the node that took it over.
+func TestListNodeLoginAddresses_LeavesRemovedNodesOut(t *testing.T) {
+	env := setupMigration(t)
+	defer env.Cleanup()
+	ctx, pool := env.Ctx, env.Pool
+	migrateUp(t, env.Migrate)
+
+	reachable := uuid.MustParse("a7000000-0000-4000-8000-000000000011")
+	unreachable := uuid.MustParse("a7000000-0000-4000-8000-000000000012")
+	purge := func() {
+		pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id IN ($1, $2)`, reachable, unreachable)
+	}
+	purge()
+	defer purge()
+	for _, s := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO clusters (id, name, api_url, token_id, token_secret_encrypted)
+		  VALUES ($1, 'ups-addr-reachable', 'https://pve.invalid:8006', 'root@pam!t', 'enc'),
+		         ($2, 'ups-addr-unreachable', 'https://pve2.invalid:8006', 'root@pam!t', 'enc')`, []any{reachable, unreachable}},
+		{`INSERT INTO nodes (id, cluster_id, name, address, last_seen_at) VALUES
+		  ('a7000000-0000-4000-8000-000000000021', $1, 'pve-01', '192.0.2.61', now()),
+		  ('a7000000-0000-4000-8000-000000000022', $1, 'pve-02', '192.0.2.62', now() - interval '2 hours'),
+		  ('a7000000-0000-4000-8000-000000000024', $1, 'pve-04', '192.0.2.64', now() - interval '30 minutes'),
+		  ('a7000000-0000-4000-8000-000000000023', $2, 'pve-03', '192.0.2.63', now() - interval '1 day')`, []any{reachable, unreachable}},
+		{`INSERT INTO node_network_interfaces (node_id, cluster_id, iface, address) VALUES
+		  ('a7000000-0000-4000-8000-000000000021', $1, 'vmbr0', '198.51.100.61'),
+		  ('a7000000-0000-4000-8000-000000000022', $1, 'vmbr0', '198.51.100.62')`, []any{reachable}},
+	} {
+		if _, err := pool.Exec(ctx, s.sql, s.args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	rows, err := gen.New(pool).ListNodeLoginAddresses(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range rows {
+		if r.ClusterID == reachable || r.ClusterID == unreachable {
+			got = append(got, r.NodeName+" "+r.Address)
+		}
+	}
+	want := []string{"pve-01 192.0.2.61", "pve-01 198.51.100.61", "pve-03 192.0.2.63", "pve-04 192.0.2.64"}
+	if slices.Sort(got); !slices.Equal(got, want) {
+		t.Errorf("login addresses = %q, want %q (pve-02 left out; pve-03 and pve-04, within the hour, kept)", got, want)
+	}
+}

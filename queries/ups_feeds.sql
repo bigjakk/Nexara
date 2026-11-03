@@ -79,15 +79,24 @@ RETURNING *;
 -- name: ListNodeLoginAddresses :many
 -- Every address a node can log in to upsd from, to match LIST CLIENT against:
 -- its cluster (corosync) address, which may be IPv6, and its interfaces' IPv4
--- addresses.
+-- addresses. Node rows are never deleted, so a node its cluster stopped
+-- listing well before the cluster's latest sync (an hour, or three sync
+-- intervals if longer) is left out; otherwise a removed node's address would
+-- shadow the node that took it over.
 SELECT n.cluster_id, n.name AS node_name, n.address
 FROM nodes n
+JOIN clusters c ON c.id = n.cluster_id
 WHERE n.address <> ''
+  AND n.last_seen_at > (SELECT max(m.last_seen_at) FROM nodes m WHERE m.cluster_id = n.cluster_id)
+                       - greatest(interval '1 hour', c.sync_interval_seconds * interval '3 seconds')
 UNION
 SELECT n.cluster_id, n.name AS node_name, i.address
 FROM node_network_interfaces i
 JOIN nodes n ON n.id = i.node_id
+JOIN clusters c ON c.id = n.cluster_id
 WHERE i.address <> ''
+  AND n.last_seen_at > (SELECT max(m.last_seen_at) FROM nodes m WHERE m.cluster_id = n.cluster_id)
+                       - greatest(interval '1 hour', c.sync_interval_seconds * interval '3 seconds')
 ORDER BY 1, 2, 3;
 
 -- name: SetNutServerHostNode :exec
