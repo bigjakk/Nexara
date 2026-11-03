@@ -1757,6 +1757,10 @@ not counted at all, since that is lost track of rather than failed.
 | GET | `/ups-devices/:id` | Get one UPS, with every variable upsd reports and its description |
 | GET | `/ups-devices/:id/metrics` | Readings over `range` = `1h`, `6h`, `24h`, `7d` or `30d`, in raw, 5-minute or hourly buckets, at most 360 points |
 | GET | `/ups-events` | Power events, newest first. Filter by `ups_id` and `kind`; page with `before` and `before_id` together, both taken from the last event of the previous page |
+| POST | `/ups-devices/:id/feeds` | Add something the UPS powers by hand: a node (`feed_cluster_id` and `node_name`) or a load that is not a node (`label`). A node already powered is a 409 |
+| PUT | `/ups-devices/:id/feeds/:feed_id` | Set `protected_elsewhere`: the node shuts down some way Nexara cannot see, and its verdict reads `checked_elsewhere` |
+| DELETE | `/ups-devices/:id/feeds/:feed_id` | Remove something the UPS powers. A node is kept as removed, so its next login does not add it again; only adding it back by hand does |
+| PUT | `/nut-servers/:id/host-node` | Say which node the NUT server runs on (`host_cluster_id` and `node_name`), so its own loopback login counts for that node; or `detect` to let the poller find it |
 
 All of them need a global grant: `view:ups`, `manage:ups` for adding, editing
 and testing, `delete:ups` for removing. Create, probe, update and test share a
@@ -1788,6 +1792,24 @@ condition clear. With no `details.ended_by`, contact was lost and the
 condition had cleared by the next reading. With `ended_by` set to
 `polling_off` or `removed`, Nexara stopped watching while it was still going:
 polling was turned off, or upsd stopped listing the UPS.
+
+**What a UPS powers.** Each device carries `feeds`, `clients`,
+`clients_listed_at` and `host_node`. A feed is a node (`kind: "node"`, with
+`cluster_id`, `cluster_name`, `node_name` and `node_id`) or a `label`,
+`source` `found` (from a upsmon login) or `manual`, and for a node a
+`protection` verdict: `protected` (with the `login_address` it logged in from),
+`not_protected`, `checked_elsewhere`, `node_offline` or `unchecked`. `clients`
+are the logins of the last listing, by `address`, with `connections`, `missed`
+(listings in a row it was absent from) and the node it matched.
+`clients_listed_at` is null until Nexara first lists the logins, which it does
+once a minute and only while the UPS is on mains. Node feeds, logins placed on
+nodes and `host_node` are returned only for clusters where the caller holds
+`view:node`, and logins that match no node only to a caller who holds it
+install-wide. A node that reads `not_protected` also adds a
+`ups_node_unprotected` entry to the device's `issues`, except on a server whose
+polling is turned off. Adding, changing and removing a feed need `manage:ups`
+(removing one too, not `delete:ups`) and `view:node` on the node's cluster;
+setting the host node needs `manage:ups` and `view:node` install-wide.
 
 Six global-scope alert metrics read the same readings: `ups_on_battery`,
 `ups_unreachable` and `ups_replace_battery` (counts), `ups_battery_charge` and

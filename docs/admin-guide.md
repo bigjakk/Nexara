@@ -134,6 +134,7 @@ Navigate to **Topology** from the sidebar for an interactive map of your infrast
 - **Filters** — toggle **VMs/CTs** and **Storage**; switch **Layout** between Top-Down and Left-Right
 - **Health coloring** — elements are colored by status: healthy, degraded, or offline
 - **Click-through** — click any element to jump to its detail page
+- **Power** — with a global `view:ups`, the **Power** toggle shows each UPS just above the hosts it powers (left of the clusters in the Left-Right layout), joined to them by a solid line while it is on mains and a dashed one on battery, and marks **No upsmon** on a host that would lose power without shutting down (see [Shutdown Protection](#shutdown-protection))
 - Pan and zoom with the mouse or trackpad
 
 ---
@@ -1040,6 +1041,48 @@ Click a UPS for its detail page: charts of charge, runtime, load and input volta
 
 An event's end that Nexara did not see is marked on its duration. **≤** means contact was lost and the condition had cleared by the next reading, so it lasted at most that long. **≥** means Nexara stopped watching while it was still going: polling was turned off, or upsd stopped listing the UPS.
 
+### What Each UPS Powers
+
+Nexara works out which nodes a UPS powers from who is logged in to it. Every `upsmon` that watches a UPS logs in to that UPS's upsd, and upsd lists those logins by address (NUT's `LIST CLIENT`, which needs no account). Once a minute, while the UPS is on mains, Nexara reads that list and matches each address to a node's cluster address or one of its interfaces' IPv4 addresses. A match adds the node to the UPS's **Powers** tab as found from its login. Found nodes are never removed automatically: a node that stops logging in still draws power from the UPS, and that is what the check below is for.
+
+Add by hand what Nexara cannot find, with **Add** on the UPS's **Powers** tab: a node, or a label for something that is not a node, such as a switch or a NAS. Adding a node needs `manage:ups` and `view:node` on its cluster. **Remove** takes a node off for good: its next login does not add it back, and only adding it by hand again restores it.
+
+A NUT server that runs on a node, with the UPS on its USB port, has its own `upsmon` log in over loopback, and that login counts for the node it runs on. Nexara knows that node when the server's address is one of the node's. Otherwise set it under **Where … runs** on the Powers tab, which needs `manage:ups` and a global `view:node`, since a server's node may be in any cluster.
+
+### Shutdown Protection
+
+Each node a UPS powers gets a verdict on whether it would shut down before the battery runs out:
+
+| Verdict | Meaning |
+|---------|---------|
+| **Protected** | A `upsmon` on the node is logged in to this UPS |
+| **Not protected** | None is, so in a long outage the node loses power without shutting down |
+| **Checked elsewhere** | Marked **Protected another way**: the node shuts down some way Nexara cannot see |
+| **Node offline** | Nexara sees the node offline (rebooting, or still off after an outage), so there is nothing to judge |
+| **Not checked yet** | Nexara has not listed this UPS's logins on mains yet, cannot tell this node's logins from another node's, or has no recent status for the node |
+
+- A node that was logged in reads **Not protected** only after it is missing from two listings in a row, so a `upsmon` restart does not raise it.
+- **Logins are listed only on mains.** Nodes log out on purpose as they shut down, so during an outage the logins hold where they were until the UPS is back on mains; a node that has shut down still reads **Node offline**.
+- **Not protected** shows on the health pill, naming the node and its cluster, on the Power page's **Shutdown protection** card and its outage banner, on the UPS's Powers tab, on the node's **Power** card, and on the [topology map](#topology-map)'s Power overlay. The outage banner leaves out a node that another UPS, still on mains, also powers.
+
+**Fixing a node that is not protected.** The node's page has a **Power** card, for `view:ups` holders, with the UPSes that power it, their charge, runtime and load, and the verdict. For a node that is not protected it gives the two lines to add on the node:
+
+```
+# /etc/nut/nut.conf
+MODE=netclient
+
+# /etc/nut/upsmon.conf
+MONITOR ups01@192.0.2.40 1 <user> <password> secondary
+```
+
+Install NUT's client on the node (`apt install nut-client`), take an account from the NUT server's `upsd.users` that has an `upsmon secondary` line, and restart `nut-monitor`. NUT before 2.8 spells `secondary` as `slave`. Use the address the node reaches upsd at, which is not always the one Nexara uses: when Nexara reaches upsd over loopback, the card leaves the address for you to fill in. Within a minute of the login the node reads **Protected**.
+
+During an outage, a node that is not protected and that no UPS still on mains powers gets **Shut down … now** on its Power card, for `manage:node` holders. It is the node's own Shutdown, behind the same confirmation.
+
+**upsd behind NAT, a proxy or an ingress.** upsd then sees every login from one address, the proxy's, so Nexara cannot tell which node a login came from: nothing is found, and nodes added by hand read **Not protected** even with `upsmon` running. Let upsd see the nodes' own addresses (for a Docker Swarm service, publish its port with `mode: host` rather than through the ingress), or switch on **Protected another way** for each node, on the Powers tab or the node's Power card. The same switch covers a node shut down by other software, such as a UPS vendor's own agent. It needs `manage:ups`.
+
+**upsmon over IPv6.** Interfaces are matched by their IPv4 addresses, so a login over IPv6 is found only when it comes from the node's cluster address. Point the node's `MONITOR` line at upsd's IPv4 address, or switch on **Protected another way** for it.
+
 ### Polling and History
 
 Every enabled server is read every **10 seconds**, tuned with `NUT_POLL_INTERVAL` (minimum `2s`). `0` stops polling every server, and within two minutes every UPS reads as unreachable and counts toward `ups_unreachable`; to stop watching one server, turn its polling off instead. A server that stops answering is retried after 10 seconds, doubling up to 5 minutes. Readings are kept at full resolution for 30 days; 5-minute and hourly rollups, which the longer chart ranges read, are kept without a limit.
@@ -1048,8 +1091,8 @@ Every enabled server is read every **10 seconds**, tuned with `NUT_POLL_INTERVAL
 
 | Permission | Allows | Granted to |
 |------------|--------|------------|
-| `view:ups` | The Power page, UPS issues in the health pill, the UPS dashboard widget | Viewer, Operator, Admin |
-| `manage:ups` | Adding, editing and testing NUT servers | Operator, Admin |
+| `view:ups` | The Power page, UPS issues in the health pill, the UPS dashboard widget, a node's Power card, the topology's Power overlay | Viewer, Operator, Admin |
+| `manage:ups` | Adding, editing and testing NUT servers; adding and removing what a UPS powers, and marking a node protected another way (with `view:node` on the node's cluster); setting the node a NUT server runs on (with a global `view:node`) | Operator, Admin |
 | `delete:ups` | Removing a NUT server and the UPS history collected from it | Operator, Admin |
 
 All three must be held install-wide: the UPS routes refuse a grant held on one cluster, so the Power page and its sidebar link appear only with a global `view:ups`. Custom roles were given the same actions on `ups` as they hold on `pbs` when this arrived.
