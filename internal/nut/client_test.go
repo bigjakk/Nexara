@@ -137,12 +137,12 @@ func TestClient_StartTLS(t *testing.T) {
 	}
 }
 
-// Read-only is the client's one safety property: a LOGIN would make the
-// primary upsmon wait on Nexara before powering the UPS off. A full session
-// through the public API must send only allow-listed verbs, and the choke
-// point must refuse the rest, and a line break smuggled into an argument,
-// before writing anything.
-func TestClient_SendsOnlyReads(t *testing.T) {
+// A LOGIN would make the primary upsmon wait on Nexara before powering the UPS
+// off. A read-only session through the public API must send only reads, and
+// the choke point must refuse LOGIN, PRIMARY, MASTER and FSD on every
+// connection, INSTCMD and SET on one not dialled for commands, and a line
+// break smuggled into an argument, before writing anything.
+func TestClient_SendsOnlyAllowedVerbs(t *testing.T) {
 	t.Parallel()
 	s, cfg := newFake(t)
 	cfg.Username, cfg.Password = "nexara", `pa ss"\wo#rd`
@@ -165,26 +165,32 @@ func TestClient_SendsOnlyReads(t *testing.T) {
 		t.Errorf("password not quoted for upsd; received %q", got)
 	}
 
-	c2 := mustDial(t, cfg)
-	before := len(s.Received())
-	for _, cmd := range [][]string{
-		{"LOGIN", "ups01"}, {"PRIMARY", "ups01"}, {"MASTER", "ups01"}, {"FSD", "ups01"},
-		{"INSTCMD", "ups01", "load.off"}, {"SET", "VAR", "ups01", "ups.delay.shutdown", "1"},
-		{"LIST", "VAR", "ups01\nLOGIN ups01"},
-	} {
-		if err := c2.write(ctx, cmd[0], cmd[1:]...); err == nil {
-			t.Errorf("write(%q) was allowed", cmd)
-		} else if cmd[0] != "LIST" && !errors.Is(err, ErrVerbNotAllowed) {
-			t.Errorf("write(%q) err = %v", cmd, err)
+	for _, commands := range []bool{false, true} {
+		cfg.Commands = commands
+		c2 := mustDial(t, cfg)
+		before := len(s.Received())
+		refused := [][]string{
+			{"LOGIN", "ups01"}, {"PRIMARY", "ups01"}, {"MASTER", "ups01"}, {"FSD", "ups01"},
+			{"LIST", "VAR", "ups01\nLOGIN ups01"}, {"SET", "VAR", "ups01", "x", "1\nFSD ups01"},
 		}
-	}
-	// A round trip after the refusals: once its reply is back, anything a
-	// refused write had sent would already be in the fake's log ahead of it.
-	if _, _, err := c2.Versions(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if after := s.Received()[before:]; !slices.Equal(after, []string{"VER", "NETVER"}) {
-		t.Errorf("server received %q after the refusals, want only VER and NETVER", after)
+		if !commands {
+			refused = append(refused, []string{"INSTCMD", "ups01", "load.off"}, []string{"SET", "TRACKING", "ON"})
+		}
+		for _, cmd := range refused {
+			if err := c2.write(ctx, cmd[0], cmd[1:]...); err == nil {
+				t.Errorf("commands=%v: write(%q) was allowed", commands, cmd)
+			} else if !strings.ContainsAny(strings.Join(cmd, " "), "\n") && !errors.Is(err, ErrVerbNotAllowed) {
+				t.Errorf("commands=%v: write(%q) err = %v", commands, cmd, err)
+			}
+		}
+		// A round trip after the refusals: once its reply is back, anything a
+		// refused write had sent would already be in the fake's log ahead of it.
+		if _, _, err := c2.Versions(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if after := s.Received()[before:]; !slices.Equal(after, []string{"VER", "NETVER"}) {
+			t.Errorf("commands=%v: server received %q after the refusals, want only VER and NETVER", commands, after)
+		}
 	}
 }
 

@@ -1,13 +1,14 @@
-// Package nut is a read-only client for upsd, the Network UPS Tools network
-// server (TCP 3493).
+// Package nut is a client for upsd, the Network UPS Tools network server (TCP
+// 3493). A connection is read-only unless it is dialled with Config.Commands,
+// which also lets it run instant commands and set variables.
 //
-// Read-only is enforced, not assumed. Every command goes through Client.write,
-// which refuses any verb outside allowedVerbs, and any argument holding a line
-// break, before a byte is written. In particular the client can never send
-// LOGIN, PRIMARY/MASTER or FSD. LOGIN registers the caller as a upsmon
-// secondary, and the primary upsmon waits for the number of attached
-// secondaries to fall to itself before it powers the UPS off: a Nexara that
-// logged in would delay the shutdown every node relies on.
+// Both limits are enforced, not assumed. Every command goes through
+// Client.write, which refuses any verb the connection may not send, and any
+// argument holding a line break, before a byte is written. In particular the
+// client can never send LOGIN, PRIMARY/MASTER or FSD. LOGIN registers the
+// caller as a upsmon secondary, and the primary upsmon waits for the number of
+// attached secondaries to fall to itself before it powers the UPS off: a
+// Nexara that logged in would delay the shutdown every node relies on.
 //
 // The wire format was checked against upsd 2.8.1; the fidelity table in
 // nuttest records what that server answered.
@@ -65,11 +66,14 @@ type Config struct {
 	// Port is the upsd port; 0 means DefaultPort.
 	Port int
 	// Username and Password are sent with USERNAME/PASSWORD when set. upsd
-	// needs them for privileged commands, which this client never sends, but
-	// a server may also demand them before it answers reads.
+	// needs them for INSTCMD and SET, and a server may also demand them
+	// before it answers reads.
 	Username string
 	Password string
 	TLS      TLSMode
+	// Commands lets the connection send INSTCMD and SET, which change the UPS.
+	// Without it the connection is read-only.
+	Commands bool
 	// VerifyTLS and Fingerprint follow internal/veeam's precedence: a pinned
 	// leaf fingerprint wins, then VerifyTLS=false skips verification, and
 	// otherwise the system CA pool verifies the chain.
@@ -95,11 +99,12 @@ type Client struct {
 	timeout     time.Duration
 	broken      error
 	fingerprint string
+	commands    bool
 }
 
-// allowedVerbs is the whole of what this client may say. Every GET and LIST
-// subcommand is a read. LOGIN, PRIMARY, MASTER and FSD are absent for the
-// reason in the package comment; INSTCMD and SET would change the UPS.
+// allowedVerbs is what any connection may say. Every GET and LIST subcommand
+// is a read. LOGIN, PRIMARY, MASTER and FSD are absent here and from
+// commandVerbs for the reason in the package comment.
 var allowedVerbs = map[string]bool{
 	"VER":      true,
 	"NETVER":   true,
@@ -115,7 +120,7 @@ var allowedVerbs = map[string]bool{
 var (
 	// ErrVerbNotAllowed is returned, before anything is written, for a verb
 	// outside allowedVerbs.
-	ErrVerbNotAllowed = errors.New("nut: command not allowed for a read-only client")
+	ErrVerbNotAllowed = errors.New("nut: command not allowed on this connection")
 	// ErrTLSUnavailable means STARTTLS was required and the server refused it.
 	// The client never falls back to plain text on its own.
 	ErrTLSUnavailable = errors.New("nut: server does not offer STARTTLS")
@@ -152,7 +157,7 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nut: dial %s: %w", addr, err)
 	}
-	c := &Client{conn: conn, r: bufio.NewReaderSize(conn, maxLineBytes), timeout: timeout}
+	c := &Client{conn: conn, r: bufio.NewReaderSize(conn, maxLineBytes), timeout: timeout, commands: cfg.Commands}
 	if err := c.setup(ctx, cfg); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -343,14 +348,20 @@ func (c *Client) ListUPS(ctx context.Context) ([]UPS, error) {
 func (c *Client) ListVars(ctx context.Context, ups string) (map[string]string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	rows, err := c.list(ctx, "VAR", ups)
+	return c.listValues(ctx, "VAR", ups)
+}
+
+// listValues reads LIST VAR or LIST RW, whose lines are "<kind> <ups> <var>
+// <value>".
+func (c *Client) listValues(ctx context.Context, kind, ups string) (map[string]string, error) {
+	rows, err := c.list(ctx, kind, ups)
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[string]string, len(rows))
 	for _, r := range rows {
-		if len(r) < 4 || r[0] != "VAR" || r[1] != ups {
-			return nil, fmt.Errorf("nut: unexpected LIST VAR line %q", clip(strings.Join(r, " "), 64))
+		if len(r) < 4 || r[0] != kind || r[1] != ups {
+			return nil, fmt.Errorf("nut: unexpected LIST %s line %q", kind, clip(strings.Join(r, " "), 64))
 		}
 		out[r[2]] = r[3]
 	}
@@ -385,9 +396,9 @@ func (c *Client) ListClients(ctx context.Context, ups string) ([]netip.Addr, err
 	return out, nil
 }
 
-// noDescription is upsd 2.8.1's placeholder: GET DESC answers it for a
-// variable it has no text for, instead of an ERR, and LIST UPS for a UPS with
-// no desc in ups.conf.
+// noDescription is upsd 2.8.1's placeholder: GET DESC and GET CMDDESC answer
+// it for a variable or command it has no text for, instead of an ERR, and
+// LIST UPS for a UPS with no desc in ups.conf.
 const noDescription = "Description unavailable"
 
 // VarDescription returns upsd's description of a variable, "" when it has none
@@ -395,7 +406,13 @@ const noDescription = "Description unavailable"
 func (c *Client) VarDescription(ctx context.Context, ups, name string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	line, err := c.roundTrip(ctx, "GET", "DESC", ups, name)
+	return c.describe(ctx, "DESC", ups, name)
+}
+
+// describe sends GET DESC or GET CMDDESC, whose reply is "<kind> <ups> <name>
+// <text>".
+func (c *Client) describe(ctx context.Context, kind, ups, name string) (string, error) {
+	line, err := c.roundTrip(ctx, "GET", kind, ups, name)
 	if errors.Is(err, errReplyCut) {
 		return "", nil
 	}
@@ -406,8 +423,8 @@ func (c *Client) VarDescription(ctx context.Context, ups, name string) (string, 
 	if err != nil {
 		return "", err
 	}
-	if len(toks) < 4 || toks[0] != "DESC" {
-		return "", fmt.Errorf("nut: unexpected GET DESC reply %q", clip(line, 64))
+	if len(toks) < 4 || toks[0] != kind {
+		return "", fmt.Errorf("nut: unexpected GET %s reply %q", kind, clip(line, 64))
 	}
 	if toks[3] == noDescription {
 		return "", nil
@@ -541,7 +558,7 @@ func (c *Client) fail(ctx context.Context, verb string, err error) error {
 
 // write is the only path to the wire.
 func (c *Client) write(ctx context.Context, verb string, args ...string) error {
-	if !allowedVerbs[verb] {
+	if !allowedVerbs[verb] && (!c.commands || !commandVerbs[verb]) {
 		return fmt.Errorf("%w: %s", ErrVerbNotAllowed, verb)
 	}
 	var b strings.Builder

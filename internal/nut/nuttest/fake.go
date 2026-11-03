@@ -1,8 +1,8 @@
 // Package nuttest is an in-process fake upsd for tests. It answers the
-// read-only commands internal/nut sends, in upsd 2.8.1's wire format (the
-// fidelity table in fake_test.go holds what that server really said), and it
-// records every command line it receives, so a test can assert what a client
-// sent and what it never sent.
+// commands internal/nut sends, in upsd 2.8.1's wire format (the fidelity
+// table in fake_test.go holds what that server really said), and it records
+// every command line it receives, so a test can assert what a client sent and
+// what it never sent.
 //
 // It must not import internal/nut: that package's own tests use this one.
 package nuttest
@@ -17,11 +17,13 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -41,6 +43,33 @@ type Device struct {
 	// Clients are the addresses logged in to the UPS, one per connection, as
 	// LIST CLIENT lists them.
 	Clients []string
+	// Commands are what LIST CMD lists, and CmdDescs the GET CMDDESC answers.
+	Commands []string
+	CmdDescs map[string]string
+	// Types holds a variable's GET TYPE words, such as "RW STRING:32"; one
+	// missing here reads "NUMBER". LIST RW lists the variables marked RW, and
+	// SET VAR sets only those, within their STRING:n, Enums and Ranges.
+	Types  map[string]string
+	Enums  map[string][]string
+	Ranges map[string][][2]int
+	// Outcomes is what GET TRACKING reports for a command, or a SET VAR of a
+	// variable, by its name: "SUCCESS" by default, an ERR line such as
+	// "ERR UNKNOWN", or "PENDING" for a driver that never answers.
+	Outcomes map[string]string
+}
+
+// User is an upsd.users account. SET is "actions = SET", and Instcmds the
+// commands it may run, "ALL" for every one.
+type User struct {
+	Password string
+	SET      bool
+	Instcmds []string
+}
+
+// session is one connection's state.
+type session struct {
+	username, password string
+	tracking           bool
 }
 
 // Server is a fake upsd on 127.0.0.1.
@@ -56,6 +85,16 @@ type Server struct {
 	received []string
 	// passwords is each PASSWORD argument as upsd's tokenizer reads it.
 	passwords []string
+	users     map[string]User
+	// tracked maps a tracking id to its outcome and the reads left that
+	// answer PENDING first.
+	tracked      map[string]*trackedRun
+	pendingReads int
+}
+
+type trackedRun struct {
+	outcome string
+	pending int
 }
 
 // NewServer starts a fake upsd that stops when the test ends.
@@ -70,6 +109,8 @@ func NewServer(t testing.TB) *Server {
 		devices:  make(map[string]Device),
 		failures: make(map[string]string),
 		conns:    make(map[net.Conn]struct{}),
+		users:    make(map[string]User),
+		tracked:  make(map[string]*trackedRun),
 	}
 	go s.serve()
 	t.Cleanup(s.Close)
@@ -93,6 +134,22 @@ func (s *Server) SetDevice(name string, d Device) {
 	d.Vars = vars
 	d.Clients = slices.Clone(d.Clients)
 	s.devices[name] = d
+}
+
+// SetUser adds or replaces an upsd.users account.
+func (s *Server) SetUser(name string, u User) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.users[name] = u
+}
+
+// SetPendingReads makes each later tracked command answer PENDING to its first
+// n GET TRACKING reads, as a real driver that has not answered yet does
+// (seen on 2026-11-03 for a SET VAR read straight after). Default 0.
+func (s *Server) SetPendingReads(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingReads = n
 }
 
 // SetClients replaces the logins LIST CLIENT reports for a UPS.
@@ -233,13 +290,14 @@ func (s *Server) handle(raw net.Conn) {
 	}()
 	var rw io.ReadWriter = raw
 	r := bufio.NewReader(rw)
+	var sess session
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
 			return
 		}
 		line = strings.TrimRight(line, "\r\n")
-		reply, upgrade, quit := s.answer(line)
+		reply, upgrade, quit := s.answer(&sess, line)
 		if _, err := io.WriteString(rw, upsdCut(reply)); err != nil || quit {
 			return
 		}
@@ -257,7 +315,7 @@ func (s *Server) handle(raw net.Conn) {
 	}
 }
 
-func (s *Server) answer(line string) (reply string, startTLS, quit bool) {
+func (s *Server) answer(sess *session, line string) (reply string, startTLS, quit bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.received = append(s.received, line)
@@ -279,18 +337,19 @@ func (s *Server) answer(line string) (reply string, startTLS, quit bool) {
 	case "LIST":
 		return s.list(f[1:]), false, false
 	case "GET":
-		if len(f) == 4 && f[1] == "DESC" {
-			_, d, ok := s.device(f[2])
-			if !ok {
-				return "ERR UNKNOWN-UPS\n", false, false
-			}
-			desc, ok := d.Descs[f[3]]
-			if !ok {
-				desc = "Description unavailable"
-			}
-			return "DESC " + f[2] + " " + f[3] + " " + quote(desc) + "\n", false, false
+		return s.get(sess, f[1:]), false, false
+	case "SET", "INSTCMD":
+		// upsd wants both credentials sent before these, then checks them
+		// per command.
+		switch {
+		case sess.username == "":
+			return "ERR USERNAME-REQUIRED\n", false, false
+		case sess.password == "":
+			return "ERR PASSWORD-REQUIRED\n", false, false
+		case f[0] == "SET":
+			return s.set(sess, f[1:]), false, false
 		}
-		return "ERR INVALID-ARGUMENT\n", false, false
+		return s.instcmd(sess, f[1:]), false, false
 	case "STARTTLS":
 		if s.tlsCfg == nil {
 			return "ERR FEATURE-NOT-CONFIGURED\n", false, false
@@ -300,8 +359,17 @@ func (s *Server) answer(line string) (reply string, startTLS, quit bool) {
 		if len(f) != 2 {
 			return "ERR INVALID-ARGUMENT\n", false, false
 		}
-		if f[0] == "PASSWORD" {
+		// upsd keeps the first of each a connection sends.
+		switch {
+		case f[0] == "USERNAME" && sess.username != "":
+			return "ERR ALREADY-SET-USERNAME\n", false, false
+		case f[0] == "PASSWORD" && sess.password != "":
+			return "ERR ALREADY-SET-PASSWORD\n", false, false
+		case f[0] == "PASSWORD":
 			s.passwords = append(s.passwords, f[1])
+			sess.password = f[1]
+		default:
+			sess.username = f[1]
 		}
 		return "OK\n", false, false
 	case "LOGOUT":
@@ -333,6 +401,44 @@ func (s *Server) list(args []string) string {
 			b.WriteString("VAR " + args[1] + " " + k + " " + quote(d.Vars[k]) + "\n")
 		}
 		b.WriteString("END LIST VAR " + args[1] + "\n")
+	case len(args) == 2 && (args[0] == "CMD" || args[0] == "RW"):
+		_, d, ok := s.device(args[1])
+		if !ok {
+			return "ERR UNKNOWN-UPS\n"
+		}
+		b.WriteString("BEGIN LIST " + args[0] + " " + args[1] + "\n")
+		if args[0] == "CMD" {
+			for _, c := range slices.Sorted(slices.Values(d.Commands)) {
+				b.WriteString("CMD " + args[1] + " " + c + "\n")
+			}
+		} else {
+			for _, k := range sortedKeys(d.Vars) {
+				if writable(d.Types[k]) {
+					b.WriteString("RW " + args[1] + " " + k + " " + quote(d.Vars[k]) + "\n")
+				}
+			}
+		}
+		b.WriteString("END LIST " + args[0] + " " + args[1] + "\n")
+	case len(args) == 3 && (args[0] == "ENUM" || args[0] == "RANGE"):
+		_, d, ok := s.device(args[1])
+		if !ok {
+			return "ERR UNKNOWN-UPS\n"
+		}
+		if _, ok := d.Vars[args[2]]; !ok {
+			return "ERR VAR-NOT-SUPPORTED\n"
+		}
+		head := args[0] + " " + args[1] + " " + args[2]
+		b.WriteString("BEGIN LIST " + head + "\n")
+		if args[0] == "ENUM" {
+			for _, v := range d.Enums[args[2]] {
+				b.WriteString(head + " " + quote(v) + "\n")
+			}
+		} else {
+			for _, r := range d.Ranges[args[2]] {
+				b.WriteString(head + " " + quote(strconv.Itoa(r[0])) + " " + quote(strconv.Itoa(r[1])) + "\n")
+			}
+		}
+		b.WriteString("END LIST " + head + "\n")
 	case len(args) == 2 && args[0] == "CLIENT":
 		name, d, ok := s.device(args[1])
 		if !ok {
@@ -348,6 +454,158 @@ func (s *Server) list(args []string) string {
 		return "ERR INVALID-ARGUMENT\n"
 	}
 	return b.String()
+}
+
+// get answers GET VAR, DESC, CMDDESC, TYPE and TRACKING.
+func (s *Server) get(sess *session, args []string) string {
+	if len(args) >= 1 && args[0] == "TRACKING" {
+		switch {
+		case len(args) == 1 && sess.tracking:
+			return "ON\n"
+		case len(args) == 1:
+			return "OFF\n"
+		case !sess.tracking:
+			return "ERR FEATURE-NOT-CONFIGURED\n"
+		}
+		run, ok := s.tracked[args[1]]
+		switch {
+		case !ok:
+			return "ERR UNKNOWN\n"
+		case run.pending > 0:
+			run.pending--
+			return "PENDING\n"
+		}
+		return run.outcome + "\n"
+	}
+	if len(args) != 3 || !slices.Contains([]string{"VAR", "DESC", "CMDDESC", "TYPE"}, args[0]) {
+		return "ERR INVALID-ARGUMENT\n"
+	}
+	_, d, ok := s.device(args[1])
+	if !ok {
+		return "ERR UNKNOWN-UPS\n"
+	}
+	head := args[0] + " " + args[1] + " " + args[2] + " "
+	switch args[0] {
+	case "VAR", "TYPE":
+		value, ok := d.Vars[args[2]]
+		if !ok {
+			return "ERR VAR-NOT-SUPPORTED\n"
+		}
+		if args[0] == "VAR" {
+			return head + quote(value) + "\n"
+		}
+		words := d.Types[args[2]]
+		if words == "" {
+			words = "NUMBER"
+		}
+		return head + words + "\n"
+	case "CMDDESC":
+		return head + quote(describe(d.CmdDescs, args[2])) + "\n"
+	}
+	return head + quote(describe(d.Descs, args[2])) + "\n"
+}
+
+func describe(descs map[string]string, name string) string {
+	if desc, ok := descs[name]; ok {
+		return desc
+	}
+	return "Description unavailable"
+}
+
+// set answers SET TRACKING and SET VAR, checking in upsd's order: the UPS, the
+// account, the variable, then the value.
+func (s *Server) set(sess *session, args []string) string {
+	if len(args) == 2 && args[0] == "TRACKING" && (args[1] == "ON" || args[1] == "OFF") {
+		sess.tracking = args[1] == "ON"
+		return "OK\n"
+	}
+	if len(args) < 4 || args[0] != "VAR" {
+		return "ERR INVALID-ARGUMENT\n"
+	}
+	_, d, ok := s.device(args[1])
+	if !ok {
+		return "ERR UNKNOWN-UPS\n"
+	}
+	if u, ok := s.users[sess.username]; !ok || u.Password != sess.password || !u.SET {
+		return "ERR ACCESS-DENIED\n"
+	}
+	name, value := args[2], args[3]
+	if _, ok := d.Vars[name]; !ok {
+		return "ERR VAR-NOT-SUPPORTED\n"
+	}
+	if !writable(d.Types[name]) {
+		return "ERR READONLY\n"
+	}
+	for _, w := range strings.Fields(d.Types[name]) {
+		if n, ok := strings.CutPrefix(w, "STRING:"); ok {
+			if limit, err := strconv.Atoi(n); err == nil && len(value) > limit {
+				return "ERR TOO-LONG\n"
+			}
+		}
+	}
+	if enum := d.Enums[name]; len(enum) > 0 && !slices.Contains(enum, value) {
+		return "ERR INVALID-VALUE\n"
+	}
+	if ranges := d.Ranges[name]; len(ranges) > 0 {
+		v := atoi(value)
+		if !slices.ContainsFunc(ranges, func(r [2]int) bool { return v >= r[0] && v <= r[1] }) {
+			return "ERR INVALID-VALUE\n"
+		}
+	}
+	// A driver that refuses the value, or never answers, keeps the old one.
+	if o := d.Outcomes[name]; o == "" || o == "SUCCESS" {
+		d.Vars[name] = value
+	}
+	return s.handled(sess, d.Outcomes[name])
+}
+
+// instcmd answers INSTCMD <ups> <cmd> [<arg>], checking the UPS, the command,
+// then the account, as upsd does.
+func (s *Server) instcmd(sess *session, args []string) string {
+	if len(args) < 2 {
+		return "ERR INVALID-ARGUMENT\n"
+	}
+	_, d, ok := s.device(args[0])
+	if !ok {
+		return "ERR UNKNOWN-UPS\n"
+	}
+	if !slices.Contains(d.Commands, args[1]) {
+		return "ERR CMD-NOT-SUPPORTED\n"
+	}
+	u, ok := s.users[sess.username]
+	if !ok || u.Password != sess.password || (!slices.Contains(u.Instcmds, "ALL") && !slices.Contains(u.Instcmds, args[1])) {
+		return "ERR ACCESS-DENIED\n"
+	}
+	return s.handled(sess, d.Outcomes[args[1]])
+}
+
+// handled is the reply to a command upsd passed to the driver: an id to track
+// it by when tracking is on.
+func (s *Server) handled(sess *session, outcome string) string {
+	if !sess.tracking {
+		return "OK\n"
+	}
+	if outcome == "" {
+		outcome = "SUCCESS"
+	}
+	id := fmt.Sprintf("00000000-0000-4000-8000-%012X", len(s.tracked)+1)
+	s.tracked[id] = &trackedRun{outcome: outcome, pending: s.pendingReads}
+	return "OK TRACKING " + id + "\n"
+}
+
+func writable(types string) bool {
+	return slices.Contains(strings.Fields(types), "RW")
+}
+
+// atoi reads a number as C's atoi does: leading digits, 0 for none.
+func atoi(v string) int {
+	v = strings.TrimSpace(v)
+	end := 0
+	for end < len(v) && (v[end] >= '0' && v[end] <= '9' || end == 0 && (v[end] == '-' || v[end] == '+')) {
+		end++
+	}
+	n, _ := strconv.Atoi(v[:end])
+	return n
 }
 
 // upsdCut applies upsd's reply buffer to each line: sendback() formats a line
