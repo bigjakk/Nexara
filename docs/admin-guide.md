@@ -1035,9 +1035,9 @@ Changing the host or port of a saved server requires re-entering its password: a
 - **NUT servers** — each server's upsd and protocol versions, when it was last read, and the last error, with a **Test** button that checks a saved server's connection.
 - **Power events** — outages, low battery, overloads, bypass, voltage correction, a battery that needs replacing, lost contact, stale driver data, and self-test results. Expand a row for the lowest charge and runtime and the peak load seen during it.
 
-Click a UPS for its detail page: charts of charge, runtime, load and input voltage over 1 hour to 7 days (the input's lowest and highest reading in each bucket show sags and surges, and shaded spans mark time on battery), every variable upsd reports with its description, and the UPS's own events.
+Click a UPS for its detail page: charts of charge, runtime, load and input voltage over 1 hour to 7 days (the input's lowest and highest reading in each bucket show sags and surges, and shaded spans mark time on battery), every variable upsd reports with its description, the UPS's own events, its maintenance windows, and its **History** (see A UPS's History). The search palette (Ctrl+K) finds a UPS by its name, description, model or NUT server, and the Power page by "power", "ups" or "nut", for a holder of a global `view:ups`.
 
-**A UPS Nexara cannot read shows that, never its last state.** **Unreachable** means upsd did not answer, **Driver down** that upsd answered but its driver for that UPS is not connected, and **Data stale** that the driver stopped updating. A reading older than three poll intervals (and at least two minutes), while upsd last answered, shows **No recent reading**: the poller stopped reading it. A server whose polling is turned off (**Poll this server**, in its Edit dialog) shows **Polling off**, keeps its history, and is left out of the alerts.
+**A UPS Nexara cannot read shows that, never its last state.** **Unreachable** means upsd did not answer (**Rolling update** instead, when its NUT server runs on a node a rolling update is upgrading or rebooting and you may see that node; see UPS Alerts), **Driver down** that upsd answered but its driver for that UPS is not connected, and **Data stale** that the driver stopped updating. A reading older than three poll intervals (and at least two minutes), while upsd last answered, shows **No recent reading**: the poller stopped reading it. A server whose polling is turned off (**Poll this server**, in its Edit dialog) shows **Polling off**, keeps its history, and is left out of the alerts.
 
 An event's end that Nexara did not see is marked on its duration. **≤** means contact was lost and the condition had cleared by the next reading, so it lasted at most that long. **≥** means Nexara stopped watching while it was still going: polling was turned off, or upsd stopped listing the UPS.
 
@@ -1133,7 +1133,7 @@ All four must be held install-wide: the UPS routes refuse a grant held on one cl
 
 ### UPS Alerts
 
-Six metrics read the UPS readings and are configured like any other alert rule. They are **global scope only**: a NUT server belongs to no cluster, so a rule judges every UPS and its alert names the worst one, as `ups@server`.
+Six metrics read the UPS readings and are configured like any other alert rule. A NUT server belongs to no cluster, so a rule has one of two scopes: **Global (all UPS)** judges every UPS and its alert names the worst one, as `ups@server`; **One UPS** judges the UPS it names. Either needs a global `manage:alert`, and a rule naming one UPS a global `view:ups` too, since its alerts carry that UPS's readings. Removing a NUT server removes the rules that name one of its UPSes, with their alerts.
 
 | Metric | Unit | Meaning |
 |--------|------|---------|
@@ -1146,11 +1146,12 @@ Six metrics read the UPS readings and are configured like any other alert rule. 
 
 - **A UPS Nexara cannot read holds a rule only if it could tip it.** Rules are judged on the UPSes Nexara can read. If one it cannot read was last seen meeting the condition (the UPS that was on battery went silent), the rule neither fires nor resolves until it reads again; otherwise it is judged without that UPS, and the alert's text says how many were not read. So a broken `ups.conf` entry cannot silence the others. `ups_unreachable` is the rule that tells you a UPS cannot be read, so pair the others with it.
 - **A server with polling turned off is left out** of every rule, `ups_unreachable` included.
+- **A UPS under a maintenance window** (see Maintenance Windows) drops out of the global rules, and the rules naming it hold: they neither fire nor resolve while the window is open. A global rule that only the UPS under a window would trip holds too, so opening a window during an outage does not report it over.
+- **A rolling update that reboots a NUT server's node** — upgrading, rebooting or health-checking it, in a running job — reads that server's UPSes as down for the update: `ups_unreachable` leaves them out, and holds where they alone would trip it (a rule naming one holds), so an alert neither fires nor resolves for them. For a viewer who may see the server's host node (`view:node` on its cluster), the health pill says "NUT server rebooting for a rolling update" instead of "UPS unreachable" and the UPS reads **Rolling update**; anyone else sees it unreachable, since that would say a rolling update is running there. That lasts until Nexara has read the UPS again, at most ten minutes after the node is back, since the poller retries a server it lost on a backoff of up to five minutes. It needs the server's host node to be known (see What Each UPS Powers); a paused job's node is not counted, so a real failure during a long pause alerts.
 - **A forced shutdown on mains is not an outage.** `ups_on_battery` counts UPSes on battery, so the FSD that `upsmon -c fsd` sets during a shutdown test does not trip it.
 - The form starts charge and runtime rules at **<**, since those watch a level running down, and the on-battery, charge and runtime rules with **no cooldown**: the cooldown runs from when the last alert resolved, and an hour of it would swallow the second outage of a storm.
 - Rules are evaluated every 60 seconds, so an on-battery alert arrives within about a minute of the switch, plus the rule's Duration.
 
-Two limits for now: there is no per-UPS rule, and maintenance windows belong to a cluster, so none can silence a UPS rule. Disable the rule during a battery swap instead.
 
 ---
 
@@ -1303,7 +1304,7 @@ Escalation only advances while the alert is still firing **and** unacknowledged 
 
 ### Maintenance Windows
 
-Maintenance windows suppress alert evaluation for a cluster (or a single node in it) during a planned outage. They are currently **API-only** — there is no page for them yet:
+Maintenance windows suppress alert evaluation for a cluster (or a single node in it), or for one UPS, during a planned outage. A **UPS's windows** are on its detail page, in the Overview's **Maintenance windows** card: open one for a battery swap, say, and the UPS drops out of the global UPS rules while the rules naming it hold (see UPS Alerts). They need `view:ups` with `view:maintenance_window` to see them and with `manage:maintenance_window` to change them, all held install-wide (a cluster's `maintenance_window` grant does not show the card), and each change is in the UPS's History. A cluster's windows are **API-only** — there is no page for them yet:
 
 ```bash
 curl -X POST https://nexara.example.com/api/v1/clusters/$CLUSTER_ID/maintenance-windows \
@@ -1592,6 +1593,10 @@ Failed tasks surface the error message from Proxmox in the UI — failures are n
 Both live on the **Events** page in the sidebar: the **Audit Log** tab, and a **Tasks** tab for anyone holding `view:task`. Reaching the page at all requires `view:audit`, which every built-in role has — including Viewer, so assume audit rows are readable by any signed-in user.
 
 Filter the audit log by cluster, resource type, user, action, source, severity and time range. What you see is scoped to the clusters your roles reach.
+
+### A UPS's History
+
+Every UPS page has a **History** tab: its power events (each at its start, with how long it lasted and what the battery got down to), and what was done to it through Nexara: commands run, settings changed, what it powers added, removed or marked protected another way (not a node found from its `upsmon` login), and its maintenance windows. Filter by type and time; it opens on the last 7 days. An episode that began before the window is not in it, even while it is still going: the Power events tab beside it lists the newest ones whatever their start. It needs `view:audit` and `view:ups`, both install-wide.
 
 ### A Guest's History
 

@@ -1764,6 +1764,11 @@ not counted at all, since that is lost track of rather than failed.
 | POST | `/ups-devices/:id/commands` | Run an instant command (`command`, and an optional `parameter`) through the server's stored account (`execute:ups`). Answers 202 with the run; one whose `confirm` is `typed` (it cuts the UPS's power) needs `confirm` set to the UPS's name, and `manage:node` on every cluster with a node the UPS powers or has powered and on its NUT server's host node's cluster (everywhere when Nexara knows none) |
 | PUT | `/ups-devices/:id/vars/:name` | Set a writable variable (`value`), checked as upsd checks it (`manage:ups`; one with `affects_power` also needs `execute:ups` and `manage:node` on those clusters, and one whose `confirm` is `typed`, `driver.flag.allow_killpower`, `confirm` set to the UPS's name). Answers 202 with the run |
 | GET | `/ups-devices/:id/command-runs` | The newest 50 command runs and variable sets, with who asked and the outcome: `sent`, `pending`, `succeeded`, `failed` or `unconfirmed` |
+| GET | `/ups-devices/:id/history` | The UPS's History: power events (`kind: power`, each at its start, its end and readings in `details`), commands and settings, feed changes and maintenance windows, newest first. Global `view:audit` and `view:ups`; takes the History filters (`category`, `source`, `start_time`, `end_time`, `all_time`) |
+| GET | `/ups-devices/:id/maintenance-windows` | The UPS's maintenance windows, newest first (`view:ups` and `view:maintenance_window`, both install-wide) |
+| POST | `/ups-devices/:id/maintenance-windows` | Open one: `starts_at`, `ends_at` (RFC 3339) and an optional `description` (`view:ups` and `manage:maintenance_window`, both install-wide) |
+| PUT | `/ups-devices/:id/maintenance-windows/:window_id` | Change one; an omitted or empty field keeps its value. Another UPS's or a cluster's window is a 404 |
+| DELETE | `/ups-devices/:id/maintenance-windows/:window_id` | Remove one |
 
 All of them need a global grant: `view:ups`, `manage:ups` for adding, editing
 and testing and for variables, `delete:ups` for removing, `execute:ups` for
@@ -1820,13 +1825,18 @@ polling is turned off. Adding, changing and removing a feed need `manage:ups`
 (removing one too, not `delete:ups`) and `view:node` on the node's cluster;
 setting the host node needs `manage:ups` and `view:node` install-wide.
 
-Six global-scope alert metrics read the same readings: `ups_on_battery`,
-`ups_unreachable` and `ups_replace_battery` (counts), `ups_battery_charge` and
-`ups_load` (the lowest charge and the highest load, in %), and `ups_runtime`
-(the shortest runtime left, in **minutes**). Rules are judged on the UPSes
-Nexara can read; one it cannot read holds a rule, neither firing nor resolving,
-only while its last reading would meet the condition. A UPS on a server whose
-polling is turned off is left out of every rule.
+Six alert metrics read the same readings, for every UPS (scope `global`) or one
+(scope `ups`, with `ups_id`): `ups_on_battery`, `ups_unreachable` and
+`ups_replace_battery` (counts), `ups_battery_charge` and `ups_load` (the lowest
+charge and the highest load, in %), and `ups_runtime` (the shortest runtime
+left, in **minutes**). Rules are judged on the UPSes Nexara can read; one it
+cannot read holds a rule, neither firing nor resolving, only while its last
+reading would meet the condition. A UPS on a server whose polling is turned off
+is left out of every rule. A UPS under a maintenance window drops out of the
+global rules, and the rules naming it hold, as does a global rule only it would
+trip; `ups_unreachable` treats a UPS whose NUT server's node a running rolling
+update is rebooting the same way, until it is read again (at most ten minutes
+after the node is back).
 
 ### Migrations (Cross-Cluster)
 
@@ -1872,7 +1882,7 @@ polling is turned off is left out of every rule.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/alert-rules` | List alert rules |
-| POST | `/alert-rules` | Create alert rule |
+| POST | `/alert-rules` | Create alert rule. `scope_type` is `cluster`, `node`, `vm`, `global` or, for the six `ups_*` metrics, `ups` with `ups_id` (a global `manage:alert` and `view:ups`) |
 | GET | `/alert-rules/:id` | Get alert rule |
 | PUT | `/alert-rules/:id` | Update alert rule |
 | DELETE | `/alert-rules/:id` | Delete alert rule |
@@ -2259,7 +2269,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/search` | Global search across clusters, VMs, nodes, storage |
+| GET | `/search` | Global search across clusters, VMs, nodes, storage, and, with a global `view:ups`, UPS devices (`type: ups`, with their `server` and no cluster) |
 
 ### API Documentation
 
