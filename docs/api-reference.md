@@ -1882,7 +1882,7 @@ after the node is back).
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/alert-rules` | List alert rules |
-| POST | `/alert-rules` | Create alert rule. `scope_type` is `cluster`, `node`, `vm`, `global` or, for the six `ups_*` metrics, `ups` with `ups_id` (a global `manage:alert` and `view:ups`) |
+| POST | `/alert-rules` | Create alert rule. `scope_type` is `cluster`, `node`, `vm`, `global` or, for the six `ups_*` metrics, `ups` with `ups_id`. A rule on a `ups_*` metric, of any scope, needs a global `manage:alert` and `view:ups`, and so does an update that leaves one enabled |
 | GET | `/alert-rules/:id` | Get alert rule |
 | PUT | `/alert-rules/:id` | Update alert rule |
 | DELETE | `/alert-rules/:id` | Delete alert rule |

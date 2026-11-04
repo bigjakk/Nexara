@@ -236,8 +236,9 @@ export function AlertRuleForm() {
   const [messageTemplate, setMessageTemplate] = useState("");
 
   const createMutation = useCreateAlertRule();
-  // A rule bound to one UPS takes global view:ups on the server, which the
-  // UPS list needs too: without it the choice is not offered.
+  // A rule on a UPS metric, of any scope, takes global view:ups on the server
+  // (its alerts name a UPS and its reading), which the UPS list needs too:
+  // without it neither the metrics nor the scope is offered.
   const { hasGlobalPermission } = usePermissions();
   const canViewUps = hasGlobalPermission("view", "ups");
   const scopes = (m: string) => scopesFor(m).filter((sc) => sc !== "ups" || canViewUps);
@@ -425,7 +426,7 @@ export function AlertRuleForm() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {METRICS.map((m) => (
+                  {METRICS.filter((m) => canViewUps || !UPS_METRICS.has(m.value)).map((m) => (
                     <SelectItem key={m.value} value={m.value}>
                       {m.label}
                     </SelectItem>

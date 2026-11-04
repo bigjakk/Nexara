@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -649,7 +650,8 @@ func resolveNodeCluster(c fiber.Ctx, queries *db.Queries, nodeID uuid.UUID, reso
 //
 // On error the returned scope is zero: a partially merged one has had the
 // node's cluster written into it, and no caller should act on that.
-func (h *AlertHandler) resolveAlertRuleScope(c fiber.Ctx, base alertRuleScope, req createAlertRuleRequest, recheckInherited bool) (alertRuleScope, error) {
+func (h *AlertHandler) resolveAlertRuleScope(c fiber.Ctx, base alertRuleScope, req createAlertRuleRequest, metric string,
+	recheckInherited bool) (alertRuleScope, error) {
 	var zero alertRuleScope
 
 	s := base
@@ -703,12 +705,13 @@ func (h *AlertHandler) resolveAlertRuleScope(c fiber.Ctx, base alertRuleScope, r
 		return zero, err
 	}
 
-	// A rule bound to a UPS reports its readings back in the alerts it raises,
-	// so binding one takes the view of it — global, as every UPS route's is —
-	// checked before the lookup can say whether the UPS exists. An inherited
-	// binding answers for it again while the update leaves the rule live, as
-	// a node's does below.
-	if req.UpsID != "" || (s.ScopeType == "ups" && s.UpsID.Valid && recheckInherited) {
+	// A rule on a UPS metric, of any scope, names a UPS and its reading in the
+	// alerts it raises, so it takes the view of them — global, as every UPS
+	// route's is. Checked before a named UPS is looked up, so nobody learns
+	// whether it exists, and for a stored rule while the update leaves it live
+	// or sets its metric, as a node binding is below: turning one off stays
+	// open to whoever can reach it.
+	if req.UpsID != "" || notifications.IsUPSMetric(metric) && (recheckInherited || req.Metric != "") {
 		if err := requirePerm(c, "view", "ups"); err != nil {
 			return zero, err
 		}
@@ -853,7 +856,7 @@ func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 	// cluster predating this still load, list, and update normally.
 	// recheckInherited is moot on create: the base scope carries no node, so
 	// the only node in play is the one this request supplies and resolves.
-	scope, err := h.resolveAlertRuleScope(c, alertRuleScope{ScopeType: req.ScopeType}, req, true)
+	scope, err := h.resolveAlertRuleScope(c, alertRuleScope{ScopeType: req.ScopeType}, req, req.Metric, true)
 	if err != nil {
 		return err
 	}
@@ -1090,7 +1093,7 @@ func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 		NodeID:    existing.NodeID,
 		VMVmid:    existing.VmVmid,
 		UpsID:     existing.UpsID,
-	}, req, alertRuleScopeTouched(req) || staysEnabled)
+	}, req, cmp.Or(req.Metric, existing.Metric), alertRuleScopeTouched(req) || staysEnabled)
 	if err != nil {
 		return err
 	}

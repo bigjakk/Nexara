@@ -437,3 +437,23 @@ func TestFormatThreshold(t *testing.T) {
 		t.Errorf("formatThreshold(90.5) = %q, want %q", got, "90.50")
 	}
 }
+
+// A firing alert escalates only while its rule still raises it: a rule turned
+// off, or moved to another metric, no longer stands behind it, and its chain,
+// which the same update may have pointed anywhere, is not the alert's.
+func TestRuleStandsBehind(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		rule db.AlertRule
+		want bool
+	}{
+		{"live, same metric", db.AlertRule{Enabled: true, Metric: MetricUPSReplaceBattery}, true},
+		{"turned off", db.AlertRule{Enabled: false, Metric: MetricUPSReplaceBattery}, false},
+		{"moved to another metric", db.AlertRule{Enabled: true, Metric: MetricVeeamRepoUsed}, false},
+	} {
+		if got := ruleStandsBehind(tc.rule, MetricUPSReplaceBattery); got != tc.want {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

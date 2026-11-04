@@ -146,7 +146,16 @@ describe("AlertRuleForm", () => {
     expect(screen.getByLabelText("Threshold")).toHaveValue(104857600);
   });
 
+  // Its alerts name a UPS and its reading, so a UPS metric takes global view:ups.
+  it("offers the UPS metrics only with a global view:ups", async () => {
+    const user = await openForm();
+    await user.click(screen.getByRole("combobox", { name: "Metric" }));
+    expect(await screen.findByRole("option", { name: "CPU Usage (%)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "UPS on Battery (count)" })).not.toBeInTheDocument();
+  });
+
   it("creates a UPS charge rule as global, below 50%", async () => {
+    useAuthStore.setState({ globalPermissions: ["view:ups"] });
     const user = await openForm();
     // "> 50" would fire on every healthy UPS, a NUT server belongs to no
     // cluster, and an hour's cooldown would swallow a storm's second outage:

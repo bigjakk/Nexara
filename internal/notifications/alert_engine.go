@@ -62,14 +62,8 @@ var validMetrics = map[string]bool{
 	//                     that broke.
 	"pve_backup_failed": true,
 	"pve_task_failed":   true,
-	// The UPS metrics read the ups_devices rows the NUT poller keeps current;
-	// global scope only. See alert_ups.go.
-	MetricUPSOnBattery:      true,
-	MetricUPSBatteryCharge:  true,
-	MetricUPSRuntime:        true,
-	MetricUPSLoad:           true,
-	MetricUPSUnreachable:    true,
-	MetricUPSReplaceBattery: true,
+	// The UPS metrics, which read the ups_devices rows the NUT poller keeps
+	// current, are upsMetrics (alert_ups.go), read by ValidMetric.
 }
 
 // Veeam metric names, referenced by both the engine and the API's scope
@@ -118,6 +112,10 @@ func MetricBounds(metric string) (MetricBound, bool) {
 // unsupported pairing at create time rather than letting the engine error out
 // once per tick, forever, on a rule that can never fire.
 func MetricScopes(metric string) []string {
+	if IsUPSMetric(metric) {
+		// Every UPS, or the one the rule names (ups_id).
+		return []string{"global", "ups"}
+	}
 	switch metric {
 	case MetricPVETaskFailed, MetricPVEBackupFailed:
 		// A task belongs to a node, but the rule stores a node UUID while the
@@ -128,10 +126,6 @@ func MetricScopes(metric string) []string {
 		return []string{"cluster", "vm"}
 	case MetricVeeamRepoUsed:
 		return []string{"global"}
-	case MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSRuntime, MetricUPSLoad, MetricUPSUnreachable,
-		MetricUPSReplaceBattery:
-		// Every UPS, or the one the rule names (ups_id).
-		return []string{"global", "ups"}
 	case MetricVeeamJobFailed:
 		return []string{"cluster"}
 	default:
@@ -187,7 +181,7 @@ func pendingDuration(rule db.AlertRule) time.Duration {
 
 // ValidMetric returns true if the metric name is supported.
 func ValidMetric(m string) bool {
-	return validMetrics[m]
+	return validMetrics[m] || IsUPSMetric(m)
 }
 
 // Engine evaluates alert rules against incoming metrics.
@@ -277,8 +271,8 @@ func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []
 	case MetricPVETaskFailed:
 		// "" = any worker type.
 		return e.evaluatePVETaskFailedRule(ctx, rule, windows, "")
-	case MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSRuntime,
-		MetricUPSLoad, MetricUPSUnreachable, MetricUPSReplaceBattery:
+	}
+	if IsUPSMetric(rule.Metric) {
 		// No cluster's maintenance window applies to a UPS; its own do.
 		return e.evaluateUPSRule(ctx, rule, windows)
 	}
@@ -790,6 +784,14 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 }
 
 // checkEscalations looks for firing alerts that need escalation.
+// ruleStandsBehind reports whether a firing alert's rule still raises it: one
+// turned off, or moved to another metric, escalates it no further. Turning a
+// rule off is how an operator stops a bad one, and its chain — which the same
+// update may have pointed anywhere — is no longer the alert's to follow.
+func ruleStandsBehind(rule db.AlertRule, alertMetric string) bool {
+	return rule.Enabled && rule.Metric == alertMetric
+}
+
 func (e *Engine) checkEscalations(ctx context.Context) {
 	alerts, err := e.queries.ListFiringUnacknowledged(ctx)
 	if err != nil {
@@ -799,7 +801,7 @@ func (e *Engine) checkEscalations(ctx context.Context) {
 
 	for _, alert := range alerts {
 		rule, err := e.queries.GetAlertRule(ctx, alert.RuleID)
-		if err != nil {
+		if err != nil || !ruleStandsBehind(rule, alert.Metric) {
 			continue
 		}
 

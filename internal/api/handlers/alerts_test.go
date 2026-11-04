@@ -531,6 +531,13 @@ func TestCreateRule_GatesAndScopeBindings(t *testing.T) {
 			status: http.StatusForbidden,
 		},
 		{
+			// Its alerts name the worst UPS and its reading, as a UPS's rule's do.
+			name:   "a rule on a UPS metric needs view:ups at global scope too",
+			role:   "alert-manager",
+			body:   `{"name":"x","metric":"ups_on_battery","operator":">","threshold":0,"scope_type":"global"}`,
+			status: http.StatusForbidden,
+		},
+		{
 			name:   "binding a UPS needs view:ups before the UPS is looked up",
 			role:   "alert-manager",
 			body:   `{` + ups + `,"ups_id":"` + upsID + `"}`,
@@ -670,5 +677,43 @@ func TestMaxDurationFor(t *testing.T) {
 	if maxWindowedDurationSec <= 7*24*60*60 {
 		t.Errorf("windowed cap %d does not exceed a week, so a weekly backup "+
 			"cannot be covered by its own alert window", maxWindowedDurationSec)
+	}
+}
+
+// A stored rule on a UPS metric answers for view:ups while an update leaves it
+// live, and turning it off stays open to whoever can reach it.
+func TestUpdateRule_UpsMetricNeedsViewUps(t *testing.T) {
+	t.Parallel()
+	rule := db.AlertRule{ID: uuid.New(), Name: "x", Enabled: true, Severity: "warning", Metric: "ups_on_battery",
+		Operator: ">", ScopeType: "global", EscalationChain: json.RawMessage("[]")}
+	for _, tc := range []struct {
+		name, body string
+		want       int
+	}{
+		{"retuned and left live", `{"threshold":1}`, http.StatusForbidden},
+		// Moved to another UPS metric while turned off: still a UPS rule.
+		{"retuned while turned off", `{"metric":"ups_load","enabled":false}`, http.StatusForbidden},
+		{"turned off", `{"enabled":false}`, http.StatusOK},
+	} {
+		dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetAlertRule": rule, "UpdateAlertRule": rule},
+			execOK: map[string]bool{"InsertAuditLog": true}}
+		h := NewAlertHandler(db.New(dbtx), testEncryptionKey, nil, nil)
+		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+		app.Use(func(c fiber.Ctx) error {
+			c.Locals("user_id", uuid.New())
+			c.Locals("rbac_engine", newGrantEngine("manage:alert")) // and no view:ups
+			return c.Next()
+		})
+		app.Put("/alert-rules/:id", h.UpdateRule)
+		req := httptest.NewRequest(http.MethodPut, "/alert-rules/"+rule.ID.String(), bytes.NewReader([]byte(tc.body)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != tc.want {
+			t.Errorf("%s: status %d, want %d", tc.name, resp.StatusCode, tc.want)
+		}
 	}
 }

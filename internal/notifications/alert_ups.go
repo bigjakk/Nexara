@@ -28,6 +28,19 @@ const (
 	MetricUPSReplaceBattery = "ups_replace_battery"
 )
 
+// upsMetrics are the UPS metrics, the one list every reader of them derives
+// from (IsUPSMetric): a metric missing from a second copy would miss the
+// view:ups gate its alerts need.
+var upsMetrics = []string{MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSRuntime, MetricUPSLoad,
+	MetricUPSUnreachable, MetricUPSReplaceBattery}
+
+// IsUPSMetric reports whether a metric reads the UPS readings. Its rules, of
+// any scope, raise alerts that name a UPS and its reading, so they take the
+// global view:ups every UPS route takes.
+func IsUPSMetric(metric string) bool {
+	return slices.Contains(upsMetrics, metric)
+}
+
 // SetUpsPollInterval tells the UPS rules how often readings arrive, so they
 // judge a reading's age as the Power page does (nut.StaleAfter).
 func (e *Engine) SetUpsPollInterval(d time.Duration) { e.upsPollInterval = d }

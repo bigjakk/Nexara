@@ -1124,7 +1124,7 @@ Every enabled server is read every **10 seconds**, tuned with `NUT_POLL_INTERVAL
 
 | Permission | Allows | Granted to |
 |------------|--------|------------|
-| `view:ups` | The Power page, UPS issues in the health pill, the UPS dashboard widget, a node's Power card, the topology's Power overlay | Viewer, Operator, Admin |
+| `view:ups` | The Power page, UPS issues in the health pill, the UPS dashboard widget, a node's Power card, the topology's Power overlay, UPS search results; with `manage:alert`, the UPS alert rules | Viewer, Operator, Admin |
 | `manage:ups` | Adding, editing and testing NUT servers; adding and removing what a UPS powers, and marking a node protected another way (with `view:node` on the node's cluster); setting the node a NUT server runs on (with a global `view:node`); setting a UPS's variables (with `execute:ups` and `manage:node` too for one that can change its power) | Operator, Admin |
 | `execute:ups` | Running a UPS's instant commands (with `manage:node` too for one that cuts its power) | Operator, Admin |
 | `delete:ups` | Removing a NUT server and the UPS history collected from it | Operator, Admin |
@@ -1133,7 +1133,7 @@ All four must be held install-wide: the UPS routes refuse a grant held on one cl
 
 ### UPS Alerts
 
-Six metrics read the UPS readings and are configured like any other alert rule. A NUT server belongs to no cluster, so a rule has one of two scopes: **Global (all UPS)** judges every UPS and its alert names the worst one, as `ups@server`; **One UPS** judges the UPS it names. Either needs a global `manage:alert`, and a rule naming one UPS a global `view:ups` too, since its alerts carry that UPS's readings. Removing a NUT server removes the rules that name one of its UPSes, with their alerts.
+Six metrics read the UPS readings and are configured like any other alert rule. A NUT server belongs to no cluster, so a rule has one of two scopes: **Global (all UPS)** judges every UPS and its alert names the worst one, as `ups@server`; **One UPS** judges the UPS it names. Either needs a global `manage:alert` and a global `view:ups`, since its alerts name a UPS and its reading; the form offers the UPS metrics only with that view, and turning such a rule off needs only `manage:alert`. Removing a NUT server removes the rules that name one of its UPSes, with their alerts.
 
 | Metric | Unit | Meaning |
 |--------|------|---------|
@@ -1300,7 +1300,7 @@ The escalation chain is an ordered list of steps, each naming **one** notificati
 1. **Step 1** — dispatched the moment the alert fires. Its delay is ignored
 2. **Step 2 and later** — dispatched once the alert has been firing for that step's delay, counted **from when the alert fired** (not from the previous step). Give step 2 `15` and step 3 `60` and they land 15 and 60 minutes after the fire, respectively
 
-Escalation only advances while the alert is still firing **and** unacknowledged — acknowledging an alert stops the chain where it is. Resolution notifications go to whichever step the alert had reached.
+Escalation only advances while the alert is still firing **and** unacknowledged, and while its rule is still enabled on the same metric — acknowledging the alert, turning the rule off or changing its metric stops the chain where it is. Resolution notifications go to whichever step the alert had reached.
 
 ### Maintenance Windows
 
