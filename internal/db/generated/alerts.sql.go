@@ -33,9 +33,11 @@ func (q *Queries) AcknowledgeAlert(ctx context.Context, arg AcknowledgeAlertPara
 const autoResolveAlert = `-- name: AutoResolveAlert :exec
 UPDATE alert_history
 SET state = 'resolved', resolved_at = now()
-WHERE id = $1 AND state IN ('pending', 'firing')
+WHERE id = $1 AND state IN ('pending', 'firing', 'acknowledged')
 `
 
+// An acknowledged alert is still active: it resolves when its condition
+// clears, as a firing one does.
 func (q *Queries) AutoResolveAlert(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, autoResolveAlert, id)
 	return err

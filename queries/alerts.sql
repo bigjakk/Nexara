@@ -129,9 +129,11 @@ SET state = 'resolved', resolved_at = now(), resolved_by = $2
 WHERE id = $1 AND state IN ('firing', 'acknowledged');
 
 -- name: AutoResolveAlert :exec
+-- An acknowledged alert is still active: it resolves when its condition
+-- clears, as a firing one does.
 UPDATE alert_history
 SET state = 'resolved', resolved_at = now()
-WHERE id = $1 AND state IN ('pending', 'firing');
+WHERE id = $1 AND state IN ('pending', 'firing', 'acknowledged');
 
 -- GetLatestAlertForRule backs the engine's dedup/transition/resolve logic.
 -- The node param MUST be sqlc.narg (nullable pgtype.UUID): with a plain @

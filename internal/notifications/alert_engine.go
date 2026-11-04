@@ -682,7 +682,7 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 		// alert" — that would insert a duplicate row every tick.
 		return fmt.Errorf("lookup existing alert: %w", err)
 	}
-	hasExisting := err == nil && (existing.State == "pending" || existing.State == "firing")
+	hasExisting := err == nil && alertActive(existing.State)
 
 	if conditionMet {
 		if hasExisting {
@@ -699,7 +699,7 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 					e.dispatchForRule(ctx, rule, existing.ID, value, resourceName, "firing", 0)
 				}
 			}
-			// Already firing — nothing to do (deduplication).
+			// Already firing or acknowledged — nothing to do (deduplication).
 			return nil
 		}
 
@@ -775,12 +775,29 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 			return fmt.Errorf("auto-resolve: %w", err)
 		}
 		e.logger.Info("alert auto-resolved",
-			"rule", rule.Name, "resource", resourceName, "alert_id", existing.ID)
+			"rule", rule.Name, "resource", resourceName, "alert_id", existing.ID, "was", existing.State)
 		e.publishAlertEvent(ctx, rule, existing.ID, "resolved")
-		e.dispatchForRule(ctx, rule, existing.ID, value, resourceName, "resolved", int(existing.EscalationLevel))
+		if resolveNotifies(existing.State) {
+			e.dispatchForRule(ctx, rule, existing.ID, value, resourceName, "resolved", int(existing.EscalationLevel))
+		}
 	}
 
 	return nil
+}
+
+// alertActive reports whether an alert in this state still stands for its rule
+// and resource. An acknowledged one does: acknowledging stops escalation, and a
+// new alert while the condition held would fire and notify all over again.
+func alertActive(state string) bool {
+	return state == "pending" || state == "firing" || state == "acknowledged"
+}
+
+// resolveNotifies reports whether auto-resolving an alert in this state sends a
+// "resolved" notification. Only a fired alert has notified anyone; a pending one
+// that clears inside its duration (a power blip shorter than a UPS rule's 60 s)
+// would otherwise send a lone "resolved" for an alert that never fired.
+func resolveNotifies(state string) bool {
+	return state == "firing" || state == "acknowledged"
 }
 
 // checkEscalations looks for firing alerts that need escalation.

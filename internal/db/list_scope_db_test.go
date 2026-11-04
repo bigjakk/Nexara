@@ -28,10 +28,11 @@ var (
 	jobBtoA = uuid.MustParse("715ce000-0000-4000-8000-0000000000c2")
 	jobBtoB = uuid.MustParse("715ce000-0000-4000-8000-0000000000c3")
 
-	alertCPU = uuid.MustParse("715ce000-0000-4000-8000-0000000000d1")
-	alertUPS = uuid.MustParse("715ce000-0000-4000-8000-0000000000d2")
-	dlqUPS   = uuid.MustParse("715ce000-0000-4000-8000-0000000000e1")
-	dlqBare  = uuid.MustParse("715ce000-0000-4000-8000-0000000000e2")
+	alertCPU   = uuid.MustParse("715ce000-0000-4000-8000-0000000000d1")
+	alertUPS   = uuid.MustParse("715ce000-0000-4000-8000-0000000000d2")
+	alertAcked = uuid.MustParse("715ce000-0000-4000-8000-0000000000d3")
+	dlqUPS     = uuid.MustParse("715ce000-0000-4000-8000-0000000000e1")
+	dlqBare    = uuid.MustParse("715ce000-0000-4000-8000-0000000000e2")
 )
 
 // TestListScope_AlertRulesAndMigrationJobs executes the two genuinely novel
@@ -219,6 +220,25 @@ func TestListScope_AlertRulesAndMigrationJobs(t *testing.T) {
 		if allAlerts.FiringCount-shownAlerts.FiringCount != 1 || allDLQ.PendingCount-shownDLQ.PendingCount != 1 {
 			t.Errorf("hiding the UPS rows should take one from each count: firing %d → %d, dead letters pending %d → %d",
 				allAlerts.FiringCount, shownAlerts.FiringCount, allDLQ.PendingCount, shownDLQ.PendingCount)
+		}
+	})
+
+	// AutoResolveAlert is :exec, so a WHERE that missed an acknowledged alert
+	// would fail silently: the engine would keep the alert active and send its
+	// "resolved" again at every evaluation. It cascades away with ruleGlobal.
+	t.Run("an acknowledged alert auto-resolves", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, `INSERT INTO alert_history (id, rule_id, state, metric, current_value, threshold)
+			VALUES ($1, $2, 'acknowledged', 'cpu_usage', 95, 90)`, alertAcked, ruleGlobal); err != nil {
+			t.Fatalf("seed acknowledged alert: %v", err)
+		}
+		if err := queries.AutoResolveAlert(ctx, alertAcked); err != nil {
+			t.Fatalf("AutoResolveAlert: %v", err)
+		}
+		var state string
+		err := pool.QueryRow(ctx, `SELECT state FROM alert_history WHERE id = $1 AND resolved_at IS NOT NULL`,
+			alertAcked).Scan(&state)
+		if err != nil || state != "resolved" {
+			t.Errorf("after AutoResolveAlert: state %q (%v), want resolved with resolved_at set", state, err)
 		}
 	})
 }

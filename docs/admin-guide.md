@@ -1300,7 +1300,7 @@ The escalation chain is an ordered list of steps, each naming **one** notificati
 1. **Step 1** — dispatched the moment the alert fires. Its delay is ignored
 2. **Step 2 and later** — dispatched once the alert has been firing for that step's delay, counted **from when the alert fired** (not from the previous step). Give step 2 `15` and step 3 `60` and they land 15 and 60 minutes after the fire, respectively
 
-Escalation only advances while the alert is still firing **and** unacknowledged, and while its rule is still enabled on the same metric — acknowledging the alert, turning the rule off or changing its metric stops the chain where it is. Resolution notifications go to whichever step the alert had reached.
+Escalation only advances while the alert is still firing **and** unacknowledged, and while its rule is still enabled on the same metric — acknowledging the alert, turning the rule off or changing its metric stops the chain where it is. Resolution notifications go to whichever step the alert had reached. An alert whose condition clears before the rule's duration is up never fired, so it resolves without a notification.
 
 ### Maintenance Windows
 
@@ -1323,7 +1323,7 @@ Windows do not repeat — create one per outage. Managing them needs `manage:mai
 ### Managing Alerts
 
 From the **Alert History** tab:
-- **Acknowledge** — mark an alert as seen (stops escalation)
+- **Acknowledge** — mark an alert as seen (stops escalation). While its condition holds the rule raises no new alert, and once the condition clears the alert resolves on its own and sends its resolution notification. A rule keeps one alert at a time (a cluster rule judged node by node, one per node), so acknowledging the alert of a rule that judges every UPS, or a cluster's tasks or Veeam jobs, quiets that rule for all of them: give a UPS a rule of its own to hear about it separately
 - **Resolve** — mark an alert as resolved
 - Filter by severity, state, cluster, and time range
 

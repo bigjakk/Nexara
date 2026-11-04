@@ -29,6 +29,8 @@ type Querier interface {
 	// LockClusterFolders, which it runs under, the row the last filing left; begun
 	// beside a concurrent filing, it would see the one before that.
 	AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) (string, error)
+	// An acknowledged alert is still active: it resolves when its condition
+	// clears, as a firing one does.
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
 	// Moves the user's auth_epoch to its next value and says how many rows it changed
 	// (0: there is no such user). It is the FIRST statement of every revoke-all —

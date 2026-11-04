@@ -457,3 +457,26 @@ func TestRuleStandsBehind(t *testing.T) {
 		}
 	}
 }
+
+// An acknowledged alert stays active, so no second alert fires while its
+// condition holds, and its auto-resolve notifies like a firing one's. A pending
+// alert that clears before its duration never notified, so its resolve doesn't.
+func TestAlertLifecycleStates(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		state            string
+		active, notifies bool
+	}{
+		{"pending", true, false},
+		{"firing", true, true},
+		{"acknowledged", true, true},
+		{"resolved", false, false},
+	} {
+		if got := alertActive(tc.state); got != tc.active {
+			t.Errorf("alertActive(%q) = %v, want %v", tc.state, got, tc.active)
+		}
+		if got := resolveNotifies(tc.state); got != tc.notifies {
+			t.Errorf("resolveNotifies(%q) = %v, want %v", tc.state, got, tc.notifies)
+		}
+	}
+}

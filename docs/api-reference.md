@@ -1872,7 +1872,7 @@ after the node is back).
 | GET | `/alerts` | List alerts across the caller's accessible clusters; alerts on the six `ups_*` metrics only for a holder of a global `view:ups` |
 | GET | `/alerts/summary` | Get alert summary counts, which count the `ups_*` metrics' alerts only for a holder of a global `view:ups` |
 | GET | `/alerts/:id` | Get alert details. An alert on a `ups_*` metric answers 404 without a global `view:ups`, and so do the two routes below |
-| POST | `/alerts/:id/acknowledge` | Acknowledge an alert |
+| POST | `/alerts/:id/acknowledge` | Acknowledge an alert. Escalation stops, its rule raises no new alert while it is acknowledged (a rule keeps one alert at a time; a cluster rule judged node by node, one per node), and it resolves on its own once the condition clears |
 | POST | `/alerts/:id/resolve` | Resolve an alert |
 | GET | `/clusters/:id/alerts` | List alerts for a cluster |
 | GET | `/clusters/:id/alerts/count` | Count active alerts for a cluster |
