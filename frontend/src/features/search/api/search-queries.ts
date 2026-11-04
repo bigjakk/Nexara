@@ -12,6 +12,8 @@ export interface SearchResult {
   cluster_name: string;
   vmid?: number;
   template?: boolean;
+  /** A UPS's NUT server. */
+  server?: string;
   [key: string]: unknown;
 }
 

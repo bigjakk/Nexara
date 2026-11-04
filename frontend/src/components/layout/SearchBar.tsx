@@ -16,6 +16,7 @@ import {
 } from "@/features/search/api/search-queries";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useThemeStore } from "@/stores/theme-store";
 import { StatusIcon } from "@/components/StatusIcon";
 import {
@@ -26,6 +27,7 @@ import {
   Monitor,
   Server,
   HardDrive,
+  BatteryCharging,
   Database,
   Search,
   Layers,
@@ -72,6 +74,8 @@ interface PageEntry {
   path?: string;
   /** "action:resource" permission required to see this entry */
   requiredPermission?: string;
+  /** The permission must be held install-wide, as every UPS route takes it. */
+  global?: boolean;
   /** Show in the zero-query "Go to" group */
   pinned?: boolean;
 }
@@ -125,6 +129,15 @@ const GLOBAL_PAGES: PageEntry[] = [
     path: "/alerts",
     requiredPermission: "view:alert",
     pinned: true,
+  },
+  {
+    keywords: ["power", "ups", "nut", "battery", "outage"],
+    label: "Power",
+    description: "UPS devices and NUT servers",
+    icon: <BatteryCharging className="h-4 w-4" />,
+    path: "/power",
+    requiredPermission: "view:ups",
+    global: true,
   },
   {
     keywords: ["reports", "schedule", "generate"],
@@ -373,17 +386,18 @@ export function SearchBar() {
   const navigate = useNavigate();
   const request = useCreateResourceStore((s) => s.request);
   const { hasPermission } = useAuth();
+  const { hasGlobalPermission } = usePermissions();
   const setThemeMode = useThemeStore((s) => s.setMode);
   const searchQuery = useGlobalSearch(query);
   const { data: clusters } = useClusters();
 
   const can = useCallback(
-    (perm?: string) => {
+    (perm?: string, global = false) => {
       if (!perm) return true;
       const parts = perm.split(":");
-      return hasPermission(parts[0] ?? "", parts[1] ?? "");
+      return (global ? hasGlobalPermission : hasPermission)(parts[0] ?? "", parts[1] ?? "");
     },
-    [hasPermission],
+    [hasPermission, hasGlobalPermission],
   );
 
   useEffect(() => {
@@ -567,7 +581,7 @@ export function SearchBar() {
     const matches: PageMatch[] = [];
 
     for (const page of GLOBAL_PAGES) {
-      if (!can(page.requiredPermission)) continue;
+      if (!can(page.requiredPermission, page.global)) continue;
       if (
         page.keywords.some((kw) => kw.includes(q)) ||
         page.label.toLowerCase().includes(q)
@@ -603,7 +617,7 @@ export function SearchBar() {
   }, [q, clusters, can]);
 
   const pinnedPages = useMemo(
-    () => GLOBAL_PAGES.filter((p) => p.pinned && can(p.requiredPermission)),
+    () => GLOBAL_PAGES.filter((p) => p.pinned && can(p.requiredPermission, p.global)),
     [can],
   );
 
@@ -631,6 +645,9 @@ export function SearchBar() {
         case "storage":
           void navigate(`/storage?cluster=${result.cluster_id}`);
           break;
+        case "ups":
+          void navigate(`/power/${result.id}`);
+          break;
         default:
           void navigate(`/clusters/${result.cluster_id}`);
           break;
@@ -651,6 +668,8 @@ export function SearchBar() {
         return <HardDrive className="h-4 w-4" />;
       case "cluster":
         return <Layers className="h-4 w-4" />;
+      case "ups":
+        return <BatteryCharging className="h-4 w-4" />;
       default:
         return null;
     }
@@ -662,6 +681,7 @@ export function SearchBar() {
     nodes: results.filter((r) => r.type === "node"),
     storage: results.filter((r) => r.type === "storage"),
     clusters: results.filter((r) => r.type === "cluster"),
+    ups: results.filter((r) => r.type === "ups"),
   };
 
   const hasResults =
@@ -669,6 +689,7 @@ export function SearchBar() {
     grouped.nodes.length > 0 ||
     grouped.storage.length > 0 ||
     grouped.clusters.length > 0 ||
+    grouped.ups.length > 0 ||
     pageMatches.length > 0 ||
     actionMatches.length > 0 ||
     clusterMatches.length > 0 ||
@@ -846,6 +867,22 @@ export function SearchBar() {
                             {r.cluster_name}
                             {r.node ? ` / ${r.node}` : ""}
                           </span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
+                  {grouped.ups.length > 0 && (
+                    <CommandGroup heading="UPS">
+                      {grouped.ups.map((r) => (
+                        <CommandItem
+                          key={`ups-${r.id}`}
+                          onSelect={() => {
+                            handleSelect(r);
+                          }}
+                        >
+                          <IconChip>{getIcon(r.type)}</IconChip>
+                          <span className="flex-1">{r.name}</span>
+                          <span className="text-xs text-muted-foreground">{r.server}</span>
                         </CommandItem>
                       ))}
                     </CommandGroup>

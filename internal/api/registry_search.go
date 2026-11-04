@@ -20,14 +20,18 @@ func registerSearchEndpoints(reg *Registry, h *handlers.SearchHandler) {
 		Method: fiber.MethodGet,
 		Path:   pathPrefix + "search",
 		Description: "Search guests, nodes, storage pools and clusters by name, and guests by VMID as " +
-			"well. A term shorter than two characters returns an empty list rather than everything, and " +
+			"well; and, for a holder of global view:ups, UPS devices (type ups) by name, description, " +
+			"model or NUT server, a row naming its server and no cluster (cluster_id and cluster_name " +
+			"empty). A term shorter than two characters returns an empty list rather than everything, and " +
 			"the result set stops at roughly 100 entries.",
 		Group: "Settings",
 		Permissions: Permissions{Advisory: &AdvisoryCheck{
 			Check: Check{Action: "view", Resource: "cluster", Scope: ScopeCluster},
 			Reason: "accessibleClusters(\"view\", \"cluster\") builds the scope and access.PermitsCluster " +
 				"is applied to every candidate row — guests, nodes, storage pools and the clusters " +
-				"themselves; the search spans every cluster, so there is none for a gate to resolve",
+				"themselves; the search spans every cluster, so there is none for a gate to resolve. UPS " +
+				"rows are added only for a holder of global view:ups (hasGlobalPerm), as every UPS route " +
+				"is gated, since a NUT server belongs to no cluster",
 		}},
 		Parameters: apischema.Properties{
 			"q": {

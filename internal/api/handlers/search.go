@@ -37,13 +37,16 @@ type searchResult struct {
 	ClusterName string `json:"cluster_name"`
 	VMID        int    `json:"vmid,omitempty"`
 	Template    bool   `json:"template,omitempty"`
+	// Server is a UPS's NUT server.
+	Server string `json:"server,omitempty"`
 }
 
 // GlobalSearch handles GET /api/v1/search?q=...
 //
 // Results are filtered per-row against the caller's view:cluster permissions
 // so users with cluster-scoped roles only see entries in clusters they have
-// access to. A caller with no clusters in scope receives an empty list.
+// access to. UPS devices are added for a holder of global view:ups alone, so a
+// caller with no clusters in scope receives those, or an empty list.
 func (h *SearchHandler) GlobalSearch(c fiber.Ctx, p *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "cluster")
 	if err != nil {
@@ -182,9 +185,40 @@ func (h *SearchHandler) GlobalSearch(c fiber.Ctx, p *apischema.Params) error {
 		}
 	}
 
+	// UPS devices, for a holder of global view:ups, as every UPS route is: a
+	// NUT server belongs to no cluster. Matched on the UPS's name, description
+	// and model, and its NUT server's name.
+	if canUps, permErr := hasGlobalPerm(c, "view", "ups"); permErr == nil && canUps && len(results) <= 100 {
+		if devices, devErr := h.queries.ListUpsDevices(c.Context()); devErr == nil {
+			for _, d := range devices {
+				if !upsMatches(queryLower, d) {
+					continue
+				}
+				// No status: the stored state is the last one Nexara read, and the UPS
+				// routes show "unknown" for one they cannot read now.
+				results = append(results, searchResult{Type: "ups", ID: d.ID.String(), Name: d.UpsName,
+					Server: d.ServerName})
+				if len(results) > 100 {
+					break
+				}
+			}
+		}
+	}
+
 	if results == nil {
 		results = []searchResult{}
 	}
 
 	return RespondItems(c, results)
+}
+
+// upsMatches reports whether a lowercased query is part of a UPS's name,
+// description or model, or its NUT server's name.
+func upsMatches(queryLower string, d db.ListUpsDevicesRow) bool {
+	for _, field := range []string{d.UpsName, d.Description, d.Model, d.ServerName} {
+		if strings.Contains(strings.ToLower(field), queryLower) {
+			return true
+		}
+	}
+	return false
 }
