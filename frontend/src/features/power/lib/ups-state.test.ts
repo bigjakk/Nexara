@@ -25,6 +25,12 @@ describe("upsStatus", () => {
     ["forced shutdown", { ...base, state: "low_battery", flags: ["FSD", "OL"] }, "Shutting down", "err"],
     // Could not look wins over the last known state, whatever it was.
     ["unreachable mid-outage", { ...base, state: "on_battery", reachability: "unreachable" }, "Unreachable", "idle"],
+    [
+      "unreachable through a rolling update",
+      { ...base, reachability: "unreachable", server_rolling_update: true },
+      "Rolling update",
+      "idle",
+    ],
     ["old reading", { ...base, reading_stale: true }, "No recent reading", "idle"],
     ["driver down", { ...base, reachability: "driver_down" }, "Driver down", "idle"],
     // The driver's last reading goes stale while it is down; it is still the driver.

@@ -9,7 +9,7 @@ export interface UpsLabel {
 
 type StatusInput = Pick<
   UpsDevice,
-  "state" | "reachability" | "reading_stale" | "server_enabled" | "flags"
+  "state" | "reachability" | "reading_stale" | "server_enabled" | "flags" | "server_rolling_update"
 >;
 
 /**
@@ -21,7 +21,10 @@ type StatusInput = Pick<
 export function upsStatus(d: StatusInput): UpsLabel {
   if (!d.server_enabled) return { label: "Polling off", tone: "idle" };
   if (d.reachability === "unknown") return { label: "Waiting", tone: "idle" };
-  if (d.reachability === "unreachable") return { label: "Unreachable", tone: "idle" };
+  if (d.reachability === "unreachable") {
+    // Down for a rolling update of its NUT server's node, not lost.
+    return { label: d.server_rolling_update === true ? "Rolling update" : "Unreachable", tone: "idle" };
+  }
   // Before the reading's age: a driver that is down leaves the last reading
   // where it was, so it goes stale while upsd still answers.
   if (d.reachability === "driver_down") return { label: "Driver down", tone: "idle" };

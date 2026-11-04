@@ -42,7 +42,13 @@ func (e *Engine) evaluateUPSRule(ctx context.Context, rule db.AlertRule, windows
 	if err != nil {
 		return fmt.Errorf("ups devices: %w", err)
 	}
-	out := upsRuleVerdict(rule, rows, windows, e.upsPollInterval, time.Now())
+	var rolling []uuid.UUID
+	if rule.Metric == MetricUPSUnreachable {
+		if rolling, err = e.queries.ListUpsOnRollingUpdateHosts(ctx); err != nil {
+			return fmt.Errorf("ups on rolling update hosts: %w", err)
+		}
+	}
+	out := upsRuleVerdict(rule, rows, windows, rolling, e.upsPollInterval, time.Now())
 	if out.hold {
 		return nil
 	}
@@ -54,9 +60,9 @@ func (e *Engine) evaluateUPSRule(ctx context.Context, rule db.AlertRule, windows
 // condition the verdict holds, neither firing nor resolving, as every rule a
 // window covers does: a window opened during an outage must not report the
 // outage over.
-func upsRuleVerdict(rule db.AlertRule, rows []db.ListUpsDevicesRow, windows []db.MaintenanceWindow,
+func upsRuleVerdict(rule db.AlertRule, rows []db.ListUpsDevicesRow, windows []db.MaintenanceWindow, rolling []uuid.UUID,
 	pollInterval time.Duration, now time.Time) upsRuleOutcome {
-	judged, held := upsRuleRows(rule, rows, windows)
+	judged, held := upsRuleRows(rule, rows, windows, rolling)
 	if held {
 		return upsRuleOutcome{hold: true}
 	}
@@ -71,16 +77,24 @@ func upsRuleVerdict(rule db.AlertRule, rows []db.ListUpsDevicesRow, windows []db
 // upsRuleRows are the UPSes a rule judges, in a new slice: for a global rule
 // every one no maintenance window covers; for a rule of scope ups the one it
 // names — none once that UPS is gone, so there is nothing to judge and a
-// firing alert resolves. held is a rule of scope ups whose UPS a window covers:
-// its verdict holds, as a node's rules do under a window.
-func upsRuleRows(rule db.AlertRule, rows []db.ListUpsDevicesRow, windows []db.MaintenanceWindow) (judged []db.ListUpsDevicesRow, held bool) {
-	if rule.ScopeType == "ups" && rule.UpsID.Valid && upsInMaintenance(uuid.UUID(rule.UpsID.Bytes), windows) {
-		return nil, true
+// firing alert resolves. ups_unreachable leaves out the rolling ones, whose NUT
+// server's node a rolling update is upgrading, rebooting or health-checking:
+// down for the update, not lost. held is a rule of scope ups whose UPS a
+// window covers, or, for ups_unreachable, a rolling one: its verdict holds,
+// as a node's rules do under a window.
+func upsRuleRows(rule db.AlertRule, rows []db.ListUpsDevicesRow, windows []db.MaintenanceWindow,
+	rolling []uuid.UUID) (judged []db.ListUpsDevicesRow, held bool) {
+	if rule.ScopeType == "ups" && rule.UpsID.Valid {
+		own := uuid.UUID(rule.UpsID.Bytes)
+		if upsInMaintenance(own, windows) || rule.Metric == MetricUPSUnreachable && slices.Contains(rolling, own) {
+			return nil, true
+		}
 	}
 	judged = make([]db.ListUpsDevicesRow, 0, len(rows))
 	for _, r := range rows {
 		if rule.ScopeType == "ups" && (!rule.UpsID.Valid || r.ID != uuid.UUID(rule.UpsID.Bytes)) ||
-			rule.ScopeType != "ups" && upsInMaintenance(r.ID, windows) {
+			rule.ScopeType != "ups" && upsInMaintenance(r.ID, windows) ||
+			rule.Metric == MetricUPSUnreachable && slices.Contains(rolling, r.ID) {
 			continue
 		}
 		judged = append(judged, r)

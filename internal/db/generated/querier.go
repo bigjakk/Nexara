@@ -2396,6 +2396,16 @@ type Querier interface {
 	// while, and that must not read as online.
 	ListUpsFeeds(ctx context.Context, nodeSeenAfter time.Time) ([]ListUpsFeedsRow, error)
 	ListUpsMaintenanceWindows(ctx context.Context, arg ListUpsMaintenanceWindowsParams) ([]MaintenanceWindow, error)
+	// The UPSes whose NUT server runs on a node a running rolling update is
+	// upgrading, rebooting or health-checking — down for the update, not lost —
+	// and, for ten minutes after that node came back, those Nexara has not read
+	// since: the poller retries a server it lost on a backoff of up to five
+	// minutes, so a UPS reads unreachable a while after its server is back, the
+	// job perhaps finished by then. A paused job's node is left out: it can stay
+	// in its step indefinitely, and a real failure meanwhile must alert. The node
+	// is the server's host node (2a), found from a loopback login or an address,
+	// or set by hand.
+	ListUpsOnRollingUpdateHosts(ctx context.Context) ([]uuid.UUID, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)

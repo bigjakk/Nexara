@@ -134,6 +134,9 @@ export interface UpsDevice {
   /** The last state read, kept for when state is "unknown". */
   last_known_state: UpsState;
   reachability: UpsReachability;
+  /** Its NUT server is on a node a rolling update is upgrading, rebooting or
+   *  health-checking now: down for the update, not lost. */
+  server_rolling_update?: boolean;
   reading_stale: boolean;
   last_reading_at: string | null;
   on_battery_since: string | null;

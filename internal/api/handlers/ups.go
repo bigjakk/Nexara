@@ -40,6 +40,7 @@ type upsDeviceResponse struct {
 	State              string     `json:"state"`
 	LastKnownState     string     `json:"last_known_state"`
 	Reachability       string     `json:"reachability"`
+	RollingUpdate      bool       `json:"server_rolling_update,omitempty"`
 	ReadingStale       bool       `json:"reading_stale"`
 	LastReadingAt      *time.Time `json:"last_reading_at"`
 	OnBatterySince     *time.Time `json:"on_battery_since"`
@@ -114,15 +115,19 @@ func (h *NutHandler) ListDevices(c fiber.Ctx, _ *apischema.Params) error {
 		return err
 	}
 	var pw *upsPower
+	var rolling []uuid.UUID
 	if len(rows) > 0 { // the pill polls this for every view:ups holder, NUT servers or not
 		if pw, err = h.loadPower(c); err != nil {
+			return err
+		}
+		if rolling, err = h.upsOnRollingHosts(c); err != nil {
 			return err
 		}
 	}
 	now := time.Now()
 	resp := make([]upsDeviceResponse, 0, len(rows))
 	for _, r := range rows {
-		resp = append(resp, h.buildUpsDevice(r, open[r.ID], pw, now, false))
+		resp = append(resp, h.buildUpsDevice(r, open[r.ID], pw, rolling, now, false))
 	}
 	return RespondItems(c, resp)
 }
@@ -141,7 +146,21 @@ func (h *NutHandler) GetDevice(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(h.buildUpsDevice(row, open[row.ID], pw, time.Now(), true))
+	rolling, err := h.upsOnRollingHosts(c)
+	if err != nil {
+		return err
+	}
+	return c.JSON(h.buildUpsDevice(row, open[row.ID], pw, rolling, time.Now(), true))
+}
+
+// upsOnRollingHosts are the UPSes whose NUT server's node a rolling update is
+// upgrading, rebooting or health-checking now.
+func (h *NutHandler) upsOnRollingHosts(c fiber.Ctx) ([]uuid.UUID, error) {
+	ids, err := h.queries.ListUpsOnRollingUpdateHosts(c.Context())
+	if err != nil {
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to list rolling updates")
+	}
+	return ids, nil
 }
 
 func (h *NutHandler) fetchDevice(c fiber.Ctx, p *apischema.Params) (db.ListUpsDevicesRow, error) {
@@ -175,7 +194,8 @@ func (h *NutHandler) openEpisodes(c fiber.Ctx) (map[uuid.UUID]map[string]time.Ti
 	return out, nil
 }
 
-func (h *NutHandler) buildUpsDevice(r db.ListUpsDevicesRow, open map[string]time.Time, pw *upsPower, now time.Time, detail bool) upsDeviceResponse {
+func (h *NutHandler) buildUpsDevice(r db.ListUpsDevicesRow, open map[string]time.Time, pw *upsPower, rolling []uuid.UUID,
+	now time.Time, detail bool) upsDeviceResponse {
 	var vars map[string]string
 	_ = json.Unmarshal(r.Vars, &vars)
 	status := nut.ParseStatus(r.Status)
@@ -226,6 +246,11 @@ func (h *NutHandler) buildUpsDevice(r db.ListUpsDevicesRow, open map[string]time
 	if pw != nil {
 		pw.apply(&d, r)
 	}
+	// Its NUT server is on a node a rolling update is upgrading, rebooting or
+	// health-checking now: down for the update, not lost. Said only where the
+	// host node itself is shown, since it says a rolling update is running on
+	// that node's cluster.
+	d.RollingUpdate = d.HostNode != nil && slices.Contains(rolling, r.ID)
 	d.Issues = upsIssues(d)
 	if detail {
 		d.Vars = vars
@@ -277,9 +302,14 @@ func upsIssues(d upsDeviceResponse) []healthIssueResponse {
 	}
 	unreadable := d.Reachability != "ok" || d.ReadingStale
 	left := upsLeft(d)
-	if unreadable {
+	switch {
+	case unreadable && d.RollingUpdate:
+		// Down for the update, not lost: said so, rather than "unreachable".
+		add("ups_server_rolling_update", healthSevWarn, "NUT server rebooting for a rolling update",
+			fmt.Sprintf("Nexara reads %s from %s again once its node is back", d.Name, d.ServerName))
+	case unreadable:
 		add("ups_unreachable", healthSevWarn, "UPS unreachable", fmt.Sprintf("Nexara cannot read %s from %s", d.Name, d.ServerName))
-	} else {
+	default:
 		switch d.State {
 		case string(nut.StateLowBattery):
 			// FSD lands here whatever the line power, as upsmon treats it; say

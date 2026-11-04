@@ -230,6 +230,9 @@ func TestUpsIssues(t *testing.T) {
 		{"unreachable while on battery", with(func(d *upsDeviceResponse) { d.State, d.Reachability = "on_battery", "unreachable" }),
 			[]string{"ups_unreachable warn Nexara cannot read ups02 from nut01"}},
 		{"old reading", with(func(d *upsDeviceResponse) { d.ReadingStale = true }), []string{"ups_unreachable warn Nexara cannot read ups02 from nut01"}},
+		// Its NUT server's node is being rebooted by a rolling update: said so.
+		{"unreadable through a rolling update", with(func(d *upsDeviceResponse) { d.Reachability, d.RollingUpdate = "unreachable", true }),
+			[]string{"ups_server_rolling_update warn Nexara reads ups02 from nut01 again once its node is back"}},
 		{"server disabled", with(func(d *upsDeviceResponse) { d.ServerEnabled, d.Reachability = false, "unreachable" }), nil},
 		{"replace battery and overload", with(func(d *upsDeviceResponse) { d.Flags = []string{"OL", "RB", "OVER"} }),
 			[]string{"ups_overload err ups02 reports an overload", "ups_replace_battery warn ups02 reports that its battery needs replacing"}},
@@ -266,7 +269,7 @@ func TestBuildUpsDevice_EstimatesPowerAndFlagsStaleReadings(t *testing.T) {
 	open := map[string]time.Time{"on_battery": now.Add(-time.Hour)}
 	row := upsTestRow(`{"ups.load":"38","ups.realpower.nominal":"900","ups.status":"OB"}`, now.Add(-time.Minute))
 	row.State = "on_battery"
-	d := h.buildUpsDevice(row, open, nil, now, false)
+	d := h.buildUpsDevice(row, open, nil, nil, now, false)
 	if d.Realpower == nil || *d.Realpower != 342 || !d.RealpowerEstimated || d.ReadingStale ||
 		d.State != "on_battery" || d.OnBatterySince == nil {
 		t.Errorf("fresh: realpower %v estimated %v stale %v state %s since %v",
@@ -274,7 +277,7 @@ func TestBuildUpsDevice_EstimatesPowerAndFlagsStaleReadings(t *testing.T) {
 	}
 	row = upsTestRow(`{"ups.realpower":"300"}`, now.Add(-10*time.Minute))
 	row.State = "on_battery"
-	d = h.buildUpsDevice(row, open, nil, now, false)
+	d = h.buildUpsDevice(row, open, nil, nil, now, false)
 	if d.Realpower == nil || *d.Realpower != 300 || d.RealpowerEstimated || !d.ReadingStale ||
 		d.State != "unknown" || d.LastKnownState != "on_battery" || d.OnBatterySince != nil {
 		t.Errorf("stale: realpower %v estimated %v stale %v state %s (last %s) since %v",

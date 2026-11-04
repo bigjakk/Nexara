@@ -94,8 +94,13 @@ func TestUpsRuleRows(t *testing.T) {
 		{"its own UPS", db.AlertRule{ScopeType: "ups", UpsID: pgtype.UUID{Bytes: b.ID, Valid: true}}, nil, []string{"ups02"}, false},
 		{"its own UPS, under a window", db.AlertRule{ScopeType: "ups", UpsID: pgtype.UUID{Bytes: b.ID, Valid: true}}, underB, nil, true},
 		{"a UPS no longer listed", db.AlertRule{ScopeType: "ups", UpsID: pgtype.UUID{Bytes: uuid.New(), Valid: true}}, nil, nil, false},
+		// Its NUT server's node is being rebooted by a rolling update.
+		{"unreachable, one down for a rolling update", db.AlertRule{ScopeType: "global", Metric: MetricUPSUnreachable}, nil,
+			[]string{"ups01"}, false},
+		{"unreachable, its own UPS down for a rolling update", db.AlertRule{ScopeType: "ups", Metric: MetricUPSUnreachable,
+			UpsID: pgtype.UUID{Bytes: b.ID, Valid: true}}, nil, nil, true},
 	} {
-		judged, held := upsRuleRows(tc.rule, []db.ListUpsDevicesRow{a, b}, tc.windows)
+		judged, held := upsRuleRows(tc.rule, []db.ListUpsDevicesRow{a, b}, tc.windows, []uuid.UUID{b.ID})
 		if held != tc.held {
 			t.Errorf("%s: held = %v, want %v", tc.name, held, tc.held)
 		}
@@ -133,7 +138,7 @@ func TestUpsRuleVerdictHoldsWhatAWindowHides(t *testing.T) {
 		{"a window on the UPS on battery", under(ob), true, false},
 		{"a window on another UPS", under(ol), false, true},
 	} {
-		got := upsRuleVerdict(global, []db.ListUpsDevicesRow{ol, ob}, tc.windows, 10*time.Second, now)
+		got := upsRuleVerdict(global, []db.ListUpsDevicesRow{ol, ob}, tc.windows, nil, 10*time.Second, now)
 		if got.hold != tc.hold || got.met != tc.met {
 			t.Errorf("%s: hold %v met %v, want hold %v met %v", tc.name, got.hold, got.met, tc.hold, tc.met)
 		}

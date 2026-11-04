@@ -213,3 +213,23 @@ LIMIT sqlc.arg('row_limit');
 -- Every open episode, so the device list can say "on battery since 03:12"
 -- without a query per device. Served by idx_ups_events_one_open.
 SELECT ups_id, kind, started_at FROM ups_events WHERE ended_at IS NULL;
+
+-- name: ListUpsOnRollingUpdateHosts :many
+-- The UPSes whose NUT server runs on a node a running rolling update is
+-- upgrading, rebooting or health-checking — down for the update, not lost —
+-- and, for ten minutes after that node came back, those Nexara has not read
+-- since: the poller retries a server it lost on a backoff of up to five
+-- minutes, so a UPS reads unreachable a while after its server is back, the
+-- job perhaps finished by then. A paused job's node is left out: it can stay
+-- in its step indefinitely, and a real failure meanwhile must alert. The node
+-- is the server's host node (2a), found from a loopback login or an address,
+-- or set by hand.
+SELECT DISTINCT d.id
+FROM ups_devices d
+JOIN nut_servers s ON s.id = d.server_id
+JOIN rolling_update_jobs j ON j.cluster_id = s.host_cluster_id
+JOIN rolling_update_nodes n ON n.job_id = j.id AND n.node_name = s.host_node_name
+WHERE (j.status = 'running' AND n.step IN ('upgrading', 'rebooting', 'health_check'))
+   OR (COALESCE(n.reboot_completed_at, n.upgrade_completed_at) > now() - interval '10 minutes'
+       AND (d.last_reading_at IS NULL
+            OR d.last_reading_at < COALESCE(n.reboot_completed_at, n.upgrade_completed_at)));

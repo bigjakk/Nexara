@@ -627,6 +627,47 @@ func (q *Queries) ListUpsEvents(ctx context.Context, arg ListUpsEventsParams) ([
 	return items, nil
 }
 
+const listUpsOnRollingUpdateHosts = `-- name: ListUpsOnRollingUpdateHosts :many
+SELECT DISTINCT d.id
+FROM ups_devices d
+JOIN nut_servers s ON s.id = d.server_id
+JOIN rolling_update_jobs j ON j.cluster_id = s.host_cluster_id
+JOIN rolling_update_nodes n ON n.job_id = j.id AND n.node_name = s.host_node_name
+WHERE (j.status = 'running' AND n.step IN ('upgrading', 'rebooting', 'health_check'))
+   OR (COALESCE(n.reboot_completed_at, n.upgrade_completed_at) > now() - interval '10 minutes'
+       AND (d.last_reading_at IS NULL
+            OR d.last_reading_at < COALESCE(n.reboot_completed_at, n.upgrade_completed_at)))
+`
+
+// The UPSes whose NUT server runs on a node a running rolling update is
+// upgrading, rebooting or health-checking — down for the update, not lost —
+// and, for ten minutes after that node came back, those Nexara has not read
+// since: the poller retries a server it lost on a backoff of up to five
+// minutes, so a UPS reads unreachable a while after its server is back, the
+// job perhaps finished by then. A paused job's node is left out: it can stay
+// in its step indefinitely, and a real failure meanwhile must alert. The node
+// is the server's host node (2a), found from a loopback login or an address,
+// or set by hand.
+func (q *Queries) ListUpsOnRollingUpdateHosts(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listUpsOnRollingUpdateHosts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markUpsDevicesAbsent = `-- name: MarkUpsDevicesAbsent :exec
 UPDATE ups_devices
 SET present = FALSE

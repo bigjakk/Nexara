@@ -23,7 +23,8 @@ var (
 // Cutting a UPS's power needs manage:node on every cluster it is known to
 // power: a removed feed still counts, or removing it would lift the check, and
 // so does the cluster of the node its NUT server runs on. A command upsd took
-// marks the account only while the server still holds it. Skipped unless
+// marks the account only while the server still holds it, and a rolling update
+// rebooting that node takes its UPSes down for the update. Skipped unless
 // NEXARA_TEST_DB_URL names a throwaway database.
 func TestUpsCommandQueries(t *testing.T) {
 	env := setupMigration(t)
@@ -79,6 +80,40 @@ func TestUpsCommandQueries(t *testing.T) {
 		var marked bool
 		if err := pool.QueryRow(ctx, `SELECT commands_verified_at IS NOT NULL FROM nut_servers WHERE id = $1`, upsCmdServer).Scan(&marked); err != nil || marked != tc.want {
 			t.Errorf("%s: marked = %v (%v), want %v", tc.name, marked, err, tc.want)
+		}
+	}
+
+	// A UPS whose NUT server's node a running rolling update is rebooting is
+	// down for the update, a paused one's is not, and once the node is back it
+	// stays so until Nexara has read it; another cluster's node of the same
+	// name is not its server's.
+	var job uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO rolling_update_jobs (cluster_id, status, created_by)
+		VALUES ($1, 'running', '00000000-0000-0000-0000-000000000001') RETURNING id`, upsCmdHostCluster).Scan(&job); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		sql  string
+		args []any
+		want []uuid.UUID
+	}{
+		{`INSERT INTO rolling_update_nodes (job_id, node_name, step) VALUES ($1, 'pve-01', 'rebooting')`, []any{job},
+			[]uuid.UUID{upsCmdDevice}},
+		{`UPDATE rolling_update_jobs SET status = 'paused' WHERE id = $1`, []any{job}, nil},
+		{`WITH r AS (UPDATE rolling_update_jobs SET status = 'running' WHERE id = $1)
+			UPDATE rolling_update_nodes SET step = 'completed', reboot_completed_at = now() WHERE job_id = $1`, []any{job},
+			[]uuid.UUID{upsCmdDevice}},
+		{`UPDATE ups_devices SET last_reading_at = now() WHERE id = $1`, []any{upsCmdDevice}, nil},
+		{`WITH j AS (INSERT INTO rolling_update_jobs (cluster_id, status, created_by)
+			VALUES ($1, 'running', '00000000-0000-0000-0000-000000000001') RETURNING id)
+			INSERT INTO rolling_update_nodes (job_id, node_name, step) SELECT id, 'pve-01', 'rebooting' FROM j`,
+			[]any{upsCmdFedCluster}, nil},
+	} {
+		if _, err := pool.Exec(ctx, step.sql, step.args...); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := q.ListUpsOnRollingUpdateHosts(ctx); err != nil || !slices.Equal(got, step.want) {
+			t.Errorf("after %q: %v, %v; want %v", step.sql, got, err, step.want)
 		}
 	}
 }
