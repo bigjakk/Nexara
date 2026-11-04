@@ -1310,7 +1310,7 @@ type Querier interface {
 	// Alert History
 	// vm_vmid is the stable Proxmox guest identity (from alert_rules.vm_vmid) —
 	// vm_id is the churn-prone vms.id surrogate kept for compat; see migration
-	// 000077.
+	// 000077. ups_id is a per-UPS rule's UPS (alert_rules.ups_id, 000136).
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
 	// Alert Rules
 	InsertAlertRule(ctx context.Context, arg InsertAlertRuleParams) (AlertRule, error)

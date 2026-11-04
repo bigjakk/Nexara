@@ -185,7 +185,7 @@ export function PowerPage() {
         }}
         title={(s) => `Remove ${s.name}?`}
         description={() =>
-          "Nexara stops reading this server and deletes its stored credential, its UPS devices, and every reading and power event collected from it. Nothing on the NUT server changes."
+          "Nexara stops reading this server and deletes its stored credential, its UPS devices, every reading and power event collected from it, and the alert rules that watch one of its UPS, with their alerts. Nothing on the NUT server changes."
         }
         confirmLabel="Remove"
       />

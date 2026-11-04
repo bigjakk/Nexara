@@ -400,14 +400,16 @@ export interface AlertRule {
    * "global" is for metrics describing infrastructure no single cluster owns
    * — a Veeam repository holds every cluster's backups. A global rule has no
    * cluster_id, and the scoped alert-history read hides its alerts from
-   * anyone but a holder of global view:alert.
+   * anyone but a holder of global view:alert. "ups" judges the one UPS
+   * ups_id names, and is filed under no cluster either.
    */
-  scope_type: "cluster" | "node" | "vm" | "global";
+  scope_type: "cluster" | "node" | "vm" | "global" | "ups";
   cluster_id?: string;
   node_id?: string;
   // Stable Proxmox VMID — vm-scoped rules key on (cluster_id, vm_vmid), not
   // the churn-prone vms-row UUID.
   vm_vmid?: number;
+  ups_id?: string;
   cooldown_seconds: number;
   escalation_chain: EscalationStep[];
   message_template: string;
@@ -531,12 +533,13 @@ export interface AlertRuleRequest {
   operator: string;
   threshold: number;
   duration_seconds?: number | undefined;
-  scope_type?: "cluster" | "node" | "vm" | "global" | undefined;
+  scope_type?: "cluster" | "node" | "vm" | "global" | "ups" | undefined;
   cluster_id?: string | undefined;
   node_id?: string | undefined;
   // Stable Proxmox VMID, matching the response type — the backend binds
   // vm_vmid and ignores anything else, so a vm_id here would be dropped.
   vm_vmid?: number | undefined;
+  ups_id?: string | undefined;
   cooldown_seconds?: number | undefined;
   escalation_chain?: EscalationStep[] | undefined;
   message_template?: string | undefined;

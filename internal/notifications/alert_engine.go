@@ -126,9 +126,12 @@ func MetricScopes(metric string) []string {
 		return []string{"cluster"}
 	case MetricSnapshotAgeDays, MetricVeeamRPOHours, MetricVeeamMalware:
 		return []string{"cluster", "vm"}
-	case MetricVeeamRepoUsed, MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSRuntime,
-		MetricUPSLoad, MetricUPSUnreachable, MetricUPSReplaceBattery:
+	case MetricVeeamRepoUsed:
 		return []string{"global"}
+	case MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSRuntime, MetricUPSLoad, MetricUPSUnreachable,
+		MetricUPSReplaceBattery:
+		// Every UPS, or the one the rule names (ups_id).
+		return []string{"global", "ups"}
 	case MetricVeeamJobFailed:
 		return []string{"cluster"}
 	default:
@@ -742,7 +745,9 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 			// Stable guest identity — vm_id above churns with the collector
 			// (ON DELETE SET NULL); vm_vmid is what per-VM views filter on.
 			// Invalid (NULL) for node/cluster-scoped rules.
-			VmVmid:          rule.VmVmid,
+			VmVmid: rule.VmVmid,
+			// The UPS a per-UPS rule judges; NULL for any other rule.
+			UpsID:           rule.UpsID,
 			ResourceName:    resourceName,
 			Metric:          rule.Metric,
 			CurrentValue:    value,

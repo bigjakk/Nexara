@@ -20,6 +20,8 @@ import {
 import { Plus } from "lucide-react";
 import { useCreateAlertRule } from "../api/alert-queries";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
+import { useUpsDevices } from "@/features/power/api/ups-queries";
+import { usePermissions } from "@/hooks/usePermissions";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { ClusterResponse, EscalationStep } from "@/types/api";
@@ -91,13 +93,13 @@ const METRIC_SCOPES: Record<string, string[]> = {
   pve_backup_failed: ["cluster"],
   pve_task_failed: ["cluster"],
   // A NUT server belongs to no cluster, so a UPS rule judges every UPS and
-  // names the worst one.
-  ups_on_battery: ["global"],
-  ups_battery_charge: ["global"],
-  ups_runtime: ["global"],
-  ups_load: ["global"],
-  ups_unreachable: ["global"],
-  ups_replace_battery: ["global"],
+  // names the worst one, or judges the one UPS it names.
+  ups_on_battery: ["global", "ups"],
+  ups_battery_charge: ["global", "ups"],
+  ups_runtime: ["global", "ups"],
+  ups_load: ["global", "ups"],
+  ups_unreachable: ["global", "ups"],
+  ups_replace_battery: ["global", "ups"],
 };
 
 const ALL_SCOPES = ["cluster", "node", "vm"];
@@ -198,6 +200,7 @@ const SCOPE_LABELS: Record<string, string> = {
   node: "Node",
   vm: "VM",
   global: "Global (all Veeam servers)",
+  ups: "One UPS",
 };
 
 function scopeLabel(scope: string, metric: string): string {
@@ -227,11 +230,18 @@ export function AlertRuleForm() {
   const [clusterId, setClusterId] = useState("");
   const [nodeId, setNodeId] = useState("");
   const [vmVmid, setVmVmid] = useState("");
+  const [upsId, setUpsId] = useState("");
   const [cooldownSeconds, setCooldownSeconds] = useState("3600");
   const [escalationChain, setEscalationChain] = useState<EscalationStep[]>([]);
   const [messageTemplate, setMessageTemplate] = useState("");
 
   const createMutation = useCreateAlertRule();
+  // A rule bound to one UPS takes global view:ups on the server, which the
+  // UPS list needs too: without it the choice is not offered.
+  const { hasGlobalPermission } = usePermissions();
+  const canViewUps = hasGlobalPermission("view", "ups");
+  const scopes = (m: string) => scopesFor(m).filter((sc) => sc !== "ups" || canViewUps);
+  const upsDevices = useUpsDevices(scopeType === "ups");
 
   const { data: clusters } = useQuery({
     queryKey: ["clusters"],
@@ -255,10 +265,13 @@ export function AlertRuleForm() {
   // VMID. Submitting without one used to create a rule that never fired.
   // Global scope binds to nothing at all — the metric describes
   // infrastructure no cluster owns — so it is ready as soon as it is chosen.
+  // A UPS's rule binds to the UPS alone, filed under no cluster.
+  const namesNoCluster = scopeType === "global" || scopeType === "ups";
   const scopeReady =
-    (scopeType === "global" || clusterId !== "") &&
+    (namesNoCluster || clusterId !== "") &&
     (scopeType !== "node" || nodeId !== "") &&
-    (scopeType !== "vm" || vmidValid);
+    (scopeType !== "vm" || vmidValid) &&
+    (scopeType !== "ups" || upsId !== "");
 
   const resetForm = () => {
     setName("");
@@ -272,6 +285,7 @@ export function AlertRuleForm() {
     setClusterId("");
     setNodeId("");
     setVmVmid("");
+    setUpsId("");
     setCooldownSeconds("3600");
     setEscalationChain([]);
     setMessageTemplate("");
@@ -288,10 +302,11 @@ export function AlertRuleForm() {
         operator,
         threshold: Number(threshold),
         duration_seconds: Number(durationSeconds),
-        scope_type: scopeType as "cluster" | "node" | "vm" | "global",
-        cluster_id: scopeType === "global" ? undefined : clusterId || undefined,
+        scope_type: scopeType as "cluster" | "node" | "vm" | "global" | "ups",
+        cluster_id: namesNoCluster ? undefined : clusterId || undefined,
         node_id: scopeType === "node" ? nodeId : undefined,
         vm_vmid: scopeType === "vm" ? vmid : undefined,
+        ups_id: scopeType === "ups" ? upsId : undefined,
         cooldown_seconds: Number(cooldownSeconds),
         escalation_chain:
           escalationChain.length > 0 ? escalationChain : undefined,
@@ -369,7 +384,7 @@ export function AlertRuleForm() {
                   // backend rejects the rest. Snapping to a supported one
                   // beats leaving the form in a state that only fails on
                   // submit.
-                  const allowed = scopesFor(v);
+                  const allowed = scopes(v);
                   if (!allowed.includes(scopeType) && allowed.length > 0) {
                     setScopeType(allowed[0] ?? "cluster");
                   }
@@ -426,7 +441,7 @@ export function AlertRuleForm() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {scopesFor(metric).map((sc) => (
+                  {scopes(metric).map((sc) => (
                     <SelectItem key={sc} value={sc}>
                       {scopeLabel(sc, metric)}
                     </SelectItem>
@@ -468,7 +483,25 @@ export function AlertRuleForm() {
             </div>
           </div>
 
-          {scopeType !== "global" && (
+          {scopeType === "ups" && (
+            <div className="space-y-2">
+              <Label htmlFor="ups">UPS</Label>
+              <Select value={upsId} onValueChange={setUpsId}>
+                <SelectTrigger id="ups">
+                  <SelectValue placeholder={upsDevices.isLoading ? "Loading UPS..." : "Select UPS"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {upsDevices.data?.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {`${d.name}@${d.server_name}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {!namesNoCluster && (
             <div className="space-y-2">
               <Label htmlFor="cluster">Cluster</Label>
               <Select

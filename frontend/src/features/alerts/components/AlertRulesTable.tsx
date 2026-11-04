@@ -18,6 +18,8 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import type { AlertRule } from "@/types/api";
+import { useUpsDevices } from "@/features/power/api/ups-queries";
+import { usePermissions } from "@/hooks/usePermissions";
 
 export function AlertRulesTable() {
   const { data: rules, isLoading } = useAlertRules();
@@ -26,6 +28,15 @@ export function AlertRulesTable() {
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "alert");
   const [pendingDelete, setPendingDelete] = useState<AlertRule | null>(null);
+  // A UPS's rule is named by its UPS, read only where the caller may list them.
+  const { hasGlobalPermission } = usePermissions();
+  const upsDevices = useUpsDevices(
+    hasGlobalPermission("view", "ups") && (rules ?? []).some((r) => r.scope_type === "ups"),
+  );
+  const upsName = (id: string | undefined) => {
+    const d = upsDevices.data?.find((u) => u.id === id);
+    return d === undefined ? "" : `${d.name}@${d.server_name}`;
+  };
 
   const toggleEnabled = (id: string, currentEnabled: boolean) => {
     updateMutation.mutate({ id, enabled: !currentEnabled });
@@ -86,9 +97,15 @@ export function AlertRulesTable() {
               <TableCell className="font-mono text-sm">
                 {rule.operator} {rule.threshold}
               </TableCell>
-              <TableCell className="text-sm capitalize">
-                {rule.scope_type}
-              </TableCell>
+              {rule.scope_type === "ups" ? (
+                <TableCell className="text-sm">
+                  UPS <span className="font-mono">{upsName(rule.ups_id)}</span>
+                </TableCell>
+              ) : (
+                <TableCell className="text-sm capitalize">
+                  {rule.scope_type}
+                </TableCell>
+              )}
               <TableCell className="text-sm">
                 {rule.duration_seconds >= 60
                   ? `${String(Math.floor(rule.duration_seconds / 60))}m`

@@ -390,8 +390,8 @@ func TestMetricScopes(t *testing.T) {
 		// threaded through. Cluster only until someone wants that stream.
 		{"pve_backup_failed", []string{"cluster"}},
 		{"pve_task_failed", []string{"cluster"}},
-		// A NUT server belongs to no cluster.
-		{"ups_on_battery", []string{"global"}},
+		// A NUT server belongs to no cluster: every UPS, or the one named.
+		{"ups_on_battery", []string{"global", "ups"}},
 		// nil means "the ordinary node/vm/cluster set", which the caller
 		// distinguishes from a restricted list.
 		{"cpu_usage", nil},

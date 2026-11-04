@@ -4,18 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/nut"
 )
 
-// UPS metric names. GLOBAL scope only: a NUT server belongs to no cluster, so
-// a rule judges every UPS and its alert names the worst one.
+// UPS metric names. A NUT server belongs to no cluster, so a rule is GLOBAL —
+// it judges every UPS and its alert names the worst one — or of scope ups,
+// judging the one UPS it names.
 const (
 	MetricUPSOnBattery      = "ups_on_battery"
 	MetricUPSBatteryCharge  = "ups_battery_charge"
@@ -31,18 +34,31 @@ func (e *Engine) SetUpsPollInterval(d time.Duration) { e.upsPollInterval = d }
 
 // evaluateUPSRule handles the ups_* metrics.
 func (e *Engine) evaluateUPSRule(ctx context.Context, rule db.AlertRule) error {
-	if rule.ScopeType != "global" {
+	if rule.ScopeType != "global" && rule.ScopeType != "ups" {
 		return fmt.Errorf("%s does not support scope_type %q", rule.Metric, rule.ScopeType)
 	}
 	rows, err := e.queries.ListUpsDevices(ctx)
 	if err != nil {
 		return fmt.Errorf("ups devices: %w", err)
 	}
-	out := upsRuleValue(rule.Metric, rule.Operator, rule.Threshold, upsAlertReadings(rows, e.upsPollInterval, time.Now()))
+	out := upsRuleValue(rule.Metric, rule.Operator, rule.Threshold,
+		upsAlertReadings(upsRuleRows(rule, rows), e.upsPollInterval, time.Now()))
 	if out.hold {
 		return nil
 	}
 	return e.handleRuleResult(ctx, rule, out.met, out.value, out.label, pgtype.UUID{}, pgtype.UUID{})
+}
+
+// upsRuleRows are the UPSes a rule judges: every one for a global rule, the
+// one it names for a rule of scope ups — none once that UPS is gone, so there
+// is nothing to judge and a firing alert resolves.
+func upsRuleRows(rule db.AlertRule, rows []db.ListUpsDevicesRow) []db.ListUpsDevicesRow {
+	if rule.ScopeType != "ups" {
+		return rows
+	}
+	return slices.DeleteFunc(rows, func(r db.ListUpsDevicesRow) bool {
+		return !rule.UpsID.Valid || r.ID != uuid.UUID(rule.UpsID.Bytes)
+	})
 }
 
 // upsRuleOutcome is a UPS rule's verdict, its value, and the label naming the

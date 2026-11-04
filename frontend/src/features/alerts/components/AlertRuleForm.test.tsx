@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { AlertRuleForm } from "./AlertRuleForm";
 import { apiClient } from "@/lib/api-client";
+import { useAuthStore } from "@/stores/auth-store";
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: { list: vi.fn(), post: vi.fn() },
@@ -29,6 +30,7 @@ const commonFields = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useAuthStore.setState({ globalPermissions: [] });
   mockedList.mockImplementation((path: string) =>
     path.endsWith("/nodes")
       ? Promise.resolve([{ id: "node-1", name: "pve1" }] as never)
@@ -168,6 +170,30 @@ describe("AlertRuleForm", () => {
       node_id: undefined,
       vm_vmid: undefined,
     });
+  });
+
+  // One UPS is offered with global view:ups, which the server holds a rule
+  // bound to a UPS to; the rule names the UPS and no cluster.
+  it("creates a rule for one UPS", async () => {
+    useAuthStore.setState({ globalPermissions: ["view:ups"] });
+    mockedList.mockImplementation((path: string) =>
+      Promise.resolve(
+        (path.includes("ups-devices") ? [{ id: "u1", name: "ups01", server_name: "nut01" }] : []) as never,
+      ),
+    );
+    const user = await openForm();
+    await pickOption(user, "Metric", "UPS Lowest Battery Charge (%)");
+    await pickOption(user, "Scope", "One UPS");
+    await pickOption(user, "UPS", "ups01@nut01");
+    await user.click(submitButton());
+
+    await waitFor(() => {
+      expect(mockedPost).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedPost).toHaveBeenCalledWith(
+      "/api/v1/alert-rules",
+      expect.objectContaining({ scope_type: "ups", ups_id: "u1", cluster_id: undefined }),
+    );
   });
 
   it("drops the chosen node when the cluster changes", async () => {

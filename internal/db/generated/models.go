@@ -36,6 +36,8 @@ type AlertHistory struct {
 	CreatedAt          time.Time          `json:"created_at"`
 	NotificationSentAt pgtype.Timestamptz `json:"notification_sent_at"`
 	VmVmid             pgtype.Int4        `json:"vm_vmid"`
+	// The UPS a per-UPS rule raised the alert for; NULL for any other rule's
+	UpsID pgtype.UUID `json:"ups_id"`
 }
 
 type AlertRule struct {
@@ -58,6 +60,8 @@ type AlertRule struct {
 	UpdatedAt       time.Time       `json:"updated_at"`
 	MessageTemplate string          `json:"message_template"`
 	VmVmid          pgtype.Int4     `json:"vm_vmid"`
+	// The UPS a rule of scope ups judges; NULL for every other scope
+	UpsID pgtype.UUID `json:"ups_id"`
 }
 
 type ApiKey struct {

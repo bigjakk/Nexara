@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -53,6 +55,7 @@ type alertRuleResponse struct {
 	ClusterID       string          `json:"cluster_id,omitempty"`
 	NodeID          string          `json:"node_id,omitempty"`
 	VMVmid          int32           `json:"vm_vmid,omitempty"`
+	UpsID           string          `json:"ups_id,omitempty"`
 	CooldownSeconds int32           `json:"cooldown_seconds"`
 	EscalationChain json.RawMessage `json:"escalation_chain"`
 	MessageTemplate string          `json:"message_template"`
@@ -90,6 +93,9 @@ func toAlertRuleResponse(r db.AlertRule) alertRuleResponse {
 	}
 	if r.VmVmid.Valid {
 		resp.VMVmid = r.VmVmid.Int32
+	}
+	if r.UpsID.Valid {
+		resp.UpsID = uuid.UUID(r.UpsID.Bytes).String()
 	}
 	return resp
 }
@@ -249,8 +255,16 @@ var validScopeTypes = map[string]bool{
 	// "global" is for metrics describing infrastructure no single cluster
 	// owns — a Veeam repository holds every cluster's backups. A global rule
 	// raises alerts with a NULL cluster_id, which the scoped history read
-	// already hides from anyone but a holder of global view:alert.
-	"cluster": true, "node": true, "vm": true, "global": true,
+	// already hides from anyone but a holder of global view:alert. "ups"
+	// judges one UPS (ups_id): a NUT server belongs to no cluster either, so
+	// it is gated and filed as a global rule is.
+	"cluster": true, "node": true, "vm": true, "global": true, "ups": true,
+}
+
+// alertScopeNamesNoCluster reports whether a scope type files its rule and
+// alerts under no cluster, so that only a global grant may read or write them.
+func alertScopeNamesNoCluster(scopeType string) bool {
+	return scopeType == "global" || scopeType == "ups"
 }
 
 // NotificationChannelTypes is the complete set of channel types Nexara can
@@ -287,6 +301,7 @@ type createAlertRuleRequest struct {
 	ClusterID       string          `json:"cluster_id"`
 	NodeID          string          `json:"node_id"`
 	VMVmid          *int32          `json:"vm_vmid"`
+	UpsID           string          `json:"ups_id"`
 	CooldownSeconds *int32          `json:"cooldown_seconds"`
 	EscalationChain json.RawMessage `json:"escalation_chain"`
 	MessageTemplate *string         `json:"message_template"`
@@ -435,6 +450,7 @@ type alertRuleScope struct {
 	ClusterID pgtype.UUID
 	NodeID    pgtype.UUID
 	VMVmid    pgtype.Int4
+	UpsID     pgtype.UUID
 }
 
 // alertRuleFields is the fully-merged view of a rule that both the create and
@@ -511,11 +527,11 @@ func validateAlertRuleFields(f alertRuleFields) error {
 			return fiber.NewError(fiber.StatusBadRequest,
 				fmt.Sprintf("%s supports %s scope", f.Metric, strings.Join(scopes, " or ")))
 		}
-	} else if f.Scope.ScopeType == "global" {
+	} else if alertScopeNamesNoCluster(f.Scope.ScopeType) {
 		// The converse: a per-node or per-VM metric has nothing to read at
-		// global scope, so it would never fire either.
+		// global or UPS scope, so it would never fire either.
 		return fiber.NewError(fiber.StatusBadRequest,
-			fmt.Sprintf("%s does not support global scope", f.Metric))
+			fmt.Sprintf("%s does not support %s scope", f.Metric, f.Scope.ScopeType))
 	}
 	return nil
 }
@@ -527,6 +543,9 @@ func validateAlertRuleFields(f alertRuleFields) error {
 // rule used to watch. Clearing here is also the only way to drop a vm_vmid or
 // node_id, neither of which has an "empty" value on the wire.
 func normalizeAlertRuleScope(s alertRuleScope) alertRuleScope {
+	if s.ScopeType != "ups" {
+		s.UpsID = pgtype.UUID{}
+	}
 	switch s.ScopeType {
 	case "cluster":
 		s.NodeID = pgtype.UUID{}
@@ -540,6 +559,11 @@ func normalizeAlertRuleScope(s alertRuleScope) alertRuleScope {
 		// alert this rule raises under that cluster, which is the opposite of
 		// what global means — and would hand a cluster-scoped viewer an alert
 		// about infrastructure shared with clusters they cannot see.
+		s.ClusterID = pgtype.UUID{}
+		s.NodeID = pgtype.UUID{}
+		s.VMVmid = pgtype.Int4{}
+	case "ups":
+		// The UPS alone, filed under no cluster, as a global rule is.
 		s.ClusterID = pgtype.UUID{}
 		s.NodeID = pgtype.UUID{}
 		s.VMVmid = pgtype.Int4{}
@@ -574,6 +598,10 @@ func validateAlertRuleScope(s alertRuleScope) error {
 		// No binding, by definition — the metric describes infrastructure no
 		// cluster owns. normalizeAlertRuleScope has already cleared any the
 		// caller sent, so there is nothing left to require.
+	case "ups":
+		if !s.UpsID.Valid {
+			return fiber.NewError(fiber.StatusBadRequest, "ups scope requires ups_id")
+		}
 	}
 	return nil
 }
@@ -583,7 +611,7 @@ func validateAlertRuleScope(s alertRuleScope) error {
 // checks existed may hold an incoherent scope, and a body that just flips
 // `enabled` (the UI toggle) has to keep working against them.
 func alertRuleScopeTouched(req createAlertRuleRequest) bool {
-	return req.ScopeType != "" || req.ClusterID != "" || req.NodeID != "" || req.VMVmid != nil
+	return req.ScopeType != "" || req.ClusterID != "" || req.NodeID != "" || req.VMVmid != nil || req.UpsID != ""
 }
 
 // resolveNodeCluster looks up a node and authorizes the caller against the
@@ -668,6 +696,29 @@ func (h *AlertHandler) resolveAlertRuleScope(c fiber.Ctx, base alertRuleScope, r
 		return zero, err
 	}
 
+	// A rule bound to a UPS reports its readings back in the alerts it raises,
+	// so binding one takes the view of it — global, as every UPS route's is —
+	// checked before the lookup can say whether the UPS exists. An inherited
+	// binding answers for it again while the update leaves the rule live, as
+	// a node's does below.
+	if req.UpsID != "" || (s.ScopeType == "ups" && s.UpsID.Valid && recheckInherited) {
+		if err := requirePerm(c, "view", "ups"); err != nil {
+			return zero, err
+		}
+	}
+	if req.UpsID != "" {
+		uid, err := uuid.Parse(req.UpsID)
+		if err != nil {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid ups_id")
+		}
+		if _, err := h.queries.GetUpsDevice(c.Context(), uid); errors.Is(err, pgx.ErrNoRows) {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Unknown ups_id")
+		} else if err != nil {
+			return zero, fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the UPS")
+		}
+		s.UpsID = pgtype.UUID{Bytes: uid, Valid: true}
+	}
+
 	// An INHERITED node binding — one the request did not supply — is only as
 	// trustworthy as the row it came from, and a row written before these
 	// checks existed may point at a node in another cluster. Re-authorize it
@@ -699,6 +750,9 @@ func validateAlertRuleBindings(req createAlertRuleRequest, scopeType string) err
 	}
 	if req.VMVmid != nil && scopeType != "vm" {
 		return fiber.NewError(fiber.StatusBadRequest, "vm_vmid is only valid for vm scope")
+	}
+	if req.UpsID != "" && scopeType != "ups" {
+		return fiber.NewError(fiber.StatusBadRequest, "ups_id is only valid for ups scope")
 	}
 	return nil
 }
@@ -767,8 +821,8 @@ func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 	// and then have the binding stripped, minting a global rule on the
 	// strength of a cluster-scoped grant. The result is invisible and
 	// unmanageable to its own creator, since every global-rule read and write
-	// requires the global grant.
-	if req.ScopeType == "global" {
+	// requires the global grant. A UPS's rule names no cluster either.
+	if alertScopeNamesNoCluster(req.ScopeType) {
 		if err := requirePerm(c, "manage", "alert"); err != nil {
 			return err
 		}
@@ -832,6 +886,7 @@ func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 		ClusterID:       scope.ClusterID,
 		NodeID:          scope.NodeID,
 		VmVmid:          scope.VMVmid,
+		UpsID:           scope.UpsID,
 		CooldownSeconds: cooldownSeconds,
 		EscalationChain: escalationChain,
 		CreatedBy:       userID,
@@ -966,6 +1021,7 @@ func mergeAlertRuleUpdate(existing db.AlertRule, req createAlertRuleRequest, sco
 		ClusterID:       scope.ClusterID,
 		NodeID:          scope.NodeID,
 		VmVmid:          scope.VMVmid,
+		UpsID:           scope.UpsID,
 		CooldownSeconds: cooldownSeconds,
 		EscalationChain: escalationChain,
 		MessageTemplate: messageTemplate,
@@ -1001,8 +1057,9 @@ func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 	// creating one does. The gate above answers for the rule as it stands, and
 	// a cluster-scoped holder converting their own cluster-A rule would
 	// otherwise pass it and walk the rule out of their own reach — a global
-	// rule can only be read, retuned or deleted with the global grant.
-	if req.ScopeType == "global" && existing.ScopeType != "global" {
+	// rule can only be read, retuned or deleted with the global grant. So with
+	// a UPS's rule, which names no cluster either.
+	if alertScopeNamesNoCluster(req.ScopeType) && !alertScopeNamesNoCluster(existing.ScopeType) {
 		if err := requirePerm(c, "manage", "alert"); err != nil {
 			return err
 		}
@@ -1025,6 +1082,7 @@ func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 		ClusterID: existing.ClusterID,
 		NodeID:    existing.NodeID,
 		VMVmid:    existing.VmVmid,
+		UpsID:     existing.UpsID,
 	}, req, alertRuleScopeTouched(req) || staysEnabled)
 	if err != nil {
 		return err

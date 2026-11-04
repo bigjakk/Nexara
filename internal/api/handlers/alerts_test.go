@@ -259,6 +259,16 @@ func TestMergeAlertRuleUpdate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "cpu_usage with ups scope rejected",
+			scope: func(r db.AlertRule) alertRuleScope {
+				s := storedScope(r)
+				s.ScopeType, s.UpsID = "ups", pgtype.UUID{Bytes: uuid.New(), Valid: true}
+				return s
+			},
+			body:    `{"scope_type":"ups"}`,
+			wantErr: true,
+		},
+		{
 			// A malware verdict is 0-3. The form's percentage default of 90
 			// produced a rule that was accepted, stored, evaluated every tick,
 			// and could never be true.
@@ -320,11 +330,17 @@ func TestNormalizeAlertRuleScope(t *testing.T) {
 	node := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 	vmid := pgtype.Int4{Int32: 101, Valid: true}
 
+	ups := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+
 	tests := []struct {
 		name     string
 		in       alertRuleScope
 		wantNode bool
 		wantVM   bool
+		wantUps  bool
+		// A UPS's rule is filed under no cluster, as a global rule is: one
+		// left on it would hand the cluster's alert viewers its alerts.
+		dropsCluster bool
 	}{
 		{
 			name: "cluster scope keeps neither binding",
@@ -340,6 +356,16 @@ func TestNormalizeAlertRuleScope(t *testing.T) {
 			in:     alertRuleScope{ScopeType: "vm", ClusterID: cluster, NodeID: node, VMVmid: vmid},
 			wantVM: true,
 		},
+		{
+			name:         "ups scope keeps the UPS alone",
+			in:           alertRuleScope{ScopeType: "ups", ClusterID: cluster, NodeID: node, VMVmid: vmid, UpsID: ups},
+			wantUps:      true,
+			dropsCluster: true,
+		},
+		{
+			name: "another scope drops a stored UPS",
+			in:   alertRuleScope{ScopeType: "cluster", ClusterID: cluster, UpsID: ups},
+		},
 	}
 
 	for _, tt := range tests {
@@ -351,7 +377,12 @@ func TestNormalizeAlertRuleScope(t *testing.T) {
 			if got.VMVmid.Valid != tt.wantVM {
 				t.Errorf("vm_vmid valid = %v, want %v", got.VMVmid.Valid, tt.wantVM)
 			}
-			if got.ClusterID != tt.in.ClusterID {
+			if got.UpsID.Valid != tt.wantUps {
+				t.Errorf("ups_id valid = %v, want %v", got.UpsID.Valid, tt.wantUps)
+			}
+			if tt.dropsCluster && got.ClusterID.Valid {
+				t.Errorf("cluster_id = %+v, want none", got.ClusterID)
+			} else if !tt.dropsCluster && got.ClusterID != tt.in.ClusterID {
 				t.Errorf("cluster_id = %+v, want it untouched", got.ClusterID)
 			}
 		})
@@ -377,6 +408,8 @@ func TestValidateAlertRuleScope(t *testing.T) {
 		{name: "vm with cluster and vmid", scope: alertRuleScope{ScopeType: "vm", ClusterID: cluster, VMVmid: vmid}},
 		{name: "vm without vmid", scope: alertRuleScope{ScopeType: "vm", ClusterID: cluster}, wantErr: true},
 		{name: "vm without cluster_id", scope: alertRuleScope{ScopeType: "vm", VMVmid: vmid}, wantErr: true},
+		{name: "ups with ups_id", scope: alertRuleScope{ScopeType: "ups", UpsID: pgtype.UUID{Bytes: uuid.New(), Valid: true}}},
+		{name: "ups without ups_id", scope: alertRuleScope{ScopeType: "ups"}, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -396,6 +429,9 @@ func TestValidateAlertRuleScope(t *testing.T) {
 // reach its verdict before any database access, so a regression that moves the
 // node lookup ahead of the permission gate panics on the nil Queries and fails
 // loudly instead of silently reintroducing a node-existence oracle.
+// alertTestCluster is the one cluster the cluster-alert-manager role manages.
+var alertTestCluster = uuid.MustParse("a7300000-0000-4000-8000-000000000001")
+
 func newAlertRuleTestApp(t *testing.T) *fiber.App {
 	t.Helper()
 	handler := NewAlertHandler(nil, testEncryptionKey, nil, nil)
@@ -408,6 +444,15 @@ func newAlertRuleTestApp(t *testing.T) *fiber.App {
 		return c.Next()
 	})
 	installStubEngineMiddleware(app)
+	app.Use(func(c fiber.Ctx) error {
+		switch c.Get("X-Test-Role") {
+		case "alert-manager": // global manage:alert and nothing else
+			c.Locals("rbac_engine", newGrantEngine("manage:alert"))
+		case "cluster-alert-manager": // manage:alert on one cluster, view:ups everywhere
+			c.Locals("rbac_engine", upsCaller{clusterGrantEngine{"manage", "alert", alertTestCluster}, []string{"view:ups"}})
+		}
+		return c.Next()
+	})
 	app.Post("/alert-rules", handler.CreateRule)
 	return app
 }
@@ -419,7 +464,9 @@ func TestCreateRule_GatesAndScopeBindings(t *testing.T) {
 	app := newAlertRuleTestApp(t)
 	clusterID := uuid.New().String()
 	nodeID := uuid.New().String()
+	upsID := uuid.New().String()
 	const base = `"name":"x","metric":"cpu_usage","operator":">","threshold":90`
+	const ups = `"name":"x","metric":"ups_on_battery","operator":">","threshold":0,"scope_type":"ups"`
 
 	tests := []struct {
 		name   string
@@ -476,6 +523,26 @@ func TestCreateRule_GatesAndScopeBindings(t *testing.T) {
 			status: http.StatusBadRequest,
 		},
 		{
+			// Its cluster would pass the cluster's own check, then be stripped:
+			// a rule filed under no cluster on the strength of a cluster grant.
+			name:   "a UPS's rule names no cluster, so a cluster's grant cannot make one",
+			role:   "cluster-alert-manager",
+			body:   `{` + ups + `,"cluster_id":"` + alertTestCluster.String() + `","ups_id":"` + upsID + `"}`,
+			status: http.StatusForbidden,
+		},
+		{
+			name:   "binding a UPS needs view:ups before the UPS is looked up",
+			role:   "alert-manager",
+			body:   `{` + ups + `,"ups_id":"` + upsID + `"}`,
+			status: http.StatusForbidden,
+		},
+		{
+			name:   "ups scope needs a UPS",
+			role:   "admin",
+			body:   `{` + ups + `}`,
+			status: http.StatusBadRequest,
+		},
+		{
 			name:   "name is required",
 			role:   "admin",
 			body:   `{"metric":"cpu_usage","operator":">","threshold":90,"cluster_id":"` + clusterID + `"}`,
@@ -525,6 +592,8 @@ func TestValidateAlertRuleBindings(t *testing.T) {
 		{name: "vm_vmid with cluster scope", req: createAlertRuleRequest{VMVmid: &vmid}, scopeType: "cluster", wantErr: true},
 		{name: "vm_vmid with node scope", req: createAlertRuleRequest{VMVmid: &vmid}, scopeType: "node", wantErr: true},
 		{name: "no binding at all", req: createAlertRuleRequest{}, scopeType: "cluster"},
+		{name: "ups_id with ups scope", req: createAlertRuleRequest{UpsID: uuid.New().String()}, scopeType: "ups"},
+		{name: "ups_id with global scope", req: createAlertRuleRequest{UpsID: uuid.New().String()}, scopeType: "global", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -554,6 +623,7 @@ func TestAlertRuleScopeTouched(t *testing.T) {
 		{name: "cluster_id", req: createAlertRuleRequest{ClusterID: uuid.New().String()}, want: true},
 		{name: "node_id", req: createAlertRuleRequest{NodeID: uuid.New().String()}, want: true},
 		{name: "vm_vmid", req: createAlertRuleRequest{VMVmid: &vmid}, want: true},
+		{name: "ups_id", req: createAlertRuleRequest{UpsID: uuid.New().String()}, want: true},
 	}
 
 	for _, tt := range tests {

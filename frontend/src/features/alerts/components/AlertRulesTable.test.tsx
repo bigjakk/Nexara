@@ -6,6 +6,7 @@ import { AlertRulesTable } from "./AlertRulesTable";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import type { AlertRule } from "@/types/api";
+import { useAuthStore } from "@/stores/auth-store";
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: { list: vi.fn(), put: vi.fn(), delete: vi.fn() },
@@ -39,6 +40,7 @@ function makeRule(overrides: Partial<AlertRule> = {}): AlertRule {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useAuthStore.setState({ globalPermissions: [] });
   vi.mocked(useAuth).mockReturnValue({
     hasPermission: () => true,
   } as unknown as ReturnType<typeof useAuth>);
@@ -79,5 +81,19 @@ describe("AlertRulesTable", () => {
 
     expect(within(row).queryByRole("button")).not.toBeInTheDocument();
     expect(within(row).getByText("Yes")).toBeInTheDocument();
+  });
+
+  // A UPS's rule reads as its UPS, looked up where the caller may list them.
+  it("names a UPS's rule by its UPS", async () => {
+    useAuthStore.setState({ globalPermissions: ["view:ups"] });
+    mockedList.mockImplementation((path: string) =>
+      Promise.resolve(
+        (path.includes("ups-devices")
+          ? [{ id: "u1", name: "ups01", server_name: "nut01" }]
+          : [makeRule({ scope_type: "ups", ups_id: "u1", metric: "ups_on_battery" })]) as never,
+      ),
+    );
+    renderWithProviders(<AlertRulesTable />);
+    expect(await screen.findByText("ups01@nut01")).toBeInTheDocument();
   });
 });
