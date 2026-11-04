@@ -10,6 +10,14 @@ set -eo pipefail
 
 TAG="${1:?Usage: generate-release-notes.sh <tag>}"
 
+# GitHub links an "@handle" in a release body as a mention and lists the account
+# as a contributor, so every subject passes through escape-mentions.awk first.
+ESCAPE_MENTIONS="$(dirname "${BASH_SOURCE[0]}")/escape-mentions.awk"
+if [ ! -f "$ESCAPE_MENTIONS" ]; then
+  echo "generate-release-notes.sh: missing ${ESCAPE_MENTIONS}" >&2
+  exit 1
+fi
+
 # Find the previous tag. If none exists, use the root commit.
 PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
 
@@ -48,7 +56,7 @@ while IFS= read -r line; do
   if [ "$MATCHED" = false ]; then
     echo "- ${line}" >> "${TMPDIR_NOTES}/other"
   fi
-done < <(git log --format="%s" "$RANGE" 2>/dev/null)
+done < <(git log --format="%s" "$RANGE" 2>/dev/null | LC_ALL=C awk -f "$ESCAPE_MENTIONS")
 
 # Section display names
 section_title() {
