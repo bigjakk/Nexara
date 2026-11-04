@@ -427,4 +427,5 @@ func registerUPSEndpoints(reg *Registry, h *handlers.NutHandler, connect, comman
 		Parameters:  apischema.Properties{"id": upsDeviceIDParam},
 		Handler:     h.ListCommandRuns,
 	})
+	registerUpsMaintenanceWindowEndpoints(reg, h)
 }

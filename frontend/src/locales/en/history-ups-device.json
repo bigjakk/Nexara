@@ -3,6 +3,7 @@
     "power": "Power events",
     "commands": "Commands and settings",
     "feeds": "What it powers",
+    "maintenance": "Maintenance",
     "other": "Other"
   },
   "empty": "Nothing has been recorded for this UPS yet.",
@@ -11,7 +12,10 @@
     "ups_command_failed": "Command failed",
     "ups_feed_added": "Now powers",
     "ups_feed_removed": "No longer powers",
-    "ups_feed_updated": "How a node is protected changed"
+    "ups_feed_updated": "How a node is protected changed",
+    "ups_maintenance_window_created": "Maintenance window opened",
+    "ups_maintenance_window_updated": "Maintenance window changed",
+    "ups_maintenance_window_deleted": "Maintenance window removed"
   },
   "events": {
     "command": "Ran {{name}}",
@@ -30,7 +34,8 @@
     "lowestCharge": "lowest charge {{value}}%",
     "peakLoad": "peak load {{value}}%",
     "protectedElsewhere": "protected another way",
-    "checkedByNexara": "checked by Nexara"
+    "checkedByNexara": "checked by Nexara",
+    "window": "{{from}} to {{to}}"
   },
   "notes": {
     "ended": "Ended: {{when}}"

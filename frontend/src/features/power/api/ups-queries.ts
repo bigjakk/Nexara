@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { reportUpsRun } from "../lib/ups-runs";
+import type { MaintenanceWindow } from "@/types/api";
 import type {
   NutProbeResult,
   NutServer,
@@ -29,6 +30,7 @@ export const upsKeys = {
   runs: (id: string) => ["ups-device", id, "runs"] as const,
   metrics: (id: string, range: UpsRange) => ["ups-device", id, "metrics", range] as const,
   events: (upsId?: string) => ["ups-events", upsId ?? "all"] as const,
+  windows: (id: string) => ["ups-device", id, "maintenance-windows"] as const,
 };
 
 export function useNutServers() {
@@ -253,5 +255,44 @@ export function useTestNutServer() {
     mutationFn: (id: string) =>
       apiClient.post<NutProbeResult>(apiPath`/api/v1/nut-servers/${id}/test`),
     ...errorsHandledLocally,
+  });
+}
+
+/** A UPS's maintenance windows, newest first. */
+export function useUpsMaintenanceWindows(upsId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: upsKeys.windows(upsId),
+    queryFn: () => apiClient.list<MaintenanceWindow>(apiPath`/api/v1/ups-devices/${upsId}/maintenance-windows`),
+    enabled,
+  });
+}
+
+export interface UpsMaintenanceWindowRequest {
+  description?: string;
+  starts_at: string;
+  ends_at: string;
+}
+
+/** Its failure is shown in the dialog that opens it, so it skips the global toast. */
+export function useCreateUpsMaintenanceWindow(upsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: UpsMaintenanceWindowRequest) =>
+      apiClient.post<MaintenanceWindow>(apiPath`/api/v1/ups-devices/${upsId}/maintenance-windows`, req),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: upsKeys.windows(upsId) });
+    },
+    ...errorsHandledLocally,
+  });
+}
+
+export function useDeleteUpsMaintenanceWindow(upsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (windowId: string) =>
+      apiClient.delete<never>(apiPath`/api/v1/ups-devices/${upsId}/maintenance-windows/${windowId}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: upsKeys.windows(upsId) });
+    },
   });
 }

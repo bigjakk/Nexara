@@ -1392,6 +1392,8 @@ type Querier interface {
 	// overflowing the ::int cast.
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	InsertUpsCommand(ctx context.Context, arg InsertUpsCommandParams) (UpsCommand, error)
+	// A UPS's window (000137) names the UPS and no cluster or node.
+	InsertUpsMaintenanceWindow(ctx context.Context, arg InsertUpsMaintenanceWindowParams) (MaintenanceWindow, error)
 	InsertUpsMetric(ctx context.Context, arg InsertUpsMetricParams) error
 	// An event with no duration, such as a self-test result.
 	InsertUpsPointEvent(ctx context.Context, arg InsertUpsPointEventParams) error
@@ -2393,6 +2395,7 @@ type Querier interface {
 	// Nexara cannot reach, as in a power cut, keeps its nodes' last status for a
 	// while, and that must not read as online.
 	ListUpsFeeds(ctx context.Context, nodeSeenAfter time.Time) ([]ListUpsFeedsRow, error)
+	ListUpsMaintenanceWindows(ctx context.Context, arg ListUpsMaintenanceWindowsParams) ([]MaintenanceWindow, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)

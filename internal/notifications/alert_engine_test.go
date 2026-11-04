@@ -309,25 +309,25 @@ func TestIsInMaintenanceWindow(t *testing.T) {
 		{
 			"cluster_wide_window",
 			clusterPg, nodePg,
-			[]db.MaintenanceWindow{{ClusterID: clusterID, NodeID: pgtype.UUID{}}},
+			[]db.MaintenanceWindow{{ClusterID: clusterPg, NodeID: pgtype.UUID{}}},
 			true,
 		},
 		{
 			"matching_node_window",
 			clusterPg, nodePg,
-			[]db.MaintenanceWindow{{ClusterID: clusterID, NodeID: nodePg}},
+			[]db.MaintenanceWindow{{ClusterID: clusterPg, NodeID: nodePg}},
 			true,
 		},
 		{
 			"different_node_window",
 			clusterPg, nodePg,
-			[]db.MaintenanceWindow{{ClusterID: clusterID, NodeID: otherNodePg}},
+			[]db.MaintenanceWindow{{ClusterID: clusterPg, NodeID: otherNodePg}},
 			false,
 		},
 		{
 			"different_cluster",
 			pgtype.UUID{Bytes: uuid.New(), Valid: true}, nodePg,
-			[]db.MaintenanceWindow{{ClusterID: clusterID, NodeID: pgtype.UUID{}}},
+			[]db.MaintenanceWindow{{ClusterID: clusterPg, NodeID: pgtype.UUID{}}},
 			false,
 		},
 	}

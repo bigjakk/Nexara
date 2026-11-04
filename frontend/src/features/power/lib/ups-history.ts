@@ -62,7 +62,8 @@ export function upsHistoryEventLabel(entry: HistoryEntry, t: TFunction): string 
 }
 
 /** The Summary column: how long a power event lasted and what the battery got
- *  down to; a command's risk and why it failed; the node or label a feed names. */
+ *  down to; a command's risk and why it failed; a maintenance window's span;
+ *  the node or label a feed names. */
 export function upsHistorySummary(entry: HistoryEntry, t: TFunction): string | undefined {
   const d = parseDetails(entry.details);
   const parts: string[] = [];
@@ -76,6 +77,10 @@ export function upsHistorySummary(entry: HistoryEntry, t: TFunction): string | u
   } else if (entry.action.startsWith("ups_command_")) {
     if (typeof d["tier"] === "string" && d["tier"] !== "everyday") parts.push(t(`tiers.${d["tier"]}`));
     if (typeof d["error"] === "string") parts.push(t("summaries.error", { error: d["error"] }));
+  } else if (entry.action.startsWith("ups_maintenance_window_")) {
+    if (typeof d["starts_at"] === "string" && typeof d["ends_at"] === "string") {
+      parts.push(t("summaries.window", { from: formatDateTime(d["starts_at"]), to: formatDateTime(d["ends_at"]) }));
+    }
   } else if (entry.action.startsWith("ups_feed_")) {
     const node = typeof d["node"] === "string" ? d["node"] : "";
     const label = typeof d["label"] === "string" ? d["label"] : "";

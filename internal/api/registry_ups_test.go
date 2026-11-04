@@ -3,7 +3,7 @@ package api
 // upsRouteCount is how many endpoints registerUPSEndpoints declares. See
 // vmRouteCount in registry_vms_test.go for why the registry total is a sum of
 // per-domain constants rather than one number.
-const upsRouteCount = 18
+const upsRouteCount = 22
 
 // upsRoutesOutsideTheClusterCheckShape lists every UPS route: global, because a
 // UPS powers machines rather than a cluster's objects and one NUT server can
@@ -40,6 +40,16 @@ var upsRoutesOutsideTheClusterCheckShape = func() map[string]string {
 		"PUT /api/v1/nut-servers/:id/host-node",
 	} {
 		out[r] = byNode
+	}
+	// A UPS's maintenance windows: the UPS's view with the window permission,
+	// both instance-wide, since a NUT server belongs to no cluster.
+	out["GET /api/v1/ups-devices/:id/maintenance-windows"] = "AllOf: global view:ups and global view:maintenance_window"
+	for _, r := range []string{
+		"POST /api/v1/ups-devices/:id/maintenance-windows",
+		"PUT /api/v1/ups-devices/:id/maintenance-windows/:window_id",
+		"DELETE /api/v1/ups-devices/:id/maintenance-windows/:window_id",
+	} {
+		out[r] = "AllOf: global view:ups and global manage:maintenance_window"
 	}
 	return out
 }()

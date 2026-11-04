@@ -212,8 +212,10 @@ func toNotificationChannelResponse(ch db.NotificationChannel) notificationChanne
 }
 
 type maintenanceWindowResponse struct {
-	ID          uuid.UUID `json:"id"`
-	ClusterID   uuid.UUID `json:"cluster_id"`
+	ID uuid.UUID `json:"id"`
+	// ClusterID is a cluster's window's; UpsID a UPS's (000137), one or the other.
+	ClusterID   string    `json:"cluster_id,omitempty"`
+	UpsID       string    `json:"ups_id,omitempty"`
 	NodeID      string    `json:"node_id,omitempty"`
 	Description string    `json:"description"`
 	StartsAt    string    `json:"starts_at"`
@@ -226,13 +228,18 @@ type maintenanceWindowResponse struct {
 func toMaintenanceWindowResponse(w db.MaintenanceWindow) maintenanceWindowResponse {
 	resp := maintenanceWindowResponse{
 		ID:          w.ID,
-		ClusterID:   w.ClusterID,
 		Description: w.Description,
 		StartsAt:    w.StartsAt.Format(time.RFC3339Nano),
 		EndsAt:      w.EndsAt.Format(time.RFC3339Nano),
 		CreatedBy:   w.CreatedBy,
 		CreatedAt:   w.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:   w.UpdatedAt.Format(time.RFC3339Nano),
+	}
+	if w.ClusterID.Valid {
+		resp.ClusterID = uuid.UUID(w.ClusterID.Bytes).String()
+	}
+	if w.UpsID.Valid {
+		resp.UpsID = uuid.UUID(w.UpsID.Bytes).String()
 	}
 	if w.NodeID.Valid {
 		id, _ := uuid.FromBytes(w.NodeID.Bytes[:])
@@ -1587,6 +1594,45 @@ func (h *AlertHandler) TestChannel(c fiber.Ctx, p *apischema.Params) error {
 
 // ====== Maintenance Windows ======
 
+// newWindowSpan reads a new window's starts_at and ends_at, both required.
+func newWindowSpan(p *apischema.Params) (startsAt, endsAt time.Time, err error) {
+	if startsAt, err = time.Parse(time.RFC3339, p.String("starts_at")); err != nil {
+		return startsAt, endsAt, fiber.NewError(fiber.StatusBadRequest, "Invalid starts_at format (use RFC3339)")
+	}
+	if endsAt, err = time.Parse(time.RFC3339, p.String("ends_at")); err != nil {
+		return startsAt, endsAt, fiber.NewError(fiber.StatusBadRequest, "Invalid ends_at format (use RFC3339)")
+	}
+	if !endsAt.After(startsAt) {
+		return startsAt, endsAt, fiber.NewError(fiber.StatusBadRequest, "ends_at must be after starts_at")
+	}
+	return startsAt, endsAt, nil
+}
+
+// editedWindow merges an update onto a stored window. Every field reads the
+// EMPTY value as absent rather than as a clear, which is what the
+// pre-migration `if req.X != ""` tests did — so there is no way to blank a
+// description through an update, and there never was.
+func editedWindow(p *apischema.Params, existing db.MaintenanceWindow) (description string, startsAt, endsAt time.Time, err error) {
+	description, startsAt, endsAt = existing.Description, existing.StartsAt, existing.EndsAt
+	if v := p.String("description"); v != "" {
+		description = v
+	}
+	if v := p.String("starts_at"); v != "" {
+		if startsAt, err = time.Parse(time.RFC3339, v); err != nil {
+			return description, startsAt, endsAt, fiber.NewError(fiber.StatusBadRequest, "Invalid starts_at format")
+		}
+	}
+	if v := p.String("ends_at"); v != "" {
+		if endsAt, err = time.Parse(time.RFC3339, v); err != nil {
+			return description, startsAt, endsAt, fiber.NewError(fiber.StatusBadRequest, "Invalid ends_at format")
+		}
+	}
+	if !endsAt.After(startsAt) {
+		return description, startsAt, endsAt, fiber.NewError(fiber.StatusBadRequest, "ends_at must be after starts_at")
+	}
+	return description, startsAt, endsAt, nil
+}
+
 // ListMaintenanceWindows lists maintenance windows for a cluster.
 func (h *AlertHandler) ListMaintenanceWindows(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
@@ -1598,7 +1644,7 @@ func (h *AlertHandler) ListMaintenanceWindows(c fiber.Ctx, p *apischema.Params) 
 	offset := int(p.Int("offset"))
 
 	windows, err := h.queries.ListMaintenanceWindows(c.Context(), db.ListMaintenanceWindowsParams{
-		ClusterID: clusterID,
+		ClusterID: ClusterUUID(clusterID),
 		Limit:     safeconv.Int32(limit),
 		Offset:    safeconv.Int32(offset),
 	})
@@ -1620,16 +1666,9 @@ func (h *AlertHandler) CreateMaintenanceWindow(c fiber.Ctx, p *apischema.Params)
 		return err
 	}
 
-	startsAt, err := time.Parse(time.RFC3339, p.String("starts_at"))
+	startsAt, endsAt, err := newWindowSpan(p)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid starts_at format (use RFC3339)")
-	}
-	endsAt, err := time.Parse(time.RFC3339, p.String("ends_at"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid ends_at format (use RFC3339)")
-	}
-	if !endsAt.After(startsAt) {
-		return fiber.NewError(fiber.StatusBadRequest, "ends_at must be after starts_at")
+		return err
 	}
 
 	// The EMPTY node_id means "the whole cluster", which the declaration keeps
@@ -1657,7 +1696,7 @@ func (h *AlertHandler) CreateMaintenanceWindow(c fiber.Ctx, p *apischema.Params)
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	window, err := h.queries.InsertMaintenanceWindow(c.Context(), db.InsertMaintenanceWindowParams{
-		ClusterID:   clusterID,
+		ClusterID:   ClusterUUID(clusterID),
 		NodeID:      nodeID,
 		Description: p.String("description"),
 		StartsAt:    startsAt,
@@ -1690,36 +1729,15 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c fiber.Ctx, p *apischema.Params)
 		return fiber.NewError(fiber.StatusNotFound, "Maintenance window not found")
 	}
 
-	// Verify the maintenance window belongs to the cluster in the URL.
-	if existing.ClusterID != clusterID {
+	// Verify the maintenance window belongs to the cluster in the URL. A UPS's
+	// names none, so it is not found here either.
+	if existing.ClusterID != ClusterUUID(clusterID) {
 		return fiber.NewError(fiber.StatusNotFound, "Maintenance window not found")
 	}
 
-	// Every field reads the EMPTY value as absent rather than as a clear, which
-	// is what the pre-migration `if req.X != ""` tests did — so there is no way
-	// to blank a description through this route, and there never was.
-	description := existing.Description
-	if v := p.String("description"); v != "" {
-		description = v
-	}
-	startsAt := existing.StartsAt
-	if v := p.String("starts_at"); v != "" {
-		parsed, parseErr := time.Parse(time.RFC3339, v)
-		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid starts_at format")
-		}
-		startsAt = parsed
-	}
-	endsAt := existing.EndsAt
-	if v := p.String("ends_at"); v != "" {
-		parsed, parseErr := time.Parse(time.RFC3339, v)
-		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid ends_at format")
-		}
-		endsAt = parsed
-	}
-	if !endsAt.After(startsAt) {
-		return fiber.NewError(fiber.StatusBadRequest, "ends_at must be after starts_at")
+	description, startsAt, endsAt, err := editedWindow(p, existing)
+	if err != nil {
+		return err
 	}
 	nodeID := existing.NodeID
 	if raw := p.String("node_id"); raw != "" {
@@ -1749,7 +1767,7 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c fiber.Ctx, p *apischema.Params)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update maintenance window")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(existing.ClusterID), "maintenance_window", id.String(), "maintenance_window_updated", nil)
+	AuditLog(c, h.queries, h.eventPub, existing.ClusterID, "maintenance_window", id.String(), "maintenance_window_updated", nil)
 
 	return c.JSON(toMaintenanceWindowResponse(window))
 }
@@ -1771,8 +1789,9 @@ func (h *AlertHandler) DeleteMaintenanceWindow(c fiber.Ctx, p *apischema.Params)
 		return fiber.NewError(fiber.StatusNotFound, "Maintenance window not found")
 	}
 
-	// Verify the maintenance window belongs to the cluster in the URL.
-	if existing.ClusterID != clusterID {
+	// Verify the maintenance window belongs to the cluster in the URL. A UPS's
+	// names none, so it is not found here either.
+	if existing.ClusterID != ClusterUUID(clusterID) {
 		return fiber.NewError(fiber.StatusNotFound, "Maintenance window not found")
 	}
 
@@ -1780,7 +1799,7 @@ func (h *AlertHandler) DeleteMaintenanceWindow(c fiber.Ctx, p *apischema.Params)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete maintenance window")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(existing.ClusterID), "maintenance_window", id.String(), "maintenance_window_deleted", nil)
+	AuditLog(c, h.queries, h.eventPub, existing.ClusterID, "maintenance_window", id.String(), "maintenance_window_deleted", nil)
 
 	return c.SendStatus(fiber.StatusNoContent)
 }

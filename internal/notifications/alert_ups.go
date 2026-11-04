@@ -32,8 +32,9 @@ const (
 // judge a reading's age as the Power page does (nut.StaleAfter).
 func (e *Engine) SetUpsPollInterval(d time.Duration) { e.upsPollInterval = d }
 
-// evaluateUPSRule handles the ups_* metrics.
-func (e *Engine) evaluateUPSRule(ctx context.Context, rule db.AlertRule) error {
+// evaluateUPSRule handles the ups_* metrics. windows are the maintenance
+// windows open now.
+func (e *Engine) evaluateUPSRule(ctx context.Context, rule db.AlertRule, windows []db.MaintenanceWindow) error {
 	if rule.ScopeType != "global" && rule.ScopeType != "ups" {
 		return fmt.Errorf("%s does not support scope_type %q", rule.Metric, rule.ScopeType)
 	}
@@ -41,23 +42,56 @@ func (e *Engine) evaluateUPSRule(ctx context.Context, rule db.AlertRule) error {
 	if err != nil {
 		return fmt.Errorf("ups devices: %w", err)
 	}
-	out := upsRuleValue(rule.Metric, rule.Operator, rule.Threshold,
-		upsAlertReadings(upsRuleRows(rule, rows), e.upsPollInterval, time.Now()))
+	out := upsRuleVerdict(rule, rows, windows, e.upsPollInterval, time.Now())
 	if out.hold {
 		return nil
 	}
 	return e.handleRuleResult(ctx, rule, out.met, out.value, out.label, pgtype.UUID{}, pgtype.UUID{})
 }
 
-// upsRuleRows are the UPSes a rule judges: every one for a global rule, the
-// one it names for a rule of scope ups — none once that UPS is gone, so there
-// is nothing to judge and a firing alert resolves.
-func upsRuleRows(rule db.AlertRule, rows []db.ListUpsDevicesRow) []db.ListUpsDevicesRow {
-	if rule.ScopeType != "ups" {
-		return rows
+// upsRuleVerdict judges a rule on the UPSes it judges (upsRuleRows). A UPS a
+// window covers drops out of a global rule, but where it alone would meet the
+// condition the verdict holds, neither firing nor resolving, as every rule a
+// window covers does: a window opened during an outage must not report the
+// outage over.
+func upsRuleVerdict(rule db.AlertRule, rows []db.ListUpsDevicesRow, windows []db.MaintenanceWindow,
+	pollInterval time.Duration, now time.Time) upsRuleOutcome {
+	judged, held := upsRuleRows(rule, rows, windows)
+	if held {
+		return upsRuleOutcome{hold: true}
 	}
-	return slices.DeleteFunc(rows, func(r db.ListUpsDevicesRow) bool {
-		return !rule.UpsID.Valid || r.ID != uuid.UUID(rule.UpsID.Bytes)
+	out := upsRuleValue(rule.Metric, rule.Operator, rule.Threshold, upsAlertReadings(judged, pollInterval, now))
+	if !out.hold && !out.met && rule.ScopeType != "ups" && len(judged) < len(rows) &&
+		upsRuleValue(rule.Metric, rule.Operator, rule.Threshold, upsAlertReadings(rows, pollInterval, now)).met {
+		return upsRuleOutcome{hold: true}
+	}
+	return out
+}
+
+// upsRuleRows are the UPSes a rule judges, in a new slice: for a global rule
+// every one no maintenance window covers; for a rule of scope ups the one it
+// names — none once that UPS is gone, so there is nothing to judge and a
+// firing alert resolves. held is a rule of scope ups whose UPS a window covers:
+// its verdict holds, as a node's rules do under a window.
+func upsRuleRows(rule db.AlertRule, rows []db.ListUpsDevicesRow, windows []db.MaintenanceWindow) (judged []db.ListUpsDevicesRow, held bool) {
+	if rule.ScopeType == "ups" && rule.UpsID.Valid && upsInMaintenance(uuid.UUID(rule.UpsID.Bytes), windows) {
+		return nil, true
+	}
+	judged = make([]db.ListUpsDevicesRow, 0, len(rows))
+	for _, r := range rows {
+		if rule.ScopeType == "ups" && (!rule.UpsID.Valid || r.ID != uuid.UUID(rule.UpsID.Bytes)) ||
+			rule.ScopeType != "ups" && upsInMaintenance(r.ID, windows) {
+			continue
+		}
+		judged = append(judged, r)
+	}
+	return judged, false
+}
+
+// upsInMaintenance reports whether one of windows covers the UPS.
+func upsInMaintenance(upsID uuid.UUID, windows []db.MaintenanceWindow) bool {
+	return slices.ContainsFunc(windows, func(w db.MaintenanceWindow) bool {
+		return w.UpsID.Valid && uuid.UUID(w.UpsID.Bytes) == upsID
 	})
 }
 

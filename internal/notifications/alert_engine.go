@@ -279,9 +279,8 @@ func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []
 		return e.evaluatePVETaskFailedRule(ctx, rule, windows, "")
 	case MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSRuntime,
 		MetricUPSLoad, MetricUPSUnreachable, MetricUPSReplaceBattery:
-		// Global, like the repository rule: no cluster maintenance window
-		// applies to a UPS.
-		return e.evaluateUPSRule(ctx, rule)
+		// No cluster's maintenance window applies to a UPS; its own do.
+		return e.evaluateUPSRule(ctx, rule, windows)
 	}
 
 	switch rule.ScopeType {
@@ -846,8 +845,8 @@ func (e *Engine) checkEscalations(ctx context.Context) {
 // isInMaintenanceWindow checks if a resource is currently in a maintenance window.
 func (e *Engine) isInMaintenanceWindow(clusterID pgtype.UUID, nodeID pgtype.UUID, windows []db.MaintenanceWindow) bool {
 	for _, w := range windows {
-		// Match cluster.
-		if clusterID.Valid && w.ClusterID == uuidFromPgtype(clusterID) {
+		// Match cluster. A UPS's window names none (upsInMaintenance).
+		if clusterID.Valid && w.ClusterID.Valid && w.ClusterID.Bytes == clusterID.Bytes {
 			// If window has a specific node, only match that node.
 			if w.NodeID.Valid {
 				if nodeID.Valid && uuidFromPgtype(nodeID) == uuidFromPgtype(w.NodeID) {

@@ -47,6 +47,11 @@ describe("a UPS's History", () => {
     expect(upsHistoryNote(power("self_test", { ended_at: at }), t)).toBeUndefined();
   });
 
+  it("summarizes a maintenance window by its span", () => {
+    const opened = audit("ups_maintenance_window_created", { starts_at: "2026-11-04T10:00:00Z", ends_at: "2026-11-04T11:00:00Z" });
+    expect(upsHistorySummary(opened, t)).toMatch(/^.+ to .+$/);
+  });
+
   it("is read from the UPS's own route, as a global History", () => {
     const history = upsHistory("u1");
     expect(history.target.clusterId).toBeNull();

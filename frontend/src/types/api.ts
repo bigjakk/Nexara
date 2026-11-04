@@ -514,7 +514,9 @@ export interface NotificationDLQSummary {
 
 export interface MaintenanceWindow {
   id: string;
-  cluster_id: string;
+  /** A cluster's window names its cluster; a UPS's names the UPS instead. */
+  cluster_id?: string;
+  ups_id?: string;
   node_id?: string;
   description: string;
   starts_at: string;

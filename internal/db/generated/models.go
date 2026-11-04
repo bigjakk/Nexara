@@ -583,7 +583,7 @@ type LeaderElection struct {
 
 type MaintenanceWindow struct {
 	ID          uuid.UUID   `json:"id"`
-	ClusterID   uuid.UUID   `json:"cluster_id"`
+	ClusterID   pgtype.UUID `json:"cluster_id"`
 	NodeID      pgtype.UUID `json:"node_id"`
 	Description string      `json:"description"`
 	StartsAt    time.Time   `json:"starts_at"`
@@ -591,6 +591,8 @@ type MaintenanceWindow struct {
 	CreatedBy   uuid.UUID   `json:"created_by"`
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
+	// The UPS the window covers; NULL for a cluster's window, which names cluster_id instead
+	UpsID pgtype.UUID `json:"ups_id"`
 }
 
 type MigrationJob struct {

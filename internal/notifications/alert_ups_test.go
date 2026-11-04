@@ -75,27 +75,67 @@ func TestUpsRuleValue(t *testing.T) {
 	}
 }
 
-// A global rule judges every UPS; a rule of scope ups the one it names, and
-// none once that UPS is gone.
+// A global rule judges every UPS no maintenance window covers; a rule of scope
+// ups the one it names, none once that UPS is gone, and holds while a window
+// covers it.
 func TestUpsRuleRows(t *testing.T) {
 	t.Parallel()
 	a, b := db.ListUpsDevicesRow{ID: uuid.New(), UpsName: "ups01"}, db.ListUpsDevicesRow{ID: uuid.New(), UpsName: "ups02"}
+	underB := []db.MaintenanceWindow{{UpsID: pgtype.UUID{Bytes: b.ID, Valid: true}}}
 	for _, tc := range []struct {
-		name string
-		rule db.AlertRule
-		want []string
+		name    string
+		rule    db.AlertRule
+		windows []db.MaintenanceWindow
+		want    []string
+		held    bool
 	}{
-		{"global", db.AlertRule{ScopeType: "global"}, []string{"ups01", "ups02"}},
-		{"its own UPS", db.AlertRule{ScopeType: "ups", UpsID: pgtype.UUID{Bytes: b.ID, Valid: true}}, []string{"ups02"}},
-		{"a UPS no longer listed", db.AlertRule{ScopeType: "ups", UpsID: pgtype.UUID{Bytes: uuid.New(), Valid: true}}, nil},
+		{"global", db.AlertRule{ScopeType: "global"}, nil, []string{"ups01", "ups02"}, false},
+		{"global, one UPS under a window", db.AlertRule{ScopeType: "global"}, underB, []string{"ups01"}, false},
+		{"its own UPS", db.AlertRule{ScopeType: "ups", UpsID: pgtype.UUID{Bytes: b.ID, Valid: true}}, nil, []string{"ups02"}, false},
+		{"its own UPS, under a window", db.AlertRule{ScopeType: "ups", UpsID: pgtype.UUID{Bytes: b.ID, Valid: true}}, underB, nil, true},
+		{"a UPS no longer listed", db.AlertRule{ScopeType: "ups", UpsID: pgtype.UUID{Bytes: uuid.New(), Valid: true}}, nil, nil, false},
 	} {
-		judged := upsRuleRows(tc.rule, []db.ListUpsDevicesRow{a, b})
+		judged, held := upsRuleRows(tc.rule, []db.ListUpsDevicesRow{a, b}, tc.windows)
+		if held != tc.held {
+			t.Errorf("%s: held = %v, want %v", tc.name, held, tc.held)
+		}
 		got := make([]string, 0, len(judged))
 		for _, r := range judged {
 			got = append(got, r.UpsName)
 		}
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("%s: judges %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A window drops its UPS out of a global rule, but where that UPS alone meets
+// the condition the verdict holds: a window opened during an outage neither
+// resolves its alert nor raises one.
+func TestUpsRuleVerdictHoldsWhatAWindowHides(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 4, 3, 12, 0, 0, time.UTC)
+	row := func(name, status string) db.ListUpsDevicesRow {
+		return db.ListUpsDevicesRow{ID: uuid.New(), UpsName: name, ServerName: "nut01", ServerEnabled: true, Status: status,
+			Reachability: "ok", Vars: json.RawMessage(`{}`), LastReadingAt: pgtype.Timestamptz{Time: now.Add(-10 * time.Second), Valid: true}}
+	}
+	ol, ob := row("ups01", "OL"), row("ups02", "OB")
+	under := func(r db.ListUpsDevicesRow) []db.MaintenanceWindow {
+		return []db.MaintenanceWindow{{UpsID: pgtype.UUID{Bytes: r.ID, Valid: true}}}
+	}
+	global := db.AlertRule{ScopeType: "global", Metric: MetricUPSOnBattery, Operator: ">", Threshold: 0}
+	for _, tc := range []struct {
+		name      string
+		windows   []db.MaintenanceWindow
+		hold, met bool
+	}{
+		{"no window", nil, false, true},
+		{"a window on the UPS on battery", under(ob), true, false},
+		{"a window on another UPS", under(ol), false, true},
+	} {
+		got := upsRuleVerdict(global, []db.ListUpsDevicesRow{ol, ob}, tc.windows, 10*time.Second, now)
+		if got.hold != tc.hold || got.met != tc.met {
+			t.Errorf("%s: hold %v met %v, want hold %v met %v", tc.name, got.hold, got.met, tc.hold, tc.met)
 		}
 	}
 }

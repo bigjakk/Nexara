@@ -21,6 +21,7 @@ import { UpsPowers } from "../components/UpsPowers";
 import { UpsCommands } from "../components/UpsCommands";
 import { UpsVariableDialog } from "../components/UpsVariableDialog";
 import { upsHistory } from "../lib/ups-history";
+import { UpsMaintenance } from "../components/UpsMaintenance";
 import { HistoryTabContent, HistoryTabTrigger } from "@/features/history/components/HistoryTab";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { UpsWritableVar } from "../types/ups";
@@ -215,6 +216,9 @@ export function UpsDetailPage() {
             </TabsList>
             <TabsContent value="overview">
               <Overview device={d} />
+              <div className="mt-4">
+                <UpsMaintenance device={d} />
+              </div>
             </TabsContent>
             <TabsContent value="powers">
               <UpsPowers device={d} />

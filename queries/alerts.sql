@@ -211,6 +211,18 @@ WHERE cluster_id = $1
 ORDER BY starts_at DESC
 LIMIT $2 OFFSET $3;
 
+-- A UPS's window (000137) names the UPS and no cluster or node.
+-- name: InsertUpsMaintenanceWindow :one
+INSERT INTO maintenance_windows (ups_id, description, starts_at, ends_at, created_by)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING *;
+
+-- name: ListUpsMaintenanceWindows :many
+SELECT * FROM maintenance_windows
+WHERE ups_id = $1
+ORDER BY starts_at DESC
+LIMIT $2 OFFSET $3;
+
 -- name: ListActiveMaintenanceWindows :many
 SELECT * FROM maintenance_windows
 WHERE now() BETWEEN starts_at AND ends_at;

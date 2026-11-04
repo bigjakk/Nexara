@@ -309,7 +309,7 @@ func (q *Queries) GetLatestAlertForRule(ctx context.Context, arg GetLatestAlertF
 }
 
 const getMaintenanceWindow = `-- name: GetMaintenanceWindow :one
-SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at FROM maintenance_windows WHERE id = $1
+SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id FROM maintenance_windows WHERE id = $1
 `
 
 func (q *Queries) GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (MaintenanceWindow, error) {
@@ -325,6 +325,7 @@ func (q *Queries) GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (Maint
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UpsID,
 	)
 	return i, err
 }
@@ -658,11 +659,11 @@ const insertMaintenanceWindow = `-- name: InsertMaintenanceWindow :one
 
 INSERT INTO maintenance_windows (cluster_id, node_id, description, starts_at, ends_at, created_by)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at
+RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id
 `
 
 type InsertMaintenanceWindowParams struct {
-	ClusterID   uuid.UUID   `json:"cluster_id"`
+	ClusterID   pgtype.UUID `json:"cluster_id"`
 	NodeID      pgtype.UUID `json:"node_id"`
 	Description string      `json:"description"`
 	StartsAt    time.Time   `json:"starts_at"`
@@ -691,6 +692,7 @@ func (q *Queries) InsertMaintenanceWindow(ctx context.Context, arg InsertMainten
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UpsID,
 	)
 	return i, err
 }
@@ -729,6 +731,45 @@ func (q *Queries) InsertNotificationChannel(ctx context.Context, arg InsertNotif
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const insertUpsMaintenanceWindow = `-- name: InsertUpsMaintenanceWindow :one
+INSERT INTO maintenance_windows (ups_id, description, starts_at, ends_at, created_by)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id
+`
+
+type InsertUpsMaintenanceWindowParams struct {
+	UpsID       pgtype.UUID `json:"ups_id"`
+	Description string      `json:"description"`
+	StartsAt    time.Time   `json:"starts_at"`
+	EndsAt      time.Time   `json:"ends_at"`
+	CreatedBy   uuid.UUID   `json:"created_by"`
+}
+
+// A UPS's window (000137) names the UPS and no cluster or node.
+func (q *Queries) InsertUpsMaintenanceWindow(ctx context.Context, arg InsertUpsMaintenanceWindowParams) (MaintenanceWindow, error) {
+	row := q.db.QueryRow(ctx, insertUpsMaintenanceWindow,
+		arg.UpsID,
+		arg.Description,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.CreatedBy,
+	)
+	var i MaintenanceWindow
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.NodeID,
+		&i.Description,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpsID,
 	)
 	return i, err
 }
@@ -836,7 +877,7 @@ func (q *Queries) ListActiveAlertsByCluster(ctx context.Context, clusterID pgtyp
 }
 
 const listActiveMaintenanceWindows = `-- name: ListActiveMaintenanceWindows :many
-SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at FROM maintenance_windows
+SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id FROM maintenance_windows
 WHERE now() BETWEEN starts_at AND ends_at
 `
 
@@ -859,6 +900,7 @@ func (q *Queries) ListActiveMaintenanceWindows(ctx context.Context) ([]Maintenan
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UpsID,
 		); err != nil {
 			return nil, err
 		}
@@ -1280,16 +1322,16 @@ func (q *Queries) ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory,
 }
 
 const listMaintenanceWindows = `-- name: ListMaintenanceWindows :many
-SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at FROM maintenance_windows
+SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id FROM maintenance_windows
 WHERE cluster_id = $1
 ORDER BY starts_at DESC
 LIMIT $2 OFFSET $3
 `
 
 type ListMaintenanceWindowsParams struct {
-	ClusterID uuid.UUID `json:"cluster_id"`
-	Limit     int32     `json:"limit"`
-	Offset    int32     `json:"offset"`
+	ClusterID pgtype.UUID `json:"cluster_id"`
+	Limit     int32       `json:"limit"`
+	Offset    int32       `json:"offset"`
 }
 
 func (q *Queries) ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error) {
@@ -1311,6 +1353,7 @@ func (q *Queries) ListMaintenanceWindows(ctx context.Context, arg ListMaintenanc
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UpsID,
 		); err != nil {
 			return nil, err
 		}
@@ -1403,6 +1446,50 @@ func (q *Queries) ListTopAlertRulesInWindow(ctx context.Context, arg ListTopAler
 			&i.Metric,
 			&i.Severity,
 			&i.Fired,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUpsMaintenanceWindows = `-- name: ListUpsMaintenanceWindows :many
+SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id FROM maintenance_windows
+WHERE ups_id = $1
+ORDER BY starts_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListUpsMaintenanceWindowsParams struct {
+	UpsID  pgtype.UUID `json:"ups_id"`
+	Limit  int32       `json:"limit"`
+	Offset int32       `json:"offset"`
+}
+
+func (q *Queries) ListUpsMaintenanceWindows(ctx context.Context, arg ListUpsMaintenanceWindowsParams) ([]MaintenanceWindow, error) {
+	rows, err := q.db.Query(ctx, listUpsMaintenanceWindows, arg.UpsID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MaintenanceWindow{}
+	for rows.Next() {
+		var i MaintenanceWindow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.NodeID,
+			&i.Description,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpsID,
 		); err != nil {
 			return nil, err
 		}
@@ -1561,7 +1648,7 @@ const updateMaintenanceWindow = `-- name: UpdateMaintenanceWindow :one
 UPDATE maintenance_windows
 SET description = $2, starts_at = $3, ends_at = $4, node_id = $5, updated_at = now()
 WHERE id = $1
-RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at
+RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id
 `
 
 type UpdateMaintenanceWindowParams struct {
@@ -1591,6 +1678,7 @@ func (q *Queries) UpdateMaintenanceWindow(ctx context.Context, arg UpdateMainten
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UpsID,
 	)
 	return i, err
 }
