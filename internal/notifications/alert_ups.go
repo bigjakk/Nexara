@@ -29,8 +29,8 @@ const (
 )
 
 // upsMetrics are the UPS metrics, the one list every reader of them derives
-// from (IsUPSMetric): a metric missing from a second copy would miss the
-// view:ups gate its alerts need.
+// from (IsUPSMetric, UPSMetrics): a metric missing from a second copy would
+// miss the view:ups gate its alerts need.
 var upsMetrics = []string{MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSRuntime, MetricUPSLoad,
 	MetricUPSUnreachable, MetricUPSReplaceBattery}
 
@@ -39,6 +39,12 @@ var upsMetrics = []string{MetricUPSOnBattery, MetricUPSBatteryCharge, MetricUPSR
 // global view:ups every UPS route takes.
 func IsUPSMetric(metric string) bool {
 	return slices.Contains(upsMetrics, metric)
+}
+
+// UPSMetrics returns a copy of the UPS metrics, for the alert reads that leave
+// their alerts out for a caller without view:ups.
+func UPSMetrics() []string {
+	return slices.Clone(upsMetrics)
 }
 
 // SetUpsPollInterval tells the UPS rules how often readings arrive, so they

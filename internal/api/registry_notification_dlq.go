@@ -67,7 +67,9 @@ func registerNotificationDLQEndpoints(reg *Registry, h *handlers.NotificationDLQ
 		Method: fiber.MethodGet,
 		Path:   dlqScope,
 		Description: "List dead-lettered notifications — dispatches that exhausted their retries or were " +
-			"rate-limited — newest first, optionally narrowed to one state or one channel.",
+			"rate-limited — newest first, optionally narrowed to one state or one channel. An entry for an " +
+			"alert on a UPS metric, whose payload names the UPS and its reading, is left out without the " +
+			"instance-wide view:ups.",
 		Group:       "Notification Channels",
 		Permissions: globalCheck("view", "notification_dlq"),
 		Parameters: apischema.Properties{
@@ -121,7 +123,9 @@ func registerNotificationDLQEndpoints(reg *Registry, h *handlers.NotificationDLQ
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
 		Path:        dlqScope + "/summary",
-		Description: "Return the dead-letter counts per state, for the alerts page's queue widget.",
+		Description: "Return the dead-letter counts per state, for the alerts page's queue widget. Entries " +
+			"for UPS alerts are counted only for a holder of the instance-wide view:ups, as the listing " +
+			"shows them.",
 		Group:       "Notification Channels",
 		Permissions: globalCheck("view", "notification_dlq"),
 		Parameters:  apischema.Properties{},

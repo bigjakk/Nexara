@@ -226,6 +226,7 @@ SELECT
     COUNT(*) FILTER (WHERE state = 'firing' AND severity = 'info') AS info_firing
 FROM alert_history
 WHERE state IN ('pending', 'firing', 'acknowledged')
+  AND NOT (metric = ANY($1::text[]))
 `
 
 type GetAlertSummaryRow struct {
@@ -237,8 +238,10 @@ type GetAlertSummaryRow struct {
 	InfoFiring        int64 `json:"info_firing"`
 }
 
-func (q *Queries) GetAlertSummary(ctx context.Context) (GetAlertSummaryRow, error) {
-	row := q.db.QueryRow(ctx, getAlertSummary)
+// GetAlertSummary takes ListAlertHistoryFiltered's hidden_metrics, so the
+// counts above the Alerts list count only what the list can show.
+func (q *Queries) GetAlertSummary(ctx context.Context, hiddenMetrics []string) (GetAlertSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getAlertSummary, hiddenMetrics)
 	var i GetAlertSummaryRow
 	err := row.Scan(
 		&i.FiringCount,
@@ -1033,8 +1036,9 @@ WHERE ($1::text = '' OR state = $1::text)
   AND ($3::uuid IS NULL OR cluster_id = $3)
   AND ($4::uuid[] IS NULL
        OR cluster_id = ANY($4::uuid[]))
+  AND NOT (metric = ANY($5::text[]))
 ORDER BY created_at DESC
-LIMIT $6 OFFSET $5
+LIMIT $7 OFFSET $6
 `
 
 type ListAlertHistoryFilteredParams struct {
@@ -1042,6 +1046,7 @@ type ListAlertHistoryFilteredParams struct {
 	Severity             string      `json:"severity"`
 	ClusterID            pgtype.UUID `json:"cluster_id"`
 	AccessibleClusterIds []uuid.UUID `json:"accessible_cluster_ids"`
+	HiddenMetrics        []string    `json:"hidden_metrics"`
 	OffsetVal            int32       `json:"offset_val"`
 	LimitVal             int32       `json:"limit_val"`
 }
@@ -1050,12 +1055,16 @@ type ListAlertHistoryFilteredParams struct {
 // caller's optional filter; accessible_cluster_ids is their view:alert RBAC
 // scope and is not optional — see the note on ListAlertRules, including why a
 // NULL cluster_id row is excluded from a scoped caller by the clause alone.
+// hidden_metrics names the metrics whose alerts the caller may not read (the
+// UPS metrics, to a caller without view:ups); '{}' hides nothing, and NULL
+// would hide every row.
 func (q *Queries) ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHistoryFilteredParams) ([]AlertHistory, error) {
 	rows, err := q.db.Query(ctx, listAlertHistoryFiltered,
 		arg.State,
 		arg.Severity,
 		arg.ClusterID,
 		arg.AccessibleClusterIds,
+		arg.HiddenMetrics,
 		arg.OffsetVal,
 		arg.LimitVal,
 	)

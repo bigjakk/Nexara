@@ -174,7 +174,8 @@ func registerAlertEndpoints(reg *Registry, h *handlers.AlertHandler) {
 		Description: "List alert history, newest first, optionally narrowed by state, severity or " +
 			"cluster. Filtered rather than gated: an alert appears only when the caller holds view:alert " +
 			"on the cluster it belongs to, and a GLOBAL alert — one raised by a rule watching " +
-			"infrastructure no cluster owns — needs the instance-wide grant.",
+			"infrastructure no cluster owns — needs the instance-wide grant. An alert on a UPS metric, " +
+			"which names the UPS and its reading, also needs the instance-wide view:ups.",
 		Group: "Alerts",
 		Permissions: Permissions{Advisory: &AdvisoryCheck{
 			Check:  Check{Action: "view", Resource: "alert", Scope: ScopeCluster},
@@ -209,7 +210,8 @@ func registerAlertEndpoints(reg *Registry, h *handlers.AlertHandler) {
 		Path:   alertScope + "/summary",
 		Description: "Count the alerts that are firing, pending and acknowledged right now, and the " +
 			"firing ones by severity. Instance-wide and NOT filtered per cluster, which is why it needs " +
-			"the instance-wide view:alert rather than a grant on one cluster.",
+			"the instance-wide view:alert rather than a grant on one cluster. Alerts on UPS metrics are " +
+			"counted only for a holder of the instance-wide view:ups, as the listing shows them.",
 		Group:       "Alerts",
 		Permissions: globalCheck("view", "alert"),
 		Parameters:  nil,
@@ -222,7 +224,8 @@ func registerAlertEndpoints(reg *Registry, h *handlers.AlertHandler) {
 		// operator building a role needs is spelled out here. Every Deferred
 		// route in this file says it the same way.
 		Description: "Get one alert. Requires view:alert on the cluster the alert belongs to, or the " +
-			"instance-wide view:alert when it carries no cluster.",
+			"instance-wide view:alert when it carries no cluster. An alert on a UPS metric answers 404 " +
+			"without the instance-wide view:ups.",
 		Group:       "Alerts",
 		Permissions: Permissions{Deferred: alertRowClusterReason},
 		Parameters:  apischema.Properties{"id": alertIDParam("Alert history identifier.")},
@@ -234,7 +237,8 @@ func registerAlertEndpoints(reg *Registry, h *handlers.AlertHandler) {
 		Description: "Acknowledge a firing alert, which silences its escalation without claiming the " +
 			"condition is over. Only an alert in the firing state can be acknowledged. Requires " +
 			"acknowledge:alert on the cluster the alert belongs to, or the instance-wide " +
-			"acknowledge:alert when it carries no cluster.",
+			"acknowledge:alert when it carries no cluster. An alert on a UPS metric answers 404 without " +
+			"the instance-wide view:ups.",
 		Group:       "Alerts",
 		Permissions: Permissions{Deferred: alertRowClusterReason},
 		Parameters:  apischema.Properties{"id": alertIDParam("Alert history identifier.")},
@@ -246,7 +250,8 @@ func registerAlertEndpoints(reg *Registry, h *handlers.AlertHandler) {
 		Description: "Resolve a firing or acknowledged alert by hand. Requires acknowledge:alert — not " +
 			"manage:alert — on the cluster the alert belongs to, or the instance-wide acknowledge:alert " +
 			"when it carries no cluster: closing an alert is the same act as acknowledging it, not a " +
-			"change to the rule that raised it.",
+			"change to the rule that raised it. An alert on a UPS metric answers 404 without the " +
+			"instance-wide view:ups.",
 		Group:       "Alerts",
 		Permissions: Permissions{Deferred: alertRowClusterReason},
 		Parameters:  apischema.Properties{"id": alertIDParam("Alert history identifier.")},

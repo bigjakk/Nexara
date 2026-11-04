@@ -441,7 +441,7 @@ type Querier interface {
 	CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (CountCompletedNodesRow, error)
 	CountGuestToolsInFlightForCluster(ctx context.Context, clusterID uuid.UUID) (int64, error)
 	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
-	CountNotificationDLQByState(ctx context.Context) (CountNotificationDLQByStateRow, error)
+	CountNotificationDLQByState(ctx context.Context, hiddenMetrics []string) (CountNotificationDLQByStateRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	// CountResolvableFavorites is the user-facing half of the per-user bound: the
 	// number the "limit reached" message is about. The half that actually bounds the
@@ -863,7 +863,9 @@ type Querier interface {
 	GetAPIKeyByID(ctx context.Context, id uuid.UUID) (ApiKey, error)
 	GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error)
 	GetAlertRule(ctx context.Context, id uuid.UUID) (AlertRule, error)
-	GetAlertSummary(ctx context.Context) (GetAlertSummaryRow, error)
+	// GetAlertSummary takes ListAlertHistoryFiltered's hidden_metrics, so the
+	// counts above the Alerts list count only what the list can show.
+	GetAlertSummary(ctx context.Context, hiddenMetrics []string) (GetAlertSummaryRow, error)
 	GetCVECacheAge(ctx context.Context) (interface{}, error)
 	GetCVECacheByID(ctx context.Context, cveID string) (CveCache, error)
 	GetCVENotificationConfig(ctx context.Context, clusterID uuid.UUID) (CveNotificationConfig, error)
@@ -1467,6 +1469,9 @@ type Querier interface {
 	// caller's optional filter; accessible_cluster_ids is their view:alert RBAC
 	// scope and is not optional — see the note on ListAlertRules, including why a
 	// NULL cluster_id row is excluded from a scoped caller by the clause alone.
+	// hidden_metrics names the metrics whose alerts the caller may not read (the
+	// UPS metrics, to a caller without view:ups); '{}' hides nothing, and NULL
+	// would hide every row.
 	ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHistoryFilteredParams) ([]AlertHistory, error)
 	// ListAlertRules backs the Alerts page. accessible_cluster_ids carries the
 	// caller's view:alert RBAC scope: NULL means global access (no restriction);
@@ -2143,7 +2148,9 @@ type Querier interface {
 	ListNonQuorateClusters(ctx context.Context) ([]uuid.UUID, error)
 	ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error)
 	// channel_id is optional. Pass NULL via sqlc.narg to match all channels;
-	// otherwise filter to the given channel.
+	// otherwise filter to the given channel. hidden_metrics is the alert reads'
+	// (ListAlertHistoryFiltered): an entry holds its alert's payload, reading
+	// included. COALESCE keeps an entry whose payload names no metric.
 	ListNotificationDLQ(ctx context.Context, arg ListNotificationDLQParams) ([]NotificationDlq, error)
 	ListNutServers(ctx context.Context) ([]NutServer, error)
 	ListOIDCConfigs(ctx context.Context) ([]OidcConfig, error)

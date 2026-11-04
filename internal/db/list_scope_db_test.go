@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +27,11 @@ var (
 	jobAtoB = uuid.MustParse("715ce000-0000-4000-8000-0000000000c1")
 	jobBtoA = uuid.MustParse("715ce000-0000-4000-8000-0000000000c2")
 	jobBtoB = uuid.MustParse("715ce000-0000-4000-8000-0000000000c3")
+
+	alertCPU = uuid.MustParse("715ce000-0000-4000-8000-0000000000d1")
+	alertUPS = uuid.MustParse("715ce000-0000-4000-8000-0000000000d2")
+	dlqUPS   = uuid.MustParse("715ce000-0000-4000-8000-0000000000e1")
+	dlqBare  = uuid.MustParse("715ce000-0000-4000-8000-0000000000e2")
 )
 
 // TestListScope_AlertRulesAndMigrationJobs executes the two genuinely novel
@@ -57,6 +64,7 @@ func TestListScope_AlertRulesAndMigrationJobs(t *testing.T) {
 		defer pcancel()
 		_, _ = pool.Exec(pctx, `DELETE FROM migration_jobs WHERE id = ANY($1)`,
 			[]uuid.UUID{jobAtoB, jobBtoA, jobBtoB})
+		_, _ = pool.Exec(pctx, `DELETE FROM notification_dlq WHERE id = ANY($1)`, []uuid.UUID{dlqUPS, dlqBare})
 		// The NULL-cluster rule has no parent to cascade from, so delete by id.
 		_, _ = pool.Exec(pctx, `DELETE FROM alert_rules WHERE id = ANY($1)`,
 			[]uuid.UUID{ruleA, ruleB, ruleGlobal})
@@ -161,6 +169,56 @@ func TestListScope_AlertRulesAndMigrationJobs(t *testing.T) {
 					map[uuid.UUID]bool{jobAtoB: true, jobBtoA: true, jobBtoB: true})
 				assertSameIDs(t, "ListMigrationJobs", got, tt.wantIDs)
 			})
+		}
+	})
+
+	// The alert reads' hidden_metrics: the UPS metrics for a caller without
+	// view:ups, '{}' for one with it. A dead-letter entry is judged by its
+	// payload's metric, and one naming none (dlqBare) is never hidden. The
+	// alerts cascade away with ruleGlobal.
+	t.Run("alerts, dead letters and their counts leave out the hidden metrics", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, `INSERT INTO alert_history (id, rule_id, state, metric, current_value, threshold)
+			VALUES ($1, $3, 'firing', 'cpu_usage', 95, 90), ($2, $3, 'firing', 'ups_on_battery', 1, 0)`,
+			alertCPU, alertUPS, ruleGlobal); err != nil {
+			t.Fatalf("seed alert history: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO notification_dlq (id, channel_type, payload)
+			VALUES ($1, 'webhook', '{"metric": "ups_on_battery"}'), ($2, 'webhook', '{}')`, dlqUPS, dlqBare); err != nil {
+			t.Fatalf("seed dead letters: %v", err)
+		}
+		hideUPS := []string{"ups_on_battery"}
+		for _, tt := range []struct {
+			hidden              []string
+			wantAlerts, wantDLQ []uuid.UUID
+		}{
+			{hideUPS, []uuid.UUID{alertCPU}, []uuid.UUID{dlqBare}},
+			{[]string{}, []uuid.UUID{alertCPU, alertUPS}, []uuid.UUID{dlqUPS, dlqBare}},
+		} {
+			label := " hiding " + strings.Join(tt.hidden, ",")
+			alerts, err := queries.ListAlertHistoryFiltered(ctx, gen.ListAlertHistoryFilteredParams{
+				LimitVal: 100, HiddenMetrics: tt.hidden})
+			if err != nil {
+				t.Fatalf("ListAlertHistoryFiltered: %v", err)
+			}
+			assertSameIDs(t, "ListAlertHistoryFiltered"+label, fixtureIDs(alerts, func(a gen.AlertHistory) uuid.UUID { return a.ID },
+				map[uuid.UUID]bool{alertCPU: true, alertUPS: true}), tt.wantAlerts)
+			dlq, err := queries.ListNotificationDLQ(ctx, gen.ListNotificationDLQParams{LimitVal: 100, HiddenMetrics: tt.hidden})
+			if err != nil {
+				t.Fatalf("ListNotificationDLQ: %v", err)
+			}
+			assertSameIDs(t, "ListNotificationDLQ"+label, fixtureIDs(dlq, func(d gen.NotificationDlq) uuid.UUID { return d.ID },
+				map[uuid.UUID]bool{dlqUPS: true, dlqBare: true}), tt.wantDLQ)
+		}
+		allAlerts, err1 := queries.GetAlertSummary(ctx, []string{})
+		shownAlerts, err2 := queries.GetAlertSummary(ctx, hideUPS)
+		allDLQ, err3 := queries.CountNotificationDLQByState(ctx, []string{})
+		shownDLQ, err4 := queries.CountNotificationDLQByState(ctx, hideUPS)
+		if err := errors.Join(err1, err2, err3, err4); err != nil {
+			t.Fatalf("counts: %v", err)
+		}
+		if allAlerts.FiringCount-shownAlerts.FiringCount != 1 || allDLQ.PendingCount-shownDLQ.PendingCount != 1 {
+			t.Errorf("hiding the UPS rows should take one from each count: firing %d → %d, dead letters pending %d → %d",
+				allAlerts.FiringCount, shownAlerts.FiringCount, allDLQ.PendingCount, shownDLQ.PendingCount)
 		}
 	})
 }

@@ -1148,6 +1148,40 @@ func (h *AlertHandler) DeleteRule(c fiber.Ctx, p *apischema.Params) error {
 
 // ====== Alert History ======
 
+// hiddenAlertMetrics names the metrics whose alerts this caller may not read.
+// A UPS alert names the UPS and its reading, which view:ups guards, so every
+// alert read, the dead-letter queue's payloads included, leaves the UPS
+// metrics' alerts out for a caller without the global view:ups. Never nil: the
+// queries read a NULL list as "hide them all".
+func hiddenAlertMetrics(c fiber.Ctx) ([]string, error) {
+	canUps, err := hasGlobalPerm(c, "view", "ups")
+	if err != nil {
+		return nil, err
+	}
+	if canUps {
+		return []string{}, nil
+	}
+	return notifications.UPSMetrics(), nil
+}
+
+// readableAlert loads one alert for GetAlert, AcknowledgeAlert and
+// ResolveAlert. One hidden from the caller (hiddenAlertMetrics) answers 404,
+// as a missing one does.
+func (h *AlertHandler) readableAlert(c fiber.Ctx, id uuid.UUID) (db.AlertHistory, error) {
+	alert, err := h.queries.GetAlertHistory(c.Context(), id)
+	if err != nil {
+		return db.AlertHistory{}, fiber.NewError(fiber.StatusNotFound, "Alert not found")
+	}
+	hidden, err := hiddenAlertMetrics(c)
+	if err != nil {
+		return db.AlertHistory{}, err
+	}
+	if slices.Contains(hidden, alert.Metric) {
+		return db.AlertHistory{}, fiber.NewError(fiber.StatusNotFound, "Alert not found")
+	}
+	return alert, nil
+}
+
 // ListAlerts lists alert history with optional filters.
 func (h *AlertHandler) ListAlerts(c fiber.Ctx, p *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "alert")
@@ -1185,6 +1219,10 @@ func (h *AlertHandler) ListAlerts(c fiber.Ctx, p *apischema.Params) error {
 	if !query {
 		return RespondItems(c, []alertHistoryResponse{})
 	}
+	hidden, err := hiddenAlertMetrics(c)
+	if err != nil {
+		return err
+	}
 
 	alerts, err := h.queries.ListAlertHistoryFiltered(c.Context(), db.ListAlertHistoryFilteredParams{
 		State:                state,
@@ -1193,6 +1231,7 @@ func (h *AlertHandler) ListAlerts(c fiber.Ctx, p *apischema.Params) error {
 		LimitVal:             safeconv.Int32(limit),
 		OffsetVal:            safeconv.Int32(offset),
 		AccessibleClusterIds: scope,
+		HiddenMetrics:        hidden,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list alerts")
@@ -1201,6 +1240,9 @@ func (h *AlertHandler) ListAlerts(c fiber.Ctx, p *apischema.Params) error {
 	result := make([]alertHistoryResponse, 0, len(alerts))
 	for _, a := range alerts {
 		// Defense-in-depth, as in ListRules.
+		if slices.Contains(hidden, a.Metric) {
+			continue
+		}
 		if a.ClusterID.Valid {
 			if !access.PermitsCluster(uuid.UUID(a.ClusterID.Bytes)) {
 				continue
@@ -1220,9 +1262,9 @@ func (h *AlertHandler) GetAlert(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	alert, err := h.queries.GetAlertHistory(c.Context(), id)
+	alert, err := h.readableAlert(c, id)
 	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, "Alert not found")
+		return err
 	}
 
 	if alert.ClusterID.Valid {
@@ -1238,7 +1280,11 @@ func (h *AlertHandler) GetAlert(c fiber.Ctx, p *apischema.Params) error {
 
 // GetAlertSummary returns active alert counts.
 func (h *AlertHandler) GetAlertSummary(c fiber.Ctx, _ *apischema.Params) error {
-	summary, err := h.queries.GetAlertSummary(c.Context())
+	hidden, err := hiddenAlertMetrics(c)
+	if err != nil {
+		return err
+	}
+	summary, err := h.queries.GetAlertSummary(c.Context(), hidden)
 	if err != nil {
 		return c.JSON(alertSummaryResponse{})
 	}
@@ -1260,9 +1306,9 @@ func (h *AlertHandler) AcknowledgeAlert(c fiber.Ctx, p *apischema.Params) error 
 		return err
 	}
 
-	alert, err := h.queries.GetAlertHistory(c.Context(), id)
+	alert, err := h.readableAlert(c, id)
 	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, "Alert not found")
+		return err
 	}
 
 	if alert.ClusterID.Valid {
@@ -1311,9 +1357,9 @@ func (h *AlertHandler) ResolveAlert(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	alert, err := h.queries.GetAlertHistory(c.Context(), id)
+	alert, err := h.readableAlert(c, id)
 	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, "Alert not found")
+		return err
 	}
 
 	if alert.ClusterID.Valid {

@@ -21,6 +21,7 @@ SELECT
     COUNT(*) FILTER (WHERE state = 'resolved') AS resolved_count,
     COUNT(*) FILTER (WHERE state = 'dismissed') AS dismissed_count
 FROM notification_dlq
+WHERE NOT (COALESCE(payload->>'metric', '') = ANY($1::text[]))
 `
 
 type CountNotificationDLQByStateRow struct {
@@ -31,8 +32,8 @@ type CountNotificationDLQByStateRow struct {
 	DismissedCount   int64 `json:"dismissed_count"`
 }
 
-func (q *Queries) CountNotificationDLQByState(ctx context.Context) (CountNotificationDLQByStateRow, error) {
-	row := q.db.QueryRow(ctx, countNotificationDLQByState)
+func (q *Queries) CountNotificationDLQByState(ctx context.Context, hiddenMetrics []string) (CountNotificationDLQByStateRow, error) {
+	row := q.db.QueryRow(ctx, countNotificationDLQByState, hiddenMetrics)
 	var i CountNotificationDLQByStateRow
 	err := row.Scan(
 		&i.PendingCount,
@@ -153,23 +154,28 @@ const listNotificationDLQ = `-- name: ListNotificationDLQ :many
 SELECT id, channel_id, channel_type, channel_name, alert_id, rule_id, cluster_id, payload, last_error, attempt_count, state, failure_kind, created_at, updated_at FROM notification_dlq
 WHERE ($1::text = '' OR state = $1::text)
   AND ($2::uuid IS NULL OR channel_id = $2)
+  AND NOT (COALESCE(payload->>'metric', '') = ANY($3::text[]))
 ORDER BY created_at DESC
-LIMIT $4 OFFSET $3
+LIMIT $5 OFFSET $4
 `
 
 type ListNotificationDLQParams struct {
-	State     string      `json:"state"`
-	ChannelID pgtype.UUID `json:"channel_id"`
-	OffsetVal int32       `json:"offset_val"`
-	LimitVal  int32       `json:"limit_val"`
+	State         string      `json:"state"`
+	ChannelID     pgtype.UUID `json:"channel_id"`
+	HiddenMetrics []string    `json:"hidden_metrics"`
+	OffsetVal     int32       `json:"offset_val"`
+	LimitVal      int32       `json:"limit_val"`
 }
 
 // channel_id is optional. Pass NULL via sqlc.narg to match all channels;
-// otherwise filter to the given channel.
+// otherwise filter to the given channel. hidden_metrics is the alert reads'
+// (ListAlertHistoryFiltered): an entry holds its alert's payload, reading
+// included. COALESCE keeps an entry whose payload names no metric.
 func (q *Queries) ListNotificationDLQ(ctx context.Context, arg ListNotificationDLQParams) ([]NotificationDlq, error) {
 	rows, err := q.db.Query(ctx, listNotificationDLQ,
 		arg.State,
 		arg.ChannelID,
+		arg.HiddenMetrics,
 		arg.OffsetVal,
 		arg.LimitVal,
 	)

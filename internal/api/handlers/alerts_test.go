@@ -7,13 +7,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/notifications"
 )
 
 func baseAlertRule() db.AlertRule {
@@ -714,6 +718,85 @@ func TestUpdateRule_UpsMetricNeedsViewUps(t *testing.T) {
 		_ = resp.Body.Close()
 		if resp.StatusCode != tc.want {
 			t.Errorf("%s: status %d, want %d", tc.name, resp.StatusCode, tc.want)
+		}
+	}
+}
+
+// Without the global view:ups no alert route serves a UPS alert: the listings
+// and the counts, the dead-letter queue's included, send the UPS metrics to SQL
+// as hidden, the alert listing drops a UPS row that comes back anyway, and one
+// alert answers 404 as if missing. The view:ups pass is the anchor: the same
+// rows and routes then serve it.
+func TestAlertReads_HideUPSAlertsWithoutViewUps(t *testing.T) {
+	t.Parallel()
+	upsAlert := db.AlertHistory{ID: uuid.New(), State: "firing", Metric: notifications.MetricUPSOnBattery}
+	cpuAlert := db.AlertHistory{ID: uuid.New(), State: "firing", Metric: "cpu_usage"}
+	idParam := apischema.Properties{"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}}
+	for _, canUps := range []bool{false, true} {
+		grants := []string{"view:alert", "acknowledge:alert", "view:notification_dlq"}
+		wantHidden, wantStatus := notifications.UPSMetrics(), http.StatusNotFound
+		if canUps {
+			grants, wantHidden, wantStatus = append(grants, "view:ups"), []string{}, http.StatusOK
+		}
+		dbtx := &auditRowsDBTX{rowsFor: map[string][]any{"ListAlertHistoryFiltered": {upsAlert, cpuAlert}},
+			rowFor: map[string]any{"GetAlertHistory": upsAlert, "GetAlertSummary": db.GetAlertSummaryRow{},
+				"CountNotificationDLQByState": db.CountNotificationDLQByStateRow{}},
+			execOK: map[string]bool{"AcknowledgeAlert": true, "ResolveAlert": true, "InsertAuditLog": true}}
+		h := NewAlertHandler(db.New(dbtx), testEncryptionKey, nil, nil)
+		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+		app.Use(func(c fiber.Ctx) error {
+			c.Locals("user_id", uuid.New())
+			c.Locals("rbac_engine", newGrantEngine(grants...))
+			return c.Next()
+		})
+		app.Get("/alerts/summary", withParams(t, apischema.Properties{}, h.GetAlertSummary))
+		app.Get("/alerts", withParams(t, alertListMirror(t, apischema.Properties{
+			"state": {Type: apischema.String, Optional: true}, "severity": {Type: apischema.String, Optional: true},
+		}), h.ListAlerts))
+		app.Get("/alerts/:id", withRequestParams(t, idParam, []string{"id"}, h.GetAlert))
+		app.Post("/alerts/:id/acknowledge", withRequestParams(t, idParam, []string{"id"}, h.AcknowledgeAlert))
+		app.Post("/alerts/:id/resolve", withRequestParams(t, idParam, []string{"id"}, h.ResolveAlert))
+		dlq := NewNotificationDLQHandler(db.New(dbtx), nil, nil)
+		app.Get("/notification-dlq/summary", withParams(t, apischema.Properties{}, dlq.Summary))
+		app.Get("/notification-dlq", withParams(t, dlqListMirror(t), dlq.List))
+		send := func(method, path string) (int, string) {
+			resp, err := app.Test(httptest.NewRequest(method, path, nil))
+			if err != nil {
+				t.Fatalf("%s %s: %v", method, path, err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			return resp.StatusCode, readBody(t, resp.Body)
+		}
+
+		_, list := send(http.MethodGet, "/alerts")
+		if strings.Contains(list, upsAlert.ID.String()) != canUps || !strings.Contains(list, cpuAlert.ID.String()) {
+			t.Errorf("view:ups %v: listing = %s", canUps, list)
+		}
+		for _, path := range []string{"/alerts/summary", "/notification-dlq", "/notification-dlq/summary"} {
+			if status, body := send(http.MethodGet, path); status != http.StatusOK {
+				t.Fatalf("view:ups %v: GET %s = %d %s", canUps, path, status, body)
+			}
+		}
+		dbtx.mu.Lock()
+		sent := append(slices.Clone(dbtx.calls), dbtx.rowCalls...)
+		dbtx.mu.Unlock()
+		for _, name := range []string{"ListAlertHistoryFiltered", "GetAlertSummary", "ListNotificationDLQ",
+			"CountNotificationDLQByState"} {
+			i := slices.IndexFunc(sent, func(q capturedQuery) bool { return strings.Contains(q.sql, "-- name: "+name+" ") })
+			if i < 0 {
+				t.Fatalf("view:ups %v: %s never ran", canUps, name)
+			}
+			j := slices.IndexFunc(sent[i].args, func(a any) bool { _, ok := a.([]string); return ok })
+			if j < 0 || sent[i].args[j].([]string) == nil || !slices.Equal(sent[i].args[j].([]string), wantHidden) {
+				t.Errorf("view:ups %v: %s was sent %v, want hidden metrics %#v", canUps, name, sent[i].args, wantHidden)
+			}
+		}
+		for _, r := range []struct{ method, suffix string }{
+			{http.MethodGet, ""}, {http.MethodPost, "/acknowledge"}, {http.MethodPost, "/resolve"},
+		} {
+			if status, body := send(r.method, "/alerts/"+upsAlert.ID.String()+r.suffix); status != wantStatus {
+				t.Errorf("view:ups %v: %s /alerts/:id%s = %d %s, want %d", canUps, r.method, r.suffix, status, body, wantStatus)
+			}
 		}
 	}
 }

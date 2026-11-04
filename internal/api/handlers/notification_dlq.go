@@ -156,11 +156,17 @@ func (h *NotificationDLQHandler) List(c fiber.Ctx, p *apischema.Params) error {
 		channelIDPg = pgtype.UUID{Bytes: cid, Valid: true}
 	}
 
+	// An entry holds its alert's payload, so it is hidden where the alert is.
+	hidden, err := hiddenAlertMetrics(c)
+	if err != nil {
+		return err
+	}
 	rows, err := h.queries.ListNotificationDLQ(c.Context(), db.ListNotificationDLQParams{
-		State:     p.String("state"),
-		ChannelID: channelIDPg,
-		LimitVal:  safeconv.Int32(int(p.Int("limit"))),
-		OffsetVal: safeconv.Int32(int(p.Int("offset"))),
+		State:         p.String("state"),
+		ChannelID:     channelIDPg,
+		HiddenMetrics: hidden,
+		LimitVal:      safeconv.Int32(int(p.Int("limit"))),
+		OffsetVal:     safeconv.Int32(int(p.Int("offset"))),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list DLQ entries")
@@ -187,7 +193,11 @@ func (h *NotificationDLQHandler) List(c fiber.Ctx, p *apischema.Params) error {
 
 // Summary returns counts grouped by state for the DLQ widget.
 func (h *NotificationDLQHandler) Summary(c fiber.Ctx, _ *apischema.Params) error {
-	row, err := h.queries.CountNotificationDLQByState(c.Context())
+	hidden, err := hiddenAlertMetrics(c)
+	if err != nil {
+		return err
+	}
+	row, err := h.queries.CountNotificationDLQByState(c.Context(), hidden)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to count DLQ entries")
 	}

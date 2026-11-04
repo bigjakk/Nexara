@@ -1869,9 +1869,9 @@ after the node is back).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/alerts` | List alerts across the caller's accessible clusters |
-| GET | `/alerts/summary` | Get alert summary counts |
-| GET | `/alerts/:id` | Get alert details |
+| GET | `/alerts` | List alerts across the caller's accessible clusters; alerts on the six `ups_*` metrics only for a holder of a global `view:ups` |
+| GET | `/alerts/summary` | Get alert summary counts, which count the `ups_*` metrics' alerts only for a holder of a global `view:ups` |
+| GET | `/alerts/:id` | Get alert details. An alert on a `ups_*` metric answers 404 without a global `view:ups`, and so do the two routes below |
 | POST | `/alerts/:id/acknowledge` | Acknowledge an alert |
 | POST | `/alerts/:id/resolve` | Resolve an alert |
 | GET | `/clusters/:id/alerts` | List alerts for a cluster |
@@ -1904,8 +1904,8 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/notification-dlq` | List failed notifications |
-| GET | `/notification-dlq/summary` | Get failure counts |
+| GET | `/notification-dlq` | List failed notifications; those for alerts on the `ups_*` metrics only for a holder of a global `view:ups` |
+| GET | `/notification-dlq/summary` | Get failure counts, which count UPS alerts' failures only for a holder of a global `view:ups` |
 | POST | `/notification-dlq/:id/retry` | Retry a failed notification |
 | POST | `/notification-dlq/:id/dismiss` | Dismiss a failed notification |
 | DELETE | `/notification-dlq/:id` | Delete a DLQ entry |

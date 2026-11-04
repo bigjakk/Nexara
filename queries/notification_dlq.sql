@@ -13,10 +13,13 @@ SELECT * FROM notification_dlq WHERE id = $1;
 
 -- name: ListNotificationDLQ :many
 -- channel_id is optional. Pass NULL via sqlc.narg to match all channels;
--- otherwise filter to the given channel.
+-- otherwise filter to the given channel. hidden_metrics is the alert reads'
+-- (ListAlertHistoryFiltered): an entry holds its alert's payload, reading
+-- included. COALESCE keeps an entry whose payload names no metric.
 SELECT * FROM notification_dlq
 WHERE (@state::text = '' OR state = @state::text)
   AND (sqlc.narg('channel_id')::uuid IS NULL OR channel_id = sqlc.narg('channel_id'))
+  AND NOT (COALESCE(payload->>'metric', '') = ANY(@hidden_metrics::text[]))
 ORDER BY created_at DESC
 LIMIT @limit_val OFFSET @offset_val;
 
@@ -27,7 +30,8 @@ SELECT
     COUNT(*) FILTER (WHERE state = 'retrying') AS retrying_count,
     COUNT(*) FILTER (WHERE state = 'resolved') AS resolved_count,
     COUNT(*) FILTER (WHERE state = 'dismissed') AS dismissed_count
-FROM notification_dlq;
+FROM notification_dlq
+WHERE NOT (COALESCE(payload->>'metric', '') = ANY(@hidden_metrics::text[]));
 
 -- name: UpdateNotificationDLQState :exec
 UPDATE notification_dlq

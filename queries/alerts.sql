@@ -81,6 +81,9 @@ LIMIT $2 OFFSET $3;
 -- caller's optional filter; accessible_cluster_ids is their view:alert RBAC
 -- scope and is not optional — see the note on ListAlertRules, including why a
 -- NULL cluster_id row is excluded from a scoped caller by the clause alone.
+-- hidden_metrics names the metrics whose alerts the caller may not read (the
+-- UPS metrics, to a caller without view:ups); '{}' hides nothing, and NULL
+-- would hide every row.
 -- name: ListAlertHistoryFiltered :many
 SELECT * FROM alert_history
 WHERE (@state::text = '' OR state = @state::text)
@@ -88,6 +91,7 @@ WHERE (@state::text = '' OR state = @state::text)
   AND (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
        OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
+  AND NOT (metric = ANY(@hidden_metrics::text[]))
 ORDER BY created_at DESC
 LIMIT @limit_val OFFSET @offset_val;
 
@@ -156,6 +160,8 @@ SELECT
 FROM alert_history
 WHERE cluster_id = $1 AND state IN ('pending', 'firing', 'acknowledged');
 
+-- GetAlertSummary takes ListAlertHistoryFiltered's hidden_metrics, so the
+-- counts above the Alerts list count only what the list can show.
 -- name: GetAlertSummary :one
 SELECT
     COUNT(*) FILTER (WHERE state = 'firing') AS firing_count,
@@ -165,7 +171,8 @@ SELECT
     COUNT(*) FILTER (WHERE state = 'firing' AND severity = 'warning') AS warning_firing,
     COUNT(*) FILTER (WHERE state = 'firing' AND severity = 'info') AS info_firing
 FROM alert_history
-WHERE state IN ('pending', 'firing', 'acknowledged');
+WHERE state IN ('pending', 'firing', 'acknowledged')
+  AND NOT (metric = ANY(@hidden_metrics::text[]));
 
 -- name: UpdateAlertEscalation :exec
 UPDATE alert_history

@@ -46,18 +46,25 @@ func (*dlqListDBTX) QueryRow(context.Context, string, ...any) pgx.Row {
 	return failRow{err: errCaptured}
 }
 
+// dlqListMirror is the DLQ listing's declaration (registry_notification_dlq.go)
+// as far as its handler reads it.
+func dlqListMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return compiledMirror(t, apischema.Properties{
+		"limit":      {Type: apischema.Integer, Optional: true, Default: 50},
+		"offset":     {Type: apischema.Integer, Optional: true, Default: 0},
+		"state":      {Type: apischema.String, Optional: true},
+		"channel_id": {Type: apischema.String, Optional: true, Pattern: apischema.Rule("uuid-or-empty")},
+	})
+}
+
 // TestNotificationDLQListTreatsAnEmptyChannelAsNone drives the real List
 // handler with ?channel_id= — "every channel", as it has always been — and
 // checks it reaches the listing unfiltered instead of failing to parse as a
 // uuid — the 500 it would answer if the declaration let the empty value
 // through while the handler still parsed every supplied one.
 func TestNotificationDLQListTreatsAnEmptyChannelAsNone(t *testing.T) {
-	mirror := compiledMirror(t, apischema.Properties{
-		"limit":      {Type: apischema.Integer, Optional: true, Default: 50},
-		"offset":     {Type: apischema.Integer, Optional: true, Default: 0},
-		"state":      {Type: apischema.String, Optional: true},
-		"channel_id": {Type: apischema.String, Optional: true, Pattern: apischema.Rule("uuid-or-empty")},
-	})
+	mirror := dlqListMirror(t)
 	channel := uuid.New()
 
 	for _, tt := range []struct {
