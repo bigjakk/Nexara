@@ -131,5 +131,8 @@
   "typed": "{{type}} {{verb}}",
   "subject": {
     "guest": "Guest {{vmid}}"
+  },
+  "power": {
+    "source": "Read from the UPS"
   }
 }

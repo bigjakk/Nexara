@@ -38,7 +38,8 @@ func TestUpsCommandRoutes(t *testing.T) {
 			"driver.flag.allow_killpower": "RW NUMBER"},
 		Commands: []string{"beeper.mute", "load.off", "shutdown.stop"},
 	})
-	fake.SetUser("nexara", nuttest.User{Password: "pw", SET: true, Instcmds: []string{"load.off", "shutdown.stop"}}) // not beeper.mute
+	// The account lacks beeper.mute.
+	fake.SetUser("nexara", nuttest.User{Password: "pw", SET: true, Instcmds: []string{"load.off", "shutdown.stop"}})
 	fake.SetPendingReads(1) // so the watch asks more than once
 	host, port := fake.Addr()
 	password, err := crypto.Encrypt("pw", testEncryptionKey)

@@ -1,0 +1,38 @@
+{
+  "categories": {
+    "power": "Power events",
+    "commands": "Commands and settings",
+    "feeds": "What it powers",
+    "other": "Other"
+  },
+  "empty": "Nothing has been recorded for this UPS yet.",
+  "actions": {
+    "ups_command_sent": "Command sent",
+    "ups_command_failed": "Command failed",
+    "ups_feed_added": "Now powers",
+    "ups_feed_removed": "No longer powers",
+    "ups_feed_updated": "How a node is protected changed"
+  },
+  "events": {
+    "command": "Ran {{name}}",
+    "commandFailed": "{{name}} failed",
+    "set": "Set {{name}}",
+    "setFailed": "Setting {{name}} failed"
+  },
+  "tiers": {
+    "test": "Test",
+    "powers_on": "Powers on",
+    "driver": "Driver",
+    "cuts_power": "Cuts power"
+  },
+  "summaries": {
+    "error": "Error: {{error}}",
+    "lowestCharge": "lowest charge {{value}}%",
+    "peakLoad": "peak load {{value}}%",
+    "protectedElsewhere": "protected another way",
+    "checkedByNexara": "checked by Nexara"
+  },
+  "notes": {
+    "ended": "Ended: {{when}}"
+  }
+}

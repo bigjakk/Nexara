@@ -36,6 +36,7 @@ import historyVeeamServerEN from "@/locales/en/history-veeam-server.json";
 import historyVeeamJobEN from "@/locales/en/history-veeam-job.json";
 import historyVeeamSessionEN from "@/locales/en/history-veeam-session.json";
 import historyBackupJobEN from "@/locales/en/history-backup-job.json";
+import historyUpsDeviceEN from "@/locales/en/history-ups-device.json";
 
 export const defaultNS = "common";
 
@@ -73,6 +74,7 @@ export const resources = {
     "history-veeam-job": historyVeeamJobEN,
     "history-veeam-session": historyVeeamSessionEN,
     "history-backup-job": historyBackupJobEN,
+    "history-ups-device": historyUpsDeviceEN,
   },
 } as const;
 

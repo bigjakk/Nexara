@@ -524,10 +524,11 @@ export function isObservedNotice(entry: HistoryEntry): boolean {
 }
 
 /** Where an entry comes from, in the shared namespace: a change Nexara saw in
- *  Proxmox reads "Detected in Proxmox", a notice is the observer's, the rest
- *  read by their source. */
+ *  Proxmox reads "Detected in Proxmox", a notice is the observer's, a UPS's
+ *  power event is read from the UPS, the rest read by their source. */
 export function historySourceLabel(entry: HistoryEntry, t: TFunction): string {
   if (isObservedNotice(entry)) return t("history:observed.noticeSource");
+  if (entry.kind === "power") return t("history:power.source");
   return entry.kind === "observed"
     ? t("history:observed.source")
     : t(`history:sources.${entry.source}`);
@@ -536,7 +537,7 @@ export function historySourceLabel(entry: HistoryEntry, t: TFunction): string {
 /** Who did it — see deriveActor; "Proxmox" for an ingested task naming nobody.
  *  Nobody, for what Nexara only saw. */
 export function historyActor(entry: HistoryEntry): string {
-  if (entry.kind === "status" || entry.kind === "observed") return "";
+  if (entry.kind === "status" || entry.kind === "observed" || entry.kind === "power") return "";
   const actor = deriveActor(entry, parseDetails(entry.details));
   if (actor === "System" && entry.source === "proxmox") return "Proxmox";
   return actor;

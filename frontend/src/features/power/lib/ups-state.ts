@@ -133,6 +133,13 @@ const EVENT_LABELS: Record<UpsEventKind, string> = {
   self_test: "Self-test",
 };
 
+/** Whether a string is one of the power-event kinds, as a History entry's
+ *  action carries it. Not Object.hasOwn, which is newer than the browsers the
+ *  build targets. */
+export function isUpsEventKind(kind: string): kind is UpsEventKind {
+  return Object.prototype.hasOwnProperty.call(EVENT_LABELS, kind);
+}
+
 export function eventLabel(e: Pick<UpsEvent, "kind" | "details">): string {
   if (e.kind === "self_test" && e.details.result) {
     return `Self-test: ${e.details.result}`;

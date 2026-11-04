@@ -214,6 +214,8 @@ export function useEventInvalidation(clusterIds: string[]): void {
             ["ups-device"],
             ["ups-events"],
           );
+          // A UPS's History lists its power events, which reach it only so.
+          scheduleHistoryInvalidation(["history", "global"]);
           break;
         case "pbs_change":
           scheduleInvalidation(

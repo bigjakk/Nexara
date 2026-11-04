@@ -40,9 +40,10 @@ export interface HistoryEntry {
    * failures, as one entry — or a move: a guest seen arriving on a node or
    * leaving it (action arrived or left, node the other one), or, with no
    * migration of it on record, its VMID seen on another node (now_on); a
-   * move's from_status and to_status are its nodes.
+   * move's from_status and to_status are its nodes — or a UPS's power event,
+   * at its start (action its kind, its end and readings in details).
    */
-  kind: "audit" | "task" | "status" | "backup" | "observed" | "run" | "move";
+  kind: "audit" | "task" | "status" | "backup" | "observed" | "run" | "move" | "power";
   occurred_at: string;
   /** One of the kind's categories, derived on the server before the page is
    *  cut so the type filter applies to the whole history. */

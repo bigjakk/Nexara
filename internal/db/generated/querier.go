@@ -1789,6 +1789,9 @@ type Querier interface {
 	//                        (observed_types). Entry kind observed. A row naming
 	//                        no cluster (000125, a PBS server's) is a global
 	//                        kind's alone.
+	//   ups_events (000131)  a UPS's power events, a global kind's: one entry at
+	//                        each one's start, kind power, its end and readings in
+	//                        details.
 	//
 	// How to add a source keyed as audit_log is — cluster_id, resource_type,
 	// resource_id, and vmid for a guest — as cluster_object_changes is: one arm in
@@ -1977,6 +1980,9 @@ type Querier interface {
 	//            include_tasks, since all of it is read from the job's task log.
 	//            A job's own audit row names no guest, so it is never a second
 	//            entry; nor is its task row, whose vmid is NULL.
+	//   power    a UPS's power event (ups_events), for a global kind's object of
+	//            type ups_device: at the event's start, its kind the action, and
+	//            its end (ended_at, end_observed) and readings in details.
 	//
 	// Guest tasks only: is_guest_upid, never vmid alone, because InsertTaskHistory
 	// stamps a vmid on any numeric worker id — cephdestroyosd's is an OSD number,

@@ -53,6 +53,7 @@ func historyRoutes() []historyRoute {
 		folderHistoryRoute(),
 		clusterHistoryRoute(),
 		nodeHistoryRoute(),
+		upsDeviceHistoryRoute(),
 	}, append(clusterPageHistoryRoutes(), backupHistoryRoutes()...)...)
 }
 

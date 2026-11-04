@@ -20,6 +20,8 @@ import { LatestEventsNote, PowerEventsTable } from "../components/PowerEventsTab
 import { UpsPowers } from "../components/UpsPowers";
 import { UpsCommands } from "../components/UpsCommands";
 import { UpsVariableDialog } from "../components/UpsVariableDialog";
+import { upsHistory } from "../lib/ups-history";
+import { HistoryTabContent, HistoryTabTrigger } from "@/features/history/components/HistoryTab";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { UpsWritableVar } from "../types/ups";
 
@@ -209,6 +211,7 @@ export function UpsDetailPage() {
               <TabsTrigger value="variables">Variables ({Object.keys(d.vars ?? {}).length})</TabsTrigger>
               <TabsTrigger value="commands">Commands ({d.commands?.length ?? 0})</TabsTrigger>
               <TabsTrigger value="events">Power events</TabsTrigger>
+              <HistoryTabTrigger history={upsHistory(d.id)} />
             </TabsList>
             <TabsContent value="overview">
               <Overview device={d} />
@@ -247,6 +250,7 @@ export function UpsDetailPage() {
                 <QueryStateNotice query={events} subject="this UPS's power events" empty="No power events recorded yet." />
               )}
             </TabsContent>
+            <HistoryTabContent history={upsHistory(d.id)} />
           </Tabs>
         </>
       )}

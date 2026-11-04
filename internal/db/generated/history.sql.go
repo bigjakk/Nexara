@@ -683,6 +683,30 @@ WITH guests AS MATERIALIZED (
        AND o.observed_at < COALESCE($26::timestamptz, 'infinity'::timestamptz)
      ORDER BY o.observed_at DESC
      LIMIT CASE WHEN $36::bool THEN NULLIF($27::int, 0) ELSE 0 END)
+    -- A UPS's power events (ups_events): an outage, low battery, lost contact,
+    -- a self-test — one entry each, at its start, for a global kind's object
+    -- of type ups_device, read by the (ups_id, started_at) index. They name no
+    -- cluster. An id that is not a UUID names no UPS rather than failing the
+    -- cast: every global kind's objects pass through here.
+    UNION ALL
+    (SELECT ('power:' || ev.id::text)::text, 'power', ev.id, NULL::uuid, ev.started_at, 'detected', ev.kind,
+            'ups_device'::text, ev.ups_id::text, 0, NULL::int, NULL::uuid, '', '', '', '', '', NULL::timestamptz, 0,
+            'objects_power'::text
+     FROM objects ob
+     CROSS JOIN LATERAL (
+         SELECT e.id, e.ups_id, e.kind, e.started_at
+         FROM ups_events e
+         WHERE $34::bool
+           AND ob.resource_type = 'ups_device' AND ob.detail_key = '' AND NOT ob.whole
+           AND e.ups_id = CASE WHEN ob.value ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                               THEN ob.value::uuid END
+           AND e.started_at >= COALESCE($25::timestamptz, '-infinity'::timestamptz)
+           AND e.started_at < COALESCE($26::timestamptz, 'infinity'::timestamptz)
+         ORDER BY e.started_at DESC
+         LIMIT NULLIF($27::int, 0)) ev
+     WHERE $28::text IS NULL OR $28::text = 'detected'
+     ORDER BY ev.started_at DESC
+     LIMIT NULLIF($27::int, 0))
     -- A node's: the tasks it ran with no audit row, its status changes, and
     -- the guests that arrived on it or left it.
     UNION ALL
@@ -888,7 +912,9 @@ SELECT p.entry_id, p.kind, p.cluster_id, p.occurred_at, p.source, p.action, p.re
        COALESCE(p.subject, 0)::int AS subject_vmid,
        p.user_id, p.upid, p.node, p.recorded_status, p.from_status, p.to_status, p.last_seen_at,
        p.run_count::int AS run_count, p.category, p.total,
-       COALESCE(ad.details, oc.detail, '{}'::jsonb)           AS details,
+       COALESCE(ad.details, oc.detail,
+                ue.details || jsonb_build_object('ended_at', ue.ended_at, 'end_observed', ue.end_observed),
+                '{}'::jsonb)                                  AS details,
        COALESCE(oc.fields, '{}'::text[])                      AS fields,
        COALESCE(u.email, '')::text                            AS user_email,
        COALESCE(u.display_name, '')::text                     AS user_display_name,
@@ -908,6 +934,8 @@ LEFT JOIN audit_log ad
        ON p.kind IN ('audit', 'run') AND ad.id = p.ref_id
 LEFT JOIN cluster_object_changes oc
        ON p.kind = 'observed' AND oc.id = p.ref_id
+LEFT JOIN ups_events ue
+       ON p.kind = 'power' AND ue.id = p.ref_id
 LEFT JOIN task_history th
        ON p.upid <> '' AND th.upid = p.upid AND th.cluster_id = p.cluster_id
 LEFT JOIN task_history_archive ar
@@ -1035,6 +1063,9 @@ type ListHistoryRow struct {
 //	                     (observed_types). Entry kind observed. A row naming
 //	                     no cluster (000125, a PBS server's) is a global
 //	                     kind's alone.
+//	ups_events (000131)  a UPS's power events, a global kind's: one entry at
+//	                     each one's start, kind power, its end and readings in
+//	                     details.
 //
 // How to add a source keyed as audit_log is — cluster_id, resource_type,
 // resource_id, and vmid for a guest — as cluster_object_changes is: one arm in
@@ -1223,6 +1254,9 @@ type ListHistoryRow struct {
 //	         include_tasks, since all of it is read from the job's task log.
 //	         A job's own audit row names no guest, so it is never a second
 //	         entry; nor is its task row, whose vmid is NULL.
+//	power    a UPS's power event (ups_events), for a global kind's object of
+//	         type ups_device: at the event's start, its kind the action, and
+//	         its end (ended_at, end_observed) and readings in details.
 //
 // Guest tasks only: is_guest_upid, never vmid alone, because InsertTaskHistory
 // stamps a vmid on any numeric worker id — cephdestroyosd's is an OSD number,

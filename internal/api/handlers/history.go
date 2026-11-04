@@ -315,10 +315,11 @@ func ObservedTypePermissions() map[string]string {
 
 // globalHistoryResourceTypes are the audit resource types whose ids are unique
 // across Nexara, so a global kind may select them in every cluster: a PBS
-// server's and a firewall template's uuid, and Veeam's own ids. Any other
-// type's id is unique only within its cluster — node pve-01, VM 100 — and
-// read in every cluster would mix the objects of the same name.
-var globalHistoryResourceTypes = []string{"pbs_server", "veeam_server", "veeam_job", "veeam_session", "firewall_template"}
+// server's, a firewall template's and a UPS's uuid, and Veeam's own ids. Any
+// other type's id is unique only within its cluster — node pve-01, VM 100 —
+// and read in every cluster would mix the objects of the same name.
+var globalHistoryResourceTypes = []string{"pbs_server", "veeam_server", "veeam_job", "veeam_session", "firewall_template",
+	"ups_device"}
 
 // globalHistoryDetailKeys are the details keys whose values are ids unique
 // across Nexara — a PBS server's uuid, Veeam's own ids — so a global kind may
@@ -336,7 +337,8 @@ type HistoryField string
 const (
 	// HistoryFieldEntry is the entry's kind: audit, task, status or backup —
 	// and observed, a change Nexara saw in Proxmox that nothing on record
-	// explains, once its source is read (queries/history.sql says how).
+	// explains, once its source is read (queries/history.sql says how), and
+	// power, a UPS's power event.
 	HistoryFieldEntry HistoryField = "entry"
 	// HistoryFieldAction is the audit row's action; a task's type for a task
 	// with no audit row.
