@@ -12,14 +12,20 @@ import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { TaskLogSection } from "@/components/TaskLogSection";
+import { Button } from "@/components/ui/button";
 import { useDataTable } from "@/hooks/useDataTable";
 import type { ColumnLayout } from "@/hooks/useColumnLayout";
 import { formatDateTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import {
   DEFAULT_ACTIVITY_SORT,
   activityLabel,
   activityRowKey,
   decorateActivity,
+  filterActivity,
+  isFailedActivity,
+  pinRunningFirst,
+  type ActivityFilter,
   type ActivityRowData,
   type ActivitySortKey,
   type LiveTaskStatus,
@@ -59,18 +65,23 @@ function ActiveTaskPoller({
     progress?: number,
   ) => void;
 }) {
-  const { data: task } = useTaskStatus(clusterId, upid);
+  const { data: task, isRefetchError } = useTaskStatus(clusterId, upid);
 
   const prevRef = useRef<string | null>(null);
   useEffect(() => {
     if (task) {
-      const key = `${task.status}:${task.exit_status}:${String(task.progress ?? "")}`;
+      // A failed refetch keeps the last good answer. "Stopped" stays true, but
+      // "running" no longer confirms anything: the node may be gone. A blank
+      // status leaves the row on the server's word, and unpinned.
+      const status =
+        isRefetchError && task.status !== "stopped" ? "" : task.status;
+      const key = `${status}:${task.exit_status}:${String(task.progress ?? "")}`;
       if (prevRef.current !== key) {
         prevRef.current = key;
-        onStatus(upid, task.status, task.exit_status, task.progress);
+        onStatus(upid, status, task.exit_status, task.progress);
       }
     }
-  }, [task, upid, onStatus]);
+  }, [task, isRefetchError, upid, onStatus]);
 
   return null;
 }
@@ -186,6 +197,67 @@ function ActivityRow({
   );
 }
 
+/** All, failed or the rest. The failed count lives here, and reads red whether selected or not. */
+function ActivityFilterControl({
+  filter,
+  failedCount,
+  onSelect,
+}: {
+  filter: ActivityFilter;
+  failedCount: number;
+  onSelect: (filter: ActivityFilter) => void;
+}) {
+  const { t } = useTranslation("common");
+  const segments: { value: ActivityFilter; label: string }[] = [
+    { value: "all", label: t("all") },
+    {
+      value: "failed",
+      label: `${String(failedCount)} ${t("failed").toLowerCase()}`,
+    },
+    { value: "other", label: t("others") },
+  ];
+
+  return (
+    <div
+      role="group"
+      aria-label={t("filterActivity")}
+      className="flex items-center gap-px rounded-md border p-px"
+      onClick={(e) => {
+        // The whole header bar toggles the panel; choosing a filter must not
+        // also collapse it.
+        e.stopPropagation();
+      }}
+    >
+      {segments.map(({ value, label }) => {
+        const selected = filter === value;
+        return (
+          <Button
+            key={value}
+            type="button"
+            variant="ghost"
+            aria-pressed={selected}
+            className={cn(
+              "h-5 rounded-sm px-1.5 py-0 text-xs font-normal",
+              value === "failed"
+                ? "text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:text-red-400"
+                : "text-muted-foreground",
+              selected && value === "failed" && "bg-red-500/20 font-medium",
+              selected &&
+                value !== "failed" &&
+                "bg-muted font-medium text-foreground",
+            )}
+            onClick={() => {
+              onSelect(value);
+            }}
+          >
+            {label}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function TaskLogPanel() {
   const { t } = useTranslation("common");
   const panelOpen = useTaskLogStore((s) => s.panelOpen);
@@ -197,6 +269,21 @@ export function TaskLogPanel() {
   const { data: entries } = useRecentActivity();
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Not persisted, unlike the panel's height: a "failed only" left on from last
+  // week would hide the running tasks from someone who has forgotten it.
+  const [filter, setFilter] = useState<ActivityFilter>("all");
+
+  const selectFilter = (next: ActivityFilter) => {
+    // On a collapsed panel the click asks to see that list. On an open one,
+    // the selected segment toggles back to everything.
+    if (!panelOpen) {
+      setPanelOpen(true);
+      setFilter(next);
+      return;
+    }
+    setFilter(filter === next ? "all" : next);
+  };
 
   // Track live task statuses from pollers
   const [taskStatuses, setTaskStatuses] = useState<
@@ -224,24 +311,29 @@ export function TaskLogPanel() {
     [],
   );
 
-  // Header counts come from the server-authoritative task_history status.
-  const runningCount =
-    entries?.filter((e) => e.task_status === "running").length ?? 0;
-  const failedCount =
-    entries?.filter((e) => e.task_status === "failed").length ?? 0;
-
   // Resolve every cell's value once, then sort on those same values.
   //
   // Sorting is client-side here, unlike the Tasks page. useRecentActivity
-  // fetches a fixed window (the server's LIMIT 50, newest first) rather than
-  // paging, so re-ordering it cannot hide rows that a next page would have
-  // held — there is no next page. It ranks WITHIN the 50 most recent entries
-  // and nothing further back; a failure older than that is not on screen to
-  // be sorted to the top, which is why the Events → Tasks table, and not this
-  // drawer, is where a full failure history is read.
+  // fetches a fixed window (the 50 most recent entries, and the long tasks
+  // ListRecentAuditLogEnriched keeps with them) rather than paging, so
+  // re-ordering it cannot hide rows that a next page would have held — there is
+  // no next page. It ranks WITHIN that window and nothing further back; a
+  // failure older than that is not on screen to be sorted to the top, which is
+  // why the Events → Tasks table, and not this drawer, is where a full failure
+  // history is read.
   const rows = useMemo(
     () => (entries ?? []).map((e) => decorateActivity(e, taskStatuses)),
     [entries, taskStatuses],
+  );
+
+  // Counted off the decorated rows, so each count says what its rows show, and
+  // the failed one is exactly what its filter selects.
+  const runningCount = rows.filter((r) => r.status === "running").length;
+  const failedCount = rows.filter(isFailedActivity).length;
+
+  const filteredRows = useMemo(
+    () => filterActivity(rows, filter),
+    [rows, filter],
   );
 
   // Live-poll only tasks the server reports as running — for the progress bar
@@ -263,14 +355,19 @@ export function TaskLogPanel() {
   const {
     layout,
     rows: sortedRows,
+    sort,
     toggle,
     directionFor,
   } = useDataTable(
     "activity",
     ACTIVITY_COLUMN_DEFS,
-    rows,
+    filteredRows,
     activityRowKey,
     DEFAULT_ACTIVITY_SORT,
+  );
+  const visibleRows = useMemo(
+    () => pinRunningFirst(sortedRows, sort),
+    [sortedRows, sort],
   );
 
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
@@ -333,10 +430,12 @@ export function TaskLogPanel() {
             {runningCount} {t("running").toLowerCase()}
           </span>
         )}
-        {failedCount > 0 && (
-          <span className="rounded-full bg-red-500/20 px-1.5 py-0.5 text-red-600 dark:text-red-400">
-            {failedCount} {t("failed").toLowerCase()}
-          </span>
+        {(failedCount > 0 || filter !== "all") && (
+          <ActivityFilterControl
+            filter={filter}
+            failedCount={failedCount}
+            onSelect={selectFilter}
+          />
         )}
         <div className="flex-1" />
         {panelOpen && (
@@ -360,12 +459,12 @@ export function TaskLogPanel() {
       {/* Activity list */}
       {panelOpen && (
         <div className="overflow-auto" style={{ height: panelHeight }}>
-          {(!entries || entries.length === 0) && (
+          {visibleRows.length === 0 && (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-              {t("noActivity")}
+              {rows.length === 0 ? t("noActivity") : t("noMatchingActivity")}
             </div>
           )}
-          {entries && entries.length > 0 && (
+          {visibleRows.length > 0 && (
             <table
               className="table-fixed text-xs"
               style={{ width: layout.totalWidth }}
@@ -380,7 +479,7 @@ export function TaskLogPanel() {
                 </tr>
               </thead>
               <tbody>
-                {sortedRows.map((row) => (
+                {visibleRows.map((row) => (
                   <ActivityRow
                     key={row.entry.id}
                     row={row}

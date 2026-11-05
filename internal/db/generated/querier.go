@@ -2195,6 +2195,19 @@ type Querier interface {
 	// before the scope would hand a cluster-scoped user whatever survives of the
 	// newest 50 global rows — usually far fewer than 50, sometimes none. The
 	// cluster label and the cluster_removed flag are explained there too.
+	//
+	// The feed is the newest 50 entries plus up to 50 task entries they would miss.
+	// A task writes its entry once, when it starts, so without the second arm a long
+	// disk move leaves the feed while still running as soon as 50 newer entries have
+	// been written. That arm takes tasks still running first, then those finished in
+	// the last hour, so a long task that fails can still be read there. It leaves out
+	// a "running" task on an offline node: nothing can say it is still running, and
+	// the SPA polls every running row, which ties up seconds per poll on a dead node.
+	// The 7 days are for a cross-cluster migration's row a hard kill left 'running':
+	// ListRunningTaskHistoryByCluster withholds it from the reconciler and
+	// DeleteCompletedTasks never prunes it, so it would otherwise stay in the feed
+	// for good. A task_history row goes with its cluster, so this arm needs the scope
+	// but not the check that the cluster exists.
 	ListRecentAuditLogEnriched(ctx context.Context, accessibleClusterIds []uuid.UUID) ([]ListRecentAuditLogEnrichedRow, error)
 	// Failed tasks in the last 24h, grouped by type so we surface a count, not spam.
 	ListRecentFailedTasksByType(ctx context.Context) ([]ListRecentFailedTasksByTypeRow, error)

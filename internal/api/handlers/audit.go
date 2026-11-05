@@ -378,7 +378,8 @@ func (h *AuditHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	return RespondList(c, resp, total)
 }
 
-// ListRecent handles GET /api/v1/audit-log/recent — returns the 50 most recent entries.
+// ListRecent handles GET /api/v1/audit-log/recent — returns the 50 most recent
+// entries, and the older task entries ListRecentAuditLogEnriched keeps with them.
 func (h *AuditHandler) ListRecent(c fiber.Ctx, _ *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "audit")
 	if err != nil {

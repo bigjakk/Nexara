@@ -208,7 +208,8 @@ func registerAuditEndpoints(reg *Registry, h *handlers.AuditHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,
 		Path:   auditScope + "/recent",
-		Description: "Return the 50 most recent audit entries the caller may see, enriched with the " +
+		Description: "Return the 50 most recent audit entries the caller may see, plus up to 50 older " +
+			"entries for tasks still running or finished in the last hour, enriched with the " +
 			"server-authoritative status of any task they dispatched. Scoped in SQL rather than trimmed " +
 			"afterwards, so a cluster-scoped caller gets their newest 50 rather than whatever survives of " +
 			"the instance's.",

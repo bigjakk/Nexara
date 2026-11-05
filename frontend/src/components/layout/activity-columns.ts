@@ -133,6 +133,12 @@ export interface ActivityRowData {
   entry: AuditLogEntry;
   details: ParsedDetails;
   status: DerivedTaskStatus;
+  /**
+   * The server says this task is running and Proxmox has just confirmed it. The
+   * server's word alone is not enough: a task on a node that went down stays
+   * "running" there until the reconciler can reach the node or gives up on it.
+   */
+  confirmedRunning: boolean;
   severity: Severity;
   /**
    * The fraction the Progress cell draws, or null when there is none —
@@ -196,6 +202,8 @@ export function decorateActivity(
     entry,
     details,
     status,
+    confirmedRunning:
+      entry.task_status === "running" && live?.status === "running",
     severity,
     progress,
     actionLabel: formatAction(entry.action),
@@ -258,3 +266,48 @@ export const DEFAULT_ACTIVITY_SORT: SortState<ActivitySortKey> = {
   key: "time",
   direction: "desc",
 };
+
+/** What the drawer's header filter shows. */
+export type ActivityFilter = "all" | "failed" | "other";
+
+/**
+ * Failed, to the drawer's count and filter: a task with the Status column's red
+ * X. Not every row whose Level says "error": Sync Failed is written every five
+ * minutes through a cluster outage and would run the count up to the whole feed.
+ * So a failure with no task behind it (a sync, a move Proxmox refused outright)
+ * stays under "Others", where its Level still reads as an error.
+ */
+export function isFailedActivity(row: ActivityRowData): boolean {
+  return row.status === "failed";
+}
+
+export function filterActivity(
+  rows: ActivityRowData[],
+  filter: ActivityFilter,
+): ActivityRowData[] {
+  if (filter === "all") return rows;
+  const wantFailed = filter === "failed";
+  return rows.filter((r) => isFailedActivity(r) === wantFailed);
+}
+
+/**
+ * Tasks Proxmox confirms running go first while the table is in its default
+ * order: a long task's entry is older than most of the feed, and the drawer is
+ * only a few rows tall. Confirmed, so tasks stranded on a dead node do not take
+ * those rows. A sort the user chose is left exactly as they chose it.
+ */
+export function pinRunningFirst(
+  rows: ActivityRowData[],
+  sort: SortState<ActivitySortKey> | null,
+): ActivityRowData[] {
+  if (
+    sort?.key !== DEFAULT_ACTIVITY_SORT.key ||
+    sort.direction !== DEFAULT_ACTIVITY_SORT.direction
+  ) {
+    return rows;
+  }
+  return [
+    ...rows.filter((r) => r.confirmedRunning),
+    ...rows.filter((r) => !r.confirmedRunning),
+  ];
+}

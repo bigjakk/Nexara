@@ -58,7 +58,43 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
 -- before the scope would hand a cluster-scoped user whatever survives of the
 -- newest 50 global rows — usually far fewer than 50, sometimes none. The
 -- cluster label and the cluster_removed flag are explained there too.
+--
+-- The feed is the newest 50 entries plus up to 50 task entries they would miss.
+-- A task writes its entry once, when it starts, so without the second arm a long
+-- disk move leaves the feed while still running as soon as 50 newer entries have
+-- been written. That arm takes tasks still running first, then those finished in
+-- the last hour, so a long task that fails can still be read there. It leaves out
+-- a "running" task on an offline node: nothing can say it is still running, and
+-- the SPA polls every running row, which ties up seconds per poll on a dead node.
+-- The 7 days are for a cross-cluster migration's row a hard kill left 'running':
+-- ListRunningTaskHistoryByCluster withholds it from the reconciler and
+-- DeleteCompletedTasks never prunes it, so it would otherwise stay in the feed
+-- for good. A task_history row goes with its cluster, so this arm needs the scope
+-- but not the check that the cluster exists.
 -- name: ListRecentAuditLogEnriched :many
+WITH feed AS (
+  (SELECT a.id
+   FROM audit_log a
+   LEFT JOIN clusters c ON c.id = a.cluster_id
+   WHERE (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+          OR a.cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
+     AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL OR c.id IS NOT NULL)
+   ORDER BY a.created_at DESC
+   LIMIT 50)
+  UNION
+  (SELECT a.id
+   FROM task_history th
+   JOIN audit_log a ON (a.details->>'upid') = th.upid AND a.cluster_id = th.cluster_id
+   WHERE th.started_at > now() - interval '7 days'
+     AND ((th.status = 'running'
+           AND NOT EXISTS (SELECT 1 FROM nodes n
+                           WHERE n.cluster_id = th.cluster_id AND n.name = th.node AND n.status = 'offline'))
+          OR th.finished_at > now() - interval '1 hour')
+     AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+          OR a.cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
+   ORDER BY (th.status = 'running') DESC, COALESCE(th.finished_at, th.started_at) DESC
+   LIMIT 50)
+)
 SELECT
   a.id,
   a.cluster_id,
@@ -78,17 +114,14 @@ SELECT
   COALESCE(th.status, '') AS task_status,
   COALESCE(th.exit_status, '') AS task_exit_status,
   th.progress AS task_progress
-FROM audit_log a
+FROM feed
+JOIN audit_log a ON a.id = feed.id
 LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
-WHERE (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
-       OR a.cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
-  AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL OR c.id IS NOT NULL)
-ORDER BY a.created_at DESC
-LIMIT 50;
+ORDER BY a.created_at DESC;
 
 -- ListAuditLogAdvanced backs the audit log page and the CSV/JSON/syslog export:
 -- the optional cluster/type/user/action/source/time filters plus offset

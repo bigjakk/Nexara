@@ -4,6 +4,8 @@ import {
   activityLabel,
   decorateActivity,
   deriveActor,
+  filterActivity,
+  pinRunningFirst,
   userLabel,
   type LiveTaskStatus,
 } from "./activity-columns";
@@ -216,6 +218,68 @@ describe("userLabel", () => {
   it("leaves every other account alone", () => {
     expect(userLabel("u1", "Alice", "a@example.com")).toBe("Alice");
     expect(userLabel("u1", "", "a@example.com")).toBe("a@example.com");
+  });
+});
+
+describe("filterActivity", () => {
+  // A failed task, and an error row with no task behind it, which the failed
+  // count must not pick up: an outage writes one of those every five minutes.
+  const rows = [
+    decorateActivity(entry({ id: "ok" }), noLive),
+    decorateActivity(
+      entry({
+        id: "task",
+        task_status: "failed",
+        details: JSON.stringify({ upid: "U" }),
+      }),
+      noLive,
+    ),
+    decorateActivity(entry({ id: "no-task", action: "sync_failed" }), noLive),
+  ];
+
+  it.each([
+    ["all", ["ok", "task", "no-task"]],
+    ["failed", ["task"]],
+    ["other", ["ok", "no-task"]],
+  ] as const)("%s keeps %j", (filter, ids) => {
+    expect(filterActivity(rows, filter).map((r) => r.entry.id)).toEqual(ids);
+  });
+});
+
+describe("pinRunningFirst", () => {
+  // "stuck" is running only on the server's word, as a task on a dead node is.
+  // "gave-up" only on an old poll's: the server has moved on and nothing polls it.
+  const live: Record<string, LiveTaskStatus> = {
+    running: { status: "running", exitStatus: "" },
+    "gave-up": { status: "running", exitStatus: "" },
+  };
+  const serverStatus: Record<string, string> = {
+    new: "completed",
+    stuck: "running",
+    "gave-up": "timeout",
+    running: "running",
+    old: "completed",
+  };
+  const rows = Object.entries(serverStatus).map(([id, task_status]) =>
+    decorateActivity(
+      entry({ id, task_status, details: JSON.stringify({ upid: id }) }),
+      live,
+    ),
+  );
+
+  it.each([
+    [
+      "the default sort",
+      DEFAULT_ACTIVITY_SORT,
+      ["running", "new", "stuck", "gave-up", "old"],
+    ],
+    [
+      "a sort the user chose",
+      { key: "time", direction: "asc" },
+      ["new", "stuck", "gave-up", "running", "old"],
+    ],
+  ] as const)("orders rows for %s", (_name, sort, ids) => {
+    expect(pinRunningFirst(rows, sort).map((r) => r.entry.id)).toEqual(ids);
   });
 });
 
