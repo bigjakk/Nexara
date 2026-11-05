@@ -591,6 +591,16 @@ Click **Evaluate Now** to trigger an immediate DRS evaluation. In Advisory mode,
 
 The **Migrations** tab within DRS shows all past evaluations, including which migrations were recommended and executed. Its **History** tab is the audit trail: who changed the DRS configuration, triggered an evaluation, created or deleted a rule, and what was done to Proxmox's HA rules from this page.
 
+### Guests DRS Leaves in Place
+
+DRS does not pick a guest Proxmox cannot migrate right now: one with a config lock (a backup or a snapshot, say) or with a task running on it, such as a disk move. An open console does not count. If a node's tasks cannot be read, its guests stay put until the next evaluation. All of these still count toward their node's load and toward rules.
+
+After a failed migration DRS leaves that guest alone for 15 minutes, doubling with each failure in a row up to 6 hours, and balances with other guests meanwhile. A completed DRS migration resets the count, and failures older than 7 days stop counting. The wait comes from the DRS history, so restarting Nexara does not clear it, and **Evaluate Now** does not skip it. To move the guest sooner, migrate it by hand; that does not reset the count.
+
+The audit entry for a failed migration carries Proxmox's error text in its details. For a task that is often only `migration aborted`; the cause is in the task's log.
+
+For an HA-managed guest, Proxmox's migrate call only queues the request. DRS follows it to the migration the HA manager starts and records how that ended, and it waits for each migration before starting the next. If the HA manager starts none within two minutes, the attempt counts as failed.
+
 ### Native CRS Coexistence (Proxmox VE 9.2+)
 
 Proxmox VE 9.2 added a native dynamic load balancer to its Cluster Resource Scheduler (CRS). When a cluster has it enabled (`crs: ha=dynamic, ha-auto-rebalance=1` in the datacenter options), Nexara detects it and **disables its own automatic migrations** so the two balancers don't fight — Advisory mode still works as a read-only second opinion, and a banner on the DRS tab explains the state. You can manage the native CRS dynamic options (threshold, hold duration, margin, method) from **Cluster → Datacenter Options → CRS**.

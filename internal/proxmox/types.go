@@ -353,6 +353,7 @@ type Container struct {
 	VMID      int     `json:"vmid"`
 	Name      string  `json:"name"`
 	Status    string  `json:"status"`
+	Lock      string  `json:"lock"`
 	Node      string  `json:"node"`
 	CPU       float64 `json:"cpu"`
 	CPUs      int     `json:"cpus"`

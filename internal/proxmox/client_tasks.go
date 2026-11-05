@@ -137,3 +137,23 @@ func (c *Client) GetNodeTasks(ctx context.Context, node string, since int64, lim
 	}
 	return tasks, nil
 }
+
+// activeTaskLimit is set because PVE would otherwise cap the list at 50 (and a
+// limit of 0 returns nothing). A node's active list is far shorter than this.
+const activeTaskLimit = 500
+
+// GetActiveNodeTasks lists the tasks on a node's active list: the running ones,
+// which have no EndTime, and those that ended moments ago and are not archived
+// yet, which do. Unlike GetNodeTasks it reads no archive, so it stays cheap enough
+// to call on every DRS evaluation.
+func (c *Client) GetActiveNodeTasks(ctx context.Context, node string) ([]NodeTask, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/tasks?source=active&limit=" + strconv.Itoa(activeTaskLimit)
+	var tasks []NodeTask
+	if err := c.do(ctx, path, &tasks); err != nil {
+		return nil, fmt.Errorf("get active tasks on %s: %w", node, err)
+	}
+	return tasks, nil
+}

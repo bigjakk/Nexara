@@ -1625,6 +1625,14 @@ type Querier interface {
 	// somehow carried an empty UPID.
 	ListCrossClusterMigrationUPIDs(ctx context.Context, upids []string) ([]string, error)
 	ListDRSHistory(ctx context.Context, arg ListDRSHistoryParams) ([]DrsHistory, error)
+	// ListDRSMigrationFailures returns, per guest, how many DRS migrations have
+	// failed since its last completed one and when the latest of them failed.
+	// internal/drs computes its back-off from this, which is why the back-off needs
+	// no state of its own: every replica reads the same rows, and they outlast a
+	// restart or a move of the scheduler's leader role. 'timeout' counts because
+	// Execute already reports it as drs_migrate_failed. The seven days bound the
+	// read and let an old run of failures age out.
+	ListDRSMigrationFailures(ctx context.Context, clusterID uuid.UUID) ([]ListDRSMigrationFailuresRow, error)
 	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsRule, error)
 	ListDistinctAuditActions(ctx context.Context) ([]string, error)
 	ListDistinctAuditUsers(ctx context.Context) ([]ListDistinctAuditUsersRow, error)

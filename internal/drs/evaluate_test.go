@@ -44,10 +44,12 @@ import (
 // database. Both methods are reads; the call counts are what let the tests
 // tell how FAR the evaluation got before it gave up.
 type stubEvalQueries struct {
-	cfg        db.DrsConfig
-	rules      []db.DrsRule
-	cfgCalls   int
-	rulesCalls int
+	cfg         db.DrsConfig
+	rules       []db.DrsRule
+	failures    []db.ListDRSMigrationFailuresRow
+	failuresErr error
+	cfgCalls    int
+	rulesCalls  int
 }
 
 func (s *stubEvalQueries) GetDRSConfig(context.Context, uuid.UUID) (db.DrsConfig, error) {
@@ -60,13 +62,19 @@ func (s *stubEvalQueries) ListDRSRules(context.Context, uuid.UUID) ([]db.DrsRule
 	return s.rules, nil
 }
 
+func (s *stubEvalQueries) ListDRSMigrationFailures(context.Context, uuid.UUID) ([]db.ListDRSMigrationFailuresRow, error) {
+	return s.failures, s.failuresErr
+}
+
 const (
 	nodesPath       = "/api2/json/nodes"
 	node1QemuPath   = "/api2/json/nodes/pve-01/qemu"
 	node1LxcPath    = "/api2/json/nodes/pve-01/lxc"
+	node1TasksPath  = "/api2/json/nodes/pve-01/tasks"
 	node1VMCfgPath  = "/api2/json/nodes/pve-01/qemu/101/config"
 	node2QemuPath   = "/api2/json/nodes/pve-02/qemu"
 	node2LxcPath    = "/api2/json/nodes/pve-02/lxc"
+	node2TasksPath  = "/api2/json/nodes/pve-02/tasks"
 	resourcesPath   = "/api2/json/cluster/resources"
 	evalThreshold   = 0.15
 	evalGuestVMID   = 101
@@ -112,9 +120,11 @@ func evaluateHandlers() map[string]http.HandlerFunc {
 		node1VMCfgPath: func(w http.ResponseWriter, _ *http.Request) {
 			haData(w, proxmox.VMConfig{})
 		},
-		node1LxcPath:  empty,
-		node2QemuPath: empty,
-		node2LxcPath:  empty,
+		node1LxcPath:   empty,
+		node1TasksPath: empty,
+		node2QemuPath:  empty,
+		node2LxcPath:   empty,
+		node2TasksPath: empty,
 		haStatusPath: func(w http.ResponseWriter, _ *http.Request) {
 			haData(w, []proxmox.HAStatusEntry{
 				{ID: "quorum", Type: "quorum", Status: "OK"},

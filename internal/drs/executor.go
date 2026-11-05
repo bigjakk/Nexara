@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,12 +17,24 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/redact"
 	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
+// executorQueries is the database surface Execute uses, behind an interface so
+// its failure paths can be tested without a database, as with evalQueries.
+type executorQueries interface {
+	InsertDRSHistory(ctx context.Context, arg db.InsertDRSHistoryParams) (db.DrsHistory, error)
+	UpdateDRSHistoryStatus(ctx context.Context, arg db.UpdateDRSHistoryStatusParams) error
+	InsertTaskHistory(ctx context.Context, arg db.InsertTaskHistoryParams) (db.TaskHistory, error)
+	ReconcileTaskHistory(ctx context.Context, arg db.ReconcileTaskHistoryParams) (int64, error)
+	GetVMByClusterAndVmid(ctx context.Context, arg db.GetVMByClusterAndVmidParams) (db.Vm, error)
+	InsertAuditLog(ctx context.Context, arg db.InsertAuditLogParams) error
+}
+
 // Executor handles DRS migration execution and history recording.
 type Executor struct {
-	queries  *db.Queries
+	queries  executorQueries
 	logger   *slog.Logger
 	eventPub *events.Publisher
 	// shutdownCtx is the parent for any context that must outlive a
@@ -27,6 +42,10 @@ type Executor struct {
 	// (SIGTERM). nil falls back to context.Background() so a partially
 	// constructed Executor (tests) still works.
 	shutdownCtx context.Context
+	// taskPollInterval is how often Execute asks Proxmox about a migration.
+	taskPollInterval time.Duration
+	// haStartGrace is how long followHAMigration waits for a migration to start.
+	haStartGrace time.Duration
 }
 
 // NewExecutor creates a new DRS executor. shutdownCtx should be the
@@ -37,10 +56,12 @@ func NewExecutor(shutdownCtx context.Context, queries *db.Queries, logger *slog.
 		shutdownCtx = context.Background()
 	}
 	return &Executor{
-		queries:     queries,
-		logger:      logger,
-		eventPub:    eventPub,
-		shutdownCtx: shutdownCtx,
+		queries:          queries,
+		logger:           logger,
+		eventPub:         eventPub,
+		shutdownCtx:      shutdownCtx,
+		taskPollInterval: 5 * time.Second,
+		haStartGrace:     2 * time.Minute,
 	}
 }
 
@@ -78,7 +99,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 				Status:     "advisory",
 				ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			})
-			e.auditLog(ctx, clusterID, vmDBID, "drs_advisory", rec)
+			e.auditLog(ctx, clusterID, vmDBID, "drs_advisory", rec, nil)
 			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "advisory")
 			continue
 		}
@@ -113,7 +134,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 				Status:     "failed",
 				ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			})
-			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate_failed", rec)
+			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate_failed", rec, failureDetails(migrateErr.Error()))
 			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "migrate_failed")
 			continue
 		}
@@ -138,15 +159,11 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 		e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "migrate_started")
 
 		// Audit log with UPID so the activity pane can show a progress bar.
-		e.auditLogWithUPID(ctx, clusterID, vmDBID, "drs_migrate_running", rec, upid)
+		e.auditLog(ctx, clusterID, vmDBID, "drs_migrate_running", rec, map[string]any{"upid": upid, "node": rec.SourceNode})
 
 		// Poll task status until completion.
 		status, exitStatus := e.waitForTask(ctx, client, rec.SourceNode, upid)
-		_ = e.queries.UpdateDRSHistoryStatus(ctx, db.UpdateDRSHistoryStatusParams{
-			ID:         history.ID,
-			Status:     status,
-			ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-		})
+		taskStatus := status
 
 		// Finalize the task_history row. ReconcileTaskHistory is guarded on
 		// status='running', so it won't clobber a row the collector reconciler
@@ -168,22 +185,83 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			FinishedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		})
 
+		// The history and the audit log record the migration, not the task that
+		// asked for it, so an HA request is followed to the task that does it.
+		if since, isHA := haRequestStart(upid); isHA && status == "completed" {
+			status, exitStatus = e.followHAMigration(client, rec, since)
+		}
+		_ = e.queries.UpdateDRSHistoryStatus(ctx, db.UpdateDRSHistoryStatusParams{
+			ID:         history.ID,
+			Status:     status,
+			ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		})
+
 		// Audit log the result.
 		if status == "completed" {
-			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate", rec)
+			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate", rec, nil)
 			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "migrate_completed")
 			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindInventoryChange, "vm", vmDBID, "drs_migrated")
 		} else {
-			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate_failed", rec)
+			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate_failed", rec, failureDetails(exitStatus))
 			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "migrate_failed")
 		}
-		e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindTaskUpdate, "task", upid, status)
+		e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindTaskUpdate, "task", upid, taskStatus)
 
 		e.logger.Info("DRS migration completed",
 			"vmid", rec.VMID, "status", status, "upid", upid)
 	}
 
 	return nil
+}
+
+// haRequestStart returns the start time of a task that only asks the HA manager
+// for a migration, and whether upid is one. For an HA-managed guest Proxmox answers
+// the migrate call with an hamigrate task, which queues the request and ends OK
+// within a second, whatever becomes of the migration.
+func haRequestStart(upid string) (int64, bool) {
+	parts := strings.Split(upid, ":")
+	if len(parts) < 7 || parts[5] != "hamigrate" {
+		return 0, false
+	}
+	start, err := strconv.ParseInt(parts[4], 16, 64)
+	return start, err == nil
+}
+
+// followHAMigration waits for the migration the HA manager starts after an
+// hamigrate task and returns how it ended. Taking the hamigrate's OK instead
+// records a migration that fails as completed, so the guest is retried on the next
+// tick with nothing in the audit log to say why.
+//
+// The HA manager runs it on the guest's node, usually within 20 s, though it shuts
+// a container down first, for up to a minute. If none starts within the grace the
+// outcome is unknown, reported as "timeout" like a task DRS stops waiting for. The
+// task list is read from since, the hamigrate's start, so an earlier attempt's task
+// cannot be taken for this one's.
+func (e *Executor) followHAMigration(client *proxmox.Client, rec Recommendation, since int64) (status string, detail string) {
+	ctx, cancel := context.WithTimeout(e.shutdownCtx, e.haStartGrace)
+	defer cancel()
+
+	ticker := time.NewTicker(e.taskPollInterval)
+	defer ticker.Stop()
+
+	vmid := strconv.Itoa(rec.VMID)
+	for {
+		select {
+		case <-ctx.Done():
+			return "timeout", fmt.Sprintf("the HA manager started no migration within %s", e.haStartGrace)
+		case <-ticker.C:
+			tasks, err := client.GetNodeTasks(ctx, rec.SourceNode, since, 0)
+			if err != nil {
+				e.logger.Warn("failed to list tasks for an HA migration", "vmid", rec.VMID, "error", err)
+				continue
+			}
+			for _, t := range tasks {
+				if t.ID == vmid && (t.Type == "qmigrate" || t.Type == "vzmigrate") {
+					return e.waitForTask(ctx, client, rec.SourceNode, t.UPID)
+				}
+			}
+		}
+	}
 }
 
 func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) (status string, detail string) {
@@ -195,7 +273,7 @@ func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node s
 	pollCtx, cancel := context.WithTimeout(e.shutdownCtx, 30*time.Minute)
 	defer cancel()
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(e.taskPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -243,45 +321,26 @@ func (e *Executor) resolveVMDBID(ctx context.Context, clusterID uuid.UUID, vmid 
 	return vm.ID.String()
 }
 
-// auditLog inserts an audit log entry for a DRS action.
-func (e *Executor) auditLogWithUPID(ctx context.Context, clusterID uuid.UUID, resourceID, action string, rec Recommendation, upid string) {
-	details, _ := json.Marshal(map[string]interface{}{
-		"vmid":        rec.VMID,
-		"vm_type":     rec.VMType,
-		"source_node": rec.SourceNode,
-		"target_node": rec.TargetNode,
-		"reason":      rec.Reason,
-		"improvement": fmt.Sprintf("%.1f%%", rec.ExpectedImprovement*100),
-		"upid":        upid,
-		"node":        rec.SourceNode,
-	})
-
-	if resourceID == "" {
-		resourceID = fmt.Sprintf("vmid:%d", rec.VMID)
-	}
-
-	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
-		ResourceType: "vm",
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      details,
-	})
-	if err != nil {
-		e.logger.Warn("failed to insert DRS audit log", "action", action, "error", err)
-	}
+// failureDetails is what a drs_migrate_failed row adds: Proxmox's own text. Audit
+// details are readable by every Viewer, so a URL in it keeps no userinfo, query or
+// fragment, as when GetTaskStatus serves the same text.
+func failureDetails(text string) map[string]any {
+	return map[string]any{"error": redact.URLs(text)}
 }
 
-func (e *Executor) auditLog(ctx context.Context, clusterID uuid.UUID, resourceID, action string, rec Recommendation) {
-	details, _ := json.Marshal(map[string]interface{}{
+// auditLog inserts an audit log entry for a DRS action, with extra added to the
+// details every entry carries.
+func (e *Executor) auditLog(ctx context.Context, clusterID uuid.UUID, resourceID, action string, rec Recommendation, extra map[string]any) {
+	fields := map[string]any{
 		"vmid":        rec.VMID,
 		"vm_type":     rec.VMType,
 		"source_node": rec.SourceNode,
 		"target_node": rec.TargetNode,
 		"reason":      rec.Reason,
 		"improvement": fmt.Sprintf("%.1f%%", rec.ExpectedImprovement*100),
-	})
+	}
+	maps.Copy(fields, extra)
+	details, _ := json.Marshal(fields)
 
 	if resourceID == "" {
 		resourceID = fmt.Sprintf("vmid:%d", rec.VMID)

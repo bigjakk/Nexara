@@ -35,11 +35,12 @@ const (
 	unreadNodeCPU  = 8
 	unreadNodeMem  = 16 << 30
 
-	node3QemuPath = "/api2/json/nodes/pve-03/qemu"
-	node3LxcPath  = "/api2/json/nodes/pve-03/lxc"
-	node1VM102Cfg = "/api2/json/nodes/pve-01/qemu/102/config"
-	node2VM201Cfg = "/api2/json/nodes/pve-02/qemu/201/config"
-	node3VM301Cfg = "/api2/json/nodes/pve-03/qemu/301/config"
+	node3QemuPath  = "/api2/json/nodes/pve-03/qemu"
+	node3LxcPath   = "/api2/json/nodes/pve-03/lxc"
+	node3TasksPath = "/api2/json/nodes/pve-03/tasks"
+	node1VM102Cfg  = "/api2/json/nodes/pve-01/qemu/102/config"
+	node2VM201Cfg  = "/api2/json/nodes/pve-02/qemu/201/config"
+	node3VM301Cfg  = "/api2/json/nodes/pve-03/qemu/301/config"
 )
 
 // unreadableNodeHandlers serves a three-node cluster in which every listing
@@ -103,6 +104,10 @@ func unreadableNodeHandlers() map[string]http.HandlerFunc {
 		},
 		node1LxcPath: empty,
 		node3LxcPath: empty,
+
+		node1TasksPath: empty,
+		node2TasksPath: empty,
+		node3TasksPath: empty,
 
 		// detectPassthrough reads every running QEMU guest's config. Empty =
 		// no hostpci/usb entries, so every guest stays migratable.

@@ -52,7 +52,8 @@ type Workload struct {
 	NetIn    int64
 	NetOut   int64
 	Status   string
-	Pinned   bool // true = must not be migrated (PCI passthrough, HA pin, etc.)
+	Lock     string // Proxmox's config lock on the guest, if any (see pinBusyGuests)
+	Pinned   bool   // true = must not be migrated (PCI passthrough, HA pin, etc.)
 }
 
 // Recommendation is a single migration recommendation.
@@ -124,6 +125,7 @@ type veeamOwnedQueries interface {
 type evalQueries interface {
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (db.DrsConfig, error)
 	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]db.DrsRule, error)
+	ListDRSMigrationFailures(ctx context.Context, clusterID uuid.UUID) ([]db.ListDRSMigrationFailuresRow, error)
 }
 
 // NewEngine creates a new DRS engine.
@@ -388,6 +390,11 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 	rules := ParseDBRules(dbRules)
 	rules = append(rules, haRules...)
 
+	e.pinBusyGuests(ctx, client, clusterID, nodeEntries, nodeWorkloads)
+	if err := e.pinBackedOffGuests(ctx, clusterID, nodeWorkloads, time.Now()); err != nil {
+		return nil, err
+	}
+
 	// Pinned workloads (PCI/USB passthrough, containers when include_containers
 	// is off, etc.) are NOT filtered out before planning. They still occupy
 	// their node — so they must count toward node load scoring — and they still
@@ -458,6 +465,7 @@ func collectNodeWorkloads(ctx context.Context, client *proxmox.Client, node stri
 			NetIn:    vm.NetIn,
 			NetOut:   vm.NetOut,
 			Status:   vm.Status,
+			Lock:     vm.Lock,
 		})
 	}
 	for _, ct := range cts {
@@ -476,6 +484,7 @@ func collectNodeWorkloads(ctx context.Context, client *proxmox.Client, node stri
 			NetIn:    ct.NetIn,
 			NetOut:   ct.NetOut,
 			Status:   ct.Status,
+			Lock:     ct.Lock,
 			Pinned:   !includeContainers,
 		})
 	}

@@ -99,3 +99,27 @@ SELECT * FROM drs_history
 WHERE cluster_id = $1 AND vm_id = $2 AND status IN ('completed', 'pending')
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- ListDRSMigrationFailures returns, per guest, how many DRS migrations have
+-- failed since its last completed one and when the latest of them failed.
+-- internal/drs computes its back-off from this, which is why the back-off needs
+-- no state of its own: every replica reads the same rows, and they outlast a
+-- restart or a move of the scheduler's leader role. 'timeout' counts because
+-- Execute already reports it as drs_migrate_failed. The seven days bound the
+-- read and let an old run of failures age out.
+-- name: ListDRSMigrationFailures :many
+SELECT f.vm_id,
+       COUNT(*)::int AS failures,
+       MAX(COALESCE(f.executed_at, f.created_at))::timestamptz AS last_failed_at
+FROM drs_history f
+WHERE f.cluster_id = $1
+  AND f.created_at > now() - interval '7 days'
+  AND f.status IN ('failed', 'timeout')
+  AND NOT EXISTS (
+      SELECT 1 FROM drs_history done
+      WHERE done.cluster_id = f.cluster_id
+        AND done.vm_id = f.vm_id
+        AND done.status = 'completed'
+        AND done.created_at > f.created_at
+  )
+GROUP BY f.vm_id;
