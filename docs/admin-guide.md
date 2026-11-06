@@ -778,9 +778,11 @@ DRS does not pick a guest Proxmox cannot migrate right now: one with a config lo
 
 After a failed migration DRS leaves that guest alone for 15 minutes, doubling with each failure in a row up to 6 hours, and balances with other guests meanwhile. A completed DRS migration resets the count, and failures older than 7 days stop counting. The wait comes from the DRS history, so restarting Nexara does not clear it, and **Run Evaluation** does not skip it. To move the guest sooner, migrate it by hand; that does not reset the count.
 
-The audit entry for a failed migration carries Proxmox's error text in its details. For a task that is often only `migration aborted`; the cause is in the task's log.
+The audit entry for a failed migration carries the reason from the task's log in its details, such as `migration aborted (duration 00:00:10): can't lock file '/var/lock/qemu-server/lock-101.conf' - got timeout`. If the log names no reason or cannot be read, it carries Proxmox's exit text instead.
 
 For an HA-managed guest, Proxmox's migrate call only queues the request. DRS follows it to the migration the HA manager starts and records how that ended, and it waits for each migration before starting the next. If the HA manager starts none within two minutes, the attempt counts as failed.
+
+If Nexara shuts down while following a migration, the attempt is recorded as `interrupted` in the DRS history, with a `drs_migrate_interrupted` audit entry. Proxmox carries on with the migration regardless, so this is not a failure and starts no wait, and the migration's task shows how it ended. If that task then fails, the failure does not count toward the wait, so DRS may try the guest again sooner. If the scheduler role moves to another replica without a shutdown, the old leader keeps following the migration and records its result as usual. A process killed outright records nothing, and its attempt stays `pending` until a scheduler start at least an hour later marks it `cancelled`.
 
 ### Native CRS Coexistence (Proxmox VE 9.2+)
 

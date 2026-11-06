@@ -247,6 +247,10 @@ func main() {
 	if shutdownErr := srv.Shutdown(); shutdownErr != nil {
 		logger.Error("server shutdown error", "error", shutdownErr)
 	}
+	// 8 s stays inside the 10 s `docker stop` allows before its SIGKILL.
+	if executor := application.DRSExecutor; executor != nil && !executor.Drain(8*time.Second) {
+		logger.Warn("stopping before DRS recorded how a migration it was following ended")
+	}
 	logger.Info("Nexara stopped")
 }
 

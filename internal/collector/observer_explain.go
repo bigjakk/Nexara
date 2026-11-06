@@ -209,7 +209,7 @@ var (
 // migration and DRS rows bookkeeping around the tasks that do the moving.
 var guestOtherActions = []string{
 	"set_pool", "guest_tools_policy_update", "migrate_created", "migrate_started", "migrate_cancelled",
-	"migrate_failed", "drs_migrate", "drs_migrate_failed", "drs_advisory", "snapshot_resync",
+	"migrate_failed", "drs_migrate", "drs_migrate_failed", "drs_migrate_interrupted", "drs_advisory", "snapshot_resync",
 }
 
 func anyOf(words ...string) string { return "^(" + strings.Join(words, "|") + ")$" }

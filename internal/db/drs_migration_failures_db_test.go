@@ -59,6 +59,7 @@ func TestListDRSMigrationFailures(t *testing.T) {
 		{cluster, 104, "pending", time.Hour, false},
 		{cluster, 104, "advisory", time.Hour, false},
 		{cluster, 104, "cancelled", time.Hour, false},
+		{cluster, 104, "interrupted", time.Hour, false},
 		// Another cluster's guest, and another cluster's migration of the same VMID.
 		{other, 105, "failed", time.Hour, false},
 		{other, 101, "completed", 10 * time.Minute, false},

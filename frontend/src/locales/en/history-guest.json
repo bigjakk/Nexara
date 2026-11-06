@@ -62,6 +62,7 @@
     "drs_migrate_running": "DRS migration",
     "drs_migrate": "DRS migration done",
     "drs_migrate_failed": "DRS migration failed",
+    "drs_migrate_interrupted": "DRS migration interrupted",
     "drs_advisory": "DRS recommendation",
     "migrate_running": "Migration",
     "disk_move_running": "Disk move",
