@@ -6,7 +6,7 @@
 - An **x86-64 (amd64)** host — the published image is amd64-only; there is no arm64 build yet
 - **2 CPU cores** and **2 GB RAM** minimum (4 GB recommended)
 - **10 GB disk** for the application and database
-- A **Proxmox VE** cluster (7.x, 8.x, or 9.x — including 9.2) with an API token
+- A **Proxmox VE** cluster (7.x, 8.x, or 9.x — including 9.2). Nexara can create its own API token from a privileged login, or you can paste one you made
 - Port **80** available on the host (or change the `80:8080` mapping in `docker-compose.yml`). Nexara serves plain HTTP on a single port — put your own reverse proxy in front of it for TLS.
 - A modern browser — **Chrome/Edge 111+, Firefox 128+, or Safari 16.4+**. Very old browsers that can't run the app at all show an upgrade notice instead of a blank page.
 
@@ -77,7 +77,7 @@ All configuration is via environment variables.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `NEXARA_VERSION` | No | `latest` | Image tag the compose file pulls (`ghcr.io/bigjakk/nexara:<tag>`). Leave unset to track the newest release; pin it (e.g. `1.9.0` — the published image tag drops the leading `v` from the git tag) to control when you upgrade, or to roll back to the previous release after a failed one |
+| `NEXARA_VERSION` | No | `latest` | Image tag the compose file pulls (`ghcr.io/bigjakk/nexara:<tag>`). Leave unset to track the newest release; pin it (e.g. `1.17.0` — the published image tag drops the leading `v` from the git tag) to control when you upgrade. An older image will not start on a schema a newer one has migrated, so rolling back also means restoring the backup from before the upgrade |
 | `POSTGRES_USER` | No | `nexara` | PostgreSQL username |
 | `POSTGRES_PASSWORD` | **Yes** | — | PostgreSQL password (change from default) |
 | `POSTGRES_DB` | No | `nexara` | PostgreSQL database name |
@@ -228,12 +228,19 @@ cluster onboarded that way is not affected by the `PVEAdmin` shortfall above.
 |---------|-----------|------|-------------|
 | Nexara | `nexara` | 8080 (mapped to 80) | Unified: API + WebSocket + frontend + collector + scheduler |
 | PostgreSQL | `nexara-db` | 5432 (internal only) | Primary database + TimescaleDB |
-| Redis | `nexara-redis` | 6379 (internal only) | Pub/sub, caching, session store |
+| Redis | `nexara-redis` | 6379 (internal only) | Pub/sub, permission and session cache, short-lived sign-in state and lockout counters |
 
 ## Updating
 
 ```bash
-cd nexara
+# The directory you installed into: ~/nexara with the install script, ./Nexara with a manual clone
+cd ~/nexara
+
+# Back up first. Rolling back an upgrade that ran migrations needs a dump from before it,
+# and the TimescaleDB version that dump was taken on, so note the version this prints.
+docker compose exec -T nexara-db psql -U nexara -d nexara -tAc \
+  "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'"
+docker compose exec -T nexara-db pg_dump -U nexara -Fc nexara > nexara-pre-upgrade-$(date +%Y%m%d).dump
 
 # Pull the compose/.env.example changes that ship with the release
 git pull
@@ -243,9 +250,19 @@ docker compose pull
 docker compose up -d
 ```
 
-The stack runs a prebuilt image from GHCR — there is nothing to compile locally. By default it tracks `latest`; pin `NEXARA_VERSION` in `.env` (e.g. `NEXARA_VERSION=1.9.0` — the published image tags drop the leading `v` from the git tag) when you want to control exactly which release you move to, or to roll back to the previous one. Note that pinning `NEXARA_VERSION` rolls back only the Nexara image; if you also revert the compose file to a release that predates Redis 8, see [Rolling back to Redis 7](#rolling-back-to-redis-7).
+The stack runs a prebuilt image from GHCR — there is nothing to compile locally. By default it tracks `latest`; pin `NEXARA_VERSION` in `.env` (e.g. `NEXARA_VERSION=1.17.0` — the published image tags drop the leading `v` from the git tag) when you want to control exactly which release you move to. Pinning an older tag does not by itself undo an upgrade that ran migrations, because an older image will not start on a schema newer than it knows: see [Recovering from a failed upgrade](#recovering-from-a-failed-upgrade). A pin changes only the Nexara image; if you also revert the compose file to a release that predates Redis 8, see [Rolling back to Redis 7](#rolling-back-to-redis-7).
 
 Database migrations are applied automatically when the API server starts. There is no need to run them manually.
+
+### Updating TimescaleDB
+
+`docker compose pull` also fetches the database image, and its `latest-pg16` tag moves with each TimescaleDB release. The database keeps running on the extension version it already has: neither the new image nor Nexara updates it. It is safe to leave for a while, and when you want the newer version, run this on its own, as the session's first command (`-X` keeps a `.psqlrc` from running anything ahead of it):
+
+```bash
+docker compose stop nexara
+docker compose exec -T nexara-db psql -X -U nexara -d nexara -c "ALTER EXTENSION timescaledb UPDATE;"
+docker compose up -d
+```
 
 ### Recovering from a failed upgrade
 
@@ -260,7 +277,7 @@ recovery tooling ships inside the image — no extra tools needed:
 docker compose run --rm nexara migrate status
 
 # 2. Take a database backup before touching anything
-docker compose exec nexara-db pg_dump -U nexara -Fc nexara > nexara-backup.dump
+docker compose exec -T nexara-db pg_dump -U nexara -Fc nexara > nexara-backup.dump
 
 # 3. Clear the dirty flag. Check what the failed migration's .up.sql does
 #    (the status output names the version; the SQL is in the repo's
@@ -281,12 +298,18 @@ first migration needs only the `pgcrypto` extension and a writable database —
 check the Postgres logs), then drop and recreate the database — or restore your
 backup — and start the stack again.
 
-If the migration fails again the error is real — restore the backup, pin the
-previous image version (`NEXARA_VERSION`), and report the migration error.
+If the migration fails again the error is real. Restore the backup you took before
+the upgrade, not the dump from step 2, which holds the failed state; pin the previous
+image version (`NEXARA_VERSION`); and report the migration error. With no such backup,
+force the schema back as in step 3 and use `migrate down` below.
 
 `nexara migrate down <n>` rolls back the last `n` migrations (running their
 `.down.sql`). Down migrations can drop data — only use it as part of a
-deliberate rollback to a matching older image, and always back up first.
+deliberate rollback to a matching older image, and always back up first. Run it
+from the newer image, before pinning the older one. An older image has no
+`.down.sql` for migrations newer than it, and refuses to start at all on a schema
+newer than it knows (`no migration found for version N`), so pinning an older tag
+alone leaves the container restart-looping.
 
 ### Rolling back to Redis 7
 
@@ -336,47 +359,79 @@ the permission cache repopulates on the next request. Users stay logged in.
 > `nexara-redis` service from your compose file**. If you left that service in
 > place it still starts, and the app still waits on it — so the note above
 > applies to it even though your data lives elsewhere.
+>
+> Any Redis you bring must allow `EVAL`/`EVALSHA`, as the stock image does: the
+> change-password and two-factor lockout runs on Lua scripts, and those routes
+> answer 503 without them.
 
 ## Backup & Restore
+
+A database backup holds your clusters' credentials encrypted under `ENCRYPTION_KEY`, so **a dump without its key cannot bring them back**: every cluster, PBS server, Veeam server and notification channel would need its secret entered again. Unless you set the key yourself in `.env`, it lives in the data volume, so copy it out once and keep it apart from the dumps:
+
+```bash
+docker compose cp nexara:/data/nexara/.secrets.json ./nexara-secrets.json
+chmod 600 nexara-secrets.json
+```
 
 ### Database Backup
 
 ```bash
-# Dump the database
-docker exec nexara-db pg_dump -U nexara nexara > nexara-backup-$(date +%Y%m%d).sql
+# Note the TimescaleDB version: a dump has to go back onto the same one
+docker compose exec -T nexara-db psql -U nexara -d nexara -tAc \
+  "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'"
 
-# Or use compressed format
-docker exec nexara-db pg_dump -U nexara -Fc nexara > nexara-backup-$(date +%Y%m%d).dump
+# Dump the database
+docker compose exec -T nexara-db pg_dump -U nexara -Fc nexara > nexara-backup-$(date +%Y%m%d).dump
 ```
+
+`pg_dump` warns about circular foreign keys on TimescaleDB's own tables (`hypertable`, `chunk` or `continuous_agg`, depending on the version) and hints that the dump might not restore. That is expected; the steps below restore it.
 
 ### Database Restore
 
+TimescaleDB needs the steps below in this order. A plain `pg_restore --clean` over the live database reports well over a hundred errors and leaves it with hypertables missing, while the row counts still look right. On a new host, install Nexara and start it first, so there is a stack to restore into.
+
 ```bash
-# Stop the application (keep DB running)
+# Stop the application (keep the database running)
 docker compose stop nexara
 
-# Restore from SQL dump
-docker exec -i nexara-db psql -U nexara nexara < nexara-backup-20240101.sql
+# On a new host or data volume, put the key back too, unless ENCRYPTION_KEY is set in .env
+docker compose cp ./nexara-secrets.json nexara:/data/nexara/.secrets.json
 
-# Or from compressed dump
-docker exec -i nexara-db pg_restore -U nexara -d nexara --clean nexara-backup-20240101.dump
+# Replace the database. This deletes what is in it now.
+docker compose exec -T nexara-db psql -U nexara -d postgres \
+  -c "DROP DATABASE nexara;" -c "CREATE DATABASE nexara TEMPLATE template0;"
 
-# Restart
+# Install the TimescaleDB version the dump was taken on, and enter restore mode
+docker compose exec -T nexara-db psql -U nexara -d nexara \
+  -c "CREATE EXTENSION timescaledb VERSION '<version from the backup>';" \
+  -c "SELECT timescaledb_pre_restore();"
+
+# Restore, and leave restore mode
+docker compose exec -T nexara-db pg_restore -U nexara -d nexara --no-owner --no-acl < nexara-backup-20260101.dump
+docker compose exec -T nexara-db psql -U nexara -d nexara -c "SELECT timescaledb_post_restore();"
+
+# Bring the extension up to the image's version, then restart
+docker compose exec -T nexara-db psql -X -U nexara -d nexara -c "ALTER EXTENSION timescaledb UPDATE;"
 docker compose up -d
 ```
 
+Restoring into a different TimescaleDB version fails with errors such as `column "schema_name" of relation "chunk" does not exist`. If `CREATE EXTENSION` says the version has no installation script, the image no longer carries it: set the `nexara-db` image in a `docker-compose.override.yml` to that release (`timescale/timescaledb:<version>-pg16`) for the restore.
+
 ### Volume Backup
 
-Nexara stores state in **three** volumes: `nexara-db-data` (PostgreSQL), `nexara-redis-data` (Redis), and `nexara-data` (secrets, branding, uploads). For a full cold backup:
+Nexara stores state in **three** volumes: `nexara-db-data` (PostgreSQL), `nexara-redis-data` (Redis), and `nexara-data` (secrets, branding, uploads). Compose prefixes each with the project name, by default the install directory's name in lower case, so `nexara_nexara-db-data` for `~/nexara`. Use the full name: `docker run -v` with the short one creates a new, empty volume and backs that up without complaint. For a full cold backup:
 
 ```bash
+# The prefix Compose uses for this install
+PROJECT=$(docker compose config | sed -n 's/^name: //p')
+
 # Stop all services
 docker compose down
 
 # Back up all three Docker volumes into one archive
 docker run --rm \
-  -v nexara-db-data:/vol/db -v nexara-redis-data:/vol/redis -v nexara-data:/vol/data \
-  -v $(pwd):/backup alpine \
+  -v "${PROJECT}_nexara-db-data":/vol/db -v "${PROJECT}_nexara-redis-data":/vol/redis -v "${PROJECT}_nexara-data":/vol/data \
+  -v "$(pwd)":/backup alpine \
   tar czf /backup/nexara-volumes-$(date +%Y%m%d).tar.gz /vol
 
 # Restart
@@ -398,9 +453,9 @@ docker compose logs nexara-db
 docker compose ps
 ```
 
-### "JWT_SECRET must be set" or "ENCRYPTION_KEY must be set"
+### "resolve secrets", "JWT_SECRET must be at least 16 characters" or "ENCRYPTION_KEY must be exactly 64 hex characters"
 
-Secrets are auto-generated on first start and persisted to `DATA_DIR/.secrets.json`. If you see this error, check that the data volume is writable. If you prefer to manage secrets externally, set `JWT_SECRET` and `ENCRYPTION_KEY` in `.env` — they take precedence over the auto-generated file.
+Secrets are auto-generated on first start and persisted to `DATA_DIR/.secrets.json`. `resolve secrets: …` at startup means that file could not be read or written, so check that the data volume is writable and owned by `PUID`/`PGID`. The other two mean a value you set yourself is invalid: `JWT_SECRET` needs at least 16 characters, and `ENCRYPTION_KEY` is 64 hex characters (`openssl rand -hex 32`). Values set in `.env` take precedence over the file. Don't change `ENCRYPTION_KEY` on an install that has stored credentials, since they can no longer be decrypted afterwards.
 
 ### Database connection refused
 
@@ -447,23 +502,32 @@ If port 80 is already in use:
 
 - Verify the API URL is reachable from the Docker host
 - Check that the API token has sufficient privileges
-- For self-signed certificates, use the **Fetch Fingerprint** button when adding the cluster
+- For self-signed certificates, verify and accept the fingerprint **Connect** shows when adding the cluster. If it worked until a Proxmox upgrade, see [When a Node's Certificate Changes](admin-guide.md#when-a-nodes-certificate-changes)
 - Check logs: `docker compose logs nexara`
 
 ### Reset admin password
 
-If you lose access to your admin account:
+If you lose access to a local account, set a new password in the database. Nexara stores bcrypt hashes, which `pgcrypto` can produce:
 
 ```bash
-# Connect to the database
-docker exec -it nexara-db psql -U nexara nexara
-
-# Delete every login-capable user; keep the seeded system actor that
-# audit-log entries and DRS / scheduler tasks attribute to. Removing
-# that row would break those references on the first system action.
-DELETE FROM users WHERE id != '00000000-0000-0000-0000-000000000001';
+docker compose exec nexara-db psql -U nexara nexara
 ```
 
-Then visit the web UI — `/api/v1/auth/setup-status` will report
-`needs_setup: true` again and the registration page will appear so you
-can create a new admin account.
+```sql
+-- See the accounts; only an auth_source of 'local' signs in with this password.
+-- system@nexara.local is Nexara's internal actor, not a login, so it is left out.
+SELECT email, role, auth_source, is_active FROM users WHERE email <> 'system@nexara.local';
+
+UPDATE users
+   SET password_hash = crypt('a-new-long-password', gen_salt('bf', 12)), is_active = true
+ WHERE email = 'admin@example.com' AND auth_source = 'local';
+
+-- Only if the account's two-factor device is gone too
+UPDATE users SET totp_secret = NULL WHERE email = 'admin@example.com';
+DELETE FROM totp_recovery_codes
+ WHERE user_id = (SELECT id FROM users WHERE email = 'admin@example.com');
+```
+
+Sign in, change the password on your **Profile** page (user menu, top right) so the temporary one is no longer in your `psql` history, and use **Sign Out All Devices** in the same menu if the old password may have leaked.
+
+Don't delete rows from `users` to get the first-run setup back. Alert rules, notification channels, reports, rolling update jobs and imports reference the user who created them, so the `DELETE` fails on an install that has any, and on one that has none it takes that user's task history and API keys with it.

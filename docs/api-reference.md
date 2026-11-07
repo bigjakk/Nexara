@@ -1,15 +1,15 @@
 # API Reference
 
-Nexara exposes a REST API at `/api/v1`. All endpoints (except auth and health) require a valid JWT bearer token.
+Nexara exposes a REST API at `/api/v1`. Every endpoint takes a JWT access token or an `nxra_` API key as a bearer token, except `/healthz`, `/version`, `/changelog` and `/auth/login`, `refresh`, `register`, `logout`, `setup-status`, `sso-status`, `oidc/*` and `totp/verify-login`.
 
-> **The live source of truth is the in-app catalog at `/settings/api-docs`.**
-> That page enumerates every route from the running Fiber router at request
-> time, so it cannot drift from what the server actually serves, and for each
-> route the endpoint registry declares it renders the whole request contract —
-> every parameter's type, where it goes on the wire, its bounds, and whether it
-> is required. This file covers the auth handshake, error envelope, and
-> WebSocket protocol — the parts the auto-generated catalog can't infer — plus
-> a hand-curated overview of the major endpoint groups for offline reference.
+> **The live source of truth is the in-app catalog at `/settings/api-docs`**
+> (**API Keys** in the user menu, then **View API Documentation**), which renders
+> `GET /api/v1/api-docs`. Its route list is read from the running router, `/api/v1`
+> routes only, so `/healthz` and `/ws*` are not in it. Each entry's description,
+> permission and parameters are that route's registry declaration; the 16 `/api/v1`
+> routes outside the registry list no parameters. This file covers what a declaration
+> cannot say, the auth handshake, error envelope, limits and WebSocket protocol, plus
+> a curated overview of the endpoint groups for offline reference.
 
 ## Base URL
 
@@ -36,8 +36,11 @@ https://nexara.example.com/api/v1
    `expires_at`, `permissions` and `global_permissions` (those of `permissions` held on the whole install, which is what an object that belongs to no one cluster — a backup server, a firewall template — is offered by), with the session's refresh token in the cookie, as
    under Login), and the `register` audit entry names the new account as the actor.
 
-   Every later registration needs an administrator as the caller, creates a plain
-   user, and **signs nobody in**. The response is `201` with the new account's record
+   Every later registration needs an administrator as the caller, meaning an account
+   whose `role` field is `admin`: the legacy field, not an RBAC role. The first user has
+   it, and granting the Admin role does not set it; `PUT /users/:id` with `role` does, from
+   that user's next refresh or sign-in, since the check reads it from their token.
+   It creates a plain user and **signs nobody in**. The response is `201` with the new account's record
    and nothing else:
    ```
    Response: { "id": "...", "email": "...", "display_name": "...", "role": "user" }
@@ -320,6 +323,7 @@ the exchange code in turn (`nexara_oidc_exchange_…`, sent only to the exchange
 the exchange refuses, with `401` and before spending it, a code no such cookie holds.
 So a client keeps cookies between the steps and starts and finishes the sign-in at
 one address, the one the redirect URI names, within the 10 minutes the state lives.
+The exchange code it ends with lives 5 seconds, so exchange it at once.
 A link from someone else's sign-in, the callback it ends in or the
 `/oidc-callback?oidc_token=` page that follows, signs nobody in.
 
@@ -366,7 +370,7 @@ is refused on `POST /auth/totp/setup`, `DELETE /auth/totp` or
 
 ## Error Format
 
-All errors return a consistent envelope:
+Nearly all errors return a consistent envelope. The exceptions are a rate limiter's `429` (plain text, see [Rate Limits](#rate-limits)), the syslog test's `400` (`{"success":false,"error":…}`), a notification channel test's or dead-letter retry's `502` (`{"success":false,"message":…}`), and a refused `/ws*` upgrade (`{"error":"<text>"}`).
 
 ```json
 {
@@ -533,13 +537,13 @@ for three minutes is closed without an answer.
 
 ## Rate Limits
 
-Every limiter returns `429`, and all but three key on the client IP (`c.IP()` —
+Every limiter returns `429`, and all but four key on the client IP (`c.IP()` —
 see `TRUSTED_PROXIES` before deploying behind a reverse proxy); the mapping
-usage limiter and the two that end sessions (sign out everywhere, end one
-session) key on the signed-in user. Note these responses come
+usage limiter, the UPS commands limiter and the two that end sessions (sign out
+everywhere, end one session) key on the signed-in user. Note these responses come
 from the limiter middleware, not the API error handler: the body is the plain
 text `Too Many Requests` (`Content-Type: text/plain`), not the JSON error
-envelope documented above.
+envelope documented above, with a `Retry-After` header. Requests that pass carry `X-RateLimit-*`.
 
 | Scope | Budget | Applies to |
 |-------|--------|------------|
@@ -550,6 +554,11 @@ envelope documented above.
 | WS token | 60/min | `/auth/ws-token` |
 | Snapshot resync | 30/min | `/clusters/:id/guest-snapshots/resync` |
 | Cluster create | 10/min | `POST /clusters` — in bootstrap mode each call spends a Proxmox login attempt |
+| Certificate fetch | 30/min, one budget per route | `POST /clusters/fetch-fingerprint`, which the cluster, PBS and Veeam add flows share, and `POST /clusters/:id/verify-certificate` |
+| Veeam logon | 10/min, one budget for all of them | Add, edit and test a Veeam server, each of which spends a real domain logon |
+| Veeam control | 30/min | Job control, session logs and session tasks |
+| NUT connect | 10/min, one budget for all of them | Create, probe, update and test a NUT server, each of which connects to an address the caller names |
+| UPS commands | 30/min per user | Running a UPS's instant commands and setting its variables |
 | Mapping usage | 10/min per user, USB and PCI checks together | `GET /clusters/:id/usb-mappings/:mapping_id/usage` and `GET /clusters/:id/pci-mappings/:mapping_id/usage` — each call reads the configuration of every VM in the cluster. The handlers also run at most two checks at once per cluster and one per user, of either kind, where a newer check replaces the older one, which answers `409`. It answers `429`, with the JSON error envelope, when the cluster has no room, when the older check has not stopped within two seconds, or when another of the user's own checks took the slot first |
 | General | `RATE_LIMIT_MAX` per `RATE_LIMIT_EXPIRATION` (default 600/min) | Everything whose path does not start with `/api/v1/auth/` or `/ws` — `/healthz` included |
 
@@ -569,9 +578,10 @@ above.
 ## Request Parameters
 
 Each endpoint declares its parameters — path, query and body alike — in one
-place, and the declaration is enforced before the handler runs. Four
+place, and the declaration is enforced before the handler runs. Five
 consequences are worth knowing before scripting against the API:
 
+- **A body must be JSON.** On a route that declares any body parameter, a body sent as anything but `application/json` is a `400`, and `curl -d` sends `application/x-www-form-urlencoded` unless told otherwise.
 - **An undeclared key is rejected, not ignored.** A request carrying a key the
   endpoint does not declare answers `400` naming it: `siz: unknown parameter
   (not declared by this endpoint)`.
@@ -612,7 +622,7 @@ fields themselves.)
 
 ## Response Envelope
 
-Every endpoint that returns a **collection** returns the same envelope:
+An endpoint that returns a **collection** returns the same envelope. Two return their own shape: `/clusters/:id/vm-folders` (`{folders, memberships}`) and `…/vm-import-sources/content` (`{node, storage, items}`):
 
 ```json
 { "items": [ ... ], "total": 128 }
@@ -620,9 +630,16 @@ Every endpoint that returns a **collection** returns the same envelope:
 
 - `items` is always a JSON array — never `null`, even when empty.
 - `total` is the number of rows matching the request's filters **before**
-  `limit`/`offset`, so `total > items.length` means the response is one page of
-  a larger set. On endpoints that return everything they have (most Proxmox
-  passthroughs), the two are equal.
+  `limit`/`offset` on `/audit-log`, `/clusters/:id/audit-log`, `/tasks`, the History
+  routes, `…/nodes/:node/syslog`, the JSON export and the virtio-win downloads, so
+  `total > items.length` means the response is one page of a larger set.
+- On `/alerts`, `/alert-rules`, `/migrations`, `/notification-dlq`,
+  `/clusters/:id/alerts`, `…/migrations`, `…/cve-scans`, `…/maintenance-windows`,
+  `…/rolling-updates`, `…/vm-imports` and `/ups-devices/:id/maintenance-windows` it is
+  the length of the page, so page through those until a page comes back short.
+- `/reports/runs` and `/reports/schedules` return at most 100 and cannot be paged. On
+  endpoints that return everything they have (most Proxmox passthroughs), `total` and
+  the length are equal.
 
 Single-resource endpoints (`GET /clusters/:id`, `GET /vms/:id`, …) return the
 object directly, unwrapped.
@@ -657,15 +674,14 @@ object directly, unwrapped.
 
 ## Pagination & Filtering
 
-List endpoints support query parameters:
+List endpoints that declare them take these query parameters (75 routes declare `limit` and 67 `offset`; on any other route `?limit=` is a `400 unknown parameter`):
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `limit` | Max items to return. The default and the ceiling are per-endpoint — most list endpoints default to 50 and cap at 100 or 200, a few default to 500 and cap higher, and a few declare no ceiling at all. Where a bound is declared, a value outside it is a `400` naming the bound, **not** a clamp | `?limit=100` |
 | `offset` | Skip N items. A negative value — or one past the endpoint's ceiling, where it declares one — is a `400` rather than being clamped | `?offset=50` |
 
-Result ordering is fixed per endpoint — there is no generic `sort`/`order`
-parameter.
+Result ordering is fixed per endpoint, except `/tasks`, which takes `sort` and `order` — there is no generic `sort`/`order` parameter.
 
 Some endpoints support additional filters documented in their sections below.
 
@@ -678,7 +694,8 @@ and the response's `total` counts the scoped set. Rows with no cluster
 (global alert rules, non-cluster audit entries), and audit entries of a cluster
 that has since been removed, are visible only to holders of the corresponding
 *global* permission. A caller with no grant at all gets an
-empty list rather than an error.
+empty list rather than an error; a filter naming a cluster outside the caller's
+grants is a `403`.
 
 ---
 
@@ -709,6 +726,8 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 |--------|------|-------------|
 | POST | `/auth/register` | Register a new user (the first user becomes admin and is signed in; later registrations need an admin caller and sign nobody in) |
 | POST | `/auth/login` | Login with email and password |
+| GET | `/auth/sessions` | List the caller's own active sessions (`{items,total}`): device, user agent, address and times, never the token hash. `is_current` marks the one whose refresh cookie the request carries, so a caller with no cookie sees none marked |
+| DELETE | `/auth/sessions/:id` | End one of the caller's own sessions (interactive session only: `403` for an API key). Another user's id, an unknown one or one already ended answers `404`; ending the current one clears the refresh cookie. 30 calls a minute per user |
 | POST | `/auth/refresh` | Refresh access token |
 | POST | `/auth/logout` | Logout: end the session the refresh token names; `403`, with the cookie left alone, for a session that belongs to another user than the access token presented |
 | POST | `/auth/logout-all` | Logout all sessions; the refresh cookie is deleted only when it is the caller's own or names no live session |
@@ -740,6 +759,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | PUT | `/clusters/:id` | Update cluster |
 | DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential). The cluster's audit entries are kept, still carrying its id and labelled `<name> (removed)`; only a holder of global `view:audit` reads them (see [Audit Log](#audit-log)). The role assignments scoped to the cluster are deleted with it, in the same statement, and the permission cache of the users who held them is cleared |
 | POST | `/clusters/fetch-fingerprint` | Fetch TLS fingerprint from a Proxmox URL |
+| POST | `/clusters/:id/verify-certificate` | Re-pin the cluster to the certificate its `api_url` serves now, only when that matches what the cluster reports for that node (`manage:cluster`, audited). Answers `{ "fingerprint", "updated", "message" }`; `409` on a mismatch, when nothing was observed to compare, or when `api_url` changed meanwhile; `502` when unreachable. 30/min per client IP |
 
 #### Onboarding a cluster without a pre-made token
 
@@ -928,6 +948,8 @@ leaves provenance intact.
 | GET | `/clusters/:id/nodes/:node_id/disks` | List node disks (model, size, health, wearout) |
 | GET | `/clusters/:id/nodes/:node_id/network-interfaces` | List node network interfaces |
 | GET | `/clusters/:id/nodes/:node_id/pci-devices` | List node PCI devices |
+| GET | `/clusters/:id/nodes/:node/report` | Download the node's `pvereport` bundle as plain text; it discloses storage paths, network layout, packages and every guest's config (`manage:node`, audited) |
+| GET | `/clusters/:id/nodes/:node/sensors` | Hardware temperatures, read over the cluster's SSH credentials and cached 60 seconds: `{items,total}` plus `available`, and `reason` when false, still `200` (`view:node`) |
 | GET | `/clusters/:id/nodes/:node/memory-modules` | The node's last memory DIMM read: each slot's size, type, speed and part number, the installed total, the firmware's maximum and ECC, the memory the node's kernel reports (`node_mem_total`; a table listing less is incomplete), with `status` (`never`, `ok`, `unavailable`, `error`) and `reason`. A failed read keeps the last good one. Never dials the node |
 | POST | `/clusters/:id/nodes/:node/memory-modules/refresh` | Read the DIMM layout now with `dmidecode` over the cluster's SSH credentials (needs root) and return it as the GET does; a failed read answers 200 with its reason, and a read within a minute of the last one that dialed the node answers 429 with `Retry-After` (`manage:node`, audited) |
 | GET | `/clusters/:id/nodes/:node/dns` | Get node DNS config |
@@ -1052,7 +1074,7 @@ A node's firewall rule routes are listed with the other rule sets under [Firewal
 | GET | `/clusters/:id/vms` | List VMs in a cluster |
 | POST | `/clusters/:id/vms` | Create a new VM |
 | GET | `/clusters/:id/vms/:vm_id` | Get VM details |
-| POST | `/clusters/:id/vms/:vm_id/status` | Perform action (start/stop/shutdown/reboot/suspend/resume) |
+| POST | `/clusters/:id/vms/:vm_id/status` | Perform action (start/stop/shutdown/reboot/reset/suspend/resume) |
 | POST | `/clusters/:id/vms/:vm_id/clone` | Clone a VM |
 | POST | `/clusters/:id/vms/:vm_id/convert-to-template` | Convert VM to template |
 | POST | `/clusters/:id/vms/:vm_id/clone-to-template` | Clone VM as template |
@@ -1094,7 +1116,7 @@ Organize guests into folders in the Nexara inventory tree (Nexara-side only — 
 | GET | `/clusters/:id/containers` | List containers in a cluster |
 | POST | `/clusters/:id/containers` | Create a new container |
 | GET | `/clusters/:id/containers/:ct_id` | Get container details |
-| POST | `/clusters/:id/containers/:ct_id/status` | Perform action (start/stop/shutdown/reboot) |
+| POST | `/clusters/:id/containers/:ct_id/status` | Perform action (start/stop/shutdown/reboot/suspend/resume) |
 | POST | `/clusters/:id/containers/:ct_id/clone` | Clone a container |
 | POST | `/clusters/:id/containers/:ct_id/convert-to-template` | Convert to template |
 | POST | `/clusters/:id/containers/:ct_id/clone-to-template` | Clone as template |
@@ -1152,7 +1174,7 @@ hold.
 
 ### VM Import
 
-Import VMs from ESXi/vCenter sources, OVA/OVF appliances, or disk images. Reads require `view:vm_import`, mutations `manage:vm_import`, except where noted.
+Import VMs from ESXi/vCenter sources or OVA/OVF appliances. Reads require `view:vm_import`, mutations `manage:vm_import`, except where noted.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1676,7 +1698,7 @@ server maps to at most one.
 
 Because every call spends a real domain logon, two dedicated rate limits apply:
 **10/min per IP** shared by create, update and test, and a separate **30/min per
-IP** for job control and session logs.
+IP** for job control, session logs and session tasks.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -2010,7 +2032,8 @@ Every schedule carries `run_as`: the user whose grants its runs read under, stam
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/audit-log` | List audit entries across the caller's accessible clusters |
-| GET | `/audit-log/recent` | List recent entries |
+| GET | `/audit-log/recent` | The 50 most recent entries, plus up to 50 older ones for tasks still running or finished in the last hour, so a response can hold up to 100 |
+| GET | `/clusters/:id/guests/:vmid/history` | One guest's History by Proxmox VMID, newest first, from the VMID's latest create, clone or restore. No `start_time` means no lower bound. Needs `view:audit`; a task's exit text, task-only rows and backup-job entries `view:task` too, status changes `view:vm` or `view:container`. `404` for an unknown cluster |
 | GET | `/audit-log/actions` | List distinct action types |
 | GET | `/audit-log/users` | List distinct users |
 | GET | `/audit-log/export` | Export audit log |
@@ -2054,8 +2077,9 @@ Each tab's History has the Histories of its objects beneath it, at
 and a firewall template's, which belongs to no cluster, at
 `/history/firewall-templates/:id` (an instance-wide `view:audit` and
 `view:network`). Each takes the guest History's filters — `limit`, `offset`,
-`category` (the tab's or object's own kinds of entry), `source` and
-`start_time` — and each is gated on `view:audit` and the view permission of the
+`category` (the tab's or object's own kinds of entry), `exclude_category`, `source`,
+`start_time`, `end_time` and `all_time` — but unlike a guest's reads only the last 7
+days when no `start_time` is given, so a script that wants more must say so. Each is gated on `view:audit` and the view permission of the
 page the object is on.
 
 #### Guest identity on an audit entry
@@ -2153,7 +2177,7 @@ the upgrade also have no `from_storage` on a disk move or a restore.
 
 #### Histories of a storage, a backup server and a backup job
 
-Each answers one object's timeline, newest first, in the shape of a guest's History: `limit`, `offset`, `category`, `source` and `start_time`. All are `GET`, and gated on `view:audit` and the object's own view permission, both on the path's cluster — or instance-wide for a server, whose rows are in any cluster or none.
+Each answers one object's timeline, newest first, in the shape of a guest's History: `limit`, `offset`, `category`, `exclude_category`, `source`, `start_time`, `end_time` and `all_time`. With no `start_time` each reads only the last 7 days. All are `GET`, and gated on `view:audit` and the object's own view permission, both on the path's cluster — or instance-wide for a server, whose rows are in any cluster or none.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -2222,7 +2246,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/ldap/configs` | List LDAP configs |
-| POST | `/ldap/configs` | Create LDAP config |
+| POST | `/ldap/configs` | Create LDAP config. An `ldap://` URL without StartTLS answers `422 insecure_ldap_transport_confirm_required` until the body sets `acknowledge_insecure_tls`; so does `PUT` |
 | GET | `/ldap/configs/:id` | Get LDAP config |
 | PUT | `/ldap/configs/:id` | Update LDAP config |
 | DELETE | `/ldap/configs/:id` | Delete LDAP config |
@@ -2234,7 +2258,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/oidc/configs` | List OIDC configs |
-| POST | `/oidc/configs` | Create OIDC config |
+| POST | `/oidc/configs` | Create OIDC config. A plain-`http` redirect URI answers `422 insecure_oidc_redirect_confirm_required` until the body sets `acknowledge_insecure_redirect`; so does `PUT` |
 | GET | `/oidc/configs/:id` | Get OIDC config |
 | PUT | `/oidc/configs/:id` | Update OIDC config |
 | DELETE | `/oidc/configs/:id` | Delete OIDC config |
@@ -2244,15 +2268,17 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/settings` | List all settings |
+| GET | `/settings` | List settings, by `?scope=` (`global` by default, or `user`) |
 | GET | `/settings/branding` | Get branding settings |
 | GET | `/settings/branding/logo-file` | Serve logo image |
 | GET | `/settings/branding/favicon-file` | Serve favicon |
 | POST | `/settings/branding/logo` | Upload logo |
 | POST | `/settings/branding/favicon` | Upload favicon |
-| GET | `/settings/:key` | Get a setting by key |
-| PUT | `/settings/:key` | Create/update a setting |
-| DELETE | `/settings/:key` | Delete a setting |
+| GET | `/settings/:key` | Get a setting by key, by `?scope=` (`user` by default, or `global`) |
+| PUT | `/settings/:key` | Create or update a setting. `scope` in the body (`user` by default); a global write needs `manage:settings` |
+| DELETE | `/settings/:key` | Delete a setting, by `?scope=`. A global delete needs `manage:settings`; a user-scope one affects only the caller's own row |
+| GET | `/version` | The running build: `version`, `commit`, `build_time`, `go_version`. Public, no token |
+| GET | `/changelog` | Cached release notes from GitHub Releases (`{items,total}`); always `200`, empty when GitHub cannot be reached. Public, no token |
 
 ### API Keys
 
@@ -2264,6 +2290,14 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | DELETE | `/api-keys` | Revoke all your API keys |
 | GET | `/admin/api-keys` | Admin: list all API keys |
 | DELETE | `/admin/api-keys/:id` | Admin: revoke any API key |
+
+### Favorites
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/favorites` | List the caller's own starred clusters, nodes and guests; each kind is filtered by its own permission (`view:cluster`, `view:node`, `view:vm`) |
+| POST | `/favorites` | Star one: `resource_type` (`cluster`, `node`, `vm`), `cluster_id`, and `ref` (omitted for a cluster, else the node name or VMID). Needs that kind's `view` permission in that cluster; `404` when it does not exist, `400` past 200 favorites |
+| DELETE | `/favorites` | Unstar one of the caller's own, named by the same three as query parameters. Needs no permission; succeeds when it is not starred |
 
 ### Search
 
@@ -2285,7 +2319,7 @@ data streaming and console access.
 | Path | Description |
 |------|-------------|
 | `/ws` | Metric and event subscription hub |
-| `/ws/console` | Serial / node-shell console proxy (xterm.js) |
+| `/ws/console` | Node shell, a text terminal (xterm.js). `vm_serial` and `ct_attach` also upgrade here, but relay a raw VNC stream and ignore resize |
 | `/ws/vnc` | VNC console proxy (noVNC) |
 
 ### Authentication
@@ -2325,12 +2359,17 @@ Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>
 In the browser this looks like:
 
 ```js
-const { token } = await fetch("/api/v1/auth/ws-token", { method: "POST" }).then(r => r.json());
+const { token } = await fetch("/api/v1/auth/ws-token", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${accessToken}` },
+}).then(r => r.json());
 const ws = new WebSocket(
   `wss://nexara.example.com/ws`,
   ["nexara.token", `nexara.token.${token}`],
 );
 ```
+
+With `WS_ALLOWED_ORIGINS` set, an upgrade with no `Origin` header is a `403`, so a non-browser client must send one that is on the list.
 
 ### Subscribing to channels
 
@@ -2343,12 +2382,14 @@ message carries a `type` and an array of `channels`:
 {"type": "ping"}
 ```
 
+A message from the client over 4,096 bytes closes the socket, which is about 70 channels, so split a long list. The server pings every `WS_PING_INTERVAL` and drops a connection that sends no WebSocket Pong within `WS_PONG_TIMEOUT`; a browser answers by itself, and the JSON `ping` message does not count.
+
 Valid channels:
 
 | Channel | Contents | Required permission |
 |---------|----------|---------------------|
 | `cluster:<cluster_id>:metrics` | Live metric samples for the cluster | `view:cluster` on that cluster |
-| `cluster:<cluster_id>:alerts` | Alert state changes for the cluster | `view:cluster` on that cluster |
+| `cluster:<cluster_id>:alerts` | A `node_offline` notice when the health monitor marks a node offline. Alert firings and state changes arrive as `alert_fired` and `alert_state_change` on the `events` channels | `view:cluster` on that cluster |
 | `cluster:<cluster_id>:events` | Operational events for the cluster | `view:cluster` on that cluster |
 | `cluster:<cluster_id>:audit` | Audit entries for the cluster | `view:audit` on that cluster |
 | `system:events` | Non-cluster operational events (task updates, report completion, PBS changes) | Any authenticated session |
@@ -2363,7 +2404,7 @@ skipped — the connection and any other subscriptions stay open.
 
 ### Console connections
 
-VNC and serial console WebSocket connections proxy directly to Proxmox.
+VNC and node-shell WebSocket connections proxy directly to Proxmox.
 Mint a console token first (which embeds the target tuple), then upgrade
 with the scope params on the URL:
 
@@ -2379,9 +2420,11 @@ wss://nexara.example.com/ws/console?cluster_id=<uuid>&node=<name>&vmid=<int>&typ
 Sec-WebSocket-Protocol: nexara.token, nexara.token.<console_jwt>
 ```
 
-`type` values: `node_shell`, `vm_serial`, `vm_vnc`, `ct_attach`, `ct_vnc`.
+A token's `type` is one of `node_shell`, `vm_serial`, `ct_attach` (these three upgrade on `/ws/console`, whose `type` parameter repeats it) or `vm_vnc`, `ct_vnc` (these two on `/ws/vnc`, which takes no `type` for `vm_vnc` and `type=lxc` for `ct_vnc`). `node_shell` takes no `vmid`.
 A console token is single-purpose — it's rejected on any upgrade whose
 scope tuple doesn't match the one it was minted for.
+
+After the upgrade the first frame is the text message `{"type":"connected"}`, and on `/ws/vnc` it carries the `password` that RFB authentication needs. On `/ws/console` output is binary, and a node shell's resize is the text message `{"type":"resize","cols":N,"rows":N}`.
 
 A console is held to the sign-in it was opened under: the session whose
 access token minted the console token, or the API key. The console is refused,
@@ -2398,4 +2441,5 @@ it opened.
   WebSocket close code `3000` ("session ended"); one closed while open gets the
   close code alone. A client should stop reconnecting then.
 - A console whose sign-in could not be checked for about a minute is closed with
-  `1011`; that, and any other error or close code, may be retried.
+  `1011`; that, and any other error or close code, may be retried, except
+  `{"type":"error","code":"guest_not_running"}`, which means the guest is powered off.

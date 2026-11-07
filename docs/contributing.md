@@ -65,7 +65,13 @@ npm install
 npm run dev
 ```
 
-The frontend dev server runs at `http://localhost:3000` with hot reload (configured in `frontend/vite.config.ts`).
+The frontend dev server runs at `http://localhost:3000` with hot reload and proxies the API and WebSockets to `localhost:8080` (configured in `frontend/vite.config.ts`).
+
+To run the whole stack from source instead, build the image locally. `docker-compose.dev.yml` also puts Caddy in front with a self-signed certificate, so features that need a secure context work at `https://localhost`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
 
 ## Project Structure
 
@@ -74,13 +80,17 @@ nexara/
 ├── cmd/
 │   └── nexara/             # Unified entry point (API + WS + collector + scheduler + embedded frontend)
 ├── internal/               # Private Go packages
-│   ├── api/                # HTTP handlers, router, middleware
+│   ├── api/                # Endpoint registry (registry_<domain>.go), router, middleware, API docs payload
+│   │   ├── apischema/      # Request parameter schema: types, formats and the rule catalogue
 │   │   └── handlers/       # Handler files (one per domain)
 │   ├── app/                # Composition root — wires every long-lived engine
+│   ├── auditkey/           # The keys cluster-page objects are audited under, which a History reads them by
 │   ├── auth/               # RBAC, LDAP, OIDC, TOTP
+│   ├── backupcoverage/     # Whether each guest is backed up, by PBS or Veeam, and how recently
 │   ├── changelog/          # GitHub Releases fetch/parse for the in-app popup
-│   ├── collector/          # Inventory and metric sync
+│   ├── collector/          # Inventory and metric sync, and the pass that records edits made in Proxmox
 │   ├── config/             # Configuration loading
+│   ├── cronspec/           # Cron parsing and next-run calculation for schedules
 │   ├── crypto/             # Authenticated symmetric encryption for secrets at rest
 │   ├── db/                 # Database layer (sqlc generated)
 │   │   └── generated/      # Auto-generated — DO NOT EDIT
@@ -90,15 +100,22 @@ nexara/
 │   ├── guesttools/         # Windows virtio-win / QEMU-GA tracking and staged in-guest updates
 │   ├── migration/          # Cross-cluster guest migration: pre-flight checks + orchestrator
 │   ├── netguard/           # SSRF guards for outbound requests
+│   ├── nodemember/         # Whether a node name is one of a cluster's nodes, for the API and the background engines
+│   ├── nodememory/         # A node's DIMM layout, read with dmidecode over SSH
 │   ├── notifications/      # Alert engine, dispatchers
+│   ├── nut/                # Client for upsd, the Network UPS Tools server
 │   ├── proxmox/            # Proxmox VE/PBS API client
+│   ├── pvefield/           # Canonical comparison of Proxmox object fields
+│   ├── redact/             # What stands in for a secret in recorded text, and finding the secret parts of a URL
 │   ├── reports/            # Report generation
 │   ├── rolling/            # Rolling update orchestrator
 │   ├── safeconv/           # Bounds-clamping numeric conversions
 │   ├── scanner/            # CVE scanner
 │   ├── scheduler/          # Scheduler engine
-│   ├── ssh/                # SSH client for rolling updates
+│   ├── ssh/                # SSH command execution on Proxmox nodes
 │   ├── syslog/             # RFC 5424 audit-event forwarding
+│   ├── upscontrol/         # A UPS's instant commands and writable variables
+│   ├── upsfeed/            # Which node a upsmon login comes from, and whether a node is protected
 │   ├── veeam/              # Veeam Backup & Replication REST client (VBR 13.1+)
 │   ├── virtiowin/          # virtio-win release discovery + ISO download into Proxmox storage
 │   └── ws/                 # WebSocket hub and handlers
@@ -110,14 +127,15 @@ nexara/
 │       ├── features/       # Feature modules (pages, components, api, types, lib)
 │       ├── hooks/          # Shared hooks
 │       ├── lib/            # Utilities
-│       ├── locales/        # i18n namespace JSON (en/)
+│       ├── locales/        # i18n namespace JSON (en/) — translators start at locales/CONTRIBUTING.md
 │       ├── stores/         # Zustand stores
 │       ├── test/           # Vitest setup + render helpers
 │       └── types/          # Shared TypeScript types
 ├── queries/                # sqlc SQL queries
 ├── migrations/             # Database migrations
-├── docker/                 # Dockerfiles and configs
-├── scripts/                # Utility scripts
+├── docker/                 # Dockerfile, test stack and dev Caddy config
+├── scripts/                # Install, env setup and release-note scripts
+├── tests/load/             # k6 load tests for the API and WebSockets
 └── docs/                   # Documentation
 ```
 
@@ -130,6 +148,10 @@ nexara/
 - **Tests:** table-driven tests. Redis-backed code fakes Redis with `miniredis` (`github.com/alicebob/miniredis/v2`); DB-backed tests in `internal/db/` run against a real *throwaway* Postgres named by `NEXARA_TEST_DB_URL` — see [Database-backed tests](#database-backed-tests). There is no `testcontainers-go` in this repo.
 - **Imports:** standard library first, then third-party, then internal
 - **Linting:** `golangci-lint` with config at `.golangci.yml`
+
+### No real identifiers
+
+The repository is public. Never commit a name or address from a real environment, in code, tests, fixtures, screenshots or docs: no host, guest, node, cluster, storage, backup job or share names, IPs, MACs, domains, usernames or certificate fingerprints. Use the placeholders: domain `example.com`, nodes `pve-01`..`pve-03`, clusters `cluster01`/`cluster02`, guests `linuxNN`/`winNN`, roles `dc01`/`ca01`/`nas01`/`vbr01`, IPs `192.0.2.x`, MACs `02:00:00:00:00:xx`, storage pools `storeNN`, PBS datastores `datastoreNN`, fingerprints in synthetic hex (`AA:BB:CC:…`), shares `\\192.0.2.x\backups` and `/export/backups`, UPS devices `upsNN`, NUT servers `nut01`. Scrub a captured API response the moment it lands. Tests in `internal/netguard/` and `url_policy_test.go` keep their `192.168.x` literals on purpose: they prove RFC 1918 addresses are blocked, which TEST-NET-1 would not.
 
 ### TypeScript
 
@@ -156,6 +178,18 @@ features/<name>/
 ```
 
 Tests live next to the code they cover — `components/Foo.test.tsx`, `lib/foo.test.ts` — not in a separate tree.
+
+## Adding an API Endpoint
+
+Routes are declared, not wired by hand. One `Endpoint` holds the path, the parameters and the permission; `/api/v1/api-docs` and the in-app catalog are rendered from those declarations, and there is no OpenAPI spec. `internal/api/registry_pools.go` is the smallest complete example.
+
+1. Write the handler in `internal/api/handlers/<resource>.go`. It receives its validated request as `*apischema.Params`. Read every input through that (`p.String`, `p.OptInt`, `p.Has`): going back to Fiber's context skips the validation and loses the difference between "not sent" and "sent empty".
+2. Add an `Endpoint` to the domain's `register<X>Endpoints` in `internal/api/registry_<domain>.go`, which `buildRegistry` (top of `registry_vms.go`) calls. Not in `router.go`: that file holds a closed set of 17 legacy routes the registry cannot express, and `TestGuard_LegacyRouteSetOnlyShrinks` fails an 18th. Then update the route tallies, or `TestVMRoutesDeclareACheck` and `TestRegistryDomainCountsAreIndividuallyRight` fail: the domain's `<domain>RouteCount` constant, and for a new `register<X>Endpoints` an entry in `registryDomainRouteCounts` and a block in that test (`internal/api/registry_vms_test.go`). A route that is not a plain `clusterCheck`, `globalCheck` included, also needs its reason in `routesOutsideTheClusterCheckShape`.
+3. Declare every parameter, path, query and body alike, in `Parameters` with the `apischema` vocabulary. A node name declared with `apischema.StdOption("node-name")` is checked against the cluster's nodes before your handler runs.
+4. Declare the permission in `Permissions`, and don't call `require*Perm` in the handler. Use `Deferred`, with its reason, only when the permission really depends on the body or a lookup. A new `action:resource` pair needs a migration that seeds it, or the route answers 403 to everyone.
+5. Return errors in the envelope `{"error": "...", "message": "...", "details": {}}` and collections through `handlers.RespondItems` or `RespondList`.
+6. Audit through `handlers.AuditLog`; a literal NULL cluster needs an `auditClusterExempt` entry with its reason. A Proxmox call that returns a UPID is recorded with `handlers.TrackTask` instead: that one call writes the audit row and the task history row and publishes the event (`MoveDisk` in `handlers/vms.go` is the reference). A new `(string, error)` method on `proxmox.Client` must be classified in `upidMethods` or `nonUPIDStringMethods` (`handlers/tracktask_guard_test.go`).
+7. Add a row to `docs/api-reference.md`. A guard test fails a row naming a route that does not exist, or a permission no migration seeds.
 
 ## Database Workflow
 
@@ -186,8 +220,8 @@ Nexara uses **sqlc** for type-safe SQL. Never write raw SQL in Go code.
 
 1. Create migration files in `migrations/`:
    ```
-   migrations/000083_add_widgets.up.sql   # next free number — check `ls migrations/ | tail`
-   migrations/000083_add_widgets.down.sql
+   migrations/000138_add_widgets.up.sql   # next free number — check `ls migrations/ | tail`
+   migrations/000138_add_widgets.down.sql
    ```
 
 2. The up migration creates the schema; the down migration reverses it
@@ -207,17 +241,33 @@ Nexara uses **sqlc** for type-safe SQL. Never write raw SQL in Go code.
 
 ## Testing
 
+### Keeping tests proportionate
+
+Tests are a cost as well as a guard, so these are the rules a review holds a change to:
+
+- **A bug fix ships one regression test** that fails without the fix, plus a case per genuinely distinct edge condition. More than about 3 test lines per production line needs a reason.
+- **Test logic once, where it lives.** Pure logic gets a table-driven unit test. Each consumer (dialog, card, handler) gets one wiring test showing it uses that logic, not a re-run of the matrix through the UI or the router.
+- **Tables over near-duplicates.** Go table tests, `it.each`/`describe.each`. Mirrored features (USB/PCI, create/edit/delete of one kind) share one parameterised suite.
+- **Reuse the scaffolding.** Frontend: `src/test/` (`renderWithProviders`, the mock factories in `mocks.ts`, `fake-server`). Go: the package's existing fakes and harnesses. Extend the shared one rather than writing a second fake of the same thing.
+- **No fixed sleeps and no tight wall-clock ceilings.** Express ordering with channels, hooks or a fake clock.
+- **Pay for expensive primitives once:** bcrypt, source parsing and registry builds run once per test binary, or at their cheapest setting (`auth.SetBcryptCostForTesting`).
+- **Parallel by default.** New hermetic Go tests call `t.Parallel()`. A test that changes process-wide state does not, and its comment says why.
+- **Prove a new guard bites** by breaking what it protects, in review, and say so in the PR. Commit at most one anti-vacuity test per guard family.
+
 ### Go Tests
 
 ```bash
-# Run all tests with race detection
-make test
+# While iterating: no race, no coverage, -short, test cache on
+make test-quick
 
 # Run tests for a specific package
-go test -race ./internal/drs/...
+go test ./internal/drs/...
 
 # Run a specific test
-go test -race -run TestEvaluate ./internal/drs/...
+go test -run TestEvaluate ./internal/drs/...
+
+# The gate, once, before you commit: race detector and coverage
+make test
 ```
 
 #### Database-backed tests
@@ -274,10 +324,13 @@ cd frontend
 npm test
 
 # Run tests in watch mode
-npm run test -- --watch
+npx vitest
 
 # Run tests for a specific file
-npm test -- src/features/topology/lib/topology-transform.test.ts
+npx vitest run src/features/topology/lib/topology-transform.test.ts
+
+# While iterating: only tests related to uncommitted changes (add `-- <ref>` to diff against a commit)
+npm run test:changed
 ```
 
 ### Testing against a disposable stack
@@ -288,7 +341,7 @@ the cluster-onboarding work surfaced only this way, and neither was reachable
 from a test suite.
 
 **Never test cluster deletion against your dev stack.** `clusters.id` is the
-target of ~30 `ON DELETE CASCADE` foreign keys: deleting one row takes its
+target of nearly 50 `ON DELETE CASCADE` foreign keys: deleting one row takes its
 nodes, VMs, task history and every metric sample with it (its audit entries
 stay, labelled as removed). Re-adding the cluster gives you an empty shell.
 
@@ -305,12 +358,15 @@ docker exec nexara-db pg_dump -U nexara -d nexara -Fc --no-owner --no-acl \
   > ~/nexara-backups/nexara-$(date +%Y%m%d-%H%M%S).dump
 ```
 
-The `pg_dump` warning about circular foreign keys on `hypertable` is expected.
+The `pg_dump` warning about circular foreign keys on TimescaleDB's own tables is expected.
 
 ```bash
-docker exec nexara-db psql -U nexara -d postgres -c "CREATE DATABASE nexara_test;"
+# A dump has to go back onto the TimescaleDB version it was taken on. A new database
+# would otherwise take whatever version template1 has, which an update does not move.
+V=$(docker exec nexara-db psql -U nexara -d nexara -tAc "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'")
+docker exec nexara-db psql -U nexara -d postgres -c "CREATE DATABASE nexara_test TEMPLATE template0;"
 docker exec nexara-db psql -U nexara -d nexara_test \
-  -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" \
+  -c "CREATE EXTENSION timescaledb VERSION '$V';" \
   -c "SELECT timescaledb_pre_restore();"
 
 cat ~/nexara-backups/nexara-*.dump | docker exec -i nexara-db \
@@ -400,8 +456,8 @@ revoked grant turns the same call into a 403.
 # Go
 make lint
 
-# Frontend
-cd frontend && npx eslint src/
+# Frontend (uses frontend/eslint.config.js; budget a few minutes and give it the machine to itself)
+cd frontend && npm run lint
 ```
 
 ## Pull Request Process
@@ -420,7 +476,7 @@ refactor/short-description
 
 ### Commit Messages
 
-Use [Conventional Commits](https://www.conventionalcommits.org/):
+Use [Conventional Commits](https://www.conventionalcommits.org/), one line each, saying what changed. No body and no bullet list: the rationale belongs in a code comment beside the thing it explains, an upgrade procedure in the migration's `.up.sql` header, and user-visible changes in the release notes.
 
 ```
 feat: add widget management API
@@ -430,6 +486,8 @@ test: add integration tests for backup handler
 docs: update API reference for CVE endpoints
 chore: upgrade Go dependencies
 ```
+
+The one exception is a migration that needs the operator to act: its commit keeps a `BREAKING:` prefix and an explicit "Existing installs must …" line.
 
 ### PR Checklist
 
@@ -442,24 +500,54 @@ chore: upgrade Go dependencies
 - [ ] New API endpoints have RBAC permission checks
 - [ ] New features have corresponding audit log entries
 - [ ] Sensitive data is encrypted at rest (AES-256-GCM via `ENCRYPTION_KEY`)
-- [ ] No secrets in code or config files
+- [ ] No secrets in code or config files, and no real identifiers anywhere ([placeholders](#no-real-identifiers))
+- [ ] Tests are proportionate to the change ([rules](#keeping-tests-proportionate))
+- [ ] User-visible changes are in the docs; a new setting is in `.env.example` and `docs/installation.md`
 
-Several of those items are enforced mechanically — a violation fails `make test`, not review. They are static-analysis tests (`go/ast`, no database, no running server), so they run in the normal `go test ./...`:
+Several of those items are enforced mechanically: a violation fails `make test`, not review. Most of these are static-analysis tests (`go/ast`, no database, no running server), so they run in the normal `go test ./...`. The `*_guard_test.go` files state their reasoning at the top.
+
+**Routes and the registry** (`internal/api/`)
 
 | Guard | Enforces |
 |-------|----------|
-| `internal/api/rbac_route_guard_test.go` | every registered route resolves to a handler that can reach a permission check, and the permission `api_docs.go` advertises matches the one the handler enforces |
-| `internal/api/handlers/tracktask_guard_test.go` | every handler that captures a UPID from a Proxmox client call records it via `handlers.TrackTask`, and no handler defines its own `auditLog` wrapper instead of the shared `handlers.AuditLog` |
-| `internal/api/api_docs_drift_test.go` | every `endpointMeta` key in `handlers/api_docs.go` matches a route actually registered in `router.go` |
-| `internal/api/handlers/list_envelope_guard_test.go` | every collection response goes out as `handlers.ListResponse[T]` via `RespondItems`/`RespondList`, never a bare JSON array — the shape external clients depend on since v1.10.0 |
-| `internal/api/handlers/credential_redirect_guard_test.go` | an `Update` handler that carries a stored secret forward while letting the caller change the address must consult `credentialRedirected` before the write, so a saved credential is never re-pointed at a new host |
-| `internal/api/handlers/confirm_gate_guard_test.go` | a confirm gate *returns* its refusal instead of writing the response itself — a gate that writes and returns `nil` leaves `err != nil` false, and the handler runs on and performs the action it just "refused" |
-| `internal/api/handlers/scope_params_guard_test.go` | every RBAC-scoped list query is built with `AccessibleClusterIds` set — a nil reaches SQL as NULL and lifts the filter |
-| `internal/api/handlers/audit_cluster_guard_test.go` | every `AuditLog`/`AuditLogAs` call passes the audited resource's cluster, unless the call site is on the documented global-audit exemption list |
-| `internal/api/handlers/metrics_authz_guard_test.go` | every historical-metrics endpoint gates on a cluster-scoped permission |
+| `legacy_route_ratchet_test.go` | the legacy routes in `router.go` only shrink: a new route must be declared in the registry |
+| `rbac_route_guard_test.go`, `registry_rbac_guard_test.go` | every route resolves to a handler that can reach a permission check, the permission the docs advertise matches the one enforced, and each self-service route has been reviewed |
+| `registry_permission_catalogue_test.go` | every permission a route declares is one a migration seeds |
+| `registry_paramkey_guard_test.go` | a handler reads only the parameters its endpoint declares; reading another panics at run time |
+| `registry_order_guard_test.go`, `registry_shadow_guard_test.go` | no route is left unreachable behind an earlier `:param` route or a legacy path |
+| `registry_group_guard_test.go` | each route's `Group`, which is a section of the API docs, comes from the agreed vocabulary |
+| `registry_history_guard_test.go` | a change to a cluster page's object files its audit row under the type its History reads |
+| `api_docs_drift_test.go` | the docs overlay in `handlers/api_docs.go`, which now only covers legacy routes, matches the routes registered |
+| `docs_reference_guard_test.go` | every endpoint row in `docs/api-reference.md` names a real route, every permission it mentions is seeded, and its list of error slugs matches `errors.go` |
+| `middleware_ratelimit_guard_test.go` | the paths the auth limiters select are real routes, and credential routes keep their limit |
+| `body_framing_guard_test.go` | nothing detaches a request body before it is read, which is what keeps connections from being desynchronised |
+
+**Handlers** (`internal/api/handlers/`)
+
+| Guard | Enforces |
+|-------|----------|
+| `tracktask_guard_test.go` | every handler that captures a UPID from a Proxmox client call records it via `handlers.TrackTask`, and no handler defines its own `auditLog` wrapper instead of the shared `handlers.AuditLog` |
+| `list_envelope_guard_test.go` | every collection response goes out as `handlers.ListResponse[T]` via `RespondItems`/`RespondList`, never a bare JSON array — the shape external clients depend on since v1.10.0 |
+| `credential_redirect_guard_test.go` | an `Update` handler that carries a stored secret forward while letting the caller change the address must consult `credentialRedirected` before the write, so a saved credential is never re-pointed at a new host |
+| `confirm_gate_guard_test.go` | a confirm gate *returns* its refusal instead of writing the response itself — a gate that writes and returns `nil` leaves `err != nil` false, and the handler runs on and performs the action it just "refused" |
+| `scope_params_guard_test.go` | every RBAC-scoped list query is built with `AccessibleClusterIds` set — a nil reaches SQL as NULL and lifts the filter |
+| `guest_cluster_scope_guard_test.go`, `rolling_job_scope_guard_test.go`, `schedule_scope_guard_test.go` | an object loaded by uuid under a cluster-scoped route is checked to belong to the path's cluster |
+| `metrics_authz_guard_test.go`, `cve_node_filter_guard_test.go` | historical metrics and per-node CVE reads stay inside the cluster or scan the caller was authorized for |
+| `audit_cluster_guard_test.go`, `audit_identity_guard_test.go`, `detach_audit_guard_test.go` | an audit row names the resource's cluster and the identity its History finds it by, and a detach records what the slot held before it went |
+| `identity_secret_guard_test.go`, `credential_render_guard_test.go`, `metric_servers_audit_guard_test.go` | credentials stay out of audit details, and a type that holds a credential cannot print it through `%v`, a log attribute or `json.Marshal` |
+| `session_rotation_guard_test.go`, `auth_epoch_guard_test.go`, `password_lockout_guard_test.go` | refresh tokens rotate only through the conditional path, a revoke-all bumps the epoch first, and only the routes that check a password touch the lockout |
+| `missing_object_guard_test.go`, `ha_rule_delete_guard_test.go` | Proxmox's bare error for an object that is gone is mapped to 404 or 409, and an HA rule delete records what really happened |
+
+**Everywhere else**
+
+| Guard | Enforces |
+|-------|----------|
 | `internal/app/guard_test.go` | each domain-service constructor is called exactly once, from the composition root. Before `internal/app` existed each was called at two to four sites with differing dependencies, and the differences were silent bugs — a rolling orchestrator with a nil notification registry dropped job-failure notifications, per-request DRS engines raced the scheduler's leader lock |
 | `internal/proxmox/transport_guard_test.go`, `internal/veeam/transport_guard_test.go` | nothing in those packages builds its own `http.Transport`/`http.Client` — `buildHTTPClient` is the sole owner of the SSRF dial guard, TLS fingerprint pinning and redirect refusal. A second constructor silently forks that hardening, and the fork is the one talking to a user-supplied URL |
-| `internal/db/scope_sql_guard_test.go` | scoped reads in `queries/*.sql` carry the exact `cluster_id = ANY(...)` scope clause |
+| `internal/proxmox/upid_signature_guard_test.go`, `internal/proxmox/snapshot_name_guard_test.go` | a client method for a worker endpoint surfaces its UPID, and every snapshot create validates the name first |
+| `internal/rolling/ha_listing_guard_test.go` | an error from reading HA state is never discarded |
+| `internal/db/scope_sql_guard_test.go`, `internal/db/cve_scope_sql_guard_test.go`, `internal/db/drs_rule_scope_sql_guard_test.go` | scoped reads in `queries/*.sql` carry their exact cluster or scan scope clause |
+| `internal/db/session_insert_guard_test.go`, `internal/db/gated_upsert_guard_test.go` | every session insert is the conditional one, and the column lists of the inventory upserts agree |
 | `internal/db/testdb_guard_test.go` | migration tests obtain `NEXARA_TEST_DB_URL` through the throwaway-database guard, never `os.Getenv` directly |
 
 ### Merge Strategy
@@ -471,8 +559,8 @@ Several of those items are enforced mechanically — a violation fails `make tes
 There is no `VERSION` file — a release **is** a tag:
 
 ```bash
-git tag -a v1.9.0 -m "v1.9.0"
-git push origin master v1.9.0
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push --atomic origin master vX.Y.Z
 ```
 
 The version the binary reports comes from `git describe --tags`, injected via ldflags into `internal/api.Version` (see `LDFLAGS` in the Makefile). Pick the bump from the commits since the last tag: `fix:`/`docs:`/`chore:` → patch, `feat:` → minor, a `BREAKING:` commit → major.
@@ -485,19 +573,23 @@ Pushing a `v*` tag fires `.github/workflows/release.yml` on GitHub Actions. It r
 
 ```bash
 make build          # Build unified Go binary
-make test           # Run Go tests with race detection
+make test           # Run Go tests with race detection and coverage: the gate before committing
+make test-quick     # Dev loop: no race, no coverage, -short, test cache on
 make lint           # Run golangci-lint
 make generate       # Run sqlc generate
 make migrate-up     # Apply pending migrations
 make migrate-down   # Rollback last migration
-make docker-build   # Build Docker image
-make docker-up      # Start full stack
+make docker-build   # docker compose build: builds nothing, docker-compose.yml has no build section (use the dev overlay above)
+make docker-up      # Start full stack from the published image
 make docker-down    # Stop full stack
 make frontend-build # npm ci + vite build, then copy dist/ into cmd/nexara/ for go:embed
 make coverage-html  # Run tests with coverage and write coverage.html
 make audit          # govulncheck + npm audit (or audit-go / audit-npm individually)
 make help           # List every target
 make clean          # Remove build artifacts
+cd frontend && npm test              # Frontend tests
+cd frontend && npm run test:changed  # Dev loop: tests related to uncommitted changes
+cd frontend && npm run lint          # Frontend ESLint
 ```
 
 ## Getting Help

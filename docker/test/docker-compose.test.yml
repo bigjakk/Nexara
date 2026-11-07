@@ -2,8 +2,9 @@
 #
 # Runs a SECOND Nexara alongside your dev stack, seeded from a dump of it, so you
 # can delete and re-add real clusters without sacrificing your working
-# environment. Deleting a cluster cascades through ~30 foreign keys — audit
-# history, task history, every metric sample — and none of it comes back.
+# environment. Deleting a cluster cascades through nearly 50 foreign keys —
+# inventory, task history, every metric sample — and none of it comes back (its
+# audit entries stay, labelled as removed).
 #
 # See docs/contributing.md → "Testing against a disposable stack" for the full
 # procedure, including the mandatory safety cutouts.

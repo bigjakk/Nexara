@@ -17,7 +17,7 @@
   </p>
 </p>
 
-Manage multiple Proxmox clusters from a single pane of glass. Real-time dashboards, granular RBAC, automated operations, enterprise security — all in a single Docker container.
+Manage multiple Proxmox clusters from a single pane of glass. Real-time dashboards, a full history of every object, granular RBAC, automated operations and enterprise security — all from one Docker Compose stack.
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="80%">
@@ -97,22 +97,30 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 
 ### Infrastructure
 - Multi-cluster management (unlimited clusters)
-- Real-time CPU, memory, disk, network metrics
+- Real-time CPU, memory, disk, network metrics, with 1-hour and 6-hour charts drawn sample by sample, so a one-minute stall shows instead of being averaged away
+- **Pressure** — CPU, memory and IO pressure stall (PSI) charts for nodes and guests on Proxmox VE 9
 - VM/CT lifecycle — create, migrate, snapshot, clone, destroy
-- **VM import** — bring VMs over from ESXi/vCenter, OVA/OVF appliances, or raw disk images (browser upload or URL)
+- **VM import** — bring VMs over from ESXi/vCenter or OVA/OVF appliances (browser upload or URL)
 - Disk management — resize, attach/detach, and move between storages with format conversion (raw/qcow2/vmdk) and a bandwidth limit
 - Template management and resource pools
-- **VM folders** — vCenter-style folder tree with a per-folder detail page (summary, guests, tasks, alerts)
+- **VM folders** — vCenter-style folder tree with a per-folder detail page (summary, guests, History, alerts)
+- **Favorites** — star clusters, nodes and guests to pin them above the inventory tree
+- **USB and PCI passthrough** — through Proxmox resource mappings, which Nexara builds from the node's own report of the device, so it works with an API token; a Resource Mappings tab shows Proxmox's check of each mapping on each node
 - Live migration with pre-flight checks — within a cluster or across clusters, with per-disk storage placement and network mapping
-- **Node evacuation** — bulk migrate all guests off a node
+- **Node evacuation** — bulk migrate a node's running guests off it
 - **Health rollup** — Ceph, disk S.M.A.R.T., quorum, storage, and task failures aggregated into one dismissible health indicator
-- **UPS monitoring** — the UPSes your Network UPS Tools (NUT) servers report: status, charge, runtime and load, power-event history, and on-battery alerts; which nodes each UPS powers, and a warning for any node with no `upsmon` to shut it down before the battery runs out; and, through an account you give it, instant commands and settings, with the UPS's name typed for any that cuts its power; a History per UPS, alert rules and maintenance windows for one UPS, and quiet while a rolling update reboots a NUT server's node
+- **UPS monitoring** — the UPSes your Network UPS Tools (NUT) servers report: status, charge, runtime, load, power events and alerts; which nodes each UPS powers, with a warning for any node that has no `upsmon` to shut it down before the battery runs out; instant commands and settings through an account you give it, with the UPS's name typed for anything that cuts its power
 
 </td>
 <td width="50%">
 
 ### Node Management
+- **Options and notes** — start-on-boot delay, ballooning target, Wake-on-LAN, location and notes, with a save that refuses to overwrite a change made since you opened the dialog
 - **DNS & timezone** — edit directly from the UI
+- **Memory modules** — every DIMM slot and the room left to grow, read with `dmidecode` over SSH
+- **Temperatures** — the node's hardware sensors
+- **Updates** — pending packages, and a one-node update in place without draining its guests
+- **Support bundle** — download a node's `pvereport`
 - **Disks** — S.M.A.R.T. data, ZFS/LVM/LVM-Thin/Directory creation with Proxmox-populated disk selectors, init GPT, wipe
 - **Services** — view status, start/stop/restart node daemons
 - **APT repositories** — list, enable/disable and add the standard Proxmox repositories per node
@@ -124,16 +132,15 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 
 ### Consoles
 - **Floating console** — detachable, draggable iLO/iDRAC-style window with power controls, keyboard macros, screenshots, and virtual-media (ISO) mounting — or a browser tab of its own per console, with fullscreen
-- **VNC** — browser-based graphical console (noVNC)
-- **Serial** — xterm.js terminal for headless systems
-- **Node shell** — direct Proxmox node access
+- **VNC** — browser-based graphical console (noVNC) for VMs, and a container's terminal
+- **Node shell** — the node's login prompt, in xterm.js
 
 ### Storage & Backup
 - **Storage management** — add, edit and remove datastores across 13 storage types (Directory, BTRFS, NFS, CIFS/SMB, GlusterFS, LVM, LVM-Thin, ZFS, iSCSI, iSCSI Direct, RBD, CephFS, PBS), with iSCSI target discovery instead of hand-typed IQNs
 - **Content management** — ISO/template upload, download-from-URL, OCI pulls, and the Proxmox appliance browser
 - PBS integration with datastore monitoring, and retention read from **prune jobs** rather than `datastore.cfg` alone
-- Scheduled backups with retention policies — target all guests, all-except-a-list, a resource pool, or a picked set of guests, on a schedule built from hourly/daily/weekly/monthly presets or a raw calendar string
-- Restore to any cluster/node
+- Scheduled backups — target all guests, all-except-a-list, a resource pool, or a picked set of guests, on a schedule built from hourly/daily/weekly/monthly presets or a raw calendar string
+- Restore to any cluster and node whose Proxmox has a storage set up for that PBS server
 - **Snapshot inventory** — every guest snapshot across all clusters on one page, with age filters, snapshot-age alerts, and a scheduled snapshot report
 - **Veeam Backup & Replication** (VBR 13.1+) — inventory collection, job and session control, per-guest protection, and orphaned-restore-point detection. Backup objects are correlated to Proxmox guests on the **SMBIOS UUID**, not the name, so a rebuilt VM is never reported as protected by a backup of the machine it replaced
 - **Unified backup coverage** — one report across PBS *and* Veeam, with eligibility so Veeam's own worker appliances aren't counted as unprotected guests
@@ -148,7 +155,7 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 - **DRS** — automatic workload balancing with affinity rules; coexists with Proxmox 9.2's native CRS dynamic balancer (defers automatic moves to it), and keeps off the guests Veeam owns so a worker isn't migrated mid-backup
 - **Rolling updates** — drain/upgrade/reboot/restore pipeline (pauses native CRS auto-rebalance while running)
 - **Alert engine** — threshold alerts, escalation chains, 7 notification channels (SMTP, Slack, Discord, Teams, Telegram, Webhook, PagerDuty)
-- **CVE scanning** — automated vulnerability scanning
+- **CVE scanning** — each node's pending updates checked against the Debian Security Tracker on a schedule, ranked with EPSS and CISA's known-exploited list
 - **Scheduled tasks** — cron-based guest snapshots and reboots
 - **Windows guest tools** — track virtio-win driver and QEMU guest agent versions per guest, stage updates that apply on reboot, and pull virtio-win ISOs into Proxmox storage on a schedule you set (or from your own mirror, for air-gapped networks)
 
@@ -161,9 +168,27 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 - **LDAP/AD** — JIT provisioning, group-to-role mapping
 - **OIDC/SSO** — Google, Okta, Keycloak, etc.
 - **2FA** — TOTP with recovery codes
-- **Audit logging** — full trail with syslog forwarding
-- **Firewall** — cluster and VM-level rules, templates, SDN
-- **Reports** — scheduled HTML/CSV for compliance
+- **Sessions and API keys** — see and revoke your own sign-ins; API keys that act with their owner's permissions and cannot change the owner's credentials
+- **Firewall** — cluster and node rules, templates, SDN
+
+</td>
+</tr>
+<tr>
+<td>
+
+### History & Audit
+- **History for every object** — guests, nodes, clusters, folders, storage, backup servers and jobs, UPSes and each tab of a cluster's page: what happened, who did it and how it ended, whether done in Nexara or in Proxmox
+- **Edits made directly in Proxmox** — a background pass compares each cluster's guest configurations and objects with its last reading and records which fields changed, never their values
+- **Task tracking** — every Proxmox task, started in Nexara or outside it, with live status, logs and an activity drawer
+- **Audit log** — the full trail, exported as JSON, CSV or syslog and forwarded to a SIEM over RFC 5424
+
+</td>
+<td>
+
+### Reports
+- **Nine report types** — cluster digest, backup compliance across PBS and Veeam, resource utilisation, VM resource usage, rightsizing, capacity forecast, snapshot inventory, patch status and uptime
+- **Findings first** — the things to act on, ranked in plain language, above the evidence
+- Print or save as PDF, download as HTML or CSV, or schedule them to email with a digest in the body
 
 </td>
 </tr>
@@ -171,7 +196,7 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 <td>
 
 ### Networking
-- Firewall management at cluster, node, and VM level with reusable templates
+- Firewall management at cluster and node level with reusable templates, and a guest's own rules through the API
 - SDN — zones, VNets, subnets, controllers, IPAM, DNS plugins
 - Network interfaces — bridges, bonds, VLANs, OVS; create/edit dialogs at parity with Proxmox's own per-type options; inline edit, apply/revert
 - ACME certificate management per node
@@ -216,7 +241,7 @@ Nexara runs as a **single Go binary** serving the API, WebSocket, embedded React
 |-----------|-------|------|---------|
 | `nexara` | `ghcr.io/bigjakk/nexara` | 80 → 8080 | API + WS + SPA + collector + scheduler |
 | `nexara-db` | `timescale/timescaledb:latest-pg16` | 5432 (internal) | Database with time-series |
-| `nexara-redis` | `redis:8-alpine` | 6379 (internal) | Pub/sub, cache, sessions |
+| `nexara-redis` | `redis:8-alpine` | 6379 (internal) | Pub/sub, cache, short-lived sign-in state |
 
 > **Running more than one replica?** Every instance serves API, WebSocket, and SPA traffic, but the collector and scheduler are each guarded by a Postgres heartbeat lease — exactly one instance runs each role at a time, and a hard-killed leader is taken over within ~40 s (a 30 s lease expiry plus the follower's 10 s retry interval). Nothing extra to configure on the Nexara side; note that the bundled `docker-compose.yml` pins `container_name` and the host port `80:8080`, so scaling out means an orchestrator (Swarm/Kubernetes) or a compose override that drops both.
 
@@ -228,6 +253,7 @@ All settings are environment variables. `docker-compose.yml` injects a curated s
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `NEXARA_VERSION` | `latest` | Image tag to run. Pin it (e.g. `1.17.0`, no leading `v`) to choose when you upgrade. An older image will not start on a newer schema, so rolling back also needs the backup from before the upgrade |
 | `POSTGRES_PASSWORD` | `changeme` | Database password (**change this**) |
 | `JWT_SECRET` | auto-generated | JWT signing key |
 | `ENCRYPTION_KEY` | auto-generated | AES-256-GCM key for secrets at rest |
@@ -248,7 +274,7 @@ All settings are environment variables. `docker-compose.yml` injects a curated s
 | `HSTS_MAX_AGE` | `0` (off) | Seconds for `Strict-Transport-Security`. Enable only on HTTPS with a trusted certificate — over a self-signed origin it pins HTTPS and makes cert errors unbypassable. Otherwise emit HSTS at the proxy. |
 | `COMPRESSION_ENABLED` | `true` | gzip/brotli on API and SPA responses (`/api/v1/api-docs` drops ~710 KB → ~81 KB). Set `false` only when a reverse proxy already compresses, to save the duplicated CPU. |
 
-See [`.env.example`](.env.example) for the full reference.
+See [`.env.example`](.env.example) and the [Installation Guide](docs/installation.md#configuration-reference) for the full reference.
 
 ---
 
@@ -264,7 +290,7 @@ server {
     listen 443 ssl;
     server_name nexara.example.com;
 
-    client_max_body_size 15G;      # for ISO uploads
+    client_max_body_size 15G;      # your largest ISO upload; Nexara sets no limit of its own
     proxy_request_buffering off;   # stream large uploads straight through
 
     location / {
@@ -308,7 +334,7 @@ nexara.example.com {
 ```
 </details>
 
-> **Tips:** Set proxy max body size to at least 15 GB for ISO uploads, and disable request buffering so the proxy streams them instead of spooling 15 GB to its own disk first. Ensure WebSocket `Upgrade` headers are forwarded. Use long read timeouts for persistent WebSocket connections. Nexara closes a kept-alive connection after 3 minutes without a request, so if you raise the proxy's idle timeout for its connections to Nexara, keep it under that — the nginx, Traefik and Caddy defaults (60 s, 90 s, 2 min) all are.
+> **Tips:** Set proxy max body size as large as your biggest ISO upload (Nexara streams uploads and sets no limit of its own), and disable request buffering so the proxy streams them instead of spooling them to its own disk first. Ensure WebSocket `Upgrade` headers are forwarded. Use long read timeouts for persistent WebSocket connections. Nexara closes a kept-alive connection after 3 minutes without a request, so if you raise the proxy's idle timeout for its connections to Nexara, keep it under that — the nginx, Traefik and Caddy defaults (60 s, 90 s, 2 min) all are.
 
 > **Set `TRUSTED_PROXIES`** to your reverse proxy's IP/CIDR (e.g. `127.0.0.1` or `10.0.0.0/8`). Without it, every request appears to come from the proxy and the per-IP auth/refresh/general rate limiters protect the *cluster*, not the *attacker*. If the proxy uses a non-standard header, also set `PROXY_HEADER`.
 
@@ -336,10 +362,10 @@ nexara.example.com {
 
 | | |
 |--|--|
-| [Installation Guide](docs/installation.md) | Setup, configuration, updating, backup, troubleshooting |
-| [Admin Guide](docs/admin-guide.md) | Clusters, RBAC, auth, alerts, DRS, HA, rolling updates, imports, reports |
-| [API Reference](docs/api-reference.md) | REST API endpoints with examples |
-| [Contributing](docs/contributing.md) | Dev environment, project layout, testing, PR process |
+| [Installation Guide](docs/installation.md) | Setup, configuration, updating, backup and restore, troubleshooting |
+| [Admin Guide](docs/admin-guide.md) | Clusters, guests, consoles, migration, storage, backup, networking, UPS monitoring, RBAC and auth, alerts, DRS, HA, rolling updates, History, reports |
+| [API Reference](docs/api-reference.md) | Auth, errors, rate limits, WebSocket protocol and every endpoint group. A running install also has a live catalog: **API Keys** in the user menu, then **View API Documentation** |
+| [Contributing](docs/contributing.md) | Dev environment, project layout, adding an endpoint, testing, PR process |
 
 ---
 
