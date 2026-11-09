@@ -42,7 +42,7 @@ describe("TaskLogPanel", () => {
     expect(useTaskLogStore.getState().focusedTask).toBeNull();
   });
 
-  describe("running tasks and the failed filter", () => {
+  describe("running tasks and the error filter", () => {
     const row = (
       name: string,
       createdAt: string,
@@ -56,12 +56,12 @@ describe("TaskLogPanel", () => {
       resource_name: name,
       ...over,
     });
-    const failed = row("linux02", "2026-09-01T11:00:00Z", {
-      task_status: "failed",
+    const completed = row("linux03", "2026-09-01T12:00:00Z", {
+      task_status: "completed",
     });
     const entries = [
-      row("linux03", "2026-09-01T12:00:00Z", { task_status: "completed" }),
-      failed,
+      completed,
+      row("linux02", "2026-09-01T11:00:00Z", { task_status: "failed" }),
       row("linux01", "2026-09-01T10:00:00Z", { task_status: "running" }),
     ];
     const shown = () =>
@@ -76,7 +76,7 @@ describe("TaskLogPanel", () => {
       });
     });
 
-    it("lists a running task first and filters on the failed count without collapsing", async () => {
+    it("lists a running task first and filters on the error count without collapsing", async () => {
       vi.mocked(apiClient.list).mockResolvedValue(entries);
       renderWithProviders(<TaskLogPanel />);
       // Pinned once its status poll has confirmed it.
@@ -84,7 +84,7 @@ describe("TaskLogPanel", () => {
         expect(shown()).toEqual(["linux01", "linux03", "linux02"]);
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "1 failed" }));
+      fireEvent.click(screen.getByRole("button", { name: "1 error" }));
       expect(shown()).toEqual(["linux02"]);
       expect(useTaskLogStore.getState().panelOpen).toBe(true);
 
@@ -123,7 +123,7 @@ describe("TaskLogPanel", () => {
         ),
       );
       const { queryClient } = renderWithProviders(<TaskLogPanel />);
-      await screen.findByRole("button", { name: "1 failed" });
+      await screen.findByRole("button", { name: "1 error" });
       await waitFor(() => {
         expect(shown()[0]).toBe("linux01");
       });
@@ -135,7 +135,7 @@ describe("TaskLogPanel", () => {
         expect(shown()[0]).toBe("linux02");
       });
       expect(
-        screen.getByRole("button", { name: "1 failed" }),
+        screen.getByRole("button", { name: "1 error" }),
       ).toBeInTheDocument();
     });
 
@@ -144,16 +144,45 @@ describe("TaskLogPanel", () => {
       useTaskLogStore.setState({ panelOpen: false });
       renderWithProviders(<TaskLogPanel />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "1 failed" }));
+      fireEvent.click(await screen.findByRole("button", { name: "1 error" }));
       expect(useTaskLogStore.getState().panelOpen).toBe(true);
       expect(shown()).toEqual(["linux02"]);
     });
 
-    it("says so when the filter matches nothing, and leaves the way back", async () => {
-      vi.mocked(apiClient.list).mockResolvedValue([failed]);
+    it("counts an error with no task behind it, and filters to it", async () => {
+      vi.mocked(apiClient.list).mockResolvedValue([
+        completed,
+        row("linux04", "2026-09-01T11:00:00Z", {
+          action: "tls_fingerprint_mismatch",
+          details: JSON.stringify({ error: "certificate changed" }),
+        }),
+      ]);
       renderWithProviders(<TaskLogPanel />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "Others" }));
+      fireEvent.click(await screen.findByRole("button", { name: "1 error" }));
+      expect(shown()).toEqual(["linux04"]);
+    });
+
+    it("claims no count until the feed has answered", async () => {
+      vi.mocked(apiClient.list).mockRejectedValue(new Error("bad gateway"));
+      const { queryClient } = renderWithProviders(<TaskLogPanel />);
+
+      await waitFor(() => {
+        expect(queryClient.getQueryState(["recent-activity"])?.status).toBe(
+          "error",
+        );
+      });
+      expect(
+        screen.getByRole("button", { name: "Errors" }),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the filter with no errors to count, says so when it matches nothing, and leaves the way back", async () => {
+      vi.mocked(apiClient.list).mockResolvedValue([completed]);
+      renderWithProviders(<TaskLogPanel />);
+      await screen.findByText(/linux03/);
+
+      fireEvent.click(screen.getByRole("button", { name: "0 errors" }));
       expect(
         screen.getByText("No recent activity matches this filter"),
       ).toBeInTheDocument();

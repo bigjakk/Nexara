@@ -239,9 +239,9 @@ func TestFailoverClusterReportsToAuditLog(t *testing.T) {
 
 	t.Run("a real failure is not swallowed by a preceding failover", func(t *testing.T) {
 		// Failover is reported first because it happens in the successful
-		// branch. A single shared budget would let the info-level "we routed
-		// around it" silence the error-level "the sync failed" arriving
-		// moments later — exactly backwards.
+		// branch. A single shared budget would let "we routed around it"
+		// silence the more serious "the sync failed" arriving moments later —
+		// exactly backwards.
 		q := &mockQueries{nodesByCluster: []db.Node{
 			{Name: "pve2", Address: "10.0.0.2", SslFingerprint: "FP2"},
 		}}

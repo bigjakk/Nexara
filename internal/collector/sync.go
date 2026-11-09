@@ -326,7 +326,7 @@ type Syncer struct {
 	eventPub             eventPublisher
 	logger               *slog.Logger
 	lastSyncErrorMu      sync.Mutex
-	lastSyncError        map[uuid.UUID]time.Time // rate-limits the info-level endpoint-failover report
+	lastSyncError        map[uuid.UUID]time.Time // rate-limits the endpoint-failover report
 	lastSyncFailure      map[uuid.UUID]time.Time // rate-limits the error-level sync-failure report
 	fastSyncInFlight     atomic.Bool             // re-entrancy guard for SyncAllResources
 	snapshotSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllGuestSnapshots
@@ -1900,11 +1900,12 @@ func (s *Syncer) reportEndpointSubstitution(ctx context.Context, cluster db.Clus
 // reportEndpointFailover records that the cluster's configured endpoint could
 // not be reached and the sync completed through another member instead.
 //
-// Deliberately reported at info level rather than as a failure: nothing was
-// lost, the data is current, and the cluster is not degraded. What the
-// operator needs to know is that the endpoint they configured is broken and
-// the cluster is running on substitutes — a state that looks entirely healthy
-// until the last usable member goes too.
+// Not reported as a sync failure: nothing was lost, the data is current, and
+// the cluster is not degraded. It still reads as an error, in the audit log and
+// in the Activity drawer's error count, because its details carry an "error":
+// the endpoint the operator configured is broken and the cluster is running on
+// substitutes — a state that looks entirely healthy until the last usable
+// member goes too.
 func (s *Syncer) reportEndpointFailover(ctx context.Context, cluster db.Cluster, failoverNode, action, reason string) {
 	if !s.syncReportAllowed(cluster.ID, false) {
 		return

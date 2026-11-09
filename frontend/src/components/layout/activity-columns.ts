@@ -268,17 +268,17 @@ export const DEFAULT_ACTIVITY_SORT: SortState<ActivitySortKey> = {
 };
 
 /** What the drawer's header filter shows. */
-export type ActivityFilter = "all" | "failed" | "other";
+export type ActivityFilter = "all" | "errors" | "other";
 
 /**
- * Failed, to the drawer's count and filter: a task with the Status column's red
- * X. Not every row whose Level says "error": Sync Failed is written every five
- * minutes through a cluster outage and would run the count up to the whole feed.
- * So a failure with no task behind it (a sync, a move Proxmox refused outright)
- * stays under "Others", where its Level still reads as an error.
+ * An error, to the drawer's count and filter: whatever the Level column calls
+ * one. So a failed task, and a row with no task behind it, such as a TLS
+ * mismatch or a failed sync. A cluster that is down, or that Nexara reaches
+ * through another node, adds one of those every 5 minutes, and the count climbs
+ * with it; that is what the drawer then holds.
  */
-export function isFailedActivity(row: ActivityRowData): boolean {
-  return row.status === "failed";
+export function isErrorActivity(row: ActivityRowData): boolean {
+  return row.severity === "error";
 }
 
 export function filterActivity(
@@ -286,8 +286,8 @@ export function filterActivity(
   filter: ActivityFilter,
 ): ActivityRowData[] {
   if (filter === "all") return rows;
-  const wantFailed = filter === "failed";
-  return rows.filter((r) => isFailedActivity(r) === wantFailed);
+  const wantErrors = filter === "errors";
+  return rows.filter((r) => isErrorActivity(r) === wantErrors);
 }
 
 /**

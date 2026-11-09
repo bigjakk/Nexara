@@ -1898,11 +1898,11 @@ Filter the audit log by cluster, resource type, user, action, source, severity a
 
 ### The Activity Drawer
 
-A bar at the bottom of every page: **Activity**, how many tasks are running, and, while the drawer holds a failed task or a filter is on, **All**, **N failed** and **Others** to filter by. Click the bar to open or close it, and drag its top edge to resize it; both are remembered per browser.
+A bar at the bottom of every page: **Activity**, how many tasks are running, and **All**, **N errors** and **Others** to filter by. Click the bar to open or close it, and drag its top edge to resize it; both are remembered per browser.
 
 - **What it lists** — the 50 newest audit entries you may see (`view:audit`), plus up to 50 older entries for tasks still running or finished in the last hour, so a long disk move stays there however many entries come after it. A running task on an offline node is not kept this way.
 - **Order** — tasks Proxmox confirms are running come first in the default newest-first order; a sort you choose replaces that, and applies within what the drawer holds.
-- **N failed** counts the tasks among those entries that failed. An error with no task behind it, such as a TLS fingerprint mismatch or a failed sync, stays under **Others**, where its Level still reads `error`.
+- **N errors** counts those entries whose Level reads `error`: failed tasks, and errors with no task behind them, such as a TLS fingerprint mismatch or a failed sync. A cluster that is down, or that Nexara reaches through another node because its configured endpoint is unusable, adds an entry every 5 minutes, so the count climbs while that lasts and falls only as newer entries push those out of the newest 50.
 - **Rows** — click to expand with the task's log (`view:task`); double-click a task for its live view.
 
 ### A UPS's History

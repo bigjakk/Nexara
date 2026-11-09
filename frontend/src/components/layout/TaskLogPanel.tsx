@@ -23,7 +23,7 @@ import {
   activityRowKey,
   decorateActivity,
   filterActivity,
-  isFailedActivity,
+  isErrorActivity,
   pinRunningFirst,
   type ActivityFilter,
   type ActivityRowData,
@@ -197,22 +197,29 @@ function ActivityRow({
   );
 }
 
-/** All, failed or the rest. The failed count lives here, and reads red whether selected or not. */
+/**
+ * All, errors or the rest. The error count lives here, and reads red whenever
+ * it is not zero, selected or not.
+ */
 function ActivityFilterControl({
   filter,
-  failedCount,
+  errorCount,
   onSelect,
 }: {
   filter: ActivityFilter;
-  failedCount: number;
+  /** Null until the feed has answered: "0 errors" would be a false all-clear. */
+  errorCount: number | null;
   onSelect: (filter: ActivityFilter) => void;
 }) {
   const { t } = useTranslation("common");
   const segments: { value: ActivityFilter; label: string }[] = [
     { value: "all", label: t("all") },
     {
-      value: "failed",
-      label: `${String(failedCount)} ${t("failed").toLowerCase()}`,
+      value: "errors",
+      label:
+        errorCount === null
+          ? t("activityErrors")
+          : t("activityErrorCount", { count: errorCount }),
     },
     { value: "other", label: t("others") },
   ];
@@ -230,6 +237,7 @@ function ActivityFilterControl({
     >
       {segments.map(({ value, label }) => {
         const selected = filter === value;
+        const alarming = value === "errors" && (errorCount ?? 0) > 0;
         return (
           <Button
             key={value}
@@ -238,13 +246,11 @@ function ActivityFilterControl({
             aria-pressed={selected}
             className={cn(
               "h-5 rounded-sm px-1.5 py-0 text-xs font-normal",
-              value === "failed"
+              alarming
                 ? "text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:text-red-400"
                 : "text-muted-foreground",
-              selected && value === "failed" && "bg-red-500/20 font-medium",
-              selected &&
-                value !== "failed" &&
-                "bg-muted font-medium text-foreground",
+              selected && alarming && "bg-red-500/20 font-medium",
+              selected && !alarming && "bg-muted font-medium text-foreground",
             )}
             onClick={() => {
               onSelect(value);
@@ -270,7 +276,7 @@ export function TaskLogPanel() {
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Not persisted, unlike the panel's height: a "failed only" left on from last
+  // Not persisted, unlike the panel's height: an "errors only" left on from last
   // week would hide the running tasks from someone who has forgotten it.
   const [filter, setFilter] = useState<ActivityFilter>("all");
 
@@ -319,17 +325,17 @@ export function TaskLogPanel() {
   // re-ordering it cannot hide rows that a next page would have held — there is
   // no next page. It ranks WITHIN that window and nothing further back; a
   // failure older than that is not on screen to be sorted to the top, which is
-  // why the Events → Tasks table, and not this drawer, is where a full failure
-  // history is read.
+  // why the Events page, not this drawer, is where a full history is read: Tasks
+  // for failed tasks, Audit Log for errors with no task behind them.
   const rows = useMemo(
     () => (entries ?? []).map((e) => decorateActivity(e, taskStatuses)),
     [entries, taskStatuses],
   );
 
   // Counted off the decorated rows, so each count says what its rows show, and
-  // the failed one is exactly what its filter selects.
+  // the error one is exactly what its filter selects.
   const runningCount = rows.filter((r) => r.status === "running").length;
-  const failedCount = rows.filter(isFailedActivity).length;
+  const errorCount = entries ? rows.filter(isErrorActivity).length : null;
 
   const filteredRows = useMemo(
     () => filterActivity(rows, filter),
@@ -417,9 +423,9 @@ export function TaskLogPanel() {
         />
       )}
 
-      {/* Header bar */}
+      {/* Header bar. On a phone it wraps rather than clip Reset columns. */}
       <div
-        className="flex h-7 cursor-pointer items-center gap-2 border-b px-3 text-xs select-none"
+        className="flex min-h-7 cursor-pointer flex-wrap items-center gap-x-2 border-b px-3 text-xs select-none sm:h-7 sm:flex-nowrap"
         onClick={() => {
           setPanelOpen(!panelOpen);
         }}
@@ -430,13 +436,12 @@ export function TaskLogPanel() {
             {runningCount} {t("running").toLowerCase()}
           </span>
         )}
-        {(failedCount > 0 || filter !== "all") && (
-          <ActivityFilterControl
-            filter={filter}
-            failedCount={failedCount}
-            onSelect={selectFilter}
-          />
-        )}
+        {/* Always there: hidden at zero, it read as a feature gone missing. */}
+        <ActivityFilterControl
+          filter={filter}
+          errorCount={errorCount}
+          onSelect={selectFilter}
+        />
         <div className="flex-1" />
         {panelOpen && (
           <span

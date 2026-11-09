@@ -222,10 +222,11 @@ describe("userLabel", () => {
 });
 
 describe("filterActivity", () => {
-  // A failed task, and an error row with no task behind it, which the failed
-  // count must not pick up: an outage writes one of those every five minutes.
+  // Errors go by the Level column: a failed task, and a row with no task behind
+  // it. A warning is not one.
   const rows = [
     decorateActivity(entry({ id: "ok" }), noLive),
+    decorateActivity(entry({ id: "warning", action: "vm_stop" }), noLive),
     decorateActivity(
       entry({
         id: "task",
@@ -234,13 +235,20 @@ describe("filterActivity", () => {
       }),
       noLive,
     ),
-    decorateActivity(entry({ id: "no-task", action: "sync_failed" }), noLive),
+    decorateActivity(
+      entry({
+        id: "no-task",
+        action: "tls_fingerprint_mismatch",
+        details: JSON.stringify({ error: "certificate changed" }),
+      }),
+      noLive,
+    ),
   ];
 
   it.each([
-    ["all", ["ok", "task", "no-task"]],
-    ["failed", ["task"]],
-    ["other", ["ok", "no-task"]],
+    ["all", ["ok", "warning", "task", "no-task"]],
+    ["errors", ["task", "no-task"]],
+    ["other", ["ok", "warning"]],
   ] as const)("%s keeps %j", (filter, ids) => {
     expect(filterActivity(rows, filter).map((r) => r.entry.id)).toEqual(ids);
   });
