@@ -2798,6 +2798,12 @@ type Querier interface {
 	// global kind's trigger writes a row with none (000125).
 	RecordObservedObjects(ctx context.Context, arg RecordObservedObjectsParams) error
 	RecordUpsReading(ctx context.Context, arg RecordUpsReadingParams) error
+	// The inventory pass's re-read of what the connection probe stored at
+	// registration. A NULL argument leaves that column as it is.
+	// Pinned to the base_url the pass connected to, so a pass still running when
+	// the server is re-pointed cannot write the old server's version onto the new
+	// one. api_revision is deliberately absent — see its comment in 000087.
+	RefreshVeeamServerInfo(ctx context.Context, arg RefreshVeeamServerInfoParams) (int64, error)
 	RemoveFavorite(ctx context.Context, arg RemoveFavoriteParams) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)

@@ -61,6 +61,17 @@ UPDATE veeam_servers
 SET last_sync_error = $2
 WHERE id = $1;
 
+-- name: RefreshVeeamServerInfo :execrows
+-- The inventory pass's re-read of what the connection probe stored at
+-- registration. A NULL argument leaves that column as it is.
+-- Pinned to the base_url the pass connected to, so a pass still running when
+-- the server is re-pointed cannot write the old server's version onto the new
+-- one. api_revision is deliberately absent — see its comment in 000087.
+UPDATE veeam_servers
+SET product_version = COALESCE(sqlc.narg(product_version), product_version),
+    license_edition = COALESCE(sqlc.narg(license_edition), license_edition)
+WHERE id = @id AND base_url = @base_url;
+
 -- name: UpsertVeeamPlatform :exec
 -- cluster_id is set ONLY on first discovery, and only when the install has
 -- exactly one active cluster — there is then no second cluster whose data a

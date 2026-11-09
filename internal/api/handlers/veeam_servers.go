@@ -573,11 +573,8 @@ func veeamAuditDetails(server db.VeeamServer, extra map[string]any) json.RawMess
 }
 
 // maxVeeamUpstreamField bounds a value read off a Veeam server before it is
-// stored. buildVersion is "13.1.0.411" and edition is "EnterprisePlus"; the
-// cap only ever bites on a value a hostile or broken server invented, and it
-// stops that value reaching a TEXT column that every view:veeam holder reads
-// back.
-const maxVeeamUpstreamField = 128
+// stored — see veeam.MaxUpstreamField, which the sync's refresh also applies.
+const maxVeeamUpstreamField = veeam.MaxUpstreamField
 
 // requireInsecureTLSAck refuses a request that would store or keep a
 // credential against an unverified connection unless the caller says so

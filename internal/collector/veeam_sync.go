@@ -97,6 +97,7 @@ type VeeamSyncQueries interface {
 	ListActiveVeeamServers(ctx context.Context) ([]db.VeeamServer, error)
 	SetVeeamServerSyncCompleted(ctx context.Context, arg db.SetVeeamServerSyncCompletedParams) error
 	SetVeeamServerSyncError(ctx context.Context, arg db.SetVeeamServerSyncErrorParams) error
+	RefreshVeeamServerInfo(ctx context.Context, arg db.RefreshVeeamServerInfoParams) (int64, error)
 
 	UpsertVeeamPlatform(ctx context.Context, arg db.UpsertVeeamPlatformParams) error
 	CorrelateVeeamBackupObjects(ctx context.Context, veeamServerID uuid.UUID) (int64, error)
@@ -143,6 +144,7 @@ type VeeamClient interface {
 	RestorePointsForObject(ctx context.Context, objectID string) ([]veeam.RestorePoint, error)
 	Sessions(ctx context.Context, since time.Time, limit int) ([]veeam.Session, error)
 	Session(ctx context.Context, sessionID string) (*veeam.Session, error)
+	ServerInfo(ctx context.Context) (*veeam.ServerInfo, error)
 	License(ctx context.Context) (*veeam.License, error)
 	Logout(ctx context.Context) error
 }
@@ -418,7 +420,8 @@ func (v *VeeamSyncer) syncServerInventory(ctx context.Context, server db.VeeamSe
 	// last_sync_error alongside a fresh last_sync_at: "synced, with a caveat".
 	v.syncInfrastructure(ctx, server, client, &res)
 
-	v.recordPlatforms(ctx, server, client, platforms)
+	lic := v.refreshServerInfo(ctx, server, client)
+	v.recordPlatforms(ctx, server, lic, platforms)
 
 	// Sticky by construction — see the query. Run here as well as after the
 	// session poll so a job learns its platform on the first inventory pass
@@ -1289,19 +1292,82 @@ func (v *VeeamSyncer) sessionWatermark(ctx context.Context, server db.VeeamServe
 	return mark.Add(-veeamSessionOverlap), nil
 }
 
+// refreshServerInfo re-reads the build version and licence edition the
+// connection probe stored at registration. Nothing else rewrites them, so they
+// used to stay frozen through every VBR upgrade and licence change.
+//
+// Best-effort, like syncInfrastructure: a read that fails or comes back empty
+// keeps the stored value, and nothing here fails the pass. It runs after the
+// required listings succeeded: a failed token grant is not cached, so running
+// first would turn a wrong password's one failed logon per pass into three.
+// Returns the licence (nil if unreadable) so
+// recordPlatforms labels from it without a second request.
+func (v *VeeamSyncer) refreshServerInfo(ctx context.Context, server db.VeeamServer, client VeeamClient) *veeam.License {
+	version, edition := server.ProductVersion, server.LicenseEdition
+
+	if info, err := client.ServerInfo(ctx); err != nil {
+		v.logger.Warn("veeam sync: server info unreadable",
+			"veeam_server_id", server.ID, "error", err)
+	} else if got := veeam.BoundUpstreamField(info.BuildVersion); got != "" {
+		version = got
+	}
+
+	lic, err := client.License(ctx)
+	if err != nil {
+		// Debug, as before this refresh existed: the probe already treats the
+		// licence as optional, and an account refused it would log every pass.
+		v.logger.Debug("veeam sync: licence unreadable",
+			"veeam_server_id", server.ID, "error", err)
+		lic = nil
+	} else if got := veeam.BoundUpstreamField(lic.Edition); got != "" {
+		edition = got
+	}
+
+	if version == server.ProductVersion && edition == server.LicenseEdition {
+		return lic
+	}
+	n, err := v.queries.RefreshVeeamServerInfo(ctx, db.RefreshVeeamServerInfoParams{
+		ID:             server.ID,
+		BaseUrl:        server.BaseUrl,
+		ProductVersion: changedText(version, server.ProductVersion),
+		LicenseEdition: changedText(edition, server.LicenseEdition),
+	})
+	switch {
+	case err != nil:
+		v.logger.Warn("veeam sync: recording server version failed",
+			"veeam_server_id", server.ID, "error", err)
+	case n > 0:
+		v.logger.Info("veeam sync: server version or licence edition changed",
+			"veeam_server_id", server.ID,
+			"previous_version", server.ProductVersion, "version", version,
+			"previous_edition", server.LicenseEdition, "edition", edition)
+	}
+	return lic
+}
+
+// changedText is next when it differs from stored, and otherwise NULL, which
+// RefreshVeeamServerInfo reads as "leave the column alone".
+func changedText(next, stored string) pgtype.Text {
+	if next == stored {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: next, Valid: true}
+}
+
 // recordPlatforms upserts the Veeam platforms this pass observed, labelling
 // them from the licence workload list.
 //
 // The licence is the only place a human-readable name for a Proxmox connection
-// appears anywhere in the API. A failure to read it is not a sync failure: the
-// platform rows still matter, they are just unlabelled until the next pass.
-func (v *VeeamSyncer) recordPlatforms(ctx context.Context, server db.VeeamServer, client VeeamClient, platforms map[string]struct{}) {
+// appears anywhere in the API. lic is nil when this pass could not read it,
+// which is not a sync failure: the platform rows still matter, they are just
+// unlabelled until the next pass.
+func (v *VeeamSyncer) recordPlatforms(ctx context.Context, server db.VeeamServer, lic *veeam.License, platforms map[string]struct{}) {
 	if len(platforms) == 0 {
 		return
 	}
 
 	label := ""
-	if lic, err := client.License(ctx); err == nil {
+	if lic != nil {
 		if clusters := lic.ProxmoxClusters(); len(clusters) == 1 {
 			// Only when the licence describes exactly one Proxmox cluster. With
 			// several there is no way to tell which platformId is which, and a
@@ -1309,9 +1375,6 @@ func (v *VeeamSyncer) recordPlatforms(ctx context.Context, server db.VeeamServer
 			// cluster mapping anyway.
 			label = clusters[0].Name
 		}
-	} else {
-		v.logger.Debug("veeam sync: licence read failed while labelling platforms",
-			"veeam_server_id", server.ID, "error", err)
 	}
 
 	for raw := range platforms {

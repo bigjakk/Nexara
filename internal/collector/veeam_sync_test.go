@@ -73,6 +73,15 @@ type fakeVeeamQueries struct {
 	// correlateErr makes CorrelateVeeamBackupObjects fail, to prove a failed
 	// enrichment does not fail the pass that produced a good inventory.
 	correlateErr error
+	// refreshed records RefreshVeeamServerInfo writes.
+	refreshed []db.RefreshVeeamServerInfoParams
+}
+
+func (q *fakeVeeamQueries) RefreshVeeamServerInfo(_ context.Context, arg db.RefreshVeeamServerInfoParams) (int64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.refreshed = append(q.refreshed, arg)
+	return 1, nil
 }
 
 func (q *fakeVeeamQueries) ListActiveVeeamServers(context.Context) ([]db.VeeamServer, error) {
@@ -293,6 +302,7 @@ type fakeVeeamClient struct {
 	points       map[string][]veeam.RestorePoint
 	sessions     []veeam.Session
 	license      *veeam.License
+	serverInfo   *veeam.ServerInfo
 
 	// byID answers the single-session re-read; sessionErrByID overrides it
 	// with a failure for one id.
@@ -398,6 +408,13 @@ func (c *fakeVeeamClient) License(context.Context) (*veeam.License, error) {
 	return c.license, nil
 }
 
+func (c *fakeVeeamClient) ServerInfo(context.Context) (*veeam.ServerInfo, error) {
+	if c.serverInfo == nil {
+		return nil, errors.New("no server info")
+	}
+	return c.serverInfo, nil
+}
+
 func (c *fakeVeeamClient) Logout(context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -477,10 +494,16 @@ func TestVeeamSync_Inventory(t *testing.T) {
 			},
 		},
 	}
+	// One Proxmox cluster on the licence labels the platform the pass found.
+	c.license = &veeam.License{}
+	c.license.Summary.Workload = []veeam.LicenseWorkload{{PlatformType: veeam.ProxmoxPlatformName, HostName: "cluster01"}}
 	syncer := newVeeamTestSyncer(t, q, c)
 
 	syncer.SyncInventory(context.Background())
 
+	if len(q.platforms) != 1 || q.platforms[0].DisplayName != "cluster01" {
+		t.Errorf("platforms = %+v, want one labelled from the licence", q.platforms)
+	}
 	if len(q.repositories) != 1 {
 		t.Fatalf("repositories upserted = %d, want 1", len(q.repositories))
 	}
@@ -522,6 +545,73 @@ func TestVeeamSync_Inventory(t *testing.T) {
 	}
 	if c.logouts != 1 {
 		t.Errorf("logouts = %d, want 1 — the token should not be left to expire", c.logouts)
+	}
+}
+
+// The version and edition stored at registration must follow the server
+// through upgrades and licence changes. A failed read keeps what is stored,
+// and an unchanged server is not rewritten every pass.
+func TestVeeamSync_RefreshesServerVersionAndEdition(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		info        *veeam.ServerInfo
+		license     *veeam.License
+		wantWrite   bool
+		wantVersion pgtype.Text
+		wantEdition pgtype.Text
+	}{
+		{
+			name:        "upgraded and relicensed",
+			info:        &veeam.ServerInfo{BuildVersion: "13.1.1.500"},
+			license:     &veeam.License{Edition: "EnterprisePlus"},
+			wantWrite:   true,
+			wantVersion: pgtype.Text{String: "13.1.1.500", Valid: true},
+			wantEdition: pgtype.Text{String: "EnterprisePlus", Valid: true},
+		},
+		{
+			name:        "unreadable licence keeps the stored edition",
+			info:        &veeam.ServerInfo{BuildVersion: "13.1.1.500"},
+			wantWrite:   true,
+			wantVersion: pgtype.Text{String: "13.1.1.500", Valid: true},
+		},
+		{
+			name:    "unchanged server is not rewritten",
+			info:    &veeam.ServerInfo{BuildVersion: "13.1.0.411"},
+			license: &veeam.License{Edition: "Enterprise"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := testVeeamServer(t)
+			server.ProductVersion, server.LicenseEdition = "13.1.0.411", "Enterprise"
+			q := &fakeVeeamQueries{servers: []db.VeeamServer{server}}
+			c := &fakeVeeamClient{serverInfo: tt.info, license: tt.license}
+
+			newVeeamTestSyncer(t, q, c).SyncInventory(context.Background())
+
+			if len(q.syncSuccesses) != 1 {
+				t.Fatalf("syncSuccesses = %d, want 1 — the refresh must not fail the pass", len(q.syncSuccesses))
+			}
+			if !tt.wantWrite {
+				if len(q.refreshed) != 0 {
+					t.Errorf("refresh writes = %+v, want none", q.refreshed)
+				}
+				return
+			}
+			if len(q.refreshed) != 1 {
+				t.Fatalf("refresh writes = %d, want 1", len(q.refreshed))
+			}
+			got := q.refreshed[0]
+			if got.ProductVersion != tt.wantVersion || got.LicenseEdition != tt.wantEdition {
+				t.Errorf("wrote version %+v edition %+v, want %+v and %+v",
+					got.ProductVersion, got.LicenseEdition, tt.wantVersion, tt.wantEdition)
+			}
+			if got.ID != server.ID || got.BaseUrl != server.BaseUrl {
+				t.Errorf("write keyed on %v %q, want the pass's server %v %q", got.ID, got.BaseUrl, server.ID, server.BaseUrl)
+			}
+		})
 	}
 }
 

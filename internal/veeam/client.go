@@ -400,6 +400,16 @@ func truncateUpstream(s string, maxRunes int) string {
 	return string(r[:maxRunes]) + "…"
 }
 
+// MaxUpstreamField bounds a serverInfo or licence value before it is stored.
+// buildVersion is "13.1.0.411" and edition is "EnterprisePlus"; the cap only
+// ever bites on a value a hostile or broken server invented, and it stops that
+// value reaching a TEXT column every view:veeam holder reads back. Shared by
+// both writers of those columns: registration and the inventory pass.
+const MaxUpstreamField = 128
+
+// BoundUpstreamField cuts a serverInfo or licence value to MaxUpstreamField.
+func BoundUpstreamField(s string) string { return truncateUpstream(s, MaxUpstreamField) }
+
 // isTerminalProbeError reports whether an error from the revision probe means
 // "stop", as opposed to "this revision isn't supported, try the next".
 func isTerminalProbeError(err error) bool {

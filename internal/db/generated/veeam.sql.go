@@ -2298,6 +2298,38 @@ func (q *Queries) PruneVeeamSessions(ctx context.Context, arg PruneVeeamSessions
 	return err
 }
 
+const refreshVeeamServerInfo = `-- name: RefreshVeeamServerInfo :execrows
+UPDATE veeam_servers
+SET product_version = COALESCE($1, product_version),
+    license_edition = COALESCE($2, license_edition)
+WHERE id = $3 AND base_url = $4
+`
+
+type RefreshVeeamServerInfoParams struct {
+	ProductVersion pgtype.Text `json:"product_version"`
+	LicenseEdition pgtype.Text `json:"license_edition"`
+	ID             uuid.UUID   `json:"id"`
+	BaseUrl        string      `json:"base_url"`
+}
+
+// The inventory pass's re-read of what the connection probe stored at
+// registration. A NULL argument leaves that column as it is.
+// Pinned to the base_url the pass connected to, so a pass still running when
+// the server is re-pointed cannot write the old server's version onto the new
+// one. api_revision is deliberately absent — see its comment in 000087.
+func (q *Queries) RefreshVeeamServerInfo(ctx context.Context, arg RefreshVeeamServerInfoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, refreshVeeamServerInfo,
+		arg.ProductVersion,
+		arg.LicenseEdition,
+		arg.ID,
+		arg.BaseUrl,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resolveVeeamInfrastructureGuests = `-- name: ResolveVeeamInfrastructureGuests :execrows
 WITH candidate AS (
     SELECT i.id, lower(i.name) AS name
