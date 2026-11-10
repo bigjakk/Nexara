@@ -51,6 +51,6 @@ export function useLiveSeries(
   return useMemo(() => {
     const seed = history ?? [];
     if (!isLive) return [...seed];
-    return spliceLive<MetricSeriesPoint>(seed, liveHistory, LIVE_WINDOW_MS);
+    return spliceLive(seed, liveHistory, LIVE_WINDOW_MS);
   }, [isLive, history, liveHistory]);
 }

@@ -11,10 +11,19 @@ import type { MetricSeriesPoint } from "@/types/ws";
 /**
  * How often a live chart's stored-history seed is refetched. The live buffers
  * hold a limited number of ticks, so a seed fetched once would leave a stretch
- * between its end and the oldest tick kept, drawn as a straight line on the
- * time axis.
+ * between its end and the oldest tick kept, with nothing to draw there.
  */
 const LIVE_SEED_REFETCH_MS = 60_000;
+
+/**
+ * A live chart's seed is also refetched the moment its tab is shown again and
+ * the moment its chart is mounted again, however fresh. The interval above
+ * runs neither in a hidden tab nor while another page is open, and the ticks
+ * kept from before do not reach back over the time away: without this the
+ * chart has that stretch until the next interval, a minute on. The app's
+ * defaults are not to refetch on focus, and on mount only what is stale.
+ */
+const LIVE_SEED_ON_RETURN = "always";
 
 export function toSeriesPoints(
   points: HistoricalMetricPoint[],
@@ -60,6 +69,8 @@ export function useSeedMetrics(clusterId: string) {
     enabled: clusterId.length > 0,
     staleTime: 5 * 60_000,
     refetchInterval: LIVE_SEED_REFETCH_MS,
+    refetchOnWindowFocus: LIVE_SEED_ON_RETURN,
+    refetchOnMount: LIVE_SEED_ON_RETURN,
   });
   return query.data;
 }
@@ -83,6 +94,8 @@ export function useSeedMetricsForClusters(
       enabled: id.length > 0,
       staleTime: 5 * 60_000,
       refetchInterval: LIVE_SEED_REFETCH_MS,
+      refetchOnWindowFocus: LIVE_SEED_ON_RETURN,
+      refetchOnMount: LIVE_SEED_ON_RETURN,
     })),
     combine: (results) => {
       const map = new Map<string, MetricSeriesPoint[]>();
@@ -116,6 +129,7 @@ export function useNodeHistoricalMetrics(
     enabled: range !== "live" && clusterId.length > 0 && nodeId.length > 0,
     staleTime: 60_000,
     refetchInterval: seedsLive ? LIVE_SEED_REFETCH_MS : false,
+    refetchOnWindowFocus: seedsLive ? LIVE_SEED_ON_RETURN : false,
   });
 }
 
@@ -137,6 +151,7 @@ export function useVMHistoricalMetrics(
     enabled: range !== "live" && clusterId.length > 0 && vmId.length > 0,
     staleTime: 60_000,
     refetchInterval: seedsLive ? LIVE_SEED_REFETCH_MS : false,
+    refetchOnWindowFocus: seedsLive ? LIVE_SEED_ON_RETURN : false,
   });
 }
 
@@ -163,6 +178,7 @@ export function useNodePressure(
     enabled: clusterId.length > 0 && nodeId.length > 0,
     staleTime: 60_000,
     refetchInterval: live ? LIVE_PRESSURE_REFETCH_MS : false,
+    refetchOnWindowFocus: live ? LIVE_SEED_ON_RETURN : false,
   });
 }
 
@@ -183,5 +199,6 @@ export function useVMPressure(
     enabled: clusterId.length > 0 && vmId.length > 0,
     staleTime: 60_000,
     refetchInterval: live ? LIVE_PRESSURE_REFETCH_MS : false,
+    refetchOnWindowFocus: live ? LIVE_SEED_ON_RETURN : false,
   });
 }

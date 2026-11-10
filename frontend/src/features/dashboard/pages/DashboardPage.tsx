@@ -507,11 +507,7 @@ function ClusterChart({
   const liveHistory = liveMetrics?.history;
   const chartData = useMemo<MetricSeriesPoint[]>(() => {
     if (!isLive) return historicalQuery.data ?? [];
-    return spliceLive<MetricSeriesPoint>(
-      seedData ?? [],
-      liveHistory ?? [],
-      LIVE_WINDOW_MS,
-    );
+    return spliceLive(seedData ?? [], liveHistory ?? [], LIVE_WINDOW_MS);
   }, [isLive, liveHistory, seedData, historicalQuery.data]);
 
   const chartConfigs = {

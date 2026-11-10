@@ -38,17 +38,62 @@ export function latestValue(
  * the collector's own sample time, so the join is exact. With `windowMs`,
  * only the newest `windowMs` of the result is kept, so a live chart keeps its
  * hour.
+ *
+ * A stretch with no sample is marked (breakAtGaps). The usual one is at the
+ * join: the history is not refetched while the tab is hidden, the ticks kept
+ * are only the newest few minutes, and a chart come back to would draw the
+ * half hour between them as one straight line.
  */
-export function spliceLive<T extends { timestamp: number }>(
-  seed: readonly T[],
-  live: readonly T[],
+export function spliceLive(
+  seed: readonly MetricSeriesPoint[],
+  live: readonly MetricSeriesPoint[],
   windowMs?: number,
-): T[] {
+): MetricSeriesPoint[] {
   const seedEnd = seed[seed.length - 1]?.timestamp ?? -Infinity;
-  const merged = [...seed, ...live.filter((p) => p.timestamp > seedEnd)];
+  const merged = breakAtGaps([
+    ...seed,
+    ...live.filter((p) => p.timestamp > seedEnd),
+  ]);
   if (windowMs === undefined || merged.length === 0) return merged;
   const newest = merged[merged.length - 1]?.timestamp ?? 0;
   return merged.filter((p) => p.timestamp >= newest - windowMs);
+}
+
+/** No sample for this long is a gap whatever the series' spacing. */
+const MIN_GAP_MS = 2 * 60_000;
+
+/**
+ * `points` with an unmeasured point after each one that is followed by a gap,
+ * so a chart on a time axis breaks its line there instead of joining the two
+ * sides: a slope nothing measured reads as a reading. A gap is over 2 minutes
+ * and over three times the usual spacing, so a series sampled every few
+ * minutes is not all gaps.
+ */
+export function breakAtGaps(
+  points: readonly MetricSeriesPoint[],
+): MetricSeriesPoint[] {
+  const steps: number[] = [];
+  for (let i = 1; i < points.length; i++) {
+    steps.push((points[i]?.timestamp ?? 0) - (points[i - 1]?.timestamp ?? 0));
+  }
+  const usual = [...steps].sort((a, b) => a - b)[steps.length >> 1] ?? 0;
+  const gap = Math.max(MIN_GAP_MS, 3 * usual);
+  const out: MetricSeriesPoint[] = [];
+  points.forEach((point, i) => {
+    out.push(point);
+    if ((steps[i] ?? 0) > gap) {
+      out.push({
+        timestamp: point.timestamp + 1,
+        cpuPercent: null,
+        memPercent: null,
+        diskReadBps: null,
+        diskWriteBps: null,
+        netInBps: null,
+        netOutBps: null,
+      });
+    }
+  });
+  return out;
 }
 
 /**
