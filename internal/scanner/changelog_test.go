@@ -55,6 +55,33 @@ func TestResolveSources(t *testing.T) {
 	}
 }
 
+// TestAugmentWithChangelogCVEs keeps Debian's kernel changelog off what Debian
+// builds from it, as the tracker match does (debianKernelSource): it names every
+// kernel CVE fixed in the range, and linux-libc-dev carried each one as an
+// unknown finding. Proxmox's kernel, the one the node runs, keeps its CVEs, as
+// does every other Debian source.
+func TestAugmentWithChangelogCVEs(t *testing.T) {
+	t.Parallel()
+	changelogs := newChangelogFetcher(fakeChangelogs{
+		"linux-libc-dev=6.1.2-1":     "linux (6.1.2-1) bookworm-security; urgency=high\n\n  * Fix CVE-2026-0001.\n",
+		"proxmox-kernel-6.8=6.8.2-1": "proxmox-kernel-6.8 (6.8.2-1) bookworm; urgency=high\n\n  * Fix CVE-2026-0002.\n",
+		"libssl3=3.0.2-1":            "openssl (3.0.2-1) bookworm-security; urgency=medium\n\n  * Fix CVE-2026-0003.\n",
+	}, slog.New(slog.DiscardHandler))
+	updates := []AptUpdateInfo{
+		{Package: "linux-libc-dev", SourcePackage: "linux", Origin: "Debian", OldVersion: "6.1.1-1", NewVersion: "6.1.2-1"},
+		{Package: "proxmox-kernel-6.8", SourcePackage: "proxmox-kernel-6.8", Origin: "Proxmox", OldVersion: "6.8.1-1", NewVersion: "6.8.2-1"},
+		{Package: "libssl3", SourcePackage: "openssl", Origin: "Debian", OldVersion: "3.0.1-1", NewVersion: "3.0.2-1"},
+	}
+	vulns := augmentWithChangelogCVEs(context.Background(), nil, updates, "pve-01", changelogs, slog.New(slog.DiscardHandler))
+	got := make([]string, 0, len(vulns))
+	for _, v := range vulns {
+		got = append(got, v.PackageName+" "+v.CVEID)
+	}
+	if want := []string{"proxmox-kernel-6.8 CVE-2026-0002", "libssl3 CVE-2026-0003"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 func TestExtractCVEsFromChangelog(t *testing.T) {
 	cases := []struct {
 		name string

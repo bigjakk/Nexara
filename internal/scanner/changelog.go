@@ -232,6 +232,10 @@ func changelogGapNote(unreadable []string, total int) string {
 // since the changelog text doesn't carry that metadata — downstream
 // EPSS/KEV enrichment fills in the risk picture.
 //
+// A binary Debian builds from its kernel source is skipped, as in the tracker
+// match (debianKernelSource): that changelog names every kernel CVE fixed in
+// the range, and the kernel the node runs is Proxmox's.
+//
 // node is the Proxmox node name (the changelog endpoint is per-node).
 func augmentWithChangelogCVEs(
 	ctx context.Context,
@@ -251,6 +255,9 @@ func augmentWithChangelogCVEs(
 
 	added := 0
 	for _, upd := range updates {
+		if upd.Origin == debianOrigin && upd.SourcePackage == debianKernelSource {
+			continue
+		}
 		// Fetch the changelog for the new (target) version, then extract
 		// only CVE references from entries strictly newer than what the
 		// node has installed. apt-get changelog returns the full upstream
