@@ -798,3 +798,26 @@ func TestExecuteTask_RefusesANodeTheClusterDoesNotHold(t *testing.T) {
 		})
 	}
 }
+
+// TestCVEScanDueKeepsTheSchedule replays a week of CVEScanTick ticks, each
+// scan's row landing a few seconds after the tick that started it, and counts
+// the scans every interval the schedule card offers. A 6-hour tick with a
+// strict comparison ran a 24-hour schedule every 30 hours and an hourly one
+// every 6.
+func TestCVEScanDueKeepsTheSchedule(t *testing.T) {
+	t.Parallel()
+	const week, rowLag = 168 * time.Hour, 5 * time.Second
+	start := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
+	for _, hours := range []int{1, 6, 12, 24, 48} {
+		interval := time.Duration(hours) * time.Hour
+		last, scans := start.Add(rowLag), 1
+		for now := start.Add(CVEScanTick); now.Before(start.Add(week)); now = now.Add(CVEScanTick) {
+			if cveScanDue(now, last, interval) {
+				last, scans = now.Add(rowLag), scans+1
+			}
+		}
+		if want := (168 + hours - 1) / hours; scans != want {
+			t.Errorf("every %dh: %d scans in a week, want %d", hours, scans, want)
+		}
+	}
+}

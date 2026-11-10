@@ -892,7 +892,10 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			// end. Database only, so it can tick faster than the dispatch.
 			{name: "scheduled_tasks_reconcile", every: 15 * time.Second, run: sched.RunScheduledTaskReconcile},
 			{name: "drs", every: 60 * time.Second, run: sched.RunDRS},
-			{name: "cve_scanning", every: 6 * time.Hour, run: sched.RunCVEScanning},
+			{
+				name: "cve_scanning", every: scheduler.CVEScanTick, run: sched.RunCVEScanning,
+				note: "per-cluster schedule, default 24h",
+			},
 			{name: "kev_refresh", every: 1 * time.Hour, run: sched.RunKEVRefresh},
 			{name: "alert_evaluation", every: 60 * time.Second, run: sched.RunAlertEvaluation},
 			{name: "report_generation", every: 60 * time.Second, run: sched.RunReportGeneration},

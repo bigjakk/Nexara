@@ -584,6 +584,22 @@ func (s *Scheduler) RunTaskRetention(ctx context.Context) {
 	s.logger.Debug("task retention complete")
 }
 
+// CVEScanTick is how often RunCVEScanning looks for a cluster due a scan.
+// Each cluster's own interval decides when one runs, so the tick only has to
+// be fine enough for the shortest interval offered, one hour, to keep time; a
+// tick with nothing due is a few small reads.
+const CVEScanTick = time.Minute
+
+// cveScanDue reports whether a cluster whose latest scan row was created at
+// last is due another under interval. The row is created a moment after the
+// tick that starts the scan, so one interval on, the tick sees a little less
+// than the interval elapsed; half a tick of slack stops that pushing every
+// scan a whole tick late. With the old 6-hour tick and no slack, a 24-hour
+// schedule ran about every 30 hours and an hourly one every 6.
+func cveScanDue(now, last time.Time, interval time.Duration) bool {
+	return now.Sub(last) >= interval-CVEScanTick/2
+}
+
 // RunCVEScanning runs CVE scans for clusters based on their schedule configuration.
 // Clusters with no schedule config default to enabled with a 24-hour interval.
 func (s *Scheduler) RunCVEScanning(ctx context.Context) {
@@ -645,13 +661,19 @@ func (s *Scheduler) RunCVEScanning(ctx context.Context) {
 
 		// Check if last scan was within the configured interval
 		lastScan, err := s.queries.GetLatestCVEScan(ctx, cluster.ID)
-		if err == nil && time.Since(lastScan.CreatedAt) < sched.interval {
+		if err == nil && !cveScanDue(time.Now(), lastScan.CreatedAt, sched.interval) {
 			continue
 		}
 
-		s.logger.Info("starting CVE scan", "cluster_id", cluster.ID, "cluster_name", cluster.Name)
-
+		// ScanCluster logs the start, once it has nodes to scan.
 		scanID, err := s.cveScanner.ScanCluster(ctx, cluster.ID)
+		if errors.Is(err, scanner.ErrNoNodes) {
+			// No scan row is made, so it is due again next tick and its first
+			// scan follows the nodes' first sync within a minute; Debug, or
+			// it would be logged every minute until then.
+			s.logger.Debug("CVE scan skipped: no nodes on record yet", "cluster_id", cluster.ID, "cluster_name", cluster.Name)
+			continue
+		}
 		if err != nil {
 			s.logger.Error("CVE scan failed",
 				"cluster_id", cluster.ID, "error", err)
@@ -659,7 +681,7 @@ func (s *Scheduler) RunCVEScanning(ctx context.Context) {
 		}
 
 		s.logger.Info("CVE scan completed",
-			"cluster_id", cluster.ID, "scan_id", scanID)
+			"cluster_id", cluster.ID, "cluster_name", cluster.Name, "scan_id", scanID)
 
 		if s.eventPub != nil {
 			s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindCVEScan, "cve_scan", scanID.String(), "completed")
