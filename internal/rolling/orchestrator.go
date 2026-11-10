@@ -1240,10 +1240,21 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 	}
 
 	o.logger.Info("automated upgrade completed", "node", node.NodeName)
+	o.finishUpgrade(ctx, job, node, client, sshCfg)
+}
 
-	// Check if the job has been cancelled while the upgrade was running.
-	if o.isJobCancelled(ctx, job.ID) {
-		o.logger.Info("job cancelled during upgrade, stopping", "node", node.NodeName)
+// finishUpgrade takes a node whose automated upgrade has just finished on to its
+// reboot, or straight to the health check.
+func (o *Orchestrator) finishUpgrade(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode, client *proxmox.Client, sshCfg sshpkg.Config) {
+	// Only while the job is still running. Another node's failure fails it
+	// and releases what keeps guests off this node (its HA rules, the
+	// rebalancer), and a failed or cancelled job is never ticked again, so a
+	// reboot now would land with nothing to follow it up. A paused job, or a
+	// status that cannot be read, is picked up by the re-launch once the
+	// heartbeat goes stale; apt then has nothing left to do.
+	if status := o.jobStatus(ctx, job.ID); status != "running" {
+		o.logger.Info("job no longer running after the upgrade, not going on to the reboot",
+			"node", node.NodeName, "status", status)
 		return
 	}
 
