@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -46,6 +47,8 @@ type memberDB struct {
 	// in writes.
 	accept map[string]int64
 	writes []string
+	// jobStatus, when set, answers GetRollingUpdateJob with a job in it.
+	jobStatus string
 }
 
 // engineOn returns an engine on d, a client of a stub Proxmox that answers
@@ -130,7 +133,11 @@ func (d *memberDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, err
 }
 
 func (d *memberDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
-	if name := queryName(sql); name != "GetNodeByClusterAndName" {
+	switch name := queryName(sql); {
+	case name == "GetRollingUpdateJob" && d.jobStatus != "":
+		id, _ := args[0].(uuid.UUID)
+		return structRow{db.RollingUpdateJob{ID: id, ClusterID: d.cluster, Status: d.jobStatus}}
+	case name != "GetNodeByClusterAndName":
 		d.t.Errorf("unexpected query row %s", name)
 		return rowErr{errors.New("unexpected")}
 	}
@@ -152,6 +159,21 @@ func (d *memberDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row 
 type rowErr struct{ err error }
 
 func (r rowErr) Scan(...any) error { return r.err }
+
+// structRow scans the fields of v, a generated model, in order: the order sqlc
+// scans a SELECT * row of its table in.
+type structRow struct{ v any }
+
+func (r structRow) Scan(dest ...any) error {
+	rv := reflect.ValueOf(r.v)
+	if rv.NumField() != len(dest) {
+		return fmt.Errorf("%d columns for the %d fields of %T", len(dest), rv.NumField(), r.v)
+	}
+	for i, d := range dest {
+		reflect.ValueOf(d).Elem().Set(rv.Field(i))
+	}
+	return nil
+}
 
 // rowsOf returns the audit rows the engine wrote for resourceType.
 func (d *memberDB) rowsOf(resourceType string) []auditRow {

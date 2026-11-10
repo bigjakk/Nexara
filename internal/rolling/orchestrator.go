@@ -1381,6 +1381,15 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 			continue // Started above; passthrough guests never migrate.
 		}
 
+		// Between guests, as the drain does: a pause or a cancel stops the
+		// restore here, not once every guest has been moved back, which at up
+		// to 30 minutes a migration can take hours. A paused node stays in
+		// restoring, and the stall check carries on from here after a resume.
+		if o.isJobCancelled(ctx, job.ID) {
+			o.logger.Info("job paused or cancelled during restore, not moving more guests back", "node", node.NodeName)
+			return
+		}
+
 		// Find the guest on other nodes.
 		currentNode := o.findGuestLocation(ctx, client, clusterNodes, guest, node.NodeName)
 		if currentNode == "" || currentNode == node.NodeName {

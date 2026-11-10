@@ -1790,9 +1790,9 @@ The cluster-wide wizard does not offer this mode; it is reached from the node pa
 ### Managing Jobs
 
 - **Start** — begin the rolling update
-- **Pause** — the node in flight finishes its current step and nothing advances until you resume. The pause of DRS and CRS, and any HA rules disabled for the job, stay in force meanwhile. A restore already under way keeps moving guests back. Resuming restarts the timeouts of the nodes in flight (1 hour in **Draining**, 60 minutes in **Upgrading**, 10 minutes in **Rebooting**, 30 minutes in **Restoring**), so the time spent paused does not count against them
+- **Pause** — the node in flight finishes its current step and nothing advances until you resume. The pause of DRS and CRS, and any HA rules disabled for the job, stay in force meanwhile. A restore already under way stops after the guest it is moving and carries on from there once you resume. Resuming restarts the timeouts of the nodes in flight (1 hour in **Draining**, 60 minutes in **Upgrading**, 10 minutes in **Rebooting**, 30 minutes in **Restoring**), so the time spent paused does not count against them
 - **Resume** — continue a paused job
-- **Cancel** — abort the job (nodes already updated stay updated, and guests already migrated are not moved back, unless that node's restore had already begun)
+- **Cancel** — abort the job. Nodes already updated stay updated and guests already migrated are not moved back; a restore under way stops after the guest it is moving
 - **Skip** — skip a node that has not started yet; a node already under way cannot be skipped
 - **Confirm Upgrade** — in manual mode, confirm that you've completed the upgrade on a node; with **Reboot after update** on, this reboots it. Only a running job's node can be confirmed: resume a paused job first, and a node a failed or cancelled job left in **Awaiting Upgrade** stays there
 
