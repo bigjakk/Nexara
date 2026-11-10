@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,8 +26,14 @@ import (
 	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 )
 
-// validDebianPkgName matches valid Debian package names: lowercase alphanum, dots, plus, hyphens.
-var validDebianPkgName = regexp.MustCompile(`^[a-z0-9][a-z0-9.+\-]{0,127}$`)
+// PackageNamePattern is the shape of a package an automated upgrade holds back:
+// an exact Debian package name. apt-mark reads anything else as a pattern over
+// every package apt knows of (libc6* puts hundreds on hold), and the node's
+// shell, which the names reach, must never see a metacharacter. The API refuses
+// anything else when a job is created, and upgradeCommand refuses it again.
+const PackageNamePattern = `^[a-z0-9][a-z0-9.+\-]{0,127}$`
+
+var validDebianPkgName = regexp.MustCompile(PackageNamePattern)
 
 func isValidDebianPkgName(name string) bool {
 	return validDebianPkgName.MatchString(name)
@@ -251,6 +258,26 @@ func (o *Orchestrator) requireDialableNode(ctx context.Context, job db.RollingUp
 	return err
 }
 
+// leftToUpgrade reports whether a node's pending updates hold anything the job
+// would install. For an automated upgrade, the packages it holds back do not
+// count, and nor do new ones (no OldVersion): Proxmox lists those only as the
+// dependencies of an upgrade it lists (a kernel point release is the series
+// package and the new build it pulls in), so with every upgrade held back none
+// is installed. A manual upgrade is the operator's own apt run, which holds
+// nothing back. (An update kept back only because it needs a newer held package
+// still counts.)
+func leftToUpgrade(job db.RollingUpdateJob, updates []proxmox.AptUpdate) bool {
+	if !job.AutoUpgrade || len(job.PackageExcludes) == 0 {
+		return len(updates) > 0
+	}
+	for _, u := range updates {
+		if u.OldVersion != "" && !slices.Contains(job.PackageExcludes, u.Package) {
+			return true
+		}
+	}
+	return false
+}
+
 func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
 	if o.requireDialableNode(ctx, job, node) != nil {
 		return
@@ -264,11 +291,16 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 		o.waitForTask(ctx, client, node.NodeName, upid)
 	}
 	updates, err := client.GetNodeAptUpdates(ctx, node.NodeName)
-	if err == nil && len(updates) == 0 {
-		o.logger.Info("node has no pending updates, skipping", "node", node.NodeName)
+	if err == nil && !leftToUpgrade(job, updates) {
+		reason := "no pending updates"
+		if len(updates) > 0 {
+			// Draining the node, and maybe rebooting it, would install nothing.
+			reason = "no pending updates but the packages the job holds back"
+		}
+		o.logger.Info("node has nothing to upgrade, skipping", "node", node.NodeName, "reason", reason)
 		_ = o.queries.SkipRollingUpdateNodeAny(ctx, db.SkipRollingUpdateNodeAnyParams{
 			ID:         node.ID,
-			SkipReason: "no pending updates",
+			SkipReason: reason,
 		})
 		o.publishEvent(ctx, job.ClusterID, job.ID, "node_skipped")
 		return
@@ -1035,6 +1067,80 @@ func (o *Orchestrator) startUpgradeHeartbeat(ctx context.Context, nodeID uuid.UU
 	}()
 }
 
+// Where an automated upgrade keeps its own state on a node.
+const (
+	heldPackagesFile = "/var/lib/nexara-rolling-update-holds"
+	upgradeLockFile  = "/run/nexara-rolling-update.lock"
+)
+
+// upgradeCommand is the script an automated upgrade runs on a node: apt's
+// upgrade, with the job's excluded packages put on hold around it, since
+// apt-get has no --exclude.
+//
+// A hold is dpkg state that outlives the run, so:
+//   - heldFile names each hold before it is made. Whatever it names is released
+//     when the run ends, whatever the upgrade did, and a release that fails
+//     fails the node with what is still held.
+//   - A run that was cut off leaves heldFile behind, and the next automated
+//     upgrade of the node releases it before anything else.
+//   - A package already on hold when the run starts is the operator's: it is
+//     neither held nor released, and a list of holds that cannot be read stops
+//     the run. One not installed has nothing to keep back.
+//   - lockFile keeps a re-launch (after Nexara restarted mid-upgrade) from
+//     starting while the run it replaces is still going. apt-get inherits the
+//     lock, so it is held as long as that apt-get runs, even with its shell gone.
+//
+// apt-mark does not wait for the dpkg lock as apt-get does, so it is retried for
+// up to 10 minutes. The rest is as before and safe to re-run: dpkg --configure
+// finishes what an interrupted run unpacked, apt-get waits up to 30 minutes for
+// the dpkg lock, and a dist-upgrade with nothing left to do exits 0.
+func upgradeCommand(excludes []string, heldFile, lockFile string) (string, error) {
+	var pkgs []string
+	for _, p := range excludes {
+		if !isValidDebianPkgName(p) {
+			return "", fmt.Errorf("invalid package exclude name: %q", p)
+		}
+		if quoted := "'" + p + "'"; !slices.Contains(pkgs, quoted) {
+			pkgs = append(pkgs, quoted)
+		}
+	}
+	var b strings.Builder
+	b.WriteString(`export DEBIAN_FRONTEND=noninteractive
+exec 2>&1
+exec 9>'` + lockFile + `' || exit 1
+flock -w 1800 9 || { echo 'nexara: another automated upgrade of this node is still running'; exit 1; }
+held='` + heldFile + `'
+retry() { n=0; until out=$("$@" 2>&1); do n=$((n+1)); if [ "$n" -ge 120 ]; then echo "$out"; return 1; fi; sleep 5; done; echo "$out"; }
+release() {
+	[ -s "$held" ] || { rm -f "$held"; return 0; }
+	if r=$(retry apt-mark unhold $(cat "$held")); then rm -f "$held"; echo "$r"; return 0; fi
+	echo "$r"
+	echo "nexara: could not release the hold on $(tr '\n' ' ' < "$held")- run apt-mark unhold on them"
+	return 1
+}
+release || exit 1
+`)
+	if len(pkgs) > 0 {
+		b.WriteString(`holds=$(apt-mark showhold) || { echo 'nexara: could not list the packages on hold, so nothing was upgraded'; exit 1; }
+for p in ` + strings.Join(pkgs, " ") + `; do
+	if printf '%s\n' "$holds" | grep -qxF "$p"; then echo "nexara: $p was already on hold and is left on hold"; continue; fi
+	if ! dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q ' installed$'; then echo "nexara: $p is not installed, so it is not held"; continue; fi
+	echo "$p" >> "$held" || exit 1
+done
+if [ -s "$held" ]; then
+	retry apt-mark hold $(cat "$held") || { echo 'nexara: could not hold the excluded packages, so nothing was upgraded'; release; exit 1; }
+fi
+`)
+	}
+	b.WriteString(`(dpkg --configure -a || true) && apt-get update -o DPkg::Lock::Timeout=1800 &&
+	apt-get dist-upgrade -y -o DPkg::Lock::Timeout=1800 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold
+rc=$?
+if ! release && [ "$rc" -eq 0 ]; then rc=1; fi
+exit "$rc"
+`)
+	return b.String(), nil
+}
+
 func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelFunc, job db.RollingUpdateJob, node db.RollingUpdateNode, client *proxmox.Client, sshCfg sshpkg.Config) {
 	defer cancel()
 
@@ -1049,45 +1155,11 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 	// should treat us as dead and re-launch.
 	o.startUpgradeHeartbeat(ctx, node.ID)
 
-	// Build package exclude args with strict validation.
-	// Debian package names: [a-z0-9][a-z0-9.+\-]+ (max 128 chars).
-	var excludeArgs string
-	if len(job.PackageExcludes) > 0 {
-		for _, pkg := range job.PackageExcludes {
-			if !isValidDebianPkgName(pkg) {
-				o.failNode(ctx, job, node, fmt.Sprintf("invalid package exclude name: %q", pkg))
-				return
-			}
-			excludeArgs += " --exclude " + pkg
-		}
+	cmd, err := upgradeCommand(job.PackageExcludes, heldPackagesFile, upgradeLockFile)
+	if err != nil {
+		o.failNode(ctx, job, node, err.Error())
+		return
 	}
-
-	// The command: recover any half-installed package state from a prior
-	// interrupted run, refresh the apt index, then dist-upgrade.
-	//
-	// Resume-safe design — this command can be re-run after a prior
-	// orchestrator instance was killed mid-upgrade:
-	//   - `dpkg --configure -a` finishes configuring packages that were
-	//     unpacked but not configured when the previous SSH session was
-	//     terminated. The `|| true` keeps us moving if there's nothing
-	//     to recover or if the dpkg lock is briefly held by another apt.
-	//   - DPkg::Lock::Timeout=1800 makes apt wait up to 30 min for the
-	//     dpkg lock to clear (Debian/Proxmox apt 2.0+).
-	//   - apt-get update + dist-upgrade are both idempotent: when there's
-	//     nothing left to upgrade, dist-upgrade exits 0 with "0 upgraded".
-	//   - DEBIAN_FRONTEND=noninteractive and the Dpkg::Options=--force-conf*
-	//     flags prevent any interactive prompts.
-	cmd := fmt.Sprintf(
-		"export DEBIAN_FRONTEND=noninteractive && "+
-			"(dpkg --configure -a 2>&1 || true) && "+
-			"apt-get update -o DPkg::Lock::Timeout=1800 && "+
-			"apt-get dist-upgrade -y"+
-			" -o DPkg::Lock::Timeout=1800"+
-			" -o Dpkg::Options::=--force-confdef"+
-			" -o Dpkg::Options::=--force-confold"+
-			"%s 2>&1",
-		excludeArgs,
-	)
 
 	result, err := sshpkg.Execute(ctx, sshCfg, cmd)
 	if err != nil {
@@ -1106,7 +1178,11 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 				"node", node.NodeName)
 			return
 		}
-		o.failNode(ctx, job, node, fmt.Sprintf("SSH upgrade failed: %v", err))
+		reason := fmt.Sprintf("SSH upgrade failed: %v", err)
+		if len(job.PackageExcludes) > 0 {
+			reason += fmt.Sprintf("; if the upgrade was cut off, the packages it put on hold stay on hold, listed in %s on the node, until the node's next automated upgrade releases them", heldPackagesFile)
+		}
+		o.failNode(ctx, job, node, reason)
 		return
 	}
 

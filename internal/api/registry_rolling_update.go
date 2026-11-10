@@ -5,6 +5,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/api/handlers"
+	"github.com/bigjakk/nexara/internal/rolling"
 )
 
 // The shared declaration vocabulary this file uses — clusterScope,
@@ -486,10 +487,15 @@ func createRollingUpdateParams() apischema.Properties {
 			// none, and an unbounded list of package names is a JSONB column
 			// nobody meant to fill.
 			MaxLength: apischema.Ptr(256),
-			Items:     &apischema.Property{Type: apischema.String, MaxLength: apischema.Ptr(128), Typetext: "<package>"},
-			Typetext:  "<package>[,<package>…]",
-			Description: "Packages to hold back during the upgrade. Omitted, nothing is held back — " +
-				"which is what an empty list means too.",
+			// The orchestrator's own rule, so a name it would refuse at upgrade
+			// time, after the node was drained, is refused here instead.
+			Items: &apischema.Property{Type: apischema.String, MaxLength: apischema.Ptr(128),
+				Pattern: rolling.PackageNamePattern, Typetext: "<package>"},
+			Typetext: "<package>[,<package>…]",
+			Description: "Packages an automated upgrade holds back: each one installed is put on hold " +
+				"with apt-mark for the upgrade and released after it. Exact package names, no " +
+				"wildcards; a package already on hold stays on hold. A manual upgrade ignores the " +
+				"list. Omitted or empty, nothing is held back.",
 		},
 		"ha_policy": {
 			Type:     apischema.String,

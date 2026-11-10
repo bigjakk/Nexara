@@ -139,7 +139,8 @@ export function CreateRollingUpdateWizard({
         parallelism,
         reboot_after_update: rebootAfterUpdate,
         auto_restore_guests: autoRestoreGuests,
-        package_excludes: excludes,
+        // A manual upgrade is the operator's own apt run; nothing applies these.
+        package_excludes: autoUpgrade ? excludes : [],
         ha_policy: haPolicy,
         auto_upgrade: autoUpgrade,
         notify_channel_id:
@@ -495,12 +496,18 @@ export function CreateRollingUpdateWizard({
               </Label>
               <Input
                 id="excludes"
-                placeholder="e.g. pve-kernel-*, grub-*"
+                placeholder="e.g. proxmox-kernel-6.17, proxmox-default-kernel"
                 value={packageExcludes}
+                disabled={!autoUpgrade}
                 onChange={(e) => {
                   setPackageExcludes(e.target.value);
                 }}
               />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {autoUpgrade
+                  ? "Exact package names, no wildcards. Each is put on hold for the upgrade and released after it."
+                  : "Only the automated upgrade holds packages back."}
+              </p>
             </div>
 
             <div>

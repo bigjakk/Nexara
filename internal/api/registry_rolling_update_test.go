@@ -472,6 +472,30 @@ func TestRollingUpdateCreateKeepsItsDefaults(t *testing.T) {
 	}
 }
 
+// TestRollingUpdatePackageExcludesAreExactNames: each package an automated
+// upgrade holds back must be an exact name, by the orchestrator's own rule, so
+// a wildcard (the wizard's old example) or anything shell-shaped is refused when
+// the job is created rather than failing the node after its drain.
+func TestRollingUpdatePackageExcludesAreExactNames(t *testing.T) {
+	t.Parallel()
+	cap := &capture{}
+	app := newRegistryApp(t, noAuth(), probeRollingEndpoint(t, fiber.MethodPost, rollingScope, cap))
+	target := pathPrefix + "clusters/" + testClusterID + "/rolling-updates"
+	for excludes, want := range map[string]int{
+		`["proxmox-default-kernel","proxmox-kernel-6.17"]`: fiber.StatusNoContent,
+		`["pve-kernel-*"]`:      fiber.StatusBadRequest,
+		`["grub; reboot"]`:      fiber.StatusBadRequest,
+		`["libc6","Uppercase"]`: fiber.StatusBadRequest,
+	} {
+		cap.called = false
+		status, env := send(t, app, jsonRequest(http.MethodPost, target,
+			`{"nodes":["`+testRollingNode+`"],"package_excludes":`+excludes+`}`))
+		if status != want || cap.called != (want == fiber.StatusNoContent) {
+			t.Errorf("package_excludes %s: status %d (%q), handler ran %v; want %d", excludes, status, env.Message, cap.called, want)
+		}
+	}
+}
+
 // TestRollingUpdateNotifyChannelKeepsItsEmptySentinel is the compatibility
 // assertion for the one uuid-valued body field whose EMPTY value is meaningful.
 //
