@@ -245,12 +245,12 @@ func augmentWithChangelogCVEs(
 	changelogs *changelogFetcher,
 	logger *slog.Logger,
 ) []VulnResult {
-	// Build an index of (cve_id, package) → already-present, so we don't
-	// duplicate entries the tracker produced. Same CVE on different
-	// packages is allowed — those are genuinely separate findings.
-	existing := make(map[string]bool, len(vulns))
-	for _, v := range vulns {
-		existing[v.CVEID+"@"+v.PackageName] = true
+	// Index (cve_id, package) → position, so we don't duplicate entries the
+	// tracker produced. Same CVE on different packages is allowed — those
+	// are genuinely separate findings.
+	existing := make(map[string]int, len(vulns))
+	for i, v := range vulns {
+		existing[v.CVEID+"@"+v.PackageName] = i
 	}
 
 	added := 0
@@ -265,7 +265,13 @@ func augmentWithChangelogCVEs(
 		// long before the user's current version.
 		cves := changelogs.CVEsBetween(ctx, node, upd.Package, upd.OldVersion, upd.NewVersion)
 		for _, cve := range cves {
-			if existing[cve+"@"+upd.Package] {
+			if i, ok := existing[cve+"@"+upd.Package]; ok {
+				// The tracker gave it no fixed version: still open in its
+				// copy, which can predate the fix. The pending version's
+				// changelog naming the CVE says that version fixes it.
+				if vulns[i].FixedVersion == "" {
+					vulns[i].FixedVersion = upd.NewVersion
+				}
 				continue
 			}
 			vulns = append(vulns, VulnResult{
@@ -277,7 +283,7 @@ func augmentWithChangelogCVEs(
 				CVSSScore:      0,
 				Description:    "Referenced in " + upd.Package + " changelog",
 			})
-			existing[cve+"@"+upd.Package] = true
+			existing[cve+"@"+upd.Package] = len(vulns) - 1
 			added++
 		}
 	}

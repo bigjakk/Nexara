@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"testing"
@@ -9,10 +10,12 @@ import (
 )
 
 // TestLookupPackageUpdates holds the tracker match to a Debian binary's source
-// package and a resolved entry to what it means. The tracker is keyed by
+// package and a release's entry to what it means. The tracker is keyed by
 // SOURCE, so the binary name alone found no CVE of libssl3 (built from
-// openssl); and a resolved entry whose fixed_version is "0" (not affected) or
-// empty was reported as if the node were vulnerable.
+// openssl); a resolved entry whose fixed_version is "0" (not affected) or
+// empty was reported as if the node were vulnerable; and an entry still open
+// in the node's release showed another release's fixed version, or the
+// pending one, as Fixed In.
 func TestLookupPackageUpdates(t *testing.T) {
 	t.Parallel()
 	cve := func(status, fixed string) map[string]debianCVEEntry {
@@ -27,19 +30,28 @@ func TestLookupPackageUpdates(t *testing.T) {
 		name    string
 		tracker map[string]map[string]debianCVEEntry
 		upd     AptUpdateInfo
-		want    []string // "package cve"
+		want    []string // "package cve fixed in"
 	}{
 		{
 			name:    "a binary is found under its source package",
 			tracker: map[string]map[string]debianCVEEntry{"openssl": cve("open", "")},
 			upd:     AptUpdateInfo{Package: "libssl3", SourcePackage: "openssl", Origin: "Debian", OldVersion: "3.0.1-1"},
-			want:    []string{"libssl3 CVE-2026-0001"},
+			want:    []string{`libssl3 CVE-2026-0001 fixed in ""`},
 		},
 		{
 			name:    "the binary name when the source is not in the tracker",
 			tracker: map[string]map[string]debianCVEEntry{"libfoo1": cve("open", "")},
 			upd:     libfoo,
-			want:    []string{"libfoo1 CVE-2026-0001"},
+			want:    []string{`libfoo1 CVE-2026-0001 fixed in ""`},
+		},
+		{
+			name: "open in the node's release has no fixed version, though another release has one",
+			tracker: map[string]map[string]debianCVEEntry{"foo": {"CVE-2026-0001": {Releases: map[string]debianRelease{
+				"bookworm": {Status: "open", Urgency: "high"},
+				"trixie":   {Status: "resolved", FixedVersion: "1.1-1", Urgency: "high"},
+			}}}},
+			upd:  libfoo,
+			want: []string{`libfoo1 CVE-2026-0001 fixed in ""`},
 		},
 		{
 			name:    "not Debian's kernel, which no Proxmox node runs",
@@ -57,7 +69,7 @@ func TestLookupPackageUpdates(t *testing.T) {
 			name:    "resolved above the installed version is still open on the node",
 			tracker: map[string]map[string]debianCVEEntry{"foo": cve("resolved", "1.0-2")},
 			upd:     libfoo,
-			want:    []string{"libfoo1 CVE-2026-0001"},
+			want:    []string{`libfoo1 CVE-2026-0001 fixed in "1.0-2"`},
 		},
 	}
 	for _, tc := range cases {
@@ -71,7 +83,7 @@ func TestLookupPackageUpdates(t *testing.T) {
 			}
 			var got []string
 			for _, v := range vulns {
-				got = append(got, v.PackageName+" "+v.CVEID)
+				got = append(got, fmt.Sprintf("%s %s fixed in %q", v.PackageName, v.CVEID, v.FixedVersion))
 			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %v, want %v", got, tc.want)

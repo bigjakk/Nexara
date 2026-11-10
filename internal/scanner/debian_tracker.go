@@ -207,17 +207,15 @@ func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdat
 				severity = bestSeverity(entry.Releases)
 			}
 
+			// Fixed In comes from the node's own release only. The tracker
+			// gives an open or undetermined entry no fixed version; another
+			// release's is a different build line, and the pending version
+			// does not fix what the release still has open. With the release
+			// unknown there is none either. augmentWithChangelogCVEs fills in
+			// the pending version when its changelog names the CVE.
 			fixedVer := rel.FixedVersion
-			if fixedVer == "" || fixedVer == "0" {
-				for _, r := range entry.Releases {
-					if r.FixedVersion != "" && r.FixedVersion != "0" {
-						fixedVer = r.FixedVersion
-						break
-					}
-				}
-			}
-			if fixedVer == "" || fixedVer == "0" {
-				fixedVer = upd.NewVersion
+			if fixedVer == "0" {
+				fixedVer = ""
 			}
 
 			desc := entry.Description
