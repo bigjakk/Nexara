@@ -1657,7 +1657,7 @@ Navigate to **Security** from the sidebar.
 ### How It Works
 
 1. Nexara reads each node's **pending updates** from Proxmox. A package with no update pending is not checked, so a score of 100 means no known CVE among the pending upgrades, not that nothing installed has one
-2. Each pending package is checked against the Debian Security Tracker, and its changelog, which Proxmox serves, is searched for CVE IDs the tracker does not list. The tracker files CVEs under source packages, so a package from Debian is looked up under its source, which the tracker's own package list gives, or failing that the package's changelog (`libssl3` under `openssl`). A Proxmox-built package is looked up under its own name, and Debian's kernel source is skipped, since a Proxmox node runs Proxmox's kernel. A security update with no CVE on record appears as `UNKNOWN-<package>`, or `SEC-<package>` when the tracker cannot be reached
+2. Each pending package is checked against the Debian Security Tracker, and its changelog, which Proxmox serves, is searched for CVE IDs the tracker does not list. The tracker files CVEs under source packages, so a package from Debian is looked up under its source, which the tracker's own package list gives, or failing that the package's changelog (`libssl3` under `openssl`). A Proxmox-built package is looked up under its own name, and Debian's kernel source is skipped, since a Proxmox node runs Proxmox's kernel. A Debian update is a security update when its changelog shows an upload to Debian's security archive (`bookworm-security`, `trixie-security`) newer than the installed version: Proxmox's update list cannot say, since it names that archive `Debian` like the main one. A security update of a package the tracker does not list appears as `UNKNOWN-<package>`, and every security update appears as `SEC-<package>` when the tracker cannot be reached
 3. Results are aggregated into a security posture score per cluster
 
 ### Manual Scan
@@ -1707,7 +1707,9 @@ Tick one or more **Channels** — the same set serves whichever bands you enable
 
 ### Reviewing Vulnerabilities
 
-In **Scan History**, expanding a scan shows its **Node Results**, and the **›** in the scan's own row opens that scan's vulnerabilities across its nodes: **CVE ID**, **Action**, **Risk**, **Score**, **EPSS**, **Package**, **Installed**, **Fixed In** and **Description**, filtered by **Actively Exploited** and by the severity the **Risk** column shows.
+In **Scan History**, expanding a scan shows its **Node Results**, and the **›** in the scan's own row opens that scan's vulnerabilities across its nodes, highest **Score** first: **CVE ID**, **Action**, **Risk**, **Score**, **EPSS**, **Package**, **Installed**, **Fixed In** and **Description**, filtered by **Actively Exploited** and by the severity the **Risk** column shows.
+
+**Fixed In** is the version that fixes the CVE in the node's Debian release, as the tracker gives it, or the pending version when the changelog entries the upgrade brings name the CVE. It reads `-` for a CVE Debian has not fixed in that release, which the pending upgrade does not fix either, and when the node's release could not be read.
 
 A node whose changelogs Proxmox could not serve still reads completed, and its row in **Node Results** names the packages: CVEs named only in those changelogs are missing from the result. Nexara's log gives the first reason Proxmox returned.
 
