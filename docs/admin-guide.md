@@ -1737,8 +1737,8 @@ Navigate to **Security > Rolling Updates** tab.
 1. Click **New Rolling Update**
 2. Work through the wizard's three steps — **Select Nodes**, **HA Constraint Check**, **Configure Update**:
    - **Nodes** — select which nodes to update (or all)
+   - **Parallelism (max nodes updated at once)** — default 1, set on the **Select Nodes** step because the pre-flight that follows checks capacity for that many nodes drained at once
    - **Conflict Policy** — offered on the **HA Constraint Check** step when the pre-flight finds conflicts: **Warn & Proceed** (continue despite the findings) or **Strict (fail on violation)**. With **Strict** selected you cannot move on to the configure step while the pre-flight report contains errors
-   - **Parallelism (max nodes updated at once)** — default 1
    - **Reboot after update** — on means always reboot. Off, an automated upgrade reboots only when the node asks for it, and a manual one never reboots
    - **Auto-restore guests** — migrate drained guests back after the node returns healthy
    - **Automated upgrade (SSH)** — run `apt dist-upgrade` over SSH. Disabled until the cluster has SSH credentials, and for anyone without `manage:ssh_credentials`, which includes a built-in Operator, since the wizard cannot tell; with it off, the job pauses at each node in the **Awaiting Upgrade** step until you click **Confirm Upgrade**

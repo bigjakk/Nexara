@@ -96,12 +96,18 @@ export function CreateRollingUpdateWizard({
   const preflight = usePreflightHA();
 
   const hasSSH = sshCreds !== null && sshCreds !== undefined;
+  // What the pre-flight checks and the job runs with: at most one per node
+  // still selected, which a removal after setting it can leave it above.
+  const effectiveParallelism = Math.min(
+    parallelism,
+    Math.max(1, selectedNodes.length),
+  );
 
   const reset = () => {
     setStep("nodes");
     setSelectedNodes([]);
     setParallelism(1);
-    setRebootAfterUpdate(true);
+    setRebootAfterUpdate(false);
     setAutoRestoreGuests(true);
     setPackageExcludes("");
     setHaPolicy("warn");
@@ -111,11 +117,13 @@ export function CreateRollingUpdateWizard({
     setStartImmediately(true);
   };
 
-  // Run preflight when entering HA review step.
+  // Run preflight when entering HA review step. Its capacity check depends on
+  // how many nodes are drained at once, which is why Parallelism is set on the
+  // step before this one.
   useEffect(() => {
     if (step === "ha_review" && selectedNodes.length > 0) {
       preflight.mutate(
-        { clusterId, nodes: selectedNodes, parallelism },
+        { clusterId, nodes: selectedNodes, parallelism: effectiveParallelism },
         {
           onSuccess: (report) => {
             setPreflightReport(report);
@@ -136,7 +144,7 @@ export function CreateRollingUpdateWizard({
       {
         clusterId,
         nodes: selectedNodes,
-        parallelism,
+        parallelism: effectiveParallelism,
         reboot_after_update: rebootAfterUpdate,
         auto_restore_guests: autoRestoreGuests,
         // A manual upgrade is the operator's own apt run; nothing applies these.
@@ -315,6 +323,30 @@ export function CreateRollingUpdateWizard({
                     </div>
                   </div>
                 )}
+
+                <div>
+                  <Label htmlFor="parallelism">
+                    Parallelism (max nodes updated at once)
+                  </Label>
+                  <Input
+                    id="parallelism"
+                    type="number"
+                    min={1}
+                    max={Math.max(1, selectedNodes.length)}
+                    value={effectiveParallelism}
+                    onChange={(e) => {
+                      setParallelism(
+                        Math.max(
+                          1,
+                          Math.min(
+                            selectedNodes.length,
+                            Number(e.target.value),
+                          ),
+                        ),
+                      );
+                    }}
+                  />
+                </div>
               </>
             )}
             <div className="flex justify-end">
@@ -427,27 +459,6 @@ export function CreateRollingUpdateWizard({
 
         {step === "configure" && (
           <div className="space-y-4">
-            <div>
-              <Label htmlFor="parallelism">
-                Parallelism (max nodes updated at once)
-              </Label>
-              <Input
-                id="parallelism"
-                type="number"
-                min={1}
-                max={selectedNodes.length}
-                value={parallelism}
-                onChange={(e) => {
-                  setParallelism(
-                    Math.max(
-                      1,
-                      Math.min(selectedNodes.length, Number(e.target.value)),
-                    ),
-                  );
-                }}
-              />
-            </div>
-
             <div className="flex items-center justify-between">
               <div>
                 <Label htmlFor="reboot">Reboot after update</Label>
