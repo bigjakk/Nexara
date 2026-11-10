@@ -104,6 +104,35 @@ func (o *Orchestrator) Tick(ctx context.Context) {
 	}
 
 	o.sweepPendingCleanups(ctx)
+	o.expireUnstartedJobs(ctx)
+}
+
+// unstartedJobTTL is how long a created job may wait to be started. A pending
+// job counts as active, so one nobody starts (the wizard's start call lost, a
+// job created for later and forgotten) blocks every later job on its cluster.
+// A day leaves room to create a job in the morning for an evening window, by
+// when its pre-flight findings and package lists are a day old anyway.
+const unstartedJobTTL = 24 * time.Hour
+
+const unstartedJobReason = "Never started: cancelled automatically 24 hours after it was created"
+
+// expireUnstartedJobs cancels the jobs that have waited longer than
+// unstartedJobTTL to be started. Such a job holds nothing on the cluster, so
+// there is nothing to release.
+func (o *Orchestrator) expireUnstartedJobs(ctx context.Context) {
+	expired, err := o.queries.ExpireUnstartedRollingUpdateJobs(ctx, db.ExpireUnstartedRollingUpdateJobsParams{
+		Reason:        unstartedJobReason,
+		CreatedBefore: time.Now().Add(-unstartedJobTTL),
+	})
+	if err != nil {
+		o.logger.Error("failed to cancel rolling update jobs that were never started", "error", err)
+		return
+	}
+	for _, j := range expired {
+		o.logger.Info("cancelled a rolling update job that was never started", "job_id", j.ID, "cluster_id", j.ClusterID)
+		o.auditLog(ctx, j.ClusterID, j.ID, "rolling_update_expired", map[string]string{"reason": unstartedJobReason})
+		o.publishEvent(ctx, j.ClusterID, j.ID, "cancelled")
+	}
 }
 
 func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) {

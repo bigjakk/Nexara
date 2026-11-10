@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -160,6 +161,49 @@ func (q *Queries) CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (Cou
 		&i.Total,
 	)
 	return i, err
+}
+
+const expireUnstartedRollingUpdateJobs = `-- name: ExpireUnstartedRollingUpdateJobs :many
+UPDATE rolling_update_jobs
+SET status = 'cancelled', failure_reason = $1, completed_at = now(), updated_at = now()
+WHERE status = 'pending' AND created_at < $2
+RETURNING id, cluster_id
+`
+
+type ExpireUnstartedRollingUpdateJobsParams struct {
+	Reason        string    `json:"reason"`
+	CreatedBefore time.Time `json:"created_before"`
+}
+
+type ExpireUnstartedRollingUpdateJobsRow struct {
+	ID        uuid.UUID `json:"id"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+}
+
+// A job that was created and never started holds nothing on the cluster (DRS,
+// the rebalancer and HA rules are first touched on its first running tick), but
+// it counts as active, so it blocks every later job on its cluster, and the
+// cluster's delete, until someone starts or cancels it. The orchestrator cancels
+// one created before created_before. Not cleanup_pending: there is nothing to
+// release.
+func (q *Queries) ExpireUnstartedRollingUpdateJobs(ctx context.Context, arg ExpireUnstartedRollingUpdateJobsParams) ([]ExpireUnstartedRollingUpdateJobsRow, error) {
+	rows, err := q.db.Query(ctx, expireUnstartedRollingUpdateJobs, arg.Reason, arg.CreatedBefore)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExpireUnstartedRollingUpdateJobsRow{}
+	for rows.Next() {
+		var i ExpireUnstartedRollingUpdateJobsRow
+		if err := rows.Scan(&i.ID, &i.ClusterID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const failRollingUpdateJob = `-- name: FailRollingUpdateJob :execrows

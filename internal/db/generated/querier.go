@@ -834,6 +834,13 @@ type Querier interface {
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	// Removing a node feed keeps the row, so the node's login does not find it again.
 	DismissUpsNodeFeed(ctx context.Context, arg DismissUpsNodeFeedParams) (UpsFeed, error)
+	// A job that was created and never started holds nothing on the cluster (DRS,
+	// the rebalancer and HA rules are first touched on its first running tick), but
+	// it counts as active, so it blocks every later job on its cluster, and the
+	// cluster's delete, until someone starts or cancels it. The orchestrator cancels
+	// one created before created_before. Not cleanup_pending: there is nothing to
+	// release.
+	ExpireUnstartedRollingUpdateJobs(ctx context.Context, arg ExpireUnstartedRollingUpdateJobsParams) ([]ExpireUnstartedRollingUpdateJobsRow, error)
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) (int64, error)
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) (int64, error)
 	// FailStaleCVEScans abandons scans stuck in running/pending — a panic, hard

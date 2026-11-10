@@ -53,6 +53,18 @@ UPDATE rolling_update_jobs
 SET status = 'running', resumed_at = now(), updated_at = now()
 WHERE id = $1 AND status = 'paused';
 
+-- A job that was created and never started holds nothing on the cluster (DRS,
+-- the rebalancer and HA rules are first touched on its first running tick), but
+-- it counts as active, so it blocks every later job on its cluster, and the
+-- cluster's delete, until someone starts or cancels it. The orchestrator cancels
+-- one created before created_before. Not cleanup_pending: there is nothing to
+-- release.
+-- name: ExpireUnstartedRollingUpdateJobs :many
+UPDATE rolling_update_jobs
+SET status = 'cancelled', failure_reason = sqlc.arg(reason), completed_at = now(), updated_at = now()
+WHERE status = 'pending' AND created_at < sqlc.arg(created_before)
+RETURNING id, cluster_id;
+
 -- name: HasRunningJobForCluster :one
 SELECT EXISTS(
     SELECT 1 FROM rolling_update_jobs

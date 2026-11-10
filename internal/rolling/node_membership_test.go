@@ -49,7 +49,38 @@ type memberDB struct {
 	writes []string
 	// jobStatus, when set, answers GetRollingUpdateJob with a job in it.
 	jobStatus string
+	// rowsFor answers each query it names with those rows, each one's columns
+	// in order, and keeps the query's arguments in queried.
+	rowsFor map[string][][]any
+	queried map[string][]any
 }
+
+// fakeRows is a result set: each row's columns, in order.
+type fakeRows struct {
+	rows [][]any
+	next int
+}
+
+func (r *fakeRows) Next() bool { r.next++; return r.next <= len(r.rows) }
+
+func (r *fakeRows) Scan(dest ...any) error {
+	row := r.rows[r.next-1]
+	if len(row) != len(dest) {
+		return fmt.Errorf("%d columns for %d destinations", len(row), len(dest))
+	}
+	for i, d := range dest {
+		reflect.ValueOf(d).Elem().Set(reflect.ValueOf(row[i]))
+	}
+	return nil
+}
+
+func (*fakeRows) Close()                                       {}
+func (*fakeRows) Err() error                                   { return nil }
+func (*fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (*fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (*fakeRows) Values() ([]any, error)                       { return nil, nil }
+func (*fakeRows) RawValues() [][]byte                          { return nil }
+func (*fakeRows) Conn() *pgx.Conn                              { return nil }
 
 // engineOn returns an engine on d, a client of a stub Proxmox that answers
 // with handler (every request a 500 when it is nil), and what the stub was sent.
@@ -127,9 +158,20 @@ func (d *memberDB) Exec(_ context.Context, sql string, args ...any) (pgconn.Comm
 	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
-func (d *memberDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-	d.t.Errorf("unexpected query %s", queryName(sql))
-	return nil, errors.New("unexpected")
+func (d *memberDB) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	name := queryName(sql)
+	rows, ok := d.rowsFor[name]
+	if !ok {
+		d.t.Errorf("unexpected query %s", name)
+		return nil, errors.New("unexpected")
+	}
+	d.mu.Lock()
+	if d.queried == nil {
+		d.queried = map[string][]any{}
+	}
+	d.queried[name] = args
+	d.mu.Unlock()
+	return &fakeRows{rows: rows}, nil
 }
 
 func (d *memberDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {

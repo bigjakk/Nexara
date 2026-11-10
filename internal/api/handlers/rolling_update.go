@@ -267,7 +267,10 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx, p *apischema.Params) error
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check for running jobs")
 	}
 	if hasRunning {
-		return fiber.NewError(fiber.StatusConflict, "A rolling update job is already active for this cluster")
+		// Pending counts: a job created and not started yet still blocks, so
+		// the message says how to clear one rather than only "active".
+		return fiber.NewError(fiber.StatusConflict,
+			"A rolling update job is already pending, running or paused for this cluster. Start, finish or cancel it first.")
 	}
 
 	// A prior job whose cleanup is still pending holds cluster state (paused

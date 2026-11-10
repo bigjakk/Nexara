@@ -1747,7 +1747,7 @@ Navigate to **Security > Rolling Updates** tab.
    - **Start immediately** — begin right after creation instead of leaving the job idle
 3. Click **Create & Start**, or **Create Job** with **Start immediately** off
 
-A cluster has one active job at a time, and any failed node fails the job. A failed job is created again rather than resumed.
+A cluster has one active job at a time, and any failed node fails the job. A failed job is created again rather than resumed. A job waiting to be started counts as the active one, so a job not started within 24 hours of being created is cancelled automatically, with *Never started* as its reason.
 
 ### Update Pipeline
 
