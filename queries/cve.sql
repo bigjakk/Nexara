@@ -58,17 +58,12 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 RETURNING *;
 
 -- name: ListCVEScanVulns :many
+-- Highest risk first: the order of the Risk column the vulnerability table
+-- shows, which risk_severity buckets risk_score into. severity is the Debian
+-- urgency, one input to the score.
 SELECT * FROM cve_scan_vulns
 WHERE scan_id = $1
-ORDER BY
-    CASE severity
-        WHEN 'critical' THEN 0
-        WHEN 'high' THEN 1
-        WHEN 'medium' THEN 2
-        WHEN 'low' THEN 3
-        ELSE 4
-    END,
-    package_name;
+ORDER BY risk_score DESC, cve_id, package_name;
 
 -- name: ListCVEScanVulnsBySeverity :many
 SELECT * FROM cve_scan_vulns
@@ -91,17 +86,10 @@ ORDER BY risk_score DESC, cve_id, package_name;
 -- name a scan-node row from another cluster's scan and read its
 -- vulnerabilities. Every sibling listing here filters on scan_id for the same
 -- reason, and TestCVEVulnReadsAreScanScoped holds all five of them to it.
+-- Ordered as ListCVEScanVulns is.
 SELECT * FROM cve_scan_vulns
 WHERE scan_id = $1 AND scan_node_id = $2
-ORDER BY
-    CASE severity
-        WHEN 'critical' THEN 0
-        WHEN 'high' THEN 1
-        WHEN 'medium' THEN 2
-        WHEN 'low' THEN 3
-        ELSE 4
-    END,
-    package_name;
+ORDER BY risk_score DESC, cve_id, package_name;
 
 -- name: UpsertCVECache :exec
 INSERT INTO cve_cache (cve_id, severity, cvss_score, description, published_at, fetched_at)

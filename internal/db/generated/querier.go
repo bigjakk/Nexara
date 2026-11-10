@@ -1599,6 +1599,9 @@ type Querier interface {
 	ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error)
 	ListCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) ([]uuid.UUID, error)
 	ListCVEScanNodes(ctx context.Context, scanID uuid.UUID) ([]CveScanNode, error)
+	// Highest risk first: the order of the Risk column the vulnerability table
+	// shows, which risk_severity buckets risk_score into. severity is the Debian
+	// urgency, one input to the score.
 	ListCVEScanVulns(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	// Vulnerabilities on one node OF ONE SCAN.
 	//
@@ -1610,6 +1613,7 @@ type Querier interface {
 	// name a scan-node row from another cluster's scan and read its
 	// vulnerabilities. Every sibling listing here filters on scan_id for the same
 	// reason, and TestCVEVulnReadsAreScanScoped holds all five of them to it.
+	// Ordered as ListCVEScanVulns is.
 	ListCVEScanVulnsByNode(ctx context.Context, arg ListCVEScanVulnsByNodeParams) ([]CveScanVuln, error)
 	ListCVEScanVulnsBySeverity(ctx context.Context, arg ListCVEScanVulnsBySeverityParams) ([]CveScanVuln, error)
 	ListCVEScanVulnsKEV(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
