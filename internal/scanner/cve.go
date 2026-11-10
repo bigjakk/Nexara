@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -75,6 +76,10 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, r
 // rather than spinning up a fresh client on every tick.
 func (e *Engine) KEVClient() *KEVClient { return e.kevClient }
 
+// ErrNoNodes is ScanCluster's refusal of a cluster with no nodes on record
+// yet, made before any scan row exists.
+var ErrNoNodes = errors.New("no nodes found")
+
 // ScanCluster performs a full CVE scan of all nodes in a cluster.
 // It creates its own scan record and returns the scan ID.
 func (e *Engine) ScanCluster(ctx context.Context, clusterID uuid.UUID) (uuid.UUID, error) {
@@ -83,7 +88,7 @@ func (e *Engine) ScanCluster(ctx context.Context, clusterID uuid.UUID) (uuid.UUI
 		return uuid.Nil, fmt.Errorf("list nodes: %w", err)
 	}
 	if len(nodes) == 0 {
-		return uuid.Nil, fmt.Errorf("no nodes found for cluster %s", clusterID)
+		return uuid.Nil, fmt.Errorf("%w for cluster %s", ErrNoNodes, clusterID)
 	}
 
 	scan, err := e.queries.InsertCVEScan(ctx, db.InsertCVEScanParams{
@@ -95,6 +100,7 @@ func (e *Engine) ScanCluster(ctx context.Context, clusterID uuid.UUID) (uuid.UUI
 		return uuid.Nil, fmt.Errorf("create scan: %w", err)
 	}
 
+	e.logger.Info("starting CVE scan", "cluster_id", clusterID, "scan_id", scan.ID, "nodes", len(nodes))
 	return e.runScan(ctx, clusterID, scan.ID, nodes)
 }
 
@@ -144,7 +150,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 	// CVE data + risk enrichment clients are held on the Engine and reused
 	// across every cluster scan; their backing caches (tracker JSON in
 	// memory, KEV in kev_cache, EPSS in epss_cache) survive the call.
-	cveClient := e.cveClient
+	// matchUpdates reads the tracker client, e.cveClient, itself.
 	kevClient := e.kevClient
 	epssClient := e.epssClient
 
@@ -217,22 +223,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 			})
 		}
 
-		// Match against Debian tracker CVEs
-		vulns, err := cveClient.LookupPackageUpdates(ctx, aptUpdates, release)
-		if err != nil {
-			e.logger.Warn("CVE lookup failed, using update data only", "node", node.Name, "error", err)
-			// Fall back to treating all security updates as vulns
-			vulns = securityUpdatesToVulns(aptUpdates)
-		}
-
-		// Augment with CVEs extracted from each pending package's own
-		// changelog. This catches CVEs that the Debian tracker doesn't
-		// index under the apt-package's name — most importantly
-		// proxmox-kernel-* and pve-kernel-* updates, where Debian tracks
-		// upstream as "linux" but Proxmox ships a differently-named
-		// package built from Ubuntu's kernel tree. Best-effort: a fetch
-		// failure for one package does not abort the scan.
-		vulns = augmentWithChangelogCVEs(ctx, vulns, aptUpdates, node.Name, changelogs, e.logger)
+		vulns, gapNote := e.matchUpdates(ctx, node.Name, release, aptUpdates, changelogs)
 
 		// Enrich vulns with EPSS and KEV before bucketing. Both lookups
 		// are best-effort: a failure leaves the vuln with no enrichment
@@ -322,7 +313,10 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 			PackagesTotal: safeconv.Int32(len(updates)),
 			VulnsFound:    nodeVulns,
 			PostureScore:  pgtype.Float4{Float32: postureScore, Valid: true},
-			ScannedAt:     pgtype.Timestamptz{Time: now, Valid: true},
+			// The scan history shows it beside the node, which still reads
+			// completed: the tracker lookup ran, on less than it should have.
+			ErrorMessage: pgtype.Text{String: gapNote, Valid: gapNote != ""},
+			ScannedAt:    pgtype.Timestamptz{Time: now, Valid: true},
 		})
 
 		totalVulns += nodeVulns
@@ -393,6 +387,39 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 	}
 
 	return scanID, nil
+}
+
+// matchUpdates finds the vulnerabilities among one node's pending updates and
+// returns them with the node's note, "" unless some changelogs could not be
+// read. release is the node's Debian codename, "" when unknown.
+func (e *Engine) matchUpdates(ctx context.Context, node, release string, updates []AptUpdateInfo, changelogs *changelogFetcher) (vulns []VulnResult, note string) {
+	// The tracker is keyed by source package: from its own binary list, else
+	// from each update's changelog. The changelog fetches are cached, so the
+	// augmentation below re-reads them for free.
+	unreadable, changelogErr := changelogs.resolveSources(ctx, node, updates, e.cveClient.binarySources(ctx, release))
+	note = changelogGapNote(unreadable, len(updates))
+	if note != "" {
+		e.logger.Warn("CVE scan could not read some changelogs; those packages may be missing CVEs",
+			"node", node, "unreadable", len(unreadable), "packages", len(updates),
+			"first_error", changelogErr)
+	}
+
+	// Match against Debian tracker CVEs
+	vulns, err := e.cveClient.LookupPackageUpdates(ctx, updates, release)
+	if err != nil {
+		e.logger.Warn("CVE lookup failed, using update data only", "node", node, "error", err)
+		// Fall back to treating all security updates as vulns
+		vulns = securityUpdatesToVulns(updates)
+	}
+
+	// Augment with CVEs extracted from each pending package's own
+	// changelog. This catches CVEs that the Debian tracker doesn't
+	// index under the apt-package's name — most importantly
+	// proxmox-kernel-* and pve-kernel-* updates, where Debian tracks
+	// upstream as "linux" but Proxmox ships a differently-named
+	// package built from Ubuntu's kernel tree. Best-effort: a fetch
+	// failure for one package does not abort the scan.
+	return augmentWithChangelogCVEs(ctx, vulns, updates, node, changelogs, e.logger), note
 }
 
 // SetProxmoxCache attaches the shared per-server cache. Nil-safe.

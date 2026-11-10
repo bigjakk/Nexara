@@ -1,9 +1,59 @@
 package scanner
 
 import (
+	"context"
+	"errors"
+	"log/slog"
 	"reflect"
 	"testing"
 )
+
+// fakeChangelogs answers apt/changelog as Proxmox does: by "pkg=version", a
+// failed `apt-get changelog` as a 200 ending "RC: <exit code>", and a package
+// it has no entry for as a failed call.
+type fakeChangelogs map[string]string
+
+func (f fakeChangelogs) GetNodeAptChangelog(_ context.Context, _, pkg, version string) (string, error) {
+	if body, ok := f[pkg+"="+version]; ok {
+		return body, nil
+	}
+	return "", errors.New("500 command 'apt-get changelog' failed: got timeout")
+}
+
+// TestResolveSources reads each update's source package from its changelog
+// and reports every changelog it could not read, the 200 carrying apt's
+// failure included, on each node the gap affects. A failed fetch used to be
+// one Debug line, with the scan reading completed.
+func TestResolveSources(t *testing.T) {
+	t.Parallel()
+	f := newChangelogFetcher(fakeChangelogs{
+		"libssl3=3.0.2-1": "openssl (3.0.2-1) bookworm-security; urgency=medium\n\n  * Fix CVE-2026-0001.\n",
+		"libbar1=2.0-1":   "E: Failed to fetch changelog:/bar.changelog  404  Not Found\nRC: 100",
+	}, slog.New(slog.DiscardHandler))
+	updates := []AptUpdateInfo{
+		{Package: "libssl3", NewVersion: "3.0.2-1"},
+		{Package: "libbar1", NewVersion: "2.0-1"},
+		{Package: "libbaz1", NewVersion: "1.1-1"},
+	}
+
+	unreadable, firstErr := f.resolveSources(context.Background(), "pve-01", updates, nil)
+	if got := []string{updates[0].SourcePackage, updates[1].SourcePackage, updates[2].SourcePackage}; !reflect.DeepEqual(got, []string{"openssl", "", ""}) {
+		t.Errorf("sources = %q, want openssl and two unknown", got)
+	}
+	if want := []string{"libbar1", "libbaz1"}; !reflect.DeepEqual(unreadable, want) || firstErr == nil {
+		t.Fatalf("unreadable = %v (first error %v), want %v and an error", unreadable, firstErr, want)
+	}
+	if got, want := changelogGapNote(unreadable, len(updates)),
+		"Changelog unavailable for 2 of 3 packages (libbar1, libbaz1); their CVEs may be incomplete"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+
+	// The next node is served the cached failure, and its result lacks the changelog too.
+	again, _ := f.resolveSources(context.Background(), "pve-02", []AptUpdateInfo{{Package: "libbar1", NewVersion: "2.0-1"}}, nil)
+	if !reflect.DeepEqual(again, []string{"libbar1"}) {
+		t.Errorf("second node's unreadable = %v, want [libbar1]", again)
+	}
+}
 
 func TestExtractCVEsFromChangelog(t *testing.T) {
 	cases := []struct {

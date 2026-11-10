@@ -51,6 +51,11 @@ type CVEClient struct {
 	trackerLoadedAt time.Time
 	cacheTTL        time.Duration // overridable for tests
 	feedURL         string        // overridable for tests
+
+	// Per release, which source each binary is built from (binarySources).
+	sourcesMu        sync.Mutex
+	sourcesByRelease map[string]releaseSources
+	debsecanURL      string // overridable for tests
 }
 
 // debianCVEEntry is the per-CVE entry inside a package's map.
@@ -79,11 +84,13 @@ func NewCVEClient(queries *db.Queries, httpClient *http.Client, logger *slog.Log
 		httpClient = netguard.NewHTTPClient(120 * time.Second)
 	}
 	return &CVEClient{
-		httpClient: httpClient,
-		queries:    queries,
-		logger:     logger,
-		cacheTTL:   cacheTTL,
-		feedURL:    debianTrackerURL,
+		httpClient:       httpClient,
+		queries:          queries,
+		logger:           logger,
+		cacheTTL:         cacheTTL,
+		feedURL:          debianTrackerURL,
+		sourcesByRelease: make(map[string]releaseSources),
+		debsecanURL:      debsecanReleaseURL,
 	}
 }
 
@@ -144,7 +151,7 @@ func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdat
 	seen := make(map[string]bool)
 
 	for _, upd := range updates {
-		pkgCVEs, ok := tracker[upd.Package]
+		pkgCVEs, ok := trackerEntriesFor(tracker, upd)
 		if !ok {
 			// Even without CVE data, security-origin updates are vulnerabilities
 			if upd.IsSecurityUpdate {
@@ -177,8 +184,14 @@ func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdat
 				if rel.Status == "" {
 					continue
 				}
-				// Skip CVEs already fixed in the user's installed version.
-				if rel.Status == "resolved" && rel.FixedVersion != "" && rel.FixedVersion != "0" {
+				// Resolved means fixed in this release. fixed_version "0" is
+				// the tracker's "not affected" and an empty one names no
+				// fixing version, so neither leaves the node vulnerable; a
+				// real one does only while the installed version is below it.
+				if rel.Status == "resolved" {
+					if rel.FixedVersion == "" || rel.FixedVersion == "0" {
+						continue
+					}
 					if cmp, ok := compareDebianVersion(upd.OldVersion, rel.FixedVersion); ok && cmp >= 0 {
 						continue
 					}
@@ -223,16 +236,47 @@ func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdat
 				Description:    truncate(desc, 500),
 			})
 
-			_ = c.queries.UpsertCVECache(ctx, db.UpsertCVECacheParams{
-				CveID:       cveID,
-				Severity:    severity,
-				CvssScore:   pgtype.Float4{Float32: severityToScore(severity), Valid: true},
-				Description: truncate(desc, 500),
-			})
+			if c.queries != nil {
+				_ = c.queries.UpsertCVECache(ctx, db.UpsertCVECacheParams{
+					CveID:       cveID,
+					Severity:    severity,
+					CvssScore:   pgtype.Float4{Float32: severityToScore(severity), Valid: true},
+					Description: truncate(desc, 500),
+				})
+			}
 		}
 	}
 
 	return results, nil
+}
+
+// debianOrigin is the Origin of Debian's archive and its security archive.
+// The tracker's per-release status describes Debian's own builds, so only a
+// binary from Debian is matched through its source: Proxmox rebuilds sources
+// such as ceph at other upstream versions, and a source match would put
+// Debian's open CVEs on every one of their binaries.
+const debianOrigin = "Debian"
+
+// debianKernelSource is the one Debian source not matched through its
+// binaries. No Proxmox node boots Debian's kernel, so what it builds there
+// (linux-libc-dev, which build-essential pulls in, or linux-perf) would bring
+// every kernel CVE open in the release with it. The kernel the node runs is
+// Proxmox's, whose CVEs come from its changelog.
+const debianKernelSource = "linux"
+
+// trackerEntriesFor returns the tracker's CVEs for an update. The tracker is
+// keyed by SOURCE package, so libssl3 is found under openssl; the binary's
+// own name is the fallback when its source is unknown, not Debian's, or not
+// in the tracker. The finding stays on the binary, the package the node
+// upgrades.
+func trackerEntriesFor(tracker map[string]map[string]debianCVEEntry, upd AptUpdateInfo) (map[string]debianCVEEntry, bool) {
+	if upd.Origin == debianOrigin && upd.SourcePackage != "" && upd.SourcePackage != debianKernelSource {
+		if cves, ok := tracker[upd.SourcePackage]; ok {
+			return cves, true
+		}
+	}
+	cves, ok := tracker[upd.Package]
+	return cves, ok
 }
 
 // snapshot returns the current tracker data, loading it from process cache,
@@ -352,7 +396,10 @@ func parseTracker(body []byte) (map[string]map[string]debianCVEEntry, error) {
 
 // AptUpdateInfo represents a pending package update from Proxmox.
 type AptUpdateInfo struct {
-	Package          string
+	Package string
+	// SourcePackage is the Debian source Package is built from, read from its
+	// changelog (resolveSources); "" when that could not be read.
+	SourcePackage    string
 	Title            string
 	OldVersion       string
 	NewVersion       string

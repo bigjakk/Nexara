@@ -2,13 +2,12 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
-
-	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // CVE references in Debian-format changelogs follow the standard
@@ -22,6 +21,25 @@ var cveRefPattern = regexp.MustCompile(`(?i)CVE-(?:19|20)\d{2}-\d{4,7}`)
 // is captured loosely (lowercase letters, digits, common punctuation) and
 // the version is whatever sits between the parentheses.
 var changelogEntryHeader = regexp.MustCompile(`(?m)^([a-z0-9][a-z0-9.+-]*)\s*\(([^)]+)\)\s+\S+;`)
+
+// aptChangelogFailed matches the line Proxmox's apt/changelog endpoint ends
+// its answer with when `apt-get changelog` exits non-zero. The endpoint still
+// answers 200 then, with apt's error text in place of the changelog
+// (PVE/API2/APT.pm: `$output .= "RC: $rc" if $rc != 0`).
+var aptChangelogFailed = regexp.MustCompile(`(?:^|\n)RC: -?\d+\s*$`)
+
+// sourcePackageFromChangelog returns the source package a changelog belongs
+// to, "" when it has no entry header. Debian Policy 4.4 makes the first word
+// of every entry header the SOURCE package's name, and `apt-get changelog`
+// serves a binary package the changelog of its source, so libssl3's begins
+// "openssl (…)". The Proxmox API offers no other way to the source: the
+// ChangeLogUrl that carried it left apt/update after PVE 7.
+func sourcePackageFromChangelog(text string) string {
+	if m := changelogEntryHeader.FindStringSubmatch(text); m != nil {
+		return m[1]
+	}
+	return ""
+}
 
 // extractCVEsFromChangelog returns the deduplicated, sorted set of CVE IDs
 // referenced anywhere in the given changelog text. Sorting is deterministic
@@ -132,6 +150,12 @@ func dedupSortedUpper(matches []string) []string {
 	return out
 }
 
+// changelogSource is the Proxmox call the fetcher makes; *proxmox.Client is
+// the real one.
+type changelogSource interface {
+	GetNodeAptChangelog(ctx context.Context, node, pkg, version string) (string, error)
+}
+
 // changelogFetcher fetches and caches per-(package, version) changelog
 // text from a Proxmox node. Caching is per-fetcher (single scan scope):
 // all nodes in a cluster share the same upgrade target list, so we want
@@ -139,21 +163,66 @@ func dedupSortedUpper(matches []string) []string {
 // per call site so different (installed, target) brackets can reuse the
 // same fetch.
 type changelogFetcher struct {
-	client *proxmox.Client
+	client changelogSource
 	logger *slog.Logger
 
 	mu     sync.Mutex
 	byPkg  map[string]string // key: "pkg=version" → raw changelog text
-	failed map[string]bool   // key: "pkg=version" → true if fetch failed
+	failed map[string]error  // key: "pkg=version" → why the fetch failed
 }
 
-func newChangelogFetcher(client *proxmox.Client, logger *slog.Logger) *changelogFetcher {
+func newChangelogFetcher(client changelogSource, logger *slog.Logger) *changelogFetcher {
 	return &changelogFetcher{
 		client: client,
 		logger: logger,
 		byPkg:  make(map[string]string),
-		failed: make(map[string]bool),
+		failed: make(map[string]error),
 	}
+}
+
+// resolveSources sets each update's SourcePackage, from known (the tracker's
+// binary list) or else its changelog, and returns the packages whose
+// changelog could not be read, with the first reason. A failure another node
+// already met counts again: this node's result lacks that changelog too.
+//
+// A Debian package the list covers is not counted: the tracker has its CVEs,
+// so its changelog would add little, and counting it would put "N of N" on
+// every scan of a node that cannot reach Debian's changelog server.
+func (f *changelogFetcher) resolveSources(ctx context.Context, node string, updates []AptUpdateInfo, known map[string]string) (unreadable []string, firstErr error) {
+	for i := range updates {
+		u := &updates[i]
+		text, err := f.fetchText(ctx, node, u.Package, u.NewVersion)
+		src, listed := known[u.Package]
+		if err != nil && (!listed || u.Origin != debianOrigin) {
+			unreadable = append(unreadable, u.Package)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+		if listed {
+			u.SourcePackage = src
+		} else {
+			u.SourcePackage = sourcePackageFromChangelog(text)
+		}
+	}
+	return unreadable, firstErr
+}
+
+// changelogGapNote is a scan node's message when some of its changelogs could
+// not be read: CVEs named only in those changelogs are missing, and a package
+// the tracker's binary list lacks was matched by its own name. "" when every
+// changelog was read.
+func changelogGapNote(unreadable []string, total int) string {
+	if len(unreadable) == 0 {
+		return ""
+	}
+	const listed = 5
+	names, more := unreadable, ""
+	if len(names) > listed {
+		names, more = names[:listed], fmt.Sprintf(" and %d more", len(unreadable)-listed)
+	}
+	return fmt.Sprintf("Changelog unavailable for %d of %d packages (%s%s); their CVEs may be incomplete",
+		len(unreadable), total, strings.Join(names, ", "), more)
 }
 
 // augmentWithChangelogCVEs takes the vulnerability list produced by the
@@ -215,45 +284,49 @@ func augmentWithChangelogCVEs(
 
 // CVEsBetween returns the CVE IDs referenced in changelog entries strictly
 // newer than installedVer and at most targetVer. Fetches the target's full
-// changelog from the Proxmox node if not cached. Errors produce nil —
-// best-effort enrichment.
+// changelog from the Proxmox node if not cached. A changelog that cannot be
+// read gives nil; resolveSources is what reports it.
 func (f *changelogFetcher) CVEsBetween(ctx context.Context, node, pkg, installedVer, targetVer string) []string {
-	text := f.fetchText(ctx, node, pkg, targetVer)
-	if text == "" {
+	text, err := f.fetchText(ctx, node, pkg, targetVer)
+	if err != nil || text == "" {
 		return nil
 	}
 	return extractCVEsFromChangelogRange(text, installedVer, targetVer)
 }
 
-func (f *changelogFetcher) fetchText(ctx context.Context, node, pkg, version string) string {
+func (f *changelogFetcher) fetchText(ctx context.Context, node, pkg, version string) (string, error) {
 	if pkg == "" {
-		return ""
+		return "", nil
 	}
 	key := pkg + "=" + version
 
 	f.mu.Lock()
 	if text, ok := f.byPkg[key]; ok {
 		f.mu.Unlock()
-		return text
+		return text, nil
 	}
-	if f.failed[key] {
+	if err, ok := f.failed[key]; ok {
 		f.mu.Unlock()
-		return ""
+		return "", err
 	}
 	f.mu.Unlock()
 
 	text, err := f.client.GetNodeAptChangelog(ctx, node, pkg, version)
+	if err == nil && aptChangelogFailed.MatchString(text) {
+		err = fmt.Errorf("apt-get changelog %s=%s on %s: %s", pkg, version, node, truncate(strings.TrimSpace(text), 300))
+	}
 	if err != nil {
+		// Each package at Debug; runScan warns once per node with the count.
 		f.logger.Debug("changelog fetch failed",
 			"node", node, "pkg", pkg, "version", version, "error", err)
 		f.mu.Lock()
-		f.failed[key] = true
+		f.failed[key] = err
 		f.mu.Unlock()
-		return ""
+		return "", err
 	}
 
 	f.mu.Lock()
 	f.byPkg[key] = text
 	f.mu.Unlock()
-	return text
+	return text, nil
 }
