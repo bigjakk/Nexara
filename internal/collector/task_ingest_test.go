@@ -14,6 +14,7 @@ import (
 	"github.com/bigjakk/nexara/internal/auditkey"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -32,7 +33,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:qmsnapshot:100:run", Type: "qmsnapshot",
 			ID: "100", Status: "", StartTime: start.Unix(),
 		}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 {
@@ -73,7 +74,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:qmigrate:111:run", Type: "qmigrate",
 			ID: "111", Status: "RUNNING", StartTime: start.Unix(), EndTime: 0,
 		}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 {
@@ -99,7 +100,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:vzdump:101:done", Type: "vzdump",
 			ID: "101", Status: "OK", StartTime: start.Unix(), EndTime: end.Unix(),
 		}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 {
@@ -121,7 +122,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:qmigrate:102:fail", Type: "qmigrate",
 			ID: "102", Status: "migration aborted", StartTime: start.Unix(), EndTime: start.Add(time.Second).Unix(),
 		}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 || q.externalTaskCalls[0].Status != "failed" {
@@ -136,7 +137,7 @@ func TestIngestTask_External(t *testing.T) {
 		q := newMockQueries()
 		s := &Syncer{queries: q, logger: testLogger()}
 		task := proxmox.NodeTask{UPID: "UPID:pve1:vncproxy:x", Type: "vncproxy", Status: ""}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 0 {
@@ -174,7 +175,7 @@ func TestIngestTask_External(t *testing.T) {
 		s := &Syncer{queries: q, logger: testLogger()}
 		task := proxmox.NodeTask{UPID: "UPID:pve1:qmstart:103", Type: "qmstart", ID: "103", Status: "OK", StartTime: start.Unix()}
 		seen := map[string]bool{"UPID:pve1:qmstart:103": true}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task, seen); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, seen); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 0 {
@@ -232,7 +233,7 @@ func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 				UPID: "UPID:pve-01:" + tc.taskType + ":" + tc.id, Type: tc.taskType, ID: tc.id,
 				Status: "OK", StartTime: time.Now().Add(-time.Minute).Unix(), EndTime: time.Now().Unix(),
 			}
-			if err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil); err != nil {
+			if _, err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
 			if len(q.auditWithSourceCalls) != 1 || len(q.externalTaskCalls) != 1 {
@@ -276,7 +277,7 @@ func TestIngestTask_RecordsTheTokenATaskRanUnder(t *testing.T) {
 				UPID: "UPID:pve-01:srvstart:pveproxy", Type: "srvstart", ID: "pveproxy", User: tc.user, TokenID: tc.tokenID,
 				Status: "OK", StartTime: time.Now().Add(-time.Minute).Unix(),
 			}
-			if err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil); err != nil {
+			if _, err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
 			var details map[string]any
@@ -320,7 +321,7 @@ func TestIngestTask_FlagsATaskDisagreeingWithItsUPID(t *testing.T) {
 			q := newMockQueries()
 			s := &Syncer{queries: q, logger: testLogger()}
 			tc.task.Status, tc.task.StartTime = "OK", time.Now().Add(-time.Minute).Unix()
-			if err := s.ingestTask(context.Background(), cluster, "pve-01", tc.task, nil); err != nil {
+			if _, err := s.ingestTask(context.Background(), cluster, "pve-01", tc.task, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
 			if len(q.auditWithSourceCalls) != 1 || len(q.externalTaskCalls) != 1 {
@@ -379,7 +380,7 @@ func TestIngestTask_AuditRowIdentity(t *testing.T) {
 				UPID: "UPID:pve-01:" + tt.taskType, Type: tt.taskType, ID: tt.id,
 				Status: "OK", StartTime: 1, EndTime: 2,
 			}
-			if err := s.ingestTask(context.Background(), db.Cluster{ID: uuid.New()}, "pve-01", task, nil); err != nil {
+			if _, err := s.ingestTask(context.Background(), db.Cluster{ID: uuid.New()}, "pve-01", task, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
 			if len(q.auditWithSourceCalls) != 1 {
@@ -452,6 +453,68 @@ func TestSyncTasksMarksTheNodeReloadsOfAnSDNApply(t *testing.T) {
 	if len(q.sdnApplyLinks) != 1 || q.sdnApplyLinks[0].ClusterID != cluster.ID ||
 		time.Since(q.sdnApplyLinks[0].Since) < sdnApplyLinkWindow {
 		t.Errorf("node reloads marked with %+v, want one pass for this cluster over the last %v", q.sdnApplyLinks, sdnApplyLinkWindow)
+	}
+}
+
+// A cluster's recorded history is linked once, in the background: a month at a
+// time, then all of it, the migration starts before the HA workers. The passes
+// after it link their own window, and announce a task the queries may link only
+// once they have run, so a list draws its row already marked.
+func TestSyncTasksLinksRelatedTasks(t *testing.T) {
+	t.Parallel()
+	cluster := db.Cluster{ID: uuid.New()}
+	start := time.Now().Add(-time.Minute).Unix()
+	const byHA, byToken = "UPID:pve1:00000001:00000001:66000001:qmstart:100:root@pam:", "UPID:pve1:00000002:00000001:66000001:qmstart:101:root@pam!token01:"
+	client := &ingestSyncFakeClient{
+		nodes: []proxmox.NodeListEntry{{Node: "pve1", Status: "online"}},
+		tasks: map[string][]proxmox.NodeTask{"pve1": {
+			{UPID: byHA, Type: "qmstart", ID: "100", User: "root@pam", Status: "OK", StartTime: start, EndTime: start + 1},
+			{UPID: byToken, Type: "qmstart", ID: "101", User: "root@pam", TokenID: "token01", Status: "OK", StartTime: start, EndTime: start + 1},
+		}},
+	}
+	q := newMockQueries()
+	q.linkCount = 1
+	pub := &mockEventPub{}
+	s := &Syncer{queries: q, logger: testLogger(), eventPub: pub}
+	announced := func() (upids []string, linked int) {
+		pub.mu.Lock()
+		defer pub.mu.Unlock()
+		for _, e := range pub.events {
+			switch {
+			case e.Kind == events.KindTaskCreated:
+				upids = append(upids, e.ResourceID)
+			case e.Action == "linked":
+				linked++
+			}
+		}
+		return upids, linked
+	}
+
+	// The first pass leaves the links to the backfill it starts.
+	s.syncTasks(context.Background(), client, cluster)
+	s.linkBackfills.Wait()
+	calls := len(q.linkSince)
+	if calls != 2*(linkBackfillSteps+1) || q.linkSince[calls-1].Unix() != 0 || time.Since(q.linkSince[0]) < linkBackfillStep ||
+		!slices.Equal(q.linkCalls[:2], []string{"target starts", "ha workers"}) {
+		t.Fatalf("the backfill ran %v from %v, want %d steps back to the beginning, a month at a time, the starts first",
+			q.linkCalls, q.linkSince, linkBackfillSteps+1)
+	}
+	if _, linked := announced(); linked != 2 {
+		t.Errorf("the backfill sent %d link events, want one each for the tasks and the audit log", linked)
+	}
+
+	// The next links its own window, then announces what it held for that.
+	pub.mu.Lock()
+	pub.events = nil
+	pub.mu.Unlock()
+	var announcedAtLink []string
+	q.onLink = func() { announcedAtLink, _ = announced() }
+	s.syncTasks(context.Background(), client, cluster)
+	if since := q.linkSince[len(q.linkSince)-1]; len(q.linkSince) != calls+2 || since.Unix() == 0 || time.Since(since) < linkWindow {
+		t.Errorf("the second pass linked from %v, want its own window of at least %v, once per query", q.linkSince[calls:], linkWindow)
+	}
+	if upids, _ := announced(); !slices.Equal(announcedAtLink, []string{byToken}) || !slices.Equal(upids, []string{byToken, byHA}) {
+		t.Errorf("announced %v while linking and %v after, want root@pam's task held until the links had run", announcedAtLink, upids)
 	}
 }
 

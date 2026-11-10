@@ -94,6 +94,9 @@ var auditReadsExemptFromScope = map[string]string{
 	// rewrites one cluster's own rows, named by a required argument, and returns
 	// a count to nobody.
 	"proxmox_task_sync.sql.LinkSDNApplyNodeTasks": "collector-internal; one cluster by a required arg, rewrites its own rows, no user context",
+	// The collector linking the tasks Proxmox ran as parts of one action: the same.
+	"proxmox_task_sync.sql.LinkMigrationTargetStarts": "collector-internal; one cluster by a required arg, rewrites its own rows, no user context",
+	"proxmox_task_sync.sql.LinkHAWorkerTasks":         "collector-internal; one cluster by a required arg, rewrites its own rows, no user context",
 }
 
 // readsAuditLogRe identifies a query that reads audit_log, through FROM or a

@@ -21,7 +21,7 @@ import {
   DEFAULT_ACTIVITY_SORT,
   activityLabel,
   activityRowKey,
-  decorateActivity,
+  decorateActivities,
   filterActivity,
   isErrorActivity,
   pinRunningFirst,
@@ -328,7 +328,7 @@ export function TaskLogPanel() {
   // why the Events page, not this drawer, is where a full history is read: Tasks
   // for failed tasks, Audit Log for errors with no task behind them.
   const rows = useMemo(
-    () => (entries ?? []).map((e) => decorateActivity(e, taskStatuses)),
+    () => decorateActivities(entries ?? [], taskStatuses),
     [entries, taskStatuses],
   );
 

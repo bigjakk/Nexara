@@ -16,6 +16,11 @@ import {
   type DerivedTaskStatus,
   type ParsedDetails,
 } from "./task-status";
+import {
+  haRequester,
+  linkedTaskRole,
+  type LinkedTaskRole,
+} from "./linked-task";
 
 /** The live poll's view of one task, keyed by UPID in TaskLogPanel state. */
 export interface LiveTaskStatus {
@@ -153,6 +158,10 @@ export interface ActivityRowData {
   /** Who did it — see deriveActor. Empty when nothing identifies an actor. */
   actorLabel: string;
   exitStatusText: string;
+  /** Which part of an HA action or a migration the row is; null for neither. */
+  linkedRole: LinkedTaskRole | null;
+  /** For an HA manager's task, who asked for it; see decorateActivities. */
+  haRequester: string;
 }
 
 export function decorateActivity(
@@ -210,7 +219,36 @@ export function decorateActivity(
     resourceLabel,
     actorLabel: deriveActor(entry, details),
     exitStatusText,
+    linkedRole: linkedTaskRole(details),
+    haRequester: haRequester(details, NO_ROWS),
   };
+}
+
+const NO_ROWS: ReadonlyMap<string, string> = new Map();
+
+/**
+ * Every entry decorated, and each HA manager's task told who asked for it.
+ * That is the actor of the request's row, which only the list as a whole can
+ * say: the request is another entry, usually the one just below.
+ */
+export function decorateActivities(
+  entries: AuditLogEntry[],
+  taskStatuses: Record<string, LiveTaskStatus>,
+): ActivityRowData[] {
+  const rows = entries.map((e) => decorateActivity(e, taskStatuses));
+  const actorByUpid = new Map(
+    rows.flatMap((r) =>
+      r.details.upid && r.actorLabel
+        ? [[r.details.upid, r.actorLabel] as const]
+        : [],
+    ),
+  );
+  for (const row of rows) {
+    if (row.linkedRole === "ha-worker") {
+      row.haRequester = haRequester(row.details, actorByUpid);
+    }
+  }
+  return rows;
 }
 
 /**

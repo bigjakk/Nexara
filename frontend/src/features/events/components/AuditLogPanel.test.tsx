@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
-import { removedClusterEntry } from "@/test/audit-entry.fixtures";
+import {
+  haStartEntries,
+  removedClusterEntry,
+} from "@/test/audit-entry.fixtures";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 import { AuditLogPanel } from "./AuditLogPanel";
 import {
@@ -85,6 +88,13 @@ describe("AuditLogPanel", () => {
 
     expect(screen.getByText("linux01")).toBeInTheDocument();
     expect(screen.getByText("cluster01 (removed)")).toBeInTheDocument();
+  });
+
+  it("marks an HA request and the HA manager's task, and says who asked for it", () => {
+    renderFor(["view:audit"], haStartEntries);
+
+    expect(screen.getByText("HA request")).toBeInTheDocument();
+    expect(screen.getByText("HA manager · for Ops")).toBeInTheDocument();
   });
 
   it("leaves the syslog card out for a Viewer, whose every read of it would 403", () => {

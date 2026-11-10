@@ -21,6 +21,13 @@ function detailKeyLabel(key: string): string {
     pool: "Pool",
     name: "Name",
     size: "Size",
+    // The links between the tasks Proxmox runs as one action
+    // (queries/proxmox_task_sync.sql).
+    ha_worker_upid: "HA worker task",
+    ha_request_upid: "HA request",
+    ha_requested_by: "Requested by",
+    migration_upid: "Part of migration",
+    target_start_upid: "Start on target",
   };
   return (
     labels[key] ??

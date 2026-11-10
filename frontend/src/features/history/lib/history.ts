@@ -4,6 +4,7 @@
  * without a renderer; the cells that show it are in history-column-defs.tsx.
  * A kind's own naming is its HistoryKind's, and its strings its namespace's.
  */
+import type { LinkedTaskRole } from "@/components/layout/linked-task";
 import type { TFunction } from "i18next";
 import {
   deriveActor,
@@ -102,6 +103,10 @@ export interface HistoryCellCtx {
   /** The guest the entry is filed under or names, with its link when the
    *  page has one; null for an entry naming no guest. */
   guest: { vmid: number; link: HistoryGuestLink | undefined } | null;
+  /** Which part of an HA action or a migration the entry is; null for neither. */
+  linkedRole: LinkedTaskRole | null;
+  /** For an HA manager's task, who asked for it, when the timeline can say. */
+  requester: string;
 }
 
 /** The guest an entry is filed under, else the one it names; 0 for none. */

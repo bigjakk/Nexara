@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -52,6 +53,7 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 	}
 
 	var maxStartTime int64
+	var held []taskEvents
 	dedupFailed := false
 	fetchFailed := false
 	listed = make([]string, 0, len(nodes))
@@ -97,12 +99,16 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 			if task.StartTime > maxStartTime {
 				maxStartTime = task.StartTime
 			}
-			if err := s.ingestTask(ctx, cluster, node.Node, task, seen); err != nil {
+			ev, err := s.ingestTask(ctx, cluster, node.Node, task, seen)
+			if err != nil {
 				s.logger.Warn("task sync: failed to ingest task",
 					"cluster_id", cluster.ID,
 					"upid", task.UPID,
 					"error", err,
 				)
+			}
+			if ev != nil {
+				held = append(held, *ev)
 			}
 		}
 		listed = append(listed, node.Node)
@@ -111,6 +117,10 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 	// An SDN apply reloads each node's network as a task of its own: mark those,
 	// whichever node's list they came from, now that every list is in.
 	s.linkSDNApplyTasks(ctx, cluster)
+
+	// And link the tasks Proxmox ran as parts of one action, then announce the
+	// ones held for it.
+	s.linkRelatedTasks(ctx, cluster, linkSince(time.Now(), since), held)
 
 	// Advance the high-water mark only when every node was fetched AND deduped
 	// cleanly. If any node failed we processed a partial set, so leaving `since`
@@ -193,10 +203,14 @@ func (s *Syncer) seenTaskUPIDs(ctx context.Context, cluster db.Cluster, upids []
 // and the Tasks page see it) plus an audit_log entry (so the activity feed shows
 // it), attributed to the system user. Nexara-initiated tasks and tasks already
 // seen on a prior tick are skipped.
-func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName string, task proxmox.NodeTask, seen map[string]bool) error {
+//
+// The task's events are published here, except those of a task linkRelatedTasks
+// may link to another (mayLink): they are returned for it to publish once it has,
+// so a list draws the row with its marker and does not gain it a moment later.
+func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName string, task proxmox.NodeTask, seen map[string]bool) (held *taskEvents, err error) {
 	// Skip noisy task types.
 	if skipTaskTypes[task.Type] {
-		return nil
+		return nil, nil
 	}
 
 	// Skip anything in the seen set, resolved once per node in syncTasks. Two
@@ -208,7 +222,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 	// the insert below would persist PVE's die message verbatim and that text
 	// can carry the target cluster's API token. See seenTaskUPIDs.
 	if seen[task.UPID] {
-		return nil
+		return nil, nil
 	}
 
 	// The identity comes from the task's type and id and the guest it is stamped
@@ -300,7 +314,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		StartedAt:   time.Unix(task.StartTime, 0),
 		FinishedAt:  finishedAt,
 	}); err != nil {
-		return fmt.Errorf("insert external task_history: %w", err)
+		return nil, fmt.Errorf("insert external task_history: %w", err)
 	}
 
 	// Build details JSON.
@@ -337,20 +351,171 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		Source:       "proxmox",
 		CreatedAt:    time.Unix(task.StartTime, 0),
 	}); err != nil {
-		return fmt.Errorf("insert audit log: %w", err)
+		return nil, fmt.Errorf("insert audit log: %w", err)
 	}
 
-	// Publish events for real-time WS updates: KindTaskCreated drives the Tasks
-	// page + activity feed; KindAuditEntry drives the audit-log page + feed. The
-	// reconciler later fires KindTaskUpdate when a running task finishes.
-	if s.eventPub != nil {
-		s.eventPub.ClusterEvent(ctx, cluster.ID.String(),
-			events.KindTaskCreated, "task", task.UPID, task.Type)
-		s.eventPub.ClusterEvent(ctx, cluster.ID.String(),
-			events.KindAuditEntry, mapping.ResourceType, resourceID, mapping.Action)
+	ev := taskEvents{upid: task.UPID, taskType: task.Type, resourceType: mapping.ResourceType, resourceID: resourceID, action: mapping.Action}
+	if mayLink(task) {
+		return &ev, nil
 	}
+	s.publishTaskEvents(ctx, cluster, ev)
+	return nil, nil
+}
 
-	return nil
+// taskEvents are the two events an ingested task is announced with.
+type taskEvents struct {
+	upid, taskType, resourceType, resourceID, action string
+}
+
+// publishTaskEvents publishes them for real-time WS updates: KindTaskCreated
+// drives the Tasks page + activity feed; KindAuditEntry drives the audit-log page
+// + feed. The reconciler later fires KindTaskUpdate when a running task finishes.
+func (s *Syncer) publishTaskEvents(ctx context.Context, cluster db.Cluster, ev taskEvents) {
+	if s.eventPub == nil {
+		return
+	}
+	s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindTaskCreated, "task", ev.upid, ev.taskType)
+	s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindAuditEntry, ev.resourceType, ev.resourceID, ev.action)
+}
+
+// linkWindow is how far back a pass looks for tasks to link, at least.
+const linkWindow = 24 * time.Hour
+
+// linkSince is where a pass's links start: a day back, or a quarter of an hour
+// before the task watermark when that is earlier, so the tasks a pass ingests
+// after an outage are still linked to the ones that caused them.
+func linkSince(now time.Time, watermark int64) time.Time {
+	since := now.Add(-linkWindow)
+	if w := time.Unix(watermark, 0).Add(-15 * time.Minute); w.Before(since) {
+		since = w
+	}
+	return since
+}
+
+// linkableWorkers are the task types the two link queries may link to the task
+// that caused them, when root@pam itself ran one. Only which events are held
+// depends on this copy of the queries' lists: a type missing here is linked all
+// the same, its row drawn without its marker for a moment first.
+var linkableWorkers = map[string]bool{
+	"qmstart": true, "vzstart": true,
+	"qmshutdown": true, "qmstop": true, "vzshutdown": true, "vzstop": true,
+	"qmigrate": true, "vzmigrate": true,
+}
+
+// mayLink reports whether a task is one the link queries may link.
+func mayLink(task proxmox.NodeTask) bool {
+	return linkableWorkers[task.Type] && proxmoxUser(task) == "root@pam"
+}
+
+// linkRelatedTasks records which of the tasks Proxmox ran belong to one action —
+// a live migration's start on its target node, an HA request and the task that
+// does its work — so the lists can mark them (queries/proxmox_task_sync.sql),
+// then publishes the events held for it. A failed link is only logged: the rows
+// stay as they were ingested, unmarked, and the next pass tries again.
+//
+// The rows recorded before the links existed get them from backfillLinks, once
+// per cluster and process. While it runs the pass links nothing itself: two
+// statements pairing the same rows at once could each give a request a
+// different worker.
+func (s *Syncer) linkRelatedTasks(ctx context.Context, cluster db.Cluster, since time.Time, held []taskEvents) {
+	v, _ := s.linkBackfill.LoadOrStore(cluster.ID, &linkBackfillState{})
+	st, _ := v.(*linkBackfillState)
+	st.mu.Lock()
+	if !st.running && !st.done && time.Since(st.lastTry) >= linkBackfillRetry {
+		st.running, st.lastTry = true, time.Now()
+		s.linkBackfills.Add(1)
+		// Its own lifetime: a pass's context ends with the pass.
+		go s.backfillLinks(context.WithoutCancel(ctx), cluster, st)
+	}
+	running := st.running
+	st.mu.Unlock()
+
+	var linked int64
+	if !running {
+		linked, _ = s.runLinks(ctx, cluster, since)
+	}
+	for _, ev := range held {
+		s.publishTaskEvents(ctx, cluster, ev)
+	}
+	s.announceLinks(ctx, cluster, linked)
+}
+
+// runLinks runs the two link queries from since on and reports how many rows
+// they linked and whether both ran. The starts first, so a request that the HA
+// manager had nothing to do for cannot take a migration's start as its worker.
+func (s *Syncer) runLinks(ctx context.Context, cluster db.Cluster, since time.Time) (linked int64, ok bool) {
+	starts, err := s.queries.LinkMigrationTargetStarts(ctx, db.LinkMigrationTargetStartsParams{ClusterID: cluster.ID, Since: since})
+	if err != nil {
+		s.logger.Warn("task sync: failed to link the target starts of migrations", "cluster_id", cluster.ID, "error", err)
+		return 0, false
+	}
+	workers, err := s.queries.LinkHAWorkerTasks(ctx, db.LinkHAWorkerTasksParams{ClusterID: cluster.ID, Since: since})
+	if err != nil {
+		s.logger.Warn("task sync: failed to link HA requests to their tasks", "cluster_id", cluster.ID, "error", err)
+		return starts, false
+	}
+	return starts + workers, true
+}
+
+// announceLinks tells the lists that rows they may already have drawn changed.
+func (s *Syncer) announceLinks(ctx context.Context, cluster db.Cluster, linked int64) {
+	if linked == 0 || s.eventPub == nil {
+		return
+	}
+	s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindTaskUpdate, "task", "", "linked")
+	s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindAuditEntry, "task", "", "linked")
+}
+
+// linkBackfillState is one cluster's backfillLinks: whether it is running or
+// done, and when it was last started.
+type linkBackfillState struct {
+	mu            sync.Mutex
+	running, done bool
+	lastTry       time.Time
+}
+
+const (
+	// linkBackfillStep and linkBackfillSteps are how backfillLinks walks back:
+	// three years a month at a time, then everything older at once.
+	linkBackfillStep  = 30 * 24 * time.Hour
+	linkBackfillSteps = 36
+	// linkBackfillTimeout bounds one attempt, and linkBackfillRetry spaces
+	// them when one fails.
+	linkBackfillTimeout = 30 * time.Minute
+	linkBackfillRetry   = 15 * time.Minute
+)
+
+// backfillLinks links a cluster's whole recorded history. Not a migration and not
+// inside a pass, because it rewrites a row per pair, seconds per ten thousand: a
+// migration that long outlasts the healthcheck and one stopped midway leaves the
+// database dirty, and a pass that long holds up every other part of the sync. It
+// goes back a month at a time, each step its own statements, so a stop loses one
+// step and the next start finds the rest already linked. A step that fails ends
+// the attempt; the passes link their own window again and a later one retries.
+func (s *Syncer) backfillLinks(ctx context.Context, cluster db.Cluster, st *linkBackfillState) {
+	defer s.linkBackfills.Done()
+	ctx, cancel := context.WithTimeout(ctx, linkBackfillTimeout)
+	defer cancel()
+
+	var linked int64
+	ok := true
+	now := time.Now()
+	for step := 1; ok && step <= linkBackfillSteps+1; step++ {
+		since := time.Unix(0, 0)
+		if step <= linkBackfillSteps {
+			since = now.Add(-time.Duration(step) * linkBackfillStep)
+		}
+		var n int64
+		n, ok = s.runLinks(ctx, cluster, since)
+		linked += n
+	}
+	st.mu.Lock()
+	st.running, st.done = false, ok
+	st.mu.Unlock()
+	if linked > 0 {
+		s.logger.Info("task sync: linked the tasks recorded as parts of one action", "cluster_id", cluster.ID, "linked", linked)
+	}
+	s.announceLinks(ctx, cluster, linked)
 }
 
 // upidTypeAndID is the worker type and id a UPID carries (fields 6 and 7 of

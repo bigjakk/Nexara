@@ -24,3 +24,40 @@ export const removedClusterEntry: AuditLogEntry = {
   resource_vmid: 100,
   resource_name: "linux01",
 };
+
+const haRequestUpid =
+  "UPID:pve-01:0000A1B3:00000001:6A8CE408:hastart:100:ops@pam!token01:";
+const haWorkerUpid =
+  "UPID:pve-01:0000A1B4:00000001:6A8CE40C:qmstart:100:root@pam:";
+
+/**
+ * An HA-managed guest's start as Proxmox runs it and the collector links it:
+ * the operator's request, and the task the HA manager then runs as root@pam,
+ * which names the request. Newest first, as a list holds them.
+ */
+export const haStartEntries: AuditLogEntry[] = [
+  {
+    ...removedClusterEntry,
+    id: "ha-worker",
+    cluster_removed: false,
+    source: "proxmox",
+    user_display_name: "",
+    user_email: "",
+    created_at: "2026-09-01T10:00:04Z",
+    details: JSON.stringify({
+      upid: haWorkerUpid,
+      proxmox_user: "root@pam",
+      ha_request_upid: haRequestUpid,
+    }),
+  },
+  {
+    ...removedClusterEntry,
+    id: "ha-request",
+    cluster_removed: false,
+    user_display_name: "Ops",
+    details: JSON.stringify({
+      upid: haRequestUpid,
+      ha_worker_upid: haWorkerUpid,
+    }),
+  },
+];

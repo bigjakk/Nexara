@@ -12,12 +12,15 @@ import { apiFetch } from "@/lib/api-client";
 import type { ApiPath } from "@/lib/api-path";
 import {
   SEVERITY_STYLES,
+  deriveActor,
   deriveSeverity,
   formatAction,
   userLabel,
   type Severity,
 } from "@/components/layout/activity-columns";
 import { parseDetails } from "@/components/layout/task-status";
+import { haRequester, linkedTaskRole } from "@/components/layout/linked-task";
+import { LinkedTaskBadge } from "@/components/LinkedTaskBadge";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
@@ -157,10 +160,13 @@ function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
 
 function EventRow({
   entry,
+  requester,
   expanded,
   onToggle,
 }: {
   entry: AuditLogEntry;
+  /** Who asked the HA manager for this entry's task, when it is one. */
+  requester: string;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -202,7 +208,15 @@ function EventRow({
             <ResourceFallback entry={entry} />
           )}
         </td>
-        <td className="px-4 py-2 font-medium">{formatAction(entry.action)}</td>
+        <td className="px-4 py-2 font-medium">
+          <span className="inline-flex items-center gap-2">
+            <LinkedTaskBadge
+              role={linkedTaskRole(parseDetails(entry.details))}
+              requester={requester}
+            />
+            {formatAction(entry.action)}
+          </span>
+        </td>
         <td className="px-4 py-2 text-xs text-muted-foreground">
           {summary ?? ""}
         </td>
@@ -365,6 +379,18 @@ export function AuditLogPanel() {
     severityFilter === "all"
       ? data?.items
       : data?.items.filter((e) => entrySeverity(e) === severityFilter);
+
+  // Who made each task on the page: an HA manager's task names its request's.
+  // From the whole page, not what the severity filter leaves of it.
+  const actorByUpid = useMemo(() => {
+    const actors = new Map<string, string>();
+    for (const entry of data?.items ?? []) {
+      const details = parseDetails(entry.details);
+      const actor = deriveActor(entry, details);
+      if (details.upid && actor) actors.set(details.upid, actor);
+    }
+    return actors;
+  }, [data?.items]);
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
 
@@ -650,6 +676,10 @@ export function AuditLogPanel() {
                   <EventRow
                     key={entry.id}
                     entry={entry}
+                    requester={haRequester(
+                      parseDetails(entry.details),
+                      actorByUpid,
+                    )}
                     expanded={expandedId === entry.id}
                     onToggle={() => {
                       setExpandedId(expandedId === entry.id ? null : entry.id);

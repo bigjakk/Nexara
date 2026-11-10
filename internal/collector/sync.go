@@ -168,6 +168,8 @@ type SyncQueries interface {
 	ListExistingAuditLogUPIDs(ctx context.Context, arg db.ListExistingAuditLogUPIDsParams) ([]string, error)
 	ListCrossClusterMigrationUPIDs(ctx context.Context, upids []string) ([]string, error)
 	LinkSDNApplyNodeTasks(ctx context.Context, arg db.LinkSDNApplyNodeTasksParams) (int64, error)
+	LinkMigrationTargetStarts(ctx context.Context, arg db.LinkMigrationTargetStartsParams) (int64, error)
+	LinkHAWorkerTasks(ctx context.Context, arg db.LinkHAWorkerTasksParams) (int64, error)
 	InsertExternalTaskHistory(ctx context.Context, arg db.InsertExternalTaskHistoryParams) error
 	// Task reconcile
 	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.TaskHistory, error)
@@ -353,6 +355,11 @@ type Syncer struct {
 	// synced realm maps, as last read (readRealmSyncs).
 	realmSyncLogs   sync.Map
 	realmSyncRealms sync.Map
+
+	// linkBackfill is each cluster's backfillLinks (*linkBackfillState), and
+	// linkBackfills the ones running, for a test to wait on.
+	linkBackfill  sync.Map
+	linkBackfills sync.WaitGroup
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.

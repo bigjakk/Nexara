@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
-import { removedClusterEntry } from "@/test/audit-entry.fixtures";
+import {
+  haStartEntries,
+  removedClusterEntry,
+} from "@/test/audit-entry.fixtures";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { TaskLogPanel } from "./TaskLogPanel";
@@ -40,6 +43,14 @@ describe("TaskLogPanel", () => {
     // Focusing the task would open its log from that cluster as well.
     fireEvent.doubleClick(screen.getByText(/linux01/));
     expect(useTaskLogStore.getState().focusedTask).toBeNull();
+  });
+
+  it("marks an HA request and the HA manager's task, and says who asked for it", async () => {
+    vi.mocked(apiClient.list).mockResolvedValue(haStartEntries);
+    renderWithProviders(<TaskLogPanel />);
+
+    expect(await screen.findByText("HA request")).toBeInTheDocument();
+    expect(screen.getByText("HA manager · for Ops")).toBeInTheDocument();
   });
 
   describe("running tasks and the error filter", () => {

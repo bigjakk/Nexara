@@ -23,6 +23,236 @@ func (q *Queries) GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (in
 	return last_synced_at, err
 }
 
+const linkHAWorkerTasks = `-- name: LinkHAWorkerTasks :execrows
+WITH requests AS (
+    SELECT p.details->>'upid' AS upid, p.vmid,
+           min(COALESCE(
+               CASE WHEN p.details->>'upid' ~ '^UPID:[^:]*:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8,9}:[0-9A-Fa-f]{8}:'
+                    THEN to_timestamp(('x' || split_part(p.details->>'upid', ':', 5))::bit(32)::bigint) END,
+               p.created_at)) AS started,
+           bool_or(p.source <> 'proxmox') AS recorded_by_nexara,
+           min(p.details->>'proxmox_user') FILTER (WHERE p.source = 'proxmox') AS requester
+    FROM audit_log p
+    WHERE p.cluster_id = $1::uuid
+      AND p.created_at > $2::timestamptz - interval '15 minutes'
+      AND p.vmid IS NOT NULL
+      AND split_part(p.details->>'upid', ':', 6) IN ('hastart', 'hastop', 'hamigrate', 'harelocate')
+      AND NOT (p.details ? 'ha_worker_upid')
+    GROUP BY p.details->>'upid', p.vmid
+), timeline AS (
+    -- One pass in time order per guest and action, a request ahead of a worker
+    -- in its slack: every worker then follows the nearest request before it.
+    SELECT r.vmid, split_part(r.upid, ':', 7) AS guest,
+           CASE split_part(r.upid, ':', 6) WHEN 'hastart' THEN 'start' WHEN 'hastop' THEN 'stop' ELSE 'migrate' END AS action,
+           r.started - interval '2 seconds' AS at, 0 AS follows,
+           r.upid, NULL::uuid AS id, r.started, r.recorded_by_nexara, r.requester
+    FROM requests r
+    UNION ALL
+    SELECT c.vmid, split_part(c.details->>'upid', ':', 7),
+           CASE WHEN split_part(c.details->>'upid', ':', 6) IN ('qmstart', 'vzstart') THEN 'start'
+                WHEN split_part(c.details->>'upid', ':', 6) IN ('qmigrate', 'vzmigrate') THEN 'migrate'
+                ELSE 'stop' END,
+           c.created_at, 1,
+           c.details->>'upid', c.id, c.created_at, NULL::bool, NULL::text
+    FROM audit_log c
+    WHERE c.cluster_id = $1::uuid
+      AND c.created_at > $2::timestamptz
+      AND c.source = 'proxmox'
+      AND c.vmid IS NOT NULL
+      AND split_part(c.details->>'upid', ':', 6) IN ('qmstart', 'vzstart', 'qmshutdown', 'qmstop', 'vzshutdown',
+                                                     'vzstop', 'qmigrate', 'vzmigrate')
+      AND split_part(c.details->>'upid', ':', 8) = 'root@pam'
+      AND NOT (c.details ?| ARRAY['migration_upid', 'ha_request_upid'])
+), grouped AS (
+    SELECT t.vmid, t.guest, t.action, t.at, t.follows, t.upid, t.id, t.started, t.recorded_by_nexara, t.requester, count(*) FILTER (WHERE t.follows = 0)
+                    OVER (PARTITION BY t.vmid, t.guest, t.action ORDER BY t.at, t.follows, t.upid) AS span
+    FROM timeline t
+), headed AS (
+    -- A span opens with its request (none before the first: span 0).
+    SELECT g.vmid, g.guest, g.action, g.at, g.follows, g.upid, g.id, g.started, g.recorded_by_nexara, g.requester, g.span, first_value(g.upid) OVER w AS request_upid, first_value(g.started) OVER w AS request_started,
+           first_value(g.recorded_by_nexara) OVER w AS request_by_nexara, first_value(g.requester) OVER w AS request_by
+    FROM grouped g
+    WINDOW w AS (PARTITION BY g.vmid, g.guest, g.action, g.span ORDER BY g.at, g.follows, g.upid)
+), pairs AS MATERIALIZED (
+    SELECT DISTINCT ON (w.vmid, w.guest, w.action, w.span) w.id, w.upid, w.request_upid,
+           w.request_by_nexara AS recorded_by_nexara, w.request_by AS requester
+    FROM headed w
+    WHERE w.follows = 1
+      AND w.span > 0
+      AND w.started <= w.request_started + interval '2 minutes'
+    ORDER BY w.vmid, w.guest, w.action, w.span, w.at, w.id
+), mark_requests AS (
+    UPDATE audit_log p
+    SET details = p.details || jsonb_build_object('ha_worker_upid', m.upid)
+    FROM pairs m
+    WHERE p.cluster_id = $1::uuid
+      AND p.details->>'upid' = m.request_upid
+)
+UPDATE audit_log c
+SET details = c.details || jsonb_build_object('ha_request_upid', m.request_upid)
+              || CASE WHEN NOT m.recorded_by_nexara AND m.requester IS NOT NULL
+                      THEN jsonb_build_object('ha_requested_by', m.requester)
+                      ELSE '{}'::jsonb END
+FROM pairs m
+WHERE c.id = m.id
+`
+
+type LinkHAWorkerTasksParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Since     time.Time `json:"since"`
+}
+
+// A start, stop or migration of an HA-managed guest is two tasks: the request
+// (hastart, hastop, hamigrate, harelocate), run by whoever asked, which only
+// queues it with the HA manager and ends OK within a second whatever becomes of
+// it; and the task that does the work, which the HA manager runs as root@pam up
+// to half a minute later, on whichever node holds the guest. Measured over 2,332
+// requests: all but one had its worker, 1 to 30 seconds after it.
+//
+// A worker is linked to the nearest request of its kind for the same guest that
+// started within the 2 minutes before it (2 seconds' slack after it), and that no
+// worker has taken; a request keeps one worker, its earliest. So a retry the HA
+// manager makes after a failed start stays a row of its own, and a worker that
+// lost its request to an earlier one looks again on the next call.
+//
+// Who asked is the request row's own user. Where only the collector recorded
+// the request (made in Proxmox, or by a Nexara engine that files no row), that is
+// a PVE account, and the worker carries it too as ha_requested_by, for a list
+// that shows the worker without its request. A Nexara user's name is not copied:
+// it is the request row's to show, and gone with the account.
+//
+// The worker's UPDATE is the statement's own, so the count returned is pairs.
+func (q *Queries) LinkHAWorkerTasks(ctx context.Context, arg LinkHAWorkerTasksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkHAWorkerTasks, arg.ClusterID, arg.Since)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const linkMigrationTargetStarts = `-- name: LinkMigrationTargetStarts :execrows
+
+WITH migrations AS (
+    SELECT a.details->>'upid' AS upid, a.vmid,
+           min(COALESCE(
+               CASE WHEN a.details->>'upid' ~ '^UPID:[^:]*:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8,9}:[0-9A-Fa-f]{8}:'
+                    THEN to_timestamp(('x' || split_part(a.details->>'upid', ':', 5))::bit(32)::bigint) END,
+               a.created_at)) AS started,
+           bool_or(a.source = 'proxmox'
+                   AND upper(COALESCE(a.details->>'status', '')) NOT IN ('', 'RUNNING')) AS ingested_finished
+    FROM audit_log a
+    WHERE a.cluster_id = $1::uuid
+      AND a.created_at > $2::timestamptz - interval '1 day'
+      AND a.vmid IS NOT NULL
+      AND split_part(a.details->>'upid', ':', 6) IN ('qmigrate', 'vzmigrate')
+      AND NOT (a.details ? 'target_start_upid')
+    GROUP BY a.details->>'upid', a.vmid
+), timeline AS (
+    -- One pass in time order per guest, a migration ahead of a start in its
+    -- slack: every start then follows the migration it could belong to.
+    SELECT m.vmid, split_part(m.upid, ':', 7) AS guest, m.started - interval '2 seconds' AS at, 0 AS follows,
+           m.upid, NULL::uuid AS id, m.started,
+           CASE WHEN m.ingested_finished THEN COALESCE(ar.finished_at, th.finished_at) END AS ended
+    FROM migrations m
+    LEFT JOIN task_history th ON th.upid = m.upid AND th.cluster_id = $1::uuid
+    LEFT JOIN task_history_archive ar ON ar.upid = m.upid AND ar.cluster_id = $1::uuid
+    UNION ALL
+    SELECT c.vmid, split_part(c.details->>'upid', ':', 7), c.created_at, 1,
+           c.details->>'upid', c.id, c.created_at, NULL::timestamptz
+    FROM audit_log c
+    WHERE c.cluster_id = $1::uuid
+      AND c.created_at > $2::timestamptz
+      AND c.source = 'proxmox'
+      AND c.vmid IS NOT NULL
+      AND split_part(c.details->>'upid', ':', 6) IN ('qmstart', 'vzstart')
+      AND split_part(c.details->>'upid', ':', 8) = 'root@pam'
+      AND NOT (c.details ?| ARRAY['migration_upid', 'ha_request_upid'])
+), grouped AS (
+    SELECT t.vmid, t.guest, t.at, t.follows, t.upid, t.id, t.started, t.ended, count(*) FILTER (WHERE t.follows = 0)
+                    OVER (PARTITION BY t.vmid, t.guest ORDER BY t.at, t.follows, t.upid) AS span
+    FROM timeline t
+), headed AS (
+    -- A span opens with its migration (none before the first: span 0).
+    SELECT g.vmid, g.guest, g.at, g.follows, g.upid, g.id, g.started, g.ended, g.span, first_value(g.upid) OVER w AS migration_upid, first_value(g.started) OVER w AS migration_started,
+           first_value(g.ended) OVER w AS migration_ended
+    FROM grouped g
+    WINDOW w AS (PARTITION BY g.vmid, g.guest, g.span ORDER BY g.at, g.follows, g.upid)
+), pairs AS MATERIALIZED (
+    SELECT DISTINCT ON (s.vmid, s.guest, s.span) s.id, s.upid, s.migration_upid
+    FROM headed s
+    WHERE s.follows = 1
+      AND s.span > 0
+      AND split_part(s.migration_upid, ':', 2) <> split_part(s.upid, ':', 2)
+      AND (s.started < s.migration_ended
+           OR s.migration_ended IS NULL AND s.started <= s.migration_started + interval '5 seconds')
+    ORDER BY s.vmid, s.guest, s.span, s.at, s.id
+), mark_migrations AS (
+    UPDATE audit_log a
+    SET details = a.details || jsonb_build_object('target_start_upid', p.upid)
+    FROM pairs p
+    WHERE a.cluster_id = $1::uuid
+      AND a.details->>'upid' = p.migration_upid
+)
+UPDATE audit_log c
+SET details = c.details || jsonb_build_object('migration_upid', p.migration_upid)
+FROM pairs p
+WHERE c.id = p.id
+`
+
+type LinkMigrationTargetStartsParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Since     time.Time `json:"since"`
+}
+
+// Proxmox runs some actions as more than one task, each with a UPID of its own:
+// its task log lists them all, and so do Nexara's lists, which is where one action
+// reads as two or three. The two queries below record which rows belong together,
+// with keys in audit_log.details, and change nothing else. Every row stays listed;
+// the lists mark the linked ones (an "HA manager" or "Migration target" badge) so
+// a start by root@pam beside the operator's own reads as its second half and not
+// as a second action. Every key:
+//
+//	migration_upid     on a migration's start on its target node: the migration
+//	target_start_upid  on the migration's row(s): that start
+//	ha_request_upid    on an HA worker task: the request that caused it
+//	ha_worker_upid     on an HA request's row(s): the task that did the work
+//	ha_requested_by    on an HA worker whose request Nexara did not record: the
+//	                   PVE account that made it
+//
+// Both read only rows the collector ingested (source 'proxmox') run by root@pam
+// itself, not by a token: the HA manager and a migration's own ssh run as that.
+// Types and times are the UPID's (fields 6 and 5), never the stored task_type,
+// which Nexara writes its own labels into. There is no migration for the rows
+// recorded before this: the collector links each cluster's history once per
+// start, in the background and a month at a time (backfillLinks).
+// A live migration starts the guest on the target node as a task of its own
+// (qmstart, vzstart), on real data within 5 seconds of the migration's start for
+// 99.2% of 6,028 and always before it ends. That start is linked to the migration
+// when it ran on another node than the migration and no earlier than it (2
+// seconds' slack for the nodes' clocks).
+//
+// How late it may be depends on whether the migration's end is known. It is only
+// for one the collector ingested already finished (its row's recorded status is
+// the exit text, not RUNNING): finished_at is then Proxmox's own, and the start
+// must come before it. Every other finished_at is when a poll noticed — the
+// reconciler's up to a pass late, a day late for a task on a node that died —
+// so for those, as for a migration still running or with no task row, the start
+// must come within 5 seconds of the migration's. What that keeps out is a start
+// made after an offline migration: the second half of an HA relocation, or the
+// HA manager recovering a guest whose node died mid-migration. Each is an action
+// of its own, and marked as part of a migration it would read as nothing to look
+// at. What it leaves, at worst, is a slow migration's start unmarked, as before.
+//
+// One start per migration, the earliest; a start in two migrations is the later
+// one's. Rows linked earlier are skipped, so a second call changes nothing.
+func (q *Queries) LinkMigrationTargetStarts(ctx context.Context, arg LinkMigrationTargetStartsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkMigrationTargetStarts, arg.ClusterID, arg.Since)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const linkSDNApplyNodeTasks = `-- name: LinkSDNApplyNodeTasks :execrows
 WITH applies AS (
     SELECT u.upid, u.started_at,

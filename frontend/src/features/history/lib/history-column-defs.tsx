@@ -15,6 +15,7 @@ import {
   STATUS_LABEL,
   type DisplayStatus,
 } from "@/components/layout/task-status";
+import { LinkedTaskBadge } from "@/components/LinkedTaskBadge";
 import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
@@ -72,7 +73,17 @@ export const HISTORY_COLUMNS: ColumnDef<
           <Icon
             className={`h-3.5 w-3.5 shrink-0 ${entry.kind === "status" ? "text-amber-500" : "text-muted-foreground"}`}
           />
-          <span className="truncate font-medium">{ctx.label}</span>
+          {/* Beside a marker the name stays whole and the marker gives way. */}
+          <span
+            className={`font-medium ${ctx.linkedRole ? "shrink-0" : "truncate"}`}
+          >
+            {ctx.label}
+          </span>
+          <LinkedTaskBadge
+            role={ctx.linkedRole}
+            requester={ctx.requester}
+            compact
+          />
         </div>
       );
     },

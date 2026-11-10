@@ -2209,6 +2209,17 @@ key refuses one that names a cluster that does not exist), so none can reach
 these entries; the audit reads also require the cluster to exist, as a second
 guard.
 
+#### Linked tasks
+
+Proxmox runs some actions as more than one task, and every one has its entry.
+The collector records which belong together, as keys in an entry's `details`:
+`ha_worker_upid` on an HA request's entry (`hastart`, `hastop`, `hamigrate`,
+`harelocate`) names the task that did the work; that task's entry carries
+`ha_request_upid`, and `ha_requested_by` when the request was made in Proxmox;
+a live migration's start on its target node carries `migration_upid`, and the
+migration's entry `target_start_upid`. An entry is listed whether or not it has
+any of them.
+
 #### Export
 
 `GET /audit-log/export?format=json|csv|syslog` returns a downloadable file,

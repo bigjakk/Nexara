@@ -70,6 +70,12 @@
   "activityErrorCount_one": "{{count}} error",
   "activityErrorCount_other": "{{count}} errors",
   "others": "Others",
+  "linkedTask": {
+    "haRequest": "HA request",
+    "haManager": "HA manager",
+    "haManagerFor": "HA manager · for {{who}}",
+    "migrationStart": "Migration target"
+  },
   "taskLog": "Task Log",
   "inProgress": "In progress...",
   "taskCompletedSuccessfully": "Task completed successfully.",

@@ -262,6 +262,42 @@ describe("HistoryTimeline", () => {
     expect(screen.getByText("Shutdown")).toBeInTheDocument();
   });
 
+  // Proxmox lists an HA guest's start as the request and the HA manager's
+  // task: both stay, marked, the second with who asked for it.
+  it("marks an HA request and the HA manager's task", async () => {
+    mockedPage.mockReset();
+    const request =
+      "UPID:pve-01:0000A1B3:00000001:6A8CE408:hastart:100:ops@pam!token01:";
+    const worker =
+      "UPID:pve-01:0000A1B4:00000001:6A8CE40C:qmstart:100:root@pam:";
+    mockedPage.mockResolvedValue({
+      items: [
+        makeHistoryEntry({
+          id: "audit:2",
+          source: "proxmox",
+          action: "start",
+          upid: worker,
+          details: JSON.stringify({
+            upid: worker,
+            proxmox_user: "root@pam",
+            ha_request_upid: request,
+          }),
+        }),
+        makeHistoryEntry({ action: "start", upid: request }),
+      ],
+      total: 2,
+    });
+    const kind = historyKind(
+      "probe",
+      { categories: { other: "Other" } },
+      { icons: {} },
+    );
+    renderWithProviders(<HistoryTimeline kind={kind} target={probeTarget} />);
+
+    expect(await screen.findByText("HA request")).toBeInTheDocument();
+    expect(screen.getByText("HA manager · for Ops")).toBeInTheDocument();
+  });
+
   // Its route reads a kind's default window when none is named, so All time
   // asks for all of it; an empty window says so, not that a filter matched
   // nothing.

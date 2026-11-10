@@ -77,6 +77,10 @@ type mockQueries struct {
 	auditUPIDClusters   []uuid.UUID     // the cluster each ListExistingAuditLogUPIDs call asked about
 	crossClusterUPIDs   map[string]bool // ListCrossClusterMigrationUPIDs echoes these back
 	sdnApplyLinks       []db.LinkSDNApplyNodeTasksParams
+	linkCalls           []string    // the link queries linkRelatedTasks ran, in order
+	linkSince           []time.Time // and how far back each was told to look
+	linkCount           int64       // what each of them reports having linked
+	onLink              func()      // called as each link query runs
 	externalTaskCalls   []db.InsertExternalTaskHistoryParams
 	taskHistUPIDErr     error // when set, ListExistingTaskHistoryUPIDs fails (dedup error)
 	crossClusterUPIDErr error // when set, ListCrossClusterMigrationUPIDs fails
@@ -486,6 +490,22 @@ func (m *mockQueries) ListExistingAuditLogUPIDs(_ context.Context, arg db.ListEx
 func (m *mockQueries) LinkSDNApplyNodeTasks(_ context.Context, arg db.LinkSDNApplyNodeTasksParams) (int64, error) {
 	m.sdnApplyLinks = append(m.sdnApplyLinks, arg)
 	return 0, nil
+}
+
+func (m *mockQueries) LinkMigrationTargetStarts(_ context.Context, arg db.LinkMigrationTargetStartsParams) (int64, error) {
+	m.linkCalls, m.linkSince = append(m.linkCalls, "target starts"), append(m.linkSince, arg.Since)
+	if m.onLink != nil {
+		m.onLink()
+	}
+	return m.linkCount, nil
+}
+
+func (m *mockQueries) LinkHAWorkerTasks(_ context.Context, arg db.LinkHAWorkerTasksParams) (int64, error) {
+	m.linkCalls, m.linkSince = append(m.linkCalls, "ha workers"), append(m.linkSince, arg.Since)
+	if m.onLink != nil {
+		m.onLink()
+	}
+	return m.linkCount, nil
 }
 
 func (m *mockQueries) ListCrossClusterMigrationUPIDs(_ context.Context, upids []string) ([]string, error) {

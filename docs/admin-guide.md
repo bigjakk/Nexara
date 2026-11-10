@@ -1898,6 +1898,20 @@ Both live on the **Events** page in the sidebar: the **Audit Log** tab, and a **
 
 Filter the audit log by cluster, resource type, user, action, source, severity and time range. What you see is scoped to the clusters your roles reach.
 
+### HA and migration markers
+
+Proxmox runs some actions as more than one task and lists each of them, and so does Nexara. A marker on the entry says which part of the action it is, in the Activity drawer, the audit log and every History:
+
+- **HA request** — a start, stop or migration of an HA-managed guest is asked of the HA manager, and the request is a task of its own under the account that asked. It ends OK as soon as it is queued, whatever becomes of it.
+- **HA manager · for _who_** — the task that does the work, which the HA manager runs as `root@pam` a few seconds later. Its outcome is the action's. It names who asked when that entry is in the same list, or the Proxmox account for a request made in Proxmox.
+- **Migration target** — a live migration's start of the guest on its target node, also as `root@pam`.
+
+A `root@pam` start, stop or migration with no marker is an action of its own: a guest started at boot, the HA manager recovering one, or a command run on the node.
+
+- An entry gets its marker on the collector's next sync of the cluster (every 30 seconds by default), so it can be listed without one until then. Entries recorded before this release are marked in the background after the upgrade, newest first and a month at a time; a removed cluster's are not.
+- If the HA manager retries a failed start, the first attempt is the one marked. A migration's start on the target is marked when it began within 5 seconds of the migration, or before the end Proxmox recorded for it.
+- **Events → Tasks** has no markers.
+
 ### The Activity Drawer
 
 A bar at the bottom of every page: **Activity**, how many tasks are running, and **All**, **N errors** and **Others** to filter by. Click the bar to open or close it, and drag its top edge to resize it; both are remembered per browser.

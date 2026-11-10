@@ -1420,6 +1420,69 @@ type Querier interface {
 	// (the rows cascade away). A NULL id matches nothing; the caller refuses a
 	// credential naming both or neither (internal/ws/console_credential.go).
 	IsConsoleCredentialLive(ctx context.Context, arg IsConsoleCredentialLiveParams) (bool, error)
+	// A start, stop or migration of an HA-managed guest is two tasks: the request
+	// (hastart, hastop, hamigrate, harelocate), run by whoever asked, which only
+	// queues it with the HA manager and ends OK within a second whatever becomes of
+	// it; and the task that does the work, which the HA manager runs as root@pam up
+	// to half a minute later, on whichever node holds the guest. Measured over 2,332
+	// requests: all but one had its worker, 1 to 30 seconds after it.
+	//
+	// A worker is linked to the nearest request of its kind for the same guest that
+	// started within the 2 minutes before it (2 seconds' slack after it), and that no
+	// worker has taken; a request keeps one worker, its earliest. So a retry the HA
+	// manager makes after a failed start stays a row of its own, and a worker that
+	// lost its request to an earlier one looks again on the next call.
+	//
+	// Who asked is the request row's own user. Where only the collector recorded
+	// the request (made in Proxmox, or by a Nexara engine that files no row), that is
+	// a PVE account, and the worker carries it too as ha_requested_by, for a list
+	// that shows the worker without its request. A Nexara user's name is not copied:
+	// it is the request row's to show, and gone with the account.
+	//
+	// The worker's UPDATE is the statement's own, so the count returned is pairs.
+	LinkHAWorkerTasks(ctx context.Context, arg LinkHAWorkerTasksParams) (int64, error)
+	// Proxmox runs some actions as more than one task, each with a UPID of its own:
+	// its task log lists them all, and so do Nexara's lists, which is where one action
+	// reads as two or three. The two queries below record which rows belong together,
+	// with keys in audit_log.details, and change nothing else. Every row stays listed;
+	// the lists mark the linked ones (an "HA manager" or "Migration target" badge) so
+	// a start by root@pam beside the operator's own reads as its second half and not
+	// as a second action. Every key:
+	//
+	//   migration_upid     on a migration's start on its target node: the migration
+	//   target_start_upid  on the migration's row(s): that start
+	//   ha_request_upid    on an HA worker task: the request that caused it
+	//   ha_worker_upid     on an HA request's row(s): the task that did the work
+	//   ha_requested_by    on an HA worker whose request Nexara did not record: the
+	//                      PVE account that made it
+	//
+	// Both read only rows the collector ingested (source 'proxmox') run by root@pam
+	// itself, not by a token: the HA manager and a migration's own ssh run as that.
+	// Types and times are the UPID's (fields 6 and 5), never the stored task_type,
+	// which Nexara writes its own labels into. There is no migration for the rows
+	// recorded before this: the collector links each cluster's history once per
+	// start, in the background and a month at a time (backfillLinks).
+	// A live migration starts the guest on the target node as a task of its own
+	// (qmstart, vzstart), on real data within 5 seconds of the migration's start for
+	// 99.2% of 6,028 and always before it ends. That start is linked to the migration
+	// when it ran on another node than the migration and no earlier than it (2
+	// seconds' slack for the nodes' clocks).
+	//
+	// How late it may be depends on whether the migration's end is known. It is only
+	// for one the collector ingested already finished (its row's recorded status is
+	// the exit text, not RUNNING): finished_at is then Proxmox's own, and the start
+	// must come before it. Every other finished_at is when a poll noticed — the
+	// reconciler's up to a pass late, a day late for a task on a node that died —
+	// so for those, as for a migration still running or with no task row, the start
+	// must come within 5 seconds of the migration's. What that keeps out is a start
+	// made after an offline migration: the second half of an HA relocation, or the
+	// HA manager recovering a guest whose node died mid-migration. Each is an action
+	// of its own, and marked as part of a migration it would read as nothing to look
+	// at. What it leaves, at worst, is a slow migration's start unmarked, as before.
+	//
+	// One start per migration, the earliest; a start in two migrations is the later
+	// one's. Rows linked earlier are skipped, so a second call changes nothing.
+	LinkMigrationTargetStarts(ctx context.Context, arg LinkMigrationTargetStartsParams) (int64, error)
 	// An SDN apply (reloadnetworkall) reloads every node's network as a task of its
 	// own (srvreload, service "networking"), which the collector ingests as a node
 	// network apply made in Proxmox. They are parts of the apply, not applies. This

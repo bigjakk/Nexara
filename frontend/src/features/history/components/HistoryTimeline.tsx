@@ -8,7 +8,8 @@ import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { TaskLogSection } from "@/components/TaskLogSection";
-import { displayProgress } from "@/components/layout/task-status";
+import { displayProgress, parseDetails } from "@/components/layout/task-status";
+import { haRequester, linkedTaskRole } from "@/components/layout/linked-task";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
 import { formatDateTime } from "@/lib/format";
 import { useTaskLogStore } from "@/stores/task-log-store";
@@ -69,6 +70,7 @@ function HistoryRow({
   kind,
   t,
   entry,
+  actorByUpid,
   clusterId,
   layout,
   guestLink,
@@ -78,6 +80,8 @@ function HistoryRow({
   kind: HistoryKind;
   t: TFunction;
   entry: HistoryEntry;
+  /** Who made each task the timeline holds: an HA manager's task names its request's. */
+  actorByUpid: ReadonlyMap<string, string>;
   clusterId: string;
   layout: HistoryLayout;
   guestLink: ((vmid: number) => HistoryGuestLink | undefined) | undefined;
@@ -102,6 +106,8 @@ function HistoryRow({
   const label = historyEventLabel(kind, entry, t);
   const summary = historySummary(kind, entry, t);
   const actor = historyActor(entry);
+  // The entry's own UPID decides a request; an audit row's details, the rest.
+  const linkDetails = { ...parseDetails(entry.details), upid: entry.upid };
   const note = expanded ? historyNote(kind, entry, t) : undefined;
   // A notice is the observer's own word, filed when it was written: no
   // reading before it to show.
@@ -150,6 +156,8 @@ function HistoryRow({
             expanded,
             icon: kind.icons[entry.category],
             guest,
+            linkedRole: linkedTaskRole(linkDetails),
+            requester: haRequester(linkDetails, actorByUpid),
           }}
         />
       </tr>
@@ -453,6 +461,13 @@ export function HistoryTimeline({
     page === 0 && absorbs
       ? shown.filter((entry) => !absorbs(entry, since))
       : shown;
+  // Who made each task shown: an HA manager's task names its request's.
+  const actorByUpid = new Map(
+    kept.flatMap((entry) => {
+      const actor = entry.upid ? historyActor(entry) : "";
+      return actor ? [[entry.upid, actor] as const] : [];
+    }),
+  );
   // The count is the server's, which still counts what `absorbs` leaves out of
   // the first page; the footer says how many.
   const absorbedHere = shown.length - kept.length;
@@ -653,6 +668,7 @@ export function HistoryTimeline({
                       kind={kind}
                       t={t}
                       entry={entry}
+                      actorByUpid={actorByUpid}
                       clusterId={entry.cluster_id ?? target.clusterId ?? ""}
                       layout={layout}
                       guestLink={guestLink}

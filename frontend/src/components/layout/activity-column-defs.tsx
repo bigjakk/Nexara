@@ -14,6 +14,7 @@ import {
   Loader2,
   XCircle,
 } from "lucide-react";
+import { LinkedTaskBadge } from "@/components/LinkedTaskBadge";
 import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
@@ -108,6 +109,11 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
     cell: (row) => (
       <div className="flex items-center gap-x-2 overflow-hidden">
         <PVESourceBadge source={row.entry.source} />
+        <LinkedTaskBadge
+          role={row.linkedRole}
+          requester={row.haRequester}
+          compact
+        />
         <span className="shrink-0 font-medium">{row.actionLabel}</span>
         {row.resourceLabel && (
           <span className="truncate text-muted-foreground">
