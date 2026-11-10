@@ -1069,7 +1069,8 @@ type RollingUpdateJob struct {
 	CleanupPending    bool               `json:"cleanup_pending"`
 	CleanupAttempts   int32              `json:"cleanup_attempts"`
 	// False upgrades each node in place, leaving its guests running (no migration, no target node needed)
-	DrainGuests bool `json:"drain_guests"`
+	DrainGuests bool               `json:"drain_guests"`
+	ResumedAt   pgtype.Timestamptz `json:"resumed_at"`
 }
 
 type RollingUpdateNode struct {

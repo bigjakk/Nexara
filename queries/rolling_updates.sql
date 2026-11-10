@@ -47,9 +47,10 @@ UPDATE rolling_update_jobs
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'running';
 
+-- resumed_at restarts the step timeouts of the nodes in flight; see stepElapsed.
 -- name: ResumeRollingUpdateJob :exec
 UPDATE rolling_update_jobs
-SET status = 'running', updated_at = now()
+SET status = 'running', resumed_at = now(), updated_at = now()
 WHERE id = $1 AND status = 'paused';
 
 -- name: HasRunningJobForCluster :one

@@ -2932,6 +2932,7 @@ type Querier interface {
 	// legitimately appear as several objects, and counting rows would drop every
 	// guest covered by more than one backup.
 	ResolveVeeamTaskGuests(ctx context.Context, arg ResolveVeeamTaskGuestsParams) ([]ResolveVeeamTaskGuestsRow, error)
+	// resumed_at restarts the step timeouts of the nodes in flight; see stepElapsed.
 	ResumeRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	RevokeAPIKey(ctx context.Context, id uuid.UUID) error
 	RevokeAllUserAPIKeys(ctx context.Context, userID uuid.UUID) error

@@ -1790,7 +1790,7 @@ The cluster-wide wizard does not offer this mode; it is reached from the node pa
 ### Managing Jobs
 
 - **Start** — begin the rolling update
-- **Pause** — the node in flight finishes its current step and nothing advances until you resume. The pause of DRS and CRS, and any HA rules disabled for the job, stay in force meanwhile. A restore already under way keeps moving guests back, and each node's step timers keep running, so on resume a node fails, and the job with it, if it has been in **Draining** for over 1 hour, **Upgrading** for over 60 minutes or **Rebooting** for over 10 minutes
+- **Pause** — the node in flight finishes its current step and nothing advances until you resume. The pause of DRS and CRS, and any HA rules disabled for the job, stay in force meanwhile. A restore already under way keeps moving guests back. Resuming restarts the timeouts of the nodes in flight (1 hour in **Draining**, 60 minutes in **Upgrading**, 10 minutes in **Rebooting**, 30 minutes in **Restoring**), so the time spent paused does not count against them
 - **Resume** — continue a paused job
 - **Cancel** — abort the job (nodes already updated stay updated, and guests already migrated are not moved back, unless that node's restore had already begun)
 - **Skip** — skip a node that has not started yet; a node already under way cannot be skipped

@@ -898,10 +898,23 @@ const upgradeAbsoluteTimeout = 60 * time.Minute
 // quickly while tolerating transient DB hiccups.
 const upgradeHeartbeatStale = 3 * time.Minute
 
+// stepElapsed is how long a node has been in the step that started at started,
+// as that step's timeout counts it: from the later of the start and the job's
+// last resume. Counting the pause failed a healthy node on resume (a node that
+// came back from its reboot during a 20-minute pause read as a 20-minute
+// reboot). A resume gives the step its whole allowance again rather than what
+// was left of it, which can only make a timeout later, never sooner.
+func stepElapsed(job db.RollingUpdateJob, started time.Time) time.Duration {
+	if job.ResumedAt.Valid && job.ResumedAt.Time.After(started) {
+		started = job.ResumedAt.Time
+	}
+	return time.Since(started)
+}
+
 func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
 	// If upgrade already started, check the absolute timeout first.
 	if node.UpgradeStartedAt.Valid {
-		if time.Since(node.UpgradeStartedAt.Time) > upgradeAbsoluteTimeout {
+		if stepElapsed(job, node.UpgradeStartedAt.Time) > upgradeAbsoluteTimeout {
 			o.failNode(ctx, job, node, fmt.Sprintf("automated upgrade timed out after %s", upgradeAbsoluteTimeout))
 			return
 		}
@@ -1200,7 +1213,7 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 
 func (o *Orchestrator) advanceDraining(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
 	// Check if drain has been going on too long (1 hour timeout).
-	if node.DrainStartedAt.Valid && time.Since(node.DrainStartedAt.Time) > time.Hour {
+	if node.DrainStartedAt.Valid && stepElapsed(job, node.DrainStartedAt.Time) > time.Hour {
 		o.failNode(ctx, job, node, "drain timed out after 1 hour")
 		return
 	}
@@ -1247,8 +1260,9 @@ func (o *Orchestrator) advanceDraining(ctx context.Context, client *proxmox.Clie
 }
 
 func (o *Orchestrator) advanceRebooting(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
-	// Check if reboot timed out (10 minutes).
-	if node.RebootStartedAt.Valid && time.Since(node.RebootStartedAt.Time) > 10*time.Minute {
+	// Check if reboot timed out (10 minutes). Only the timeout discounts a
+	// pause: the uptime check below needs the real time since the reboot.
+	if node.RebootStartedAt.Valid && stepElapsed(job, node.RebootStartedAt.Time) > 10*time.Minute {
 		o.failNode(ctx, job, node, "reboot timed out after 10 minutes")
 		return
 	}
@@ -1442,7 +1456,7 @@ func (o *Orchestrator) advanceRestoring(ctx context.Context, client *proxmox.Cli
 	// Check for timeout (30 minutes). Anything not restored by now (guests
 	// still elsewhere, passthrough guests still recorded stopped) is left to
 	// the job-end release / cleanup sweep.
-	if node.RestoreStartedAt.Valid && time.Since(node.RestoreStartedAt.Time) > 30*time.Minute {
+	if node.RestoreStartedAt.Valid && stepElapsed(job, node.RestoreStartedAt.Time) > 30*time.Minute {
 		o.logger.Warn("guest restore timed out, marking node completed", "node", node.NodeName)
 		_ = o.queries.SetNodeRestoreCompleted(ctx, node.ID)
 		o.publishEvent(ctx, job.ClusterID, job.ID, "node_completed")

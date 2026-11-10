@@ -241,7 +241,7 @@ func (q *Queries) GetNextPendingNode(ctx context.Context, jobID uuid.UUID) (Roll
 }
 
 const getRollingUpdateJob = `-- name: GetRollingUpdateJob :one
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests FROM rolling_update_jobs WHERE id = $1
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at FROM rolling_update_jobs WHERE id = $1
 `
 
 func (q *Queries) GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (RollingUpdateJob, error) {
@@ -272,6 +272,7 @@ func (q *Queries) GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (Rollin
 		&i.CleanupPending,
 		&i.CleanupAttempts,
 		&i.DrainGuests,
+		&i.ResumedAt,
 	)
 	return i, err
 }
@@ -344,7 +345,7 @@ func (q *Queries) IncrementJobCleanupAttempts(ctx context.Context, id uuid.UUID)
 const insertRollingUpdateJob = `-- name: InsertRollingUpdateJob :one
 INSERT INTO rolling_update_jobs (cluster_id, parallelism, reboot_after_update, auto_restore_guests, package_excludes, ha_policy, ha_warnings, auto_upgrade, created_by, notify_channel_id, drain_guests)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests
+RETURNING id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at
 `
 
 type InsertRollingUpdateJobParams struct {
@@ -401,6 +402,7 @@ func (q *Queries) InsertRollingUpdateJob(ctx context.Context, arg InsertRollingU
 		&i.CleanupPending,
 		&i.CleanupAttempts,
 		&i.DrainGuests,
+		&i.ResumedAt,
 	)
 	return i, err
 }
@@ -457,7 +459,7 @@ func (q *Queries) InsertRollingUpdateNode(ctx context.Context, arg InsertRolling
 }
 
 const listCleanupPendingJobsForCluster = `-- name: ListCleanupPendingJobsForCluster :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at FROM rolling_update_jobs
 WHERE cluster_id = $1
   AND cleanup_pending = true
   AND status IN ('completed', 'failed', 'cancelled')
@@ -498,6 +500,7 @@ func (q *Queries) ListCleanupPendingJobsForCluster(ctx context.Context, clusterI
 			&i.CleanupPending,
 			&i.CleanupAttempts,
 			&i.DrainGuests,
+			&i.ResumedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -510,7 +513,7 @@ func (q *Queries) ListCleanupPendingJobsForCluster(ctx context.Context, clusterI
 }
 
 const listRollingUpdateJobs = `-- name: ListRollingUpdateJobs :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at FROM rolling_update_jobs
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -556,6 +559,7 @@ func (q *Queries) ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpda
 			&i.CleanupPending,
 			&i.CleanupAttempts,
 			&i.DrainGuests,
+			&i.ResumedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -568,7 +572,7 @@ func (q *Queries) ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpda
 }
 
 const listRollingUpdateJobsNeedingCleanup = `-- name: ListRollingUpdateJobsNeedingCleanup :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at FROM rolling_update_jobs
 WHERE cleanup_pending = true
   AND status IN ('completed', 'failed', 'cancelled')
 ORDER BY updated_at
@@ -609,6 +613,7 @@ func (q *Queries) ListRollingUpdateJobsNeedingCleanup(ctx context.Context) ([]Ro
 			&i.CleanupPending,
 			&i.CleanupAttempts,
 			&i.DrainGuests,
+			&i.ResumedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -673,7 +678,7 @@ func (q *Queries) ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) (
 }
 
 const listRunningRollingUpdateJobs = `-- name: ListRunningRollingUpdateJobs :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at FROM rolling_update_jobs
 WHERE status = 'running'
 ORDER BY created_at
 `
@@ -712,6 +717,7 @@ func (q *Queries) ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUp
 			&i.CleanupPending,
 			&i.CleanupAttempts,
 			&i.DrainGuests,
+			&i.ResumedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -736,10 +742,11 @@ func (q *Queries) PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 
 const resumeRollingUpdateJob = `-- name: ResumeRollingUpdateJob :exec
 UPDATE rolling_update_jobs
-SET status = 'running', updated_at = now()
+SET status = 'running', resumed_at = now(), updated_at = now()
 WHERE id = $1 AND status = 'paused'
 `
 
+// resumed_at restarts the step timeouts of the nodes in flight; see stepElapsed.
 func (q *Queries) ResumeRollingUpdateJob(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, resumeRollingUpdateJob, id)
 	return err
