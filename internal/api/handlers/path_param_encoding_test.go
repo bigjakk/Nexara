@@ -50,22 +50,33 @@ const pathParamEncKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456
 const pathParamNode = "pve-01"
 
 // proxmoxCapture records the raw request target of every call a handler makes
-// to the stand-in Proxmox server.
+// to the stand-in Proxmox server, and the form body each one carried.
 type proxmoxCapture struct {
 	mu      sync.Mutex
 	targets []string
+	forms   []url.Values
 }
 
-func (p *proxmoxCapture) record(target string) {
+func (p *proxmoxCapture) record(target string, form url.Values) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.targets = append(p.targets, target)
+	p.forms = append(p.forms, form)
 }
 
 func (p *proxmoxCapture) reset() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.targets = nil
+	p.forms = nil
+}
+
+// sentForms returns the form bodies recorded since the last reset, in the
+// order the calls were made.
+func (p *proxmoxCapture) sentForms() []url.Values {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]url.Values(nil), p.forms...)
 }
 
 // only returns the single target the request produced, failing if the handler
@@ -98,7 +109,10 @@ func newProxmoxCaptureServer(t *testing.T) (string, *proxmoxCapture) {
 	t.Helper()
 	cap := &proxmoxCapture{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cap.record(r.RequestURI)
+		// PostForm holds a POST or PUT's form body only; the query stays in
+		// the raw target, which is what this suite compares.
+		_ = r.ParseForm()
+		cap.record(r.RequestURI, r.PostForm)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": "UPID:" + pathParamNode + ":00001234:0000ABCD:66000000:cephdestroypool::root@pam:",

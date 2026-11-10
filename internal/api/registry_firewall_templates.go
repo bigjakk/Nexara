@@ -88,9 +88,10 @@ func registerFirewallTemplateEndpoints(reg *Registry, h *handlers.NetworkHandler
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   clusterScope + "/firewall-templates/:id/apply",
-		Description: "Copy a template's rules into one cluster's firewall. Each rule is added " +
-			"independently and a rule Proxmox rejects is SKIPPED, so the response reports how many of " +
-			"the total landed. Cluster-scoped manage:network, unlike the template routes themselves.",
+		Description: "Copy a template's rules into one cluster's firewall, at the top of its rule list " +
+			"and in the template's order. Each rule is added independently and a rule Proxmox rejects is " +
+			"SKIPPED, so the response reports how many of the total landed. Cluster-scoped " +
+			"manage:network, unlike the template routes themselves.",
 		Group:       "Firewall",
 		Permissions: clusterCheck("manage", "network"),
 		Parameters: clusterParams(apischema.Properties{

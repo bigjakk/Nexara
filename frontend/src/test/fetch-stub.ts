@@ -2,13 +2,17 @@ import { vi } from "vitest";
 
 /**
  * Replaces the global fetch with a recorder that answers GETs from `reads`
- * (keyed by exact URL) and every other method with 204. It records each
- * request apiClient actually sent as "METHOD url", the auth refresh aside, so
- * a test asserts on the wire rather than on a mocked hook.
+ * (keyed by exact URL), a write named in `writes` (keyed "METHOD url") with
+ * that body, and every other method with 204. It records each request
+ * apiClient actually sent as "METHOD url", the auth refresh aside, so a test
+ * asserts on the wire rather than on a mocked hook.
  *
  * Undo with vi.unstubAllGlobals().
  */
-export function stubApi(reads: Record<string, unknown>): {
+export function stubApi(
+  reads: Record<string, unknown>,
+  writes: Record<string, unknown> = {},
+): {
   sent: string[];
   /** Every request that was not a GET. */
   writes: () => string[];
@@ -29,8 +33,17 @@ export function stubApi(reads: Record<string, unknown>): {
         return Promise.resolve(new Response("{}", { status: 401 }));
       }
       const method = init?.method ?? "GET";
-      sent.push(`${method} ${url}`);
+      const request = `${method} ${url}`;
+      sent.push(request);
       if (method !== "GET") {
+        if (request in writes) {
+          return Promise.resolve(
+            new Response(JSON.stringify(writes[request]), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
         return Promise.resolve(new Response(null, { status: 204 }));
       }
       if (!(url in reads)) {

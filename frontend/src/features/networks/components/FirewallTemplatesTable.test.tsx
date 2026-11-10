@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { setupUser } from "@/test/user";
 import { FirewallTemplatesTable } from "./FirewallTemplatesTable";
 import type { FirewallTemplate } from "../types/network";
+
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const TEMPLATES_PATH = "/api/v1/firewall-templates";
 const WEB_ID = "11111111-0000-0000-0000-000000000001";
@@ -84,5 +88,37 @@ describe("FirewallTemplatesTable — deleting a template", () => {
     await waitFor(() => {
       expect(api.writes()).toEqual([`DELETE ${TEMPLATES_PATH}/${DB_ID}`]);
     });
+  });
+});
+
+describe("FirewallTemplatesTable — applying a template", () => {
+  it("says where the rules land, warns of the DROP, and reports how many Proxmox took", async () => {
+    const APPLY = `/api/v1/clusters/c1/firewall-templates/${DB_ID}/apply`;
+    api = stubApi(
+      { [TEMPLATES_PATH]: listOf(TEMPLATES) },
+      { [`POST ${APPLY}`]: { status: "ok", applied: 2, total: 2 } },
+    );
+    const user = setupUser();
+    renderWithProviders(<FirewallTemplatesTable clusterId="c1" />);
+    await user.click(
+      await screen.findByRole("button", { name: "Apply template db" }),
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(
+      "Adds 2 rules at the top of the cluster's firewall rules, above every rule already there, in the order below.",
+    );
+    expect(dialog).toHaveTextContent("This can lock you out of the cluster");
+    expect(api.writes()).toEqual([]);
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Apply to Cluster" }),
+    );
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(
+        "Added 2 rules from db at the top of the cluster's firewall rules.",
+      );
+    });
+    expect(api.writes()).toEqual([`POST ${APPLY}`]);
   });
 });

@@ -214,9 +214,14 @@ func (h *NetworkHandler) ApplyTemplate(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// Proxmox's create_rule puts each new rule at the top of the list (see
+	// internal/proxmox/client_firewall.go), so the rules go out last first:
+	// they then land above the cluster's own rules in the template's order.
+	// Sent first first, they landed reversed, so a template's closing broad
+	// DROP came out on top of its own ACCEPTs.
 	applied := 0
-	for _, rule := range rules {
-		if err := pxClient.CreateClusterFirewallRule(c.Context(), rule); err != nil {
+	for i := len(rules) - 1; i >= 0; i-- {
+		if err := pxClient.CreateClusterFirewallRule(c.Context(), rules[i]); err != nil {
 			continue
 		}
 		applied++

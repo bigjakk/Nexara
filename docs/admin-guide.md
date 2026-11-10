@@ -969,7 +969,7 @@ A guest's own firewall is API only (`/clusters/:id/vms/:vmid/firewall/…`, wher
 
 **Firewall** → **Templates** holds reusable rule sets that belong to Nexara rather than one cluster, so listing, creating and deleting them needs an instance-wide `view:network`, `manage:network` or `delete:network`. A rule has a direction, action, protocol, destination port and comment. The page cannot edit a template; `PUT /api/v1/firewall-templates/:id` can.
 
-**Apply to Cluster** (`manage:network` on the cluster) only adds rules, and never replaces what is there. Each rule goes to the top of the list, one at a time, so the template's rows land above your existing rules and in reverse order: a last row with a broad `DROP` sits above everything, the template's own `ACCEPT` rows included, and can lock you out of the cluster. The dialog does not warn about this, so write the rows in the opposite order to the one you want. A rule Proxmox rejects is skipped, and the dialog closes as soon as the request returns, so check the rule list afterwards.
+**Apply to Cluster** (`manage:network` on the cluster) only adds rules, and never replaces what is there. The template's rules go to the top of the cluster's list, above your existing rules, in the template's order. Rules are matched from the top, so a broad `DROP` or `REJECT` in a template comes before every rule the cluster already has and can lock you out of the cluster. The dialog says how many rules it adds and where, and warns when the template has a `DROP` or `REJECT` rule. A rule Proxmox rejects is skipped, and a message then says how many of the template's rules were added.
 
 ### SDN
 
