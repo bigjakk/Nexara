@@ -18,9 +18,10 @@ var cveRefPattern = regexp.MustCompile(`(?i)CVE-(?:19|20)\d{2}-\d{4,7}`)
 
 // changelogEntryHeader matches the start of a Debian-format changelog
 // entry: "pkgname (version) distribution; urgency=...". The package name
-// is captured loosely (lowercase letters, digits, common punctuation) and
-// the version is whatever sits between the parentheses.
-var changelogEntryHeader = regexp.MustCompile(`(?m)^([a-z0-9][a-z0-9.+-]*)\s*\(([^)]+)\)\s+\S+;`)
+// is captured loosely (lowercase letters, digits, common punctuation),
+// the version is whatever sits between the parentheses, and the
+// distribution is the word before the semicolon.
+var changelogEntryHeader = regexp.MustCompile(`(?m)^([a-z0-9][a-z0-9.+-]*)\s*\(([^)]+)\)\s+(\S+);`)
 
 // aptChangelogFailed matches the line Proxmox's apt/changelog endpoint ends
 // its answer with when `apt-get changelog` exits non-zero. The endpoint still
@@ -107,8 +108,32 @@ func extractCVEsFromChangelogRange(text, installedVer, targetVer string) []strin
 }
 
 type changelogEntry struct {
-	version string
-	body    string
+	version      string
+	distribution string
+	body         string
+}
+
+// securityUploadSince reports whether the changelog has an entry above
+// installed, and at most target, uploaded to Debian's security archive: its
+// distribution is "<release>-security". A new package, with nothing
+// installed, patches nothing.
+func securityUploadSince(text, installed, target string) bool {
+	if installed == "" {
+		return false
+	}
+	for _, e := range splitChangelogEntries(text) {
+		if !strings.HasSuffix(e.distribution, "-security") {
+			continue
+		}
+		if cmp, ok := compareDebianVersion(installed, e.version); !ok || cmp >= 0 {
+			continue
+		}
+		if cmp, ok := compareDebianVersion(e.version, target); ok && cmp > 0 {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // splitChangelogEntries breaks a Debian-format changelog into per-version
@@ -121,14 +146,16 @@ func splitChangelogEntries(text string) []changelogEntry {
 	}
 	entries := make([]changelogEntry, 0, len(idxs))
 	for i, m := range idxs {
-		// m[0]:m[1] = full header line; m[4]:m[5] = version capture group.
+		// m[0]:m[1] = full header line; m[4]:m[5] = version, m[6]:m[7] =
+		// distribution capture groups.
 		end := len(text)
 		if i+1 < len(idxs) {
 			end = idxs[i+1][0]
 		}
 		entries = append(entries, changelogEntry{
-			version: strings.TrimSpace(text[m[4]:m[5]]),
-			body:    text[m[1]:end],
+			version:      strings.TrimSpace(text[m[4]:m[5]]),
+			distribution: text[m[6]:m[7]],
+			body:         text[m[1]:end],
 		})
 	}
 	return entries
@@ -181,9 +208,10 @@ func newChangelogFetcher(client changelogSource, logger *slog.Logger) *changelog
 }
 
 // resolveSources sets each update's SourcePackage, from known (the tracker's
-// binary list) or else its changelog, and returns the packages whose
-// changelog could not be read, with the first reason. A failure another node
-// already met counts again: this node's result lacks that changelog too.
+// binary list) or else its changelog, and IsSecurityUpdate, from its
+// changelog, and returns the packages whose changelog could not be read, with
+// the first reason. A failure another node already met counts again: this
+// node's result lacks that changelog too.
 //
 // A Debian package the list covers is not counted: the tracker has its CVEs,
 // so its changelog would add little, and counting it would put "N of N" on
@@ -204,6 +232,10 @@ func (f *changelogFetcher) resolveSources(ctx context.Context, node string, upda
 		} else {
 			u.SourcePackage = sourcePackageFromChangelog(text)
 		}
+		// Debian's kernel is left out, as in the tracker match: no Proxmox
+		// node runs it.
+		u.IsSecurityUpdate = u.Origin == debianOrigin && u.SourcePackage != debianKernelSource &&
+			securityUploadSince(text, u.OldVersion, u.NewVersion)
 	}
 	return unreadable, firstErr
 }

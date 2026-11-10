@@ -153,7 +153,7 @@ func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdat
 	for _, upd := range updates {
 		pkgCVEs, ok := trackerEntriesFor(tracker, upd)
 		if !ok {
-			// Even without CVE data, security-origin updates are vulnerabilities
+			// Even without CVE data, a security update is a vulnerability
 			if upd.IsSecurityUpdate {
 				key := upd.Package + ":unknown"
 				if !seen[key] {
@@ -397,11 +397,13 @@ type AptUpdateInfo struct {
 	Package string
 	// SourcePackage is the Debian source Package is built from, read from its
 	// changelog (resolveSources); "" when that could not be read.
-	SourcePackage    string
-	Title            string
-	OldVersion       string
-	NewVersion       string
-	Origin           string
+	SourcePackage string
+	Title         string
+	OldVersion    string
+	NewVersion    string
+	Origin        string
+	// IsSecurityUpdate is that the upgrade brings an upload to Debian's
+	// security archive, read from the changelog (resolveSources).
 	IsSecurityUpdate bool
 }
 

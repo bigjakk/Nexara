@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -207,23 +206,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 			continue
 		}
 
-		// Convert Proxmox updates to our format
-		aptUpdates := make([]AptUpdateInfo, 0, len(updates))
-		for _, u := range updates {
-			isSecurityUpdate := strings.Contains(u.Origin, "security") ||
-				strings.Contains(u.Origin, "Debian-Security") ||
-				strings.EqualFold(u.Priority, "required")
-			aptUpdates = append(aptUpdates, AptUpdateInfo{
-				Package:          u.Package,
-				Title:            u.Title,
-				OldVersion:       u.OldVersion,
-				NewVersion:       u.NewVersion,
-				Origin:           u.Origin,
-				IsSecurityUpdate: isSecurityUpdate,
-			})
-		}
-
-		vulns, gapNote := e.matchUpdates(ctx, node.Name, release, aptUpdates, changelogs)
+		vulns, gapNote := e.matchUpdates(ctx, node.Name, release, aptUpdateInfos(updates), changelogs)
 
 		// Enrich vulns with EPSS and KEV before bucketing. Both lookups
 		// are best-effort: a failure leaves the vuln with no enrichment
@@ -387,6 +370,26 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 	}
 
 	return scanID, nil
+}
+
+// aptUpdateInfos converts a node's pending updates. Whether one is a security
+// update is not read here, since apt/update cannot say: it gives Debian's
+// security archive the Origin "Debian", as it does the main archive
+// (assemble_pkginfo in pve-manager's PVE/API2/APT.pm), and its Priority
+// ("required" and the like) is the package's importance to the system.
+// resolveSources reads it from the changelog.
+func aptUpdateInfos(updates []proxmox.AptUpdate) []AptUpdateInfo {
+	infos := make([]AptUpdateInfo, 0, len(updates))
+	for _, u := range updates {
+		infos = append(infos, AptUpdateInfo{
+			Package:    u.Package,
+			Title:      u.Title,
+			OldVersion: u.OldVersion,
+			NewVersion: u.NewVersion,
+			Origin:     u.Origin,
+		})
+	}
+	return infos
 }
 
 // matchUpdates finds the vulnerabilities among one node's pending updates and
