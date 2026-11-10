@@ -12,7 +12,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 
 import { createAppQueryClient } from "@/test/app-query-client";
-import { listOf, stubApi } from "@/test/fetch-stub";
+import { bodiesOf, listOf, stubApi } from "@/test/fetch-stub";
 import { useAuthStore } from "@/stores/auth-store";
 import type { NodeResponse } from "@/types/api";
 import type { NodeDNSResponse, NodeTimeResponse } from "../api/cluster-queries";
@@ -112,22 +112,6 @@ function time(timezone: string): NodeTimeResponse {
 /** How many times the page has read `url`. */
 function reads(url: string): number {
   return api.sent.filter((r) => r === `GET ${url}`).length;
-}
-
-/** The body of each request of `method` to `url` the page has sent. */
-function bodiesOf(method: string, url: string): unknown[] {
-  return vi
-    .mocked(globalThis.fetch)
-    .mock.calls.filter(
-      ([input, init]) => input === url && init?.method === method,
-    )
-    .map(([, init]) => {
-      // apiClient sends every body as a JSON string.
-      if (typeof init?.body !== "string") {
-        throw new Error(`${method} ${url} was sent without a JSON body`);
-      }
-      return JSON.parse(init.body) as unknown;
-    });
 }
 
 /** Hands the router's navigate to the test, to move the page under a dialog. */

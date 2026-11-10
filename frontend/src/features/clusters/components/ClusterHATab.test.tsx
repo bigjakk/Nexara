@@ -347,3 +347,47 @@ describe("ClusterHATab — HA resource settings", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("ClusterHATab — a State that stops the guest", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanManage = true;
+  });
+
+  it.each([
+    { state: "stopped", says: "HA still moves it to another node, stopped." },
+    { state: "disabled", says: "it is not moved to another node" },
+  ])(
+    "asks before setting $state, and sends it only on confirm",
+    async ({ state, says }) => {
+      const user = await openResources(PVE9, RESOURCES);
+      const row = screen.getByText("vm:101").closest("tr");
+      if (!(row instanceof HTMLElement)) throw new Error("no row for vm:101");
+      await user.click(within(row).getByRole("combobox"));
+      await user.click(await screen.findByRole("option", { name: state }));
+
+      const dialog = await screen.findByRole("alertdialog");
+      expect(
+        within(dialog).getByRole("heading", {
+          name: `Set vm:101 to ${state}?`,
+        }),
+      ).toBeInTheDocument();
+      expect(dialog).toHaveTextContent(
+        "HA shuts vm:101 down shortly after you confirm, if it is running",
+      );
+      expect(dialog).toHaveTextContent(says);
+      expect(putMock).not.toHaveBeenCalled();
+
+      await user.click(
+        within(dialog).getByRole("button", { name: `Set to ${state}` }),
+      );
+      await waitFor(() => {
+        expect(putMock).toHaveBeenCalledTimes(1);
+      });
+      expect(putMock.mock.calls[0]).toEqual([
+        `/api/v1/clusters/${CLUSTER}/ha/resources/vm%3A101`,
+        { state },
+      ]);
+    },
+  );
+});

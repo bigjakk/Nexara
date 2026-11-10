@@ -54,12 +54,14 @@ const CONFIG_PATH = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/acme-config`;
 const listMock = vi.fn();
 const getMock = vi.fn();
 const putMock = vi.fn();
+const postMock = vi.fn();
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock({
     list: (path: string) => listMock(path) as unknown,
     get: (path: string) => getMock(path) as unknown,
     put: (path: string, body: unknown) => putMock(path, body) as unknown,
+    post: (path: string, body: unknown) => postMock(path, body) as unknown,
   }),
 );
 
@@ -1281,4 +1283,52 @@ describe("a save that settles after its session ended", () => {
       },
     );
   });
+});
+
+describe("ClusterACMETab Order Certificate and Renew", () => {
+  const CERTS = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/certificates`;
+
+  it.each([
+    {
+      button: "Order Certificate",
+      title: `Order a certificate for ${NODE}?`,
+      mock: () => postMock,
+      sends: [`${CERTS}/order`, {}],
+    },
+    {
+      button: "Renew",
+      title: `Renew the certificate of ${NODE} now?`,
+      mock: () => putMock,
+      sends: [`${CERTS}/renew`, { force: true }],
+    },
+  ])(
+    "$button asks first and sends only on confirm",
+    async ({ button, title, mock, sends }) => {
+      const user = userEvent.setup();
+      serve([TWO_DOMAINS]);
+      postMock.mockResolvedValue({ upid: "UPID:pve-01:0:0:0:acmenewcert::" });
+      renderTab();
+      await openCertificatesTab(user);
+      const opener = await screen.findByRole("button", { name: button });
+      await waitFor(() => {
+        expect(opener).toBeEnabled();
+      });
+
+      await user.click(opener);
+      const dialog = await screen.findByRole("alertdialog");
+      expect(
+        within(dialog).getByRole("heading", { name: title }),
+      ).toBeInTheDocument();
+      expect(dialog).toHaveTextContent(
+        "Nexara's live calls to the cluster fail until you verify the new certificate on the cluster's page",
+      );
+      expect(mock()).not.toHaveBeenCalled();
+
+      await user.click(within(dialog).getByRole("button", { name: button }));
+      await waitFor(() => {
+        expect(mock()).toHaveBeenCalledTimes(1);
+      });
+      expect(mock().mock.calls[0]).toEqual(sends);
+    },
+  );
 });

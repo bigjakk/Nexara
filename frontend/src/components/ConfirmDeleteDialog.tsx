@@ -28,7 +28,12 @@ interface ConfirmDeleteDialogProps<T> {
   title: (target: T) => ReactNode;
   /** Say what is lost and whether it can be undone — the dialog adds nothing. */
   description: (target: T) => ReactNode;
-  confirmLabel?: string;
+  /**
+   * The confirm button's text; a function of the target for a dialog that
+   * confirms more than one kind of action. Read from the target the dialog
+   * shows, so it holds while the dialog closes.
+   */
+  confirmLabel?: string | ((target: T) => string);
   /**
    * Holds the confirm button shut, for a description that is still being
    * read — what the delete would affect, say. Cancel stays available.
@@ -119,7 +124,9 @@ export function ConfirmDeleteDialog<T>({
                   if (target !== null) onConfirm(target);
                 }}
               >
-                {confirmLabel}
+                {typeof confirmLabel === "function"
+                  ? confirmLabel(current)
+                  : confirmLabel}
               </AlertDialogAction>
             </AlertDialogFooter>
           </>

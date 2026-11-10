@@ -214,6 +214,11 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   );
   const [pendingRule, setPendingRule] = useState<HARuleEntry | null>(null);
   const [pendingGroup, setPendingGroup] = useState<HAGroup | null>(null);
+  // A State pick that stops the guest only sets this; see handleQuickStateChange.
+  const [pendingState, setPendingState] = useState<{
+    sid: string;
+    state: "stopped" | "disabled";
+  } | null>(null);
 
   const existingHASIDs = useMemo(() => {
     const sids = new Set<string>();
@@ -290,7 +295,13 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
     setGrpComment(g.comment ?? "");
   };
 
+  // stopped and disabled make HA shut the guest down, so they confirm first;
+  // started and ignored send at once.
   const handleQuickStateChange = (sid: string, state: string) => {
+    if (state === "stopped" || state === "disabled") {
+      setPendingState({ sid, state });
+      return;
+    }
     updateResource.mutate({ sid, state }, { onError: handleMutationError });
   };
 
@@ -1133,6 +1144,37 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         description={() =>
           "Proxmox deletes the group as soon as you confirm. It refuses while any HA resource is still assigned to the group, and on a cluster whose HA groups were migrated to rules. To undo, create the group again."
         }
+      />
+      {/*
+        The LRM stops the guest with a shutdown (pve-ha-manager
+        Resources/PVEVM.pm and PVECT.pm "shutdown"; only a VM's is forced once
+        it times out, so the dialog promises no forced stop). The CRM still
+        relocates a stopped resource on a node failure and not a disabled one
+        (ha-manager(1), the resource "state" option).
+      */}
+      <ConfirmDeleteDialog
+        target={pendingState}
+        onClose={() => {
+          setPendingState(null);
+        }}
+        onConfirm={(p) => {
+          updateResource.mutate(
+            { sid: p.sid, state: p.state },
+            { onError: handleMutationError },
+          );
+        }}
+        title={(p) => {
+          const name = vmNameBySID.get(p.sid);
+          return `Set ${p.sid}${name ? ` (${name})` : ""} to ${p.state}?`;
+        }}
+        description={(p) =>
+          `HA shuts ${p.sid} down shortly after you confirm, if it is running, and keeps it stopped until it is started again. ${
+            p.state === "stopped"
+              ? "If its node fails, HA still moves it to another node, stopped."
+              : "Unlike stopped, it is not moved to another node if its node fails."
+          }`
+        }
+        confirmLabel={(p) => `Set to ${p.state}`}
       />
     </Tabs>
   );

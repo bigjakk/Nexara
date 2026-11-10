@@ -271,7 +271,7 @@ A node's tabs are **Summary**, **VMs**, **Network**, **Disks**, **Services**, **
 
 **Disks** (`manage:node`). Click a device for its S.M.A.R.T. data. **Init GPT** and **Wipe** act on a disk, and ZFS, LVM, LVM-Thin and Directory storage can be created from the node's disks. Destroying one offers **Cleanup Disks** and **Cleanup Storage Configuration**; a Directory cannot be destroyed here.
 
-**Services.** Start, restart and stop node daemons, without a confirmation (`manage:node`). **Syslog.** The node's log for the last hour, day, three days or week, filtered by service, 500 lines a page. **PCI Devices** is read-only.
+**Services.** Start, restart and stop node daemons (`manage:node`). **Restart** and **Stop** ask first; **Start** does not. Proxmox will not stop `pveproxy`, `pvedaemon` or `pve-cluster`, so those offer **Restart** only. **Syslog.** The node's log for the last hour, day, three days or week, filtered by service, 500 lines a page. **PCI Devices** is read-only.
 
 **Updates.** **Pending updates** with [**Update this node**](#updating-a-single-node-in-place) (`view:rolling_update` and `manage:rolling_update`), and **APT Repositories**, which switches repositories on and off and adds the standard Proxmox ones (`view:apt_repository` and `manage:apt_repository`).
 
@@ -794,6 +794,8 @@ Proxmox VE 9.2 added a native dynamic load balancer to its Cluster Resource Sche
 
 Nexara manages Proxmox HA from each cluster's **HA** tab.
 
+On its **Resources** sub-tab, a resource's **State** sets the HA request state. `started` and `ignored` apply at once; `stopped` and `disabled`, which shut the guest down, ask first. HA still moves a `stopped` resource to another node when its node fails, and not a `disabled` one.
+
 ### HA Rules
 
 On Proxmox VE 9 and later, create rules from the **HA** tab's **Groups / Rules** sub-tab: **HA Rules** → **Add Rule**. Proxmox VE 8 has **Add Group** there instead. Rule names must start with a letter, be at least 2 characters, and contain only letters, numbers, hyphens, and underscores — the form validates this up front instead of letting Proxmox reject the rule later.
@@ -947,7 +949,7 @@ Creating or destroying an OSD and creating a CephFS are not offered.
 
 A cluster's **Networks** → **Interfaces**, after picking a node in **Filter by node:**, or a node's **Network** tab. **Create Interface** offers Linux Bridge, Bond and VLAN, and OVS Bridge, Bond and IntPort, each with Proxmox's own options for that type. Edits stay pending, with no marker, until you apply them.
 
-**Apply** (**Apply Config** on the node's tab) reloads the node's network and **Revert** drops pending edits. Neither asks first, and a bad configuration can cut the node off from Nexara. `view:network`, `manage:network` and `delete:network` gate reading, changing and deleting.
+**Apply Config** makes every pending edit live and reloads the node's network, and **Revert** discards every pending edit. Both act on edits made outside Nexara too, and both ask first. A bad configuration can cut the node off from Nexara, and then needs fixing from its console. `view:network`, `manage:network` and `delete:network` gate reading, changing and deleting.
 
 ### Cluster Firewall
 
@@ -959,9 +961,9 @@ A cluster's **Firewall** tab has **Cluster Rules**, **Templates**, **Aliases**, 
 
 ### Node Firewall
 
-A node's **Firewall** tab has **+ Accept Rule** and **+ Drop Rule**, the log, and delete (`manage:network`).
+A node's **Firewall** tab has **+ Accept Rule** and **+ Drop Rule**, the log, and delete (`manage:network`). Each button asks first, then adds an enabled, match-everything inbound rule at the top of the node's list, with no form.
 
-> **+ Drop Rule is immediate.** Each button adds an enabled, match-everything inbound rule at the top, with no form and no confirmation. On a node whose firewall is on, **+ Drop Rule** can lock you out of it.
+> **Both rules match everything.** On a node whose firewall is on, **+ Drop Rule** can cut off access to the node — its web UI and API, SSH, and Nexara's own connection to it. **+ Accept Rule** lets every inbound connection through, whatever the rules below it say.
 
 A guest's own firewall is API only (`/clusters/:id/vms/:vmid/firewall/…`, where the id is the VMID).
 
@@ -983,7 +985,7 @@ A cluster's **Certificates** tab reads with `view:certificate` and changes with 
 
 - **Accounts** are read-only here: create one in the Proxmox web UI. The API has routes for them
 - **Plugins** — **Add Plugin** takes Standalone (HTTP) or DNS with its **Validation Delay (seconds)** (30 by default). A plugin can be deleted but not edited
-- **Node Certificates** — pick a node. **Add Domain** (up to 6) and **Edit** set its ACME domains; removing a domain is done in Proxmox. **Order Certificate** needs a domain and restarts `pveproxy`. **Renew** always forces a renewal. A certificate with under 30 days left reads **Expiring**. Revoking is API only
+- **Node Certificates** — pick a node. **Add Domain** (up to 6) and **Edit** set its ACME domains; removing a domain is done in Proxmox. **Order Certificate** needs a domain and restarts `pveproxy`. **Renew** always forces a renewal, and Proxmox then revokes the old certificate. Both ask first. If Nexara pinned the certificate of the node it connects through, a new one there breaks the pin: see [When a Node's Certificate Changes](#when-a-nodes-certificate-changes). A certificate with under 30 days left reads **Expiring**. Revoking is API only
 
 ---
 

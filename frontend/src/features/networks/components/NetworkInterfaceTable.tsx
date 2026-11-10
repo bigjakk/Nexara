@@ -9,18 +9,17 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Trash2, RotateCcw, Check, Pencil } from "lucide-react";
+import { Trash2, Pencil } from "lucide-react";
 import {
   useNetworkInterfaces,
   useDeleteNetworkInterface,
-  useApplyNetworkConfig,
-  useRevertNetworkConfig,
 } from "../api/network-queries";
 import type { NetworkInterface } from "../types/network";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { CreateInterfaceDialog } from "./CreateInterfaceDialog";
 import { InterfaceFormDialog } from "./InterfaceFormDialog";
+import { NetworkApplyRevertButtons } from "./NetworkApplyRevertButtons";
 import { ConfirmInterfaceDeleteDialog } from "./ConfirmInterfaceDeleteDialog";
 import {
   interfaceAddresses,
@@ -80,7 +79,7 @@ export function NetworkInterfaceTable({
         <div className="flex items-center gap-2">
           {selectedNode && (
             <>
-              <ApplyRevertButtons
+              <NetworkApplyRevertButtons
                 clusterId={clusterId}
                 nodeName={selectedNode}
               />
@@ -230,42 +229,5 @@ function InterfaceRow({
         />
       </TableCell>
     </TableRow>
-  );
-}
-
-function ApplyRevertButtons({
-  clusterId,
-  nodeName,
-}: {
-  clusterId: string;
-  nodeName: string;
-}) {
-  const apply = useApplyNetworkConfig(clusterId, nodeName);
-  const revert = useRevertNetworkConfig(clusterId, nodeName);
-
-  return (
-    <>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          revert.mutate();
-        }}
-        disabled={revert.isPending}
-      >
-        <RotateCcw className="mr-1 h-4 w-4" />
-        Revert
-      </Button>
-      <Button
-        size="sm"
-        onClick={() => {
-          apply.mutate();
-        }}
-        disabled={apply.isPending}
-      >
-        <Check className="mr-1 h-4 w-4" />
-        Apply
-      </Button>
-    </>
   );
 }

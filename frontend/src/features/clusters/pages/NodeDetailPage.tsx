@@ -11,8 +11,6 @@ import {
   CircuitBoard,
   Globe,
   Trash2,
-  RotateCcw,
-  Check,
   Pencil,
   Cog,
   FileText,
@@ -32,6 +30,7 @@ import { ResourceTable } from "@/features/inventory/components/ResourceTable";
 import { InventoryUnavailableNote } from "@/features/inventory/components/InventoryUnavailableNote";
 import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { DetailChip } from "@/components/DetailChip";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -89,11 +88,10 @@ import {
 import {
   useNodeNetworkInterfaces as useNodeNetworkInterfacesLive,
   useDeleteNetworkInterface,
-  useApplyNetworkConfig,
-  useRevertNetworkConfig,
 } from "@/features/networks/api/network-queries";
 import type { NetworkInterface } from "@/features/networks/types/network";
 import { CreateInterfaceDialog } from "@/features/networks/components/CreateInterfaceDialog";
+import { NetworkApplyRevertButtons } from "@/features/networks/components/NetworkApplyRevertButtons";
 import { InterfaceFormDialog } from "@/features/networks/components/InterfaceFormDialog";
 import { ConfirmInterfaceDeleteDialog } from "@/features/networks/components/ConfirmInterfaceDeleteDialog";
 import { ConfirmFirewallRuleDeleteDialog } from "@/features/networks/components/ConfirmFirewallRuleDeleteDialog";
@@ -572,8 +570,6 @@ export function NetworkTab({
   const interfacesQuery = useNodeNetworkInterfacesLive(clusterId, nodeName);
   const networkInterfaces = interfacesQuery.data;
   const deleteIface = useDeleteNetworkInterface(clusterId, nodeName);
-  const apply = useApplyNetworkConfig(clusterId, nodeName);
-  const revert = useRevertNetworkConfig(clusterId, nodeName);
   const [editIface, setEditIface] = useState<NetworkInterface | null>(null);
   const [pendingDelete, setPendingDelete] = useState<NetworkInterface | null>(
     null,
@@ -587,28 +583,7 @@ export function NetworkTab({
           <h2 className="text-lg font-semibold">Network Interfaces</h2>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              revert.mutate();
-            }}
-            disabled={revert.isPending}
-          >
-            <RotateCcw className="mr-1 h-4 w-4" />
-            Revert
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              apply.mutate();
-            }}
-            disabled={apply.isPending}
-          >
-            <Check className="mr-1 h-4 w-4" />
-            Apply Config
-          </Button>
+          <NetworkApplyRevertButtons clusterId={clusterId} nodeName={nodeName} />
           <CreateInterfaceDialog clusterId={clusterId} nodeName={nodeName} />
         </div>
       </div>
@@ -2029,8 +2004,15 @@ export function FirewallTab({
   const createRule = useCreateNodeFirewallRule(clusterId, nodeName);
   const logQuery = useNodeFirewallLog(clusterId, nodeName);
   const logEntries = logQuery.data;
+  // A quick-add button only sets this; the rule is sent from its confirmation.
+  const [pendingQuickAdd, setPendingQuickAdd] = useState<
+    "ACCEPT" | "DROP" | null
+  >(null);
 
-  const handleQuickAdd = (action: string) => {
+  // The rule names no source, destination, protocol or port, so it matches
+  // every inbound packet, and Proxmox's create_rule puts it first in the list
+  // (see internal/proxmox/client_firewall.go).
+  const handleQuickAdd = (action: "ACCEPT" | "DROP") => {
     createRule.mutate({
       type: "in",
       action,
@@ -2047,7 +2029,7 @@ export function FirewallTab({
             variant="outline"
             size="sm"
             onClick={() => {
-              handleQuickAdd("ACCEPT");
+              setPendingQuickAdd("ACCEPT");
             }}
             disabled={createRule.isPending}
           >
@@ -2057,7 +2039,7 @@ export function FirewallTab({
             variant="outline"
             size="sm"
             onClick={() => {
-              handleQuickAdd("DROP");
+              setPendingQuickAdd("DROP");
             }}
             disabled={createRule.isPending}
           >
@@ -2189,11 +2171,37 @@ export function FirewallTab({
         owner={`node ${nodeName}`}
         current={rules}
       />
+
+      <ConfirmDeleteDialog
+        target={pendingQuickAdd}
+        onClose={() => {
+          setPendingQuickAdd(null);
+        }}
+        onConfirm={handleQuickAdd}
+        title={(action) =>
+          action === "DROP"
+            ? `Drop all inbound traffic to ${nodeName}?`
+            : `Accept all inbound traffic to ${nodeName}?`
+        }
+        description={(action) =>
+          action === "DROP"
+            ? `Proxmox adds an enabled DROP rule at the top of the rule list of node ${nodeName} that matches every inbound packet: any source, protocol and port. The firewall service applies it within about 10 seconds. While the firewall is on for ${nodeName}, this can cut off access to the node — its web UI and API, SSH, and Nexara's own connection to it.`
+            : `Proxmox adds an enabled ACCEPT rule at the top of the rule list of node ${nodeName} that matches every inbound packet: any source, protocol and port. The firewall service applies it within about 10 seconds. Rules are checked from the top, so while the firewall is on for ${nodeName} it lets every inbound connection to the node through, whatever the rules below it and the inbound policy say. To undo it, delete the rule.`
+        }
+        confirmLabel={(action) =>
+          action === "DROP" ? "Add Drop Rule" : "Add Accept Rule"
+        }
+      />
     </div>
   );
 }
 
-function ServicesTab({
+// Proxmox refuses to stop these: the stop task dies with "refusing to stop
+// essential service!" (pve-manager PVE/API2/Services.pm $essential_services).
+// They can still be restarted.
+const UNSTOPPABLE_SERVICES = new Set(["pveproxy", "pvedaemon", "pve-cluster"]);
+
+export function ServicesTab({
   clusterId,
   nodeName,
 }: {
@@ -2203,6 +2211,12 @@ function ServicesTab({
   const servicesQuery = useNodeServices(clusterId, nodeName);
   const services = servicesQuery.data;
   const serviceAction = useServiceAction(clusterId, nodeName);
+  // Restart and Stop only set this and send from its confirmation; Start
+  // sends at once.
+  const [pendingAction, setPendingAction] = useState<{
+    service: string;
+    action: "restart" | "stop";
+  } | null>(null);
 
   // The heading is outside the branch so it stays whatever the read does: a
   // failure then reads as this section failing rather than as the section not
@@ -2276,7 +2290,7 @@ function ServicesTab({
                             size="sm"
                             className="h-7 gap-1 text-xs"
                             onClick={() => {
-                              serviceAction.mutate({
+                              setPendingAction({
                                 service: svc.service,
                                 action: "restart",
                               });
@@ -2286,21 +2300,23 @@ function ServicesTab({
                             <RotateCw className="h-3 w-3" />
                             Restart
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-1 text-xs"
-                            onClick={() => {
-                              serviceAction.mutate({
-                                service: svc.service,
-                                action: "stop",
-                              });
-                            }}
-                            disabled={serviceAction.isPending}
-                          >
-                            <Square className="h-3 w-3" />
-                            Stop
-                          </Button>
+                          {!UNSTOPPABLE_SERVICES.has(svc.service) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1 text-xs"
+                              onClick={() => {
+                                setPendingAction({
+                                  service: svc.service,
+                                  action: "stop",
+                                });
+                              }}
+                              disabled={serviceAction.isPending}
+                            >
+                              <Square className="h-3 w-3" />
+                              Stop
+                            </Button>
+                          )}
                         </>
                       )}
                     </div>
@@ -2311,6 +2327,25 @@ function ServicesTab({
           </table>
         </div>
       )}
+
+      <ConfirmDeleteDialog
+        target={pendingAction}
+        onClose={() => {
+          setPendingAction(null);
+        }}
+        onConfirm={(p) => {
+          serviceAction.mutate(p);
+        }}
+        title={(p) =>
+          `${p.action === "stop" ? "Stop" : "Restart"} ${p.service} on ${nodeName}?`
+        }
+        description={(p) =>
+          p.action === "stop"
+            ? `Proxmox stops ${p.service} on ${nodeName} as soon as you confirm, and it stays stopped until it is started again. Whatever relies on it stops working until then.`
+            : `Proxmox restarts ${p.service} on ${nodeName} as soon as you confirm. Whatever relies on it is interrupted while it restarts.`
+        }
+        confirmLabel={(p) => (p.action === "stop" ? "Stop" : "Restart")}
+      />
     </div>
   );
 }

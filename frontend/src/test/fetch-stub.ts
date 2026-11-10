@@ -68,6 +68,22 @@ export function stubApi(
   };
 }
 
+/** The body of each request of `method` to `url` sent through stubApi. */
+export function bodiesOf(method: string, url: string): unknown[] {
+  return vi
+    .mocked(globalThis.fetch)
+    .mock.calls.filter(
+      ([input, init]) => input === url && init?.method === method,
+    )
+    .map(([, init]) => {
+      // apiClient sends every body as a JSON string.
+      if (typeof init?.body !== "string") {
+        throw new Error(`${method} ${url} was sent without a JSON body`);
+      }
+      return JSON.parse(init.body) as unknown;
+    });
+}
+
 /** A {items,total} list envelope, the shape every collection endpoint returns. */
 export function listOf<T>(items: T[]): { items: T[]; total: number } {
   return { items, total: items.length };

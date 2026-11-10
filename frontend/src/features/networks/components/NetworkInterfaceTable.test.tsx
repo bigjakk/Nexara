@@ -3,6 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { fill, setupUser } from "@/test/user";
 import { NetworkInterfaceTable } from "./NetworkInterfaceTable";
 import type { NodeInterfaces } from "../types/network";
 
@@ -103,6 +104,34 @@ describe("NetworkInterfaceTable — deleting an interface", () => {
 
     await waitFor(() => {
       expect(api.writes()).toEqual([`DELETE ${NETWORKS_PATH}/pve-02/vmbr1`]);
+    });
+  });
+});
+
+describe("NetworkInterfaceTable — Apply Config", () => {
+  it("asks first, naming the node picked in the filter, and applies there only on confirm", async () => {
+    api = stubApi({ [NETWORKS_PATH]: listOf(NODES) });
+    const user = setupUser();
+    renderWithProviders(<NetworkInterfaceTable clusterId={CLUSTER} />);
+    fill(
+      await screen.findByRole("combobox", { name: "Filter by node" }),
+      "pve-02",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Apply Config" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      within(dialog).getByRole("heading", {
+        name: "Apply the pending network changes on pve-02?",
+      }),
+    ).toBeInTheDocument();
+    expect(api.writes()).toEqual([]);
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Apply Config" }),
+    );
+    await waitFor(() => {
+      expect(api.writes()).toEqual([`POST ${NETWORKS_PATH}/pve-02/apply`]);
     });
   });
 });

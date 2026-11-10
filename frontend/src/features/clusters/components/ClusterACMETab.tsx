@@ -36,6 +36,7 @@ import { describeError } from "@/lib/api-error";
 import { useAuth } from "@/hooks/useAuth";
 import { Textarea } from "@/components/ui/textarea";
 import { useTaskLogStore } from "@/stores/task-log-store";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   useACMEAccounts,
   useACMEPlugins,
@@ -562,6 +563,12 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
   const orderCert = useOrderNodeCertificate(clusterId);
   const renewCert = useRenewNodeCertificate(clusterId);
   const { setFocusedTask, setPanelOpen } = useTaskLogStore();
+  // Order Certificate and Renew only set this; the request goes from the
+  // confirmation, for the node the button was pressed on.
+  const [pendingCert, setPendingCert] = useState<{
+    kind: "order" | "renew";
+    node: string;
+  } | null>(null);
 
   const firstNode = nodesQuery.data?.[0]?.name ?? "";
   const certNode = selectedNode || firstNode;
@@ -1156,19 +1163,7 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
                 size="sm"
                 variant="outline"
                 onClick={() => {
-                  orderCert.mutate(
-                    { node: certNode },
-                    {
-                      onSuccess: (data) => {
-                        setFocusedTask({
-                          clusterId,
-                          upid: data.upid,
-                          description: `Order ACME certificate — ${certNode}`,
-                        });
-                        setPanelOpen(true);
-                      },
-                    },
-                  );
+                  setPendingCert({ kind: "order", node: certNode });
                 }}
                 disabled={orderCert.isPending || !hasDomains}
                 title={
@@ -1184,19 +1179,7 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
                 size="sm"
                 variant="outline"
                 onClick={() => {
-                  renewCert.mutate(
-                    { node: certNode, force: true },
-                    {
-                      onSuccess: (data) => {
-                        setFocusedTask({
-                          clusterId,
-                          upid: data.upid,
-                          description: `Renew ACME certificate — ${certNode}`,
-                        });
-                        setPanelOpen(true);
-                      },
-                    },
-                  );
+                  setPendingCert({ kind: "renew", node: certNode });
                 }}
                 disabled={renewCert.isPending}
                 title="Renew existing certificate (force)"
@@ -1280,6 +1263,47 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
           )}
         </CardContent>
       </Card>
+
+      {/*
+        pve-manager PVE/API2/ACME.pm: new_certificate and renew_certificate
+        both install the certificate and run `systemctl reload-or-restart
+        pveproxy`; renew then revokes the old one. Order is refused while
+        the node has a custom certificate, since it is sent without force.
+      */}
+      <ConfirmDeleteDialog
+        target={pendingCert}
+        onClose={() => {
+          setPendingCert(null);
+        }}
+        onConfirm={(p) => {
+          const onSuccess = (data: { upid: string }) => {
+            setFocusedTask({
+              clusterId,
+              upid: data.upid,
+              description: `${p.kind === "order" ? "Order" : "Renew"} ACME certificate — ${p.node}`,
+            });
+            setPanelOpen(true);
+          };
+          if (p.kind === "order") {
+            orderCert.mutate({ node: p.node }, { onSuccess });
+          } else {
+            renewCert.mutate({ node: p.node, force: true }, { onSuccess });
+          }
+        }}
+        title={(p) =>
+          p.kind === "order"
+            ? `Order a certificate for ${p.node}?`
+            : `Renew the certificate of ${p.node} now?`
+        }
+        description={(p) =>
+          `${
+            p.kind === "order"
+              ? `Proxmox asks the certificate authority of the ACME account for a certificate for the domains of ${p.node}, installs it as the certificate ${p.node} serves, and reloads pveproxy, which serves its web UI and API, to use it.`
+              : `Proxmox asks the certificate authority for a new certificate for the domains of ${p.node}, even if the current one is not due for renewal yet, installs it, reloads pveproxy to use it, and then revokes the old one.`
+          } If Nexara reaches this cluster through ${p.node} and has pinned its certificate, Nexara's live calls to the cluster fail until you verify the new certificate on the cluster's page.`
+        }
+        confirmLabel={(p) => (p.kind === "order" ? "Order Certificate" : "Renew")}
+      />
     </div>
   );
 }

@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event";
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
-import { listOf, stubApi } from "@/test/fetch-stub";
-import { FirewallTab, NetworkTab } from "./NodeDetailPage";
+import { bodiesOf, listOf, stubApi } from "@/test/fetch-stub";
+import { setupUser } from "@/test/user";
+import { FirewallTab, NetworkTab, ServicesTab } from "./NodeDetailPage";
 
 vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
@@ -280,5 +281,169 @@ describe("NodeDetailPage Firewall tab — deleting a rule", () => {
         screen.getByRole("button", { name: "Delete firewall rule 0" }),
       ).toBeEnabled();
     });
+  });
+});
+
+// The node tabs' disruptive one-click actions now ask first. Each case opens
+// the confirmation, checks it names the node and what happens, and that the
+// request goes out only on confirm.
+describe("NodeDetailPage Network tab — Apply Config and Revert", () => {
+  const NET = `/api/v1/clusters/${CLUSTER}/networks/${NODE}`;
+
+  it.each([
+    {
+      button: "Apply Config",
+      title: `Apply the pending network changes on ${NODE}?`,
+      says: "can lose its network connection, Nexara's included",
+      sends: `POST ${NET}/apply`,
+    },
+    {
+      button: "Revert",
+      title: `Discard the pending network changes on ${NODE}?`,
+      says: "The running network does not change.",
+      sends: `POST ${NET}/revert`,
+    },
+  ])(
+    "$button asks first and sends only on confirm",
+    async ({ button, title, says, sends }) => {
+      api = stubApi({ [NET]: listOf([]) });
+      const user = setupUser();
+      renderWithProviders(<NetworkTab clusterId={CLUSTER} nodeName={NODE} />);
+
+      await user.click(await screen.findByRole("button", { name: button }));
+      const dialog = await screen.findByRole("alertdialog");
+      expect(
+        within(dialog).getByRole("heading", { name: title }),
+      ).toBeInTheDocument();
+      expect(dialog).toHaveTextContent(says);
+      expect(api.writes()).toEqual([]);
+
+      await user.click(within(dialog).getByRole("button", { name: button }));
+      await waitFor(() => {
+        expect(api.writes()).toEqual([sends]);
+      });
+    },
+  );
+});
+
+describe("NodeDetailPage Firewall tab — quick-add rules", () => {
+  const RULES = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/firewall/rules`;
+
+  it.each([
+    {
+      button: "+ Drop Rule",
+      title: `Drop all inbound traffic to ${NODE}?`,
+      says: "this can cut off access to the node",
+      confirm: "Add Drop Rule",
+      action: "DROP",
+    },
+    {
+      button: "+ Accept Rule",
+      title: `Accept all inbound traffic to ${NODE}?`,
+      says: "it lets every inbound connection to the node through",
+      confirm: "Add Accept Rule",
+      action: "ACCEPT",
+    },
+  ])(
+    "$button asks first, saying what the rule does, and adds it only on confirm",
+    async ({ button, title, says, confirm, action }) => {
+      api = stubApi({ [RULES]: listOf([]) });
+      const user = setupUser();
+      renderWithProviders(<FirewallTab clusterId={CLUSTER} nodeName={NODE} />);
+
+      await user.click(await screen.findByRole("button", { name: button }));
+      const dialog = await screen.findByRole("alertdialog");
+      expect(
+        within(dialog).getByRole("heading", { name: title }),
+      ).toBeInTheDocument();
+      expect(dialog).toHaveTextContent(says);
+      expect(api.writes()).toEqual([]);
+
+      await user.click(within(dialog).getByRole("button", { name: confirm }));
+      await waitFor(() => {
+        expect(api.writes()).toEqual([`POST ${RULES}`]);
+      });
+      expect(bodiesOf("POST", RULES)).toEqual([
+        { type: "in", action, enable: 1 },
+      ]);
+    },
+  );
+});
+
+describe("NodeDetailPage Services tab — Stop and Restart", () => {
+  const SERVICES = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/services`;
+
+  // The second row is the one acted on, so an action sent for the first
+  // shows.
+  it.each([
+    {
+      button: "Stop",
+      says: "it stays stopped until it is started again",
+      sends: `POST ${SERVICES}/pvestatd/stop`,
+    },
+    {
+      button: "Restart",
+      says: "interrupted while it restarts",
+      sends: `POST ${SERVICES}/pvestatd/restart`,
+    },
+  ])(
+    "$button asks first and sends only on confirm",
+    async ({ button, says, sends }) => {
+      api = stubApi({
+        [SERVICES]: listOf([
+          { service: "cron", name: "cron", desc: "Cron", state: "running" },
+          {
+            service: "pvestatd",
+            name: "pvestatd",
+            desc: "PVE Status Daemon",
+            state: "running",
+          },
+        ]),
+      });
+      const user = setupUser();
+      renderWithProviders(<ServicesTab clusterId={CLUSTER} nodeName={NODE} />);
+
+      const row = (await screen.findByText("pvestatd")).closest("tr");
+      if (!(row instanceof HTMLElement)) throw new Error("no row for pvestatd");
+      await user.click(within(row).getByRole("button", { name: button }));
+      const dialog = await screen.findByRole("alertdialog");
+      expect(
+        within(dialog).getByRole("heading", {
+          name: `${button} pvestatd on ${NODE}?`,
+        }),
+      ).toBeInTheDocument();
+      expect(dialog).toHaveTextContent(says);
+      expect(api.writes()).toEqual([]);
+
+      await user.click(within(dialog).getByRole("button", { name: button }));
+      await waitFor(() => {
+        expect(api.writes()).toEqual([sends]);
+      });
+    },
+  );
+
+  // Proxmox's stop task refuses pveproxy, pvedaemon and pve-cluster, so a
+  // Stop there could only fail after a confirmation saying it would stop.
+  it("offers Restart but no Stop for a service Proxmox will not stop", async () => {
+    api = stubApi({
+      [SERVICES]: listOf([
+        {
+          service: "pveproxy",
+          name: "pveproxy",
+          desc: "PVE API Proxy Server",
+          state: "running",
+        },
+      ]),
+    });
+    renderWithProviders(<ServicesTab clusterId={CLUSTER} nodeName={NODE} />);
+
+    const row = (await screen.findByText("pveproxy")).closest("tr");
+    if (!(row instanceof HTMLElement)) throw new Error("no row for pveproxy");
+    expect(
+      within(row).getByRole("button", { name: "Restart" }),
+    ).toBeInTheDocument();
+    expect(
+      within(row).queryByRole("button", { name: "Stop" }),
+    ).not.toBeInTheDocument();
   });
 });
