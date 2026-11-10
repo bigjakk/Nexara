@@ -263,3 +263,26 @@ SET status = 'failed',
     completed_at = now()
 WHERE status IN ('running', 'pending')
   AND started_at < now() - interval '2 hours';
+
+-- PruneCVEScanHistory deletes each cluster's scans beyond its newest keep,
+-- counted in the created_at order ListCVEScans and GetLatestCVEScan read. A
+-- scan's node rows and vulnerabilities go with it by cascade (000020; 000139
+-- indexes the step from node to vulnerability). Older scans stay, whatever
+-- their age, in two cases. The latest completed one: GetClusterSecuritySummary
+-- reads it for the security dashboard and the posture score, which answers
+-- "no scans" and a score of 100 without it, so a run of failed scans must not
+-- push it out. And any still running or pending, whose rows the scanner is
+-- still writing.
+-- name: PruneCVEScanHistory :execrows
+DELETE FROM cve_scans
+WHERE id IN (
+    SELECT id FROM (
+        SELECT id, status,
+               row_number() OVER (PARTITION BY cluster_id ORDER BY created_at DESC, id DESC) AS newest,
+               row_number() OVER (PARTITION BY cluster_id, status ORDER BY created_at DESC, id DESC) AS newest_of_status
+        FROM cve_scans
+    ) ranked
+    WHERE newest > sqlc.arg('keep')::int
+      AND status NOT IN ('running', 'pending')
+      AND NOT (status = 'completed' AND newest_of_status = 1)
+);

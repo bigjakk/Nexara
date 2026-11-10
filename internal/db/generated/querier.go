@@ -2742,6 +2742,16 @@ type Querier interface {
 	// At most one open episode per (UPS, kind); a second open is a no-op.
 	OpenUpsEvent(ctx context.Context, arg OpenUpsEventParams) error
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	// PruneCVEScanHistory deletes each cluster's scans beyond its newest keep,
+	// counted in the created_at order ListCVEScans and GetLatestCVEScan read. A
+	// scan's node rows and vulnerabilities go with it by cascade (000020; 000139
+	// indexes the step from node to vulnerability). Older scans stay, whatever
+	// their age, in two cases. The latest completed one: GetClusterSecuritySummary
+	// reads it for the security dashboard and the posture score, which answers
+	// "no scans" and a score of 100 without it, so a run of failed scans must not
+	// push it out. And any still running or pending, whose rows the scanner is
+	// still writing.
+	PruneCVEScanHistory(ctx context.Context, keep int32) (int64, error)
 	// Logins not seen since before go, so a host that changed address does not
 	// stay listed forever, and so does all but the newest 256: upsd output is
 	// untrusted, and a server listing thousands of made-up addresses a minute

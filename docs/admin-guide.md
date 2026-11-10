@@ -1711,6 +1711,10 @@ In **Scan History**, expanding a scan shows its **Node Results**, and the **›*
 
 A node whose changelogs Proxmox could not serve still reads completed, and its row in **Node Results** names the packages: CVEs named only in those changelogs are missing from the result. Nexara's log gives the first reason Proxmox returned.
 
+### How Long Scans Are Kept
+
+Nexara keeps each cluster's 20 newest scans, the number **Scan History** lists, and once an hour deletes older ones with their node results and vulnerabilities. Two kinds of older scan stay, however old: the latest completed scan, which the posture card reads, so a run of failed scans never sets the card back to a score of 100 with no findings; and a scan still running. On an hourly schedule the 20 cover less than a day, on the default daily one 20 days. For a longer record, schedule the **Patch status** report, which keeps each scheduled run for 90 days.
+
 ---
 
 ## Rolling Updates

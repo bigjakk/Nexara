@@ -914,6 +914,38 @@ func (q *Queries) ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVC
 	return items, nil
 }
 
+const pruneCVEScanHistory = `-- name: PruneCVEScanHistory :execrows
+DELETE FROM cve_scans
+WHERE id IN (
+    SELECT id FROM (
+        SELECT id, status,
+               row_number() OVER (PARTITION BY cluster_id ORDER BY created_at DESC, id DESC) AS newest,
+               row_number() OVER (PARTITION BY cluster_id, status ORDER BY created_at DESC, id DESC) AS newest_of_status
+        FROM cve_scans
+    ) ranked
+    WHERE newest > $1::int
+      AND status NOT IN ('running', 'pending')
+      AND NOT (status = 'completed' AND newest_of_status = 1)
+)
+`
+
+// PruneCVEScanHistory deletes each cluster's scans beyond its newest keep,
+// counted in the created_at order ListCVEScans and GetLatestCVEScan read. A
+// scan's node rows and vulnerabilities go with it by cascade (000020; 000139
+// indexes the step from node to vulnerability). Older scans stay, whatever
+// their age, in two cases. The latest completed one: GetClusterSecuritySummary
+// reads it for the security dashboard and the posture score, which answers
+// "no scans" and a score of 100 without it, so a run of failed scans must not
+// push it out. And any still running or pending, whose rows the scanner is
+// still writing.
+func (q *Queries) PruneCVEScanHistory(ctx context.Context, keep int32) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneCVEScanHistory, keep)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateCVENotificationSent = `-- name: UpdateCVENotificationSent :exec
 UPDATE cve_notification_configs
 SET last_notified_at = now(),

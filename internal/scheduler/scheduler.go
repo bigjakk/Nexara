@@ -584,6 +584,41 @@ func (s *Scheduler) RunTaskRetention(ctx context.Context) {
 	s.logger.Debug("task retention complete")
 }
 
+// cveScanHistoryKeep is how many of each cluster's newest CVE scans
+// RunCVEScanRetention keeps: the 20 the Security page's Scan History lists
+// (?limit=20 in frontend/src/features/security/api/cve-queries.ts), so every
+// scan it lists can be opened. Everything else that reads a scan reads one:
+// the newest, as the Patch status report and the schedule's due check do, or
+// the latest completed, which the posture card reads and the query keeps
+// however old. A count rather than an age, because schedules differ: the same
+// 20 are under a day of hourly scans and 20 days of the default daily ones.
+const cveScanHistoryKeep = 20
+
+// RunCVEScanRetention deletes each cluster's CVE scans beyond its newest
+// cveScanHistoryKeep, with their node results and vulnerabilities. Mirrors
+// RunTaskRetention; PruneCVEScanHistory never deletes a cluster's latest
+// completed scan or one still running. Without this tick every scan's rows
+// were kept forever, 24 scans a day on an hourly schedule.
+func (s *Scheduler) RunCVEScanRetention(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("CVE scan retention panicked", "panic", r)
+		}
+	}()
+	deleted, err := s.queries.PruneCVEScanHistory(ctx, cveScanHistoryKeep)
+	if err != nil {
+		s.logger.Warn("CVE scan retention failed", "error", err)
+		return
+	}
+	// Info, so the first pass after an upgrade, which deletes every scan
+	// beyond each cluster's newest, is on record.
+	if deleted > 0 {
+		s.logger.Info("CVE scan retention deleted old scans", "deleted_scans", deleted, "keep_newest", cveScanHistoryKeep)
+		return
+	}
+	s.logger.Debug("CVE scan retention complete")
+}
+
 // CVEScanTick is how often RunCVEScanning looks for a cluster due a scan.
 // Each cluster's own interval decides when one runs, so the tick only has to
 // be fine enough for the shortest interval offered, one hour, to keep time; a

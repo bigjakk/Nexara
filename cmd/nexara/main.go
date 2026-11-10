@@ -901,6 +901,9 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			{name: "report_generation", every: 60 * time.Second, run: sched.RunReportGeneration},
 			{name: "report_retention", every: 24 * time.Hour, run: sched.RunReportRetention},
 			{name: "task_retention", every: 1 * time.Hour, run: sched.RunTaskRetention},
+			// Hourly, as scans can be: each pass then has a scan or so per
+			// cluster to delete, not a day's worth.
+			{name: "cve_scan_retention", every: 1 * time.Hour, run: sched.RunCVEScanRetention},
 			{name: "rolling_updates", every: 15 * time.Second, run: sched.RunRollingUpdates},
 			{name: "vm_import_reconcile", every: 15 * time.Second, run: sched.RunVMImportReconcile},
 
