@@ -1657,7 +1657,7 @@ Navigate to **Security** from the sidebar.
 ### How It Works
 
 1. Nexara reads each node's **pending updates** from Proxmox. A package with no update pending is not checked, so a score of 100 means no known CVE among the pending upgrades, not that nothing installed has one
-2. Each pending package is checked against the Debian Security Tracker, and its changelog, which Proxmox serves, is searched for CVE IDs the tracker does not list. A security update with no CVE on record appears as `UNKNOWN-<package>`, or `SEC-<package>` when the tracker cannot be reached
+2. Each pending package is checked against the Debian Security Tracker, and its changelog, which Proxmox serves, is searched for CVE IDs the tracker does not list. The tracker files CVEs under source packages, so a package from Debian is looked up under its source, which the tracker's own package list gives, or failing that the package's changelog (`libssl3` under `openssl`). A Proxmox-built package is looked up under its own name, and Debian's kernel source is skipped, since a Proxmox node runs Proxmox's kernel. A security update with no CVE on record appears as `UNKNOWN-<package>`, or `SEC-<package>` when the tracker cannot be reached
 3. Results are aggregated into a security posture score per cluster
 
 ### Manual Scan
@@ -1668,10 +1668,10 @@ Navigate to **Security** from the sidebar.
 
 ### Automated Scanning
 
-Each cluster is scanned automatically on its own interval — **every 24 hours** unless you change it. The scheduler checks every 6 hours which clusters are due, so intervals shorter than that are rounded up in practice.
+Each cluster is scanned automatically on its own interval — **every 24 hours** unless you change it. The scheduler checks every minute which clusters are due, so a scan starts within a minute of its interval, counted from the start of the cluster's last scan, a manual one included.
 
 1. Open the **Scan Schedule** card on the Security page
-2. Toggle **Automatic scanning** on or off, and pick an interval — hourly, 6 / 12 / 24 / 48 hours, or weekly
+2. Toggle **Automatic scanning** on or off, and pick an interval — hourly, or every 6, 12, 24 or 48 hours
 3. Changes save immediately
 
 ### Security Posture
@@ -1707,7 +1707,9 @@ Tick one or more **Channels** — the same set serves whichever bands you enable
 
 ### Reviewing Vulnerabilities
 
-In **Scan History**, expanding a scan shows its **Node Results**, and the **›** in the scan's own row opens that scan's vulnerabilities across its nodes: **CVE ID**, **Action**, **Risk**, **Score**, **EPSS**, **Package**, **Installed**, **Fixed In** and **Description**, filtered by **Actively Exploited** and by severity.
+In **Scan History**, expanding a scan shows its **Node Results**, and the **›** in the scan's own row opens that scan's vulnerabilities across its nodes: **CVE ID**, **Action**, **Risk**, **Score**, **EPSS**, **Package**, **Installed**, **Fixed In** and **Description**, filtered by **Actively Exploited** and by the severity the **Risk** column shows.
+
+A node whose changelogs Proxmox could not serve still reads completed, and its row in **Node Results** names the packages: CVEs named only in those changelogs are missing from the result. Nexara's log gives the first reason Proxmox returned.
 
 ---
 
