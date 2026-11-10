@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"maps"
@@ -40,6 +41,40 @@ type memberDB struct {
 	asked    []string
 	failures []string   // the reason of each FailRollingUpdateNode
 	rows     []auditRow // each InsertAuditLog, when audits is set
+
+	// accept answers each write it names with that many rows and records it
+	// in writes.
+	accept map[string]int64
+	writes []string
+}
+
+// engineOn returns an engine on d, a client of a stub Proxmox that answers
+// with handler (every request a 500 when it is nil), and what the stub was sent.
+func engineOn(t *testing.T, d *memberDB, handler http.HandlerFunc) (*Orchestrator, *proxmox.Client, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var sent []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		sent = append(sent, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		if handler == nil {
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+			return
+		}
+		handler(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	client, err := proxmox.NewClient(proxmox.ClientConfig{BaseURL: srv.URL, TokenID: "nexara@pve!api", TokenSecret: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := NewOrchestrator(context.Background(), db.New(d), "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	return o, client, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(sent)
+	}
 }
 
 type auditRow struct {
@@ -57,7 +92,14 @@ func queryName(sql string) string {
 }
 
 func (d *memberDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	switch name := queryName(sql); {
+	name := queryName(sql)
+	if n, ok := d.accept[name]; ok {
+		d.mu.Lock()
+		d.writes = append(d.writes, name)
+		d.mu.Unlock()
+		return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", n)), nil
+	}
+	switch {
 	case name == "FailRollingUpdateNode":
 		reason, _ := args[1].(string)
 		d.mu.Lock()
@@ -150,7 +192,7 @@ func TestNodeSteps_ANodeTheClusterDoesNotHoldIsNeverSentToProxmox(t *testing.T) 
 		// drain check and the reboot. Its error is what the handler maps to
 		// 409 (a stranger) or 500 (a failed lookup), so its type is pinned.
 		n.Step = "awaiting_upgrade"
-		j.RebootAfterUpdate = true
+		j.Status, j.RebootAfterUpdate = "running", true
 		err := o.ConfirmUpgrade(context.Background(), j, n)
 		lookupFailed := strings.HasSuffix(t.Name(), "a_failed_lookup")
 		if got := errors.As(err, new(*nodemember.LookupError)); got != lookupFailed ||

@@ -1794,7 +1794,7 @@ The cluster-wide wizard does not offer this mode; it is reached from the node pa
 - **Resume** — continue a paused job
 - **Cancel** — abort the job (nodes already updated stay updated, and guests already migrated are not moved back, unless that node's restore had already begun)
 - **Skip** — skip a node that has not started yet; a node already under way cannot be skipped
-- **Confirm Upgrade** — in manual mode, confirm that you've completed the upgrade on a node. The job's status is not checked: the button stays on a paused, failed or cancelled job and still works, and with **Reboot after update** on it reboots the node
+- **Confirm Upgrade** — in manual mode, confirm that you've completed the upgrade on a node; with **Reboot after update** on, this reboots it. Only a running job's node can be confirmed: resume a paused job first, and a node a failed or cancelled job left in **Awaiting Upgrade** stays there
 
 ### HA-Aware Scheduling
 

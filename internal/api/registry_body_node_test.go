@@ -779,7 +779,7 @@ func TestConfirmUpgrade_RefusesANodeTheClusterDoesNotHold(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := &handlerNodeDB{t: t, lookErr: tt.lookErr,
 				rows: map[string]any{
-					"GetRollingUpdateJob": db.RollingUpdateJob{ID: jobID, ClusterID: uuid.MustParse(testClusterID), RebootAfterUpdate: true},
+					"GetRollingUpdateJob": db.RollingUpdateJob{ID: jobID, ClusterID: uuid.MustParse(testClusterID), Status: "running", RebootAfterUpdate: true},
 					"GetRollingUpdateNode": db.RollingUpdateNode{ID: nodeID, JobID: jobID, NodeName: "192.0.2.10",
 						Step: "awaiting_upgrade"},
 				},

@@ -97,15 +97,27 @@ func (q *Queries) CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) (i
 	return result.RowsAffected(), nil
 }
 
-const confirmNodeUpgrade = `-- name: ConfirmNodeUpgrade :exec
+const confirmNodeUpgrade = `-- name: ConfirmNodeUpgrade :execrows
 UPDATE rolling_update_nodes
 SET upgrade_confirmed_at = now(), updated_at = now()
-WHERE id = $1 AND step = 'awaiting_upgrade'
+WHERE rolling_update_nodes.id = $1 AND rolling_update_nodes.step = 'awaiting_upgrade'
+  AND EXISTS (
+      SELECT 1 FROM rolling_update_jobs j
+      WHERE j.id = rolling_update_nodes.job_id AND j.status = 'running'
+  )
 `
 
-func (q *Queries) ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, confirmNodeUpgrade, id)
-	return err
+// The job's status is checked here as well as the node's step. ConfirmUpgrade
+// refuses a job that is not running before it starts, but the drain check it
+// runs before this write calls Proxmox and can take a while, and a cancel that
+// lands meanwhile must not be followed by a reboot. Zero rows means nothing is
+// confirmed, and the caller sends nothing.
+func (q *Queries) ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, confirmNodeUpgrade, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countActiveNodes = `-- name: CountActiveNodes :one

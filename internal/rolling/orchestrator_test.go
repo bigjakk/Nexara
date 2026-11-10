@@ -203,21 +203,12 @@ func TestOrchestrator_WaitForGuestUnlocked_CancelsOnShutdown(t *testing.T) {
 	}
 }
 
-// stubOrchestrator builds an Orchestrator pointed at a stub Proxmox server.
+// stubOrchestrator is engineOn with no database, for code that reads none. The
+// stub closes when the test ends; the returned func is for the callers' defers.
 func stubOrchestrator(t *testing.T, handler http.HandlerFunc) (*Orchestrator, *proxmox.Client, func()) {
 	t.Helper()
-	stub := httptest.NewServer(handler)
-	client, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:     stub.URL,
-		TokenID:     "user@pam!test",
-		TokenSecret: "secret",
-	})
-	if err != nil {
-		stub.Close()
-		t.Fatalf("NewClient: %v", err)
-	}
-	o := NewOrchestrator(context.Background(), nil, "", slog.Default(), nil, nil)
-	return o, client, stub.Close
+	o, client, _ := engineOn(t, nil, handler)
+	return o, client, func() {}
 }
 
 // TestOrchestrator_MigrateWithRetry_RetriesTransientLock verifies a drain

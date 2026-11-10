@@ -353,7 +353,12 @@ type Querier interface {
 	// every held resource is confirmed released, then clears the flag.
 	CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) (int64, error)
 	CompleteVMImportJob(ctx context.Context, id uuid.UUID) error
-	ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) error
+	// The job's status is checked here as well as the node's step. ConfirmUpgrade
+	// refuses a job that is not running before it starts, but the drain check it
+	// runs before this write calls Proxmox and can take a while, and a cancel that
+	// lands meanwhile must not be followed by a reboot. Zero rows means nothing is
+	// confirmed, and the caller sends nothing.
+	ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) (int64, error)
 	// CorrelateVeeamBackupObjects resolves every backup object on one server to a
 	// (cluster_id, vmid) guest, in one statement.
 	//

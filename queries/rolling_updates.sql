@@ -136,10 +136,19 @@ UPDATE rolling_update_nodes
 SET guests_json = $2, updated_at = now()
 WHERE id = $1;
 
--- name: ConfirmNodeUpgrade :exec
+-- The job's status is checked here as well as the node's step. ConfirmUpgrade
+-- refuses a job that is not running before it starts, but the drain check it
+-- runs before this write calls Proxmox and can take a while, and a cancel that
+-- lands meanwhile must not be followed by a reboot. Zero rows means nothing is
+-- confirmed, and the caller sends nothing.
+-- name: ConfirmNodeUpgrade :execrows
 UPDATE rolling_update_nodes
 SET upgrade_confirmed_at = now(), updated_at = now()
-WHERE id = $1 AND step = 'awaiting_upgrade';
+WHERE rolling_update_nodes.id = $1 AND rolling_update_nodes.step = 'awaiting_upgrade'
+  AND EXISTS (
+      SELECT 1 FROM rolling_update_jobs j
+      WHERE j.id = rolling_update_nodes.job_id AND j.status = 'running'
+  );
 
 -- name: SetNodeUpgradeStarted :exec
 -- COALESCE preserves the original upgrade_started_at on a resume re-launch

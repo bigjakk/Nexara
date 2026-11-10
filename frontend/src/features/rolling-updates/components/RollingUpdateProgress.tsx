@@ -98,11 +98,13 @@ function NodeRow({
   node,
   clusterId,
   jobId,
+  jobRunning,
   canManage,
 }: {
   node: RollingUpdateNode;
   clusterId: string;
   jobId: string;
+  jobRunning: boolean;
   canManage: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -143,7 +145,9 @@ function NodeRow({
         <StepIndicator node={node} />
 
         <div className="ml-auto flex items-center gap-2">
-          {canManage && node.step === "awaiting_upgrade" && (
+          {/* A failed, cancelled or paused job leaves its awaiting node as it
+              was; the API refuses to confirm it, so the button is not offered. */}
+          {canManage && jobRunning && node.step === "awaiting_upgrade" && (
             <Button
               size="sm"
               onClick={(e) => {
@@ -505,6 +509,7 @@ export function RollingUpdateProgress({
               node={node}
               clusterId={clusterId}
               jobId={jobId}
+              jobRunning={job.status === "running"}
               canManage={canManage}
             />
           ))}

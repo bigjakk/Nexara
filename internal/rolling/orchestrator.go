@@ -1460,6 +1460,14 @@ func (o *Orchestrator) advanceRestoring(ctx context.Context, client *proxmox.Cli
 
 // ConfirmUpgrade is called by the API when an admin confirms a node upgrade is done.
 func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode) error {
+	// Only a running job's node can be confirmed. A failed or cancelled job
+	// leaves its awaiting node where it was, but it has released what kept
+	// guests off that node (its HA rules and the rebalancer are back on) and
+	// is never ticked again, so a reboot sent now could hit guests moving back
+	// and nothing would follow it up. A paused job is held still on purpose.
+	if job.Status != "running" {
+		return fmt.Errorf("the job is %s, not running: only a running job's node can be confirmed", job.Status)
+	}
 	if node.Step != "awaiting_upgrade" {
 		return fmt.Errorf("node is not awaiting upgrade (current step: %s)", node.Step)
 	}
@@ -1506,8 +1514,13 @@ func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJ
 		}
 	}
 
-	if err := o.queries.ConfirmNodeUpgrade(ctx, node.ID); err != nil {
+	rows, err := o.queries.ConfirmNodeUpgrade(ctx, node.ID)
+	if err != nil {
 		return fmt.Errorf("confirm node upgrade: %w", err)
+	}
+	if rows == 0 {
+		// A cancel or a pause landed while the node was being checked.
+		return errors.New("the node is no longer awaiting its upgrade, or its job is no longer running; nothing was confirmed")
 	}
 
 	if job.RebootAfterUpdate {
