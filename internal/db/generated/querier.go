@@ -831,6 +831,11 @@ type Querier interface {
 	// settles it later exactly as it settles an enabled row, keeping the reason in
 	// last_error.
 	DisableScheduledTaskForBadSchedule(ctx context.Context, arg DisableScheduledTaskForBadScheduleParams) error
+	// A pending alert whose condition cleared before it fired notified no one.
+	// Dropping it rather than resolving it keeps a passing spike from starting the
+	// rule's cooldown, which runs from the latest resolved alert, and keeps a
+	// flapping metric from leaving a row per blip. Only a still-pending row goes.
+	DiscardPendingAlert(ctx context.Context, id uuid.UUID) error
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	// Removing a node feed keeps the row, so the node's login does not find it again.
 	DismissUpsNodeFeed(ctx context.Context, arg DismissUpsNodeFeedParams) (UpsFeed, error)

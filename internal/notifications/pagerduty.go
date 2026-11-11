@@ -21,13 +21,18 @@ func (d *PagerDutyDispatcher) Type() string { return "pagerduty" }
 // resolve events for the same alert must share a key for the resolve to land
 // on the right incident.
 //
-// Keying on rule_id alone (the previous behaviour) was wrong: two alerts
-// firing on different resources from the same rule (e.g. CPU > 90 on vm-a
-// AND vm-b) collapsed into one incident, suppressing the second resource's
-// notification. Keying on (rule, cluster, resource) keeps each
-// (rule, resource) pair as its own incident while still deduping repeat
-// firings on that pair.
+// An alert's own id is that key. The resource name is no stable stand-in: a
+// UPS, task-failure or Veeam rule's is a sentence carrying live readings, and
+// an escalation sends the one stored at creation, so its trigger, escalation
+// and resolve each opened or missed an incident of their own.
+//
+// A notification with no alert (a channel test, a CVE notice, a dead letter
+// stored before alert_id) keeps the older (rule, cluster, resource) key, which
+// still gives each resource of one rule its own incident.
 func pagerdutyDedupKey(payload AlertPayload) string {
+	if payload.AlertID != "" {
+		return "nexara-alert-" + payload.AlertID
+	}
 	cluster := payload.ClusterID
 	if cluster == "" {
 		cluster = "global"

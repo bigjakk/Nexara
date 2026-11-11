@@ -374,14 +374,14 @@ func (e *Engine) evaluateSnapshotAgeRule(ctx context.Context, rule db.AlertRule,
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return e.handleRuleResult(ctx, rule, false, 0, label, pgtype.UUID{}, pgtype.UUID{})
+				return e.handleRuleResult(ctx, rule, false, 0, label, pgtype.UUID{})
 			}
 			return fmt.Errorf("cluster snapshot age stats: %w", err)
 		}
 		resourceName := fmt.Sprintf("%s — %d snapshot(s) over threshold, oldest %q on guest %d",
 			label, stats.OverCount, stats.OldestName, stats.OldestVmid)
 		conditionMet := compareValue(stats.OldestAgeDays, rule.Operator, rule.Threshold)
-		return e.handleRuleResult(ctx, rule, conditionMet, stats.OldestAgeDays, resourceName, pgtype.UUID{}, pgtype.UUID{})
+		return e.handleRuleResult(ctx, rule, conditionMet, stats.OldestAgeDays, resourceName, pgtype.UUID{})
 
 	case "vm":
 		if !rule.VmVmid.Valid {
@@ -406,14 +406,14 @@ func (e *Engine) evaluateSnapshotAgeRule(ctx context.Context, rule db.AlertRule,
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return e.handleRuleResult(ctx, rule, false, 0, vm.Name, pgtype.UUID{}, vmID)
+				return e.handleRuleResult(ctx, rule, false, 0, vm.Name, vmID)
 			}
 			return fmt.Errorf("vm snapshot age stats: %w", err)
 		}
 		resourceName := fmt.Sprintf("%s (vmid %d) — oldest snapshot %q",
 			vm.Name, vm.Vmid, stats.OldestName)
 		conditionMet := compareValue(stats.OldestAgeDays, rule.Operator, rule.Threshold)
-		return e.handleRuleResult(ctx, rule, conditionMet, stats.OldestAgeDays, resourceName, pgtype.UUID{}, vmID)
+		return e.handleRuleResult(ctx, rule, conditionMet, stats.OldestAgeDays, resourceName, vmID)
 
 	default:
 		return fmt.Errorf("snapshot_age_days does not support scope_type %q", rule.ScopeType)
@@ -430,7 +430,7 @@ func (e *Engine) evaluateNodeRule(ctx context.Context, rule db.AlertRule, nodeID
 		return fmt.Errorf("get node metrics: %w", err)
 	}
 
-	allMatch, latestValue, ok := nodeRuleOutcome(rule, metrics, time.Now())
+	v, ok := nodeRuleOutcome(rule, metrics, time.Now())
 	if !ok {
 		return nil // No data in the window — can't evaluate.
 	}
@@ -443,7 +443,7 @@ func (e *Engine) evaluateNodeRule(ctx context.Context, rule db.AlertRule, nodeID
 	}
 
 	nodeIDPg := pgtype.UUID{Bytes: nodeID, Valid: true}
-	return e.handleRuleResult(ctx, rule, allMatch, latestValue, resourceName, nodeIDPg, pgtype.UUID{})
+	return e.handleVerdict(ctx, rule, v, resourceName, nodeIDPg, pgtype.UUID{})
 }
 
 // evaluateVMRule evaluates a rule against a single VM's metrics.
@@ -456,7 +456,7 @@ func (e *Engine) evaluateVMRule(ctx context.Context, rule db.AlertRule, vmID uui
 		return fmt.Errorf("get vm metrics: %w", err)
 	}
 
-	allMatch, latestValue, ok := vmRuleOutcome(rule, metrics, time.Now())
+	v, ok := vmRuleOutcome(rule, metrics, time.Now())
 	if !ok {
 		return nil
 	}
@@ -468,7 +468,7 @@ func (e *Engine) evaluateVMRule(ctx context.Context, rule db.AlertRule, vmID uui
 	}
 
 	vmIDPg := pgtype.UUID{Bytes: vmID, Valid: true}
-	return e.handleRuleResult(ctx, rule, allMatch, latestValue, resourceName, pgtype.UUID{}, vmIDPg)
+	return e.handleVerdict(ctx, rule, v, resourceName, pgtype.UUID{}, vmIDPg)
 }
 
 // inWindow keeps the readings a level rule judges from a newest-first fetch:
@@ -487,19 +487,26 @@ func inWindow[T any](rule db.AlertRule, rows []T, now time.Time, at func(T) time
 	return kept
 }
 
-// judge reports whether every reading meets the rule's condition and the
-// newest value; ok is false when there is nothing to judge.
-func judge[T any](rule db.AlertRule, rows []T, value func(T) float64) (met bool, latest float64, ok bool) {
+// verdict is what a metric rule's readings say: met, that every reading in the
+// rule's duration meets its condition; now, that the newest one does; and
+// latest, that newest reading's value.
+type verdict struct {
+	met, now bool
+	latest   float64
+}
+
+// judge reads a newest-first window of readings; ok is false when there is
+// nothing to judge.
+func judge[T any](rule db.AlertRule, rows []T, value func(T) float64) (v verdict, ok bool) {
 	if len(rows) == 0 {
-		return false, 0, false
+		return verdict{}, false
 	}
-	latest = value(rows[0])
-	for _, r := range rows {
-		if !compareValue(value(r), rule.Operator, rule.Threshold) {
-			return false, latest, true
-		}
-	}
-	return true, latest, true
+	v.latest = value(rows[0])
+	v.now = compareValue(v.latest, rule.Operator, rule.Threshold)
+	v.met = v.now && !slices.ContainsFunc(rows[1:], func(r T) bool {
+		return !compareValue(value(r), rule.Operator, rule.Threshold)
+	})
+	return v, true
 }
 
 // isCounterMetric reports whether a metric is stored as a cumulative byte
@@ -579,10 +586,10 @@ func counterRates[T any](rows []T, at func(T) time.Time, counter func(T) (bytes 
 // derived from the whole fetch, which reaches before the window
 // (metricLookback). While the newest reading has no rate it holds — ok is
 // false — rather than judge the rates before it as if they were current.
-func counterOutcome[T any](rule db.AlertRule, rows []T, now time.Time, at func(T) time.Time, counter func(T) (float64, bool)) (met bool, latest float64, ok bool) {
+func counterOutcome[T any](rule db.AlertRule, rows []T, now time.Time, at func(T) time.Time, counter func(T) (float64, bool)) (verdict, bool) {
 	rates := counterRates(rows, at, counter)
 	if len(rates) == 0 || !rates[0].at.Equal(at(rows[0])) {
-		return false, 0, false
+		return verdict{}, false
 	}
 	return judge(rule, inWindow(rule, rates, now, func(r rateReading) time.Time { return r.at }), func(r rateReading) float64 { return r.bps })
 }
@@ -591,7 +598,7 @@ func counterOutcome[T any](rule db.AlertRule, rows []T, now time.Time, at func(T
 // metric is judged on its rates, a disk one leaving out the samples the
 // collector marks disk_unreported: the node's disk sums then include a guest
 // PVE did not report, or miss guests whose list could not be read.
-func nodeRuleOutcome(rule db.AlertRule, rows []db.GetNodeRecentMetricsRow, now time.Time) (met bool, latest float64, ok bool) {
+func nodeRuleOutcome(rule db.AlertRule, rows []db.GetNodeRecentMetricsRow, now time.Time) (verdict, bool) {
 	at := func(r db.GetNodeRecentMetricsRow) time.Time { return r.Bucket }
 	value := func(r db.GetNodeRecentMetricsRow) float64 { return extractNodeMetric(r, rule.Metric) }
 	if isCounterMetric(rule.Metric) {
@@ -616,7 +623,7 @@ func nodeRuleOutcome(rule db.AlertRule, rows []db.GetNodeRecentMetricsRow, now t
 // at times does under load, and they are carried forward — nor is a zero
 // counter on a guest that shows CPU or memory: such a sample before that
 // column, or a counter PVE never reports. A stopped guest's zeros are readings.
-func vmRuleOutcome(rule db.AlertRule, rows []db.GetVMRecentMetricsRow, now time.Time) (met bool, latest float64, ok bool) {
+func vmRuleOutcome(rule db.AlertRule, rows []db.GetVMRecentMetricsRow, now time.Time) (verdict, bool) {
 	at := func(r db.GetVMRecentMetricsRow) time.Time { return r.Bucket }
 	value := func(r db.GetVMRecentMetricsRow) float64 { return extractVMMetric(r, rule.Metric) }
 	if isCounterMetric(rule.Metric) {
@@ -637,9 +644,9 @@ func vmRuleOutcome(rule db.AlertRule, rows []db.GetVMRecentMetricsRow, now time.
 		}
 		if len(rows) > 0 && len(judged) == 0 {
 			if slices.ContainsFunc(fetched, judgeable) {
-				return false, 0, false
+				return verdict{}, false
 			}
-			return false, 0, true
+			return verdict{}, true
 		}
 		rows = judged
 	}
@@ -666,8 +673,53 @@ func metricLookback(rule db.AlertRule) time.Duration {
 	return lookback
 }
 
-// handleRuleResult creates, transitions, or auto-resolves alerts based on evaluation.
-func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, conditionMet bool, value float64, resourceName string, nodeID, vmID pgtype.UUID) error {
+// handleRuleResult applies an evaluation that judges its condition at one
+// instant: it has held throughout exactly when it holds now, and the pending
+// timer alone times the rule's duration. None of these rules evaluates per
+// node; a metric rule, which can, goes through handleVerdict.
+func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, conditionMet bool, value float64, resourceName string, vmID pgtype.UUID) error {
+	return e.handleVerdict(ctx, rule, verdict{met: conditionMet, now: conditionMet, latest: value}, resourceName, pgtype.UUID{}, vmID)
+}
+
+// alertAction is what one evaluation does to a rule's alert.
+type alertAction int
+
+const (
+	alertKeep    alertAction = iota
+	alertOpen                // open a pending alert
+	alertFire                // fire the pending alert
+	alertResolve             // resolve the fired alert
+	alertDiscard             // drop the pending alert, which never fired
+)
+
+// decideAlert is the alert lifecycle. An alert opens, pending, at the first
+// evaluation that finds its condition holding, and fires once it has been
+// pending for the rule's duration with every reading in that duration meeting
+// the condition. An evaluation that finds the condition no longer holding
+// resolves a fired alert and drops a pending one, which notified no one: kept
+// as resolved, a single passing spike would start the rule's cooldown. state
+// is the rule's latest alert's, "" for none.
+//
+// A metric rule's readings span its duration, so opening only once they all met
+// it and then waiting the duration again, as the engine did, took twice as long.
+func decideAlert(state string, pendingFor, duration time.Duration, v verdict) alertAction {
+	switch {
+	case !alertActive(state):
+		if v.now {
+			return alertOpen
+		}
+	case !v.now && state == "pending":
+		return alertDiscard
+	case !v.now:
+		return alertResolve
+	case state == "pending" && v.met && pendingFor >= duration:
+		return alertFire
+	}
+	return alertKeep
+}
+
+// handleVerdict creates, fires or auto-resolves a rule's alert on one evaluation.
+func (e *Engine) handleVerdict(ctx context.Context, rule db.AlertRule, v verdict, resourceName string, nodeID, vmID pgtype.UUID) error {
 	// Find the existing active alert for this rule (+node for cluster-scoped
 	// rules, which evaluate per node). The node param passes through as
 	// pgtype.UUID so an absent dimension reaches SQL as NULL (uuid.Nil would
@@ -682,27 +734,37 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 		// alert" — that would insert a duplicate row every tick.
 		return fmt.Errorf("lookup existing alert: %w", err)
 	}
-	hasExisting := err == nil && alertActive(existing.State)
+	var state string
+	var pendingFor time.Duration
+	if err == nil {
+		state, pendingFor = existing.State, time.Since(existing.PendingAt)
+	}
+	value := v.latest
 
-	if conditionMet {
-		if hasExisting {
-			// Already tracking — check if pending needs transition to firing.
-			if existing.State == "pending" {
-				elapsed := time.Since(existing.PendingAt)
-				if elapsed >= pendingDuration(rule) {
-					if err := e.queries.TransitionAlertToFiring(ctx, existing.ID); err != nil {
-						return fmt.Errorf("transition to firing: %w", err)
-					}
-					e.logger.Info("alert fired",
-						"rule", rule.Name, "resource", resourceName, "value", value)
-					e.publishAlertEvent(ctx, rule, existing.ID, "fired")
-					e.dispatchForRule(ctx, rule, existing.ID, value, resourceName, "firing", 0)
-				}
-			}
-			// Already firing or acknowledged — nothing to do (deduplication).
-			return nil
+	switch decideAlert(state, pendingFor, pendingDuration(rule), v) {
+	case alertFire:
+		return e.fireAlert(ctx, rule, existing.ID, value, resourceName)
+
+	case alertResolve:
+		if err := e.queries.AutoResolveAlert(ctx, existing.ID); err != nil {
+			return fmt.Errorf("auto-resolve: %w", err)
+		}
+		e.logger.Info("alert auto-resolved",
+			"rule", rule.Name, "resource", resourceName, "alert_id", existing.ID, "was", existing.State)
+		e.publishAlertEvent(ctx, rule, existing.ID, "resolved")
+		if resolveNotifies(existing.State) {
+			e.dispatchForRule(ctx, rule, existing.ID, value, resourceName, "resolved", int(existing.EscalationLevel))
 		}
 
+	case alertDiscard:
+		if err := e.queries.DiscardPendingAlert(ctx, existing.ID); err != nil {
+			return fmt.Errorf("discard pending alert: %w", err)
+		}
+		e.logger.Info("pending alert cleared before it fired",
+			"rule", rule.Name, "resource", resourceName, "alert_id", existing.ID)
+		e.publishAlertEvent(ctx, rule, existing.ID, "discarded")
+
+	case alertOpen:
 		// Check deduplication cooldown, measured from when the previous
 		// alert resolved — measuring from creation would let an alert that
 		// stayed active longer than the cooldown re-fire the instant it
@@ -756,32 +818,23 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 		e.logger.Info("alert pending",
 			"rule", rule.Name, "resource", resourceName, "alert_id", alert.ID)
 
-		// Fire immediately when nothing has to persist first — an explicit
+		// Fire at once when nothing has to persist first — an explicit
 		// duration of 0, or a windowed metric whose duration is its window.
-		if pendingDuration(rule) == 0 {
-			if err := e.queries.TransitionAlertToFiring(ctx, alert.ID); err != nil {
-				return fmt.Errorf("immediate fire: %w", err)
-			}
-			e.publishAlertEvent(ctx, rule, alert.ID, "fired")
-			e.dispatchForRule(ctx, rule, alert.ID, value, resourceName, "firing", 0)
-		}
-
-		return nil
-	}
-
-	// Condition NOT met — auto-resolve any active alerts.
-	if hasExisting {
-		if err := e.queries.AutoResolveAlert(ctx, existing.ID); err != nil {
-			return fmt.Errorf("auto-resolve: %w", err)
-		}
-		e.logger.Info("alert auto-resolved",
-			"rule", rule.Name, "resource", resourceName, "alert_id", existing.ID, "was", existing.State)
-		e.publishAlertEvent(ctx, rule, existing.ID, "resolved")
-		if resolveNotifies(existing.State) {
-			e.dispatchForRule(ctx, rule, existing.ID, value, resourceName, "resolved", int(existing.EscalationLevel))
+		if decideAlert("pending", 0, pendingDuration(rule), v) == alertFire {
+			return e.fireAlert(ctx, rule, alert.ID, value, resourceName)
 		}
 	}
+	return nil
+}
 
+// fireAlert moves a pending alert to firing and notifies its rule's first step.
+func (e *Engine) fireAlert(ctx context.Context, rule db.AlertRule, alertID uuid.UUID, value float64, resourceName string) error {
+	if err := e.queries.TransitionAlertToFiring(ctx, alertID); err != nil {
+		return fmt.Errorf("transition to firing: %w", err)
+	}
+	e.logger.Info("alert fired", "rule", rule.Name, "resource", resourceName, "value", value)
+	e.publishAlertEvent(ctx, rule, alertID, "fired")
+	e.dispatchForRule(ctx, rule, alertID, value, resourceName, "firing", 0)
 	return nil
 }
 
@@ -947,6 +1000,7 @@ func (e *Engine) dispatchToChannel(ctx context.Context, rule db.AlertRule, alert
 	}
 
 	payload := AlertPayload{
+		AlertID:         alertID.String(),
 		RuleName:        rule.Name,
 		RuleID:          rule.ID.String(),
 		Severity:        rule.Severity,

@@ -174,9 +174,9 @@ func TestVMRuleOutcome(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			rule := db.AlertRule{Metric: tt.metric, Operator: ">", Threshold: 90, DurationSeconds: tt.duration}
-			met, latest, ok := vmRuleOutcome(rule, tt.rows, now)
-			if met != tt.met || ok != tt.ok || latest != tt.wantLatest {
-				t.Errorf("vmRuleOutcome = (%v, %v, %v), want (%v, %v, %v)", met, latest, ok, tt.met, tt.wantLatest, tt.ok)
+			v, ok := vmRuleOutcome(rule, tt.rows, now)
+			if v.met != tt.met || ok != tt.ok || v.latest != tt.wantLatest {
+				t.Errorf("vmRuleOutcome = (%v, %v, %v), want (%v, %v, %v)", v.met, v.latest, ok, tt.met, tt.wantLatest, tt.ok)
 			}
 		})
 	}
@@ -220,11 +220,11 @@ func TestCounterOutcome(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			rule := db.AlertRule{Metric: "net_in", Operator: ">", Threshold: 40, DurationSeconds: tt.duration}
-			met, latest, ok := counterOutcome(rule, tt.readings, now,
+			v, ok := counterOutcome(rule, tt.readings, now,
 				func(r sample) time.Time { return now.Add(-r.ago) },
 				func(r sample) (float64, bool) { return r.bytes, !r.unreported })
-			if met != tt.met || ok != tt.ok || latest != tt.wantLatest {
-				t.Errorf("counterOutcome = (%v, %v, %v), want (%v, %v, %v)", met, latest, ok, tt.met, tt.wantLatest, tt.ok)
+			if v.met != tt.met || ok != tt.ok || v.latest != tt.wantLatest {
+				t.Errorf("counterOutcome = (%v, %v, %v), want (%v, %v, %v)", v.met, v.latest, ok, tt.met, tt.wantLatest, tt.ok)
 			}
 		})
 	}
@@ -257,9 +257,9 @@ func TestNodeRuleOutcome(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			rule := db.AlertRule{Metric: tt.metric, Operator: ">", Threshold: 90, DurationSeconds: 60}
-			met, latest, ok := nodeRuleOutcome(rule, tt.rows, now)
-			if met != tt.met || ok != tt.ok || latest != tt.wantLatest {
-				t.Errorf("nodeRuleOutcome = (%v, %v, %v), want (%v, %v, %v)", met, latest, ok, tt.met, tt.wantLatest, tt.ok)
+			v, ok := nodeRuleOutcome(rule, tt.rows, now)
+			if v.met != tt.met || ok != tt.ok || v.latest != tt.wantLatest {
+				t.Errorf("nodeRuleOutcome = (%v, %v, %v), want (%v, %v, %v)", v.met, v.latest, ok, tt.met, tt.wantLatest, tt.ok)
 			}
 		})
 	}
@@ -477,6 +477,62 @@ func TestAlertLifecycleStates(t *testing.T) {
 		}
 		if got := resolveNotifies(tc.state); got != tc.notifies {
 			t.Errorf("resolveNotifies(%q) = %v, want %v", tc.state, got, tc.notifies)
+		}
+	}
+}
+
+// judge reads a window two ways: met when every reading meets the condition,
+// now when the newest does. An alert opens on now and fires on met.
+func TestJudge(t *testing.T) {
+	t.Parallel()
+	rule := db.AlertRule{Operator: ">", Threshold: 90}
+	for _, tc := range []struct {
+		name     string
+		readings []float64 // newest first
+		met, now bool
+	}{
+		{"every reading meets it", []float64{95, 92}, true, true},
+		{"the newest meets it, an older one does not", []float64{95, 50}, false, true},
+		{"the newest does not", []float64{50, 95}, false, false},
+	} {
+		v, ok := judge(rule, tc.readings, func(f float64) float64 { return f })
+		if !ok || v.met != tc.met || v.now != tc.now || v.latest != tc.readings[0] {
+			t.Errorf("%s: judge = %+v, %v; want met %v, now %v, latest %v", tc.name, v, ok, tc.met, tc.now, tc.readings[0])
+		}
+	}
+}
+
+// An alert goes pending at the first evaluation that sees its condition and
+// fires once pending for the rule's duration with every reading in it meeting
+// the condition. Opening only once the whole duration had held, as the engine
+// did, fired a metric rule after twice its duration.
+func TestDecideAlert(t *testing.T) {
+	t.Parallel()
+	const d = 5 * time.Minute
+	held := verdict{met: true, now: true}
+	building := verdict{now: true} // holds now, not yet throughout
+	cleared := verdict{}
+	for _, tc := range []struct {
+		name       string
+		state      string
+		pendingFor time.Duration
+		duration   time.Duration
+		v          verdict
+		want       alertAction
+	}{
+		{"none: opens at the first reading that meets it", "", 0, d, building, alertOpen},
+		{"none: nothing while it does not hold", "", 0, d, cleared, alertKeep},
+		{"a resolved alert counts as none", "resolved", 0, d, building, alertOpen},
+		{"pending the duration, every reading meeting it: fires", "pending", d, d, held, alertFire},
+		{"pending less than the duration: holds", "pending", time.Minute, d, held, alertKeep},
+		{"pending, a reading in the duration missed it: holds", "pending", 2 * d, d, building, alertKeep},
+		{"pending, no longer holds: dropped, so a spike starts no cooldown", "pending", time.Minute, d, cleared, alertDiscard},
+		{"zero duration: a just-opened alert fires", "pending", 0, 0, held, alertFire},
+		{"firing, holds now: stays", "firing", 0, d, building, alertKeep},
+		{"acknowledged, no longer holds: resolves", "acknowledged", 0, d, cleared, alertResolve},
+	} {
+		if got := decideAlert(tc.state, tc.pendingFor, tc.duration, tc.v); got != tc.want {
+			t.Errorf("%s: decideAlert = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

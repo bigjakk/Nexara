@@ -14,7 +14,17 @@ func TestPagerDutyDedupKey(t *testing.T) {
 		want    string
 	}{
 		{
-			name: "rule + cluster + resource composes the key",
+			name: "an alert's own id is its key, whatever its resource label reads",
+			payload: AlertPayload{
+				AlertID:      "33333333-3333-3333-3333-333333333333",
+				RuleID:       "rule-A",
+				ClusterID:    "cluster-1",
+				ResourceName: "ups01 on battery: 80% charge",
+			},
+			want: "nexara-alert-33333333-3333-3333-3333-333333333333",
+		},
+		{
+			name: "without an alert id, rule + cluster + resource composes the key",
 			payload: AlertPayload{
 				RuleID:       "rule-A",
 				ClusterID:    "cluster-1",

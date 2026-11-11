@@ -156,11 +156,13 @@ export function ChannelForm({
 
   const handleSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
-    const config = buildConfig();
 
     if (isEdit && editId) {
+      // Edit shows no settings fields (the stored ones are never sent back),
+      // so it sends no config: the server replaces the stored settings with
+      // any config it is given, and blank fields would stop the channel.
       updateMutation.mutate(
-        { id: editId, name, channel_type: channelType, config, enabled },
+        { id: editId, name, enabled },
         {
           onSuccess: () => {
             setOpen(false);
@@ -170,7 +172,7 @@ export function ChannelForm({
       );
     } else {
       createMutation.mutate(
-        { name, channel_type: channelType, config, enabled },
+        { name, channel_type: channelType, config: buildConfig(), enabled },
         {
           onSuccess: () => {
             setOpen(false);

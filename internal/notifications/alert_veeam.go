@@ -69,7 +69,7 @@ func (e *Engine) evaluateVeeamRPORule(ctx context.Context, rule db.AlertRule, wi
 		// operator removes the last job — rather than pinning it at whatever
 		// the final reading was.
 		if stats.ProtectedCount == 0 {
-			return e.handleRuleResult(ctx, rule, false, 0, e.clusterLabel(ctx, clusterID), pgtype.UUID{}, pgtype.UUID{})
+			return e.handleRuleResult(ctx, rule, false, 0, e.clusterLabel(ctx, clusterID), pgtype.UUID{})
 		}
 
 		label := fmt.Sprintf("%s — oldest recovery point %.1fh on guest %d, %d of %d guests over threshold",
@@ -96,7 +96,7 @@ func (e *Engine) evaluateVeeamRPORule(ctx context.Context, rule db.AlertRule, wi
 			}
 			label += fmt.Sprintf("; %d have NO restore points left at all", stats.UnrecoverableCount)
 		}
-		return e.handleRuleResult(ctx, rule, conditionMet, stats.WorstRpoHours, label, pgtype.UUID{}, pgtype.UUID{})
+		return e.handleRuleResult(ctx, rule, conditionMet, stats.WorstRpoHours, label, pgtype.UUID{})
 
 	case "vm":
 		if !rule.VmVmid.Valid {
@@ -135,18 +135,18 @@ func (e *Engine) evaluateVeeamRPORule(ctx context.Context, rule db.AlertRule, wi
 			// Veeam — produces an alert nothing can clear. Coverage reports
 			// the guest as unprotected either way, and that is the surface
 			// built to answer "should this be backed up at all".
-			return e.handleRuleResult(ctx, rule, false, 0, vm.Name, pgtype.UUID{}, vmID)
+			return e.handleRuleResult(ctx, rule, false, 0, vm.Name, vmID)
 		}
 		if !stats.HasRestorePoint {
 			// Veeam knows the guest and can restore NOTHING. No age to
 			// compare, and worse than any threshold — see the cluster arm.
 			label := fmt.Sprintf("%s (vmid %d) — Veeam holds NO restore points for this guest", vm.Name, vm.Vmid)
-			return e.handleRuleResult(ctx, rule, exceedsThreshold(rule.Operator), 0, label, pgtype.UUID{}, vmID)
+			return e.handleRuleResult(ctx, rule, exceedsThreshold(rule.Operator), 0, label, vmID)
 		}
 
 		label := fmt.Sprintf("%s (vmid %d) — newest Veeam restore point %.1fh old", vm.Name, vm.Vmid, stats.RpoHours)
 		conditionMet := compareValue(stats.RpoHours, rule.Operator, rule.Threshold)
-		return e.handleRuleResult(ctx, rule, conditionMet, stats.RpoHours, label, pgtype.UUID{}, vmID)
+		return e.handleRuleResult(ctx, rule, conditionMet, stats.RpoHours, label, vmID)
 
 	default:
 		return fmt.Errorf("veeam_rpo_hours does not support scope_type %q", rule.ScopeType)
@@ -179,13 +179,13 @@ func (e *Engine) evaluateVeeamMalwareRule(ctx context.Context, rule db.AlertRule
 			return fmt.Errorf("cluster veeam malware stats: %w", err)
 		}
 		if stats.ScannedCount == 0 {
-			return e.handleRuleResult(ctx, rule, false, 0, e.clusterLabel(ctx, clusterID), pgtype.UUID{}, pgtype.UUID{})
+			return e.handleRuleResult(ctx, rule, false, 0, e.clusterLabel(ctx, clusterID), pgtype.UUID{})
 		}
 		label := fmt.Sprintf("%s — worst verdict %q on guest %d, %d of %d guests at or over threshold",
 			e.clusterLabel(ctx, clusterID), stats.WorstStatus, stats.WorstVmid,
 			stats.OverCount, stats.ScannedCount)
 		conditionMet := compareValue(stats.WorstSeverity, rule.Operator, rule.Threshold)
-		return e.handleRuleResult(ctx, rule, conditionMet, stats.WorstSeverity, label, pgtype.UUID{}, pgtype.UUID{})
+		return e.handleRuleResult(ctx, rule, conditionMet, stats.WorstSeverity, label, pgtype.UUID{})
 
 	case "vm":
 		if !rule.VmVmid.Valid {
@@ -210,11 +210,11 @@ func (e *Engine) evaluateVeeamMalwareRule(ctx context.Context, rule db.AlertRule
 			return fmt.Errorf("guest veeam malware: %w", err)
 		}
 		if !stats.Scanned {
-			return e.handleRuleResult(ctx, rule, false, 0, vm.Name, pgtype.UUID{}, vmID)
+			return e.handleRuleResult(ctx, rule, false, 0, vm.Name, vmID)
 		}
 		label := fmt.Sprintf("%s (vmid %d) — newest Veeam restore point verdict %q", vm.Name, vm.Vmid, stats.Status)
 		conditionMet := compareValue(stats.Severity, rule.Operator, rule.Threshold)
-		return e.handleRuleResult(ctx, rule, conditionMet, stats.Severity, label, pgtype.UUID{}, vmID)
+		return e.handleRuleResult(ctx, rule, conditionMet, stats.Severity, label, vmID)
 
 	default:
 		return fmt.Errorf("veeam_malware_status does not support scope_type %q", rule.ScopeType)
@@ -243,13 +243,13 @@ func (e *Engine) evaluateVeeamRepoRule(ctx context.Context, rule db.AlertRule) e
 	// No repository reports a capacity — Veeam does that for targets whose
 	// size it cannot measure, such as an object store. Nothing to judge.
 	if stats.MeasuredCount == 0 {
-		return e.handleRuleResult(ctx, rule, false, 0, "Veeam repositories", pgtype.UUID{}, pgtype.UUID{})
+		return e.handleRuleResult(ctx, rule, false, 0, "Veeam repositories", pgtype.UUID{})
 	}
 
 	label := fmt.Sprintf("%s — %.1f%% used, %d of %d repositories over threshold",
 		stats.FullestName, stats.FullestPercent, stats.OverCount, stats.MeasuredCount)
 	conditionMet := compareValue(stats.FullestPercent, rule.Operator, rule.Threshold)
-	return e.handleRuleResult(ctx, rule, conditionMet, stats.FullestPercent, label, pgtype.UUID{}, pgtype.UUID{})
+	return e.handleRuleResult(ctx, rule, conditionMet, stats.FullestPercent, label, pgtype.UUID{})
 }
 
 // evaluateVeeamJobFailedRule handles veeam_job_failed: how many of a cluster's
@@ -285,7 +285,7 @@ func (e *Engine) evaluateVeeamJobFailedRule(ctx context.Context, rule db.AlertRu
 	// reading — the same shape evaluateVeeamRPORule takes for an unprotected
 	// cluster.
 	if stats.JobCount == 0 {
-		return e.handleRuleResult(ctx, rule, false, 0, e.clusterLabel(ctx, clusterID), pgtype.UUID{}, pgtype.UUID{})
+		return e.handleRuleResult(ctx, rule, false, 0, e.clusterLabel(ctx, clusterID), pgtype.UUID{})
 	}
 
 	failed := float64(stats.FailedCount)
@@ -307,7 +307,7 @@ func (e *Engine) evaluateVeeamJobFailedRule(ctx context.Context, rule db.AlertRu
 	}
 
 	conditionMet := compareValue(failed, rule.Operator, rule.Threshold)
-	return e.handleRuleResult(ctx, rule, conditionMet, failed, label, pgtype.UUID{}, pgtype.UUID{})
+	return e.handleRuleResult(ctx, rule, conditionMet, failed, label, pgtype.UUID{})
 }
 
 // clusterLabel resolves a cluster's name for an alert message, falling back to

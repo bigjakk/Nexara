@@ -150,6 +150,19 @@ func (q *Queries) DeleteNotificationChannel(ctx context.Context, id uuid.UUID) e
 	return err
 }
 
+const discardPendingAlert = `-- name: DiscardPendingAlert :exec
+DELETE FROM alert_history WHERE id = $1 AND state = 'pending'
+`
+
+// A pending alert whose condition cleared before it fired notified no one.
+// Dropping it rather than resolving it keeps a passing spike from starting the
+// rule's cooldown, which runs from the latest resolved alert, and keeps a
+// flapping metric from leaving a row per blip. Only a still-pending row goes.
+func (q *Queries) DiscardPendingAlert(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, discardPendingAlert, id)
+	return err
+}
+
 const getAlertHistory = `-- name: GetAlertHistory :one
 SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid, ups_id FROM alert_history WHERE id = $1
 `

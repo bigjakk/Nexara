@@ -71,7 +71,7 @@ func (e *Engine) evaluateUPSRule(ctx context.Context, rule db.AlertRule, windows
 	if out.hold {
 		return nil
 	}
-	return e.handleRuleResult(ctx, rule, out.met, out.value, out.label, pgtype.UUID{}, pgtype.UUID{})
+	return e.handleRuleResult(ctx, rule, out.met, out.value, out.label, pgtype.UUID{})
 }
 
 // upsRuleVerdict judges a rule on the UPSes it judges (upsRuleRows). A UPS a

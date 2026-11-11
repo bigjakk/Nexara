@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
-import { listOf, stubApi } from "@/test/fetch-stub";
+import { bodiesOf, listOf, stubApi } from "@/test/fetch-stub";
 import { useAuthStore } from "@/stores/auth-store";
 import type { NotificationChannel } from "@/types/api";
 import { ChannelsTable } from "./ChannelsTable";
@@ -55,6 +55,29 @@ async function clickDelete(user: ReturnType<typeof userEvent.setup>) {
     await screen.findByRole("button", { name: "Delete oncall-webhook" }),
   );
 }
+
+describe("ChannelsTable — edit", () => {
+  // Edit shows no settings fields, and the server replaces the stored
+  // settings with any config it is sent, so a rename must send none.
+  it("saves the name and Enabled without sending config", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ChannelsTable />);
+    const row = await screen.findByRole("row", { name: /oncall-webhook/ });
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "oncall-renamed");
+    await user.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => {
+      expect(api.writes()).toEqual(["PUT /api/v1/notification-channels/ch-2"]);
+    });
+    expect(bodiesOf("PUT", "/api/v1/notification-channels/ch-2")).toEqual([
+      { name: "oncall-renamed", enabled: true },
+    ]);
+  });
+});
 
 describe("ChannelsTable — delete", () => {
   it("asks first, naming the channel and what uses it, and sends nothing yet", async () => {

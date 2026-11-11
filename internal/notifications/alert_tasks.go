@@ -73,7 +73,7 @@ func (e *Engine) evaluatePVETaskFailedRule(
 	label := taskFailureLabel(e.clusterLabel(ctx, clusterID), taskType, stats, metricLookback(rule))
 
 	conditionMet := compareValue(failed, rule.Operator, rule.Threshold)
-	return e.handleRuleResult(ctx, rule, conditionMet, failed, label, pgtype.UUID{}, pgtype.UUID{})
+	return e.handleRuleResult(ctx, rule, conditionMet, failed, label, pgtype.UUID{})
 }
 
 // taskFailureLabel builds the human sentence the alert carries.

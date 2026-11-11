@@ -135,6 +135,13 @@ UPDATE alert_history
 SET state = 'resolved', resolved_at = now()
 WHERE id = $1 AND state IN ('pending', 'firing', 'acknowledged');
 
+-- name: DiscardPendingAlert :exec
+-- A pending alert whose condition cleared before it fired notified no one.
+-- Dropping it rather than resolving it keeps a passing spike from starting the
+-- rule's cooldown, which runs from the latest resolved alert, and keeps a
+-- flapping metric from leaving a row per blip. Only a still-pending row goes.
+DELETE FROM alert_history WHERE id = $1 AND state = 'pending';
+
 -- GetLatestAlertForRule backs the engine's dedup/transition/resolve logic.
 -- The node param MUST be sqlc.narg (nullable pgtype.UUID): with a plain @
 -- param sqlc generates non-nullable uuid.UUID, and pgx encodes uuid.Nil as

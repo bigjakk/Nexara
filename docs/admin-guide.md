@@ -1566,7 +1566,7 @@ Navigate to **Alerts** from the sidebar. Its tabs are **Alert History**, **Alert
 
      **Disk Read/Write** and **Network In/Out** are rates in bytes/s, measured between samples. Under load Proxmox at times leaves a running VM's disk counters unreported (it reads them as 0). Nexara then keeps the last reported figures, for up to six hours, and marks the sample — for a node, any sample in which one of its guests was unreported or a guest list could not be read. A disk rule skips marked samples, holding (neither firing nor resolving) while the newest sample is one, and measures the rate across them once a reported sample follows. A counter Proxmox never reports while the guest runs (network on a VM without a NIC, say) is never judged, so a `<` rule on it never fires. When a counter falls — a guest restarted, stopped or moved off the node, or a node's guest list could not be read — the rule holds until the counter is back at its earlier level or that sample is older than the rule's duration plus ten minutes. A dip Nexara could not mark — one already under way when it started, or one past six hours — can still read as a burst, so give node- and cluster-scope disk rules a duration rather than `0`.
    - **Condition** — threshold and comparison (e.g., CPU > 90%)
-   - **Duration** — how long the condition must persist before firing; `0` fires on the first breaching sample. The CPU, memory, disk and network metrics serve it twice, because a tick only matches once every sample in the window meets the condition and the pending alert then waits again: 300 fires after about ten minutes
+   - **Duration** — how long the condition must persist before firing; `0` fires on the first breaching sample. The alert goes pending at the first check that sees the condition and fires once every sample in the duration has met it, so 300 fires about five minutes after the condition starts. A check that finds the condition no longer holding resolves a fired alert and drops a pending one, which never notified anyone and starts no cooldown
    - **Severity** — info, warning, critical
    - **Cooldown** — minimum time between re-fires, measured from when the previous alert resolved
 4. Add an **Escalation Chain** — this is how the rule notifies; a rule with an empty chain never sends anything
@@ -1596,7 +1596,9 @@ A saved rule can be turned off or on from its row, or deleted, which also delete
 
 A Slack, Discord, Teams or Generic Webhook URL that resolves to a private or loopback address is refused when Nexara sends to it, with no override, so a webhook receiver on your LAN cannot be used. An SMTP host that resolves to a private address is refused too: with **Use STARTTLS** on, any private or loopback address, and with it off, anything but loopback. So a mail relay on your LAN cannot send alerts or report email unless it is reached through a loopback address.
 
-> **Known issue: don't use a channel's Edit button.** The dialog shows only the name and **Enabled**, but saving it also replaces the channel's stored settings with empty ones, so the channel stops sending. To change a channel, send only the fields you are changing to `PUT /api/v1/notification-channels/:id`; leaving out `config` keeps the stored settings, and sending it replaces them all, since they are never shown again. Deleting a channel and creating it again gives it a new id: every alert rule step that named the old one silently sends nothing, with no dead-letter entry, and the channel drops out of CVE notifications and report schedules.
+A channel's **Edit** changes its name and **Enabled** only: its settings are stored encrypted and never shown again. To change them, send a new `config` to `PUT /api/v1/notification-channels/:id`, which replaces them all. Deleting a channel and creating it again gives it a new id: every alert rule step that named the old one silently sends nothing, with no dead-letter entry, and the channel drops out of CVE notifications and report schedules.
+
+Each alert is one PagerDuty incident: its firing, escalation and resolution share the alert's id (`alert_id` in a webhook's payload) as the dedup key. The resolution goes only to the escalation step the alert had reached, so the incident closes when that step is the PagerDuty channel; a manual **Resolve** sends no notification, so close the incident in PagerDuty too.
 
 ### Escalation Chains
 
@@ -1605,7 +1607,7 @@ The escalation chain is an ordered list of steps, each naming **one** notificati
 1. **Step 1** — dispatched the moment the alert fires. Its delay is ignored
 2. **Step 2 and later** — dispatched once the alert has been firing for that step's delay, counted **from when the alert fired** (not from the previous step). Give step 2 `15` and step 3 `60` and they land 15 and 60 minutes after the fire, respectively
 
-Escalation only advances while the alert is still firing **and** unacknowledged, and while its rule is still enabled on the same metric — acknowledging the alert, turning the rule off or changing its metric stops the chain where it is. Resolution notifications go to whichever step the alert had reached. An alert whose condition clears before the rule's duration is up never fired, so it resolves without a notification.
+Escalation only advances while the alert is still firing **and** unacknowledged, and while its rule is still enabled on the same metric — acknowledging the alert, turning the rule off or changing its metric stops the chain where it is. Resolution notifications go to whichever step the alert had reached. An alert whose condition clears before the rule's duration is up never fired, so it is dropped without a notification.
 
 ### Maintenance Windows
 

@@ -7,6 +7,9 @@ import (
 
 // AlertPayload contains all template variables for notification rendering.
 type AlertPayload struct {
+	// AlertID is the alert's id, the same on its firing, escalated and
+	// resolved notifications; empty for a notification no alert sent.
+	AlertID         string  `json:"alert_id,omitempty"`
 	RuleName        string  `json:"rule_name"`
 	RuleID          string  `json:"rule_id"`
 	Severity        string  `json:"severity"`
