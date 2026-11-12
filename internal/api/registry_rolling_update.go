@@ -471,8 +471,9 @@ func createRollingUpdateParams() apischema.Properties {
 		"auto_upgrade": {
 			Type: apischema.Boolean, Optional: true, Default: false, Typetext: "<boolean>",
 			Description: "Run the upgrade over SSH instead of waiting for an operator to confirm each " +
-				"node by hand. Requires an SSH credential to be configured for the cluster; without one " +
-				"the create is refused.",
+				"node by hand. Requires an SSH credential to be configured for the cluster, and for every " +
+				"node named a known IP address and a pinned host key; without them the create is refused, " +
+				"naming the nodes.",
 		},
 		"drain_guests": {
 			Type: apischema.Boolean, Optional: true, Default: true, Typetext: "<boolean>",

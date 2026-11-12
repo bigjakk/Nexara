@@ -518,16 +518,16 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           title={(c) =>
             `Delete SSH credentials for ${c.username} on port ${String(c.port)}?`
           }
-          // Every SSH path reads the one stored row and fails without it:
-          // rolling.RunNodeCommand (maintenance mode, node sensors) returns
-          // ErrSSHNotConfigured, and CreateJob refuses auto_upgrade. The SSH
-          // step runs only for an auto_upgrade job (beginUpgrade), and there
-          // the orchestrator's failNode ("SSH credentials not found") calls
-          // failJob, failing the whole job, not just the node. The
-          // DELETE removes only cluster_ssh_credentials — the handler's
-          // re-home check notes the pins outlive it.
+          // Every SSH path resolves through rolling.NodeSSHConfig, which
+          // reads the one stored row and returns ErrSSHNotConfigured without
+          // it: RunNodeCommand (maintenance mode, node sensors) fails,
+          // CreateJob refuses auto_upgrade, and a running automated job fails
+          // its next node before draining it (startNode's sshReady), which
+          // fails the whole job. The DELETE removes only
+          // cluster_ssh_credentials — the handler's re-home check notes the
+          // pins outlive it.
           description={() =>
-            "The stored password or private key is deleted from Nexara and cannot be recovered; you would have to enter it again. Until you do, Nexara cannot run commands on this cluster's nodes over SSH: rolling updates cannot run automated apt upgrades (a running rolling update with automated upgrades fails when its next node reaches the upgrade step), and node maintenance mode and node sensor readings stop working. Pinned host keys are kept."
+            "The stored password or private key is deleted from Nexara and cannot be recovered; you would have to enter it again. Until you do, Nexara cannot run commands on this cluster's nodes over SSH: rolling updates cannot run automated apt upgrades (a running rolling update with automated upgrades fails when its next node starts, before that node is drained), and node maintenance mode and node sensor readings stop working. Pinned host keys are kept."
           }
         />
 
@@ -544,12 +544,12 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           }
           // Unpinning does NOT fall back to trusting whatever key is presented:
           // internal/ssh/client.go Execute refuses to connect when
-          // KnownHostKey is nil, rolling.RunNodeCommand returns
-          // ErrHostKeyNotPinned before dialling, and the orchestrator fails
-          // the node ("SSH host key not pinned"), which fails the job. The pin
-          // is looked up by (host, the credential's port) — nodessh.go and
-          // orchestrator.go GetSSHKnownHost — so it is host:port that is
-          // refused. A key is only pinned again
+          // KnownHostKey is nil, and rolling.NodeSSHConfig, which every SSH
+          // path resolves through, returns ErrHostKeyNotPinned before
+          // dialling, so the orchestrator fails the node (before its drain,
+          // if it has not started) and the job. The pin is looked up by
+          // (host, the credential's port) in NodeSSHConfig, so it is
+          // host:port that is refused. A key is only pinned again
           // through Test Connection + Trust & Pin (PinSSHHostKey re-scans and
           // must match the fingerprint the operator confirmed).
           description={(kh) =>

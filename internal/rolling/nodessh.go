@@ -23,9 +23,14 @@ import (
 // log wants; that detail is deliberately NOT safe to hand to an API caller
 // verbatim, so classify on the sentinel and log the wrapped error.
 var (
-	// ErrSSHNotConfigured means the cluster has no stored SSH credentials —
-	// or that reading them failed. Actionable: add credentials in Settings.
+	// ErrSSHNotConfigured means the cluster has no stored SSH credentials.
+	// Actionable: add credentials in Settings.
 	ErrSSHNotConfigured = errors.New("SSH credentials are not configured for this cluster")
+
+	// ErrSSHLookup means reading what the call needs failed (a database
+	// error, not a missing row), so nothing is known to be wrong with the
+	// setup. A caller that can wait tries again instead of reporting one.
+	ErrSSHLookup = errors.New("could not read the SSH settings")
 
 	// ErrNodeAddressUnknown means the collector has not yet reported an IP
 	// address for the node, so there is nothing to connect to.
@@ -80,29 +85,47 @@ func RunNodeCommand(ctx context.Context, queries *db.Queries, encryptionKey stri
 // the command's stdout and of its stderr (sshpkg.ExecuteLimited); 0 keeps
 // Execute's default cap.
 func RunNodeCommandLimited(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName, command string, maxOutput int) (*sshpkg.ExecResult, error) {
+	cfg, err := NodeSSHConfig(ctx, queries, encryptionKey, clusterID, nodeName)
+	if err != nil {
+		return nil, err
+	}
+	if maxOutput > 0 {
+		return sshpkg.ExecuteLimited(ctx, cfg, command, maxOutput)
+	}
+	return sshpkg.Execute(ctx, cfg, command)
+}
+
+// NodeSSHConfig resolves how to reach a node over SSH: the cluster's stored
+// credentials, the node's address and its pinned host key. It dials nothing.
+//
+// Every SSH call to a node resolves through it, and so do the checks made
+// before an automated job is created and before a node is drained, so those
+// checks find exactly the missing pieces the upgrade would. They do not dial:
+// a wrong password or a changed host key still shows only when it connects.
+// A database error is ErrSSHLookup; a missing piece is its own sentinel.
+func NodeSSHConfig(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName string) (sshpkg.Config, error) {
 	creds, err := queries.GetClusterSSHCredentials(ctx, clusterID)
 	if err != nil {
 		// Only a genuinely absent row means "not configured". A database
 		// outage lands here too, and classifying that as a missing row would
-		// send the operator to add credentials that already exist — so it
-		// stays an unclassified error the caller reports generically and logs.
+		// send the operator to add credentials that already exist.
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrSSHNotConfigured
+			return sshpkg.Config{}, ErrSSHNotConfigured
 		}
-		return nil, fmt.Errorf("look up SSH credentials: %w", err)
+		return sshpkg.Config{}, fmt.Errorf("%w: look up SSH credentials: %w", ErrSSHLookup, err)
 	}
 
 	var password, privateKey string
 	if creds.EncryptedPassword != "" {
 		password, err = crypto.Decrypt(creds.EncryptedPassword, encryptionKey)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt SSH password: %w", err)
+			return sshpkg.Config{}, fmt.Errorf("decrypt SSH password: %w", err)
 		}
 	}
 	if creds.EncryptedPrivateKey != "" {
 		privateKey, err = crypto.Decrypt(creds.EncryptedPrivateKey, encryptionKey)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt SSH key: %w", err)
+			return sshpkg.Config{}, fmt.Errorf("decrypt SSH key: %w", err)
 		}
 	}
 
@@ -113,11 +136,11 @@ func RunNodeCommandLimited(ctx context.Context, queries *db.Queries, encryptionK
 		Name:      nodeName,
 	})
 	if addrErr != nil && !errors.Is(addrErr, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("look up node address: %w", addrErr)
+		return sshpkg.Config{}, fmt.Errorf("%w: look up node address: %w", ErrSSHLookup, addrErr)
 	}
 	// Covers both a missing row and a row the collector has not filled in yet.
 	if sshHost == "" {
-		return nil, fmt.Errorf("%w (node %q; the collector hasn't reported it)", ErrNodeAddressUnknown, nodeName)
+		return sshpkg.Config{}, fmt.Errorf("%w (node %q; the collector hasn't reported it)", ErrNodeAddressUnknown, nodeName)
 	}
 
 	pinned, pinErr := queries.GetSSHKnownHost(ctx, db.GetSSHKnownHostParams{
@@ -127,25 +150,21 @@ func RunNodeCommandLimited(ctx context.Context, queries *db.Queries, encryptionK
 	})
 	if pinErr != nil {
 		if !errors.Is(pinErr, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("look up pinned host key for %s: %w", sshHost, pinErr)
+			return sshpkg.Config{}, fmt.Errorf("%w: look up pinned host key for %s: %w", ErrSSHLookup, sshHost, pinErr)
 		}
-		return nil, fmt.Errorf("%w (%s) — open Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint", ErrHostKeyNotPinned, sshHost)
+		return sshpkg.Config{}, fmt.Errorf("%w (%s) — open Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint", ErrHostKeyNotPinned, sshHost)
 	}
 	knownKey, parseErr := sshpkg.ParseAuthorizedKey(pinned.PublicKey)
 	if parseErr != nil {
-		return nil, fmt.Errorf("stored SSH host key for %s is corrupt: %w — delete and re-pin", sshHost, parseErr)
+		return sshpkg.Config{}, fmt.Errorf("stored SSH host key for %s is corrupt: %w — delete and re-pin", sshHost, parseErr)
 	}
 
-	cfg := sshpkg.Config{
+	return sshpkg.Config{
 		Host:         sshHost,
 		Port:         int(creds.Port),
 		Username:     creds.Username,
 		Password:     password,
 		PrivateKey:   privateKey,
 		KnownHostKey: knownKey,
-	}
-	if maxOutput > 0 {
-		return sshpkg.ExecuteLimited(ctx, cfg, command, maxOutput)
-	}
-	return sshpkg.Execute(ctx, cfg, command)
+	}, nil
 }

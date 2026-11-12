@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -273,6 +274,20 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx, p *apischema.Params) error
 			"A rolling update job is already pending, running or paused for this cluster. Start, finish or cancel it first.")
 	}
 
+	// An automated upgrade needs SSH to every node it names. Checked before
+	// anything below touches the cluster, so a job that could not reach a
+	// node is refused here instead of failing once that node is drained.
+	autoUpgrade := p.Bool("auto_upgrade")
+	if autoUpgrade {
+		hasCreds, err := h.queries.HasClusterSSHCredentials(c.Context(), clusterID)
+		if err != nil || !hasCreds {
+			return fiber.NewError(fiber.StatusBadRequest, "Auto upgrade requires SSH credentials to be configured for this cluster")
+		}
+		if err := h.requireNodesReachableBySSH(c.Context(), clusterID, nodes); err != nil {
+			return err
+		}
+	}
+
 	// A prior job whose cleanup is still pending holds cluster state (paused
 	// native CRS, disabled HA rules, stopped passthrough guests). Starting a
 	// new job under it is unsafe: the deferred cleanup sweep would restore
@@ -361,15 +376,6 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx, p *apischema.Params) error
 		haWarningsJSON = json.RawMessage(`[]`)
 	}
 
-	autoUpgrade := p.Bool("auto_upgrade")
-	if autoUpgrade {
-		// Verify SSH credentials exist for this cluster.
-		hasCreds, err := h.queries.HasClusterSSHCredentials(c.Context(), clusterID)
-		if err != nil || !hasCreds {
-			return fiber.NewError(fiber.StatusBadRequest, "Auto upgrade requires SSH credentials to be configured for this cluster")
-		}
-	}
-
 	var notifyChannelID pgtype.UUID
 	// The EMPTY string is the sentinel for "no channel"; the declaration's
 	// empty-or-uuid pattern is what keeps it expressible, because every
@@ -431,6 +437,40 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx, p *apischema.Params) error
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", job.ID.String(), "rolling_update_created", nil)
 
 	return c.Status(fiber.StatusCreated).JSON(toJobResponse(job))
+}
+
+// requireNodesReachableBySSH refuses an automated job naming a node its upgrade
+// could not reach, through rolling.NodeSSHConfig: the resolution the upgrade
+// makes. Each reason is written here rather than taken from the error, which
+// carries node IPs and decrypt detail (see rolling.UnavailableReason).
+func (h *RollingUpdateHandler) requireNodesReachableBySSH(ctx context.Context, clusterID uuid.UUID, nodes []string) error {
+	var unreachable []string
+	for _, name := range nodes {
+		_, err := rolling.NodeSSHConfig(ctx, h.queries, h.encryptionKey, clusterID, name)
+		var why string
+		switch {
+		case err == nil:
+			continue
+		case errors.Is(err, rolling.ErrSSHLookup):
+			slog.Error("rolling-update create: SSH settings lookup failed", "node", name, "error", err)
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to check the nodes' SSH settings")
+		case errors.Is(err, rolling.ErrHostKeyNotPinned):
+			why = "its SSH host key is not pinned"
+		case errors.Is(err, rolling.ErrNodeAddressUnknown):
+			why = "no IP address is known for it yet"
+		case errors.Is(err, rolling.ErrSSHNotConfigured):
+			why = "the cluster has no SSH credentials"
+		default:
+			slog.Error("rolling-update create: SSH settings unusable", "node", name, "error", err)
+			why = "its stored SSH credentials or host key cannot be used"
+		}
+		unreachable = append(unreachable, name+" ("+why+")")
+	}
+	if len(unreachable) == 0 {
+		return nil
+	}
+	return fiber.NewError(fiber.StatusBadRequest, "Automated upgrade cannot reach "+strings.Join(unreachable, ", ")+
+		" over SSH. Pin missing host keys under Security → Rolling Updates → SSH Credentials, or turn off Automated upgrade.")
 }
 
 // GetJob returns a single rolling update job with node counts.

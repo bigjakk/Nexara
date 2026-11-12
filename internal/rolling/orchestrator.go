@@ -287,6 +287,25 @@ func (o *Orchestrator) requireDialableNode(ctx context.Context, job db.RollingUp
 	return err
 }
 
+// sshReady reports whether the automated upgrade can reach a node over SSH,
+// asked by startNode before the node is drained. A setup problem (no address
+// yet, no pinned or a corrupt host key, credentials gone or undecryptable)
+// fails the node with the reason. A lookup that fails fails nothing and leaves
+// the node pending for the next tick, as requireDialableNode does.
+func (o *Orchestrator) sshReady(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode) bool {
+	_, err := NodeSSHConfig(ctx, o.queries, o.encryptionKey, job.ClusterID, node.NodeName)
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, ErrSSHLookup):
+		o.logger.Error("rolling update: SSH settings lookup failed",
+			"job_id", job.ID, "node", node.NodeName, "error", err)
+	default:
+		o.failNode(ctx, job, node, "not drained, since the automated upgrade could not reach it: "+err.Error())
+	}
+	return false
+}
+
 // leftToUpgrade reports whether a node's pending updates hold anything the job
 // would install. For an automated upgrade, the packages it holds back do not
 // count, and nor do new ones (no OldVersion): Proxmox lists those only as the
@@ -341,6 +360,13 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			ID:           node.ID,
 			PackagesJson: freshPkgs,
 		})
+	}
+
+	// The automated upgrade reaches the node over SSH. Found unreachable only
+	// at the upgrade step, the node had already been drained; checked here,
+	// through the same resolution, it fails with nothing moved.
+	if job.AutoUpgrade && !o.sshReady(ctx, job, node) {
+		return
 	}
 
 	// In-place job: upgrade this node without moving anything off it.
@@ -995,66 +1021,12 @@ func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Cli
 	}
 
 	// First time seeing this node in 'upgrading' (or resuming after a
-	// dead SSH goroutine) — kick off the SSH upgrade.
-	sshCreds, err := o.queries.GetClusterSSHCredentials(ctx, job.ClusterID)
+	// dead SSH goroutine) — kick off the SSH upgrade. An unpinned host key
+	// fails closed; startNode made the same check before the drain.
+	sshCfg, err := NodeSSHConfig(ctx, o.queries, o.encryptionKey, job.ClusterID, node.NodeName)
 	if err != nil {
-		o.failNode(ctx, job, node, fmt.Sprintf("SSH credentials not found: %v", err))
+		o.failNode(ctx, job, node, err.Error())
 		return
-	}
-
-	// Decrypt credentials.
-	var password, privateKey string
-	if sshCreds.EncryptedPassword != "" {
-		password, err = crypto.Decrypt(sshCreds.EncryptedPassword, o.encryptionKey)
-		if err != nil {
-			o.failNode(ctx, job, node, fmt.Sprintf("decrypt SSH password: %v", err))
-			return
-		}
-	}
-	if sshCreds.EncryptedPrivateKey != "" {
-		privateKey, err = crypto.Decrypt(sshCreds.EncryptedPrivateKey, o.encryptionKey)
-		if err != nil {
-			o.failNode(ctx, job, node, fmt.Sprintf("decrypt SSH key: %v", err))
-			return
-		}
-	}
-
-	// Look up the node's IP address from the DB (populated by collector from corosync).
-	// Fail loudly if missing — the previous fallback to using node name as
-	// hostname could end up at any DNS-resolved address.
-	sshHost, addrErr := o.queries.GetNodeAddressByName(ctx, db.GetNodeAddressByNameParams{
-		ClusterID: job.ClusterID,
-		Name:      node.NodeName,
-	})
-	if addrErr != nil || sshHost == "" {
-		o.failNode(ctx, job, node, fmt.Sprintf("no IP address known for node %q (collector hasn't reported it). Wait for the collector to tick, then retry.", node.NodeName))
-		return
-	}
-
-	// Require a pinned host key. The previous InsecureIgnoreHostKey policy
-	// is gone; an unpinned host now fails closed.
-	pinned, pinErr := o.queries.GetSSHKnownHost(ctx, db.GetSSHKnownHostParams{
-		ClusterID: job.ClusterID,
-		Host:      sshHost,
-		Port:      sshCreds.Port,
-	})
-	if pinErr != nil {
-		o.failNode(ctx, job, node, fmt.Sprintf("SSH host key not pinned for %s. Visit Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint to pin it.", sshHost))
-		return
-	}
-	knownKey, parseErr := sshpkg.ParseAuthorizedKey(pinned.PublicKey)
-	if parseErr != nil {
-		o.failNode(ctx, job, node, fmt.Sprintf("stored SSH host key for %s is corrupt: %v — delete and re-pin", sshHost, parseErr))
-		return
-	}
-
-	sshCfg := sshpkg.Config{
-		Host:         sshHost,
-		Port:         int(sshCreds.Port),
-		Username:     sshCreds.Username,
-		Password:     password,
-		PrivateKey:   privateKey,
-		KnownHostKey: knownKey,
 	}
 
 	_ = o.queries.SetNodeUpgradeStarted(ctx, node.ID)

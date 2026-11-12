@@ -145,6 +145,7 @@ func TestStartNode_SkipsANodeWhoseOnlyUpdatesAreHeldBack(t *testing.T) {
 	t.Parallel()
 	kernel := `{"Package":"proxmox-kernel-6.17","OldVersion":"6.17.13-12","Version":"6.17.13-13"},` +
 		`{"Package":"proxmox-kernel-6.17.13-13-pve-signed","Version":"6.17.13-13"}`
+	hostKey := testHostKey(t)
 	for _, tt := range []struct {
 		name       string
 		auto       bool
@@ -161,7 +162,9 @@ func TestStartNode_SkipsANodeWhoseOnlyUpdatesAreHeldBack(t *testing.T) {
 			cluster := uuid.New()
 			d := &memberDB{t: t, cluster: cluster, members: []string{"pve-01"}, accept: map[string]int64{
 				"SkipRollingUpdateNodeAny": 1, "SetNodePackagesJSON": 1,
-				"SetNodeInPlaceUpgradeAuto": 1, "SetNodeInPlaceUpgradeManual": 1}}
+				"SetNodeInPlaceUpgradeAuto": 1, "SetNodeInPlaceUpgradeManual": 1},
+				// Reachable over SSH, which an automated node is checked for before it starts.
+				ssh: &sshAnswers{creds: &db.ClusterSshCredential{ClusterID: cluster, Port: 22}, address: "192.0.2.11", key: hostKey}}
 			// The index refresh is refused, so there is no task to wait out.
 			o, client, _ := engineOn(t, d, func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet && r.URL.Path == "/api2/json/nodes/pve-01/apt/update" {
