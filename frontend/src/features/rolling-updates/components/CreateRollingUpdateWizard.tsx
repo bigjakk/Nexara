@@ -82,20 +82,28 @@ export function CreateRollingUpdateWizard({
   const [autoRestoreGuests, setAutoRestoreGuests] = useState(true);
   const [packageExcludes, setPackageExcludes] = useState("");
   const [haPolicy, setHaPolicy] = useState<"strict" | "warn">("warn");
-  const [autoUpgrade, setAutoUpgrade] = useState(false);
+  const [autoUpgrade, setAutoUpgrade] = useState(true);
   const [preflightReport, setPreflightReport] =
     useState<HAPreFlightReport | null>(null);
   const [notifyChannelId, setNotifyChannelId] = useState<string>("none");
   const [startImmediately, setStartImmediately] = useState(true);
 
   const { data: nodes, isLoading: nodesLoading } = useClusterNodes(clusterId);
-  const { data: sshCreds } = useSSHCredentials(clusterId);
+  const sshQuery = useSSHCredentials(clusterId);
+  const { data: sshCreds } = sshQuery;
   const { data: channels } = useNotificationChannels();
   const createJob = useCreateRollingUpdateJob();
   const startJob = useStartRollingUpdateJob();
   const preflight = usePreflightHA();
 
   const hasSSH = sshCreds !== null && sshCreds !== undefined;
+  // Reading the credential needs manage:ssh_credentials, which a built-in
+  // Operator lacks, so a failed read is "could not check", not "none" (as in
+  // NodeUpdatePanel): the switch stays usable, and the create says if not.
+  const sshUnknown = sshQuery.isError;
+  // On by default, since running the upgrade is what the job is for. Without
+  // the cluster's SSH credential the create is refused, so none means manual.
+  const effectiveAutoUpgrade = autoUpgrade && (hasSSH || sshUnknown);
   // What the pre-flight checks and the job runs with: at most one per node
   // still selected, which a removal after setting it can leave it above.
   const effectiveParallelism = Math.min(
@@ -111,7 +119,7 @@ export function CreateRollingUpdateWizard({
     setAutoRestoreGuests(true);
     setPackageExcludes("");
     setHaPolicy("warn");
-    setAutoUpgrade(false);
+    setAutoUpgrade(true);
     setPreflightReport(null);
     setNotifyChannelId("none");
     setStartImmediately(true);
@@ -148,9 +156,9 @@ export function CreateRollingUpdateWizard({
         reboot_after_update: rebootAfterUpdate,
         auto_restore_guests: autoRestoreGuests,
         // A manual upgrade is the operator's own apt run; nothing applies these.
-        package_excludes: autoUpgrade ? excludes : [],
+        package_excludes: effectiveAutoUpgrade ? excludes : [],
         ha_policy: haPolicy,
-        auto_upgrade: autoUpgrade,
+        auto_upgrade: effectiveAutoUpgrade,
         notify_channel_id:
           notifyChannelId !== "none" ? notifyChannelId : undefined,
       },
@@ -490,14 +498,16 @@ export function CreateRollingUpdateWizard({
                 <p className="text-xs text-muted-foreground">
                   {hasSSH
                     ? "Run apt dist-upgrade automatically via SSH"
-                    : "Configure SSH credentials to enable"}
+                    : sshUnknown
+                      ? "Run apt dist-upgrade via SSH, which needs the cluster's SSH credentials"
+                      : "Configure SSH credentials to enable"}
                 </p>
               </div>
               <Switch
                 id="auto-upgrade"
-                checked={autoUpgrade}
+                checked={effectiveAutoUpgrade}
                 onCheckedChange={setAutoUpgrade}
-                disabled={!hasSSH}
+                disabled={!hasSSH && !sshUnknown}
               />
             </div>
 
@@ -509,13 +519,13 @@ export function CreateRollingUpdateWizard({
                 id="excludes"
                 placeholder="e.g. proxmox-kernel-6.17, proxmox-default-kernel"
                 value={packageExcludes}
-                disabled={!autoUpgrade}
+                disabled={!effectiveAutoUpgrade}
                 onChange={(e) => {
                   setPackageExcludes(e.target.value);
                 }}
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                {autoUpgrade
+                {effectiveAutoUpgrade
                   ? "Exact package names, no wildcards. Each is put on hold for the upgrade and released after it."
                   : "Only the automated upgrade holds packages back."}
               </p>

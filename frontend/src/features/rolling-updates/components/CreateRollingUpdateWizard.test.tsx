@@ -3,11 +3,15 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { CreateRollingUpdateWizard } from "./CreateRollingUpdateWizard";
+import { ApiClientError } from "@/lib/api-client";
 import { renderWithProviders } from "@/test/test-utils";
 
 const CLUSTER = "cccccccc-0000-0000-0000-000000000001";
 const PREFLIGHT_PATH = `/api/v1/clusters/${CLUSTER}/rolling-updates/preflight-ha`;
+const CREATE_PATH = `/api/v1/clusters/${CLUSTER}/rolling-updates`;
+const SSH_PATH = `/api/v1/clusters/${CLUSTER}/ssh-credentials`;
 
+const getMock = vi.fn();
 const postMock = vi.fn();
 
 vi.mock("@/lib/api-client", async () =>
@@ -21,12 +25,14 @@ vi.mock("@/lib/api-client", async () =>
             ]
           : [],
       ),
-    get: () => Promise.resolve(null),
+    get: (path: string) => getMock(path) as unknown,
     post: (path: string, body: unknown) => postMock(path, body) as unknown,
   }),
 );
 
 beforeEach(() => {
+  getMock.mockReset();
+  getMock.mockResolvedValue(null);
   postMock.mockReset();
   postMock.mockResolvedValue({ conflicts: [], has_errors: false });
 });
@@ -71,4 +77,61 @@ describe("CreateRollingUpdateWizard", () => {
       await screen.findByRole("switch", { name: "Reboot after update" }),
     ).not.toBeChecked();
   });
+
+  // The automated upgrade is on by default, but the create is refused for a
+  // cluster with no SSH credential. One the caller may not read (an Operator)
+  // is unknown rather than absent, so it stays on and the create decides.
+  it.each([
+    {
+      ssh: "configured",
+      read: () =>
+        Promise.resolve({ cluster_id: CLUSTER, username: "root", port: 22 }),
+      automated: true,
+    },
+    {
+      ssh: "not configured",
+      read: () => Promise.resolve(null),
+      automated: false,
+    },
+    {
+      ssh: "unreadable",
+      read: () =>
+        Promise.reject(
+          new ApiClientError(403, { error: "forbidden", message: "" }),
+        ),
+      automated: true,
+    },
+  ])(
+    "creates the job with auto_upgrade $automated when SSH is $ssh",
+    async ({ read, automated }) => {
+      getMock.mockImplementation((path: string) =>
+        path === SSH_PATH ? read() : Promise.resolve(null),
+      );
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<CreateRollingUpdateWizard clusterId={CLUSTER} />);
+      await openWithBothNodes(user);
+      await user.click(screen.getByRole("button", { name: "Next" }));
+      await user.click(await screen.findByRole("button", { name: "Next" }));
+
+      const toggle = await screen.findByRole("switch", {
+        name: "Automated upgrade (SSH)",
+      });
+      await waitFor(() => {
+        expect(toggle).toHaveAttribute("aria-checked", String(automated));
+      });
+      // Usable exactly when it defaults on: a refused Operator must turn it off.
+      expect(toggle).toHaveProperty("disabled", !automated);
+      await user.click(
+        screen.getByRole("switch", { name: "Start immediately" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Create Job" }));
+
+      await waitFor(() => {
+        expect(postMock).toHaveBeenCalledWith(
+          CREATE_PATH,
+          expect.objectContaining({ auto_upgrade: automated }),
+        );
+      });
+    },
+  );
 });
