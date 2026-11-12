@@ -28,11 +28,13 @@ func newTestServer(t *testing.T) (addr string, hostKey ssh.PublicKey, stop func(
 
 // testServerOpts varies newTestServer's exec handler. With received set it
 // signals as a command arrives and waits for release before it replies; stream
-// writes without end until a write fails.
+// writes without end until a write fails; reply, when set, is the stdout in
+// place of "ok\n".
 type testServerOpts struct {
 	received chan<- struct{}
 	release  <-chan struct{}
 	stream   bool
+	reply    string
 }
 
 func newTestServerWith(t *testing.T, opts testServerOpts) (addr string, hostKey ssh.PublicKey, stop func()) {
@@ -118,7 +120,11 @@ func serveOne(rawConn net.Conn, cfg *ssh.ServerConfig, opts testServerOpts) {
 							}
 						}
 					}
-					_, _ = io.WriteString(ch, "ok\n")
+					reply := "ok\n"
+					if opts.reply != "" {
+						reply = opts.reply
+					}
+					_, _ = io.WriteString(ch, reply)
 					_, _ = ch.SendRequest("exit-status", false, []byte{0, 0, 0, 0})
 					return
 				default:
@@ -218,6 +224,40 @@ func TestExecute_succeedsWithMatchingKey(t *testing.T) {
 	}
 	if !strings.Contains(res.Stdout, "ok") {
 		t.Fatalf("Stdout = %q, want to contain 'ok'", res.Stdout)
+	}
+}
+
+// RequireRoot is what a rolling update asks of a node before draining it, so
+// it must fail for each reason the upgrade would (a refused login, an account
+// that is not root, since the upgrade runs apt-get with no sudo, a session that
+// runs something else) and for none it would not: a shell that prints at login.
+func TestRequireRoot(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, reply, password string
+		wantErr               bool
+		wantNotRoot           bool
+	}{
+		{name: "root", reply: "nexara-uid=0\n", password: "test-pass"},
+		{name: "root, with a shell that prints at login", reply: "Welcome to the lab\n\x1b]0;title\x07nexara-uid=0\r\n", password: "test-pass"},
+		{name: "not root", reply: "nexara-uid=1000\n", password: "test-pass", wantErr: true, wantNotRoot: true},
+		{name: "a session that runs something else", reply: "ok\n", password: "test-pass", wantErr: true},
+		{name: "wrong password", reply: "nexara-uid=0\n", password: "nope", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			addr, hostKey, stop := newTestServerWith(t, testServerOpts{reply: tt.reply})
+			defer stop()
+			host, port := splitHostPort(t, addr)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			err := RequireRoot(ctx, Config{Host: host, Port: port, Username: "test-user",
+				Password: tt.password, KnownHostKey: hostKey})
+			if (err != nil) != tt.wantErr || errors.Is(err, ErrNotRoot) != tt.wantNotRoot {
+				t.Errorf("RequireRoot = %v, want an error %v, ErrNotRoot %v", err, tt.wantErr, tt.wantNotRoot)
+			}
+		})
 	}
 }
 

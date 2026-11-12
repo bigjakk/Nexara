@@ -177,38 +177,53 @@ func TestNodeSSHConfig(t *testing.T) {
 	}
 }
 
-// startNode checks an automated job's node over SSH before draining it: a node
-// the upgrade cannot reach fails with nothing moved, and one whose settings
-// cannot be read waits, undrained, for the next tick. A manual job needs no SSH.
+// startNode checks an automated job's node before draining it, with the SSH
+// settings the upgrade will use and then a login: a node the upgrade cannot run
+// on fails with nothing moved, and one whose settings cannot be read, or whose
+// login the tick's end cut off, waits undrained for the next tick. A manual job
+// needs no SSH and is neither checked nor logged in to.
 func TestStartNode_ChecksSSHBeforeTheDrain(t *testing.T) {
 	t.Parallel()
 	cluster := uuid.New()
 	creds := &db.ClusterSshCredential{ClusterID: cluster, Username: "root", Port: 22}
+	reachable := sshAnswers{creds: creds, address: "192.0.2.11", key: testHostKey(t)}
+	const cannotRun = "not drained, since the automated upgrade cannot run on it: "
 	// Every Proxmox call fails, so a node past the check fails at the first
 	// call of its drain, the guest listing.
 	const drainFailed = "snapshot guests: "
 	for _, tt := range []struct {
-		name    string
-		auto    bool
-		answers sshAnswers
-		failure string // the start of the node's failure reason; "" for none
+		name     string
+		auto     bool
+		answers  sshAnswers
+		loginErr error  // what the login answers
+		loggedIn bool   // whether a login was tried
+		failure  string // the start of the node's failure reason; "" for none
 	}{
-		{"unreachable", true, sshAnswers{creds: creds, address: "192.0.2.11"},
-			"not drained, since the automated upgrade could not reach it: " + ErrHostKeyNotPinned.Error()},
-		{"settings unreadable", true, sshAnswers{failing: sshLookups[0]}, ""},
-		{"reachable", true, sshAnswers{creds: creds, address: "192.0.2.11", key: testHostKey(t)}, drainFailed},
-		{"manual, no SSH at all", false, sshAnswers{}, drainFailed},
+		{"not pinned", true, sshAnswers{creds: creds, address: "192.0.2.11"}, nil, false, cannotRun + ErrHostKeyNotPinned.Error()},
+		{"settings unreadable", true, sshAnswers{failing: sshLookups[0]}, nil, false, ""},
+		{"login refused", true, reachable, errors.New("ssh: unable to authenticate"), true, cannotRun + "ssh: unable to authenticate"},
+		{"login cut off", true, reachable, context.Canceled, true, ""},
+		{"ready", true, reachable, nil, true, drainFailed},
+		{"manual, no SSH at all", false, sshAnswers{}, nil, false, drainFailed},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			d := &memberDB{t: t, cluster: cluster, members: []string{sshNode}, ssh: &tt.answers}
 			o, client, sent := engineOn(t, d, nil)
+			var logins []string
+			o.sshProbe = func(_ context.Context, cfg sshpkg.Config) error {
+				logins = append(logins, fmt.Sprintf("%s:%d", cfg.Host, cfg.Port))
+				return tt.loginErr
+			}
 			job := db.RollingUpdateJob{ID: uuid.New(), ClusterID: cluster, AutoUpgrade: tt.auto, DrainGuests: true}
 			o.startNode(context.Background(), client, job,
 				db.RollingUpdateNode{ID: uuid.New(), JobID: job.ID, NodeName: sshNode, Step: "pending"})
 
 			if got := strings.Join(d.failures, " | "); !strings.HasPrefix(got, tt.failure) || (got == "") != (tt.failure == "") {
 				t.Errorf("failed the node with %q, want a reason starting %q", got, tt.failure)
+			}
+			if want := map[bool][]string{true: {"192.0.2.11:22"}}[tt.loggedIn]; !slices.Equal(logins, want) {
+				t.Errorf("logged in to %v, want %v", logins, want)
 			}
 			listed := slices.ContainsFunc(sent(), func(r string) bool { return strings.HasSuffix(r, "/qemu") })
 			if want := tt.failure == drainFailed; listed != want {

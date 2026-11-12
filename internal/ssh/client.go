@@ -169,6 +169,9 @@ var errCaptureDone = errors.New("nexara/ssh: host key captured")
 // caller's limit. The session is closed at that point rather than read on.
 var ErrOutputTooLarge = errors.New("ssh: command output exceeded the limit")
 
+// ErrNotRoot reports an account that logs in but is not root (RequireRoot).
+var ErrNotRoot = errors.New("ssh: the SSH user is not root")
+
 // defaultMaxOutput caps what Execute keeps of a command's stdout, and of its
 // stderr. The largest output any caller reads is apt's, a few MiB at most; the
 // cap exists so a compromised node cannot stream Nexara out of memory.
@@ -432,6 +435,42 @@ func TestConnection(ctx context.Context, cfg Config) error {
 	}
 	if result.ExitCode != 0 {
 		return fmt.Errorf("test command exited with code %d: %s", result.ExitCode, result.Stderr)
+	}
+	return nil
+}
+
+// uidMarker opens the line RequireRoot reads its uid from, so text the
+// account's shell prints at login (a .bashrc that echoes) is not taken for it.
+const uidMarker = "nexara-uid="
+
+// RequireRoot logs in to the host as cfg says, against its pinned key, and
+// checks that the account is root, which an apt run through Execute needs: it
+// has no sudo. A caller about to act on a host learns of a wrong password, a
+// changed host key, an sshd that does not answer or a non-root account here,
+// before it acts. The error names the uid, digits only, and not the account.
+func RequireRoot(ctx context.Context, cfg Config) error {
+	result, err := Execute(ctx, cfg, `echo "`+uidMarker+`$(id -u)"`)
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("the uid check exited with code %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+	}
+	// The last marker is the command's own: the shell's login output comes
+	// first, and output with no newline (a terminal title) shares its line.
+	uid := ""
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if i := strings.LastIndex(line, uidMarker); i >= 0 {
+			uid = strings.TrimSpace(line[i+len(uidMarker):])
+		}
+	}
+	switch {
+	case uid == "" || strings.Trim(uid, "0123456789") != "":
+		// A forced command or a restricted shell ran instead of the check,
+		// and would run instead of an upgrade too.
+		return errors.New("ssh: the uid check printed no uid, so the session does not run the commands it is sent")
+	case uid != "0":
+		return fmt.Errorf("%w (uid %s)", ErrNotRoot, uid)
 	}
 	return nil
 }

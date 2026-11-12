@@ -24,6 +24,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/nodemember"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 )
 
 // memberDB is a db.DBTX that answers the node-membership lookup from members
@@ -106,6 +107,8 @@ func engineOn(t *testing.T, d *memberDB, handler http.HandlerFunc) (*Orchestrato
 		t.Fatal(err)
 	}
 	o := NewOrchestrator(context.Background(), db.New(d), "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	// No test here has an SSH server: a node whose settings resolve logs in.
+	o.sshProbe = func(context.Context, sshpkg.Config) error { return nil }
 	return o, client, func() []string {
 		mu.Lock()
 		defer mu.Unlock()

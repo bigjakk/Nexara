@@ -100,8 +100,8 @@ func RunNodeCommandLimited(ctx context.Context, queries *db.Queries, encryptionK
 //
 // Every SSH call to a node resolves through it, and so do the checks made
 // before an automated job is created and before a node is drained, so those
-// checks find exactly the missing pieces the upgrade would. They do not dial:
-// a wrong password or a changed host key still shows only when it connects.
+// checks find exactly the missing pieces the upgrade would. It dials nothing;
+// the check before a drain then logs in with what it returns (sshReady).
 // A database error is ErrSSHLookup; a missing piece is its own sentinel.
 func NodeSSHConfig(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName string) (sshpkg.Config, error) {
 	creds, err := queries.GetClusterSSHCredentials(ctx, clusterID)

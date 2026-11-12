@@ -60,7 +60,14 @@ type Orchestrator struct {
 	// scheduler tick (SSH upgrade, task polling, notification dispatch)
 	// but should still be cancelled on graceful shutdown (SIGTERM).
 	shutdownCtx context.Context
+	// sshProbe logs in to a node before its drain (sshReady):
+	// sshpkg.RequireRoot, which tests replace, having no SSH server to reach.
+	sshProbe func(context.Context, sshpkg.Config) error
 }
+
+// sshProbeTimeout bounds sshReady's login, which runs on the tick: Execute caps
+// the connect and the handshake at 30 s each, and nothing else caps the command.
+const sshProbeTimeout = 90 * time.Second
 
 // SetProxmoxCache attaches the shared per-server cache. Nil-safe.
 func (o *Orchestrator) SetProxmoxCache(cache *proxmox.ClientCache) {
@@ -87,6 +94,7 @@ func NewOrchestrator(shutdownCtx context.Context, queries *db.Queries, encryptio
 		eventPub:       eventPub,
 		notifyRegistry: notifyRegistry,
 		shutdownCtx:    shutdownCtx,
+		sshProbe:       sshpkg.RequireRoot,
 	}
 }
 
@@ -287,21 +295,33 @@ func (o *Orchestrator) requireDialableNode(ctx context.Context, job db.RollingUp
 	return err
 }
 
-// sshReady reports whether the automated upgrade can reach a node over SSH,
-// asked by startNode before the node is drained. A setup problem (no address
-// yet, no pinned or a corrupt host key, credentials gone or undecryptable)
-// fails the node with the reason. A lookup that fails fails nothing and leaves
-// the node pending for the next tick, as requireDialableNode does.
+// sshReady reports whether the automated upgrade can run on a node, asked by
+// startNode before the node is drained. It resolves the node's SSH settings and
+// then logs in with them as the upgrade will, as root (sshProbe). Anything the
+// upgrade would fail on fails the node now, with the reason: no address yet, no
+// pinned or a corrupt host key, unusable credentials, a refused login, a
+// changed host key, an sshd that does not answer, a user that is not root.
+// A lookup that fails, or a login cut off by the tick ending (shutdown, or
+// leadership lost), fails nothing and leaves the node pending for the next
+// tick, as requireDialableNode does.
 func (o *Orchestrator) sshReady(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode) bool {
-	_, err := NodeSSHConfig(ctx, o.queries, o.encryptionKey, job.ClusterID, node.NodeName)
+	cfg, err := NodeSSHConfig(ctx, o.queries, o.encryptionKey, job.ClusterID, node.NodeName)
+	if err == nil {
+		probeCtx, cancel := context.WithTimeout(ctx, sshProbeTimeout)
+		err = o.sshProbe(probeCtx, cfg)
+		cancel()
+	}
 	switch {
 	case err == nil:
 		return true
 	case errors.Is(err, ErrSSHLookup):
 		o.logger.Error("rolling update: SSH settings lookup failed",
 			"job_id", job.ID, "node", node.NodeName, "error", err)
+	case o.interrupted(err):
+		o.logger.Info("rolling update: SSH check interrupted, retrying next tick",
+			"job_id", job.ID, "node", node.NodeName)
 	default:
-		o.failNode(ctx, job, node, "not drained, since the automated upgrade could not reach it: "+err.Error())
+		o.failNode(ctx, job, node, "not drained, since the automated upgrade cannot run on it: "+err.Error())
 	}
 	return false
 }
@@ -364,7 +384,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 
 	// The automated upgrade reaches the node over SSH. Found unreachable only
 	// at the upgrade step, the node had already been drained; checked here,
-	// through the same resolution, it fails with nothing moved.
+	// with the same settings and a real login, it fails with nothing moved.
 	if job.AutoUpgrade && !o.sshReady(ctx, job, node) {
 		return
 	}
