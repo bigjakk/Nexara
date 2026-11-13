@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Thermometer } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
-import { Skeleton } from "@/components/ui/skeleton";
+import { Panel } from "@/components/page/Panel";
 import { cn } from "@/lib/utils";
 import {
   useNodeSensors,
@@ -11,90 +11,77 @@ import {
 /**
  * Hardware temperatures for a node, read from its kernel hwmon tree over SSH.
  *
- * Proxmox has no sensor API, so this depends on the cluster's SSH credentials
- * and degrades to an explanatory note whenever they are missing, unusable, or
- * the host simply has no temperature-reporting chips (every virtualised node).
- * It is a supplementary panel on a page full of things that work without SSH,
- * so it never renders as an error.
+ * Proxmox has no sensor API, so this depends on the cluster's SSH credentials.
+ * The panel is drawn while the read is out and when the node has readings; why
+ * it has none is NodeTemperaturesNote's to say, as one line of the Hardware
+ * panel. Both read the same query, so the page asks once.
  */
 export function NodeTemperatures({
   clusterId,
   nodeName,
   online,
-  className,
 }: {
   clusterId: string;
   nodeName: string;
   /** An offline node cannot be reached over SSH; skip the guaranteed timeout. */
   online: boolean;
-  className?: string;
 }) {
-  const { data, isLoading, isError } = useNodeSensors(
-    clusterId,
-    nodeName,
-    online,
-  );
+  const { data, isError } = useNodeSensors(clusterId, nodeName, online);
   const groups = useMemo(() => groupByDevice(data?.items ?? []), [data?.items]);
+  if (!online) return null;
+  // A query with neither data nor an error is loading, or paused in a
+  // background tab: the panel holds its place until the read lands.
+  if (data === undefined) {
+    return isError ? null : (
+      <Panel title="Temperatures">
+        <p className="text-sm text-muted-foreground">Reading…</p>
+      </Panel>
+    );
+  }
+  if (!data.available || groups.length === 0) return null;
 
   return (
-    <div className={cn("rounded-lg border p-4", className)}>
-      <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-        <span className="text-muted-foreground">
-          <Thermometer className="h-4 w-4" />
-        </span>
-        Temperatures
+    <Panel title="Temperatures">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(13rem,100%),1fr))] items-start gap-x-8 gap-y-2.5">
+        {groups.map((group) => (
+          <SensorGroupRow key={group.device} group={group} />
+        ))}
       </div>
-      <Body
-        online={online}
-        // A paused query — which is what a backgrounded tab produces — is
-        // neither loading nor errored nor holding data, so "still loading" has
-        // to mean "no data yet", not isLoading alone. Keying off isLoading
-        // would render this panel empty rather than as a skeleton.
-        loading={isLoading || (!data && !isError)}
-        error={isError}
-        available={data?.available ?? false}
-        reason={data?.reason ?? ""}
-        groups={groups}
-      />
-    </div>
+    </Panel>
   );
 }
 
-function Body({
+/**
+ * Why the node page has no Temperatures panel: the credentials are missing or
+ * unusable, the read failed, or the host has no temperature-reporting chips
+ * (every virtualised node). It is supplementary on a page full of things that
+ * work without SSH, so it is a note and never an error. Nothing while the read
+ * is out, and nothing once there are readings.
+ */
+export function NodeTemperaturesNote({
+  clusterId,
+  nodeName,
   online,
-  loading,
-  error,
-  available,
-  reason,
-  groups,
 }: {
+  clusterId: string;
+  nodeName: string;
   online: boolean;
-  loading: boolean;
-  error: boolean;
-  available: boolean;
-  reason: string;
-  groups: SensorGroup[];
 }) {
+  const { data, isError } = useNodeSensors(clusterId, nodeName, online);
   if (!online) {
     return (
       <Note>Temperatures are only readable while the node is online.</Note>
     );
   }
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        <Skeleton className="h-5 w-full" />
-        <Skeleton className="h-5 w-4/5" />
-      </div>
-    );
+  if (data === undefined) {
+    return isError ? (
+      <Note>Could not load temperatures for this node.</Note>
+    ) : null;
   }
-  if (error) {
-    return <Note>Could not load temperatures for this node.</Note>;
+  if (!data.available) {
+    return <Note>{data.reason || "Temperatures are not available."}</Note>;
   }
-  if (!available) {
-    return <Note>{reason || "Temperatures are not available."}</Note>;
-  }
-  if (groups.length === 0) {
+  if (data.items.length === 0) {
     return (
       <Note>
         This node reports no temperature sensors. Virtualised hosts usually have
@@ -102,17 +89,16 @@ function Body({
       </Note>
     );
   }
-  return (
-    <div className="grid grid-cols-1 items-start gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-      {groups.map((group) => (
-        <SensorGroupRow key={group.device} group={group} />
-      ))}
-    </div>
-  );
+  return null;
 }
 
 function Note({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-muted-foreground">{children}</p>;
+  return (
+    <div className="text-[12.5px]">
+      <p className="font-medium">Temperatures</p>
+      <p className="text-muted-foreground">{children}</p>
+    </div>
+  );
 }
 
 /**
@@ -130,40 +116,34 @@ function SensorGroupRow({ group }: { group: SensorGroup }) {
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2 text-sm">
-        <div className="flex min-w-0 items-baseline gap-1.5">
-          {extra > 0 ? (
-            <button
-              type="button"
-              onClick={() => {
-                setExpanded((prev) => !prev);
-              }}
-              className="flex min-w-0 items-center gap-1 text-left hover:text-foreground"
-              aria-expanded={expanded}
-            >
-              {expanded ? (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="truncate font-medium">{group.title}</span>
-              <span className="shrink-0 text-xs text-muted-foreground">
-                +{extra}
-              </span>
-            </button>
-          ) : (
-            // Same leading gap as the expandable rows. A single-sensor chip
-            // stacked above a multi-sensor one in the same grid column would
-            // otherwise sit a chevron's width to its left.
-            <span className="flex min-w-0 items-center gap-1">
-              <span aria-hidden className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate font-medium">{group.title}</span>
+        {extra > 0 ? (
+          // The chevron trails the name, so every device's name starts on the
+          // panel's gutter whether or not it has more sensors to show.
+          <button
+            type="button"
+            onClick={() => {
+              setExpanded((prev) => !prev);
+            }}
+            className="flex min-w-0 items-center gap-1.5 rounded-sm text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            aria-expanded={expanded}
+          >
+            <span className="truncate">{group.title}</span>
+            <span className="shrink-0 text-[12.5px] text-muted-foreground">
+              +{extra}
             </span>
-          )}
-        </div>
+            {expanded ? (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            )}
+          </button>
+        ) : (
+          <span className="min-w-0 truncate">{group.title}</span>
+        )}
         <Reading reading={group.hottest} />
       </div>
       {expanded && (
-        <dl className="mt-1.5 space-y-1 border-l pl-4">
+        <dl className="mt-1.5 space-y-1 border-l pl-3">
           {group.readings.map((reading) => (
             <div
               key={reading.key}
@@ -212,7 +192,7 @@ function Reading({ reading }: { reading: NodeSensorReading }) {
       className={cn(
         "shrink-0 text-right font-medium tabular-nums",
         critical && "text-destructive",
-        high && "text-amber-600 dark:text-amber-500",
+        high && "text-amber-700 dark:text-amber-400",
       )}
       title={limits.length > 0 ? limits.join(" · ") : undefined}
     >

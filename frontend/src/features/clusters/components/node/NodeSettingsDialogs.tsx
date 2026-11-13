@@ -36,10 +36,10 @@ import {
 } from "../../api/cluster-queries";
 
 /**
- * The Edit button of the node page's Network & DNS card, and the dialog it
- * opens. The page draws it only for a user who can manage the node, on an
- * online one, so for anyone else there is nothing here to show and nothing to
- * read.
+ * The Edit button beside the DNS servers in the node page's System panel, and
+ * the dialog it opens. The page draws it only for a user who can manage the
+ * node, on an online one, so for anyone else there is nothing here to show and
+ * nothing to read.
  *
  * The write replaces all four settings (PUT …/dns, internal/api/
  * registry_nodes.go: a resolver sent empty is removed), so the form must start
@@ -78,8 +78,8 @@ export function EditDNSDialog({
 }
 
 /**
- * The Edit button of the node page's System card for the timezone, and the
- * dialog it opens: the same rules as EditDNSDialog.
+ * The Edit button beside the timezone in the node page's System panel, and
+ * the dialog it opens: the same rules as EditDNSDialog.
  *
  * The form starts from the timezone the node itself reports (useNodeTime), not
  * from the node list's copy of it, which the collector stores: that is empty
@@ -120,8 +120,8 @@ export function EditTimezoneDialog({
 }
 
 /**
- * What the Network & DNS card says when its read failed and left nothing to
- * edit from, under its rows, where the Options card says the same of its own:
+ * What the System panel says when the DNS read failed and left nothing to
+ * edit from, under its rows, where the Options panel says the same of its own:
  * the Edit button is not drawn without that read, and a button that is simply
  * absent explains nothing. Not drawn once there is data: a read that fails
  * after that is for EditFromRead to say, when Edit is pressed.
@@ -140,13 +140,13 @@ export function DNSReadNote({
       query={query}
       subject="this node's DNS settings"
       identity={nodeName}
-      className="mt-2"
+      className="mt-2.5"
     />
   );
 }
 
 /**
- * What the System card says of a timezone it could not read: see DNSReadNote.
+ * What the System panel says of a timezone it could not read: see DNSReadNote.
  */
 export function TimezoneReadNote({
   clusterId,
@@ -162,7 +162,7 @@ export function TimezoneReadNote({
       query={query}
       subject="this node's timezone"
       identity={nodeName}
-      className="mt-2"
+      className="mt-2.5"
     />
   );
 }
@@ -340,7 +340,7 @@ function EditFromRead<T>({
           title={held}
           variant="ghost"
           size="icon"
-          className="h-6 w-6 disabled:pointer-events-auto"
+          className="h-6 w-6 shrink-0 text-muted-foreground disabled:pointer-events-auto"
           disabled={reading || saving}
           onClick={read}
         >

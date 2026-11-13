@@ -16,24 +16,36 @@ import { useShutdownNode } from "../../api/cluster-queries";
  * A node's shutdown behind its confirm, shared by the page's power actions and
  * the Power card's "shut it down now" during an outage, so both ask the same
  * question: a shutdown always confirms.
+ *
+ * Opened by its `trigger`, or, from a menu item that is gone by the time the
+ * dialog shows, by `open` and `onOpenChange`.
  */
 export function NodeShutdownConfirm({
   clusterId,
   nodeName,
   trigger,
+  open,
+  onOpenChange,
   onConfirm,
   onError,
 }: {
   clusterId: string;
   nodeName: string;
-  trigger: ReactNode;
+  trigger?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onConfirm?: () => void;
   onError?: (err: unknown) => void;
 }) {
   const shutdown = useShutdownNode(clusterId, nodeName);
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+    <AlertDialog
+      {...(open !== undefined ? { open } : {})}
+      {...(onOpenChange !== undefined ? { onOpenChange } : {})}
+    >
+      {trigger !== undefined && (
+        <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+      )}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Shutdown {nodeName}?</AlertDialogTitle>

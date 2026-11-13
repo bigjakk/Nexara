@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
-import { Pencil, SlidersHorizontal } from "lucide-react";
+import { Pencil } from "lucide-react";
 
+import { PropertyList, PropertyRow } from "@/components/page/Panel";
 import {
   QueryFailureNote,
   QueryStateNotice,
@@ -62,7 +63,6 @@ export function NodeOptionsCard({
   return (
     <>
       <NodeCardShell
-        icon={<SlidersHorizontal className="h-4 w-4" />}
         title="Options"
         className={className}
         cardRef={cardRef}
@@ -72,12 +72,12 @@ export function NodeOptionsCard({
               aria-label="Edit node options"
               variant="ghost"
               size="icon"
-              className="h-6 w-6"
+              className="h-7 w-7 text-muted-foreground"
               onClick={() => {
                 setEditing(data);
               }}
             >
-              <Pencil className="h-3 w-3" />
+              <Pencil className="h-3.5 w-3.5" />
             </Button>
           ) : undefined
         }
@@ -98,14 +98,14 @@ export function NodeOptionsCard({
           <>
             <OptionRows pveVersion={pveVersion} data={data} />
             {!online && (
-              <p className="mt-2 text-xs text-muted-foreground">
+              <p className="mt-2.5 text-[12.5px] text-muted-foreground">
                 Node is offline — showing the options as last read.
               </p>
             )}
             <QueryFailureNote
               query={query}
               subject="this node's options"
-              className="mt-2"
+              className="mt-2.5"
             />
           </>
         )}
@@ -136,7 +136,7 @@ function OptionRows({
 }) {
   const support = nodeOptionSupport(pveVersion, data);
   return (
-    <dl className="space-y-1.5">
+    <PropertyList>
       <Row
         label={NODE_OPTION_LABELS["startall-onboot-delay"]}
         value={describeStartDelay(data["startall-onboot-delay"])}
@@ -159,7 +159,7 @@ function OptionRows({
           title={data.location}
         />
       )}
-    </dl>
+    </PropertyList>
   );
 }
 
@@ -177,14 +177,13 @@ function Row({
   title?: string | undefined;
 }) {
   return (
-    <div className="flex justify-between gap-2 text-sm">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd
-        className="min-w-0 truncate text-right font-medium"
+    <PropertyRow label={label}>
+      <span
+        className="block truncate"
         title={title === undefined || title === "" ? value : title}
       >
         {value}
-      </dd>
-    </div>
+      </span>
+    </PropertyRow>
   );
 }

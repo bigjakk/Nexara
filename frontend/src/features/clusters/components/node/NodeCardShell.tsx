@@ -1,28 +1,29 @@
 import type { ReactNode, Ref } from "react";
 
+import { Panel } from "@/components/page/Panel";
 import { cn } from "@/lib/utils";
 
 /**
- * The chrome of the node page's summary cards (the same as HardwareSection's in
- * NodeDetailPage): a bordered box with an icon, a title and, at the right of
- * the header, an optional action.
+ * A summary panel of the node page that a dialog is opened from: a Panel with,
+ * at the right of its title, an optional action.
  *
  * The root takes focus (tabIndex -1) and is handed back as `cardRef`, for a
- * dialog opened from the card to fall back to when its opener cannot take focus
- * (DialogContent's fallbackFocus): the opener is an Edit button that is not
- * there, or not enabled, by then.
+ * dialog opened from the panel to fall back to when its opener cannot take
+ * focus (DialogContent's fallbackFocus): the opener is an Edit button that is
+ * not there, or not enabled, by then.
  */
 export function NodeCardShell({
-  icon,
   title,
   action,
+  flush,
   className,
   cardRef,
   children,
 }: {
-  icon: ReactNode;
   title: string;
   action?: ReactNode;
+  /** For a table that runs edge to edge: see Panel. */
+  flush?: boolean | undefined;
   className?: string | undefined;
   cardRef?: Ref<HTMLDivElement> | undefined;
   children: ReactNode;
@@ -32,18 +33,13 @@ export function NodeCardShell({
       ref={cardRef}
       tabIndex={-1}
       className={cn(
-        "rounded-lg border p-4 outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
+        "min-w-0 rounded-[10px] outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
         className,
       )}
     >
-      <div className="mb-3 flex items-center justify-between text-sm font-medium">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">{icon}</span>
-          {title}
-        </div>
-        {action}
-      </div>
-      {children}
+      <Panel title={title} actions={action} flush={flush ?? false}>
+        {children}
+      </Panel>
     </div>
   );
 }

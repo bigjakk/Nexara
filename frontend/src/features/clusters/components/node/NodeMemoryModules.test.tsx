@@ -3,7 +3,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
-import { NodeMemoryModules } from "./NodeMemoryModules";
+import { NodeMemoryModules, NodeMemoryModulesNote } from "./NodeMemoryModules";
 import type { NodeMemoryModulesResponse } from "../../api/cluster-queries";
 
 vi.mock("@/lib/api-client", async () =>
@@ -56,14 +56,14 @@ const goodRead: NodeMemoryModulesResponse = {
   auto_read: true,
 };
 
+// The panel and the line that stands in for it, as the node page draws them.
 function render(canRead: boolean) {
+  const props = { clusterId: CLUSTER, nodeName: NODE, online: true, canRead };
   return renderWithProviders(
-    <NodeMemoryModules
-      clusterId={CLUSTER}
-      nodeName={NODE}
-      online
-      canRead={canRead}
-    />,
+    <>
+      <NodeMemoryModules {...props} />
+      <NodeMemoryModulesNote {...props} />
+    </>,
   );
 }
 

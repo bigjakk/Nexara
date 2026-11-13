@@ -1,5 +1,14 @@
-import { useState } from "react";
-import { ArrowRightLeft, RefreshCw, Power, Wrench } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import {
+  ArrowRightLeft,
+  FileText,
+  Loader2,
+  MoreHorizontal,
+  Power,
+  RefreshCw,
+  Wrench,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -8,7 +17,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   AlertDialog,
@@ -22,6 +30,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  useDownloadNodeReport,
   useRebootNode,
   useEvacuateNode,
   useSetNodeMaintenance,
@@ -31,26 +47,50 @@ import { useSSHCredentials } from "@/features/rolling-updates/api/rolling-update
 import { NodeShutdownConfirm } from "./NodeShutdownConfirm";
 import { useTaskLogStore } from "@/stores/task-log-store";
 
+/**
+ * What can be done to a node, ranked: the page's own primary button first
+ * (`children`, its Shell), maintenance beside it, and what is rare or takes
+ * the node away behind "More actions". Each still asks before it acts.
+ */
 export function NodePowerActions({
   clusterId,
   nodeName,
   otherNodes,
   inMaintenance,
+  canReport,
+  bannerContainer,
+  children,
 }: {
   clusterId: string;
   nodeName: string;
   otherNodes: string[];
   inMaintenance: boolean;
+  /** Whether to offer the `pvereport` support bundle: it takes manage:node. */
+  canReport: boolean;
+  /**
+   * Where a failure, and the note that a bundle is being generated, go.
+   * Without it they sit among the buttons; a page that puts the buttons in
+   * its header gives them a full-width place of their own.
+   */
+  bannerContainer?: HTMLElement | null | undefined;
+  /** Shown first in the row: the page's primary action. */
+  children?: ReactNode;
 }) {
   const reboot = useRebootNode(clusterId, nodeName);
   const evacuate = useEvacuateNode(clusterId, nodeName);
   const maintenance = useSetNodeMaintenance(clusterId, nodeName);
+  // Generated on demand, and Proxmox shells out to a long list of commands to
+  // build it, so the pending state is held for however long that takes.
+  const report = useDownloadNodeReport(clusterId, nodeName);
   const { data: sshCreds } = useSSHCredentials(clusterId);
   const hasSSH = sshCreds != null;
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [evacuateOpen, setEvacuateOpen] = useState(false);
+  // Opened from the menu, whose items are gone by the time a dialog shows.
+  const [dialog, setDialog] = useState<
+    "evacuate" | "reboot" | "shutdown" | null
+  >(null);
   const [mode, setMode] = useState<"distribute" | "single">("distribute");
   const [targetNode, setTargetNode] = useState("");
   const [migrations, setMigrations] = useState<EvacuateMigration[] | null>(
@@ -86,47 +126,176 @@ export function NodePowerActions({
   };
 
   const closeEvacuate = () => {
-    setEvacuateOpen(false);
+    setDialog(null);
     setTargetNode("");
     setMode("distribute");
     setMigrations(null);
   };
 
-  return (
+  const reportError =
+    report.error == null
+      ? null
+      : report.error instanceof Error
+        ? report.error.message
+        : "Failed to download the report.";
+
+  const banner = (
     <>
       {actionError && (
-        <div className="flex items-center gap-2 rounded-md border border-destructive bg-destructive/10 px-3 py-1.5 text-sm text-destructive">
-          <span className="flex-1">{actionError}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            onClick={() => {
-              setActionError(null);
-            }}
-          >
-            Dismiss
-          </Button>
-        </div>
+        <Notice
+          onDismiss={() => {
+            setActionError(null);
+          }}
+        >
+          {actionError}
+        </Notice>
       )}
-      <Dialog
-        open={evacuateOpen}
-        onOpenChange={(v) => {
-          if (!v) closeEvacuate();
-          else setEvacuateOpen(true);
-        }}
-      >
-        <DialogTrigger asChild>
+      {reportError !== null && (
+        <Notice
+          onDismiss={() => {
+            report.reset();
+          }}
+        >
+          {reportError}
+        </Notice>
+      )}
+      {report.isPending && (
+        <p
+          role="status"
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Generating the support bundle for {nodeName}. Proxmox runs a long list
+          of commands to build it, so this can take a while.
+        </p>
+      )}
+    </>
+  );
+
+  return (
+    <>
+      {children}
+
+      {hasSSH ? (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <Wrench className="h-4 w-4" />
+              {inMaintenance ? "Exit maintenance" : "Enter maintenance"}
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {inMaintenance
+                  ? `Exit maintenance on ${nodeName}?`
+                  : `Enter maintenance on ${nodeName}?`}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {inMaintenance
+                  ? "Takes the node out of HA maintenance so HA can place guests on it again. Runs ha-manager node-maintenance disable over SSH."
+                  : "Puts the node into HA maintenance: HA-managed guests are migrated away and the node will not receive new ones, while the rest of the cluster stays HA-protected. Runs ha-manager node-maintenance over SSH."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setActionError(null);
+                  maintenance.mutate(!inMaintenance, { onError: handleError });
+                }}
+                disabled={maintenance.isPending}
+              >
+                {inMaintenance ? "Exit maintenance" : "Enter maintenance"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          disabled
+          title="Configure SSH credentials (Security → Rolling Updates → SSH Credentials) to use node maintenance, or use Evacuate."
+        >
+          <Wrench className="h-4 w-4" />
+          Maintenance
+        </Button>
+      )}
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
             size="sm"
-            className="gap-1.5"
+            className="px-2"
+            aria-label="More actions"
+            aria-busy={report.isPending || undefined}
+          >
+            {report.isPending ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <MoreHorizontal />
+            )}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {canReport && (
+            <DropdownMenuItem
+              className="gap-2"
+              disabled={report.isPending}
+              title="Download this node's pvereport support bundle"
+              onClick={() => {
+                report.mutate();
+              }}
+            >
+              <FileText className="h-4 w-4" />
+              {report.isPending
+                ? "Generating support bundle…"
+                : "Support bundle"}
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem
+            className="gap-2"
             disabled={otherNodes.length === 0}
+            onClick={() => {
+              setDialog("evacuate");
+            }}
           >
             <ArrowRightLeft className="h-4 w-4" />
             Evacuate
-          </Button>
-        </DialogTrigger>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="gap-2"
+            onClick={() => {
+              setDialog("reboot");
+            }}
+          >
+            <RefreshCw className="h-4 w-4" />
+            Reboot
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="gap-2 text-red-700 focus:text-red-700 dark:text-red-400 dark:focus:text-red-400"
+            onClick={() => {
+              setDialog("shutdown");
+            }}
+          >
+            <Power className="h-4 w-4" />
+            Shutdown
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {bannerContainer != null ? createPortal(banner, bannerContainer) : banner}
+
+      <Dialog
+        open={dialog === "evacuate"}
+        onOpenChange={(v) => {
+          if (!v) closeEvacuate();
+        }}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Evacuate all guests from {nodeName}</DialogTitle>
@@ -139,8 +308,8 @@ export function NodePowerActions({
               </p>
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <Label>Distribution Mode</Label>
-                  <div className="flex gap-3">
+                  <Label>Distribution mode</Label>
+                  <div className="flex flex-wrap gap-3">
                     <label className="flex items-center gap-2 text-sm">
                       <input
                         type="radio"
@@ -168,7 +337,7 @@ export function NodePowerActions({
                 </div>
                 {mode === "single" && (
                   <div className="space-y-2">
-                    <Label>Target Node</Label>
+                    <Label>Target node</Label>
                     <select
                       className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                       value={targetNode}
@@ -251,61 +420,12 @@ export function NodePowerActions({
         </DialogContent>
       </Dialog>
 
-      {hasSSH ? (
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <Wrench className="h-4 w-4" />
-              {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {inMaintenance
-                  ? `Exit maintenance on ${nodeName}?`
-                  : `Enter maintenance on ${nodeName}?`}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {inMaintenance
-                  ? "Takes the node out of HA maintenance so HA can place guests on it again. Runs ha-manager node-maintenance disable over SSH."
-                  : "Puts the node into HA maintenance: HA-managed guests are migrated away and the node will not receive new ones, while the rest of the cluster stays HA-protected. Runs ha-manager node-maintenance over SSH."}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  setActionError(null);
-                  maintenance.mutate(!inMaintenance, { onError: handleError });
-                }}
-                disabled={maintenance.isPending}
-              >
-                {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      ) : (
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          disabled
-          title="Configure SSH credentials (Security → Rolling Updates → SSH Credentials) to use node maintenance, or use Evacuate."
-        >
-          <Wrench className="h-4 w-4" />
-          Maintenance
-        </Button>
-      )}
-
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <RefreshCw className="h-4 w-4" />
-            Reboot
-          </Button>
-        </AlertDialogTrigger>
+      <AlertDialog
+        open={dialog === "reboot"}
+        onOpenChange={(v) => {
+          if (!v) setDialog(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Reboot {nodeName}?</AlertDialogTitle>
@@ -332,15 +452,43 @@ export function NodePowerActions({
       <NodeShutdownConfirm
         clusterId={clusterId}
         nodeName={nodeName}
-        onConfirm={() => { setActionError(null); }}
+        open={dialog === "shutdown"}
+        onOpenChange={(v) => {
+          if (!v) setDialog(null);
+        }}
+        onConfirm={() => {
+          setActionError(null);
+        }}
         onError={handleError}
-        trigger={
-          <Button variant="destructive" size="sm" className="gap-1.5">
-            <Power className="h-4 w-4" />
-            Shutdown
-          </Button>
-        }
       />
     </>
+  );
+}
+
+/** A failed action, said where the whole width is free, until dismissed. */
+function Notice({
+  children,
+  onDismiss,
+}: {
+  children: ReactNode;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-sm text-destructive"
+    >
+      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+        {children}
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 px-2 text-xs"
+        onClick={onDismiss}
+      >
+        Dismiss
+      </Button>
+    </div>
   );
 }

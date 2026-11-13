@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Pencil, StickyNote } from "lucide-react";
+import { Pencil } from "lucide-react";
 
 import {
   QueryFailureNote,
@@ -68,7 +68,6 @@ export function NodeNotesCard({
   return (
     <>
       <NodeCardShell
-        icon={<StickyNote className="h-4 w-4" />}
         title="Notes"
         className={className}
         cardRef={cardRef}
@@ -78,12 +77,12 @@ export function NodeNotesCard({
               aria-label="Edit node notes"
               variant="ghost"
               size="icon"
-              className="h-6 w-6"
+              className="h-7 w-7 text-muted-foreground"
               onClick={() => {
                 setEditing(data);
               }}
             >
-              <Pencil className="h-3 w-3" />
+              <Pencil className="h-3.5 w-3.5" />
             </Button>
           ) : undefined
         }
@@ -119,14 +118,14 @@ export function NodeNotesCard({
               </p>
             )}
             {!online && (
-              <p className="mt-2 text-xs text-muted-foreground">
+              <p className="mt-2.5 text-[12.5px] text-muted-foreground">
                 Node is offline — showing the notes as last read.
               </p>
             )}
             <QueryFailureNote
               query={query}
               subject="this node's notes"
-              className="mt-2"
+              className="mt-2.5"
             />
           </>
         )}

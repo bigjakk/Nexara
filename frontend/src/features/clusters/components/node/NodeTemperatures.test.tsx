@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
-import { NodeTemperatures } from "./NodeTemperatures";
+import { NodeTemperatures, NodeTemperaturesNote } from "./NodeTemperatures";
 import type {
   NodeSensorReading,
   NodeSensorsResponse,
@@ -33,9 +33,14 @@ function sensors(items: NodeSensorReading[]): NodeSensorsResponse {
   return { items, total: items.length, available: true };
 }
 
+// The panel and the line that stands in for it, as the node page draws them.
 function render(online = true) {
+  const props = { clusterId: CLUSTER, nodeName: NODE, online };
   return renderWithProviders(
-    <NodeTemperatures clusterId={CLUSTER} nodeName={NODE} online={online} />,
+    <>
+      <NodeTemperatures {...props} />
+      <NodeTemperaturesNote {...props} />
+    </>,
   );
 }
 

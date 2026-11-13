@@ -1,7 +1,7 @@
-import { MemoryStick, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
+import { Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -18,21 +18,24 @@ import {
   type NodeMemoryModule,
   type NodeMemoryModulesResponse,
 } from "../../api/cluster-queries";
-import { NodeCardShell } from "./NodeCardShell";
 
 /**
  * A node's memory DIMM layout: every slot, its module, and the headroom to the
  * firmware's maximum, as `dmidecode` reports them over the cluster's SSH
- * credentials. Like the temperatures card it depends on SSH and degrades to a
- * note; unlike it, it shows a stored read, so opening the page never dials the
- * node. The server reads each node daily, and Read now reads it on demand.
+ * credentials. Like the temperatures it depends on SSH; unlike them, it shows
+ * a stored read, so opening the page never dials the node. The server reads
+ * each node daily, and Read now reads it on demand.
+ *
+ * The panel is drawn while the stored read is being fetched and once there is
+ * one to show. When there is none, NodeMemoryModulesNote says why, as one line
+ * of the Hardware panel, with the same Read now. Both read the same query, so
+ * the page asks once.
  */
 export function NodeMemoryModules({
   clusterId,
   nodeName,
   online,
   canRead,
-  className,
 }: {
   clusterId: string;
   nodeName: string;
@@ -40,104 +43,57 @@ export function NodeMemoryModules({
   online: boolean;
   /** Read now opens a root SSH session, so it needs manage:node. */
   canRead: boolean;
-  className?: string;
 }) {
   const { data, isError } = useNodeMemoryModules(clusterId, nodeName);
-  const refresh = useRefreshNodeMemoryModules(clusterId, nodeName);
-
-  return (
-    <NodeCardShell
-      icon={<MemoryStick className="h-4 w-4" />}
-      title="Memory modules"
-      className={className}
-      action={
-        canRead ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={!online || refresh.isPending}
-            title={
-              online
-                ? "Read the memory layout now with dmidecode over the cluster's SSH credentials"
-                : "The node is offline"
-            }
-            onClick={() => {
-              refresh.mutate();
-            }}
-          >
-            <RefreshCw
-              className={cn("h-3.5 w-3.5", refresh.isPending && "animate-spin")}
-            />
-            {refresh.isPending ? "Reading…" : "Read now"}
-          </Button>
-        ) : undefined
-      }
-    >
-      {/* Data first, even beside a failed refetch; then the error; and a
-          query with neither, loading or paused in a background tab, shows the
-          skeleton rather than an empty card. */}
-      {data !== undefined ? (
-        <Body data={data} />
-      ) : isError ? (
-        <Note>Could not load the memory layout for this node.</Note>
-      ) : (
-        <div className="space-y-2">
-          <Skeleton className="h-5 w-full" />
-          <Skeleton className="h-5 w-4/5" />
-        </div>
-      )}
-    </NodeCardShell>
-  );
-}
-
-function Body({ data }: { data: NodeMemoryModulesResponse }) {
-  if (data.status === "never") {
+  const read = storedRead(data);
+  const readNow = canRead ? (
+    <ReadNowButton clusterId={clusterId} nodeName={nodeName} online={online} />
+  ) : undefined;
+  // A query with neither data nor an error is loading, or paused in a
+  // background tab: the panel holds its place until the read lands.
+  if (data === undefined && !isError) {
     return (
-      <Note>
-        {data.auto_read
-          ? "Not read yet. Nexara reads each node's memory layout once a day with dmidecode over the cluster's SSH credentials."
-          : "Not read yet. Read now reads it with dmidecode over the cluster's SSH credentials."}
-      </Note>
+      <Panel title="Memory modules" actions={readNow}>
+        <p className="text-sm text-muted-foreground">Reading…</p>
+      </Panel>
     );
   }
-  if (data.read_at === undefined) {
-    return <Note>{data.reason ?? "The memory layout could not be read."}</Note>;
-  }
+  if (read === null) return null;
+
   return (
-    <div className="space-y-3">
-      {data.status !== "ok" && (
-        <p className="text-sm text-amber-600 dark:text-amber-400">
-          The last read failed: {data.reason} Showing the read from{" "}
-          {formatRelativeTime(data.read_at)}.
-        </p>
-      )}
-      <p className="text-sm">
-        <span className="font-medium">
-          {formatBytes(data.installed_bytes)}
-        </span>{" "}
-        installed in {data.slots_used} of {data.slots_total} slots
-        {data.max_capacity_bytes > 0 && (
-          <>
-            {" "}
-            · firmware maximum {formatBytes(data.max_capacity_bytes)}
-          </>
+    <Panel
+      flush
+      title="Memory modules"
+      aside={`read ${formatRelativeTime(read.read_at)}`}
+      actions={readNow}
+    >
+      <div className="space-y-2 px-[18px] pb-3">
+        {read.status !== "ok" && (
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            The last read failed: {read.reason} Showing the read from{" "}
+            {formatRelativeTime(read.read_at)}.
+          </p>
         )}
-        {data.ecc !== undefined && <> · {data.ecc}</>}
-        <span className="text-muted-foreground">
-          {" "}
-          · read {formatRelativeTime(data.read_at)}
-        </span>
-      </p>
-      {data.node_mem_total > data.installed_bytes && (
-        <Note>
-          The firmware lists {formatBytes(data.installed_bytes)}, but the node
-          has {formatBytes(data.node_mem_total)}: memory hot-plugged into a
-          virtual node, modules the firmware leaves out, or memory added since
-          this read are missing from this table.
-        </Note>
-      )}
-      <Table>
+        <p className="text-sm">
+          <span className="font-semibold">
+            {formatBytes(read.installed_bytes)}
+          </span>{" "}
+          installed in {read.slots_used} of {read.slots_total} slots
+          {read.max_capacity_bytes > 0 && (
+            <> · firmware maximum {formatBytes(read.max_capacity_bytes)}</>
+          )}
+          {read.ecc !== undefined && <> · {read.ecc}</>}
+        </p>
+        {read.node_mem_total > read.installed_bytes && (
+          <Note>
+            The firmware lists {formatBytes(read.installed_bytes)}, but the node
+            has {formatBytes(read.node_mem_total)}: memory hot-plugged into a
+            virtual node, modules the firmware leaves out, or memory added since
+            this read are missing from this table.
+          </Note>
+        )}
+      </div>
+      <Table className="whitespace-nowrap">
         <TableHeader>
           <TableRow>
             <TableHead>Slot</TableHead>
@@ -149,12 +105,101 @@ function Body({ data }: { data: NodeMemoryModulesResponse }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.items.map((m, i) => (
+          {read.items.map((m, i) => (
             <ModuleRow key={`${m.locator}-${String(i)}`} module={m} />
           ))}
         </TableBody>
       </Table>
+    </Panel>
+  );
+}
+
+/**
+ * Why the node page has no Memory modules panel: the layout was never read, or
+ * could not be. Nothing while the read of the stored layout is out, and
+ * nothing once there is one to show.
+ */
+export function NodeMemoryModulesNote({
+  clusterId,
+  nodeName,
+  online,
+  canRead,
+}: {
+  clusterId: string;
+  nodeName: string;
+  online: boolean;
+  canRead: boolean;
+}) {
+  const { data, isError } = useNodeMemoryModules(clusterId, nodeName);
+  if (storedRead(data) !== null) return null;
+  // A query with neither data nor an error is loading, or paused in a
+  // background tab: the line is left out until it has something to say.
+  if (data === undefined && !isError) return null;
+
+  return (
+    <div className="space-y-1.5 text-[12.5px]">
+      <div>
+        <p className="font-medium">Memory modules</p>
+        <Note>
+          {data === undefined
+            ? "Could not load the memory layout for this node."
+            : data.status === "never"
+              ? data.auto_read
+                ? "Not read yet. Nexara reads each node's memory layout once a day with dmidecode over the cluster's SSH credentials."
+                : "Not read yet. Read now reads it with dmidecode over the cluster's SSH credentials."
+              : (data.reason ?? "The memory layout could not be read.")}
+        </Note>
+      </div>
+      {canRead && (
+        <ReadNowButton
+          clusterId={clusterId}
+          nodeName={nodeName}
+          online={online}
+        />
+      )}
     </div>
+  );
+}
+
+/** The layout when there is a stored read of it to show, else null. */
+function storedRead(
+  data: NodeMemoryModulesResponse | undefined,
+): (NodeMemoryModulesResponse & { read_at: string }) | null {
+  if (data === undefined || data.status === "never") return null;
+  const { read_at } = data;
+  return read_at === undefined ? null : { ...data, read_at };
+}
+
+function ReadNowButton({
+  clusterId,
+  nodeName,
+  online,
+}: {
+  clusterId: string;
+  nodeName: string;
+  online: boolean;
+}) {
+  const refresh = useRefreshNodeMemoryModules(clusterId, nodeName);
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="gap-1.5"
+      disabled={!online || refresh.isPending}
+      title={
+        online
+          ? "Read the memory layout now with dmidecode over the cluster's SSH credentials"
+          : "The node is offline"
+      }
+      onClick={() => {
+        refresh.mutate();
+      }}
+    >
+      <RefreshCw
+        className={cn("h-3.5 w-3.5", refresh.isPending && "animate-spin")}
+      />
+      {refresh.isPending ? "Reading…" : "Read now"}
+    </Button>
   );
 }
 
@@ -194,5 +239,5 @@ function speedLabel(m: NodeMemoryModule): string {
 }
 
 function Note({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-muted-foreground">{children}</p>;
+  return <p className="text-[12.5px] text-muted-foreground">{children}</p>;
 }

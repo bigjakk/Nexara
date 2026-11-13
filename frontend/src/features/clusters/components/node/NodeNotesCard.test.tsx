@@ -138,8 +138,10 @@ describe("what the card shows", () => {
     serve({ description: "line one\nline two\n", digest: "d1" });
     renderCard();
 
+    // The paragraph itself: the panel's body holds nothing else, so has the
+    // same text.
     const notes = await screen.findByText(
-      (_, el) => el?.textContent === "line one\nline two",
+      (_, el) => el?.tagName === "P" && el.textContent === "line one\nline two",
     );
     expect(notes).toHaveClass("whitespace-pre-wrap");
     expect(notes).toHaveAttribute("tabindex", "0");

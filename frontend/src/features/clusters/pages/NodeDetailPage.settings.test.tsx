@@ -166,13 +166,6 @@ const EDIT_TIMEZONE = { name: "Edit timezone" };
  */
 const SETTINGS_NOTE = /Could not load this node's (DNS settings|timezone)/;
 
-/** The summary card with this title: the bordered box its header sits in. */
-function cardOf(title: string): HTMLElement {
-  const card = screen.getByText(title).closest(".rounded-lg");
-  if (!(card instanceof HTMLElement)) throw new Error(`no ${title} card`);
-  return card;
-}
-
 /** The two dialogs, for the test that moves the page to another node under one. */
 const MOVES: [
   name: string,
@@ -223,18 +216,16 @@ describe("NodeDetailPage timezone and DNS Edit buttons", () => {
   });
 
   // The Edit button is not drawn without its read, and a button that is simply
-  // absent explains nothing: each card says what it could not read, under its
-  // own rows.
-  it("say under their own card's rows what could not be read, to someone who manages nodes", async () => {
+  // absent explains nothing: the System panel says what it could not read,
+  // under its rows.
+  it("say under the System panel's rows what could not be read, to someone who manages nodes", async () => {
     // Neither route is stubbed: the stub answers 404.
     api = stubApi({ [NODES]: listOf([node("n1", "pve-01")]) });
     renderPage();
 
-    await screen.findByText("System");
-    const system = cardOf("System");
-    const network = cardOf("Network & DNS");
+    const system = await screen.findByRole("region", { name: "System" });
     expect(
-      await within(network).findByText(
+      await within(system).findByText(
         /Could not load this node's DNS settings: HTTP 404/,
       ),
     ).toBeInTheDocument();
@@ -243,8 +234,6 @@ describe("NodeDetailPage timezone and DNS Edit buttons", () => {
         /Could not load this node's timezone: HTTP 404/,
       ),
     ).toBeInTheDocument();
-    expect(within(network).queryByText(/timezone/)).toBeNull();
-    expect(within(system).queryByText(/DNS settings/)).toBeNull();
     expect(screen.queryByRole("button", EDIT_DNS)).toBeNull();
     expect(screen.queryByRole("button", EDIT_TIMEZONE)).toBeNull();
   });

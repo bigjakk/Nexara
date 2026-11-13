@@ -1,125 +1,45 @@
 import { useMemo, useState } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
-import {
-  ArrowLeft,
-  Terminal,
-  Cpu,
-  MemoryStick,
-  HardDrive,
-  Info,
-  Network,
-  CircuitBoard,
-  Globe,
-  Trash2,
-  Pencil,
-  Cog,
-  FileText,
-  Play,
-  Square,
-  RotateCw,
-  Plus,
-  Loader2,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  Server,
-} from "lucide-react";
-import { StatusBadge } from "@/features/inventory/components/StatusBadge";
+import { Server, ServerOff, Terminal } from "lucide-react";
 import { ResourceTable } from "@/features/inventory/components/ResourceTable";
 import { InventoryUnavailableNote } from "@/features/inventory/components/InventoryUnavailableNote";
 import { useInventoryData } from "@/features/inventory/api/inventory-queries";
-import { DetailChip } from "@/components/DetailChip";
-import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
-import { QueryStateNotice } from "@/components/QueryStateNotice";
+import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { EmptyState } from "@/components/EmptyState";
+import { DetailHeader, Fact, StatusFact } from "@/components/page/DetailHeader";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { NodeUpdatePanel } from "@/features/rolling-updates/components/NodeUpdatePanel";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { useClusterMetrics } from "@/hooks/useMetrics";
-import {
-  useClusterNodes,
-  useClusterVMs,
-  useNodeDisks,
-  useNodePCIDevices,
-  useDiskSMART,
-  useNodeZFSPools,
-  useNodeLVM,
-  useNodeLVMThin,
-  useInitializeGPT,
-  useWipeDisk,
-  type ZFSPoolResponse,
-  type LVMVolumeGroupResponse,
-  type LVMThinPoolResponse,
-  type DirectoryEntryResponse,
-  type LiveDiskResponse,
-  useLiveDisks,
-  useCreateZFSPool,
-  useDeleteZFSPool,
-  useCreateLVM,
-  useDeleteLVM,
-  useCreateLVMThin,
-  useDeleteLVMThin,
-  useNodeDirectories,
-  useCreateDirectory,
-  useNodeServices,
-  useServiceAction,
-  useNodeSyslog,
-  useNodeFirewallRules,
-  useCreateNodeFirewallRule,
-  useDeleteNodeFirewallRule,
-  useNodeFirewallLog,
-  type NodeFirewallRuleResponse,
-} from "../api/cluster-queries";
-import {
-  useNodeNetworkInterfaces as useNodeNetworkInterfacesLive,
-  useDeleteNetworkInterface,
-} from "@/features/networks/api/network-queries";
-import type { NetworkInterface } from "@/features/networks/types/network";
-import { CreateInterfaceDialog } from "@/features/networks/components/CreateInterfaceDialog";
-import { NetworkApplyRevertButtons } from "@/features/networks/components/NetworkApplyRevertButtons";
-import { InterfaceFormDialog } from "@/features/networks/components/InterfaceFormDialog";
-import { ConfirmInterfaceDeleteDialog } from "@/features/networks/components/ConfirmInterfaceDeleteDialog";
-import { ConfirmFirewallRuleDeleteDialog } from "@/features/networks/components/ConfirmFirewallRuleDeleteDialog";
-import {
-  interfaceAddresses,
-  interfaceGateways,
-  interfacePorts,
-  interfaceTypeLabel,
-} from "@/features/networks/components/interface-fields";
+import { useClusterNodes, useClusterVMs } from "../api/cluster-queries";
 import { openConsole } from "@/features/console/lib/open-console";
 import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
 import { usePermissions } from "@/hooks/usePermissions";
 import { NodeAptRepositories } from "../components/NodeAptRepositories";
 import { NodeHistoryTab } from "../components/NodeHistoryTab";
 import { NodePowerActions } from "../components/node/NodePowerActions";
-import { NodeReportButton } from "../components/node/NodeReportButton";
 import { NodeMetricsPanel } from "../components/node/NodeMetricsPanel";
+import { NodeGuestsPanel } from "../components/node/NodeGuestsPanel";
+import { NodeHardwarePanel } from "../components/node/NodeHardwarePanel";
+import { NodeSystemPanel } from "../components/node/NodeSystemPanel";
 import { NodeNotesCard } from "../components/node/NodeNotesCard";
 import { NodeOptionsCard } from "../components/node/NodeOptionsCard";
-import { NodeTemperatures } from "../components/node/NodeTemperatures";
-import { NodePowerCard } from "@/features/power/components/NodePowerCard";
-import { NodeMemoryModules } from "../components/node/NodeMemoryModules";
 import {
-  DNSReadNote,
-  EditDNSDialog,
-  EditTimezoneDialog,
-  TimezoneReadNote,
-} from "../components/node/NodeSettingsDialogs";
+  NodeTemperatures,
+  NodeTemperaturesNote,
+} from "../components/node/NodeTemperatures";
+import { NodePowerCard } from "@/features/power/components/NodePowerCard";
+import {
+  NodeMemoryModules,
+  NodeMemoryModulesNote,
+} from "../components/node/NodeMemoryModules";
+import { NetworkTab } from "../components/node/NodeNetworkTab";
+import { DisksTab } from "../components/node/NodeDisksTab";
+import { ServicesTab } from "../components/node/NodeServicesTab";
+import { FirewallTab } from "../components/node/NodeFirewallTab";
+import { SyslogTab } from "../components/node/NodeSyslogTab";
+import { PCIDevicesTab } from "../components/node/NodePCIDevicesTab";
 import { formatBytes, formatUptime } from "@/lib/format";
 
 export function NodeDetailPage() {
@@ -144,13 +64,21 @@ export function NodeDetailPage() {
   };
   const { data: nodes, isLoading } = useClusterNodes(clusterId);
   const node = nodes?.find((n) => n.id === nodeId);
+  // The cluster's name, for the breadcrumb: the list the inventory already
+  // reads, so the page asks for nothing more.
+  const { data: clusters } = useClusters();
+  const clusterName = clusters?.find((c) => c.id === clusterId)?.name;
 
   const clusterMetrics = useClusterMetrics(clusterId);
 
   // Guests resident on this node, as inventory rows so the VMs tab gets the
   // full ResourceTable (context menu, bulk actions) like the folder view.
   const { data: clusterVMs } = useClusterVMs(clusterId);
-  const { rows: inventoryRows, failedClusterIds } = useInventoryData();
+  const {
+    rows: inventoryRows,
+    failedClusterIds,
+    isLoading: inventoryLoading,
+  } = useInventoryData();
   const nodeVmRows = useMemo(() => {
     const onNode = new Set(
       (clusterVMs ?? [])
@@ -170,6 +98,9 @@ export function NodeDetailPage() {
   // without both grants the tab would be a table of refusals.
   const canHistory =
     hasPermission("view", "audit") && hasPermission("view", "task");
+  // A failed action, and the note that a support bundle is on its way, get
+  // the full width under the header; the buttons sit in the header's corner.
+  const [bannerSlot, setBannerSlot] = useState<HTMLDivElement | null>(null);
 
   function openShell(keys: ConsoleClickKeys) {
     if (!node) return;
@@ -199,79 +130,52 @@ export function NodeDetailPage() {
     );
   }
 
-  const swapPercent =
-    node.swap_total > 0
-      ? ((node.swap_used / node.swap_total) * 100).toFixed(1)
-      : null;
+  const online = node.status === "online";
+  const inventoryFailed = failedClusterIds.includes(clusterId);
+  // Until the guest list has answered, or when it could not be read, an empty
+  // list is not "no guests": the header then says nothing of them.
+  const guestsKnown = !inventoryLoading && !inventoryFailed;
   // Who is shown the timezone and DNS dialogs, and who makes the reads they edit
-  // from. It gates what is DRAWN, not a flag the dialogs take: they then unmount
-  // with the permission (or the node going offline), their state with them, and
-  // nothing comes back from an old snapshot when it returns.
-  const canEditSettings = node.status === "online" && canManage("node");
+  // from: see NodeSystemPanel.
+  const canEditSettings = online && canManage("node");
+  const pveVersion = node.pve_version.replace(/^pve-manager\/([^/]+).*$/, "$1");
+  const statusLabel =
+    node.status.charAt(0).toUpperCase() + node.status.slice(1);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <Button
-            aria-label="Back to cluster"
-            variant="ghost"
-            size="sm"
-            asChild
-            className="-ml-2 mt-1.5"
-          >
-            <Link to={`/clusters/${clusterId}`}>
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
-          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-            <Server className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <div className="min-w-0 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">
-                {node.name}
-              </h1>
-              <StatusBadge status={node.status} />
-              {node.ha_state === "maintenance" && (
-                <Badge
-                  variant="outline"
-                  className="border-amber-500/50 text-amber-600 dark:text-amber-400"
-                >
-                  Maintenance
-                </Badge>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <DetailChip>Proxmox node</DetailChip>
-              {node.pve_version !== "" && (
-                <DetailChip>
-                  PVE{" "}
-                  {node.pve_version.replace(/^pve-manager\/([^/]+).*$/, "$1")}
-                </DetailChip>
-              )}
-              <DetailChip>{node.cpu_count} vCPU</DetailChip>
-              <DetailChip>{formatBytes(node.mem_total)} RAM</DetailChip>
-            </div>
-          </div>
-        </div>
-        {node.status === "online" && (
-          <div className="flex flex-wrap items-center gap-2">
-            {canConsole("node") && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={openShell}
-              >
-                <Terminal className="h-4 w-4" />
-                Shell
-              </Button>
+    <div className="space-y-5">
+      <DetailHeader
+        crumbs={[
+          { label: "Inventory", to: "/inventory" },
+          { label: clusterName ?? "Cluster", to: `/clusters/${clusterId}` },
+          { label: node.name },
+        ]}
+        icon={<Server />}
+        title={node.name}
+        facts={
+          <>
+            <StatusFact
+              status={node.status}
+              label={statusLabel}
+              detail={
+                online && node.uptime > 0
+                  ? `up ${formatUptime(node.uptime)}`
+                  : undefined
+              }
+            />
+            {node.ha_state === "maintenance" && (
+              <StatusFact status="maintenance" label="In maintenance" />
             )}
-            {canManage("node") && (
-              <NodeReportButton clusterId={clusterId} nodeName={node.name} />
+            {pveVersion !== "" && <Fact label="PVE">{pveVersion}</Fact>}
+            <Fact label="vCPUs">{String(node.cpu_count)}</Fact>
+            <Fact label="RAM">{formatBytes(node.mem_total)}</Fact>
+            {guestsKnown && (
+              <Fact label="Guests">{String(nodeVmRows.length)}</Fact>
             )}
+          </>
+        }
+        actions={
+          online ? (
             <NodePowerActions
               clusterId={clusterId}
               nodeName={node.name}
@@ -279,10 +183,20 @@ export function NodeDetailPage() {
               otherNodes={(nodes ?? [])
                 .filter((n) => n.name !== node.name && n.status === "online")
                 .map((n) => n.name)}
-            />
-          </div>
-        )}
-      </div>
+              canReport={canManage("node")}
+              bannerContainer={bannerSlot}
+            >
+              {canConsole("node") && (
+                <Button size="sm" className="gap-1.5" onClick={openShell}>
+                  <Terminal className="h-4 w-4" />
+                  Shell
+                </Button>
+              )}
+            </NodePowerActions>
+          ) : undefined
+        }
+      />
+      <div ref={setBannerSlot} className="space-y-2 empty:hidden" />
 
       {/* Tabbed content */}
       <Tabs value={tabParam || "summary"} onValueChange={setTab}>
@@ -294,184 +208,99 @@ export function NodeDetailPage() {
           <TabsTrigger value="services">Services</TabsTrigger>
           <TabsTrigger value="firewall">Firewall</TabsTrigger>
           <TabsTrigger value="syslog">Syslog</TabsTrigger>
-          <TabsTrigger value="pci">PCI Devices</TabsTrigger>
+          <TabsTrigger value="pci">PCI devices</TabsTrigger>
           <TabsTrigger value="updates">Updates</TabsTrigger>
           {canHistory && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
 
         {/* Summary Tab */}
-        <TabsContent value="summary" className="mt-4 space-y-6">
-          {/* Hardware Info Cards */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <HardwareSection
-              icon={<Cpu className="h-4 w-4" />}
-              title="Processor"
-              items={[
-                { label: "Model", value: node.cpu_model || "--" },
-                {
-                  label: "Sockets",
-                  value: node.cpu_sockets ? String(node.cpu_sockets) : "--",
-                },
-                {
-                  label: "Cores",
-                  value: node.cpu_cores
-                    ? `${String(node.cpu_cores)} per socket`
-                    : "--",
-                },
-                {
-                  label: "Threads",
-                  value: node.cpu_threads
-                    ? `${String(node.cpu_threads)} per core`
-                    : "--",
-                },
-                { label: "Total CPUs", value: String(node.cpu_count) },
-                {
-                  label: "Frequency",
-                  value: node.cpu_mhz ? `${node.cpu_mhz} MHz` : "--",
-                },
-              ]}
-            />
-            <HardwareSection
-              icon={<MemoryStick className="h-4 w-4" />}
-              title="Memory"
-              items={[
-                { label: "Total RAM", value: formatBytes(node.mem_total) },
-                {
-                  label: "Swap Total",
-                  value: node.swap_total ? formatBytes(node.swap_total) : "--",
-                },
-                {
-                  label: "Swap Used",
-                  value: node.swap_total
-                    ? `${formatBytes(node.swap_used)} (${swapPercent ?? "0"}%)`
-                    : "--",
-                },
-              ]}
-            />
-            {/* The timezone and DNS dialogs are keyed on the node, like the
-                Options and Notes cards below: the page is the same component
-                for every node it is routed to, and a dialog that survived a
-                change of node would PUT what it was opened with to the new
-                one. Their notes say what could not be read, under the rows. */}
-            <HardwareSectionWithAction
-              icon={<Info className="h-4 w-4" />}
-              title="System"
-              items={[
-                { label: "PVE Version", value: node.pve_version || "--" },
-                { label: "Kernel", value: node.kernel_version || "--" },
-                { label: "Uptime", value: formatUptime(node.uptime) },
-                { label: "Load Average", value: node.load_avg || "--" },
-                {
-                  label: "I/O Wait",
-                  value:
-                    node.io_wait > 0
-                      ? `${(node.io_wait * 100).toFixed(1)}%`
-                      : "--",
-                },
-                { label: "Timezone", value: node.timezone || "--" },
-              ]}
-              action={
-                canEditSettings ? (
-                  <EditTimezoneDialog
-                    key={`timezone-${node.id}`}
-                    clusterId={clusterId}
-                    nodeName={node.name}
-                  />
-                ) : undefined
-              }
-            >
-              {canEditSettings && (
-                <TimezoneReadNote clusterId={clusterId} nodeName={node.name} />
-              )}
-            </HardwareSectionWithAction>
-            <HardwareSectionWithAction
-              icon={<Globe className="h-4 w-4" />}
-              title="Network & DNS"
-              items={[
-                { label: "DNS Servers", value: node.dns_servers || "--" },
-                { label: "Search Domain", value: node.dns_search || "--" },
-                ...(node.subscription_status
-                  ? [
-                      {
-                        label: "Subscription",
-                        value: `${node.subscription_status}${node.subscription_level ? ` (${node.subscription_level})` : ""}`,
-                      },
-                    ]
-                  : []),
-              ]}
-              action={
-                canEditSettings ? (
-                  <EditDNSDialog
-                    key={`dns-${node.id}`}
-                    clusterId={clusterId}
-                    nodeName={node.name}
-                  />
-                ) : undefined
-              }
-            >
-              {canEditSettings && (
-                <DNSReadNote clusterId={clusterId} nodeName={node.name} />
-              )}
-            </HardwareSectionWithAction>
-            {/* Keyed on the node: the page is the same component for every node
-                it is routed to, and a dialog that survived a change of node
-                would PUT the old node's snapshot to the new one. Each has its
-                own key, because siblings cannot share one. */}
-            <NodeOptionsCard
-              key={`options-${node.id}`}
-              clusterId={clusterId}
-              nodeName={node.name}
-              pveVersion={node.pve_version}
-              online={node.status === "online"}
-              canEdit={canManage("node")}
-              className="lg:col-span-2"
-            />
-            <NodeNotesCard
-              key={`notes-${node.id}`}
-              clusterId={clusterId}
-              nodeName={node.name}
-              online={node.status === "online"}
-              canEdit={canManage("node")}
-              className="lg:col-span-2"
-            />
-            {/* The UPSes that power the node, for view:ups holders: full width,
-                as it can hold several. */}
-            <NodePowerCard
-              clusterId={clusterId}
-              nodeName={node.name}
-              online={node.status === "online"}
-              className="sm:col-span-2 lg:col-span-4"
-            />
-            {/* Full-width under the hardware cards: the reading count varies
-                with the host, so a fixed grid slot would either crop a
-                well-instrumented board or leave a mostly-empty card. */}
-            <NodeTemperatures
-              clusterId={clusterId}
-              nodeName={node.name}
-              online={node.status === "online"}
-              className="sm:col-span-2 lg:col-span-4"
-            />
-            <NodeMemoryModules
-              clusterId={clusterId}
-              nodeName={node.name}
-              online={node.status === "online"}
-              canRead={canManage("node")}
-              className="sm:col-span-2 lg:col-span-4"
-            />
+        <TabsContent value="summary" className="mt-5">
+          {/* Two columns that fold into one: what the node is doing on the
+              left, what it is and how it is set up on the right. */}
+          <div className="flex flex-wrap items-start gap-4">
+            <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-4">
+              <NodeMetricsPanel
+                clusterId={clusterId}
+                nodeId={nodeId}
+                liveMetric={liveMetric}
+                memTotalBytes={node.mem_total}
+                cpuCount={node.cpu_count}
+                loadAvg={node.load_avg}
+                ioWait={node.io_wait}
+              />
+              <NodeGuestsPanel
+                rows={nodeVmRows}
+                loading={inventoryLoading}
+                unavailable={inventoryFailed}
+                onViewAll={() => {
+                  setTab("vms");
+                }}
+              />
+              {/* Each only when it has something to show: without, the
+                  Hardware panel says why in a line. */}
+              <NodeTemperatures
+                clusterId={clusterId}
+                nodeName={node.name}
+                online={online}
+              />
+              <NodeMemoryModules
+                clusterId={clusterId}
+                nodeName={node.name}
+                online={online}
+                canRead={canManage("node")}
+              />
+            </div>
+            <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-4">
+              <NodeHardwarePanel node={node}>
+                <NodeTemperaturesNote
+                  clusterId={clusterId}
+                  nodeName={node.name}
+                  online={online}
+                />
+                <NodeMemoryModulesNote
+                  clusterId={clusterId}
+                  nodeName={node.name}
+                  online={online}
+                  canRead={canManage("node")}
+                />
+              </NodeHardwarePanel>
+              <NodeSystemPanel
+                clusterId={clusterId}
+                node={node}
+                canEdit={canEditSettings}
+              />
+              {/* Keyed on the node: the page is the same component for every
+                  node it is routed to, and a dialog that survived a change of
+                  node would PUT the old node's snapshot to the new one. Each
+                  has its own key, because siblings cannot share one. */}
+              <NodeOptionsCard
+                key={`options-${node.id}`}
+                clusterId={clusterId}
+                nodeName={node.name}
+                pveVersion={node.pve_version}
+                online={online}
+                canEdit={canManage("node")}
+              />
+              <NodeNotesCard
+                key={`notes-${node.id}`}
+                clusterId={clusterId}
+                nodeName={node.name}
+                online={online}
+                canEdit={canManage("node")}
+              />
+              {/* The UPSes that power the node, for view:ups holders. */}
+              <NodePowerCard
+                clusterId={clusterId}
+                nodeName={node.name}
+                online={online}
+              />
+            </div>
           </div>
-
-          {/* Live metrics + charts */}
-          <NodeMetricsPanel
-            clusterId={clusterId}
-            nodeId={nodeId}
-            liveMetric={liveMetric}
-            memTotalBytes={node.mem_total}
-          />
         </TabsContent>
 
         {/* VMs Tab */}
         <TabsContent value="vms" className="mt-4">
-          {failedClusterIds.includes(clusterId) && <InventoryUnavailableNote />}
+          {inventoryFailed && <InventoryUnavailableNote />}
           <ResourceTable data={nodeVmRows} />
         </TabsContent>
 
@@ -486,40 +315,40 @@ export function NodeDetailPage() {
             clusterId={clusterId}
             nodeId={nodeId}
             nodeName={node.name}
-            isOnline={node.status === "online"}
+            isOnline={online}
           />
         </TabsContent>
 
         {/* Services Tab */}
         <TabsContent value="services" className="mt-4">
-          {node.status === "online" ? (
+          {online ? (
             <ServicesTab clusterId={clusterId} nodeName={node.name} />
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Node must be online to view services.
-            </p>
+            <OfflineNote>
+              Services can be read only while the node is online.
+            </OfflineNote>
           )}
         </TabsContent>
 
         {/* Firewall Tab */}
         <TabsContent value="firewall" className="mt-4">
-          {node.status === "online" ? (
+          {online ? (
             <FirewallTab clusterId={clusterId} nodeName={node.name} />
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Node must be online to manage firewall.
-            </p>
+            <OfflineNote>
+              The firewall can be managed only while the node is online.
+            </OfflineNote>
           )}
         </TabsContent>
 
         {/* Syslog Tab */}
         <TabsContent value="syslog" className="mt-4">
-          {node.status === "online" ? (
+          {online ? (
             <SyslogTab clusterId={clusterId} nodeName={node.name} />
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Node must be online to view syslog.
-            </p>
+            <OfflineNote>
+              The system log can be read only while the node is online.
+            </OfflineNote>
           )}
         </TabsContent>
 
@@ -530,7 +359,7 @@ export function NodeDetailPage() {
 
         {/* Updates Tab */}
         <TabsContent value="updates" className="mt-4 space-y-4">
-          {node.status === "online" ? (
+          {online ? (
             <>
               {/* Above the repositories: what is pending and how to apply it is
                   the question this tab is opened with; where the packages come
@@ -539,9 +368,9 @@ export function NodeDetailPage() {
               <NodeAptRepositories clusterId={clusterId} nodeName={node.name} />
             </>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Node must be online to view updates.
-            </p>
+            <OfflineNote>
+              Updates can be read only while the node is online.
+            </OfflineNote>
           )}
         </TabsContent>
 
@@ -556,2125 +385,13 @@ export function NodeDetailPage() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Tab content components                                             */
-/* ------------------------------------------------------------------ */
-
-export function NetworkTab({
-  clusterId,
-  nodeName,
-}: {
-  clusterId: string;
-  nodeName: string;
-}) {
-  const interfacesQuery = useNodeNetworkInterfacesLive(clusterId, nodeName);
-  const networkInterfaces = interfacesQuery.data;
-  const deleteIface = useDeleteNetworkInterface(clusterId, nodeName);
-  const [editIface, setEditIface] = useState<NetworkInterface | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<NetworkInterface | null>(
-    null,
-  );
-
+/** What a tab that reads the node itself shows while the node is offline. */
+function OfflineNote({ children }: { children: string }) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Network className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">Network Interfaces</h2>
-        </div>
-        <div className="flex items-center gap-2">
-          <NetworkApplyRevertButtons clusterId={clusterId} nodeName={nodeName} />
-          <CreateInterfaceDialog clusterId={clusterId} nodeName={nodeName} />
-        </div>
-      </div>
-
-      {!networkInterfaces || networkInterfaces.length === 0 ? (
-        <QueryStateNotice
-          query={interfacesQuery}
-          subject="this node's network interfaces"
-          empty="No network interfaces found."
-          skeletonClassName="h-48 w-full"
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Interface</th>
-                <th className="px-3 py-2 text-left font-medium">Type</th>
-                <th className="px-3 py-2 text-left font-medium">Active</th>
-                <th className="px-3 py-2 text-left font-medium">Autostart</th>
-                <th className="px-3 py-2 text-left font-medium">VLAN aware</th>
-                <th className="px-3 py-2 text-left font-medium">
-                  Ports / Slaves
-                </th>
-                <th className="px-3 py-2 text-left font-medium">Bond Mode</th>
-                <th className="px-3 py-2 text-left font-medium">
-                  Address / CIDR
-                </th>
-                <th className="px-3 py-2 text-left font-medium">Gateway</th>
-                <th className="px-3 py-2 text-left font-medium">MTU</th>
-                <th className="px-3 py-2 text-left font-medium">Comment</th>
-                <th className="w-20 px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {networkInterfaces.map((iface) => (
-                <tr key={iface.iface} className="hover:bg-muted/30">
-                  <td className="px-3 py-2 font-mono text-xs">{iface.iface}</td>
-                  <td className="px-3 py-2">
-                    <Badge variant="outline" className="text-xs">
-                      {interfaceTypeLabel(iface.type)}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2">
-                    <Badge
-                      variant={iface.active ? "default" : "secondary"}
-                      className="text-xs"
-                    >
-                      {iface.active ? "up" : "down"}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    {iface.autostart ? "Yes" : "No"}
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    {iface.type === "bridge"
-                      ? iface.bridge_vlan_aware
-                        ? "Yes"
-                        : "No"
-                      : "--"}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {interfacePorts(iface)}
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    {iface.bond_mode ?? "--"}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {interfaceAddresses(iface)}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {interfaceGateways(iface)}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {iface.mtu ?? "--"}
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    {iface.comments ?? "--"}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1">
-                      <Button
-                        aria-label={`Edit ${iface.iface}`}
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => {
-                          setEditIface(iface);
-                        }}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        aria-label={`Delete ${iface.iface}`}
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => {
-                          setPendingDelete(iface);
-                        }}
-                        disabled={deleteIface.isPending}
-                      >
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {editIface && (
-        <InterfaceFormDialog
-          clusterId={clusterId}
-          nodeName={nodeName}
-          existing={editIface}
-          open
-          onOpenChange={(open) => {
-            if (!open) setEditIface(null);
-          }}
-        />
-      )}
-
-      <ConfirmInterfaceDeleteDialog
-        target={pendingDelete}
-        nodeName={nodeName}
-        onClose={() => {
-          setPendingDelete(null);
-        }}
-        onConfirm={(iface) => {
-          deleteIface.mutate(iface.iface);
-        }}
-      />
-    </div>
-  );
-}
-
-function DisksTab({
-  clusterId,
-  nodeId,
-  nodeName,
-  isOnline,
-}: {
-  clusterId: string;
-  nodeId: string;
-  nodeName: string;
-  isOnline: boolean;
-}) {
-  const disksQuery = useNodeDisks(clusterId, nodeId);
-  const disks = disksQuery.data;
-  const [smartDisk, setSmartDisk] = useState<string | null>(null);
-  const initGPT = useInitializeGPT(clusterId, nodeName);
-  const wipeDisk = useWipeDisk(clusterId, nodeName);
-
-  return (
-    <div className="space-y-6">
-      {/* Physical Disks */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <HardDrive className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">Physical Disks</h2>
-        </div>
-        {!disks || disks.length === 0 ? (
-          <QueryStateNotice
-            query={disksQuery}
-            subject="this node's physical disks"
-            empty="No physical disks found."
-            skeletonClassName="h-48 w-full"
-          />
-        ) : (
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-muted/50">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium">Device</th>
-                  <th className="px-3 py-2 text-left font-medium">Model</th>
-                  <th className="px-3 py-2 text-left font-medium">Serial</th>
-                  <th className="px-3 py-2 text-left font-medium">Size</th>
-                  <th className="px-3 py-2 text-left font-medium">Type</th>
-                  <th className="px-3 py-2 text-left font-medium">Health</th>
-                  <th className="px-3 py-2 text-left font-medium">Wearout</th>
-                  {isOnline && (
-                    <th className="w-28 px-3 py-2 text-left font-medium">
-                      Actions
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {disks.map((d) => (
-                  <tr key={d.id} className="hover:bg-muted/30">
-                    <td className="px-3 py-2 font-mono text-xs">
-                      <button
-                        type="button"
-                        className="text-primary underline-offset-4 hover:underline"
-                        onClick={() => {
-                          setSmartDisk(
-                            smartDisk === d.dev_path ? null : d.dev_path,
-                          );
-                        }}
-                      >
-                        {d.dev_path}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2">{d.model || "--"}</td>
-                    <td className="px-3 py-2 font-mono text-xs">
-                      {d.serial || "--"}
-                    </td>
-                    <td className="px-3 py-2">{formatBytes(d.size)}</td>
-                    <td className="px-3 py-2">
-                      <Badge variant="outline" className="text-xs">
-                        {d.disk_type.toUpperCase() || "unknown"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge
-                        variant={
-                          d.health === "PASSED" ? "default" : "destructive"
-                        }
-                        className="text-xs"
-                      >
-                        {d.health || "unknown"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2">
-                      {d.wearout && d.wearout !== "N/A" ? d.wearout : "--"}
-                    </td>
-                    {isOnline && (
-                      <td className="px-3 py-2">
-                        <div className="flex gap-1">
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs"
-                              >
-                                Init GPT
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>
-                                  Initialize {d.dev_path} with GPT?
-                                </AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will create a new GPT partition table on
-                                  the disk. All existing data will be lost.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => {
-                                    initGPT.mutate(d.dev_path);
-                                  }}
-                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                >
-                                  Initialize
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs"
-                              >
-                                Wipe
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>
-                                  Wipe {d.dev_path}?
-                                </AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will wipe all data from the disk. This
-                                  action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => {
-                                    wipeDisk.mutate(d.dev_path);
-                                  }}
-                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                >
-                                  Wipe
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* SMART detail panel */}
-        {smartDisk && isOnline && (
-          <DiskSMARTPanel
-            clusterId={clusterId}
-            nodeName={nodeName}
-            disk={smartDisk}
-          />
-        )}
-      </div>
-
-      {/* ZFS / LVM / LVM-Thin / Directory sections (only when online) */}
-      {isOnline && (
-        <>
-          <ZFSPoolsSection clusterId={clusterId} nodeName={nodeName} />
-          <LVMSection clusterId={clusterId} nodeName={nodeName} />
-          <LVMThinSection clusterId={clusterId} nodeName={nodeName} />
-          <DirectorySection clusterId={clusterId} nodeName={nodeName} />
-        </>
-      )}
-    </div>
-  );
-}
-
-function DiskSMARTPanel({
-  clusterId,
-  nodeName,
-  disk,
-}: {
-  clusterId: string;
-  nodeName: string;
-  disk: string;
-}) {
-  const smartQuery = useDiskSMART(clusterId, nodeName, disk);
-  const smart = smartQuery.data;
-
-  // The panel is opened by clicking a disk, so it has to appear whatever the
-  // read does. Returning null on failure looked exactly like the click not
-  // registering, and left the operator with no reason for it.
-  if (!smart) {
-    return (
-      <div className="rounded-lg border p-4">
-        <h3 className="mb-3 text-sm font-semibold">S.M.A.R.T. Data - {disk}</h3>
-        <QueryStateNotice
-          query={smartQuery}
-          subject={`S.M.A.R.T. data for ${disk}`}
-          empty="No S.M.A.R.T. data available for this disk."
-          identity={disk}
-          skeletonClassName="h-24 w-full"
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">S.M.A.R.T. Data - {disk}</h3>
-        <Badge
-          variant={smart.health === "PASSED" ? "default" : "destructive"}
-          className="text-xs"
-        >
-          {smart.health}
-        </Badge>
-      </div>
-      {smart.attributes && smart.attributes.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-2 py-1 text-left">ID</th>
-                <th className="px-2 py-1 text-left">Attribute</th>
-                <th className="px-2 py-1 text-right">Value</th>
-                <th className="px-2 py-1 text-right">Worst</th>
-                <th className="px-2 py-1 text-right">Thresh</th>
-                <th className="px-2 py-1 text-left">Raw</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {smart.attributes.map((attr) => (
-                <tr
-                  key={attr.id}
-                  className={
-                    attr.value <= attr.threshold ? "bg-destructive/10" : ""
-                  }
-                >
-                  <td className="px-2 py-1 font-mono">{attr.id}</td>
-                  <td className="px-2 py-1">{attr.name}</td>
-                  <td className="px-2 py-1 text-right font-mono">
-                    {attr.value}
-                  </td>
-                  <td className="px-2 py-1 text-right font-mono">
-                    {attr.worst}
-                  </td>
-                  <td className="px-2 py-1 text-right font-mono">
-                    {attr.threshold}
-                  </td>
-                  <td className="px-2 py-1 font-mono">{attr.raw}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : smart.text ? (
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">
-          {smart.text}
-        </pre>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          No S.M.A.R.T. attributes available.
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * What the four create forms show where their disk picker would be. An empty
- * picker is the same picture whether the node has no spare disks or Nexara
- * could not ask it, so the distinction has to come from the query.
- */
-function UnusedDisksNotice({
-  query,
-  className,
-}: {
-  query: Parameters<typeof QueryStateNotice>[0]["query"];
-  className?: string;
-}) {
-  return (
-    <QueryStateNotice
-      query={query}
-      subject="this node's disks"
-      empty="No unused disks available."
-      skeletonClassName={className ?? "h-8 w-full"}
+    <EmptyState
+      icon={ServerOff}
+      title="This node is offline"
+      description={children}
     />
-  );
-}
-
-function diskLabel(d: LiveDiskResponse): string {
-  const size = formatBytes(d.size);
-  const model = d.model ? ` - ${d.model}` : "";
-  const used = d.used ? ` [${d.used}]` : " [unused]";
-  return `${d.dev_path} (${size}${model})${used}`;
-}
-
-function ZFSPoolsSection({
-  clusterId,
-  nodeName,
-}: {
-  clusterId: string;
-  nodeName: string;
-}) {
-  const poolsQuery = useNodeZFSPools(clusterId, nodeName);
-  const pools = poolsQuery.data;
-  const liveDisksQuery = useLiveDisks(clusterId, nodeName);
-  const liveDisks = liveDisksQuery.data;
-  const [showCreate, setShowCreate] = useState(false);
-  const [zfsName, setZfsName] = useState("");
-  const [zfsRaid, setZfsRaid] = useState("single");
-  const [zfsSelectedDisks, setZfsSelectedDisks] = useState<string[]>([]);
-  const [zfsCompression, setZfsCompression] = useState("on");
-  const createZFS = useCreateZFSPool(clusterId, nodeName);
-  const deleteZFS = useDeleteZFSPool(clusterId, nodeName);
-  const deleteError =
-    deleteZFS.error instanceof Error ? deleteZFS.error.message : "";
-  const [cleanupDisks, setCleanupDisks] = useState(true);
-  const [cleanupConfig, setCleanupConfig] = useState(true);
-
-  const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
-
-  const toggleDisk = (devPath: string) => {
-    setZfsSelectedDisks((prev) =>
-      prev.includes(devPath)
-        ? prev.filter((p) => p !== devPath)
-        : [...prev, devPath],
-    );
-  };
-
-  const handleCreate = () => {
-    createZFS.mutate(
-      {
-        name: zfsName,
-        raidlevel: zfsRaid,
-        devices: zfsSelectedDisks.join(","),
-        compression: zfsCompression,
-      },
-      {
-        onSuccess: () => {
-          setShowCreate(false);
-          setZfsName("");
-          setZfsSelectedDisks([]);
-        },
-      },
-    );
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">ZFS Pools</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setShowCreate(!showCreate);
-          }}
-        >
-          <Plus className="mr-1 h-4 w-4" />
-          Create ZFS
-        </Button>
-      </div>
-      {showCreate && (
-        <div className="rounded-lg border p-4 space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Pool Name</Label>
-              <Input
-                className="h-8 text-sm"
-                value={zfsName}
-                onChange={(e) => {
-                  setZfsName(e.target.value);
-                }}
-                placeholder="e.g. mypool"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">RAID Level</Label>
-              <select
-                className="h-8 w-full rounded-md border bg-background px-2 text-sm"
-                value={zfsRaid}
-                onChange={(e) => {
-                  setZfsRaid(e.target.value);
-                }}
-              >
-                <option value="single">Single</option>
-                <option value="mirror">Mirror</option>
-                <option value="raidz">RAIDZ</option>
-                <option value="raidz2">RAIDZ2</option>
-                <option value="raidz3">RAIDZ3</option>
-              </select>
-            </div>
-            <div className="space-y-1 sm:col-span-2">
-              <Label className="text-xs">
-                Select Disks ({zfsSelectedDisks.length} selected)
-              </Label>
-              {unusedDisks.length === 0 ? (
-                <UnusedDisksNotice query={liveDisksQuery} />
-              ) : (
-                <div className="max-h-40 overflow-auto rounded border p-2 space-y-1">
-                  {unusedDisks.map((d) => (
-                    <label
-                      key={d.dev_path}
-                      className="flex items-center gap-2 text-xs hover:bg-muted/30 rounded px-1 py-0.5 cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={zfsSelectedDisks.includes(d.dev_path)}
-                        onChange={() => {
-                          toggleDisk(d.dev_path);
-                        }}
-                        className="rounded border"
-                      />
-                      <span className="font-mono">{d.dev_path}</span>
-                      <span className="text-muted-foreground">
-                        {formatBytes(d.size)}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {d.model || ""}
-                      </span>
-                      <Badge variant="outline" className="text-[10px]">
-                        {d.disk_type.toUpperCase()}
-                      </Badge>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Compression</Label>
-              <select
-                className="h-8 w-full rounded-md border bg-background px-2 text-sm"
-                value={zfsCompression}
-                onChange={(e) => {
-                  setZfsCompression(e.target.value);
-                }}
-              >
-                <option value="on">On (LZ4)</option>
-                <option value="off">Off</option>
-                <option value="lz4">LZ4</option>
-                <option value="zstd">ZSTD</option>
-                <option value="gzip">GZIP</option>
-              </select>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setShowCreate(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleCreate}
-              disabled={
-                !zfsName || zfsSelectedDisks.length === 0 || createZFS.isPending
-              }
-            >
-              Create
-            </Button>
-          </div>
-        </div>
-      )}
-      {!pools || pools.length === 0 ? (
-        <QueryStateNotice
-          query={poolsQuery}
-          subject="this node's ZFS pools"
-          empty="No ZFS pools found."
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Name</th>
-                <th className="px-3 py-2 text-left font-medium">Size</th>
-                <th className="px-3 py-2 text-left font-medium">Allocated</th>
-                <th className="px-3 py-2 text-left font-medium">Free</th>
-                <th className="px-3 py-2 text-left font-medium">Frag</th>
-                <th className="px-3 py-2 text-left font-medium">Health</th>
-                <th className="px-3 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {pools.map((p: ZFSPoolResponse) => (
-                <tr key={p.name} className="hover:bg-muted/30">
-                  <td className="px-3 py-2 font-mono text-xs">{p.name}</td>
-                  <td className="px-3 py-2">{formatBytes(p.size)}</td>
-                  <td className="px-3 py-2">{formatBytes(p.alloc)}</td>
-                  <td className="px-3 py-2">{formatBytes(p.free)}</td>
-                  <td className="px-3 py-2">{p.frag}%</td>
-                  <td className="px-3 py-2">
-                    <Badge
-                      variant={
-                        p.health === "ONLINE" ? "default" : "destructive"
-                      }
-                      className="text-xs"
-                    >
-                      {p.health}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          aria-label={`Destroy pool ${p.name}`}
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Destroy ZFS Pool</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Are you sure you want to destroy{" "}
-                            <span className="font-mono font-semibold">
-                              {p.name}
-                            </span>
-                            ? This will permanently delete the pool and all data
-                            on it. This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <div className="space-y-2 py-2">
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={cleanupDisks}
-                              onChange={(e) => {
-                                setCleanupDisks(e.target.checked);
-                              }}
-                              className="rounded border"
-                            />
-                            Cleanup Disks
-                          </label>
-                          <p className="ml-6 text-xs text-muted-foreground">
-                            Wipe partition tables of member disks
-                          </p>
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={cleanupConfig}
-                              onChange={(e) => {
-                                setCleanupConfig(e.target.checked);
-                              }}
-                              className="rounded border"
-                            />
-                            Cleanup Storage Configuration
-                          </label>
-                          <p className="ml-6 text-xs text-muted-foreground">
-                            Remove associated storage from Proxmox configuration
-                          </p>
-                        </div>
-                        {deleteError && (
-                          <p className="text-sm text-destructive">
-                            {deleteError}
-                          </p>
-                        )}
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            disabled={deleteZFS.isPending}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              deleteZFS.mutate({
-                                poolName: p.name,
-                                cleanupDisks,
-                                cleanupConfig,
-                              });
-                            }}
-                          >
-                            {deleteZFS.isPending ? "Destroying…" : "Destroy"}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LVMSection({
-  clusterId,
-  nodeName,
-}: {
-  clusterId: string;
-  nodeName: string;
-}) {
-  const vgsQuery = useNodeLVM(clusterId, nodeName);
-  const vgs = vgsQuery.data;
-  const liveDisksQuery = useLiveDisks(clusterId, nodeName);
-  const liveDisks = liveDisksQuery.data;
-  const [showCreate, setShowCreate] = useState(false);
-  const [lvmName, setLvmName] = useState("");
-  const [lvmDevice, setLvmDevice] = useState("");
-  const [lvmAddStorage, setLvmAddStorage] = useState(true);
-  const createLVM = useCreateLVM(clusterId, nodeName);
-  const deleteLVM = useDeleteLVM(clusterId, nodeName);
-  const deleteError =
-    deleteLVM.error instanceof Error ? deleteLVM.error.message : "";
-  const [lvmCleanupDisks, setLvmCleanupDisks] = useState(true);
-  const [lvmCleanupConfig, setLvmCleanupConfig] = useState(true);
-  const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
-
-  const handleCreate = () => {
-    createLVM.mutate(
-      { name: lvmName, device: lvmDevice, add_storage: lvmAddStorage },
-      {
-        onSuccess: () => {
-          setShowCreate(false);
-          setLvmName("");
-          setLvmDevice("");
-        },
-      },
-    );
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">LVM Volume Groups</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setShowCreate(!showCreate);
-          }}
-        >
-          <Plus className="mr-1 h-4 w-4" />
-          Create LVM
-        </Button>
-      </div>
-      {showCreate && (
-        <div className="rounded-lg border p-4 space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Volume Group Name</Label>
-              <Input
-                className="h-8 text-sm"
-                value={lvmName}
-                onChange={(e) => {
-                  setLvmName(e.target.value);
-                }}
-                placeholder="e.g. myvg"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Disk</Label>
-              <select
-                className="h-8 w-full rounded-md border bg-background px-2 text-sm"
-                value={lvmDevice}
-                onChange={(e) => {
-                  setLvmDevice(e.target.value);
-                }}
-              >
-                <option value="">Select a disk...</option>
-                {unusedDisks.map((d) => (
-                  <option key={d.dev_path} value={d.dev_path}>
-                    {diskLabel(d)}
-                  </option>
-                ))}
-              </select>
-              {unusedDisks.length === 0 && (
-                <UnusedDisksNotice
-                  query={liveDisksQuery}
-                  className="h-4 w-40"
-                />
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="lvm-add-storage"
-              checked={lvmAddStorage}
-              onChange={(e) => {
-                setLvmAddStorage(e.target.checked);
-              }}
-              className="rounded border"
-            />
-            <Label htmlFor="lvm-add-storage" className="text-xs">
-              Add as Proxmox storage
-            </Label>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setShowCreate(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleCreate}
-              disabled={!lvmName || !lvmDevice || createLVM.isPending}
-            >
-              Create
-            </Button>
-          </div>
-        </div>
-      )}
-      {!vgs || vgs.length === 0 ? (
-        <QueryStateNotice
-          query={vgsQuery}
-          subject="this node's LVM volume groups"
-          empty="No LVM volume groups found."
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Name</th>
-                <th className="px-3 py-2 text-left font-medium">Size</th>
-                <th className="px-3 py-2 text-left font-medium">Free</th>
-                <th className="px-3 py-2 text-left font-medium">PVs</th>
-                <th className="px-3 py-2 text-left font-medium">LVs</th>
-                <th className="px-3 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {vgs.map((vg: LVMVolumeGroupResponse) => (
-                <tr key={vg.name} className="hover:bg-muted/30">
-                  <td className="px-3 py-2 font-mono text-xs">{vg.name}</td>
-                  <td className="px-3 py-2">{formatBytes(vg.size)}</td>
-                  <td className="px-3 py-2">{formatBytes(vg.free)}</td>
-                  <td className="px-3 py-2">{vg.pv_count}</td>
-                  <td className="px-3 py-2">{vg.lv_count}</td>
-                  <td className="px-3 py-2 text-right">
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          aria-label={`Destroy volume group ${vg.name}`}
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>
-                            Destroy LVM Volume Group
-                          </AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Are you sure you want to destroy{" "}
-                            <span className="font-mono font-semibold">
-                              {vg.name}
-                            </span>
-                            ? This will permanently delete the volume group and
-                            all data on it. This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <div className="space-y-2 py-2">
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={lvmCleanupDisks}
-                              onChange={(e) => {
-                                setLvmCleanupDisks(e.target.checked);
-                              }}
-                              className="rounded border"
-                            />
-                            Cleanup Disks
-                          </label>
-                          <p className="ml-6 text-xs text-muted-foreground">
-                            Wipe partition tables of member disks
-                          </p>
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={lvmCleanupConfig}
-                              onChange={(e) => {
-                                setLvmCleanupConfig(e.target.checked);
-                              }}
-                              className="rounded border"
-                            />
-                            Cleanup Storage Configuration
-                          </label>
-                          <p className="ml-6 text-xs text-muted-foreground">
-                            Remove associated storage from Proxmox configuration
-                          </p>
-                        </div>
-                        {deleteError && (
-                          <p className="text-sm text-destructive">
-                            {deleteError}
-                          </p>
-                        )}
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            disabled={deleteLVM.isPending}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              deleteLVM.mutate({
-                                name: vg.name,
-                                cleanupDisks: lvmCleanupDisks,
-                                cleanupConfig: lvmCleanupConfig,
-                              });
-                            }}
-                          >
-                            {deleteLVM.isPending ? "Destroying…" : "Destroy"}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LVMThinSection({
-  clusterId,
-  nodeName,
-}: {
-  clusterId: string;
-  nodeName: string;
-}) {
-  const poolsQuery = useNodeLVMThin(clusterId, nodeName);
-  const pools = poolsQuery.data;
-  const liveDisksQuery = useLiveDisks(clusterId, nodeName);
-  const liveDisks = liveDisksQuery.data;
-  const [showCreate, setShowCreate] = useState(false);
-  const [thinName, setThinName] = useState("");
-  const [thinDevice, setThinDevice] = useState("");
-  const [thinAddStorage, setThinAddStorage] = useState(true);
-  const createThin = useCreateLVMThin(clusterId, nodeName);
-  const deleteThin = useDeleteLVMThin(clusterId, nodeName);
-  const thinDeleteError =
-    deleteThin.error instanceof Error ? deleteThin.error.message : "";
-  const [thinCleanupDisks, setThinCleanupDisks] = useState(true);
-  const [thinCleanupConfig, setThinCleanupConfig] = useState(true);
-  const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
-
-  const handleCreate = () => {
-    createThin.mutate(
-      { name: thinName, device: thinDevice, add_storage: thinAddStorage },
-      {
-        onSuccess: () => {
-          setShowCreate(false);
-          setThinName("");
-          setThinDevice("");
-        },
-      },
-    );
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">LVM-Thin Pools</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setShowCreate(!showCreate);
-          }}
-        >
-          <Plus className="mr-1 h-4 w-4" />
-          Create LVM-Thin
-        </Button>
-      </div>
-      {showCreate && (
-        <div className="rounded-lg border p-4 space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Thin Pool Name</Label>
-              <Input
-                className="h-8 text-sm"
-                value={thinName}
-                onChange={(e) => {
-                  setThinName(e.target.value);
-                }}
-                placeholder="e.g. mythinpool"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Disk</Label>
-              <select
-                className="h-8 w-full rounded-md border bg-background px-2 text-sm"
-                value={thinDevice}
-                onChange={(e) => {
-                  setThinDevice(e.target.value);
-                }}
-              >
-                <option value="">Select a disk...</option>
-                {unusedDisks.map((d) => (
-                  <option key={d.dev_path} value={d.dev_path}>
-                    {diskLabel(d)}
-                  </option>
-                ))}
-              </select>
-              {unusedDisks.length === 0 && (
-                <UnusedDisksNotice
-                  query={liveDisksQuery}
-                  className="h-4 w-40"
-                />
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="thin-add-storage"
-              checked={thinAddStorage}
-              onChange={(e) => {
-                setThinAddStorage(e.target.checked);
-              }}
-              className="rounded border"
-            />
-            <Label htmlFor="thin-add-storage" className="text-xs">
-              Add as Proxmox storage
-            </Label>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setShowCreate(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleCreate}
-              disabled={!thinName || !thinDevice || createThin.isPending}
-            >
-              Create
-            </Button>
-          </div>
-        </div>
-      )}
-      {!pools || pools.length === 0 ? (
-        <QueryStateNotice
-          query={poolsQuery}
-          subject="this node's LVM thin pools"
-          empty="No LVM thin pools found."
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">LV</th>
-                <th className="px-3 py-2 text-left font-medium">VG</th>
-                <th className="px-3 py-2 text-left font-medium">Size</th>
-                <th className="px-3 py-2 text-left font-medium">Used</th>
-                <th className="px-3 py-2 text-left font-medium">Data %</th>
-                <th className="px-3 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {pools.map((p: LVMThinPoolResponse) => (
-                <tr key={`${p.vg}-${p.lv}`} className="hover:bg-muted/30">
-                  <td className="px-3 py-2 font-mono text-xs">{p.lv}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{p.vg}</td>
-                  <td className="px-3 py-2">{formatBytes(p.lv_size)}</td>
-                  <td className="px-3 py-2">{formatBytes(p.used)}</td>
-                  <td className="px-3 py-2">{p.data_percent.toFixed(1)}%</td>
-                  <td className="px-3 py-2 text-right">
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          aria-label={`Destroy thin pool ${p.vg}/${p.lv}`}
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>
-                            Destroy LVM-Thin Pool
-                          </AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Are you sure you want to destroy{" "}
-                            <span className="font-mono font-semibold">
-                              {p.vg}/{p.lv}
-                            </span>
-                            ? This will permanently delete the thin pool and all
-                            data on it. This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <div className="space-y-2 py-2">
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={thinCleanupDisks}
-                              onChange={(e) => {
-                                setThinCleanupDisks(e.target.checked);
-                              }}
-                              className="rounded border"
-                            />
-                            Cleanup Disks
-                          </label>
-                          <p className="ml-6 text-xs text-muted-foreground">
-                            Wipe partition tables of member disks
-                          </p>
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={thinCleanupConfig}
-                              onChange={(e) => {
-                                setThinCleanupConfig(e.target.checked);
-                              }}
-                              className="rounded border"
-                            />
-                            Cleanup Storage Configuration
-                          </label>
-                          <p className="ml-6 text-xs text-muted-foreground">
-                            Remove associated storage from Proxmox configuration
-                          </p>
-                        </div>
-                        {thinDeleteError && (
-                          <p className="text-sm text-destructive">
-                            {thinDeleteError}
-                          </p>
-                        )}
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            disabled={deleteThin.isPending}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              deleteThin.mutate({
-                                lv: p.lv,
-                                vg: p.vg,
-                                cleanupDisks: thinCleanupDisks,
-                                cleanupConfig: thinCleanupConfig,
-                              });
-                            }}
-                          >
-                            {deleteThin.isPending ? "Destroying…" : "Destroy"}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DirectorySection({
-  clusterId,
-  nodeName,
-}: {
-  clusterId: string;
-  nodeName: string;
-}) {
-  const dirsQuery = useNodeDirectories(clusterId, nodeName);
-  const dirs = dirsQuery.data;
-  const liveDisksQuery = useLiveDisks(clusterId, nodeName);
-  const liveDisks = liveDisksQuery.data;
-  const [showCreate, setShowCreate] = useState(false);
-  const [dirName, setDirName] = useState("");
-  const [dirDevice, setDirDevice] = useState("");
-  const [dirFs, setDirFs] = useState("ext4");
-  const [dirAddStorage, setDirAddStorage] = useState(true);
-  const createDir = useCreateDirectory(clusterId, nodeName);
-  const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
-
-  const handleCreate = () => {
-    createDir.mutate(
-      {
-        name: dirName,
-        device: dirDevice,
-        filesystem: dirFs,
-        add_storage: dirAddStorage,
-      },
-      {
-        onSuccess: () => {
-          setShowCreate(false);
-          setDirName("");
-          setDirDevice("");
-        },
-      },
-    );
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Directory Storage</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setShowCreate(!showCreate);
-          }}
-        >
-          <Plus className="mr-1 h-4 w-4" />
-          Create Directory
-        </Button>
-      </div>
-      {showCreate && (
-        <div className="rounded-lg border p-4 space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Name</Label>
-              <Input
-                className="h-8 text-sm"
-                value={dirName}
-                onChange={(e) => {
-                  setDirName(e.target.value);
-                }}
-                placeholder="e.g. mydir"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Disk</Label>
-              <select
-                className="h-8 w-full rounded-md border bg-background px-2 text-sm"
-                value={dirDevice}
-                onChange={(e) => {
-                  setDirDevice(e.target.value);
-                }}
-              >
-                <option value="">Select a disk...</option>
-                {unusedDisks.map((d) => (
-                  <option key={d.dev_path} value={d.dev_path}>
-                    {diskLabel(d)}
-                  </option>
-                ))}
-              </select>
-              {unusedDisks.length === 0 && (
-                <UnusedDisksNotice
-                  query={liveDisksQuery}
-                  className="h-4 w-40"
-                />
-              )}
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Filesystem</Label>
-              <select
-                className="h-8 w-full rounded-md border bg-background px-2 text-sm"
-                value={dirFs}
-                onChange={(e) => {
-                  setDirFs(e.target.value);
-                }}
-              >
-                <option value="ext4">ext4</option>
-                <option value="xfs">XFS</option>
-              </select>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="dir-add-storage"
-              checked={dirAddStorage}
-              onChange={(e) => {
-                setDirAddStorage(e.target.checked);
-              }}
-              className="rounded border"
-            />
-            <Label htmlFor="dir-add-storage" className="text-xs">
-              Add as Proxmox storage
-            </Label>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setShowCreate(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleCreate}
-              disabled={!dirName || !dirDevice || createDir.isPending}
-            >
-              Create
-            </Button>
-          </div>
-        </div>
-      )}
-      {!dirs || dirs.length === 0 ? (
-        <QueryStateNotice
-          query={dirsQuery}
-          subject="this node's directory storage entries"
-          empty="No directory storage entries found."
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Path</th>
-                <th className="px-3 py-2 text-left font-medium">Device</th>
-                <th className="px-3 py-2 text-left font-medium">Type</th>
-                <th className="px-3 py-2 text-left font-medium">Options</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {dirs.map((d: DirectoryEntryResponse) => (
-                <tr key={d.path} className="hover:bg-muted/30">
-                  <td className="px-3 py-2 font-mono text-xs">{d.path}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{d.device}</td>
-                  <td className="px-3 py-2 text-xs">{d.type}</td>
-                  <td className="px-3 py-2 text-xs">{d.options || "--"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function FirewallTab({
-  clusterId,
-  nodeName,
-}: {
-  clusterId: string;
-  nodeName: string;
-}) {
-  const [showLog, setShowLog] = useState(false);
-  const rulesQuery = useNodeFirewallRules(clusterId, nodeName);
-  const rules = rulesQuery.data;
-  const deleteRule = useDeleteNodeFirewallRule(clusterId, nodeName);
-  const [pendingDelete, setPendingDelete] =
-    useState<NodeFirewallRuleResponse | null>(null);
-  const createRule = useCreateNodeFirewallRule(clusterId, nodeName);
-  const logQuery = useNodeFirewallLog(clusterId, nodeName);
-  const logEntries = logQuery.data;
-  // A quick-add button only sets this; the rule is sent from its confirmation.
-  const [pendingQuickAdd, setPendingQuickAdd] = useState<
-    "ACCEPT" | "DROP" | null
-  >(null);
-
-  // The rule names no source, destination, protocol or port, so it matches
-  // every inbound packet, and Proxmox's create_rule puts it first in the list
-  // (see internal/proxmox/client_firewall.go).
-  const handleQuickAdd = (action: "ACCEPT" | "DROP") => {
-    createRule.mutate({
-      type: "in",
-      action,
-      enable: 1,
-    });
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Firewall Rules</h2>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setPendingQuickAdd("ACCEPT");
-            }}
-            disabled={createRule.isPending}
-          >
-            + Accept Rule
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setPendingQuickAdd("DROP");
-            }}
-            disabled={createRule.isPending}
-          >
-            + Drop Rule
-          </Button>
-          <Button
-            variant={showLog ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              setShowLog(!showLog);
-            }}
-          >
-            {showLog ? "Hide Log" : "Show Log"}
-          </Button>
-        </div>
-      </div>
-
-      {!rules || rules.length === 0 ? (
-        <QueryStateNotice
-          query={rulesQuery}
-          subject="this node's firewall rules"
-          empty="No firewall rules configured."
-          skeletonClassName="h-32 w-full"
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">#</th>
-                <th className="px-3 py-2 text-left font-medium">Type</th>
-                <th className="px-3 py-2 text-left font-medium">Action</th>
-                <th className="px-3 py-2 text-left font-medium">Macro</th>
-                <th className="px-3 py-2 text-left font-medium">Proto</th>
-                <th className="px-3 py-2 text-left font-medium">Source</th>
-                <th className="px-3 py-2 text-left font-medium">Dest</th>
-                <th className="px-3 py-2 text-left font-medium">Port</th>
-                <th className="px-3 py-2 text-left font-medium">Enabled</th>
-                <th className="px-3 py-2 text-left font-medium">Comment</th>
-                <th className="w-12 px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {rules.map((rule) => (
-                <tr key={rule.pos} className="hover:bg-muted/30">
-                  <td className="px-3 py-2 font-mono text-xs">{rule.pos}</td>
-                  <td className="px-3 py-2 text-xs">{rule.type}</td>
-                  <td className="px-3 py-2">
-                    <Badge
-                      variant={
-                        rule.action === "ACCEPT" ? "default" : "destructive"
-                      }
-                      className="text-xs"
-                    >
-                      {rule.action}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2 text-xs">{rule.macro || "--"}</td>
-                  <td className="px-3 py-2 text-xs">{rule.proto || "--"}</td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {rule.source || "--"}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {rule.dest || "--"}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {rule.dport || rule.sport || "--"}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Badge
-                      variant={rule.enable ? "default" : "secondary"}
-                      className="text-xs"
-                    >
-                      {rule.enable ? "yes" : "no"}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2 text-xs">{rule.comment || "--"}</td>
-                  <td className="px-3 py-2">
-                    <Button
-                      aria-label={`Delete firewall rule ${String(rule.pos)}`}
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => {
-                        setPendingDelete(rule);
-                      }}
-                      disabled={deleteRule.isPending}
-                    >
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {showLog && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold">Firewall Log</h3>
-          {!logEntries || logEntries.length === 0 ? (
-            <QueryStateNotice
-              query={logQuery}
-              subject="this node's firewall log"
-              empty="No log entries."
-              skeletonClassName="h-32 w-full"
-            />
-          ) : (
-            <div className="max-h-[400px] overflow-auto rounded-lg border bg-muted/30 p-3">
-              <pre className="text-xs leading-relaxed">
-                {logEntries.map((entry) => (
-                  <div key={entry.n}>{entry.t}</div>
-                ))}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-
-      <ConfirmFirewallRuleDeleteDialog
-        target={pendingDelete}
-        onClose={() => {
-          setPendingDelete(null);
-        }}
-        onConfirm={(rule) => {
-          deleteRule.mutate({ pos: rule.pos, digest: rule.digest });
-        }}
-        owner={`node ${nodeName}`}
-        current={rules}
-      />
-
-      <ConfirmDeleteDialog
-        target={pendingQuickAdd}
-        onClose={() => {
-          setPendingQuickAdd(null);
-        }}
-        onConfirm={handleQuickAdd}
-        title={(action) =>
-          action === "DROP"
-            ? `Drop all inbound traffic to ${nodeName}?`
-            : `Accept all inbound traffic to ${nodeName}?`
-        }
-        description={(action) =>
-          action === "DROP"
-            ? `Proxmox adds an enabled DROP rule at the top of the rule list of node ${nodeName} that matches every inbound packet: any source, protocol and port. The firewall service applies it within about 10 seconds. While the firewall is on for ${nodeName}, this can cut off access to the node — its web UI and API, SSH, and Nexara's own connection to it.`
-            : `Proxmox adds an enabled ACCEPT rule at the top of the rule list of node ${nodeName} that matches every inbound packet: any source, protocol and port. The firewall service applies it within about 10 seconds. Rules are checked from the top, so while the firewall is on for ${nodeName} it lets every inbound connection to the node through, whatever the rules below it and the inbound policy say. To undo it, delete the rule.`
-        }
-        confirmLabel={(action) =>
-          action === "DROP" ? "Add Drop Rule" : "Add Accept Rule"
-        }
-      />
-    </div>
-  );
-}
-
-// Proxmox refuses to stop these: the stop task dies with "refusing to stop
-// essential service!" (pve-manager PVE/API2/Services.pm $essential_services).
-// They can still be restarted.
-const UNSTOPPABLE_SERVICES = new Set(["pveproxy", "pvedaemon", "pve-cluster"]);
-
-export function ServicesTab({
-  clusterId,
-  nodeName,
-}: {
-  clusterId: string;
-  nodeName: string;
-}) {
-  const servicesQuery = useNodeServices(clusterId, nodeName);
-  const services = servicesQuery.data;
-  const serviceAction = useServiceAction(clusterId, nodeName);
-  // Restart and Stop only set this and send from its confirmation; Start
-  // sends at once.
-  const [pendingAction, setPendingAction] = useState<{
-    service: string;
-    action: "restart" | "stop";
-  } | null>(null);
-
-  // The heading is outside the branch so it stays whatever the read does: a
-  // failure then reads as this section failing rather than as the section not
-  // existing, which is what the old bare <p> looked like.
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Cog className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-lg font-semibold">Node Services</h2>
-      </div>
-      {!services || services.length === 0 ? (
-        <QueryStateNotice
-          query={servicesQuery}
-          subject="this node's services"
-          empty="No services found."
-          skeletonClassName="h-48 w-full"
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Service</th>
-                <th className="px-3 py-2 text-left font-medium">Description</th>
-                <th className="px-3 py-2 text-left font-medium">State</th>
-                <th className="w-40 px-3 py-2 text-left font-medium">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {services.map((svc) => (
-                <tr key={svc.service} className="hover:bg-muted/30">
-                  <td className="px-3 py-2 font-mono text-xs">{svc.service}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {svc.desc || svc.name || "--"}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Badge
-                      variant={
-                        svc.state === "running" ? "default" : "secondary"
-                      }
-                      className="text-xs"
-                    >
-                      {svc.state}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1">
-                      {svc.state !== "running" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 gap-1 text-xs"
-                          onClick={() => {
-                            serviceAction.mutate({
-                              service: svc.service,
-                              action: "start",
-                            });
-                          }}
-                          disabled={serviceAction.isPending}
-                        >
-                          <Play className="h-3 w-3" />
-                          Start
-                        </Button>
-                      )}
-                      {svc.state === "running" && (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-1 text-xs"
-                            onClick={() => {
-                              setPendingAction({
-                                service: svc.service,
-                                action: "restart",
-                              });
-                            }}
-                            disabled={serviceAction.isPending}
-                          >
-                            <RotateCw className="h-3 w-3" />
-                            Restart
-                          </Button>
-                          {!UNSTOPPABLE_SERVICES.has(svc.service) && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 gap-1 text-xs"
-                              onClick={() => {
-                                setPendingAction({
-                                  service: svc.service,
-                                  action: "stop",
-                                });
-                              }}
-                              disabled={serviceAction.isPending}
-                            >
-                              <Square className="h-3 w-3" />
-                              Stop
-                            </Button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <ConfirmDeleteDialog
-        target={pendingAction}
-        onClose={() => {
-          setPendingAction(null);
-        }}
-        onConfirm={(p) => {
-          serviceAction.mutate(p);
-        }}
-        title={(p) =>
-          `${p.action === "stop" ? "Stop" : "Restart"} ${p.service} on ${nodeName}?`
-        }
-        description={(p) =>
-          p.action === "stop"
-            ? `Proxmox stops ${p.service} on ${nodeName} as soon as you confirm, and it stays stopped until it is started again. Whatever relies on it stops working until then.`
-            : `Proxmox restarts ${p.service} on ${nodeName} as soon as you confirm. Whatever relies on it is interrupted while it restarts.`
-        }
-        confirmLabel={(p) => (p.action === "stop" ? "Stop" : "Restart")}
-      />
-    </div>
-  );
-}
-
-// Sent to the API as relative offsets (`24h`), which it resolves server-side.
-//
-// These used to be rendered into a `YYYY-MM-DD` date computed from the
-// BROWSER's clock, and the node reads that string in its OWN timezone — so on
-// any node behind the browser, the "Today" preset asked journalctl for a window
-// starting in the future and got back its literal "-- No entries --", which
-// reads as a node with no logs. A relative offset carries no wall-clock date,
-// so there is no timezone to disagree about.
-//
-// "Today" is gone with it: it was the preset that tripped the bug, and it
-// duplicated "Last 24h" anyway. "Last 1h" is the genuinely shorter window it
-// never provided.
-const SYSLOG_TIMESPANS = [
-  { label: "Last 1h", hours: 1 },
-  { label: "Last 24h", hours: 24 },
-  { label: "Last 3 Days", hours: 72 },
-  { label: "Last Week", hours: 168 },
-] as const;
-
-const SYSLOG_PAGE_SIZE = 500;
-
-function SyslogTab({
-  clusterId,
-  nodeName,
-}: {
-  clusterId: string;
-  nodeName: string;
-}) {
-  const [serviceFilter, setServiceFilter] = useState("");
-  const [timespanHours, setTimespanHours] = useState(24);
-  // null page = "newest" (server resolves to last page)
-  const [page, setPage] = useState<number | null>(null);
-  const since = `${String(timespanHours)}h`;
-
-  const startParam = page === null ? undefined : page * SYSLOG_PAGE_SIZE;
-  const syslogQuery = useNodeSyslog(clusterId, nodeName, {
-    limit: SYSLOG_PAGE_SIZE,
-    start: startParam,
-    service: serviceFilter || undefined,
-    since,
-  });
-  const { data, isFetching } = syslogQuery;
-  const entries = data?.items;
-  const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / SYSLOG_PAGE_SIZE));
-  // When page is null (newest), we're on the last page
-  const currentPage = page ?? totalPages - 1;
-  const rangeStart = currentPage * SYSLOG_PAGE_SIZE + 1;
-  const rangeEnd = Math.min(rangeStart + (entries?.length ?? 0) - 1, total);
-
-  const goToPage = (p: number) => {
-    const lastPage = totalPages - 1;
-    if (p >= lastPage) {
-      setPage(null); // use "newest" mode for last page
-    } else {
-      setPage(Math.max(0, p));
-    }
-  };
-
-  // Reset to newest page when timespan or filter changes
-  const handleTimespanChange = (hours: number) => {
-    setTimespanHours(hours);
-    setPage(null);
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <FileText className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">System Log</h2>
-          {isFetching && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              <span>Loading logs…</span>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-md border">
-            {SYSLOG_TIMESPANS.map((ts) => (
-              <button
-                key={ts.hours}
-                className={`px-3 py-1 text-xs transition-colors ${timespanHours === ts.hours ? "bg-action text-action-foreground" : "hover:bg-muted"}`}
-                onClick={() => {
-                  handleTimespanChange(ts.hours);
-                }}
-              >
-                {ts.label}
-              </button>
-            ))}
-          </div>
-          <Input
-            className="w-48"
-            placeholder="Filter by service..."
-            value={serviceFilter}
-            onChange={(e) => {
-              setServiceFilter(e.target.value);
-            }}
-          />
-        </div>
-      </div>
-      {!entries || entries.length === 0 ? (
-        <QueryStateNotice
-          query={syslogQuery}
-          subject="this node's syslog"
-          empty="No syslog entries found."
-          skeletonClassName="h-64 w-full"
-        />
-      ) : (
-        <>
-          <div className="max-h-[600px] overflow-auto rounded-lg border bg-muted/30 p-3">
-            <pre className="text-xs leading-relaxed">
-              {entries.map((entry) => (
-                <div key={entry.n} className="hover:bg-muted/50">
-                  {entry.t}
-                </div>
-              ))}
-            </pre>
-          </div>
-          {total > SYSLOG_PAGE_SIZE && (
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                {rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()} of{" "}
-                {total.toLocaleString()} entries
-              </span>
-              <div className="flex items-center gap-1">
-                <Button
-                  aria-label="First page"
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={currentPage === 0 || isFetching}
-                  onClick={() => {
-                    goToPage(0);
-                  }}
-                >
-                  <ChevronsLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  aria-label="Previous page"
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={currentPage === 0 || isFetching}
-                  onClick={() => {
-                    goToPage(currentPage - 1);
-                  }}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="px-2 text-xs text-muted-foreground">
-                  Page {(currentPage + 1).toLocaleString()} of{" "}
-                  {totalPages.toLocaleString()}
-                </span>
-                <Button
-                  aria-label="Next page"
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={currentPage >= totalPages - 1 || isFetching}
-                  onClick={() => {
-                    goToPage(currentPage + 1);
-                  }}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-                <Button
-                  aria-label="Last page"
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={page === null || isFetching}
-                  onClick={() => {
-                    goToPage(totalPages - 1);
-                  }}
-                >
-                  <ChevronsRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function PCIDevicesTab({
-  clusterId,
-  nodeId,
-}: {
-  clusterId: string;
-  nodeId: string;
-}) {
-  const pciQuery = useNodePCIDevices(clusterId, nodeId);
-  const pciDevices = pciQuery.data;
-
-  // Heading outside the branch, as in ServicesTab: a failure has to read as
-  // this section failing, not as the section not being there.
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <CircuitBoard className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-lg font-semibold">PCI Devices</h2>
-      </div>
-      {!pciDevices || pciDevices.length === 0 ? (
-        <QueryStateNotice
-          query={pciQuery}
-          subject="this node's PCI devices"
-          empty="No PCI devices found."
-          skeletonClassName="h-48 w-full"
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">PCI ID</th>
-                <th className="px-3 py-2 text-left font-medium">Device</th>
-                <th className="px-3 py-2 text-left font-medium">Vendor</th>
-                <th className="px-3 py-2 text-left font-medium">IOMMU Group</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {pciDevices.map((d) => (
-                <tr key={d.id} className="hover:bg-muted/30">
-                  <td className="px-3 py-2 font-mono text-xs">{d.pci_id}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {d.device_name || d.device || "--"}
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    {d.vendor_name || d.vendor || "--"}
-                  </td>
-                  <td className="px-3 py-2">
-                    {d.iommu_group >= 0 ? String(d.iommu_group) : "--"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Shared sub-components                                              */
-/* ------------------------------------------------------------------ */
-
-interface HardwareItem {
-  label: string;
-  value: string;
-}
-
-function HardwareSection({
-  icon,
-  title,
-  items,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  items: HardwareItem[];
-}) {
-  return (
-    <div className="rounded-lg border p-4">
-      <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-        <span className="text-muted-foreground">{icon}</span>
-        {title}
-      </div>
-      <dl className="space-y-1.5">
-        {items.map((item) => (
-          <div key={item.label} className="flex justify-between gap-2 text-sm">
-            <dt className="text-muted-foreground">{item.label}</dt>
-            <dd
-              className="min-w-0 truncate text-right font-medium"
-              title={item.value}
-            >
-              {item.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-}
-
-function HardwareSectionWithAction({
-  icon,
-  title,
-  items,
-  action,
-  children,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  items: HardwareItem[];
-  action?: React.ReactNode;
-  /** Under the rows: what the card has to say besides them. */
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border p-4">
-      <div className="mb-3 flex items-center justify-between text-sm font-medium">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">{icon}</span>
-          {title}
-        </div>
-        {action}
-      </div>
-      <dl className="space-y-1.5">
-        {items.map((item) => (
-          <div key={item.label} className="flex justify-between gap-2 text-sm">
-            <dt className="text-muted-foreground">{item.label}</dt>
-            <dd
-              className="min-w-0 truncate text-right font-medium"
-              title={item.value}
-            >
-              {item.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {children}
-    </div>
   );
 }

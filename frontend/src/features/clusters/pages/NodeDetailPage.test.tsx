@@ -6,7 +6,11 @@ import { toast } from "sonner";
 import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import { bodiesOf, listOf, stubApi } from "@/test/fetch-stub";
 import { setupUser } from "@/test/user";
-import { FirewallTab, NetworkTab, ServicesTab } from "./NodeDetailPage";
+import { DisksTab } from "../components/node/NodeDisksTab";
+import { FirewallTab } from "../components/node/NodeFirewallTab";
+import { NetworkTab } from "../components/node/NodeNetworkTab";
+import { NodePowerActions } from "../components/node/NodePowerActions";
+import { ServicesTab } from "../components/node/NodeServicesTab";
 
 vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
@@ -18,6 +22,101 @@ let api: ReturnType<typeof stubApi>;
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+});
+
+describe("NodeDetailPage header — More actions", () => {
+  // The rare and the disruptive actions sit behind a menu, whose items are
+  // gone by the time a dialog shows: one must still ask, and send only then.
+  it("Reboot asks first and sends only on confirm", async () => {
+    api = stubApi({});
+    const user = setupUser();
+    renderWithProviders(
+      <NodePowerActions
+        clusterId={CLUSTER}
+        nodeName={NODE}
+        otherNodes={[]}
+        inMaintenance={false}
+        canReport={false}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Reboot" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      within(dialog).getByRole("heading", { name: `Reboot ${NODE}?` }),
+    ).toBeInTheDocument();
+    expect(api.writes()).toEqual([]);
+
+    await user.click(within(dialog).getByRole("button", { name: "Reboot" }));
+    await waitFor(() => {
+      expect(api.writes()).toEqual([
+        `POST /api/v1/clusters/${CLUSTER}/nodes/${NODE}/reboot`,
+      ]);
+    });
+  });
+});
+
+describe("NodeDetailPage Disks tab — row actions", () => {
+  const DISKS = `/api/v1/clusters/${CLUSTER}/nodes/n1/disks`;
+  const disk = (dev: string) => ({
+    id: dev,
+    dev_path: dev,
+    model: "Example SSD",
+    serial: "",
+    size: 1_000_000_000_000,
+    disk_type: "ssd",
+    health: "PASSED",
+    wearout: "",
+    rpm: 0,
+    vendor: "",
+    wwn: "",
+  });
+
+  // Both actions open one shared confirmation from a row's menu: it must name
+  // the disk whose menu it was, and send that disk and no other.
+  it.each([
+    {
+      item: "Initialize with GPT",
+      title: "Initialize /dev/sdb with GPT?",
+      confirm: "Initialize",
+      method: "POST",
+      path: "initgpt",
+    },
+    {
+      item: "Wipe disk",
+      title: "Wipe /dev/sdb?",
+      confirm: "Wipe",
+      method: "PUT",
+      path: "wipe",
+    },
+  ])(
+    "$item asks first, naming the disk, and sends it only on confirm",
+    async ({ item, title, confirm, method, path }) => {
+      api = stubApi({ [DISKS]: listOf([disk("/dev/sda"), disk("/dev/sdb")]) });
+      const user = setupUser();
+      renderWithProviders(
+        <DisksTab clusterId={CLUSTER} nodeId="n1" nodeName={NODE} isOnline />,
+      );
+
+      await user.click(
+        await screen.findByRole("button", { name: "Actions for /dev/sdb" }),
+      );
+      await user.click(await screen.findByRole("menuitem", { name: item }));
+      const dialog = await screen.findByRole("alertdialog");
+      expect(
+        within(dialog).getByRole("heading", { name: title }),
+      ).toBeInTheDocument();
+      expect(api.writes()).toEqual([]);
+
+      await user.click(within(dialog).getByRole("button", { name: confirm }));
+      const url = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/disks/${path}`;
+      await waitFor(() => {
+        expect(api.writes()).toEqual([`${method} ${url}`]);
+      });
+      expect(bodiesOf(method, url)).toEqual([{ disk: "/dev/sdb" }]);
+    },
+  );
 });
 
 describe("NodeDetailPage Network tab — deleting an interface", () => {
@@ -331,17 +430,17 @@ describe("NodeDetailPage Firewall tab — quick-add rules", () => {
 
   it.each([
     {
-      button: "+ Drop Rule",
+      button: "Add drop rule",
       title: `Drop all inbound traffic to ${NODE}?`,
       says: "this can cut off access to the node",
-      confirm: "Add Drop Rule",
+      confirm: "Add drop rule",
       action: "DROP",
     },
     {
-      button: "+ Accept Rule",
+      button: "Add accept rule",
       title: `Accept all inbound traffic to ${NODE}?`,
       says: "it lets every inbound connection to the node through",
-      confirm: "Add Accept Rule",
+      confirm: "Add accept rule",
       action: "ACCEPT",
     },
   ])(
