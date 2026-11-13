@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, CheckCircle, Eye } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -16,6 +16,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DetailField } from "@/components/DetailField";
+import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
+import { DefGrid, Panel } from "@/components/page/Panel";
 import { AlertStateBadge } from "./AlertStateBadge";
 import { AlertSeverityBadge } from "./AlertSeverityBadge";
 import {
@@ -37,6 +40,8 @@ export function AlertsTable() {
   if (stateFilter && stateFilter !== "all") filters.state = stateFilter;
   if (severityFilter && severityFilter !== "all")
     filters.severity = severityFilter;
+  const filtered =
+    filters.state !== undefined || filters.severity !== undefined;
 
   const { data: alerts, isLoading } = useAlerts(filters);
 
@@ -51,91 +56,97 @@ export function AlertsTable() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <Select value={stateFilter} onValueChange={setStateFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All States" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All States</SelectItem>
-            <SelectItem value="firing">Firing</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="acknowledged">Acknowledged</SelectItem>
-            <SelectItem value="resolved">Resolved</SelectItem>
-          </SelectContent>
-        </Select>
+    <Panel
+      flush
+      aside={
+        alerts === undefined || alerts.length === 0
+          ? undefined
+          : `${String(alerts.length)} ${alerts.length === 1 ? "alert" : "alerts"}${filtered ? " match" : ""}`
+      }
+      actions={
+        <>
+          <Select value={stateFilter} onValueChange={setStateFilter}>
+            <SelectTrigger className="h-8 w-40" aria-label="Filter by state">
+              <SelectValue placeholder="All states" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All states</SelectItem>
+              <SelectItem value="firing">Firing</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="acknowledged">Acknowledged</SelectItem>
+              <SelectItem value="resolved">Resolved</SelectItem>
+            </SelectContent>
+          </Select>
 
-        <Select value={severityFilter} onValueChange={setSeverityFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All Severities" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Severities</SelectItem>
-            <SelectItem value="critical">Critical</SelectItem>
-            <SelectItem value="warning">Warning</SelectItem>
-            <SelectItem value="info">Info</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
+          <Select value={severityFilter} onValueChange={setSeverityFilter}>
+            <SelectTrigger className="h-8 w-40" aria-label="Filter by severity">
+              <SelectValue placeholder="All severities" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All severities</SelectItem>
+              <SelectItem value="critical">Critical</SelectItem>
+              <SelectItem value="warning">Warning</SelectItem>
+              <SelectItem value="info">Info</SelectItem>
+            </SelectContent>
+          </Select>
+        </>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-8" />
+            <TableHead>State</TableHead>
+            <TableHead>Severity</TableHead>
+            <TableHead>Resource</TableHead>
+            <TableHead>Metric</TableHead>
+            <TableHead>Message</TableHead>
+            <TableHead>Time</TableHead>
+            {canAcknowledge && <TableHead>Actions</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading && (
             <TableRow>
-              <TableHead className="w-8" />
-              <TableHead>State</TableHead>
-              <TableHead>Severity</TableHead>
-              <TableHead>Resource</TableHead>
-              <TableHead>Metric</TableHead>
-              <TableHead>Message</TableHead>
-              <TableHead>Time</TableHead>
-              {canAcknowledge && <TableHead>Actions</TableHead>}
+              <TableCell
+                colSpan={canAcknowledge ? 8 : 7}
+                className="py-8 text-center text-muted-foreground"
+              >
+                Loading...
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading && (
-              <TableRow>
-                <TableCell
-                  colSpan={canAcknowledge ? 8 : 7}
-                  className="text-center text-muted-foreground py-8"
-                >
-                  Loading...
-                </TableCell>
-              </TableRow>
-            )}
-            {!isLoading && (!alerts || alerts.length === 0) && (
-              <TableRow>
-                <TableCell
-                  colSpan={canAcknowledge ? 8 : 7}
-                  className="text-center text-muted-foreground py-8"
-                >
-                  No alerts found
-                </TableCell>
-              </TableRow>
-            )}
-            {alerts?.map((alert) => (
-              <AlertRow
-                key={alert.id}
-                alert={alert}
-                expanded={expandedId === alert.id}
-                onToggle={() => {
-                  setExpandedId(expandedId === alert.id ? null : alert.id);
-                }}
-                canAcknowledge={canAcknowledge}
-                onAcknowledge={() => {
-                  ackMutation.mutate(alert.id);
-                }}
-                onResolve={() => {
-                  resolveMutation.mutate(alert.id);
-                }}
-                formatDate={formatDate}
-              />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+          )}
+          {!isLoading && (!alerts || alerts.length === 0) && (
+            <TableRow>
+              <TableCell
+                colSpan={canAcknowledge ? 8 : 7}
+                className="py-8 text-center text-muted-foreground"
+              >
+                No alerts found
+              </TableCell>
+            </TableRow>
+          )}
+          {alerts?.map((alert) => (
+            <AlertRow
+              key={alert.id}
+              alert={alert}
+              expanded={expandedId === alert.id}
+              onToggle={() => {
+                setExpandedId(expandedId === alert.id ? null : alert.id);
+              }}
+              canAcknowledge={canAcknowledge}
+              onAcknowledge={() => {
+                ackMutation.mutate(alert.id);
+              }}
+              onResolve={() => {
+                resolveMutation.mutate(alert.id);
+              }}
+              formatDate={formatDate}
+            />
+          ))}
+        </TableBody>
+      </Table>
+    </Panel>
   );
 }
 
@@ -158,8 +169,8 @@ export function AlertRow({
 }) {
   return (
     <>
-      <TableRow className="cursor-pointer hover:bg-muted/50" onClick={onToggle}>
-        <TableCell>
+      <TableRow className="cursor-pointer" onClick={onToggle}>
+        <TableCell className="text-muted-foreground">
           {expanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
@@ -174,10 +185,10 @@ export function AlertRow({
         </TableCell>
         <TableCell className="font-medium">{alert.resource_name}</TableCell>
         <TableCell className="text-muted-foreground">{alert.metric}</TableCell>
-        <TableCell className="max-w-xs truncate text-sm">
+        <TableCell className="max-w-xs truncate" title={alert.message}>
           {alert.message}
         </TableCell>
-        <TableCell className="text-sm text-muted-foreground">
+        <TableCell className="whitespace-nowrap text-muted-foreground">
           {formatDate(alert.fired_at ?? alert.pending_at)}
         </TableCell>
         {canAcknowledge && (
@@ -186,25 +197,17 @@ export function AlertRow({
               e.stopPropagation();
             }}
           >
+            {/* Acknowledge is the common answer to a firing alert; Resolve
+                closes it by hand, so it is the quieter of the two. */}
             <div className="flex gap-1">
               {alert.state === "firing" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onAcknowledge}
-                  title="Acknowledge"
-                >
-                  <Eye className="h-3 w-3" />
+                <Button variant="outline" size="sm" onClick={onAcknowledge}>
+                  Acknowledge
                 </Button>
               )}
               {(alert.state === "firing" || alert.state === "acknowledged") && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onResolve}
-                  title="Resolve"
-                >
-                  <CheckCircle className="h-3 w-3" />
+                <Button variant="ghost" size="sm" onClick={onResolve}>
+                  Resolve
                 </Button>
               )}
             </div>
@@ -213,57 +216,44 @@ export function AlertRow({
       </TableRow>
 
       {expanded && (
-        <TableRow>
-          <TableCell
-            colSpan={canAcknowledge ? 8 : 7}
-            className="bg-muted/30 p-4"
-          >
-            <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm md:grid-cols-4">
-              <div>
-                <span className="text-muted-foreground">Alert ID:</span>{" "}
-                <span className="font-mono text-xs">{alert.id}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Rule ID:</span>{" "}
-                <span className="font-mono text-xs">{alert.rule_id}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Current Value:</span>{" "}
-                {alert.current_value.toFixed(2)}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Threshold:</span>{" "}
-                {alert.threshold.toFixed(2)}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Pending At:</span>{" "}
-                {formatDate(alert.pending_at)}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Fired At:</span>{" "}
-                {formatDate(alert.fired_at)}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Acknowledged At:</span>{" "}
-                {formatDate(alert.acknowledged_at)}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Resolved At:</span>{" "}
-                {formatDate(alert.resolved_at)}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Escalation Level:</span>{" "}
-                {alert.escalation_level}
-              </div>
-              {alert.cluster_id && (
-                <div>
-                  <span className="text-muted-foreground">Cluster:</span>{" "}
-                  <span className="font-mono text-xs">{alert.cluster_id}</span>
-                </div>
-              )}
-            </div>
-          </TableCell>
-        </TableRow>
+        <ExpandedDetailRow colSpan={canAcknowledge ? 8 : 7}>
+          <DefGrid>
+            <DetailField label="Current value">
+              {alert.current_value.toFixed(2)}
+            </DetailField>
+            <DetailField label="Threshold">
+              {alert.threshold.toFixed(2)}
+            </DetailField>
+            <DetailField label="Escalation level">
+              {alert.escalation_level}
+            </DetailField>
+            <DetailField label="Pending at">
+              {formatDate(alert.pending_at)}
+            </DetailField>
+            <DetailField label="Fired at">
+              {formatDate(alert.fired_at)}
+            </DetailField>
+            <DetailField label="Acknowledged at">
+              {formatDate(alert.acknowledged_at)}
+            </DetailField>
+            <DetailField label="Resolved at">
+              {formatDate(alert.resolved_at)}
+            </DetailField>
+          </DefGrid>
+          <DefGrid className="grid-cols-[repeat(auto-fit,minmax(min(19rem,100%),1fr))]">
+            <DetailField label="Alert ID" variant="mono">
+              <span className="text-xs">{alert.id}</span>
+            </DetailField>
+            <DetailField label="Rule ID" variant="mono">
+              <span className="text-xs">{alert.rule_id}</span>
+            </DetailField>
+            {alert.cluster_id && (
+              <DetailField label="Cluster" variant="mono">
+                <span className="text-xs">{alert.cluster_id}</span>
+              </DetailField>
+            )}
+          </DefGrid>
+        </ExpandedDetailRow>
       )}
     </>
   );

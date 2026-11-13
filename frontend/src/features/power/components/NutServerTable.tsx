@@ -12,6 +12,7 @@ import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
+import { DefGrid } from "@/components/page/Panel";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { describeError } from "@/lib/api-error";
 import { useTestNutServer } from "../api/ups-queries";
@@ -158,54 +159,52 @@ export function NutServerTable({
   };
 
   return (
-    <div className="rounded-md border">
-      <DataTableFrame layout={layout}>
-        <TableHeader>
-          <DataTableHeadRow layout={layout} directionFor={directionFor} onSort={toggle} />
-        </TableHeader>
-        <TableBody>
-          {rows.map((s) => {
-            const test = tests[s.id];
-            return (
-              <Fragment key={s.id}>
-                <TableRow className="cursor-pointer" onClick={() => { toggleExpand(s.id); }}>
-                  <DataTableCells row={s} layout={layout} ctx={ctx} />
-                </TableRow>
-                {expanded.has(s.id) && (
-                  <ExpandedDetailRow colSpan={layout.columns.length} spacing="space-y-3">
-                    <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                      <DetailField label="Username" variant={s.username === "" ? "muted" : "mono"}>
-                        {s.username !== "" ? s.username : s.has_password ? "Hidden — requires manage:ups" : "None"}
-                      </DetailField>
-                      <DetailField label="Certificate">
-                        {s.tls_mode !== "starttls"
-                          ? "No TLS"
-                          : s.tls_fingerprint !== ""
-                            ? "Pinned (SHA-256)"
-                            : s.verify_tls
-                              ? "Verified against system CAs"
-                              : "Not verified"}
-                      </DetailField>
-                      <DetailField label="Last successful poll">{formatDateTime(s.last_poll_at, "Never")}</DetailField>
-                      <DetailField label="Added">{formatDateTime(s.created_at)}</DetailField>
-                    </dl>
-                    {s.last_poll_error !== "" && (
-                      <p className="text-sm text-destructive">Last poll failed: {s.last_poll_error}</p>
-                    )}
-                    {typeof test === "string" && <p className="text-sm text-destructive">Test failed: {test}</p>}
-                    {test !== undefined && typeof test !== "string" && (
-                      <p className="text-sm">
-                        Test passed in {test.took_ms} ms: {test.devices.length} UPS (
-                        {test.devices.map((d) => d.name).join(", ")})
-                      </p>
-                    )}
-                  </ExpandedDetailRow>
-                )}
-              </Fragment>
-            );
-          })}
-        </TableBody>
-      </DataTableFrame>
-    </div>
+    <DataTableFrame layout={layout}>
+      <TableHeader>
+        <DataTableHeadRow layout={layout} directionFor={directionFor} onSort={toggle} />
+      </TableHeader>
+      <TableBody>
+        {rows.map((s) => {
+          const test = tests[s.id];
+          return (
+            <Fragment key={s.id}>
+              <TableRow className="cursor-pointer" onClick={() => { toggleExpand(s.id); }}>
+                <DataTableCells row={s} layout={layout} ctx={ctx} />
+              </TableRow>
+              {expanded.has(s.id) && (
+                <ExpandedDetailRow colSpan={layout.columns.length} spacing="space-y-3">
+                  <DefGrid>
+                    <DetailField label="Username" variant={s.username === "" ? "muted" : "mono"}>
+                      {s.username !== "" ? s.username : s.has_password ? "Hidden — requires manage:ups" : "None"}
+                    </DetailField>
+                    <DetailField label="Certificate">
+                      {s.tls_mode !== "starttls"
+                        ? "No TLS"
+                        : s.tls_fingerprint !== ""
+                          ? "Pinned (SHA-256)"
+                          : s.verify_tls
+                            ? "Verified against system CAs"
+                            : "Not verified"}
+                    </DetailField>
+                    <DetailField label="Last successful poll">{formatDateTime(s.last_poll_at, "Never")}</DetailField>
+                    <DetailField label="Added">{formatDateTime(s.created_at)}</DetailField>
+                  </DefGrid>
+                  {s.last_poll_error !== "" && (
+                    <p className="text-sm text-destructive">Last poll failed: {s.last_poll_error}</p>
+                  )}
+                  {typeof test === "string" && <p className="text-sm text-destructive">Test failed: {test}</p>}
+                  {test !== undefined && typeof test !== "string" && (
+                    <p className="text-sm">
+                      Test passed in {test.took_ms} ms: {test.devices.length} UPS (
+                      {test.devices.map((d) => d.name).join(", ")})
+                    </p>
+                  )}
+                </ExpandedDetailRow>
+              )}
+            </Fragment>
+          );
+        })}
+      </TableBody>
+    </DataTableFrame>
   );
 }

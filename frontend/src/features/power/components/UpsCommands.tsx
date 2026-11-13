@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { TypeToConfirmDialog } from "@/components/TypeToConfirmDialog";
 import { DataTableFrame } from "@/components/DataTableFrame";
@@ -21,6 +20,7 @@ import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { DetailField } from "@/components/DetailField";
+import { DefGrid, Panel } from "@/components/page/Panel";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
@@ -28,8 +28,10 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { formatDateTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { VMResponse } from "@/types/api";
 import { useNutServers, useRunUpsCommand, useUpsCommandRuns } from "../api/ups-queries";
+import { DANGER_OUTLINE } from "../lib/ups-style";
 import type { UpsCommand, UpsCommandRun, UpsCommandTier, UpsDevice } from "../types/ups";
 
 const TIERS: { tier: UpsCommandTier; title: string; note: string }[] = [
@@ -73,55 +75,66 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
 
   if (device.commands_listed_at === undefined) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Nexara has not read this UPS&apos;s commands yet. It lists them within a minute of reading the UPS.
-      </p>
+      <Panel>
+        <p className="text-sm text-muted-foreground">
+          Nexara has not read this UPS&apos;s commands yet. It lists them within a minute of reading the UPS.
+        </p>
+      </Panel>
     );
   }
   const commands = device.commands ?? [];
   return (
     <div className="space-y-4">
-      <AccountNote hasAccount={hasAccount} verifiedAt={server?.commands_verified_at ?? null} />
-      {commands.length === 0 && <p className="text-sm text-muted-foreground">upsd lists no instant commands for this UPS.</p>}
-      {TIERS.map(({ tier, title, note }) => {
-        const inTier = commands.filter((c) => c.tier === tier);
-        if (inTier.length === 0) return null;
-        return (
-          <Card key={tier}>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                {tier === "cuts_power" && <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden="true" />}
-                {title}
-              </CardTitle>
-              <p className="text-xs text-muted-foreground">{note}</p>
-            </CardHeader>
-            <CardContent className="divide-y">
-              {inTier.map((cmd) => (
-                <div key={cmd.name} className="flex items-start justify-between gap-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="break-all font-mono text-sm">{cmd.name}</p>
-                    {cmd.description !== "" && <p className="text-xs text-muted-foreground">{cmd.description}</p>}
-                  </div>
-                  {(tier === "cuts_power" ? canCutPower : canRun) && (
-                    <Button
-                      size="sm"
-                      className="shrink-0"
-                      variant={tier === "cuts_power" ? "destructive" : "outline"}
-                      disabled={!hasAccount || run.isPending}
-                      aria-label={`Run ${cmd.name}`}
-                      onClick={() => {
-                        start(cmd);
-                      }}
-                    >
-                      Run
-                    </Button>
-                  )}
+      <Panel title="Commands" aside={commands.length > 0 ? `${String(commands.length)} from upsd` : undefined}>
+        <div className="-mt-2 max-w-[70ch]">
+          <AccountNote hasAccount={hasAccount} verifiedAt={server?.commands_verified_at ?? null} />
+        </div>
+        {commands.length === 0 && <p className="mt-3 text-sm text-muted-foreground">upsd lists no instant commands for this UPS.</p>}
+        {/* A tier per band: what it can do on the left, its commands on the right. */}
+        <div className="@container mt-3 divide-y border-t empty:hidden">
+          {TIERS.map(({ tier, title, note }) => {
+            const inTier = commands.filter((c) => c.tier === tier);
+            if (inTier.length === 0) return null;
+            const cuts = tier === "cuts_power";
+            return (
+              <section key={tier} className="grid gap-x-8 gap-y-3 py-4 last:pb-0 @2xl:grid-cols-[14rem_minmax(0,1fr)]">
+                <div>
+                  <h3 className={cn("flex items-center gap-1.5 text-sm font-semibold", cuts && "text-red-700 dark:text-red-400")}>
+                    {cuts && <AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+                    {title}
+                  </h3>
+                  <p className="mt-0.5 text-[12.5px] text-muted-foreground">{note}</p>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        );
-      })}
+                <ul className="space-y-3">
+                  {inTier.map((cmd) => (
+                    <li key={cmd.name} className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="break-all font-mono text-[13px]">{cmd.name}</p>
+                        {cmd.description !== "" && <p className="text-[12.5px] text-muted-foreground">{cmd.description}</p>}
+                      </div>
+                      {/* Never a filled button: the one that cuts power is marked, not made the loudest. */}
+                      {(cuts ? canCutPower : canRun) && (
+                        <Button
+                          size="sm"
+                          className={cn("shrink-0", cuts && DANGER_OUTLINE)}
+                          variant="outline"
+                          disabled={!hasAccount || run.isPending}
+                          aria-label={`Run ${cmd.name}`}
+                          onClick={() => {
+                            start(cmd);
+                          }}
+                        >
+                          Run
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      </Panel>
       <RunHistory upsId={device.id} />
 
       <AlertDialog
@@ -234,7 +247,7 @@ function WhatItPowers({ device }: { device: UpsDevice }) {
         </ul>
       )}
       {hostFed && (
-        <p className="flex items-start gap-1.5 text-destructive">
+        <p className="flex items-start gap-1.5 text-red-700 dark:text-red-400">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           {device.server_name} runs on {host.node_name}: cutting the power stops it too, and Nexara may not hear how the command
           went.
@@ -261,7 +274,7 @@ const RUN_COLUMNS: ColumnDef<UpsCommandRun, RunKey, { expanded: Set<string> }>[]
   {
     key: "what",
     label: "What",
-    width: 280,
+    width: 380,
     wrap: true,
     sortValue: (r) => r.name,
     cell: (r) => (
@@ -271,7 +284,7 @@ const RUN_COLUMNS: ColumnDef<UpsCommandRun, RunKey, { expanded: Set<string> }>[]
   {
     key: "status",
     label: "Outcome",
-    width: 130,
+    width: 160,
     sortValue: (r) => r.status,
     cell: (r) => (
       <Badge variant={STATUS_VARIANT[r.status]}>{r.status === "pending" || r.status === "sent" ? "waiting" : r.status}</Badge>
@@ -286,37 +299,30 @@ function RunHistory({ upsId }: { upsId: string }) {
   const { expanded, toggle: toggleExpand } = useExpandedRows();
   if ((runs.data ?? []).length === 0) return null;
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Runs</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="rounded-md border">
-          <DataTableFrame layout={layout}>
-            <TableHeader>
-              <DataTableHeadRow layout={layout} directionFor={directionFor} onSort={toggle} />
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => (
-                <Fragment key={r.id}>
-                  <TableRow className="cursor-pointer" onClick={() => { toggleExpand(r.id); }}>
-                    <DataTableCells row={r} layout={layout} ctx={{ expanded }} />
-                  </TableRow>
-                  {expanded.has(r.id) && (
-                    <ExpandedDetailRow colSpan={layout.columns.length}>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <DetailField label="Outcome">{r.result || (r.status === "succeeded" ? "The driver ran it" : "—")}</DetailField>
-                        <DetailField label="Finished">{formatDateTime(r.finished_at)}</DetailField>
-                        {r.kind === "set" && <DetailField label="Before">{r.previous ?? "—"}</DetailField>}
-                      </div>
-                    </ExpandedDetailRow>
-                  )}
-                </Fragment>
-              ))}
-            </TableBody>
-          </DataTableFrame>
-        </div>
-      </CardContent>
-    </Card>
+    <Panel flush title="Runs" aside="commands run and variables set">
+      <DataTableFrame layout={layout}>
+        <TableHeader>
+          <DataTableHeadRow layout={layout} directionFor={directionFor} onSort={toggle} />
+        </TableHeader>
+        <TableBody>
+          {rows.map((r) => (
+            <Fragment key={r.id}>
+              <TableRow className="cursor-pointer" onClick={() => { toggleExpand(r.id); }}>
+                <DataTableCells row={r} layout={layout} ctx={{ expanded }} />
+              </TableRow>
+              {expanded.has(r.id) && (
+                <ExpandedDetailRow colSpan={layout.columns.length}>
+                  <DefGrid>
+                    <DetailField label="Outcome">{r.result || (r.status === "succeeded" ? "The driver ran it" : "—")}</DetailField>
+                    <DetailField label="Finished">{formatDateTime(r.finished_at)}</DetailField>
+                    {r.kind === "set" && <DetailField label="Before">{r.previous ?? "—"}</DetailField>}
+                  </DefGrid>
+                </ExpandedDetailRow>
+              )}
+            </Fragment>
+          ))}
+        </TableBody>
+      </DataTableFrame>
+    </Panel>
   );
 }

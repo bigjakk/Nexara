@@ -1,9 +1,10 @@
 import { useId, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Panel } from "@/components/page/Panel";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
@@ -38,10 +39,10 @@ export function UpsMaintenance({ device }: { device: UpsDevice }) {
   const now = Date.now();
   const list = windows.data ?? [];
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-base">Maintenance windows</CardTitle>
-        {canManage && (
+    <Panel
+      title="Maintenance windows"
+      actions={
+        canManage ? (
           <Button
             size="sm"
             variant="outline"
@@ -51,29 +52,35 @@ export function UpsMaintenance({ device }: { device: UpsDevice }) {
           >
             Add window
           </Button>
-        )}
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm">
-        <p className="text-muted-foreground">
-          While one is open, {device.name} drops out of the global UPS alert rules, and its own rules hold.
-        </p>
-        {list.length === 0 ? (
-          // Its loading, failure and paused states too: a paused read has no data
-          // and no error, and is not "no windows".
-          <QueryStateNotice
-            query={windows}
-            subject="this UPS's maintenance windows"
-            empty="No maintenance windows."
-            skeletonClassName="h-8 w-full"
-          />
-        ) : (
-          <ul className="divide-y">
-            {list.map((w) => (
-              <li key={w.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+        ) : undefined
+      }
+    >
+      <p className="-mt-2 mb-3 max-w-[65ch] text-sm text-muted-foreground">
+        While one is open, {device.name} drops out of the global UPS alert rules, and its own rules hold.
+      </p>
+      {list.length === 0 ? (
+        // Its loading, failure and paused states too: a paused read has no data
+        // and no error, and is not "no windows".
+        <QueryStateNotice
+          query={windows}
+          subject="this UPS's maintenance windows"
+          empty="No maintenance windows."
+          skeletonClassName="h-8 w-full"
+        />
+      ) : (
+        <ul className="divide-y text-sm">
+          {list.map((w) => {
+            const state = windowState(w, now);
+            return (
+              <li key={w.id} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
                 <div className="min-w-0">
-                  <div>
-                    {formatDateTime(w.starts_at)} – {formatDateTime(w.ends_at)}{" "}
-                    <span className="text-muted-foreground">· {windowState(w, now)}</span>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {formatDateTime(w.starts_at)} – {formatDateTime(w.ends_at)}
+                    {state === "Open now" ? (
+                      <Badge variant="secondary">{state}</Badge>
+                    ) : (
+                      <span className="text-[12.5px] text-muted-foreground">{state}</span>
+                    )}
                   </div>
                   {w.description !== "" && <div className="break-words text-muted-foreground">{w.description}</div>}
                 </div>
@@ -91,10 +98,10 @@ export function UpsMaintenance({ device }: { device: UpsDevice }) {
                   </Button>
                 )}
               </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
+            );
+          })}
+        </ul>
+      )}
       {adding && (
         <AddWindowDialog
           device={device}
@@ -103,7 +110,7 @@ export function UpsMaintenance({ device }: { device: UpsDevice }) {
           }}
         />
       )}
-    </Card>
+    </Panel>
   );
 }
 

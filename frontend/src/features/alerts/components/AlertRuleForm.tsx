@@ -13,6 +13,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -26,28 +28,32 @@ import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { ClusterResponse, EscalationStep } from "@/types/api";
 import { EscalationChainEditor } from "./EscalationChainEditor";
+import { FormSection } from "./FormParts";
 import { TemplateEditor } from "./TemplateEditor";
 
+/** The line of help under a field. */
+const HINT = "text-[12.5px] text-muted-foreground";
+
 const METRICS = [
-  { value: "cpu_usage", label: "CPU Usage (%)" },
-  { value: "mem_percent", label: "Memory Usage (%)" },
-  { value: "disk_read", label: "Disk Read (bytes/s)" },
-  { value: "disk_write", label: "Disk Write (bytes/s)" },
-  { value: "net_in", label: "Network In (bytes/s)" },
-  { value: "net_out", label: "Network Out (bytes/s)" },
-  { value: "snapshot_age_days", label: "Snapshot Age (days)" },
-  { value: "veeam_rpo_hours", label: "Veeam Recovery Point Age (hours)" },
-  { value: "veeam_malware_status", label: "Veeam Malware Verdict (0-3)" },
-  { value: "veeam_repo_used_percent", label: "Veeam Repository Usage (%)" },
-  { value: "veeam_job_failed", label: "Veeam Failed Jobs (count)" },
-  { value: "pve_backup_failed", label: "Proxmox Failed Backups (count)" },
-  { value: "pve_task_failed", label: "Proxmox Failed Tasks (count)" },
-  { value: "ups_on_battery", label: "UPS on Battery (count)" },
-  { value: "ups_battery_charge", label: "UPS Lowest Battery Charge (%)" },
-  { value: "ups_runtime", label: "UPS Shortest Runtime (minutes)" },
-  { value: "ups_load", label: "UPS Highest Load (%)" },
-  { value: "ups_unreachable", label: "UPS Unreachable (count)" },
-  { value: "ups_replace_battery", label: "UPS Battery Needs Replacing (count)" },
+  { value: "cpu_usage", label: "CPU usage (%)" },
+  { value: "mem_percent", label: "Memory usage (%)" },
+  { value: "disk_read", label: "Disk read (bytes/s)" },
+  { value: "disk_write", label: "Disk write (bytes/s)" },
+  { value: "net_in", label: "Network in (bytes/s)" },
+  { value: "net_out", label: "Network out (bytes/s)" },
+  { value: "snapshot_age_days", label: "Snapshot age (days)" },
+  { value: "veeam_rpo_hours", label: "Veeam recovery point age (hours)" },
+  { value: "veeam_malware_status", label: "Veeam malware verdict (0-3)" },
+  { value: "veeam_repo_used_percent", label: "Veeam repository usage (%)" },
+  { value: "veeam_job_failed", label: "Veeam failed jobs (count)" },
+  { value: "pve_backup_failed", label: "Proxmox failed backups (count)" },
+  { value: "pve_task_failed", label: "Proxmox failed tasks (count)" },
+  { value: "ups_on_battery", label: "UPS on battery (count)" },
+  { value: "ups_battery_charge", label: "UPS lowest battery charge (%)" },
+  { value: "ups_runtime", label: "UPS shortest runtime (minutes)" },
+  { value: "ups_load", label: "UPS highest load (%)" },
+  { value: "ups_unreachable", label: "UPS unreachable (count)" },
+  { value: "ups_replace_battery", label: "UPS battery needs replacing (count)" },
 ];
 
 const UPS_METRICS = new Set([
@@ -325,14 +331,17 @@ export function AlertRuleForm() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Create Rule
+        <Button className="gap-1.5">
+          <Plus className="h-4 w-4" />
+          Create rule
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Create Alert Rule</DialogTitle>
+          <DialogTitle>Create alert rule</DialogTitle>
+          <DialogDescription>
+            Raises an alert when a metric crosses its threshold and stays there.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -343,7 +352,7 @@ export function AlertRuleForm() {
               onChange={(e) => {
                 setName(e.target.value);
               }}
-              placeholder="High CPU Usage"
+              placeholder="High CPU usage"
               required
             />
           </div>
@@ -360,21 +369,7 @@ export function AlertRuleForm() {
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="severity">Severity</Label>
-              <Select value={severity} onValueChange={setSeverity}>
-                <SelectTrigger id="severity">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="critical">Critical</SelectItem>
-                  <SelectItem value="warning">Warning</SelectItem>
-                  <SelectItem value="info">Info</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
+          <FormSection title="Condition">
             <div className="space-y-2">
               <Label htmlFor="metric">Metric</Label>
               <Select
@@ -435,215 +430,233 @@ export function AlertRuleForm() {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="scope">Scope</Label>
-              <Select value={scopeType} onValueChange={setScopeType}>
-                <SelectTrigger id="scope">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {scopes(metric).map((sc) => (
-                    <SelectItem key={sc} value={sc}>
-                      {scopeLabel(sc, metric)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+            <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="operator">Operator</Label>
+                <Select value={operator} onValueChange={setOperator}>
+                  <SelectTrigger id="operator">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {OPERATORS.map((op) => (
+                      <SelectItem key={op.value} value={op.value}>
+                        {op.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="operator">Operator</Label>
-              <Select value={operator} onValueChange={setOperator}>
-                <SelectTrigger id="operator">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {OPERATORS.map((op) => (
-                    <SelectItem key={op.value} value={op.value}>
-                      {op.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="space-y-2">
+                <Label htmlFor="threshold">Threshold</Label>
+                <Input
+                  id="threshold"
+                  type="number"
+                  step="any"
+                  value={threshold}
+                  onChange={(e) => {
+                    setThreshold(e.target.value);
+                  }}
+                  required
+                />
+              </div>
             </div>
+          </FormSection>
 
-            <div className="space-y-2">
-              <Label htmlFor="threshold">Threshold</Label>
-              <Input
-                id="threshold"
-                type="number"
-                step="any"
-                value={threshold}
-                onChange={(e) => {
-                  setThreshold(e.target.value);
-                }}
-                required
-              />
-            </div>
-          </div>
+          <FormSection title="Applies to">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="scope">Scope</Label>
+                <Select value={scopeType} onValueChange={setScopeType}>
+                  <SelectTrigger id="scope">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {scopes(metric).map((sc) => (
+                      <SelectItem key={sc} value={sc}>
+                        {scopeLabel(sc, metric)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          {scopeType === "ups" && (
-            <div className="space-y-2">
-              <Label htmlFor="ups">UPS</Label>
-              <Select value={upsId} onValueChange={setUpsId}>
-                <SelectTrigger id="ups">
-                  <SelectValue placeholder={upsDevices.isLoading ? "Loading UPS..." : "Select UPS"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {upsDevices.data?.map((d) => (
-                    <SelectItem key={d.id} value={d.id}>
-                      {`${d.name}@${d.server_name}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {!namesNoCluster && (
-            <div className="space-y-2">
-              <Label htmlFor="cluster">Cluster</Label>
-              <Select
-                value={clusterId}
-                onValueChange={(v) => {
-                  setClusterId(v);
-                  // Nodes are per-cluster; a leftover pick would belong to the
-                  // old one, which the backend rejects.
-                  setNodeId("");
-                }}
-              >
-                <SelectTrigger id="cluster">
-                  <SelectValue placeholder="Select cluster" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clusters?.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {scopeType === "node" && (
-            <div className="space-y-2">
-              <Label htmlFor="node">Node</Label>
-              <Select
-                value={nodeId}
-                onValueChange={setNodeId}
-                disabled={!clusterId || nodesLoading}
-              >
-                <SelectTrigger id="node">
-                  <SelectValue
-                    placeholder={
-                      !clusterId
-                        ? "Select a cluster first"
-                        : nodesLoading
-                          ? "Loading nodes..."
-                          : "Select node"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {nodes?.map((n) => (
-                    <SelectItem key={n.id} value={n.id}>
-                      {n.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {nodesError && (
-                <p className="text-xs text-destructive">
-                  Could not load this cluster&apos;s nodes.
-                </p>
+              {scopeType === "ups" && (
+                <div className="space-y-2">
+                  <Label htmlFor="ups">UPS</Label>
+                  <Select value={upsId} onValueChange={setUpsId}>
+                    <SelectTrigger id="ups">
+                      <SelectValue placeholder={upsDevices.isLoading ? "Loading UPS..." : "Select UPS"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {upsDevices.data?.map((d) => (
+                        <SelectItem key={d.id} value={d.id}>
+                          {`${d.name}@${d.server_name}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               )}
-              {!nodesError &&
-                !nodesLoading &&
-                clusterId &&
-                nodes?.length === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    This cluster has no nodes.
+
+              {!namesNoCluster && (
+                <div className="space-y-2">
+                  <Label htmlFor="cluster">Cluster</Label>
+                  <Select
+                    value={clusterId}
+                    onValueChange={(v) => {
+                      setClusterId(v);
+                      // Nodes are per-cluster; a leftover pick would belong to the
+                      // old one, which the backend rejects.
+                      setNodeId("");
+                    }}
+                  >
+                    <SelectTrigger id="cluster">
+                      <SelectValue placeholder="Select cluster" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clusters?.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {scopeType === "node" && (
+              <div className="space-y-2">
+                <Label htmlFor="node">Node</Label>
+                <Select
+                  value={nodeId}
+                  onValueChange={setNodeId}
+                  disabled={!clusterId || nodesLoading}
+                >
+                  <SelectTrigger id="node">
+                    <SelectValue
+                      placeholder={
+                        !clusterId
+                          ? "Select a cluster first"
+                          : nodesLoading
+                            ? "Loading nodes..."
+                            : "Select node"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {nodes?.map((n) => (
+                      <SelectItem key={n.id} value={n.id}>
+                        {n.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {nodesError && (
+                  <p className="text-xs text-destructive">
+                    Could not load this cluster&apos;s nodes.
                   </p>
                 )}
-            </div>
-          )}
+                {!nodesError &&
+                  !nodesLoading &&
+                  clusterId &&
+                  nodes?.length === 0 && (
+                    <p className={HINT}>This cluster has no nodes.</p>
+                  )}
+              </div>
+            )}
 
-          {scopeType === "vm" && (
-            <div className="space-y-2">
-              <Label htmlFor="vm-vmid">VMID</Label>
-              <Input
-                id="vm-vmid"
-                type="number"
-                min="1"
-                value={vmVmid}
-                onChange={(e) => {
-                  setVmVmid(e.target.value);
-                }}
-                placeholder="100"
-              />
-              <p className="text-xs text-muted-foreground">
-                Proxmox VMID of the guest to watch
-              </p>
-              {metric === "mem_percent" && (
-                <p className="text-xs text-muted-foreground">
-                  Memory is judged on the guest&apos;s own figure: a
-                  container&apos;s always, a VM&apos;s only while its balloon
-                  driver reports it. A VM without one never fires on memory.
+            {scopeType === "vm" && (
+              <div className="space-y-2">
+                <Label htmlFor="vm-vmid">VMID</Label>
+                <Input
+                  id="vm-vmid"
+                  type="number"
+                  min="1"
+                  value={vmVmid}
+                  onChange={(e) => {
+                    setVmVmid(e.target.value);
+                  }}
+                  placeholder="100"
+                />
+                <p className={HINT}>Proxmox VMID of the guest to watch</p>
+                {metric === "mem_percent" && (
+                  <p className={HINT}>
+                    Memory is judged on the guest&apos;s own figure: a
+                    container&apos;s always, a VM&apos;s only while its balloon
+                    driver reports it. A VM without one never fires on memory.
+                  </p>
+                )}
+              </div>
+            )}
+          </FormSection>
+
+          <FormSection title="Timing">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="duration">Duration (seconds)</Label>
+                <Input
+                  id="duration"
+                  type="number"
+                  min="0"
+                  max={maxDurationFor(metric)}
+                  value={durationSeconds}
+                  onChange={(e) => {
+                    setDurationSeconds(e.target.value);
+                  }}
+                />
+                <p className={HINT}>
+                  {WINDOWED_METRICS.has(metric)
+                    ? "How far back to count: 86400 covers a nightly run, up to 2592000 (30 days)"
+                    : "How long the condition must hold before the alert fires"}
                 </p>
-              )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="cooldown">Cooldown (seconds)</Label>
+                <Input
+                  id="cooldown"
+                  type="number"
+                  value={cooldownSeconds}
+                  onChange={(e) => {
+                    setCooldownSeconds(e.target.value);
+                  }}
+                />
+                <p className={HINT}>
+                  No new alert for this long after the last one resolved
+                </p>
+              </div>
             </div>
-          )}
+          </FormSection>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="duration">Duration (seconds)</Label>
-              <Input
-                id="duration"
-                type="number"
-                min="0"
-                max={maxDurationFor(metric)}
-                value={durationSeconds}
-                onChange={(e) => {
-                  setDurationSeconds(e.target.value);
-                }}
-              />
-              <p className="text-xs text-muted-foreground">
-                {WINDOWED_METRICS.has(metric)
-                  ? "How far back to count — 86400 covers a nightly run, up to 2592000 (30 days)"
-                  : "How long condition must persist"}
-              </p>
+          <FormSection title="Notification">
+            <div className="space-y-2 sm:max-w-[calc(50%-0.5rem)]">
+              <Label htmlFor="severity">Severity</Label>
+              <Select value={severity} onValueChange={setSeverity}>
+                <SelectTrigger id="severity">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="warning">Warning</SelectItem>
+                  <SelectItem value="info">Info</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="cooldown">Cooldown (seconds)</Label>
-              <Input
-                id="cooldown"
-                type="number"
-                value={cooldownSeconds}
-                onChange={(e) => {
-                  setCooldownSeconds(e.target.value);
-                }}
-              />
-              <p className="text-xs text-muted-foreground">
-                Suppress re-fire within window
-              </p>
-            </div>
-          </div>
+            <EscalationChainEditor
+              steps={escalationChain}
+              onChange={setEscalationChain}
+            />
 
-          <EscalationChainEditor
-            steps={escalationChain}
-            onChange={setEscalationChain}
-          />
+            <TemplateEditor
+              value={messageTemplate}
+              onChange={setMessageTemplate}
+            />
+          </FormSection>
 
-          <TemplateEditor
-            value={messageTemplate}
-            onChange={setMessageTemplate}
-          />
-
-          <div className="flex justify-end gap-2 pt-2">
+          <DialogFooter className="gap-2 sm:space-x-0">
             <Button
               type="button"
               variant="outline"
@@ -657,9 +670,9 @@ export function AlertRuleForm() {
               type="submit"
               disabled={createMutation.isPending || !scopeReady}
             >
-              {createMutation.isPending ? "Creating..." : "Create Rule"}
+              {createMutation.isPending ? "Creating..." : "Create rule"}
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

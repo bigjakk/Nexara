@@ -1,17 +1,17 @@
 import { Link } from "react-router-dom";
-import { BatteryCharging, Power } from "lucide-react";
+import { Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { Panel } from "@/components/page/Panel";
 import { NodeShutdownConfirm } from "@/features/clusters/components/node/NodeShutdownConfirm";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 import { useNutServers, useSetUpsFeedProtectedElsewhere, useUpsDevices } from "../api/ups-queries";
 import { feedName, protectionView, upsmonSystem } from "../lib/ups-feeds";
 import { formatRuntime, upsOnBattery } from "../lib/ups-state";
+import { DANGER_OUTLINE } from "../lib/ups-style";
 import type { NutServer, UpsDevice, UpsFeed } from "../types/ups";
-import { UpsStatusBadges } from "./UpsBadges";
-import { ProtectionBadge } from "./UpsPowers";
+import { ProtectionBadge, UpsStatusBadges } from "./UpsBadges";
 
 interface Props {
   clusterId: string;
@@ -45,21 +45,16 @@ function NodePowerCardBody({ clusterId, nodeName, online, className }: Props) {
   const stillFedBy = feeding.filter(({ device }) => device.state === "online").map(({ device }) => device.name);
 
   return (
-    <Card className={className}>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          <BatteryCharging className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          Power
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        {feeding.length === 0 ? (
-          <p className="text-muted-foreground">
-            No UPS Nexara knows powers {nodeName}. Add it to a UPS&apos;s Powers tab on the{" "}
-            <Link to="/power" className="text-primary hover:underline">Power page</Link> to have it checked.
-          </p>
-        ) : (
-          feeding.map(({ device, feed }) => (
+    <Panel title="Power" className={className}>
+      {feeding.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No UPS Nexara knows powers {nodeName}. Add it to a UPS&apos;s Powers tab on the{" "}
+          <Link to="/power" className="text-primary hover:underline">Power page</Link> to have it checked.
+        </p>
+      ) : (
+        // One block per UPS, divided by a rule: no box inside the panel.
+        <div className="divide-y text-sm">
+          {feeding.map(({ device, feed }) => (
             <FedBy
               key={device.id}
               device={device}
@@ -70,10 +65,10 @@ function NodePowerCardBody({ clusterId, nodeName, online, className }: Props) {
               online={online}
               stillFedBy={stillFedBy}
             />
-          ))
-        )}
-      </CardContent>
-    </Card>
+          ))}
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -95,7 +90,7 @@ function FedBy({ device, feed, server, clusterId, nodeName, online, stillFedBy }
   const value = cn("font-medium tabular-nums", !(device.reachability === "ok" && !device.reading_stale) && "text-muted-foreground");
 
   return (
-    <div className="space-y-3 rounded-md border p-3">
+    <div className="space-y-3 py-3.5 first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-center gap-2">
         <span>
           Powered by{" "}
@@ -104,10 +99,10 @@ function FedBy({ device, feed, server, clusterId, nodeName, online, stillFedBy }
         </span>
         <UpsStatusBadges device={device} />
       </div>
-      <dl className="grid grid-cols-3 gap-2 text-xs">
-        <div><dt className="text-muted-foreground">Battery</dt><dd className={value}>{device.battery_charge == null ? "—" : `${String(Math.round(device.battery_charge))}%`}</dd></div>
-        <div><dt className="text-muted-foreground">Runtime</dt><dd className={value}>{formatRuntime(device.battery_runtime)}</dd></div>
-        <div><dt className="text-muted-foreground">Load</dt><dd className={value}>{device.load == null ? "—" : `${String(Math.round(device.load))}%`}</dd></div>
+      <dl className="grid grid-cols-3 gap-2">
+        <div><dt className="text-xs text-muted-foreground">Battery</dt><dd className={value}>{device.battery_charge == null ? "—" : `${String(Math.round(device.battery_charge))}%`}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">Runtime</dt><dd className={value}>{formatRuntime(device.battery_runtime)}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">Load</dt><dd className={value}>{device.load == null ? "—" : `${String(Math.round(device.load))}%`}</dd></div>
       </dl>
       {others.length > 0 && <p className="text-xs text-muted-foreground">Also powers {others.join(", ")}</p>}
 
@@ -137,7 +132,7 @@ function FedBy({ device, feed, server, clusterId, nodeName, online, stillFedBy }
               To shut {nodeName} down before {device.name}&apos;s battery runs out, run upsmon on it as a secondary of{" "}
               {device.server_name}, with an account from its upsd.users:
             </p>
-            <pre className="overflow-x-auto rounded bg-muted p-2 font-mono">
+            <pre className="overflow-x-auto rounded-md bg-foreground/[0.06] p-2.5 font-mono">
               {`# /etc/nut/nut.conf\nMODE=netclient\n\n# /etc/nut/upsmon.conf\nMONITOR ${upsmonSystem(device.name, server)} 1 <user> <password> secondary`}
             </pre>
           </div>
@@ -152,7 +147,7 @@ function FedBy({ device, feed, server, clusterId, nodeName, online, stillFedBy }
             clusterId={clusterId}
             nodeName={nodeName}
             trigger={
-              <Button size="sm" variant="destructive" className="gap-1.5">
+              <Button size="sm" variant="outline" className={cn("gap-1.5", DANGER_OUTLINE)}>
                 <Power className="h-4 w-4" aria-hidden="true" />
                 Shut down {nodeName} now…
               </Button>

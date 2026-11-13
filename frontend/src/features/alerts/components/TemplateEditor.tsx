@@ -1,7 +1,6 @@
-import { useRef } from "react";
+import { useId, useRef } from "react";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 
 const TEMPLATE_VARS = [
   "{{.RuleName}}",
@@ -27,8 +26,9 @@ interface TemplateEditorProps {
 export function TemplateEditor({
   value,
   onChange,
-  label = "Message Template (optional)",
+  label = "Message template (optional)",
 }: TemplateEditorProps) {
+  const id = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const insertVariable = (variable: string) => {
@@ -53,32 +53,37 @@ export function TemplateEditor({
 
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
-      <div className="flex flex-wrap gap-1 mb-1">
-        {TEMPLATE_VARS.map((v) => (
-          <Badge
-            key={v}
-            variant="secondary"
-            className="cursor-pointer hover:bg-muted-foreground/20 text-xs"
-            onClick={() => {
-              insertVariable(v);
-            }}
-          >
-            {v}
-          </Badge>
-        ))}
-      </div>
+      <Label htmlFor={id}>{label}</Label>
       <Textarea
+        id={id}
         ref={textareaRef}
         value={value}
         onChange={(e) => {
           onChange(e.target.value);
         }}
-        placeholder="Custom notification message. Click variables above to insert."
+        placeholder="Custom notification message. Pick a variable below to insert it."
         rows={3}
       />
-      <p className="text-xs text-muted-foreground">
-        Uses Go template syntax. Leave empty for default message.
+      <div
+        role="group"
+        aria-label="Insert a variable"
+        className="flex flex-wrap gap-1"
+      >
+        {TEMPLATE_VARS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            className="rounded-[5px] bg-foreground/[0.07] px-1.5 py-0.5 font-mono text-[11.5px] text-muted-foreground outline-hidden transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => {
+              insertVariable(v);
+            }}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
+      <p className="text-[12.5px] text-muted-foreground">
+        Uses Go template syntax. Leave empty for the default message.
       </p>
     </div>
   );

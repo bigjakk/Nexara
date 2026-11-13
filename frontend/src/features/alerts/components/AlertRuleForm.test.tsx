@@ -62,7 +62,7 @@ async function pickOption(
 function submitButton() {
   // The dialog trigger shares this name; the submit button is the one inside.
   return within(screen.getByRole("dialog")).getByRole("button", {
-    name: "Create Rule",
+    name: "Create rule",
   });
 }
 
@@ -140,9 +140,9 @@ describe("AlertRuleForm", () => {
   it("starts a disk or network rule at a bytes/s threshold", async () => {
     const user = await openForm();
     // 90, the percent metrics' default, fires on any I/O as bytes/s.
-    await pickOption(user, "Metric", "Disk Read (bytes/s)");
+    await pickOption(user, "Metric", "Disk read (bytes/s)");
     expect(screen.getByLabelText("Threshold")).toHaveValue(104857600);
-    await pickOption(user, "Metric", "Network Out (bytes/s)");
+    await pickOption(user, "Metric", "Network out (bytes/s)");
     expect(screen.getByLabelText("Threshold")).toHaveValue(104857600);
   });
 
@@ -150,8 +150,8 @@ describe("AlertRuleForm", () => {
   it("offers the UPS metrics only with a global view:ups", async () => {
     const user = await openForm();
     await user.click(screen.getByRole("combobox", { name: "Metric" }));
-    expect(await screen.findByRole("option", { name: "CPU Usage (%)" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "UPS on Battery (count)" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "CPU usage (%)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "UPS on battery (count)" })).not.toBeInTheDocument();
   });
 
   it("creates a UPS charge rule as global, below 50%", async () => {
@@ -160,7 +160,7 @@ describe("AlertRuleForm", () => {
     // "> 50" would fire on every healthy UPS, a NUT server belongs to no
     // cluster, and an hour's cooldown would swallow a storm's second outage:
     // all three snap with the metric.
-    await pickOption(user, "Metric", "UPS Lowest Battery Charge (%)");
+    await pickOption(user, "Metric", "UPS lowest battery charge (%)");
     expect(screen.getByRole("combobox", { name: "Scope" })).toHaveTextContent("Global (all UPS)");
     await user.click(submitButton());
 
@@ -191,7 +191,7 @@ describe("AlertRuleForm", () => {
       ),
     );
     const user = await openForm();
-    await pickOption(user, "Metric", "UPS Lowest Battery Charge (%)");
+    await pickOption(user, "Metric", "UPS lowest battery charge (%)");
     await pickOption(user, "Scope", "One UPS");
     await pickOption(user, "UPS", "ups01@nut01");
     await user.click(submitButton());

@@ -15,7 +15,6 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
-  AlertTriangle,
 } from "lucide-react";
 import {
   useNotificationDLQ,
@@ -27,13 +26,18 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { formatRelativeTime } from "@/lib/format";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { DetailField } from "@/components/DetailField";
+import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
+import { DefGrid, Panel } from "@/components/page/Panel";
+import { Stat, StatStrip } from "@/components/page/StatStrip";
+import { cn } from "@/lib/utils";
 import type { DLQState, NotificationDLQEntry } from "@/types/api";
 
 const STATE_VARIANTS: Record<DLQState, BadgeVariant> = {
   pending: "destructive",
   rate_limited: "secondary",
   retrying: "outline",
-  resolved: "default",
+  resolved: "outline",
   dismissed: "secondary",
 };
 
@@ -87,73 +91,73 @@ export function NotificationDLQTable() {
     });
   };
 
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <SummaryTile
-          label="Failed"
-          count={summary?.pending ?? 0}
-          variant="destructive"
-          onClick={() => {
-            setStateFilter("pending");
-          }}
-          active={stateFilter === "pending"}
-        />
-        <SummaryTile
-          label="Rate-limited"
-          count={summary?.rate_limited ?? 0}
-          variant="secondary"
-          onClick={() => {
-            setStateFilter("rate_limited");
-          }}
-          active={stateFilter === "rate_limited"}
-        />
-        <SummaryTile
-          label="Retrying"
-          count={summary?.retrying ?? 0}
-          variant="outline"
-          onClick={() => {
-            setStateFilter("retrying");
-          }}
-          active={stateFilter === "retrying"}
-        />
-        <SummaryTile
-          label="Resolved"
-          count={summary?.resolved ?? 0}
-          variant="default"
-          onClick={() => {
-            setStateFilter("resolved");
-          }}
-          active={stateFilter === "resolved"}
-        />
-        <SummaryTile
-          label="All"
-          count={
-            (summary?.pending ?? 0) +
-            (summary?.rate_limited ?? 0) +
-            (summary?.retrying ?? 0) +
-            (summary?.resolved ?? 0) +
-            (summary?.dismissed ?? 0)
-          }
-          variant="outline"
-          onClick={() => {
-            setStateFilter("");
-          }}
-          active={stateFilter === ""}
-        />
-      </div>
+  const counts = {
+    pending: summary?.pending ?? 0,
+    rate_limited: summary?.rate_limited ?? 0,
+    retrying: summary?.retrying ?? 0,
+    resolved: summary?.resolved ?? 0,
+  };
+  const all =
+    counts.pending +
+    counts.rate_limited +
+    counts.retrying +
+    counts.resolved +
+    (summary?.dismissed ?? 0);
+  // No summary (still loading, or the read failed) is not a count of zero.
+  const count = (n: number) => (summary === undefined ? "—" : n);
+  const pick = (state: DLQState | "") => ({
+    selected: stateFilter === state,
+    onSelect: () => {
+      setStateFilter(state);
+    },
+  });
 
-      <div className="rounded-md border">
+  return (
+    <Panel flush bodyClassName="pt-4">
+      {/* The counts are the filter: the one pressed is what the table lists. */}
+      <StatStrip>
+        <Stat
+          label="Failed"
+          value={count(counts.pending)}
+          tone={counts.pending > 0 ? "bad" : "quiet"}
+          {...pick("pending")}
+        />
+        <Stat
+          label="Rate-limited"
+          value={count(counts.rate_limited)}
+          tone={counts.rate_limited > 0 ? "warn" : "quiet"}
+          {...pick("rate_limited")}
+        />
+        <Stat
+          label="Retrying"
+          value={count(counts.retrying)}
+          tone={counts.retrying > 0 ? "default" : "quiet"}
+          {...pick("retrying")}
+        />
+        <Stat
+          label="Resolved"
+          value={count(counts.resolved)}
+          tone={counts.resolved > 0 ? "default" : "quiet"}
+          {...pick("resolved")}
+        />
+        <Stat
+          label="All"
+          value={count(all)}
+          tone={all > 0 ? "default" : "quiet"}
+          {...pick("")}
+        />
+      </StatStrip>
+
+      <div className="-mt-px border-t">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : !entries?.length ? (
-          <div className="py-12 text-center text-muted-foreground">
-            <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-muted-foreground/60" />
+          <p className="px-[18px] py-10 text-center text-sm text-muted-foreground">
             No dead-letter entries
             {stateFilter ? ` in state "${STATE_LABELS[stateFilter]}"` : ""}.
-          </div>
+          </p>
         ) : (
           <Table>
             <TableHeader>
@@ -211,36 +215,7 @@ export function NotificationDLQTable() {
           "The entry, its stored payload and its last error are deleted, so this notification can no longer be retried or inspected. This cannot be undone."
         }
       />
-    </div>
-  );
-}
-
-interface SummaryTileProps {
-  label: string;
-  count: number;
-  variant: BadgeVariant;
-  onClick: () => void;
-  active: boolean;
-}
-
-function SummaryTile({
-  label,
-  count,
-  variant,
-  onClick,
-  active,
-}: SummaryTileProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-md border bg-card p-3 text-left transition hover:bg-accent ${active ? "ring-2 ring-primary" : ""}`}
-    >
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <Badge variant={variant}>{count}</Badge>
-      </div>
-    </button>
+    </Panel>
   );
 }
 
@@ -270,7 +245,7 @@ function DLQRow({
   return (
     <>
       <TableRow className="cursor-pointer" onClick={onToggle}>
-        <TableCell className="px-2">
+        <TableCell className="text-muted-foreground">
           {expanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
@@ -279,7 +254,7 @@ function DLQRow({
         </TableCell>
         <TableCell>
           <div className="font-medium">{entry.channel_name}</div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-[12.5px] text-muted-foreground">
             {entry.channel_type}
           </div>
         </TableCell>
@@ -289,7 +264,12 @@ function DLQRow({
           </Badge>
           {feedback && (
             <span
-              className={`ml-2 text-xs ${feedback.success ? "text-emerald-600" : "text-red-600"}`}
+              className={cn(
+                "ml-2 text-[12.5px]",
+                feedback.success
+                  ? "text-muted-foreground"
+                  : "text-red-700 dark:text-red-400",
+              )}
             >
               {feedback.message}
             </span>
@@ -315,10 +295,11 @@ function DLQRow({
                   <Button
                     variant="outline"
                     size="sm"
+                    className="gap-1"
                     onClick={onRetry}
                     disabled={retryPending}
                   >
-                    <RefreshCw className="mr-1 h-3 w-3" />
+                    <RefreshCw className="h-3 w-3" />
                     Retry
                   </Button>
                   <Button variant="ghost" size="sm" onClick={onDismiss}>
@@ -330,52 +311,52 @@ function DLQRow({
                 aria-label={`Delete failed notification to ${entry.channel_name} from ${formatRelativeTime(entry.created_at)}`}
                 variant="ghost"
                 size="sm"
+                className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
                 onClick={onDelete}
               >
-                <Trash2 className="h-4 w-4 text-destructive" />
+                <Trash2 className="h-4 w-4" />
               </Button>
             </div>
           </TableCell>
         )}
       </TableRow>
       {expanded && (
-        <TableRow>
-          <TableCell colSpan={canManage ? 7 : 6} className="bg-muted/30">
-            <div className="space-y-2 p-2 text-xs">
-              <DetailField label="Failure kind" value={entry.failure_kind} />
-              <DetailField label="Created" value={entry.created_at} />
-              <DetailField label="Last update" value={entry.updated_at} />
-              {entry.alert_id && (
-                <DetailField label="Alert ID" value={entry.alert_id} />
-              )}
-              {entry.rule_id && (
-                <DetailField label="Rule ID" value={entry.rule_id} />
-              )}
-              <div>
-                <div className="text-muted-foreground mb-1">Last error</div>
-                <pre className="whitespace-pre-wrap rounded bg-background p-2 text-xs">
-                  {entry.last_error || "(empty)"}
-                </pre>
-              </div>
-              <div>
-                <div className="text-muted-foreground mb-1">Stored payload</div>
-                <pre className="whitespace-pre-wrap rounded bg-background p-2 text-xs">
-                  {JSON.stringify(entry.payload, null, 2)}
-                </pre>
-              </div>
-            </div>
-          </TableCell>
-        </TableRow>
+        <ExpandedDetailRow colSpan={canManage ? 7 : 6}>
+          <DefGrid className="grid-cols-[repeat(auto-fit,minmax(min(14rem,100%),1fr))]">
+            <DetailField label="Failure kind" variant="mono">
+              {entry.failure_kind}
+            </DetailField>
+            <DetailField label="Created" variant="mono">
+              {entry.created_at}
+            </DetailField>
+            <DetailField label="Last update" variant="mono">
+              {entry.updated_at}
+            </DetailField>
+            {entry.alert_id && (
+              <DetailField label="Alert ID" variant="mono">
+                {entry.alert_id}
+              </DetailField>
+            )}
+            {entry.rule_id && (
+              <DetailField label="Rule ID" variant="mono">
+                {entry.rule_id}
+              </DetailField>
+            )}
+          </DefGrid>
+          <div className="text-xs">
+            <div className="mb-1 text-muted-foreground">Last error</div>
+            <pre className="whitespace-pre-wrap rounded-md bg-background p-2.5">
+              {entry.last_error || "(empty)"}
+            </pre>
+          </div>
+          <div className="text-xs">
+            <div className="mb-1 text-muted-foreground">Stored payload</div>
+            <pre className="whitespace-pre-wrap rounded-md bg-background p-2.5">
+              {JSON.stringify(entry.payload, null, 2)}
+            </pre>
+          </div>
+        </ExpandedDetailRow>
       )}
     </>
-  );
-}
-
-function DetailField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[160px_1fr] gap-2">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono">{value}</span>
-    </div>
   );
 }

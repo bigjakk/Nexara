@@ -10,6 +10,7 @@ import { DataTableFrame } from "@/components/DataTableFrame";
 import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
+import { Panel } from "@/components/page/Panel";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import type { UpsWritableVar } from "../types/ups";
 
@@ -44,7 +45,7 @@ const COLUMNS: ColumnDef<UpsVar, SortKey, Ctx>[] = [
   {
     key: "description",
     label: "Description",
-    width: 360,
+    width: 460,
     sortValue: (v) => v.description || null,
     wrap: true,
     cell: (v) => <span className="text-sm text-muted-foreground">{v.description || "—"}</span>,
@@ -58,7 +59,7 @@ const COLUMNS: ColumnDef<UpsVar, SortKey, Ctx>[] = [
       const w = v.writable;
       if (w === undefined) return null;
       if (edit === undefined) {
-        return <Badge variant="outline" title={whyNot ?? undefined}>writable</Badge>;
+        return <Badge variant="outline" className="font-medium text-muted-foreground" title={whyNot ?? undefined}>Writable</Badge>;
       }
       return (
         <Button
@@ -112,18 +113,29 @@ export function UpsVariablesTable({
   const { expanded, toggle: toggleExpand } = useExpandedRows();
 
   return (
-    <div className="space-y-3">
-      <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
-        <Input
-          aria-label="Filter variables"
-          placeholder={`Filter ${String(all.length)} variables`}
-          className="pl-8"
-          value={filter}
-          onChange={(e) => { setFilter(e.target.value); }}
-        />
-      </div>
-      <div className="rounded-md border">
+    <Panel
+      flush
+      title="Variables"
+      aside={q === "" ? `${String(all.length)} from upsd` : `${String(shown.length)} of ${String(all.length)}`}
+      actions={
+        <div className="relative w-64 max-w-full">
+          <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          <Input
+            aria-label="Filter variables"
+            placeholder={`Filter ${String(all.length)} variables`}
+            className="h-8 pl-8"
+            value={filter}
+            onChange={(e) => { setFilter(e.target.value); }}
+          />
+        </div>
+      }
+    >
+      {rows.length === 0 && (
+        <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+          {all.length === 0 ? "upsd reported no variables for this UPS." : "No variable matches the filter."}
+        </p>
+      )}
+      {rows.length > 0 && (
         <DataTableFrame layout={layout}>
           <TableHeader>
             <DataTableHeadRow layout={layout} directionFor={directionFor} onSort={toggle} />
@@ -154,7 +166,7 @@ export function UpsVariablesTable({
             })}
           </TableBody>
         </DataTableFrame>
-      </div>
-    </div>
+      )}
+    </Panel>
   );
 }

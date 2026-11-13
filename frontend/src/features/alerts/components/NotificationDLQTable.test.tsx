@@ -72,6 +72,11 @@ describe("NotificationDLQTable — delete", () => {
   it("asks first, naming the entry, and sends nothing yet", async () => {
     const user = userEvent.setup();
     renderWithProviders(<NotificationDLQTable />);
+    // Before the summary arrives the strip has no count to show, and says so:
+    // a 0 here would read as "nothing failed".
+    expect(screen.getByRole("button", { name: /^Failed/ })).toHaveTextContent(
+      "—",
+    );
     await clickDelete(user);
 
     const dialog = screen.getByRole("alertdialog");

@@ -1,24 +1,25 @@
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { PROBLEM_CHIP } from "../lib/alert-style";
 
-const stateStyles: Record<string, string> = {
-  pending:
-    "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  firing: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  acknowledged:
-    "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  resolved:
-    "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-};
-
+/**
+ * Firing is red and pending amber, the two states that want attention.
+ * Acknowledged is a plain chip and resolved a quiet one: both are handled.
+ */
 export function AlertStateBadge({ state }: { state: string }) {
   return (
-    <span
+    <Badge
+      variant={state === "pending" ? "warning" : "outline"}
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize",
-        stateStyles[state] ?? "bg-muted text-muted-foreground",
+        "capitalize",
+        state === "firing" && PROBLEM_CHIP,
+        state !== "firing" &&
+          state !== "pending" &&
+          state !== "acknowledged" &&
+          "font-medium text-muted-foreground",
       )}
     >
       {state}
-    </span>
+    </Badge>
   );
 }

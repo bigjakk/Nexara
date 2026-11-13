@@ -10,6 +10,7 @@ import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
+import { DefGrid } from "@/components/page/Panel";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { cn } from "@/lib/utils";
 import type { UpsEvent } from "../types/ups";
@@ -43,7 +44,7 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
     {
       key: "event",
       label: "Event",
-      width: 280,
+      width: 340,
       sortValue: (e) => eventLabel(e),
       cell: (e) => (
         <span className="flex items-center gap-2 font-medium">
@@ -57,7 +58,7 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
     cols.push({
       key: "ups",
       label: "UPS",
-      width: 160,
+      width: 200,
       sortValue: (e) => e.ups_name,
       cell: (e) => (
         <Link to={`/power/${e.ups_id}`} className="hover:underline" onClick={(ev) => { ev.stopPropagation(); }}>
@@ -69,7 +70,7 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
   cols.push({
     key: "duration",
     label: "Duration",
-    width: 150,
+    width: 200,
     sortValue: (e) => (e.ended_at === null ? Infinity : Date.parse(e.ended_at) - Date.parse(e.started_at)),
     cell: (e, ctx) => <span className="text-sm text-muted-foreground">{eventDuration(e, ctx.now)}</span>,
   });
@@ -80,7 +81,7 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
 export function LatestEventsNote({ count }: { count: number }) {
   if (count < UPS_EVENTS_LIMIT) return null;
   return (
-    <p className="text-xs text-muted-foreground">
+    <p className="border-t px-[18px] pt-3 text-[12.5px] text-muted-foreground">
       Showing the latest {UPS_EVENTS_LIMIT} power events.
     </p>
   );
@@ -107,49 +108,47 @@ export function PowerEventsTable({ events, showUps = false }: { events: UpsEvent
   }
 
   return (
-    <div className="rounded-md border">
-      <DataTableFrame layout={layout}>
-        <TableHeader>
-          <DataTableHeadRow layout={layout} directionFor={directionFor} onSort={toggle} />
-        </TableHeader>
-        <TableBody>
-          {rows.map((e) => (
-            <Fragment key={e.id}>
-              <TableRow className="cursor-pointer" onClick={() => { toggleExpand(e.id); }}>
-                <DataTableCells row={e} layout={layout} ctx={ctx} />
-              </TableRow>
-              {expanded.has(e.id) && (
-                <ExpandedDetailRow colSpan={layout.columns.length}>
-                  <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                    <DetailField label="Started">{formatDateTime(e.started_at)}</DetailField>
-                    {e.kind !== "self_test" && (
-                      <DetailField label="Ended">
-                        {eventEnded(e, e.ended_at === null ? "" : formatDateTime(e.ended_at))}
-                      </DetailField>
-                    )}
-                    <DetailField label="UPS">{e.ups_description !== "" ? `${e.ups_name} (${e.ups_description})` : e.ups_name}</DetailField>
-                    <DetailField label="NUT server">{e.server_name}</DetailField>
-                    {e.details.lowest_charge !== undefined && (
-                      <DetailField label="Lowest charge">{`${String(Math.round(e.details.lowest_charge))}%`}</DetailField>
-                    )}
-                    {e.details.lowest_runtime !== undefined && (
-                      <DetailField label="Lowest runtime">{formatRuntime(e.details.lowest_runtime)}</DetailField>
-                    )}
-                    {e.details.peak_load !== undefined && (
-                      <DetailField label="Peak load">{`${String(Math.round(e.details.peak_load))}%`}</DetailField>
-                    )}
-                    {e.details.status !== undefined && e.details.status !== "" && (
-                      <DetailField label="Status" variant="mono">{e.details.status}</DetailField>
-                    )}
-                    {e.details.reason !== undefined && <DetailField label="Reason">{e.details.reason}</DetailField>}
-                    {e.details.result !== undefined && <DetailField label="Result">{e.details.result}</DetailField>}
-                  </dl>
-                </ExpandedDetailRow>
-              )}
-            </Fragment>
-          ))}
-        </TableBody>
-      </DataTableFrame>
-    </div>
+    <DataTableFrame layout={layout}>
+      <TableHeader>
+        <DataTableHeadRow layout={layout} directionFor={directionFor} onSort={toggle} />
+      </TableHeader>
+      <TableBody>
+        {rows.map((e) => (
+          <Fragment key={e.id}>
+            <TableRow className="cursor-pointer" onClick={() => { toggleExpand(e.id); }}>
+              <DataTableCells row={e} layout={layout} ctx={ctx} />
+            </TableRow>
+            {expanded.has(e.id) && (
+              <ExpandedDetailRow colSpan={layout.columns.length}>
+                <DefGrid>
+                  <DetailField label="Started">{formatDateTime(e.started_at)}</DetailField>
+                  {e.kind !== "self_test" && (
+                    <DetailField label="Ended">
+                      {eventEnded(e, e.ended_at === null ? "" : formatDateTime(e.ended_at))}
+                    </DetailField>
+                  )}
+                  <DetailField label="UPS">{e.ups_description !== "" ? `${e.ups_name} (${e.ups_description})` : e.ups_name}</DetailField>
+                  <DetailField label="NUT server">{e.server_name}</DetailField>
+                  {e.details.lowest_charge !== undefined && (
+                    <DetailField label="Lowest charge">{`${String(Math.round(e.details.lowest_charge))}%`}</DetailField>
+                  )}
+                  {e.details.lowest_runtime !== undefined && (
+                    <DetailField label="Lowest runtime">{formatRuntime(e.details.lowest_runtime)}</DetailField>
+                  )}
+                  {e.details.peak_load !== undefined && (
+                    <DetailField label="Peak load">{`${String(Math.round(e.details.peak_load))}%`}</DetailField>
+                  )}
+                  {e.details.status !== undefined && e.details.status !== "" && (
+                    <DetailField label="Status" variant="mono">{e.details.status}</DetailField>
+                  )}
+                  {e.details.reason !== undefined && <DetailField label="Reason">{e.details.reason}</DetailField>}
+                  {e.details.result !== undefined && <DetailField label="Result">{e.details.result}</DetailField>}
+                </DefGrid>
+              </ExpandedDetailRow>
+            )}
+          </Fragment>
+        ))}
+      </TableBody>
+    </DataTableFrame>
   );
 }

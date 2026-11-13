@@ -57,6 +57,16 @@ async function clickDelete(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("ChannelsTable — edit", () => {
+  // The empty state says alerts are sent nowhere, which only a read that came
+  // back empty may claim. An unstubbed GET answers 404.
+  it("says a failed read failed, not that there are no channels", async () => {
+    stubApi({});
+    renderWithProviders(<ChannelsTable />);
+    expect(
+      await screen.findByText("Could not load notification channels."),
+    ).toBeInTheDocument();
+  });
+
   // Edit shows no settings fields, and the server replaces the stored
   // settings with any config it is sent, so a rename must send none.
   it("saves the name and Enabled without sending config", async () => {

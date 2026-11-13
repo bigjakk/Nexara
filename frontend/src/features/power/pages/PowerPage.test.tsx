@@ -36,13 +36,17 @@ describe("PowerPage", () => {
 
     expect(await screen.findByText(/ups01 is on battery/)).toBeInTheDocument();
     expect(screen.getByText(/Shortest runtime: ups01, 9m 40s/)).toBeInTheDocument();
-    // What the outage will cost, in the banner, the summary and the card.
+    // The page says the state in its summary, counting ups02 as not read.
+    expect(screen.getByText("2 UPS on 1 NUT server, 1 on battery, 1 not read")).toBeInTheDocument();
+    // What the outage will cost, in the banner, the summary and the row.
     expect(screen.getByText("Will lose power without shutting down: pve-03 (cluster01).")).toBeInTheDocument();
-    expect(screen.getByText("1 of 2 nodes")).toBeInTheDocument();
-    const cards = screen.getAllByRole("link", { name: /^ups0[12]$/ }).map((a) => a.closest("div.panel") as HTMLElement);
-    expect(within(cards[0] as HTMLElement).getByText("On battery")).toBeInTheDocument();
-    expect(within(cards[0] as HTMLElement).getByText("Not protected")).toBeInTheDocument();
-    expect(within(cards[1] as HTMLElement).getByText("Unreachable")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Not protected: pve-03 (cluster01)")).toBeInTheDocument();
+    const [first, second] = screen.getAllByRole("listitem");
+    expect(within(first as HTMLElement).getByRole("link", { name: "ups01" })).toHaveAttribute("href", "/power/u1");
+    expect(within(first as HTMLElement).getByText("On battery")).toBeInTheDocument();
+    expect(within(first as HTMLElement).getByText("Not protected")).toBeInTheDocument();
+    expect(within(second as HTMLElement).getByText("Unreachable")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add nut server/i })).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -24,6 +26,7 @@ import {
   useUpdateNotificationChannel,
 } from "../api/alert-queries";
 import type { ChannelType } from "@/types/api";
+import { Field, FormSection } from "./FormParts";
 
 const CHANNEL_TYPES: { value: ChannelType; label: string }[] = [
   { value: "email", label: "Email (SMTP)" },
@@ -31,7 +34,7 @@ const CHANNEL_TYPES: { value: ChannelType; label: string }[] = [
   { value: "discord", label: "Discord" },
   { value: "teams", label: "Microsoft Teams" },
   { value: "telegram", label: "Telegram" },
-  { value: "webhook", label: "Generic Webhook" },
+  { value: "webhook", label: "Generic webhook" },
   { value: "pagerduty", label: "PagerDuty" },
 ];
 
@@ -57,6 +60,7 @@ export function ChannelForm({
     editType ?? "email",
   );
   const [enabled, setEnabled] = useState(editEnabled ?? true);
+  const enabledId = useId();
 
   // Email fields
   const [smtpHost, setSmtpHost] = useState("");
@@ -185,11 +189,16 @@ export function ChannelForm({
   const isPending = createMutation.isPending || updateMutation.isPending;
 
   const dialogContent = (
-    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+    <DialogContent className="max-w-lg">
       <DialogHeader>
         <DialogTitle>
-          {isEdit ? "Edit Channel" : "Create Notification Channel"}
+          {isEdit ? "Edit channel" : "Add notification channel"}
         </DialogTitle>
+        <DialogDescription>
+          {isEdit
+            ? "Rename the channel or turn it off. Its stored settings stay as they are."
+            : "Where alert notifications are sent. Its settings are stored encrypted and never shown again."}
+        </DialogDescription>
       </DialogHeader>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
@@ -200,37 +209,42 @@ export function ChannelForm({
             onChange={(e) => {
               setName(e.target.value);
             }}
-            placeholder="Production Alerts"
+            placeholder="Production alerts"
             required
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label>Channel Type</Label>
-            <Select
-              value={channelType}
-              onValueChange={(v) => {
-                setChannelType(v as ChannelType);
-              }}
-              disabled={isEdit}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CHANNEL_TYPES.map((ct) => (
-                  <SelectItem key={ct.value} value={ct.value}>
-                    {ct.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
+          <Field label="Channel type">
+            {(id) => (
+              <Select
+                value={channelType}
+                onValueChange={(v) => {
+                  setChannelType(v as ChannelType);
+                }}
+                disabled={isEdit}
+              >
+                <SelectTrigger id={id}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CHANNEL_TYPES.map((ct) => (
+                    <SelectItem key={ct.value} value={ct.value}>
+                      {ct.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </Field>
 
-          <div className="flex items-end gap-2 pb-1">
-            <Switch checked={enabled} onCheckedChange={setEnabled} />
-            <Label>Enabled</Label>
+          <div className="flex h-9 items-center gap-2">
+            <Switch
+              id={enabledId}
+              checked={enabled}
+              onCheckedChange={setEnabled}
+            />
+            <Label htmlFor={enabledId}>Enabled</Label>
           </div>
         </div>
 
@@ -309,7 +323,7 @@ export function ChannelForm({
           </>
         )}
 
-        <div className="flex justify-end gap-2 pt-2">
+        <DialogFooter className="gap-2 sm:space-x-0">
           <Button
             type="button"
             variant="outline"
@@ -323,7 +337,7 @@ export function ChannelForm({
           <Button type="submit" disabled={isPending}>
             {isPending ? "Saving..." : isEdit ? "Update" : "Create"}
           </Button>
-        </div>
+        </DialogFooter>
       </form>
     </DialogContent>
   );
@@ -350,9 +364,9 @@ export function ChannelForm({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline">
-          <Plus className="mr-2 h-4 w-4" />
-          Add Channel
+        <Button variant="outline" className="gap-1.5">
+          <Plus className="h-4 w-4" />
+          Add channel
         </Button>
       </DialogTrigger>
       {dialogContent}
@@ -397,86 +411,98 @@ function EmailFields({
   subjectTemplate: string;
   setSubjectTemplate: (v: string) => void;
 }) {
+  const tlsId = useId();
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <p className="text-sm font-medium">SMTP Configuration</p>
+    <FormSection title="SMTP settings">
       <div className="grid grid-cols-3 gap-3">
-        <div className="col-span-2 space-y-1">
-          <Label>Host</Label>
-          <Input
-            value={host}
-            onChange={(e) => {
-              setHost(e.target.value);
-            }}
-            placeholder="smtp.gmail.com"
-            required
-          />
-        </div>
-        <div className="space-y-1">
-          <Label>Port</Label>
-          <Input
-            type="number"
-            value={port}
-            onChange={(e) => {
-              setPort(e.target.value);
-            }}
-          />
-        </div>
+        <Field label="Host" className="col-span-2">
+          {(id) => (
+            <Input
+              id={id}
+              value={host}
+              onChange={(e) => {
+                setHost(e.target.value);
+              }}
+              placeholder="smtp.example.com"
+              required
+            />
+          )}
+        </Field>
+        <Field label="Port">
+          {(id) => (
+            <Input
+              id={id}
+              type="number"
+              value={port}
+              onChange={(e) => {
+                setPort(e.target.value);
+              }}
+            />
+          )}
+        </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label>Username</Label>
+        <Field label="Username">
+          {(id) => (
+            <Input
+              id={id}
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+              }}
+            />
+          )}
+        </Field>
+        <Field label="Password">
+          {(id) => (
+            <Input
+              id={id}
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+              }}
+            />
+          )}
+        </Field>
+      </div>
+      <Field label="From">
+        {(id) => (
           <Input
-            value={username}
+            id={id}
+            value={from}
             onChange={(e) => {
-              setUsername(e.target.value);
+              setFrom(e.target.value);
             }}
+            placeholder="alerts@example.com"
+            required
           />
-        </div>
-        <div className="space-y-1">
-          <Label>Password</Label>
+        )}
+      </Field>
+      <Field label="To (comma-separated)">
+        {(id) => (
           <Input
-            type="password"
-            value={password}
+            id={id}
+            value={to}
             onChange={(e) => {
-              setPassword(e.target.value);
+              setTo(e.target.value);
             }}
+            placeholder="admin@example.com, ops@example.com"
+            required
           />
-        </div>
-      </div>
-      <div className="space-y-1">
-        <Label>From</Label>
-        <Input
-          value={from}
-          onChange={(e) => {
-            setFrom(e.target.value);
-          }}
-          placeholder="alerts@example.com"
-          required
-        />
-      </div>
-      <div className="space-y-1">
-        <Label>To (comma-separated)</Label>
-        <Input
-          value={to}
-          onChange={(e) => {
-            setTo(e.target.value);
-          }}
-          placeholder="admin@example.com, ops@example.com"
-          required
-        />
-      </div>
+        )}
+      </Field>
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Switch checked={tls} onCheckedChange={setTls} />
-          <Label>Use STARTTLS</Label>
+          <Switch id={tlsId} checked={tls} onCheckedChange={setTls} />
+          <Label htmlFor={tlsId}>Use STARTTLS</Label>
         </div>
         {!tls && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+          <div className="flex items-start gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="space-y-1">
               <p className="font-medium">
-                Cleartext SMTP — local development only
+                Cleartext SMTP: local development only
               </p>
               <p>
                 With STARTTLS off, credentials and message bodies are sent
@@ -489,17 +515,19 @@ function EmailFields({
           </div>
         )}
       </div>
-      <div className="space-y-1">
-        <Label>Subject Template (optional)</Label>
-        <Input
-          value={subjectTemplate}
-          onChange={(e) => {
-            setSubjectTemplate(e.target.value);
-          }}
-          placeholder="[{{.Severity}}] {{.RuleName}} on {{.ResourceName}}"
-        />
-      </div>
-    </div>
+      <Field label="Subject template (optional)">
+        {(id) => (
+          <Input
+            id={id}
+            value={subjectTemplate}
+            onChange={(e) => {
+              setSubjectTemplate(e.target.value);
+            }}
+            placeholder="[{{.Severity}}] {{.RuleName}} on {{.ResourceName}}"
+          />
+        )}
+      </Field>
+    </FormSection>
   );
 }
 
@@ -519,41 +547,46 @@ function SlackFields({
   setUsername: (v: string) => void;
 }) {
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <p className="text-sm font-medium">Slack Configuration</p>
-      <div className="space-y-1">
-        <Label>Webhook URL</Label>
-        <Input
-          value={webhookUrl}
-          onChange={(e) => {
-            setWebhookUrl(e.target.value);
-          }}
-          placeholder="https://hooks.slack.com/services/..."
-          required
-        />
-      </div>
+    <FormSection title="Slack settings">
+      <Field label="Webhook URL">
+        {(id) => (
+          <Input
+            id={id}
+            value={webhookUrl}
+            onChange={(e) => {
+              setWebhookUrl(e.target.value);
+            }}
+            placeholder="https://hooks.slack.com/services/..."
+            required
+          />
+        )}
+      </Field>
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label>Channel (optional)</Label>
-          <Input
-            value={channel}
-            onChange={(e) => {
-              setChannel(e.target.value);
-            }}
-            placeholder="#alerts"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label>Username (optional)</Label>
-          <Input
-            value={username}
-            onChange={(e) => {
-              setUsername(e.target.value);
-            }}
-          />
-        </div>
+        <Field label="Channel (optional)">
+          {(id) => (
+            <Input
+              id={id}
+              value={channel}
+              onChange={(e) => {
+                setChannel(e.target.value);
+              }}
+              placeholder="#alerts"
+            />
+          )}
+        </Field>
+        <Field label="Username (optional)">
+          {(id) => (
+            <Input
+              id={id}
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+              }}
+            />
+          )}
+        </Field>
       </div>
-    </div>
+    </FormSection>
   );
 }
 
@@ -569,29 +602,32 @@ function DiscordFields({
   setUsername: (v: string) => void;
 }) {
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <p className="text-sm font-medium">Discord Configuration</p>
-      <div className="space-y-1">
-        <Label>Webhook URL</Label>
-        <Input
-          value={webhookUrl}
-          onChange={(e) => {
-            setWebhookUrl(e.target.value);
-          }}
-          placeholder="https://discord.com/api/webhooks/..."
-          required
-        />
-      </div>
-      <div className="space-y-1">
-        <Label>Username (optional)</Label>
-        <Input
-          value={username}
-          onChange={(e) => {
-            setUsername(e.target.value);
-          }}
-        />
-      </div>
-    </div>
+    <FormSection title="Discord settings">
+      <Field label="Webhook URL">
+        {(id) => (
+          <Input
+            id={id}
+            value={webhookUrl}
+            onChange={(e) => {
+              setWebhookUrl(e.target.value);
+            }}
+            placeholder="https://discord.com/api/webhooks/..."
+            required
+          />
+        )}
+      </Field>
+      <Field label="Username (optional)">
+        {(id) => (
+          <Input
+            id={id}
+            value={username}
+            onChange={(e) => {
+              setUsername(e.target.value);
+            }}
+          />
+        )}
+      </Field>
+    </FormSection>
   );
 }
 
@@ -603,20 +639,21 @@ function TeamsFields({
   setWebhookUrl: (v: string) => void;
 }) {
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <p className="text-sm font-medium">Microsoft Teams Configuration</p>
-      <div className="space-y-1">
-        <Label>Webhook URL</Label>
-        <Input
-          value={webhookUrl}
-          onChange={(e) => {
-            setWebhookUrl(e.target.value);
-          }}
-          placeholder="https://outlook.office.com/webhook/..."
-          required
-        />
-      </div>
-    </div>
+    <FormSection title="Microsoft Teams settings">
+      <Field label="Webhook URL">
+        {(id) => (
+          <Input
+            id={id}
+            value={webhookUrl}
+            onChange={(e) => {
+              setWebhookUrl(e.target.value);
+            }}
+            placeholder="https://outlook.office.com/webhook/..."
+            required
+          />
+        )}
+      </Field>
+    </FormSection>
   );
 }
 
@@ -632,31 +669,34 @@ function TelegramFields({
   setChatId: (v: string) => void;
 }) {
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <p className="text-sm font-medium">Telegram Configuration</p>
-      <div className="space-y-1">
-        <Label>Bot Token</Label>
-        <Input
-          value={botToken}
-          onChange={(e) => {
-            setBotToken(e.target.value);
-          }}
-          placeholder="123456:ABC-DEF..."
-          required
-        />
-      </div>
-      <div className="space-y-1">
-        <Label>Chat ID</Label>
-        <Input
-          value={chatId}
-          onChange={(e) => {
-            setChatId(e.target.value);
-          }}
-          placeholder="-1001234567890"
-          required
-        />
-      </div>
-    </div>
+    <FormSection title="Telegram settings">
+      <Field label="Bot token">
+        {(id) => (
+          <Input
+            id={id}
+            value={botToken}
+            onChange={(e) => {
+              setBotToken(e.target.value);
+            }}
+            placeholder="123456:ABC-DEF..."
+            required
+          />
+        )}
+      </Field>
+      <Field label="Chat ID">
+        {(id) => (
+          <Input
+            id={id}
+            value={chatId}
+            onChange={(e) => {
+              setChatId(e.target.value);
+            }}
+            placeholder="-1001234567890"
+            required
+          />
+        )}
+      </Field>
+    </FormSection>
   );
 }
 
@@ -680,61 +720,67 @@ function WebhookFields({
   setBodyTemplate: (v: string) => void;
 }) {
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <p className="text-sm font-medium">Webhook Configuration</p>
+    <FormSection title="Webhook settings">
       <div className="grid grid-cols-3 gap-3">
-        <div className="col-span-2 space-y-1">
-          <Label>URL</Label>
-          <Input
-            value={url}
+        <Field label="URL" className="col-span-2">
+          {(id) => (
+            <Input
+              id={id}
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value);
+              }}
+              placeholder="https://example.com/webhook"
+              required
+            />
+          )}
+        </Field>
+        <Field label="Method">
+          {(id) => (
+            <Select value={method} onValueChange={setMethod}>
+              <SelectTrigger id={id}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="GET">GET</SelectItem>
+                <SelectItem value="POST">POST</SelectItem>
+                <SelectItem value="PUT">PUT</SelectItem>
+                <SelectItem value="PATCH">PATCH</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+      </div>
+      <Field label="Headers (JSON, optional)">
+        {(id) => (
+          <Textarea
+            id={id}
+            value={headers}
             onChange={(e) => {
-              setUrl(e.target.value);
+              setHeaders(e.target.value);
             }}
-            placeholder="https://example.com/webhook"
-            required
+            placeholder='{"Authorization": "Bearer xxx"}'
+            rows={2}
           />
-        </div>
-        <div className="space-y-1">
-          <Label>Method</Label>
-          <Select value={method} onValueChange={setMethod}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="GET">GET</SelectItem>
-              <SelectItem value="POST">POST</SelectItem>
-              <SelectItem value="PUT">PUT</SelectItem>
-              <SelectItem value="PATCH">PATCH</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      <div className="space-y-1">
-        <Label>Headers (JSON, optional)</Label>
-        <Textarea
-          value={headers}
-          onChange={(e) => {
-            setHeaders(e.target.value);
-          }}
-          placeholder='{"Authorization": "Bearer xxx"}'
-          rows={2}
-        />
-      </div>
-      <div className="space-y-1">
-        <Label>Body Template (optional)</Label>
-        <Textarea
-          value={bodyTemplate}
-          onChange={(e) => {
-            setBodyTemplate(e.target.value);
-          }}
-          placeholder='{"alert": "{{.RuleName}}", "severity": "{{.Severity}}"}'
-          rows={3}
-        />
-        <p className="text-xs text-muted-foreground">
-          Leave empty to send full alert payload as JSON
-        </p>
-      </div>
-    </div>
+        )}
+      </Field>
+      <Field
+        label="Body template (optional)"
+        hint="Leave empty to send full alert payload as JSON"
+      >
+        {(id) => (
+          <Textarea
+            id={id}
+            value={bodyTemplate}
+            onChange={(e) => {
+              setBodyTemplate(e.target.value);
+            }}
+            placeholder='{"alert": "{{.RuleName}}", "severity": "{{.Severity}}"}'
+            rows={3}
+          />
+        )}
+      </Field>
+    </FormSection>
   );
 }
 
@@ -746,19 +792,20 @@ function PagerDutyFields({
   setRoutingKey: (v: string) => void;
 }) {
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <p className="text-sm font-medium">PagerDuty Configuration</p>
-      <div className="space-y-1">
-        <Label>Integration/Routing Key</Label>
-        <Input
-          value={routingKey}
-          onChange={(e) => {
-            setRoutingKey(e.target.value);
-          }}
-          placeholder="service-integration-key"
-          required
-        />
-      </div>
-    </div>
+    <FormSection title="PagerDuty settings">
+      <Field label="Integration or routing key">
+        {(id) => (
+          <Input
+            id={id}
+            value={routingKey}
+            onChange={(e) => {
+              setRoutingKey(e.target.value);
+            }}
+            placeholder="service-integration-key"
+            required
+          />
+        )}
+      </Field>
+    </FormSection>
   );
 }

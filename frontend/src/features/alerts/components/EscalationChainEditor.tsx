@@ -1,6 +1,6 @@
+import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -22,6 +22,7 @@ export function EscalationChainEditor({
   onChange,
 }: EscalationChainEditorProps) {
   const { data: channels } = useNotificationChannels();
+  const labelId = useId();
 
   const addStep = () => {
     onChange([...steps, { channel_id: "", delay_minutes: 0 }]);
@@ -44,16 +45,18 @@ export function EscalationChainEditor({
   };
 
   return (
-    <div className="space-y-3">
-      <Label>Escalation Chain</Label>
+    <div role="group" aria-labelledby={labelId} className="space-y-2.5">
+      <div id={labelId} className="text-sm font-medium leading-none">
+        Escalation chain
+      </div>
       {steps.length === 0 && (
         <p className="text-sm text-muted-foreground">
           No escalation steps. Add one to send notifications when alerts fire.
         </p>
       )}
       {steps.map((step, index) => (
-        <div key={index} className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground w-6">
+        <div key={index} className="flex flex-wrap items-center gap-2">
+          <span className="w-5 text-sm text-muted-foreground">
             {index + 1}.
           </span>
           <Select
@@ -62,7 +65,10 @@ export function EscalationChainEditor({
               updateStep(index, "channel_id", v);
             }}
           >
-            <SelectTrigger className="flex-1">
+            <SelectTrigger
+              className="min-w-0 flex-[1_1_10rem]"
+              aria-label={`Channel for step ${String(index + 1)}`}
+            >
               <SelectValue placeholder="Select channel" />
             </SelectTrigger>
             <SelectContent>
@@ -73,17 +79,18 @@ export function EscalationChainEditor({
               ))}
             </SelectContent>
           </Select>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <Input
               type="number"
               min="0"
               className="w-20"
+              aria-label={`Delay in minutes for step ${String(index + 1)}`}
               value={step.delay_minutes}
               onChange={(e) => {
                 updateStep(index, "delay_minutes", Number(e.target.value));
               }}
             />
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
+            <span className="whitespace-nowrap text-[12.5px] text-muted-foreground">
               min delay
             </span>
           </div>
@@ -92,17 +99,24 @@ export function EscalationChainEditor({
             type="button"
             variant="ghost"
             size="sm"
+            className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
             onClick={() => {
               removeStep(index);
             }}
           >
-            <Trash2 className="h-4 w-4 text-destructive" />
+            <Trash2 className="h-4 w-4" />
           </Button>
         </div>
       ))}
-      <Button type="button" variant="outline" size="sm" onClick={addStep}>
-        <Plus className="mr-1 h-3 w-3" />
-        Add Step
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="gap-1"
+        onClick={addStep}
+      >
+        <Plus className="h-3 w-3" />
+        Add step
       </Button>
     </div>
   );

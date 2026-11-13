@@ -227,7 +227,7 @@ export function NutServerDialog({ server, trigger, open: openProp, onOpenChange 
             </label>
           )}
           {tlsMode === "starttls" && (
-            <div className="space-y-3 rounded-md border p-3">
+            <div className="space-y-3 border-t pt-4">
               <div className="space-y-2">
                 <Label htmlFor="nut-fp">Pinned certificate fingerprint</Label>
                 <Input id="nut-fp" value={fingerprint} onChange={(e) => { setFingerprint(e.target.value); }} placeholder="SHA-256, from Test connection" className="font-mono text-xs" />
@@ -269,7 +269,7 @@ export function NutServerDialog({ server, trigger, open: openProp, onOpenChange 
           )}
 
           {probe !== null && (
-            <div className="space-y-1 rounded-md border bg-muted/40 p-3 text-sm">
+            <div className="space-y-1 rounded-md bg-foreground/[0.05] p-3 text-sm">
               <div className="flex items-center gap-2 font-medium">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden="true" />
                 Connected in {probe.took_ms} ms · upsd {probe.nut_version || "?"}, protocol {probe.protocol_version || "?"}

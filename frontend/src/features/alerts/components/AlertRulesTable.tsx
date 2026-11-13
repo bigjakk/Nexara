@@ -17,6 +17,7 @@ import {
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { Panel } from "@/components/page/Panel";
 import type { AlertRule } from "@/types/api";
 import { useUpsDevices } from "@/features/power/api/ups-queries";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -42,8 +43,17 @@ export function AlertRulesTable() {
     updateMutation.mutate({ id, enabled: !currentEnabled });
   };
 
+  const enabledCount = (rules ?? []).filter((r) => r.enabled).length;
+
   return (
-    <div className="rounded-md border">
+    <Panel
+      flush
+      aside={
+        rules === undefined || rules.length === 0
+          ? undefined
+          : `${String(rules.length)} ${rules.length === 1 ? "rule" : "rules"}, ${String(enabledCount)} enabled`
+      }
+    >
       <Table>
         <TableHeader>
           <TableRow>
@@ -54,7 +64,11 @@ export function AlertRulesTable() {
             <TableHead>Scope</TableHead>
             <TableHead>Duration</TableHead>
             <TableHead>Enabled</TableHead>
-            {canManage && <TableHead>Actions</TableHead>}
+            {canManage && (
+              <TableHead className="w-12">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -62,7 +76,7 @@ export function AlertRulesTable() {
             <TableRow>
               <TableCell
                 colSpan={canManage ? 8 : 7}
-                className="text-center text-muted-foreground py-8"
+                className="py-8 text-center text-muted-foreground"
               >
                 Loading...
               </TableCell>
@@ -72,19 +86,22 @@ export function AlertRulesTable() {
             <TableRow>
               <TableCell
                 colSpan={canManage ? 8 : 7}
-                className="text-center text-muted-foreground py-8"
+                className="py-8 text-center text-muted-foreground"
               >
                 No alert rules configured
               </TableCell>
             </TableRow>
           )}
           {rules?.map((rule) => (
-            <TableRow key={rule.id}>
+            <TableRow
+              key={rule.id}
+              className={rule.enabled ? undefined : "text-muted-foreground"}
+            >
               <TableCell>
                 <div>
                   <div className="font-medium">{rule.name}</div>
                   {rule.description && (
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-[12.5px] text-muted-foreground">
                       {rule.description}
                     </div>
                   )}
@@ -93,20 +110,18 @@ export function AlertRulesTable() {
               <TableCell>
                 <AlertSeverityBadge severity={rule.severity} />
               </TableCell>
-              <TableCell className="text-sm">{rule.metric}</TableCell>
-              <TableCell className="font-mono text-sm">
+              <TableCell>{rule.metric}</TableCell>
+              <TableCell className="whitespace-nowrap font-mono text-[13px]">
                 {rule.operator} {rule.threshold}
               </TableCell>
               {rule.scope_type === "ups" ? (
-                <TableCell className="text-sm">
+                <TableCell>
                   UPS <span className="font-mono">{upsName(rule.ups_id)}</span>
                 </TableCell>
               ) : (
-                <TableCell className="text-sm capitalize">
-                  {rule.scope_type}
-                </TableCell>
+                <TableCell className="capitalize">{rule.scope_type}</TableCell>
               )}
-              <TableCell className="text-sm">
+              <TableCell>
                 {rule.duration_seconds >= 60
                   ? `${String(Math.floor(rule.duration_seconds / 60))}m`
                   : `${String(rule.duration_seconds)}s`}
@@ -116,6 +131,7 @@ export function AlertRulesTable() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    className="h-8 px-2"
                     aria-label={rule.enabled ? "Disable rule" : "Enable rule"}
                     onClick={() => {
                       toggleEnabled(rule.id, rule.enabled);
@@ -123,21 +139,13 @@ export function AlertRulesTable() {
                     disabled={updateMutation.isPending}
                   >
                     {rule.enabled ? (
-                      <ToggleRight className="h-5 w-5 text-emerald-500" />
+                      <ToggleRight className="h-5 w-5 text-primary" />
                     ) : (
                       <ToggleLeft className="h-5 w-5 text-muted-foreground" />
                     )}
                   </Button>
                 ) : (
-                  <span
-                    className={
-                      rule.enabled
-                        ? "text-emerald-500"
-                        : "text-muted-foreground"
-                    }
-                  >
-                    {rule.enabled ? "Yes" : "No"}
-                  </span>
+                  <span>{rule.enabled ? "Yes" : "No"}</span>
                 )}
               </TableCell>
               {canManage && (
@@ -145,13 +153,14 @@ export function AlertRulesTable() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
                     aria-label="Delete rule"
                     onClick={() => {
                       setPendingDelete(rule);
                     }}
                     disabled={deleteMutation.isPending}
                   >
-                    <Trash2 className="h-4 w-4 text-destructive" />
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </TableCell>
               )}
@@ -174,6 +183,6 @@ export function AlertRulesTable() {
           "The rule is no longer evaluated, and every alert it has raised — firing, acknowledged and resolved — is deleted with it. This cannot be undone."
         }
       />
-    </div>
+    </Panel>
   );
 }
