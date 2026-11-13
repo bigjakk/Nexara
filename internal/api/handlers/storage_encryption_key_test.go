@@ -262,10 +262,11 @@ func captureProductionLog(t *testing.T) *lockedLog {
 func storageCreateMirror(t *testing.T) apischema.Properties {
 	t.Helper()
 	return compiledMirror(t, apischema.Properties{
-		"cluster_id": apischema.StdOption("cluster-id"),
-		"storage":    {Type: apischema.String, Format: "storage-id"},
-		"type":       {Type: apischema.String, Enum: slices.Clone(StorageTypes)},
-		"params":     {Type: apischema.Object, Optional: true},
+		"cluster_id":    apischema.StdOption("cluster-id"),
+		"storage":       {Type: apischema.String, Format: "storage-id"},
+		"type":          {Type: apischema.String, Enum: slices.Clone(StorageTypes)},
+		"params":        {Type: apischema.Object, Optional: true},
+		"pbs_server_id": {Type: apischema.String, Optional: true, Format: "uuid"},
 	})
 }
 
@@ -358,6 +359,8 @@ func newStorageKeyHarnessFor(t *testing.T, poolType string) *storageKeyHarness {
 		// Without an actor AuditLog returns at its first line, and every audit
 		// assertion below would run against nothing.
 		c.Locals("user_id", uuid.New())
+		// The create checks manage:storage itself (it is Deferred).
+		c.Locals("rbac_engine", &stubEngine{role: "admin"})
 		return c.Next()
 	})
 	app.Post("/api/v1/clusters/:cluster_id/storage",

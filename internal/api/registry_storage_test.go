@@ -40,39 +40,45 @@ func storageRoute(path string) string {
 }
 
 // storageRoutesOutsideTheClusterCheckShape is this domain's half of the
-// registry-wide exception list in registry_vms_test.go.
-//
-// Exactly one entry, and it is the only route in either Phase 6d domain
-// that does not hoist.
+// registry-wide exception list in registry_vms_test.go: the two routes in
+// this domain that do not hoist.
 var storageRoutesOutsideTheClusterCheckShape = map[string]string{
 	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload": "Deferred: the grant depends on the " +
 		"content type, which does not exist until the multipart body is being read",
+	"POST /api/v1/clusters/:cluster_id/storage": "Deferred: a pbs_server_id in the body adds a check on " +
+		"that PBS server, whose scope only its row says",
 }
 
 // storageLegacyPermissions is what each handler checked with hand-placed calls BEFORE Phase 6d,
 // transcribed from `git show HEAD:` over handlers/storage.go and storage_templates.go at be1379f: 12
 // requireClusterPerm calls and 2 hasClusterPerm calls across the 13 routes. shape says what the
-// declaration must be and calls how many permission calls the handler made: eleven of the twelve migrated
+// declaration must be and calls how many permission calls the handler made: ten of the twelve migrated
 // routes hoist their single call into middleware, the upload keeps BOTH of its own (which is what
 // Deferred means), and the thirteenth route's call is not in this table (see
-// TestStorageDeleteContentIsStillLegacy).
+// TestStorageDeleteContentIsStillLegacy). The create hoisted its call until it took pbs_server_id, whose
+// check on a PBS server only the body names; it keeps that call now. A Deferred row's names are the
+// grants its Description must spell out, and decider is what its reason must name.
 var storageLegacyPermissions = map[string]struct {
 	permission string
 	shape      string
 	calls      int
+	names      []string
+	decider    string
 }{
-	"GET /api/v1/clusters/:cluster_id/storage":                           {"view:storage", "Check", 1},
-	"POST /api/v1/clusters/:cluster_id/storage":                          {"manage:storage", "Check", 1},
-	"GET /api/v1/clusters/:cluster_id/storage/:storage_id/config":        {"view:storage", "Check", 1},
-	"PUT /api/v1/clusters/:cluster_id/storage/:storage_id":               {"manage:storage", "Check", 1},
-	"DELETE /api/v1/clusters/:cluster_id/storage/:storage_id":            {"delete:storage", "Check", 1},
-	"GET /api/v1/clusters/:cluster_id/storage/:storage_id/content":       {"view:storage", "Check", 1},
-	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload":       {"manage:storage", "Deferred", 2},
-	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/oci-pull":     {"manage:storage", "Check", 1},
-	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/download-url": {"manage:storage", "Check", 1},
-	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/appliances":   {"manage:storage", "Check", 1},
-	"GET /api/v1/clusters/:cluster_id/appliances":                        {"view:storage", "Check", 1},
-	"GET /api/v1/clusters/:cluster_id/scan/iscsi":                        {"manage:storage", "Check", 1},
+	"GET /api/v1/clusters/:cluster_id/storage": {"view:storage", "Check", 1, nil, ""},
+	"POST /api/v1/clusters/:cluster_id/storage": {"manage:storage", "Deferred", 1,
+		[]string{"manage:storage", "manage:pbs"}, "pbsSourceSettings"},
+	"GET /api/v1/clusters/:cluster_id/storage/:storage_id/config":  {"view:storage", "Check", 1, nil, ""},
+	"PUT /api/v1/clusters/:cluster_id/storage/:storage_id":         {"manage:storage", "Check", 1, nil, ""},
+	"DELETE /api/v1/clusters/:cluster_id/storage/:storage_id":      {"delete:storage", "Check", 1, nil, ""},
+	"GET /api/v1/clusters/:cluster_id/storage/:storage_id/content": {"view:storage", "Check", 1, nil, ""},
+	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload": {"manage:storage", "Deferred", 2,
+		[]string{"manage:storage", "manage:vm_import"}, "hasClusterPerm"},
+	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/oci-pull":     {"manage:storage", "Check", 1, nil, ""},
+	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/download-url": {"manage:storage", "Check", 1, nil, ""},
+	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/appliances":   {"manage:storage", "Check", 1, nil, ""},
+	"GET /api/v1/clusters/:cluster_id/appliances":                        {"view:storage", "Check", 1, nil, ""},
+	"GET /api/v1/clusters/:cluster_id/scan/iscsi":                        {"manage:storage", "Check", 1, nil, ""},
 }
 
 // declaredStorageEndpoints returns every declaration in this domain, keyed
@@ -121,7 +127,7 @@ func TestStorageRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 		case "Deferred":
 			kept += want.calls
 			if e.Permissions.Deferred == "" {
-				t.Errorf("%s declares %q, want Deferred: its grant depends on the multipart body",
+				t.Errorf("%s declares %q, want Deferred: its grant depends on the body",
 					key, e.Permissions.Describe())
 				continue
 			}
@@ -129,7 +135,7 @@ func TestStorageRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 			// permissions an operator needs have to survive in the prose —
 			// BOTH of them, since holding only one of the two opens only part
 			// of the endpoint.
-			for _, perm := range []string{"manage:storage", "manage:vm_import"} {
+			for _, perm := range want.names {
 				if !strings.Contains(e.Description, perm) {
 					t.Errorf("%s is Deferred but its Description never names %q, so the docs tell an "+
 						"operator building a role nothing: %q", key, perm, e.Description)
@@ -137,16 +143,16 @@ func TestStorageRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 			}
 			// And the reason has to name what the handler actually does, so
 			// the next reader can go and check that it still does it.
-			if !strings.Contains(e.Permissions.Deferred, "hasClusterPerm") {
-				t.Errorf("%s: the Deferred reason does not name hasClusterPerm, which is what makes the "+
-					"decision: %q", key, e.Permissions.Deferred)
+			if !strings.Contains(e.Permissions.Deferred, want.decider) {
+				t.Errorf("%s: the Deferred reason does not name %s, which is what makes the "+
+					"decision: %q", key, want.decider, e.Permissions.Deferred)
 			}
 		default:
 			t.Fatalf("%s: unknown shape %q in the tally", key, want.shape)
 		}
 	}
-	if hoisted != 11 || kept != 2 {
-		t.Errorf("the tally moves %d permission call(s) into middleware and keeps %d in handlers, want 11 / 2",
+	if hoisted != 10 || kept != 3 {
+		t.Errorf("the tally moves %d permission call(s) into middleware and keeps %d in handlers, want 10 / 3",
 			hoisted, kept)
 	}
 
@@ -157,7 +163,7 @@ func TestStorageRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 		routes     int
 	}{
 		{"view:storage", 4},
-		{"manage:storage", 6},
+		{"manage:storage", 5},
 		{"delete:storage", 1},
 	} {
 		if byPermission[tt.permission] != tt.routes {

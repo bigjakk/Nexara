@@ -72,9 +72,9 @@ function getInitials(name: string): string {
 }
 
 /**
- * A storage page is only reachable from the Storage tree, so the tree shows
- * that grouping whenever one is open. Cluster and inventory pages are
- * reachable from every grouping and leave the choice alone.
+ * A store's page belongs to the Storage tree's grouping (a cluster's Storage
+ * tab links to it too), so the tree shows that grouping whenever one is open.
+ * Cluster and inventory pages are in every grouping and leave the choice alone.
  */
 function useStorageTreeOnStorageRoutes() {
   const { pathname } = useLocation();

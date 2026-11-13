@@ -908,6 +908,7 @@ type PbsServer struct {
 	CreatedAt            time.Time   `json:"created_at"`
 	UpdatedAt            time.Time   `json:"updated_at"`
 	TlsFingerprint       string      `json:"tls_fingerprint"`
+	TokenClusterApiUrl   string      `json:"token_cluster_api_url"`
 }
 
 type PbsSnapshot struct {

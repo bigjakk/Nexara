@@ -9,8 +9,10 @@ export interface PBSServer {
   updated_at: string;
 }
 
+/** One of a PBS server's datastores, as GET /pbs-servers/:id/datastores lists it. */
 export interface PBSDatastore {
-  name: string;
+  /** The datastore's name: PBS's /admin/datastore calls it `store`. */
+  store: string;
   path?: string;
   comment?: string;
 }

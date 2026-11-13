@@ -102,7 +102,7 @@ Removing a cluster leaves its audit entries untouched, so it takes no longer for
 
 ### The Cluster Page
 
-Click a cluster in the inventory tree. Its tabs are **Overview**, **VMs**, **Options**, **HA**, **Pools**, **Resource Mappings**, **Access Control**, **Replication**, **Ceph**, **Networks**, **Firewall**, **Certificates**, **Metrics**, **DRS**, **Guest Tools** and **History**, each covered in its own section below.
+Click a cluster in the inventory tree. Its tabs are **Overview**, **VMs**, **Storage**, **Options**, **HA**, **Pools**, **Resource Mappings**, **Access Control**, **Replication**, **Ceph**, **Networks**, **Firewall**, **Certificates**, **Metrics**, **DRS**, **Guest Tools** and **History**, each covered in its own section below.
 
 ### When a Node's Certificate Changes
 
@@ -823,14 +823,14 @@ On Proxmox VE 9.2+, the **HA Maintenance** card on the HA tab's **Status** sub-t
 
 ## Storage Management
 
-Switch the inventory tree to its **Storage** view and click a cluster, or search
-for "Storage" with Ctrl+K. The pool list groups shared storage at the top and
-per-node storage below.
+Open a cluster's **Storage** tab, switch the inventory tree to its **Storage** view
+and click a cluster, or search for "Storage" with Ctrl+K. The pool list groups
+shared storage at the top and per-node storage below.
 
 ### Adding Storage
 
-**Add Storage** on the pool list, or right-click a cluster in the Storage view
-(`manage:storage`). Give it an **ID** (letters, digits, `-` and `_`), a **Type**,
+**Add Storage** on the pool list or a cluster's Storage tab, or right-click a
+cluster in the Storage view (`manage:storage`). Give it an **ID** (letters, digits, `.`, `-` and `_`), a **Type**,
 that type's fields, its **Content Types**, optionally the **Nodes** it is on, and
 **Enable** it. The types are Directory, BTRFS, NFS, CIFS/SMB, GlusterFS, LVM, LVM-Thin,
 ZFS, iSCSI, iSCSI Direct, RBD (Ceph), CephFS and Proxmox Backup Server.
@@ -841,7 +841,19 @@ ZFS, iSCSI, iSCSI Direct, RBD (Ceph), CephFS and Proxmox Backup Server.
 - **RBD and CephFS.** Filling **Monitor Hosts** makes the storage external, so
   **Keyring** or **Secret Key** becomes required.
 - **Proxmox Backup Server.** A generated encryption key is shown once and Nexara keeps
-  no copy.
+  no copy. **PBS server** offers the servers registered under [Backup](#pbs-server-setup)
+  that you can see (`view:pbs`): pick one and Proxmox connects to its address, port and
+  pinned certificate, and the **Datastore** list is that server's. **Token** is either
+  **This server's token** or **Another token** you type, such as one with only the
+  `DatastoreBackup` role on that datastore. The server's own token needs `manage:pbs` on
+  it and is offered only on the cluster the server is attached to. It works only while that
+  cluster's API URL is the one it had when the token was entered: after moving the server
+  to another cluster or changing the cluster's URL, Create refuses it until you enter the
+  token secret again on the server under Backup. Proxmox keeps its own copy and backs up with every right the token
+  holds on the PBS, and a token replaced in Nexara later is not replaced in Proxmox. **Port** is needed only for a PBS that does not
+  listen on 8007, and Nexara reads only a datastore's root namespace, so backups
+  written to a **Namespace** do not show in Backup, coverage or restore. Until you type
+  an ID, it follows the datastore: coverage ties a PBS storage to its datastore by ID.
 
 **Edit** cannot change the ID, the Type or an iSCSI portal or target. It sends only
 fields you changed to a non-empty value, so blanking a text field does nothing, and
@@ -1108,8 +1120,13 @@ Importing is gated by a dedicated VM-import permission (`manage:vm_import`). Thr
    - **API URL** — PBS API endpoint (e.g., `https://pbs.example.com:8007`)
    - **API Token ID** — e.g. `root@pam!nexara`
    - **API Token Secret**
-   - **Associated Cluster** (optional) — decides who may see the server: bound to a cluster, that cluster's grants apply; standalone, instance-wide ones. Coverage does not read it
+   - **Associated Cluster** (optional) — decides who may see the server: bound to a cluster, that cluster's grants apply; standalone, instance-wide ones. It is also the one cluster whose storage may be given this server's own token (see [Adding Storage](#adding-storage)). Coverage does not read it
 4. Click **Connect**, accept the certificate the same way as for a cluster, and confirm
+
+Registering a server lets Nexara read it; it adds no storage to any cluster. To back
+guests up to it, add one of its datastores to a cluster: the cluster's **Storage** tab,
+**Add storage**, **Proxmox Backup Server**, then pick the server (see
+[Adding Storage](#adding-storage)).
 
 ### Managing Datastores
 
@@ -1169,7 +1186,7 @@ The jobs table shows the schedule in plain English with the raw calendar event u
 5. Optionally change the VMID
 6. Click **Restore**
 
-The restore reads the snapshot through the Proxmox storage on the target cluster that is set up for the snapshot's PBS server and datastore (Datacenter > Storage > Proxmox Backup Server). The storage must be enabled, available on the node the guest is restored onto, have no namespace, and name the snapshot's datastore. Nexara ties it to the PBS server by the certificate fingerprint when both carry one (two different fingerprints rule a storage out), and otherwise by address and port, 8007 where none is set; the same host on another port is another server. A PBS that Nexara reaches by an IP address and Proxmox by a name, with no fingerprint to say so, is used when its storage is the only candidate left and no other PBS server Nexara knows is tied to it; the restore's audit entry then records `matched_by: only_candidate`. If two storages are tied to the server the restore is refused, and so is one for which no storage can be used; either way the answer names the PBS storages it found, rather than reading from a PBS nobody picked. **Overwrite existing VM** stops the guest first, once that storage is found, and the stop is a task of its own in the guest's History. A restore needs permission to manage backups on the target cluster and to view backups on the PBS server (on the cluster it is attached to, or instance-wide when it is standalone); a server you may not view is reported as not found.
+The restore reads the snapshot through the Proxmox storage on the target cluster that is set up for the snapshot's PBS server and datastore (the cluster's **Storage** tab, or Datacenter > Storage > Proxmox Backup Server in Proxmox). The storage must be enabled, available on the node the guest is restored onto, have no namespace, and name the snapshot's datastore. Nexara ties it to the PBS server by the certificate fingerprint when both carry one (two different fingerprints rule a storage out), and otherwise by address and port, 8007 where none is set; the same host on another port is another server. A PBS that Nexara reaches by an IP address and Proxmox by a name, with no fingerprint to say so, is used when its storage is the only candidate left and no other PBS server Nexara knows is tied to it; the restore's audit entry then records `matched_by: only_candidate`. If two storages are tied to the server the restore is refused, and so is one for which no storage can be used; either way the answer names the PBS storages it found, rather than reading from a PBS nobody picked. **Overwrite existing VM** stops the guest first, once that storage is found, and the stop is a task of its own in the guest's History. A restore needs permission to manage backups on the target cluster and to view backups on the PBS server (on the cluster it is attached to, or instance-wide when it is standalone); a server you may not view is reported as not found.
 
 ---
 

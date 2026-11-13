@@ -437,6 +437,9 @@ export function EditStorageDialog({
                     placeholder={field.placeholder}
                   />
                 )}
+                {field.help !== undefined && field.type !== "checkbox" && (
+                  <p className="text-xs text-muted-foreground">{field.help}</p>
+                )}
               </div>
             ))}
 

@@ -664,6 +664,12 @@ var sweepRouteOverrides = map[string]sweepEndpointOverride{
 		// exclusion, which would never send it at all.
 		values: map[string]any{"disk_format": ""},
 	},
+	// storage_pbs_source.go: pbs_server_id applies only to a pbs storage, and
+	// type's Enum[0] is dir — a value-conditional rule Requires cannot state.
+	// "pbs" is a real value, so pbs_server_id stays under test on with-optional.
+	"POST " + pathPrefix + "clusters/:cluster_id/storage": {
+		values: map[string]any{"type": "pbs"},
+	},
 	// clusters.go: "Supply either token_id and token_secret, or a bootstrap
 	// block — not both" (registry_clusters.go's own comment on why this
 	// stays in the handler). The with-optional variant's premise — every

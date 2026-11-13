@@ -106,6 +106,10 @@ func (h *PBSHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt token secret")
 	}
+	paired, err := h.tokenClusterURL(c, clusterID)
+	if err != nil {
+		return err
+	}
 
 	pbs, err := h.queries.CreatePBSServer(c.Context(), db.CreatePBSServerParams{
 		Name:                 p.String("name"),
@@ -114,6 +118,7 @@ func (h *PBSHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		TokenSecretEncrypted: encrypted,
 		ClusterID:            clusterID,
 		TlsFingerprint:       p.String("tls_fingerprint"),
+		TokenClusterApiUrl:   paired,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create PBS server")
@@ -180,6 +185,26 @@ func (h *PBSHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	return RespondItems(c, resp)
+}
+
+// tokenClusterURL is what a PBS server's token is paired with as its secret is
+// entered: the API URL of the cluster the server is attached to, or "" for a
+// standalone one. A storage on that cluster may be given the stored token only
+// while the cluster's URL is still this (pbsSourceSettings), because the token
+// travels to Proxmox through that URL, and moving it takes only a new secret
+// for the cluster's own token, which can be made up.
+func (h *PBSHandler) tokenClusterURL(c fiber.Ctx, clusterID pgtype.UUID) (string, error) {
+	if !clusterID.Valid {
+		return "", nil
+	}
+	cluster, err := h.queries.GetCluster(c.Context(), uuid.UUID(clusterID.Bytes))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fiber.NewError(fiber.StatusNotFound, "Cluster not found")
+	}
+	if err != nil {
+		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
+	}
+	return cluster.ApiUrl, nil
 }
 
 // Get handles GET /api/v1/pbs-servers/:id.
@@ -261,6 +286,7 @@ func (h *PBSHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		TokenSecretEncrypted: existing.TokenSecretEncrypted,
 		ClusterID:            existing.ClusterID,
 		TlsFingerprint:       existing.TlsFingerprint,
+		TokenClusterApiUrl:   existing.TokenClusterApiUrl,
 	}
 
 	// If the user is moving the PBS server to a different cluster, also require
@@ -307,6 +333,19 @@ func (h *PBSHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	}
 	if fingerprint, supplied := p.OptString("tls_fingerprint"); supplied {
 		params.TlsFingerprint = fingerprint
+	}
+	// The pairing a storage on the attached cluster needs to be given this
+	// server's token (see tokenClusterURL): renewed whenever the secret is
+	// entered, and broken by a move to another cluster without it.
+	switch {
+	case secretSupplied:
+		paired, err := h.tokenClusterURL(c, params.ClusterID)
+		if err != nil {
+			return err
+		}
+		params.TokenClusterApiUrl = paired
+	case params.ClusterID != existing.ClusterID:
+		params.TokenClusterApiUrl = ""
 	}
 
 	// Refuse to re-point a stored token at an address the operator never

@@ -513,14 +513,20 @@ func CreateProxmoxClient(c fiber.Ctx, queries *db.Queries, encryptionKey string,
 		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
 	}
 
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, encryptionKey)
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
 	t := 30 * time.Second
 	if len(timeout) > 0 {
 		t = timeout[0]
+	}
+	return clusterRowClient(cluster, encryptionKey, t)
+}
+
+// clusterRowClient is a Proxmox client for exactly the API URL and pinned
+// certificate a cluster row names: no cache, and none of the cache's failover
+// to another member's address (proxmox.SelectClusterEndpoint).
+func clusterRowClient(cluster db.Cluster, encryptionKey string, timeout time.Duration) (*proxmox.Client, error) {
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, encryptionKey)
+	if err != nil {
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
 	}
 
 	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
@@ -528,7 +534,7 @@ func CreateProxmoxClient(c fiber.Ctx, queries *db.Queries, encryptionKey string,
 		TokenID:        cluster.TokenID,
 		TokenSecret:    tokenSecret,
 		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        t,
+		Timeout:        timeout,
 	})
 	if err != nil {
 		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")

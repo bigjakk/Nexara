@@ -1,6 +1,7 @@
 -- name: CreatePBSServer :one
-INSERT INTO pbs_servers (name, api_url, token_id, token_secret_encrypted, cluster_id, tls_fingerprint)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO pbs_servers (name, api_url, token_id, token_secret_encrypted, cluster_id, tls_fingerprint,
+    token_cluster_api_url)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetPBSServer :one
@@ -19,7 +20,8 @@ SET name = $2,
     token_id = $4,
     token_secret_encrypted = $5,
     cluster_id = $6,
-    tls_fingerprint = $7
+    tls_fingerprint = $7,
+    token_cluster_api_url = $8
 WHERE id = $1
 RETURNING *;
 

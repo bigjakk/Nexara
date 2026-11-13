@@ -34,8 +34,8 @@ const CREATE_URL = "/api/v1/clusters/c1/storage";
 
 let user: UserEvent;
 
-/** Picks a storage type from the Type select and names the storage. */
-async function chooseType(typeLabel: string) {
+/** Picks a storage type from the Type select and names the storage, unless id is null. */
+async function chooseType(typeLabel: string, id: string | null = "store01") {
   // The Type select is the only combobox showing "Directory" on open.
   const typeSelect = screen
     .getAllByRole("combobox")
@@ -43,7 +43,7 @@ async function chooseType(typeLabel: string) {
   if (!typeSelect) throw new Error("no Type select");
   await user.click(typeSelect);
   await user.click(await screen.findByRole("option", { name: typeLabel }));
-  fill(screen.getByLabelText("ID"), "store01");
+  if (id !== null) fill(screen.getByLabelText("ID"), id);
 }
 
 /**
@@ -51,7 +51,7 @@ async function chooseType(typeLabel: string) {
  * and picks a storage type from the Type select. The QueryClient is returned
  * so a test can look inside its caches.
  */
-async function openAdd(typeLabel: string) {
+async function openAdd(typeLabel: string, id: string | null = "store01") {
   const { queryClient } = renderWithProviders(
     <>
       <AddStorageDialog clusterId="c1" />
@@ -59,8 +59,14 @@ async function openAdd(typeLabel: string) {
     </>,
   );
   await user.click(screen.getByRole("button", { name: "Add storage" }));
-  await chooseType(typeLabel);
+  await chooseType(typeLabel, id);
   return queryClient;
+}
+
+/** Opens a Select by its label and picks an option. */
+async function pick(label: RegExp | string, option: RegExp | string) {
+  await user.click(screen.getByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
 }
 
 /** Whether any mutation in the cache still holds text in its request or answer. */
@@ -386,5 +392,99 @@ describe("AddStorageDialog — Ceph keyring", () => {
       type: "rbd",
       params: { monhost: "", content: "images,rootdir" },
     });
+  });
+});
+
+describe("AddStorageDialog — a registered PBS server", () => {
+  const PAIRS = Array.from({ length: 32 }, () => "AB").join(":");
+  const server = (id: string, name: string, clusterId: string) => ({
+    id,
+    name,
+    api_url: `https://${name}.example.com:8443`,
+    token_id: "backup@pbs!test",
+    tls_fingerprint: PAIRS,
+    cluster_id: clusterId,
+    created_at: "",
+    updated_at: "",
+  });
+
+  beforeEach(() => {
+    // pbs01 is attached to the cluster the dialog adds to, pbs02 to another.
+    const answers: Record<string, unknown[]> = {
+      "/api/v1/pbs-servers": [
+        server("pbs-1", "pbs01", "c1"),
+        server("pbs-2", "pbs02", "c2"),
+      ],
+      "/api/v1/pbs-servers/pbs-1/datastores": [{ store: "datastore01" }],
+      "/api/v1/pbs-servers/pbs-2/datastores": [{ store: "datastore02" }],
+    };
+    mockedList.mockImplementation((path: string) =>
+      Promise.resolve(answers[path] ?? []),
+    );
+  });
+
+  // Handing a server's own token to Proxmox takes manage:pbs, and the server
+  // must be attached to this cluster; otherwise the token is typed, and where
+  // to connect still comes from the server.
+  it.each([
+    { permissions: ["manage:pbs"], pick: "pbs01", reuse: true },
+    { permissions: [], pick: "pbs01", reuse: false },
+    { permissions: ["manage:pbs"], pick: "pbs02", reuse: false },
+  ])(
+    "permissions $permissions, $pick: its own token is used: $reuse",
+    async ({ permissions, pick: name, reuse }) => {
+      useAuthStore.setState({ permissions });
+      const datastore = name === "pbs01" ? "datastore01" : "datastore02";
+      await openAdd("Proxmox Backup Server", null);
+      await pick("PBS server", name);
+      expect(screen.queryByLabelText(/^Server/)).not.toBeInTheDocument();
+      await pick(/^Datastore/, datastore);
+      // Backup coverage ties a PBS storage to its datastore by ID.
+      expect(screen.getByLabelText("ID")).toHaveValue(datastore);
+      if (!reuse) {
+        fill(screen.getByLabelText(/^Username/), "backup@pbs!other");
+        fill(screen.getByLabelText(/^Password/), "not-a-real-password");
+      } else {
+        expect(screen.queryByLabelText(/^Username/)).not.toBeInTheDocument();
+      }
+
+      await user.click(screen.getByRole("button", { name: "Create storage" }));
+      await waitFor(() => {
+        expect(mockedPost).toHaveBeenCalled();
+      });
+      // What each mode sends is pbsSourceRequest's to decide (pbs-source.test.ts).
+      const sent = sentBody() as {
+        storage: string;
+        type: string;
+        params: Record<string, string>;
+        pbs_server_id?: string;
+      };
+      expect([sent.storage, sent.type, sent.pbs_server_id]).toEqual([
+        datastore,
+        "pbs",
+        reuse ? "pbs-1" : undefined,
+      ]);
+      if (reuse) {
+        expect(sent.params).toEqual({ datastore, content: "backup" });
+      } else {
+        expect(sent.params).toMatchObject({
+          server: `${name}.example.com`,
+          username: "backup@pbs!other",
+        });
+      }
+    },
+  );
+
+  it("drops the datastore picked for one server when another is picked", async () => {
+    useAuthStore.setState({ permissions: ["manage:pbs"] });
+    await openAdd("Proxmox Backup Server", null);
+    await pick("PBS server", "pbs01");
+    await pick(/^Datastore/, "datastore01");
+    await pick("PBS server", "pbs02");
+
+    expect(screen.getByLabelText("ID")).toHaveValue("");
+    expect(
+      screen.getByRole("button", { name: "Create storage" }),
+    ).toBeDisabled();
   });
 });

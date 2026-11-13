@@ -63,6 +63,8 @@ import { ResourceTable } from "@/features/inventory/components/ResourceTable";
 import { InventoryUnavailableNote } from "@/features/inventory/components/InventoryUnavailableNote";
 import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { storageTotals, storeRows } from "@/features/storage/lib/store-rows";
+import { AddStorageDialog } from "@/features/storage/components/AddStorageDialog";
+import { ClusterStoresPanel } from "@/features/storage/components/ClusterStoresPanel";
 import type {
   ClusterResponse,
   HealthIssue,
@@ -180,6 +182,7 @@ export function ClusterDetailPage() {
   // The header offers only what the server would allow: its Update and
   // Delete routes ask for these.
   const canEditCluster = hasPermission("manage", "cluster");
+  const canManageStorage = hasPermission("manage", "storage");
   const canDeleteCluster = hasPermission("delete", "cluster");
 
   const clusterMetrics = useClusterMetrics(clusterId ?? "");
@@ -362,6 +365,7 @@ export function ClusterDetailPage() {
               <TabsTrigger value="vms">
                 VMs ({clusterVmRows.length})
               </TabsTrigger>
+              <TabsTrigger value="storage">Storage</TabsTrigger>
               <TabsTrigger value="options">Options</TabsTrigger>
               <TabsTrigger value="ha">HA</TabsTrigger>
               <TabsTrigger value="pools">Pools</TabsTrigger>
@@ -468,6 +472,21 @@ export function ClusterDetailPage() {
                   <InventoryUnavailableNote />
                 )}
               <ResourceTable data={clusterVmRows} />
+            </TabsContent>
+
+            {/* Where Proxmox has Datacenter > Storage: the stores Nexara has
+                read for this cluster, and Add storage. */}
+            <TabsContent value="storage">
+              <ClusterStoresPanel
+                clusterId={clusterId ?? ""}
+                title="Storage"
+                showTotals
+                actions={
+                  canManageStorage ? (
+                    <AddStorageDialog clusterId={clusterId ?? ""} />
+                  ) : undefined
+                }
+              />
             </TabsContent>
 
             <TabsContent value="options">

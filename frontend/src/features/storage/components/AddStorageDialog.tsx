@@ -26,6 +26,8 @@ import {
   NodeRestrictionField,
 } from "./StorageFormFields";
 import { PBSEncryptionField } from "./PBSEncryptionField";
+import { PBSDatastoreField, PBSServerSource } from "./PBSServerSource";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { StorageType, StorageContentType } from "../types/storage";
 import {
   CEPH_SECRET_FIELD,
@@ -39,6 +41,11 @@ import {
   pbsEncryptionRequest,
   type PBSEncryptionChoice,
 } from "../lib/pbs-encryption";
+import {
+  pbsSourceRequest,
+  pbsSuppliedFields,
+  type PBSSource,
+} from "../lib/pbs-source";
 
 interface AddStorageDialogProps {
   clusterId: string;
@@ -59,6 +66,14 @@ interface AddStorageDialogProps {
 }
 
 const ALL_STORAGE_TYPES = Object.keys(STORAGE_TYPE_LABELS) as StorageType[];
+
+/**
+ * What the ID field keeps of what is typed, or of a datastore's name: the
+ * characters a Proxmox storage id may hold (the storage-id format).
+ */
+function storageID(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, "");
+}
 
 const ALL_CONTENT_TYPES: { value: StorageContentType; label: string }[] = [
   { value: "images", label: "Disk images" },
@@ -97,8 +112,14 @@ export function AddStorageDialog({
   );
   const [cephSecret, setCephSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // A PBS server registered under Backup, picked to fill the PBS fields in.
+  const [pbsSource, setPbsSource] = useState<PBSSource | null>(null);
+  // Until the ID is typed, a PBS storage's follows its datastore: backup
+  // coverage ties the two by name (internal/reports/gen_backup.go).
+  const [idTyped, setIdTyped] = useState(false);
 
   const createMutation = useCreateStorage();
+  const { hasPermission } = usePermissions();
 
   // PVE models "use LUNs directly" as the content type rather than a flag of its
   // own, and offers it for the kernel iSCSI plugin only — iSCSI Direct always
@@ -108,6 +129,9 @@ export function AddStorageDialog({
   const typeFields = STORAGE_TYPE_FIELDS[storageType];
   const availableContent = STORAGE_TYPE_CONTENT[storageType];
   const isPBS = storageType === "pbs";
+  const source = isPBS ? pbsSource : null;
+  const supplied = useMemo(() => pbsSuppliedFields(source), [source]);
+  const datastore = params["datastore"] ?? "";
   // Only an external Ceph cluster takes a credential here; see CEPH_SECRET_FIELD.
   const cephSecretDef = CEPH_SECRET_FIELD[storageType];
   const showCephSecret =
@@ -116,6 +140,7 @@ export function AddStorageDialog({
   const hasAllRequired = useMemo(() => {
     if (!storageName.trim()) return false;
     for (const field of typeFields) {
+      if (supplied.has(field.key)) continue;
       if (field.required && !params[field.key]?.trim()) return false;
     }
     // Required once showing, as the Proxmox GUI has it (allowBlank: false in
@@ -128,6 +153,7 @@ export function AddStorageDialog({
     storageName,
     params,
     typeFields,
+    supplied,
     showCephSecret,
     cephSecret,
     isPBS,
@@ -144,6 +170,8 @@ export function AddStorageDialog({
     setEncryption(initialPBSEncryption(false));
     setCephSecret("");
     setError(null);
+    setPbsSource(null);
+    setIdTyped(false);
     createMutation.reset();
   }
 
@@ -175,10 +203,14 @@ export function AddStorageDialog({
     setEncryption(initialPBSEncryption(false));
     setCephSecret("");
     setError(null);
+    setPbsSource(null);
   }
 
   function handleParamChange(key: string, value: string) {
     setParams((prev) => ({ ...prev, [key]: value }));
+    if (isPBS && key === "datastore" && !idTyped) {
+      setStorageName(storageID(value));
+    }
   }
 
   function toggleContent(ct: StorageContentType) {
@@ -234,13 +266,20 @@ export function AddStorageDialog({
       }
     }
 
+    // From a picked PBS server, its own fields go as it says, whatever the
+    // form held for them before it was picked.
+    const fromSource =
+      source === null
+        ? { params: submitParams }
+        : pbsSourceRequest(source, submitParams);
+
     createMutation.mutate(
       {
         clusterId,
         data: {
           storage: storageName.trim(),
           type: storageType,
-          params: submitParams,
+          ...fromSource,
         },
       },
       {
@@ -299,14 +338,26 @@ export function AddStorageDialog({
               id="storage-name"
               value={storageName}
               onChange={(e) => {
-                setStorageName(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""));
+                const id = storageID(e.target.value);
+                setStorageName(id);
+                setIdTyped(id !== "");
               }}
               placeholder="my-storage"
               autoFocus
             />
             <p className="text-xs text-muted-foreground">
-              Alphanumeric, dashes, and underscores only.
+              Letters, digits, dots, dashes and underscores.
             </p>
+            {isPBS &&
+              datastore !== "" &&
+              storageName !== "" &&
+              storageName !== datastore && (
+                <p className="text-xs text-muted-foreground">
+                  Backup coverage ties a PBS storage to its datastore by ID:
+                  with an ID other than &ldquo;{datastore}&rdquo;, backups made
+                  to it won&apos;t count.
+                </p>
+              )}
           </div>
 
           {/* Storage Type */}
@@ -331,84 +382,116 @@ export function AddStorageDialog({
             </Select>
           </div>
 
+          {isPBS && (
+            <PBSServerSource
+              value={pbsSource}
+              onChange={(next) => {
+                // A datastore picked for one server is not another's.
+                if (next?.server.id !== pbsSource?.server.id) {
+                  handleParamChange("datastore", "");
+                }
+                setPbsSource(next);
+              }}
+              clusterId={clusterId}
+              canManagePBS={hasPermission("manage", "pbs")}
+            />
+          )}
+
           {/* Type-specific fields */}
-          {typeFields.map((field) => (
-            <div key={field.key} className="space-y-1.5">
-              <Label htmlFor={`field-${field.key}`}>
-                {field.label}
-                {field.required && (
-                  <span className="ml-1 text-destructive">*</span>
-                )}
-              </Label>
-              {field.scan === "iscsi" ? (
-                <ISCSITargetField
-                  id={`field-${field.key}`}
-                  clusterId={clusterId}
-                  portal={params[field.scanFrom ?? "portal"] ?? ""}
-                  value={params[field.key] ?? ""}
-                  onChange={(v) => {
-                    handleParamChange(field.key, v);
-                  }}
-                  placeholder={field.placeholder}
-                />
-              ) : field.type === "select" && field.options ? (
-                <Select
-                  value={params[field.key] ?? ""}
-                  onValueChange={(v) => {
-                    handleParamChange(field.key, v);
-                  }}
-                >
-                  <SelectTrigger id={`field-${field.key}`}>
-                    <SelectValue placeholder="Select..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {field.options.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value || "_empty"}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : field.type === "checkbox" ? (
-                <div className="flex items-center gap-2">
-                  <Checkbox
+          {typeFields
+            .filter((field) => !supplied.has(field.key))
+            .map((field) => (
+              <div key={field.key} className="space-y-1.5">
+                <Label htmlFor={`field-${field.key}`}>
+                  {field.label}
+                  {field.required && (
+                    <span className="ml-1 text-destructive">*</span>
+                  )}
+                </Label>
+                {source !== null && field.key === "datastore" ? (
+                  <PBSDatastoreField
                     id={`field-${field.key}`}
-                    checked={params[field.key] === "1"}
-                    onCheckedChange={(checked) => {
-                      handleParamChange(field.key, checked ? "1" : "0");
+                    serverId={source.server.id}
+                    value={datastore}
+                    onChange={(v) => {
+                      handleParamChange(field.key, v);
                     }}
                   />
-                  <Label
-                    htmlFor={`field-${field.key}`}
-                    className="text-sm font-normal"
+                ) : field.scan === "iscsi" ? (
+                  <ISCSITargetField
+                    id={`field-${field.key}`}
+                    clusterId={clusterId}
+                    portal={params[field.scanFrom ?? "portal"] ?? ""}
+                    value={params[field.key] ?? ""}
+                    onChange={(v) => {
+                      handleParamChange(field.key, v);
+                    }}
+                    placeholder={field.placeholder}
+                  />
+                ) : field.type === "select" && field.options ? (
+                  <Select
+                    value={params[field.key] ?? ""}
+                    onValueChange={(v) => {
+                      handleParamChange(field.key, v);
+                    }}
                   >
-                    {field.help ?? "Enable"}
-                  </Label>
-                </div>
-              ) : (
-                <Input
-                  id={`field-${field.key}`}
-                  type={
-                    field.type === "password"
-                      ? "password"
-                      : field.type === "number"
-                        ? "number"
-                        : "text"
-                  }
-                  value={params[field.key] ?? ""}
-                  onChange={(e) => {
-                    handleParamChange(field.key, e.target.value);
-                  }}
-                  // A storage credential, never the Nexara login a browser
-                  // would otherwise offer to fill in.
-                  autoComplete={
-                    field.type === "password" ? "new-password" : undefined
-                  }
-                  placeholder={field.placeholder}
-                />
-              )}
-            </div>
-          ))}
+                    <SelectTrigger id={`field-${field.key}`}>
+                      <SelectValue placeholder="Select..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {field.options.map((opt) => (
+                        <SelectItem
+                          key={opt.value}
+                          value={opt.value || "_empty"}
+                        >
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : field.type === "checkbox" ? (
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id={`field-${field.key}`}
+                      checked={params[field.key] === "1"}
+                      onCheckedChange={(checked) => {
+                        handleParamChange(field.key, checked ? "1" : "0");
+                      }}
+                    />
+                    <Label
+                      htmlFor={`field-${field.key}`}
+                      className="text-sm font-normal"
+                    >
+                      {field.help ?? "Enable"}
+                    </Label>
+                  </div>
+                ) : (
+                  <Input
+                    id={`field-${field.key}`}
+                    type={
+                      field.type === "password"
+                        ? "password"
+                        : field.type === "number"
+                          ? "number"
+                          : "text"
+                    }
+                    value={params[field.key] ?? ""}
+                    onChange={(e) => {
+                      handleParamChange(field.key, e.target.value);
+                    }}
+                    // A storage credential, never the Nexara login a browser
+                    // would otherwise offer to fill in.
+                    autoComplete={
+                      field.type === "password" ? "new-password" : undefined
+                    }
+                    placeholder={field.placeholder}
+                  />
+                )}
+                {field.help !== undefined && field.type !== "checkbox" && (
+                  <p className="text-xs text-muted-foreground">{field.help}</p>
+                )}
+              </div>
+            ))}
 
           {cephSecretDef && showCephSecret && (
             <CephSecretField

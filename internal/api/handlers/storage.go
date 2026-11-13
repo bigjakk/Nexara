@@ -621,9 +621,16 @@ func encryptionKeyChange(storageType string, form url.Values, deleteOptions []st
 }
 
 // Create handles POST /api/v1/clusters/:cluster_id/storage.
+//
+// Its permission is Deferred (storageCreateDeferredReason): manage:storage on
+// the cluster in the path, then, for a pbs_server_id, the server's own grants,
+// which pbsSourceSettings checks.
 func (h *StorageHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
 		return err
 	}
 
@@ -637,13 +644,30 @@ func (h *StorageHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	form := storagePluginForm(params)
-	form.Set("storage", storage)
-	form.Set("type", storageType)
-
-	pxClient, err := h.createProxmoxClient(c, clusterID)
-	if err != nil {
+	var pxClient *proxmox.Client
+	pbsServerID, fromPBSServer := p.OptString("pbs_server_id")
+	if fromPBSServer {
+		pbsID, err := parseParamUUID(pbsServerID)
+		if err != nil {
+			return err
+		}
+		settings, cluster, err := h.pbsSourceSettings(c, clusterID, pbsID, storageType, form)
+		if err != nil {
+			return err
+		}
+		for k := range settings {
+			form.Set(k, settings.Get(k))
+		}
+		// The stored token goes only to the URL and pinned certificate the
+		// pairing was checked against (see pbsSourceSettings).
+		if pxClient, err = clusterRowClient(cluster, h.encryptionKey, time.Minute); err != nil {
+			return err
+		}
+	} else if pxClient, err = h.createProxmoxClient(c, clusterID); err != nil {
 		return err
 	}
+	form.Set("storage", storage)
+	form.Set("type", storageType)
 
 	result, err := pxClient.CreateStorage(c.Context(), form)
 	if err != nil {
@@ -653,6 +677,11 @@ func (h *StorageHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	audit := map[string]string{"storage": storage, "resource_name": storage, "type": storageType}
 	if change := encryptionKeyChange(storageType, form, nil); change != "" {
 		audit["encryption_key"] = change
+	}
+	// Whose token the storage was given, by id alone: the server's name is
+	// view:pbs's to show, and every view:audit holder reads this row.
+	if fromPBSServer {
+		audit["pbs_server_id"] = pbsServerID
 	}
 	details, _ := json.Marshal(audit)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", storage, "create", details)

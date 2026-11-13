@@ -30,12 +30,7 @@ export interface DownloadURLRequest {
   filename: string;
   checksum?: string;
   checksum_algorithm?:
-    | "md5"
-    | "sha1"
-    | "sha224"
-    | "sha256"
-    | "sha384"
-    | "sha512";
+    "md5" | "sha1" | "sha224" | "sha256" | "sha384" | "sha512";
   decompression_algorithm?: "gz" | "lzo" | "zst" | "bz2";
   verify_certificates?: boolean;
 }
@@ -95,18 +90,18 @@ export type StorageType =
 
 /** Content types that can be stored */
 export type StorageContentType =
-  | "images"
-  | "rootdir"
-  | "iso"
-  | "vztmpl"
-  | "backup"
-  | "snippets";
+  "images" | "rootdir" | "iso" | "vztmpl" | "backup" | "snippets";
 
 /** Create storage request body */
 export interface CreateStorageRequest {
   storage: string;
   type: StorageType;
   params: Record<string, string>;
+  /**
+   * For a pbs storage: a PBS server registered under Backup, whose address,
+   * port, fingerprint and token the server side fills in.
+   */
+  pbs_server_id?: string;
 }
 
 /** Update storage request body */
@@ -489,11 +484,20 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
       required: true,
       placeholder: "pbs.example.com",
     },
+    { key: "port", label: "Port", type: "number", placeholder: "8007" },
     {
       key: "datastore",
       label: "Datastore",
       required: true,
       placeholder: "main",
+    },
+    {
+      key: "namespace",
+      label: "Namespace",
+      placeholder: "Root namespace",
+      // restoreStorage refuses a storage with one, and Nexara lists only a
+      // datastore's root namespace.
+      help: "Nexara reads only a datastore's root namespace, so backups written to a namespace don't show in Backup, coverage or restore.",
     },
     {
       key: "username",

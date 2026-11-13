@@ -1149,7 +1149,7 @@ row: QEMU rows require `view:vm` on the row's cluster, LXC rows
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/clusters/:id/storage` | List storage in a cluster |
-| POST | `/clusters/:id/storage` | Create storage |
+| POST | `/clusters/:id/storage` | Create storage. With `pbs_server_id`, a pbs storage connects with that registered PBS server's address, port, fingerprint and token. The server must be attached to this cluster, whose API URL must be the one it had when the server's token was entered, and the caller needs `manage:pbs` on the server too |
 | GET | `/clusters/:id/storage/:sid/config` | Get storage configuration |
 | PUT | `/clusters/:id/storage/:sid` | Update storage |
 | DELETE | `/clusters/:id/storage/:sid` | Delete storage |

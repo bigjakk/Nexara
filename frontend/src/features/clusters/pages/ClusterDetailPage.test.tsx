@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ReactNode } from "react";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { makeCluster, makeNode } from "@/test/cluster.fixtures";
@@ -44,6 +45,23 @@ vi.mock("../components/ClusterFirewallTab", () => ({
 }));
 vi.mock("../components/ClusterDRSTab", () => ({
   ClusterDRSTab: () => <div data-testid="drs-tab">DRS Tab</div>,
+}));
+vi.mock("@/features/storage/components/ClusterStoresPanel", () => ({
+  ClusterStoresPanel: (props: {
+    clusterId: string;
+    title: ReactNode;
+    actions?: ReactNode;
+  }) => (
+    <section aria-label={`stores of ${props.clusterId}`}>
+      {props.title}
+      {props.actions}
+    </section>
+  ),
+}));
+vi.mock("@/features/storage/components/AddStorageDialog", () => ({
+  AddStorageDialog: (props: { clusterId: string }) => (
+    <button type="button">Add storage to {props.clusterId}</button>
+  ),
 }));
 
 const mockUseInventoryData = vi.fn();
@@ -162,6 +180,43 @@ describe("ClusterDetailPage", () => {
       screen.queryByRole("button", { name: "More actions" }),
     ).not.toBeInTheDocument();
   });
+
+  // Where Proxmox has Datacenter > Storage; adding one takes manage:storage.
+  it.each([
+    { permissions: ["manage:storage"], canAdd: true },
+    { permissions: [], canAdd: false },
+  ])(
+    "?tab=storage lists this cluster's stores, with Add storage: $canAdd",
+    ({ permissions, canAdd }) => {
+      useAuthStore.setState({ user: null, permissions });
+      mockUseCluster.mockReturnValue({
+        data: makeCluster({ id: "test-cluster-id" }),
+        isLoading: false,
+        error: null,
+      });
+      mockUseClusterNodes.mockReturnValue({
+        data: [],
+        isLoading: false,
+        error: null,
+      });
+
+      renderWithProviders(<ClusterDetailPage />, {
+        router: { initialEntries: ["/clusters/test-cluster-id?tab=storage"] },
+      });
+
+      expect(
+        screen.getByRole("tab", { name: "Storage", selected: true }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("region", { name: "stores of test-cluster-id" }),
+      ).toHaveTextContent("Storage");
+      expect(
+        screen.queryByRole("button", {
+          name: "Add storage to test-cluster-id",
+        }) !== null,
+      ).toBe(canAdd);
+    },
+  );
 
   it("shows error state", () => {
     mockUseCluster.mockReturnValue({

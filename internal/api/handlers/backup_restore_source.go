@@ -71,7 +71,7 @@ func restoreStorage(cfgs []proxmox.StorageConfig, server db.PbsServer, others []
 	what := "datastore " + quoted(datastore) + " of PBS server " + quoted(server.Name)
 	switch {
 	case len(pbs) == 0:
-		return "", "", fiber.NewError(fiber.StatusBadRequest, "No PBS storage configured on this PVE cluster. Add the PBS server as storage in PVE first (Datacenter > Storage > Add > Proxmox Backup Server).")
+		return "", "", fiber.NewError(fiber.StatusBadRequest, "No PBS storage configured on this PVE cluster. Add the PBS server as storage first: on the cluster's Storage tab, Add storage, Proxmox Backup Server, then pick the server or enter its details.")
 	case len(matches) > 1:
 		return "", "", fiber.NewError(fiber.StatusConflict, "More than one Proxmox storage on this cluster reads "+what+": "+
 			strings.Join(matches, ", ")+". A restore cannot tell which to read through; remove the duplicate, or restrict one of them to other nodes.")
@@ -82,7 +82,7 @@ func restoreStorage(cfgs []proxmox.StorageConfig, server db.PbsServer, others []
 	}
 	return "", "", fiber.NewError(fiber.StatusBadRequest, "No enabled Proxmox storage on node "+node+" reads "+what+
 		" (its root namespace) and can be tied to that server. The PBS storages on this cluster are "+strings.Join(pbs, ", ")+
-		". Add one in Proxmox (Datacenter > Storage > Add > Proxmox Backup Server), with the address, port or fingerprint Nexara knows the PBS server by.")
+		". Add one on the cluster's Storage tab (Add storage, Proxmox Backup Server, then pick the server or enter its details); picking it uses the address, port and fingerprint Nexara knows it by.")
 }
 
 func quoted(s string) string { return `"` + s + `"` }

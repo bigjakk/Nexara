@@ -78,12 +78,22 @@ const storageUploadReason = "the permission depends on what the multipart stream
 	"manage:vm_import up front with hasClusterPerm and then enforces per-content — an ISO or CT " +
 	"template needs manage:storage, an OVA (import) either grant (see uploadContentAllowed)"
 
+// storageCreateDeferredReason is the create's Deferred justification: like the
+// restore's (restoreDeferredReason), its second check is on something only the
+// body names.
+const storageCreateDeferredReason = "two checks, the second on something only the body names: manage:storage " +
+	"on the cluster in the path, then, when the body's pbs_server_id names a registered PBS server whose token " +
+	"the storage is to use, view:pbs and manage:pbs on that server — pbsSourceSettings loads its row and gates " +
+	"on the cluster it is attached to, or instance-wide when it is standalone — refused as a 404 when the " +
+	"caller cannot view it, so a server they cannot see looks like one that does not exist; the server must " +
+	"then be attached to the cluster in the path"
+
 // registerStorageEndpoints declares the 12 storage routes served by
 // StorageHandler that the registry can express.
 //
-// Eleven are plain cluster-scoped Checks — one static requireClusterPerm
-// each, hoisted into middleware. The twelfth, the upload, is Deferred; see
-// storageUploadReason.
+// Ten are plain cluster-scoped Checks — one static requireClusterPerm each,
+// hoisted into middleware. Two are Deferred: the upload (storageUploadReason)
+// and the create (storageCreateDeferredReason).
 //
 // A THIRTEENTH route stays in router.go and is deliberately not declared
 // here: DELETE .../storage/:storage_id/content/* takes the volume id as a
@@ -112,10 +122,17 @@ func registerStorageEndpoints(reg *Registry, h *handlers.StorageHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   storageScope,
+		// The grants are spelled out here because a Deferred route renders as
+		// the bare word "deferred".
 		Description: "Add a storage pool to the cluster. The plugin-specific settings go in params, whose " +
-			"accepted keys are Proxmox's own for the chosen type. " + generatedKeyDoc,
+			"accepted keys are Proxmox's own for the chosen type. Requires manage:storage on this cluster; " +
+			"with pbs_server_id, also manage:pbs on that PBS server (on the cluster it is attached to, or " +
+			"instance-wide when it is standalone), and a server the caller cannot view answers 404. " +
+			"The server must be attached to this cluster (400 otherwise), and this cluster's API URL must be " +
+			"the one it had when the server's token was entered (409 otherwise). " +
+			generatedKeyDoc,
 		Group:       "Storage",
-		Permissions: clusterCheck("manage", "storage"),
+		Permissions: Permissions{Deferred: storageCreateDeferredReason},
 		Parameters:  clusterParams(createStorageParams()),
 		Handler:     h.Create,
 	})
@@ -312,6 +329,17 @@ func createStorageParams() apischema.Properties {
 			"Plugin-specific settings, as a flat object of string values — path for dir, server and " +
 				"export for nfs, vgname for lvm, and so on. An empty value is dropped rather than sent, " +
 				"and \"storage\" and \"type\" are ignored here because they are named above."),
+		"pbs_server_id": {
+			Type:     apischema.String,
+			Optional: true,
+			Format:   "uuid",
+			Typetext: "<uuid>",
+			Description: "For a pbs pool: a registered PBS server attached to this cluster, the id of a " +
+				"row from GET /pbs-servers. The storage then connects with that server's address, port, " +
+				"certificate fingerprint and API token, so params may not set server, port, username, " +
+				"password or fingerprint. Proxmox keeps its own copy of the token: replacing it on the PBS " +
+				"server later does not update the storage.",
+		},
 	}
 }
 

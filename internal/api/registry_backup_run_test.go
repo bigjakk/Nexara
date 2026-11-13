@@ -265,8 +265,10 @@ type backupRunDBTX struct {
 	// before any request.
 	lookups map[string]any
 	lists   map[string][]any
-	// asked is the sqlc name of each :one query the handler ran, in order.
-	asked []string
+	// asked is the sqlc name of each :one query the handler ran, in order, and
+	// askedWith the arguments of the last run of each.
+	asked     []string
+	askedWith map[string][]any
 	// queried is the arguments of the last :many query run, by its sqlc name.
 	queried map[string][]any
 }
@@ -302,6 +304,10 @@ func (d *backupRunDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.asked = append(d.asked, stmtName(sql))
+	if d.askedWith == nil {
+		d.askedWith = map[string][]any{}
+	}
+	d.askedWith[stmtName(sql)] = args
 	for name, row := range d.lookups {
 		if strings.Contains(sql, "-- name: "+name+" :one") {
 			if err, failed := row.(error); failed {
@@ -450,6 +456,24 @@ func newBackupJobApp(t *testing.T, pve *backupRunPVE, method, path string,
 func newBackupAppAs(t *testing.T, pve *backupRunPVE, grants map[string]bool, method, path string,
 	handler func(*handlers.BackupHandler, fiber.Ctx, *apischema.Params) error) (*fiber.App, *backupRunDBTX) {
 	t.Helper()
+	return newPVEAppAs(t, pve, grants, method, path, func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
+		backup := handlers.NewBackupHandler(q, backupRunEncKey, nil)
+		if pve.readTimeout > 0 {
+			backup.SetReadTimeout(pve.readTimeout)
+		}
+		if pve.stopPoll > 0 {
+			backup.SetStopPollInterval(pve.stopPoll)
+		}
+		return func(c fiber.Ctx, p *apischema.Params) error { return handler(backup, c, p) }
+	})
+}
+
+// newPVEAppAs serves the declared endpoint at method and path with the handler
+// bind builds over the recording DB, against the stand-in Proxmox, for a
+// caller holding exactly grants.
+func newPVEAppAs(t *testing.T, pve *backupRunPVE, grants map[string]bool, method, path string,
+	bind func(*db.Queries) func(fiber.Ctx, *apischema.Params) error) (*fiber.App, *backupRunDBTX) {
+	t.Helper()
 	baseURL := pve.serve(t)
 	encrypted, err := crypto.Encrypt("token-secret-value", backupRunEncKey)
 	if err != nil {
@@ -466,14 +490,7 @@ func newBackupAppAs(t *testing.T, pve *backupRunPVE, grants map[string]bool, met
 
 	dbtx := &backupRunDBTX{}
 	e := declaredEndpoint(t, method, path)
-	backup := handlers.NewBackupHandler(db.New(dbtx), backupRunEncKey, nil)
-	if pve.readTimeout > 0 {
-		backup.SetReadTimeout(pve.readTimeout)
-	}
-	if pve.stopPoll > 0 {
-		backup.SetStopPollInterval(pve.stopPoll)
-	}
-	e.Handler = func(c fiber.Ctx, p *apischema.Params) error { return handler(backup, c, p) }
+	e.Handler = bind(db.New(dbtx))
 
 	// stubAuth sets the user TrackTask and AuditLog need — without one they
 	// record nothing, and every "no rows" assertion below would pass for that
