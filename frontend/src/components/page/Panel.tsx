@@ -1,7 +1,9 @@
-import { useId, type HTMLAttributes, type ReactNode } from "react";
+import { useId, type HTMLAttributes, type ReactNode, type Ref } from "react";
 import { cn } from "@/lib/utils";
 
 interface PanelProps extends Omit<HTMLAttributes<HTMLElement>, "title"> {
+  /** The section itself, for a dialog that hands focus back to the panel. */
+  ref?: Ref<HTMLElement> | undefined;
   title?: ReactNode;
   /** Muted text beside the title: a count, a state, a one-line note. */
   aside?: ReactNode;

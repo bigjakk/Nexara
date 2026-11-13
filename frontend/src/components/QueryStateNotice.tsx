@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AlertTriangle } from "lucide-react";
+import { CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { describeError } from "@/lib/api-error";
@@ -96,19 +96,28 @@ export function QueryStateNotice({
       // role="status" rather than "alert": a tab can hold several of these at
       // once — the node Disks tab draws five — and five assertive
       // interruptions in a row is worse for a screen reader than a polite one.
+      // Flat and quiet: a tint, no outline. Only the mark is red; the words
+      // are read as text, and the server's own are small print under them.
       <div
         role="status"
-        className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        className="flex flex-wrap items-start gap-x-2.5 gap-y-2 rounded-[8px] bg-destructive/[0.08] px-3.5 py-2.5 text-sm"
       >
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p>{`Could not load ${subject}.`}</p>
+        <CircleAlert
+          aria-hidden="true"
+          className="mt-0.5 h-4 w-4 shrink-0 text-destructive"
+        />
+        <div className="min-w-0 flex-[1_1_14rem]">
+          <p className="font-medium">{`Could not load ${subject}.`}</p>
           {serverMessage !== "" && (
-            <p className="mt-1 font-mono text-xs break-words opacity-90">
+            <p className="mt-0.5 font-mono text-[12.5px] break-words text-muted-foreground">
               {serverMessage}
             </p>
           )}
-          {query.isPaused && <p className="mt-1 text-xs">{PAUSED_RETRY}</p>}
+          {query.isPaused && (
+            <p className="mt-1 text-[12.5px] text-muted-foreground">
+              {PAUSED_RETRY}
+            </p>
+          )}
         </div>
         <RetryButton query={query} />
       </div>
@@ -129,8 +138,8 @@ export function QueryStateNotice({
   // with nothing on screen to explain why, so this branch has to say
   // something for any state at all.
   return (
-    <div className="flex items-start justify-between gap-2">
-      <p className="text-sm text-muted-foreground">
+    <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+      <p className="min-w-0 flex-[1_1_14rem] text-sm text-muted-foreground">
         {query.isPaused
           ? // Both gates in the retryer's canContinue() have to reopen —
             // onlineManager.isOnline() and focusManager.isFocused(), the
@@ -179,7 +188,7 @@ export function QueryFailureNote({
   return (
     <p
       role="status"
-      className={`text-xs text-destructive ${className}`.trimEnd()}
+      className={`text-[12.5px] text-destructive ${className}`.trimEnd()}
     >
       {`Could not load ${subject}${serverMessage !== "" ? `: ${serverMessage}` : "."}`}{" "}
       {offer ? (

@@ -8,7 +8,11 @@ import { Monitor } from "lucide-react";
 export function PVESourceBadge({ source }: { source: string }) {
   if (source !== "proxmox") return null;
   return (
-    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] leading-none font-medium text-orange-600 dark:text-orange-400">
+    // A label, not a state: neutral, so the row keeps one colour to read.
+    <span
+      title="Ingested from Proxmox"
+      className="inline-flex shrink-0 items-center gap-1 rounded-[5px] bg-foreground/[0.07] px-1.5 py-[3px] text-[11px] leading-none font-medium text-muted-foreground"
+    >
       <Monitor className="h-2.5 w-2.5" />
       PVE
     </span>

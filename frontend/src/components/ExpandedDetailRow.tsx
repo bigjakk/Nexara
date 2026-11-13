@@ -26,9 +26,10 @@ export function ExpandedDetailRow({
   children: ReactNode;
 }) {
   return (
-    <TableRow>
-      <TableCell colSpan={colSpan} className="bg-muted/30">
-        <div className={cn(spacing, "px-2 py-3")}>{children}</div>
+    // Recessed and unhovered: this is the row above opened up, not a row.
+    <TableRow className="bg-foreground/[0.035] hover:bg-foreground/[0.035]">
+      <TableCell colSpan={colSpan}>
+        <div className={cn(spacing, "py-1.5")}>{children}</div>
       </TableCell>
     </TableRow>
   );

@@ -1,5 +1,6 @@
 import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { WarningCallout } from "@/components/WarningCallout";
 
 interface ConfirmRequiredWarningProps {
   title: string;
@@ -29,16 +30,13 @@ export function ConfirmRequiredWarning({
   pending = false,
 }: ConfirmRequiredWarningProps) {
   return (
-    <div
+    <WarningCallout
       data-testid="confirm-required-warning"
-      className="space-y-3 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4"
+      title={title}
+      icon={ShieldAlert}
     >
-      <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
-        <ShieldAlert className="h-5 w-5 shrink-0" />
-        <span className="font-medium">{title}</span>
-      </div>
-      <p className="text-sm text-muted-foreground">{message}</p>
-      <div className="flex flex-wrap gap-2">
+      <p>{message}</p>
+      <div className="flex flex-wrap gap-2 pt-1.5">
         <Button
           type="button"
           size="sm"
@@ -52,6 +50,6 @@ export function ConfirmRequiredWarning({
           Cancel
         </Button>
       </div>
-    </div>
+    </WarningCallout>
   );
 }

@@ -278,6 +278,15 @@
   }
 }
 
+/* --destructive is a button fill, and in the dark theme a fill dark enough for
+   white text is too dark to read as text on a panel. Error text takes a
+   lighter red there. In the utilities layer so it outranks the utility. */
+@layer utilities {
+  .dark .text-destructive {
+    color: hsl(0 91% 71%);
+  }
+}
+
 @keyframes shimmer {
   100% {
     transform: translateX(100%);

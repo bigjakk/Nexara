@@ -5,7 +5,7 @@ import {
 
 const FILL: Record<DisplayStatus, string> = {
   running: "bg-data",
-  ok: "bg-muted-foreground/50",
+  ok: "bg-foreground/30",
   failed: "bg-red-500",
 };
 const TEXT: Record<DisplayStatus, string> = {
@@ -48,7 +48,7 @@ export function TaskProgressCell({
 }) {
   if (completedLabel && display === "ok") {
     return (
-      <span className="text-[11px] font-medium text-muted-foreground">
+      <span className="text-[12.5px] text-muted-foreground">
         {STATUS_LABEL.ok}
       </span>
     );
@@ -66,10 +66,10 @@ export function TaskProgressCell({
         className="flex items-center gap-1.5"
         title="Proxmox reports no progress for this task type"
       >
-        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+        <div className="h-1 w-16 overflow-hidden rounded-full bg-foreground/10">
           <div className="h-full w-[30%] animate-task-indeterminate rounded-full bg-data" />
         </div>
-        <span className="text-[10px] tabular-nums text-muted-foreground">
+        <span className="text-[11.5px] tabular-nums text-muted-foreground">
           —
         </span>
       </div>
@@ -79,13 +79,13 @@ export function TaskProgressCell({
   const pct = Math.round(value * 100);
   return (
     <div className="flex items-center gap-1.5">
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+      <div className="h-1 w-16 overflow-hidden rounded-full bg-foreground/10">
         <div
           className={`h-full rounded-full transition-all duration-500 ${FILL[display]}`}
           style={{ width: `${String(pct)}%` }}
         />
       </div>
-      <span className={`text-[10px] tabular-nums ${TEXT[display]}`}>
+      <span className={`text-[11.5px] tabular-nums ${TEXT[display]}`}>
         {pct}%
       </span>
     </div>

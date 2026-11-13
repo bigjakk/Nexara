@@ -39,28 +39,27 @@ export function TaskLogSection({
   const { t } = useTranslation("common");
   const missing = isMissingLog(lines);
   return (
-    <div className="mt-2 border-t pt-2">
-      <span className="text-xs font-medium text-muted-foreground">
-        {t("log")}
-      </span>
+    <div className="mt-3">
+      <span className="text-xs text-muted-foreground">{t("log")}</span>
       {isLoading && (
-        <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+        <div className="mt-1 flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
           {t("loadingLog")}
         </div>
       )}
       {lines && lines.length > 0 && !missing && (
-        <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap">
+        // Recessed, not boxed: the output is read in place, as on a terminal.
+        <pre className="mt-1 max-h-48 overflow-auto rounded-[7px] bg-foreground/[0.06] px-3 py-2 font-mono text-[11.5px] leading-[1.6] break-all whitespace-pre-wrap dark:bg-black/30">
           {lines.map((line) => line.t).join("\n")}
         </pre>
       )}
       {lines && lines.length === 0 && (
-        <div className="mt-1 text-xs text-muted-foreground">
+        <div className="mt-1 text-[12.5px] text-muted-foreground">
           {t("noLogOutput")}
         </div>
       )}
       {(missing || (isError && !isLoading && !lines)) && (
-        <div className="mt-1 text-xs text-muted-foreground">
+        <div className="mt-1 text-[12.5px] text-muted-foreground">
           {t("logUnavailable")}
         </div>
       )}

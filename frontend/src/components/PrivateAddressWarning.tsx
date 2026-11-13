@@ -1,5 +1,6 @@
 import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { WarningCallout } from "@/components/WarningCallout";
 
 interface PrivateAddressWarningProps {
   ip: string;
@@ -23,16 +24,13 @@ export function PrivateAddressWarning({
   pending = false,
 }: PrivateAddressWarningProps) {
   return (
-    <div className="space-y-3 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4">
-      <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
-        <ShieldAlert className="h-5 w-5 shrink-0" />
-        <span className="font-medium">Private network address</span>
-      </div>
-      <p className="text-sm text-muted-foreground">
+    <WarningCallout title="Private network address" icon={ShieldAlert}>
+      <p>
         {url != null && url !== "" ? (
           <>
-            <strong className="break-all">{url}</strong> resolves to a
-            private/loopback IP (<code className="font-mono">{ip}</code>).
+            <strong className="break-all text-foreground">{url}</strong>{" "}
+            resolves to a private/loopback IP (
+            <code className="font-mono">{ip}</code>).
           </>
         ) : (
           <>
@@ -40,10 +38,10 @@ export function PrivateAddressWarning({
             <code className="font-mono">{ip}</code>).
           </>
         )}{" "}
-        This is fine for self-hosted lab setups — confirm to continue, or go
-        back and use a public address.
+        This is fine for self-hosted lab setups. Confirm to continue, or go back
+        and use a public address.
       </p>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 pt-1.5">
         <Button
           type="button"
           size="sm"
@@ -65,6 +63,6 @@ export function PrivateAddressWarning({
           </Button>
         )}
       </div>
-    </div>
+    </WarningCallout>
   );
 }

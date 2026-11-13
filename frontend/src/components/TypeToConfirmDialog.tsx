@@ -9,8 +9,66 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { CopyableName } from "@/components/CopyableName";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+interface ConfirmNameFieldProps {
+  id: string;
+  /** The name to type, exactly. */
+  name: string;
+  value: string;
+  onChange: (value: string) => void;
+  /**
+   * Help with the typing: the name copies itself when pressed, and shows in
+   * the empty box. For a guest's own dialogs, which have always offered it.
+   * Left off, the name has to be read and typed, which is the point of asking
+   * for it before something as drastic as cutting a UPS's power.
+   */
+  assist?: boolean;
+}
+
+/**
+ * The field a drastic action is held behind: the name to type, over the box
+ * to type it in. Shared by every dialog that asks for a name, so they all ask
+ * the same way.
+ */
+export function ConfirmNameField({
+  id,
+  name,
+  value,
+  onChange,
+  assist = false,
+}: ConfirmNameFieldProps) {
+  return (
+    <div className="space-y-2">
+      <Label
+        htmlFor={id}
+        className="block font-normal leading-snug text-muted-foreground"
+      >
+        Type{" "}
+        {assist ? (
+          <CopyableName name={name} />
+        ) : (
+          <span className="font-mono font-semibold text-foreground">
+            {name}
+          </span>
+        )}{" "}
+        to confirm
+      </Label>
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
+        {...(assist ? { placeholder: name } : {})}
+        autoComplete="off"
+        spellCheck={false}
+      />
+    </div>
+  );
+}
 
 interface TypeToConfirmDialogProps<T> {
   /** What is waiting to be confirmed. The dialog is open while this is non-null. */
@@ -68,25 +126,20 @@ export function TypeToConfirmDialog<T>({
           <>
             <AlertDialogHeader>
               <AlertDialogTitle>{title(current)}</AlertDialogTitle>
-              <AlertDialogDescription>{description(current)}</AlertDialogDescription>
+              <AlertDialogDescription>
+                {description(current)}
+              </AlertDialogDescription>
             </AlertDialogHeader>
             {details?.(current)}
-            <div className="space-y-1.5">
-              <Label htmlFor={id}>
-                Type <span className="font-mono font-semibold">{expected}</span> to confirm
-              </Label>
-              <Input
-                id={id}
-                autoComplete="off"
-                spellCheck={false}
-                value={typed}
-                onChange={(e) => {
-                  setTyped(e.target.value);
-                }}
-              />
-            </div>
+            <ConfirmNameField
+              id={id}
+              name={expected}
+              value={typed}
+              onChange={setTyped}
+            />
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
+              {/* The one filled red control: everything else here is quiet. */}
               <AlertDialogAction
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 disabled={typed !== expected}

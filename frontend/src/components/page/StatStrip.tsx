@@ -73,6 +73,8 @@ export function Stat({
           "mt-0.5 truncate text-2xl font-[650] leading-[1.15] [font-stretch:108%]",
           TONE_CLASS[tone],
         )}
+        // A long reading ("1023.9 KiB/s") can be cut off in a narrow cell.
+        title={typeof value === "string" ? value : undefined}
       >
         {value}
       </div>
@@ -88,11 +90,15 @@ export function Stat({
         <UsageBar percent={percent} className="mt-2.5" />
       )}
       {trend !== undefined && trend.length >= 2 && (
-        <Sparkline
-          points={[...trend]}
-          max={trendMax}
-          className="mt-2 h-7 w-full text-data"
-        />
+        // Pinned to the foot of the cell, so the trends of one row share a
+        // baseline when one cell's context runs to a second line.
+        <div className="mt-auto pt-2">
+          <Sparkline
+            points={[...trend]}
+            max={trendMax}
+            className="h-7 w-full text-data"
+          />
+        </div>
       )}
     </>
   );
@@ -115,6 +121,8 @@ export function Stat({
     );
   }
   return (
-    <div className={cn("min-w-0 border-l px-[18px]", className)}>{body}</div>
+    <div className={cn("flex min-w-0 flex-col border-l px-[18px]", className)}>
+      {body}
+    </div>
   );
 }

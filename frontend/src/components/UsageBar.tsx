@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { usageLevel } from "@/lib/usage-level";
+import { usageLevel, type UsageLevel } from "@/lib/usage-level";
 
 /**
  * A utilisation bar in the data colour, amber and red at the shared
@@ -9,15 +9,21 @@ import { usageLevel } from "@/lib/usage-level";
 export function UsageBar({
   percent,
   thresholds = true,
+  level: givenLevel,
   className,
 }: {
   percent: number | null;
   /** False for a bar that measures progress or share, not something filling up. */
   thresholds?: boolean;
+  /**
+   * The state to draw, where the caller knows it and the thresholds do not:
+   * a battery that is draining is amber however full it is.
+   */
+  level?: UsageLevel | undefined;
   className?: string;
 }) {
   const clamped = percent === null ? null : Math.min(100, Math.max(0, percent));
-  const level = thresholds ? usageLevel(clamped) : "ok";
+  const level = givenLevel ?? (thresholds ? usageLevel(clamped) : "ok");
   return (
     <div
       aria-hidden="true"

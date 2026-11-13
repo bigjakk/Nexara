@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Panel } from "./Panel";
 
@@ -12,6 +12,8 @@ export function SettingsSection({
   actions,
   children,
   className,
+  ref,
+  tabIndex,
 }: {
   title: ReactNode;
   /** One or two sentences on what the group controls. */
@@ -20,9 +22,15 @@ export function SettingsSection({
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
-}) {
+} & Pick<ComponentProps<typeof Panel>, "ref" | "tabIndex">) {
   return (
-    <Panel title={title} actions={actions} className={className}>
+    <Panel
+      ref={ref}
+      tabIndex={tabIndex}
+      title={title}
+      actions={actions}
+      className={className}
+    >
       {description !== undefined && (
         <p className="-mt-2 mb-3 max-w-[65ch] text-sm text-muted-foreground">
           {description}

@@ -35,7 +35,8 @@ export function LinkedTaskBadge({
     <span
       title={label}
       className={cn(
-        "inline-flex items-center gap-0.5 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] leading-none font-medium text-violet-600 dark:text-violet-400",
+        // A label, not a state: neutral, so the row keeps one colour to read.
+        "inline-flex items-center gap-1 rounded-[5px] bg-foreground/[0.07] px-1.5 py-[3px] text-[11px] leading-none font-medium text-muted-foreground",
         compact ? "min-w-0" : "shrink-0",
       )}
     >

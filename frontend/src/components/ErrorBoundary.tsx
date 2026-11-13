@@ -1,6 +1,5 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
-import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -68,20 +67,37 @@ export class ErrorBoundary extends Component<Props, State> {
       const staleChunk = this.state.error
         ? isStaleChunkError(this.state.error)
         : false;
+      const message = this.state.error?.message ?? "";
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
-          <AlertTriangle className="h-12 w-12 text-destructive" />
-          <h2 className="text-lg font-semibold">
-            {staleChunk ? "Update available" : "Something went wrong"}
-          </h2>
-          <p className="text-sm text-muted-foreground max-w-md text-center">
-            {staleChunk
-              ? "A new version of Nexara was deployed while this tab was open. Reload to pick it up."
-              : (this.state.error?.message ?? "An unexpected error occurred.")}
-          </p>
-          <Button onClick={this.handleRetry} variant="outline">
-            {staleChunk ? "Reload" : "Try Again"}
-          </Button>
+        <div className="flex h-full min-h-60 items-center justify-center p-4">
+          <div
+            role="alert"
+            className="panel w-full max-w-lg rounded-[10px] px-6 py-6"
+          >
+            <h2 className="text-base font-semibold [font-stretch:108%]">
+              {staleChunk
+                ? "A new version of Nexara is ready"
+                : "This page could not be shown"}
+            </h2>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              {staleChunk
+                ? "It was deployed while this tab was open. Reload to pick it up."
+                : "It failed while it was being drawn. Retry, or open another page."}
+            </p>
+            {!staleChunk && message !== "" && (
+              <pre className="mt-3 max-h-40 overflow-auto rounded-[7px] bg-foreground/[0.06] px-3 py-2 font-mono text-[12.5px] leading-[1.55] break-words whitespace-pre-wrap dark:bg-black/30">
+                {message}
+              </pre>
+            )}
+            <Button
+              onClick={this.handleRetry}
+              variant="outline"
+              size="sm"
+              className="mt-5"
+            >
+              {staleChunk ? "Reload" : "Retry"}
+            </Button>
+          </div>
         </div>
       );
     }
