@@ -230,8 +230,8 @@ export function AppShell() {
         </>
       )}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* 56px tall: the topology and report pages size themselves against
-              it. Search is centred on the bar, not on the space left over. */}
+        {/* 56px tall: the report viewer sizes its frame against it. Search is
+              centred on the bar, not on the space left over. */}
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 md:px-4">
           <div className="flex min-w-0 items-center gap-2 md:flex-1">
             {isMobile ? (

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  ChevronRight,
+  AlertTriangle,
   Server,
-  MoreVertical,
+  MoreHorizontal,
   Plus,
   Pencil,
   Trash2,
@@ -23,16 +23,18 @@ import {
   useFallbackFocus,
 } from "@/components/ui/return-focus";
 import {
-  severityDotClass,
+  severityTextClass,
   worstIssueSeverity,
 } from "@/features/ceph/lib/ceph-health";
 import { visibleClusterIssues } from "@/lib/health-issues";
 import { useHealthDismissStore } from "@/stores/health-dismiss-store";
 import { useHealthMuteStore } from "@/stores/health-mute-store";
 import { StatusIcon } from "@/components/StatusIcon";
-import { VMIcon } from "@/components/VMIcon";
-import { OSIcon } from "@/components/OSIcon";
-import { classifyOS } from "@/lib/os-classify";
+import {
+  filterTree,
+  type TreeFilterNode,
+  type TreeFilterResult,
+} from "@/lib/tree-filter";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useClusterNodes,
@@ -55,12 +57,25 @@ import { useSidebarStore } from "@/stores/sidebar-store";
 import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { EditClusterDialog } from "@/features/clusters/components/EditClusterDialog";
 import { DeleteClusterDialog } from "@/features/clusters/components/DeleteClusterDialog";
-import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import {
   FavoriteContextItem,
   FavoriteDropdownItem,
 } from "@/features/favorites/components/FavoriteMenuItem";
 import { CreateResourceContextItems } from "./create-resource-actions";
+import {
+  TreeChevron,
+  TreeGuestRow,
+  TreeHeading,
+  TreeNote,
+  TreeRowAside,
+  TreeSkeleton,
+} from "./TreeRow";
+import {
+  TREE_ROW_MAIN,
+  TREE_ROW_TOGGLE,
+  treeIndent,
+  treeRowClass,
+} from "./tree-row-style";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -70,19 +85,33 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { ClusterResponse, NodeResponse, VMResponse } from "@/types/api";
 
+const nodeKeyOf = (clusterId: string, nodeId: string) =>
+  `node:${clusterId}:${nodeId}`;
+const guestKeyOf = (vmId: string) => `vm:${vmId}`;
+const guestLabel = (vm: VMResponse) => `${String(vm.vmid)} ${vm.name}`;
+
 interface NodeBranchProps {
   node: NodeResponse;
   vms: VMResponse[];
   clusterId: string;
+  /** What the filter box keeps and holds open; null when it is empty. */
+  filter: TreeFilterResult | null;
 }
 
-function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
+function NodeBranch({ node, vms, clusterId, filter }: NodeBranchProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
-  const nodeKey = `node:${clusterId}:${node.id}`;
-  const isExpanded = expandedNodes.has(nodeKey);
+  const nodeKey = nodeKeyOf(clusterId, node.id);
+  // The filter holds a branch open over a match; the stored expansion is left
+  // as it was, and is what shows again when the box is cleared.
+  const heldOpen = filter?.open.has(nodeKey) ?? false;
+  const isExpanded = expandedNodes.has(nodeKey) || heldOpen;
   const nodeVMs = vms.filter((vm) => vm.node_id === node.id);
+  const shownVMs =
+    filter === null
+      ? nodeVMs
+      : nodeVMs.filter((vm) => filter.visible.has(guestKeyOf(vm.id)));
   const isActive =
     location.pathname === `/clusters/${clusterId}/nodes/${node.id}`;
   const { canManage } = useAuth();
@@ -108,15 +137,15 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
     }
   }, [location.pathname, clusterId, nodeKey, nodeVMs, expandNode]);
 
+  if (filter !== null && !filter.visible.has(nodeKey)) return null;
+
   return (
-    <div className="border-l border-border pl-3 ml-3">
+    <div>
       <ContextMenu modal={false}>
         <ContextMenuTrigger asChild>
           <div
-            className={cn(
-              "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-              isActive && "bg-primary/10 text-foreground",
-            )}
+            className={treeRowClass({ active: isActive })}
+            style={treeIndent(1)}
           >
             <button
               aria-label={`${isExpanded ? "Collapse" : "Expand"} node ${node.name}`}
@@ -124,23 +153,23 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
               disabled={nodeVMs.length === 0}
               onClick={(e) => {
                 e.stopPropagation();
+                // Held open by the filter: a toggle would change nothing on
+                // screen and flip what clearing the box restores.
+                if (heldOpen) return;
                 if (nodeVMs.length > 0) toggleNode(nodeKey);
               }}
-              className="shrink-0"
+              className={TREE_ROW_TOGGLE}
             >
-              <ChevronRight
-                className={cn(
-                  "h-3 w-3 transition-transform",
-                  nodeVMs.length === 0 && "invisible",
-                  isExpanded && "rotate-90",
-                )}
+              <TreeChevron
+                expanded={isExpanded}
+                hidden={nodeVMs.length === 0}
               />
             </button>
             <button
               onClick={() => {
                 void navigate(`/clusters/${clusterId}/nodes/${node.id}`);
               }}
-              className="flex min-w-0 flex-1 items-center gap-1.5"
+              className={TREE_ROW_MAIN}
             >
               {node.ha_state === "maintenance" ? (
                 <Wrench
@@ -152,6 +181,9 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
               )}
               <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate">{node.name}</span>
+              {nodeVMs.length > 0 && (
+                <TreeRowAside>{nodeVMs.length}</TreeRowAside>
+              )}
             </button>
           </div>
         </ContextMenuTrigger>
@@ -179,60 +211,19 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
         </ContextMenuContent>
       </ContextMenu>
 
-      {isExpanded && nodeVMs.length > 0 && (
-        <div className="border-l border-border pl-3 ml-3">
-          {nodeVMs
-            .sort((a, b) => a.vmid - b.vmid)
-            .map((vm) => {
-              const kind = vm.type === "lxc" ? "lxc" : "qemu";
-              const vmPath = `/inventory/${kind}/${clusterId}/${vm.id}`;
-              const vmActive = location.pathname === vmPath;
-              return (
-                <VMContextMenu
-                  key={vm.id}
-                  target={{
-                    clusterId,
-                    resourceId: vm.id,
-                    vmid: vm.vmid,
-                    name: vm.name,
-                    kind: vm.type === "lxc" ? "ct" : "vm",
-                    status: vm.status,
-                    currentNode: node.name,
-                    template: vm.template,
-                  }}
-                >
-                  <button
-                    onClick={() => {
-                      void navigate(vmPath);
-                    }}
-                    className={cn(
-                      "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-                      vmActive && "bg-primary/10 text-foreground",
-                    )}
-                  >
-                    <StatusIcon status={vm.status} />
-                    <VMIcon type={vm.type} template={vm.template} />
-                    {(classifyOS(vm.ostype) !== "unknown" ||
-                      classifyOS(vm.config_ostype) !== "unknown") && (
-                      <OSIcon
-                        ostype={vm.ostype}
-                        configOstype={vm.config_ostype}
-                      />
-                    )}
-                    <span
-                      className={cn(
-                        "truncate",
-                        vm.template && "text-muted-foreground",
-                      )}
-                    >
-                      {vm.vmid} {vm.name}
-                    </span>
-                  </button>
-                </VMContextMenu>
-              );
-            })}
-        </div>
-      )}
+      {isExpanded &&
+        shownVMs
+          .slice()
+          .sort((a, b) => a.vmid - b.vmid)
+          .map((vm) => (
+            <TreeGuestRow
+              key={vm.id}
+              vm={vm}
+              clusterId={clusterId}
+              currentNode={node.name}
+              depth={2}
+            />
+          ))}
 
       <AlertDialog open={maintOpen} onOpenChange={setMaintOpen}>
         <AlertDialogContent>
@@ -267,9 +258,11 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
 
 interface ClusterBranchProps {
   cluster: ClusterResponse;
+  /** The filter box's text, normalised; empty when nothing is typed. */
+  filter: string;
 }
 
-function ClusterBranch({ cluster }: ClusterBranchProps) {
+function ClusterBranch({ cluster, filter }: ClusterBranchProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
@@ -307,6 +300,32 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
     }
   }, [location.pathname, cluster.id, clusterKey, expandNode]);
 
+  // The rows under this cluster, as the filter box sees them. Only what has
+  // loaded: a collapsed cluster has no rows to look through.
+  const filtered = useMemo(() => {
+    if (filter === "" || !isExpanded || nodes === undefined) return null;
+    const model: TreeFilterNode = {
+      id: clusterKey,
+      label: cluster.name,
+      children: nodes.map((node) => ({
+        id: nodeKeyOf(cluster.id, node.id),
+        label: node.name,
+        children: (vms ?? [])
+          .filter((vm) => vm.node_id === node.id)
+          .map((vm) => ({ id: guestKeyOf(vm.id), label: guestLabel(vm) })),
+      })),
+    };
+    return filterTree([model], filter);
+  }, [filter, isExpanded, nodes, vms, cluster.id, cluster.name, clusterKey]);
+
+  if (filtered !== null && !filtered.visible.has(clusterKey)) return null;
+  // A collapsed cluster has loaded nothing to look through. It stays, dimmed,
+  // rather than vanish as if nothing in it matched.
+  const unsearched =
+    filter !== "" &&
+    filtered === null &&
+    !cluster.name.toLowerCase().includes(filter);
+
   return (
     <>
       <ContextMenu modal={false}>
@@ -314,9 +333,13 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
           <div>
             <div
               className={cn(
-                "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-                isActive && "bg-primary/10 text-foreground",
+                treeRowClass({ active: isActive }),
+                unsearched && "opacity-55",
               )}
+              style={treeIndent(0)}
+              title={
+                unsearched ? "Collapsed: open it to filter inside" : undefined
+              }
             >
               <button
                 aria-label={`${isExpanded ? "Collapse" : "Expand"} cluster ${cluster.name}`}
@@ -324,36 +347,35 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
                 onClick={() => {
                   toggleNode(clusterKey);
                 }}
-                className="shrink-0"
+                className={TREE_ROW_TOGGLE}
               >
-                <ChevronRight
-                  className={cn(
-                    "h-3 w-3 transition-transform",
-                    isExpanded && "rotate-90",
-                  )}
-                />
+                <TreeChevron expanded={isExpanded} />
               </button>
               <button
                 onClick={() => {
                   void navigate(`/clusters/${cluster.id}`);
                 }}
-                className="flex min-w-0 flex-1 items-center gap-1.5"
+                className={TREE_ROW_MAIN}
               >
                 <StatusIcon
                   status={
                     cluster.status === "degraded" ? "degraded" : cluster.status
                   }
                 />
-                <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate font-medium">{cluster.name}</span>
+                <span className="truncate font-semibold text-foreground">
+                  {cluster.name}
+                </span>
                 {clusterWorst !== "ok" && (
                   <span
                     className={cn(
-                      "h-1.5 w-1.5 shrink-0 rounded-full",
-                      severityDotClass[clusterWorst],
+                      "flex shrink-0 items-center gap-0.5 text-[11.5px] font-semibold tabular-nums",
+                      severityTextClass[clusterWorst],
                     )}
                     title={`${String(clusterIssueCount)} health issue${clusterIssueCount === 1 ? "" : "s"}`}
-                  />
+                  >
+                    <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+                    {clusterIssueCount}
+                  </span>
                 )}
               </button>
 
@@ -361,9 +383,9 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
                 <DropdownMenuTrigger asChild>
                   <button
                     aria-label={`Actions for ${cluster.name}`}
-                    className="shrink-0 rounded p-0.5 opacity-0 hover:bg-accent group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
+                    className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 outline-hidden hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100"
                   >
-                    <MoreVertical className="h-3 w-3" />
+                    <MoreHorizontal className="h-3.5 w-3.5" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-44">
@@ -406,6 +428,7 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
                       node={node}
                       vms={vms ?? []}
                       clusterId={cluster.id}
+                      filter={filtered}
                     />
                   ))}
               </div>
@@ -461,7 +484,7 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
   );
 }
 
-export function InventoryTree() {
+export function InventoryTree({ filter = "" }: { filter?: string }) {
   const { t } = useTranslation("common");
   const { data: clusters, isLoading } = useClusters();
   // Where a dialog opened from the tree sends focus when its opener has gone
@@ -478,43 +501,48 @@ export function InventoryTree() {
         role="group"
         aria-label={t("datacenter")}
         tabIndex={-1}
-        className="space-y-1 py-1 outline-none"
+        className="outline-none"
       >
-        <div className="flex items-center justify-between px-2 pb-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            {t("datacenter")}
-          </span>
-          <AddClusterDialog
-            trigger={
-              <Button
-                aria-label="Add cluster"
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5"
-              >
-                <Plus className="h-3 w-3" />
-              </Button>
-            }
-          />
-        </div>
+        <TreeHeading
+          action={
+            <AddClusterDialog
+              trigger={
+                <Button
+                  aria-label="Add cluster"
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              }
+            />
+          }
+        >
+          {t("datacenter")}
+        </TreeHeading>
 
-        {isLoading && (
-          <div className="space-y-1 px-2">
-            {Array.from({ length: 2 }, (_, i) => (
-              <div key={i} className="h-6 animate-pulse rounded bg-muted" />
+        {isLoading && <TreeSkeleton />}
+
+        {clusters?.length === 0 && <TreeNote>{t("noClustersAdded")}</TreeNote>}
+
+        {clusters !== undefined && clusters.length > 0 && (
+          <div>
+            {clusters.map((cluster) => (
+              <ClusterBranch
+                key={cluster.id}
+                cluster={cluster}
+                filter={filter}
+              />
             ))}
+            {/* Alone here once the filter has hidden every cluster. */}
+            {filter !== "" && (
+              <TreeNote className="hidden only:block">
+                Nothing in the tree matches.
+              </TreeNote>
+            )}
           </div>
         )}
-
-        {clusters?.length === 0 && (
-          <p className="px-2 text-xs text-muted-foreground">
-            {t("noClustersAdded")}
-          </p>
-        )}
-
-        {clusters?.map((cluster) => (
-          <ClusterBranch key={cluster.id} cluster={cluster} />
-        ))}
       </div>
     </FallbackFocusContext>
   );

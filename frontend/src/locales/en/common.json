@@ -71,6 +71,8 @@
   "activityErrorCount_one": "{{count}} error",
   "activityErrorCount_other": "{{count}} errors",
   "others": "Others",
+  "expandActivity": "Expand activity",
+  "collapseActivity": "Collapse activity",
   "linkedTask": {
     "haRequest": "HA request",
     "haManager": "HA manager",

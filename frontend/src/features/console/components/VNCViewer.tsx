@@ -1,15 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import RFB from "@novnc/novnc";
-import {
-  AlertCircle,
-  Loader2,
-  Play,
-  PowerOff,
-  RotateCcw,
-  Unplug,
-} from "lucide-react";
+import { Loader2, Play, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { MAX_CONSOLE_AUTO_RETRIES, type ConsoleTab } from "../types/console";
+import {
+  MAX_CONSOLE_AUTO_RETRIES,
+  type ConsoleStatus,
+  type ConsoleTab,
+} from "../types/console";
 import { useConsoleSession, useConsoleStoreApi } from "@/stores/console-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMAction } from "@/features/vms/api/vm-queries";
@@ -20,6 +17,7 @@ import {
   SESSION_ENDED_CLOSE,
   SESSION_ENDED_CODE,
 } from "../lib/session-ended";
+import { ConsoleStateDot } from "./ConsoleState";
 import { VNCToolbar } from "./VNCToolbar";
 import {
   buildVncWsUrl,
@@ -32,12 +30,18 @@ interface VNCViewerProps {
   visible: boolean;
   /** Show the toolbar's maximize/restore for the floating window (default). */
   windowControls?: boolean;
+  /**
+   * The page's own toolbar, for the display's controls to join (see
+   * VNCToolbar's `slot`). Omitted, they are a bar above the display.
+   */
+  toolbarSlot?: HTMLElement | null | undefined;
 }
 
 export function VNCViewer({
   tab,
   visible,
   windowControls = true,
+  toolbarSlot,
 }: VNCViewerProps) {
   const { id: tabId, clusterID, node, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -334,9 +338,16 @@ export function VNCViewer({
       style={{ display: visible ? "flex" : "none" }}
     >
       {!isMinimized && (
-        <VNCToolbar rfb={rfb} tab={tab} windowControls={windowControls} />
+        <VNCToolbar
+          rfb={rfb}
+          tab={tab}
+          windowControls={windowControls}
+          slot={toolbarSlot}
+        />
       )}
-      <div className="relative flex-1 overflow-hidden">
+      {/* The stage is dark in both themes, so what sits on it reads the dark
+          tokens: text, buttons and all. */}
+      <div className="dark relative flex-1 overflow-hidden text-foreground">
         <div
           ref={containerRef}
           className="h-full w-full bg-black"
@@ -412,93 +423,113 @@ function ConsoleStateOverlay({
     status === "reconnecting"
   ) {
     return (
-      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin" />
-        <p className="text-xs">
-          {status === "reconnecting" ? "Reconnecting…" : "Connecting…"}
-        </p>
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 bg-black/60 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        {status === "reconnecting" ? "Reconnecting…" : "Connecting…"}
       </div>
     );
   }
 
   if (status === "guest-stopped") {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 px-4 text-center">
-        <PowerOff className="h-8 w-8 text-muted-foreground" />
-        <div>
-          <p className="text-sm font-medium text-foreground">
-            {kindLabel} is powered off
-          </p>
-          {hasResource && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              The console will connect automatically when it powers on.
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          {hasResource && (
-            <Button
-              size="sm"
-              className="h-7 gap-1.5 px-3 text-xs"
-              disabled={actionMutation.isPending}
-              onClick={handleStart}
-            >
-              {actionMutation.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Play className="h-3.5 w-3.5" />
-              )}
-              {actionMutation.isPending ? "Starting…" : `Start ${kindLabel}`}
-            </Button>
-          )}
+      <StageNotice
+        status={status}
+        title={`${kindLabel} is powered off`}
+        description={
+          hasResource
+            ? "The console will connect automatically when it powers on."
+            : undefined
+        }
+      >
+        {hasResource && (
           <Button
-            variant="outline"
             size="sm"
-            className="h-7 gap-1.5 bg-background px-3 text-xs"
-            onClick={onReconnect}
+            className="gap-1.5"
+            disabled={actionMutation.isPending}
+            onClick={handleStart}
           >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Connect anyway
+            {actionMutation.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
+            {actionMutation.isPending ? "Starting…" : `Start ${kindLabel}`}
           </Button>
-        </div>
-      </div>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={onReconnect}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Connect anyway
+        </Button>
+      </StageNotice>
     );
   }
 
   // disconnected / error
   const isError = status === "error";
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 px-4 text-center">
-      {isError ? (
-        <AlertCircle className="h-8 w-8 text-destructive" />
-      ) : (
-        <Unplug className="h-8 w-8 text-muted-foreground" />
-      )}
-      <div>
-        <p className="text-sm font-medium text-foreground">
-          {isError
-            ? "Console connection failed"
-            : sessionEnded
-              ? "Session ended"
-              : "Console disconnected"}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {isError
-            ? "The console session could not be established."
-            : sessionEnded
-              ? "Sign in again to use the console."
-              : "Automatic reconnect attempts were exhausted."}
-        </p>
-      </div>
+    <StageNotice
+      status={status}
+      title={
+        isError
+          ? "Console connection failed"
+          : sessionEnded
+            ? "Session ended"
+            : "Console disconnected"
+      }
+      description={
+        isError
+          ? "The console session could not be established."
+          : sessionEnded
+            ? "Sign in again to use the console."
+            : "Automatic reconnect attempts were exhausted."
+      }
+    >
       <Button
         variant="outline"
         size="sm"
-        className="h-7 gap-1.5 bg-background px-3 text-xs"
+        className="gap-1.5"
         onClick={onReconnect}
       >
         <RotateCcw className="h-3.5 w-3.5" />
         {isError ? "Retry" : "Reconnect"}
       </Button>
+    </StageNotice>
+  );
+}
+
+/** What the stage says in place of a display: the state, why, what to do. */
+function StageNotice({
+  status,
+  title,
+  description,
+  children,
+}: {
+  status: ConsoleStatus;
+  title: string;
+  description: string | undefined;
+  children: ReactNode;
+}) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3.5 bg-black/85 px-4 text-center">
+      <div>
+        <p className="flex items-center justify-center gap-2 text-sm font-semibold">
+          <ConsoleStateDot status={status} />
+          {title}
+        </p>
+        {description !== undefined && (
+          <p className="mt-1 max-w-sm text-[12.5px] text-muted-foreground">
+            {description}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {children}
+      </div>
     </div>
   );
 }

@@ -5,10 +5,11 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { StatusIcon } from "@/components/StatusIcon";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
@@ -28,7 +29,15 @@ interface VMEntry {
   resourceId: string;
 }
 
-export function QuickConnect() {
+export function QuickConnect({
+  appearance = "primary",
+}: {
+  /**
+   * `primary` is the Console page's one button; `compact` is the plus in the
+   * floating window's bar, where a labelled button would crowd the tabs.
+   */
+  appearance?: "primary" | "compact";
+}) {
   const [open, setOpen] = useState(false);
   const { canConsole } = usePermissions();
 
@@ -120,97 +129,107 @@ export function QuickConnect() {
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        className="gap-1.5"
-        onClick={() => {
-          setOpen(true);
-        }}
-      >
-        <Plus className="h-4 w-4" />
-        New Console
-      </Button>
+      {appearance === "compact" ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground"
+          aria-label="New console"
+          title="New console"
+          onClick={() => {
+            setOpen(true);
+          }}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          className="gap-1.5"
+          onClick={() => {
+            setOpen(true);
+          }}
+        >
+          <Plus className="h-4 w-4" />
+          New console
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg gap-3">
           <DialogHeader>
-            <DialogTitle>Open Console</DialogTitle>
+            <DialogTitle>Open a console</DialogTitle>
+            <DialogDescription>
+              Choose a running guest to open its console.
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-2">
-            <Label>Select a VM or Container</Label>
-            <div className="max-h-80 overflow-y-auto rounded-md border">
-              {vmList.length === 0 ? (
-                <p className="p-4 text-center text-sm text-muted-foreground">
-                  No VMs or containers found
-                </p>
-              ) : (
-                vmList.map((vm) => {
-                  const isRunning = vm.status === "running";
-                  const isVM = vm.type === "qemu";
+          {vmList.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No VMs or containers found
+            </p>
+          ) : (
+            <ul className="-mx-6 max-h-80 divide-y overflow-y-auto border-y">
+              {vmList.map((vm) => {
+                const isRunning = vm.status === "running";
+                const isVM = vm.type === "qemu";
 
-                  return (
-                    <div
-                      key={`${vm.clusterId}-${String(vm.vmid)}`}
-                      className="flex items-center justify-between border-b px-3 py-2 last:border-b-0"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`inline-block h-2 w-2 rounded-full ${isRunning ? "bg-emerald-500" : vm.status === "suspended" ? "bg-amber-500" : "bg-gray-400"}`}
-                          />
-                          <span className="truncate text-sm font-medium">
-                            {vm.name}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {String(vm.vmid)}
-                          </span>
-                        </div>
-                        {clusterIds.length > 1 && (
-                          <span className="text-xs text-muted-foreground">
-                            {vm.clusterName} / {vm.nodeName}
-                          </span>
-                        )}
+                return (
+                  <li
+                    key={`${vm.clusterId}-${String(vm.vmid)}`}
+                    className="flex items-center gap-3 py-1.5 pl-6 pr-4"
+                  >
+                    <StatusIcon status={vm.status} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="truncate text-sm font-medium">
+                          {vm.name}
+                        </span>
+                        <span className="shrink-0 text-[12.5px] tabular-nums text-muted-foreground">
+                          {String(vm.vmid)}
+                        </span>
                       </div>
-
-                      <div className="flex items-center gap-1">
-                        {isVM ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 gap-1 px-2 text-xs"
-                            disabled={!isRunning}
-                            title="VNC Console"
-                            onClick={(e) => {
-                              openGuest(vm, "vnc", e);
-                            }}
-                          >
-                            <Monitor className="h-3.5 w-3.5" />
-                            VNC
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 gap-1 px-2 text-xs"
-                            disabled={!isRunning}
-                            title="Container Attach"
-                            onClick={(e) => {
-                              openGuest(vm, "attach", e);
-                            }}
-                          >
-                            <TerminalSquare className="h-3.5 w-3.5" />
-                            Attach
-                          </Button>
-                        )}
-                      </div>
+                      {clusterIds.length > 1 && (
+                        <span className="block truncate text-[12.5px] text-muted-foreground">
+                          {vm.clusterName} / {vm.nodeName}
+                        </span>
+                      )}
                     </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
+
+                    {isVM ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 shrink-0 gap-1.5 px-2 text-[12.5px]"
+                        disabled={!isRunning}
+                        title="VNC Console"
+                        onClick={(e) => {
+                          openGuest(vm, "vnc", e);
+                        }}
+                      >
+                        <Monitor className="h-3.5 w-3.5" />
+                        VNC
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 shrink-0 gap-1.5 px-2 text-[12.5px]"
+                        disabled={!isRunning}
+                        title="Container Attach"
+                        onClick={(e) => {
+                          openGuest(vm, "attach", e);
+                        }}
+                      >
+                        <TerminalSquare className="h-3.5 w-3.5" />
+                        Attach
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </DialogContent>
       </Dialog>
     </>

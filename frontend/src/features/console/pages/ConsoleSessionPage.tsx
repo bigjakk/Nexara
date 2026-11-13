@@ -26,6 +26,7 @@ import { useLoadBranding } from "@/hooks/useLoadBranding";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSignOutFromOtherTabs } from "@/hooks/useSignOutFromOtherTabs";
 import { ApiClientError } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth-store";
 import { useBrandingStore } from "@/stores/branding-store";
 import {
@@ -33,7 +34,7 @@ import {
   createConsoleSessionStore,
   useConsoleSession,
 } from "@/stores/console-store";
-import { StatusIcon } from "../components/ConsoleTabBar";
+import { ConsoleStateFact } from "../components/ConsoleState";
 import { Terminal } from "../components/Terminal";
 import { VNCViewer } from "../components/VNCViewer";
 import { consoleIdentity, takeLaunch } from "../lib/console-launch";
@@ -42,22 +43,7 @@ import {
   consolePermission,
   parseConsoleSessionTarget,
 } from "../lib/console-session";
-import type {
-  ConsoleStatus,
-  ConsoleTab,
-  ConsoleTarget,
-} from "../types/console";
-
-/** Read out with the header's status icon. */
-const STATUS_TEXT: Record<ConsoleStatus, string> = {
-  idle: "Not connected",
-  connecting: "Connecting",
-  connected: "Connected",
-  reconnecting: "Reconnecting",
-  disconnected: "Disconnected",
-  error: "Connection failed",
-  "guest-stopped": "Powered off",
-};
+import type { ConsoleTab, ConsoleTarget } from "../types/console";
 
 /**
  * One console in a browser tab of its own, outside the app shell. Its query
@@ -409,55 +395,87 @@ function ConsoleSessionScreen({ tab }: { tab: ConsoleTab }) {
   const fullscreen = useDocumentFullscreen();
   const isMobile = useIsMobile();
   const isVnc = tab.type === "vm_vnc" || tab.type === "ct_vnc";
-  const headerButton = isMobile ? "h-8 w-8 p-0" : "h-7 px-2";
+  // The display's own controls (power, keys, paste…) join this page's toolbar
+  // here, so there is one bar above the stage and not two.
+  const [toolSlot, setToolSlot] = useState<HTMLDivElement | null>(null);
+  // Touch-sized on a phone; an icon and its word where the bar has the room.
+  const tool = cn(
+    "shrink-0 gap-1.5 text-[12.5px] font-normal text-muted-foreground hover:text-foreground",
+    isMobile ? "h-8 w-8 p-0" : "h-7 px-2",
+  );
 
   return (
     <div className="flex h-screen flex-col bg-background supports-[height:100dvh]:h-dvh">
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b bg-card px-3">
-        <StatusIcon status={tab.status} />
-        <span className="sr-only">{STATUS_TEXT[tab.status]}</span>
-        <h1 className="min-w-0 truncate text-sm font-medium">{label}</h1>
-        <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:inline">
-          {clusterName !== undefined
-            ? `${clusterName} / ${tab.node}`
-            : tab.node}
-        </span>
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={headerButton}
-            title="Reconnect"
-            aria-label={`Reconnect ${label}`}
-            onClick={() => {
-              reconnectTab(tab.id);
-            }}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </Button>
-          {fullscreen.supported && (
+      {/* One slim toolbar: what this console is and the state it is in on
+          the left, what can be done to it on the right. */}
+      <header className="@container shrink-0 border-b bg-card">
+        {/* Wraps on a phone: the name and state above, the controls below. */}
+        <div className="flex min-h-11 flex-wrap items-center gap-x-4 px-3 py-1 sm:px-4">
+          <h1 className="min-w-0 shrink truncate text-sm font-semibold">
+            {label}
+          </h1>
+          <div className="flex min-w-0 items-center gap-x-4 text-[12.5px] text-muted-foreground">
+            <ConsoleStateFact status={tab.status} className="text-foreground" />
+            <span className="hidden min-w-0 truncate sm:inline">
+              {clusterName !== undefined
+                ? `${clusterName} / ${tab.node}`
+                : tab.node}
+            </span>
+          </div>
+          <div className="ml-auto flex max-w-full items-center gap-0.5 overflow-x-auto">
+            <div
+              ref={setToolSlot}
+              className="flex items-center gap-0.5 empty:hidden"
+            />
             <Button
               variant="ghost"
               size="sm"
-              className={headerButton}
-              title={fullscreen.active ? "Exit fullscreen" : "Fullscreen"}
-              onClick={fullscreen.toggle}
+              className={tool}
+              title="Reconnect"
+              aria-label={`Reconnect ${label}`}
+              onClick={() => {
+                reconnectTab(tab.id);
+              }}
             >
-              {fullscreen.active ? (
-                <Minimize className="h-3.5 w-3.5" />
-              ) : (
-                <Maximize className="h-3.5 w-3.5" />
-              )}
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span className="hidden @5xl:inline">Reconnect</span>
             </Button>
-          )}
+            {fullscreen.supported && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={tool}
+                title={fullscreen.active ? "Exit fullscreen" : "Fullscreen"}
+                aria-label={
+                  fullscreen.active ? "Exit fullscreen" : "Fullscreen"
+                }
+                onClick={fullscreen.toggle}
+              >
+                {fullscreen.active ? (
+                  <Minimize className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize className="h-3.5 w-3.5" />
+                )}
+                <span className="hidden @5xl:inline">
+                  {fullscreen.active ? "Exit fullscreen" : "Fullscreen"}
+                </span>
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* min-h-0 so the console can shrink to the space left: an xterm's
-          intrinsic rows would otherwise push this past the viewport. */}
+      {/* The stage: flat and dark in both themes. min-h-0 so the console can
+          shrink to the space left: an xterm's intrinsic rows would otherwise
+          push this past the viewport. */}
       <main className="relative min-h-0 flex-1 bg-[#1a1b26]">
         {isVnc ? (
-          <VNCViewer tab={viewTab} visible={shown} windowControls={false} />
+          <VNCViewer
+            tab={viewTab}
+            visible={shown}
+            windowControls={false}
+            toolbarSlot={toolSlot}
+          />
         ) : (
           <Terminal tab={viewTab} visible={shown} />
         )}
@@ -526,12 +544,17 @@ function useDocumentFullscreen() {
 
 function ConsoleSessionLoading() {
   return (
-    <div className="flex h-screen items-center justify-center bg-background supports-[height:100dvh]:h-dvh">
-      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+    <div
+      role="status"
+      className="flex h-screen items-center justify-center gap-2 bg-background text-sm text-muted-foreground supports-[height:100dvh]:h-dvh"
+    >
+      <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+      Checking this console
     </div>
   );
 }
 
+/** The page in place of a console: why there is none, and the ways on. */
 function ConsoleSessionNotice({
   title,
   description,
@@ -542,16 +565,25 @@ function ConsoleSessionNotice({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-3 bg-background p-6 text-center supports-[height:100dvh]:h-dvh">
-      <TerminalSquare className="h-10 w-10 text-muted-foreground opacity-50" />
-      <h1 className="text-base font-semibold">{title}</h1>
-      <p className="max-w-sm text-sm text-muted-foreground">{description}</p>
-      <div className="flex flex-wrap justify-center gap-2">
-        {children}
-        {/* A page load, not an in-app navigation: this tab becomes the app. */}
-        <Button variant="outline" size="sm" asChild>
-          <a href="/">Open Nexara</a>
-        </Button>
+    <div className="flex h-screen items-center justify-center bg-background p-4 supports-[height:100dvh]:h-dvh">
+      <div className="panel w-full max-w-md rounded-[10px] px-6 py-7">
+        <span
+          aria-hidden="true"
+          className="grid h-11 w-11 place-items-center rounded-[10px] bg-foreground/[0.06] text-muted-foreground"
+        >
+          <TerminalSquare className="h-5 w-5" />
+        </span>
+        <h1 className="mt-4 text-base font-semibold [font-stretch:108%]">
+          {title}
+        </h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">{description}</p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {children}
+          {/* A page load, not an in-app navigation: this tab becomes the app. */}
+          <Button variant="outline" size="sm" asChild>
+            <a href="/">Open Nexara</a>
+          </Button>
+        </div>
       </div>
     </div>
   );

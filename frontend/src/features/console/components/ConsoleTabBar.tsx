@@ -1,37 +1,14 @@
-import {
-  X,
-  Terminal,
-  Loader2,
-  AlertCircle,
-  Unplug,
-  RotateCcw,
-  PowerOff,
-  Circle,
-} from "lucide-react";
+import { RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConsoleStore } from "@/stores/console-store";
-import type { ConsoleStatus } from "../types/console";
+import { CONSOLE_STATUS_TEXT } from "../lib/console-status";
+import { ConsoleStateDot } from "./ConsoleState";
 
-export function StatusIcon({ status }: { status: ConsoleStatus }) {
-  switch (status) {
-    // Restored tab that hasn't been opened yet — it connects on first click.
-    case "idle":
-      return <Circle className="h-3 w-3 text-muted-foreground/50" />;
-    case "connecting":
-      return <Loader2 className="h-3 w-3 animate-spin text-amber-500" />;
-    case "connected":
-      return <Terminal className="h-3 w-3 text-emerald-500" />;
-    case "reconnecting":
-      return <RotateCcw className="h-3 w-3 animate-spin text-amber-500" />;
-    case "disconnected":
-      return <Unplug className="h-3 w-3 text-muted-foreground" />;
-    case "error":
-      return <AlertCircle className="h-3 w-3 text-destructive" />;
-    case "guest-stopped":
-      return <PowerOff className="h-3 w-3 text-muted-foreground" />;
-  }
-}
-
+/**
+ * The floating window's sessions as tabs: a state dot, the label, and on hover
+ * the two things that can be done to one. The open one carries the same
+ * underline the app's page tabs do.
+ */
 export function ConsoleTabBar() {
   const tabs = useConsoleStore((s) => s.tabs);
   const activeTabId = useConsoleStore((s) => s.activeTabId);
@@ -44,54 +21,64 @@ export function ConsoleTabBar() {
   }
 
   return (
-    <div className="flex items-center gap-1 px-2 pt-1">
-      {tabs.map((tab) => (
-        <div
-          key={tab.id}
-          className={cn(
-            "group flex items-center gap-2 rounded-t-md border border-b-0 px-3 py-1.5 text-sm cursor-pointer transition-colors",
-            tab.id === activeTabId
-              ? "bg-background text-foreground"
-              : "bg-muted/50 text-muted-foreground hover:bg-muted",
-          )}
-          onClick={() => {
-            setActiveTab(tab.id);
-          }}
-          role="tab"
-          aria-selected={tab.id === activeTabId}
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
+    <div role="tablist" aria-label="Console sessions" className="flex h-full">
+      {tabs.map((tab) => {
+        const active = tab.id === activeTabId;
+        return (
+          <div
+            key={tab.id}
+            className={cn(
+              "group relative flex h-full shrink-0 cursor-pointer items-center gap-2 pl-3 pr-1.5 text-[13px] outline-hidden transition-colors focus-visible:bg-foreground/[0.07]",
+              active
+                ? "font-medium text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => {
               setActiveTab(tab.id);
-            }
-          }}
-        >
-          <StatusIcon status={tab.status} />
-          <span className="max-w-[150px] truncate">{tab.label}</span>
-          <button
-            className="ml-1 rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              reconnectTab(tab.id);
             }}
-            aria-label={`Reconnect ${tab.label}`}
-            title="Reconnect"
-          >
-            <RotateCcw className="h-3 w-3" />
-          </button>
-          <button
-            className="rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
-            onClick={(e) => {
+            // The bar this sits in maximizes the window on a double-click.
+            onDoubleClick={(e) => {
               e.stopPropagation();
-              removeTab(tab.id);
             }}
-            aria-label={`Close ${tab.label}`}
-            title="Close"
+            role="tab"
+            aria-selected={active}
+            title={`${tab.label}: ${CONSOLE_STATUS_TEXT[tab.status]}`}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                setActiveTab(tab.id);
+              }
+            }}
           >
-            <X className="h-3 w-3" />
-          </button>
-        </div>
-      ))}
+            <ConsoleStateDot status={tab.status} />
+            <span className="max-w-[160px] truncate">{tab.label}</span>
+            <span className="flex items-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100">
+              <button
+                className="grid h-5 w-5 place-items-center rounded text-muted-foreground outline-hidden hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  reconnectTab(tab.id);
+                }}
+                aria-label={`Reconnect ${tab.label}`}
+                title="Reconnect"
+              >
+                <RotateCcw className="h-3 w-3" />
+              </button>
+              <button
+                className="grid h-5 w-5 place-items-center rounded text-muted-foreground outline-hidden hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeTab(tab.id);
+                }}
+                aria-label={`Close ${tab.label}`}
+                title="Close"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

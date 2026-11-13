@@ -1,15 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
-import {
-  ChevronRight,
-  Server,
-  HardDrive,
-  Database,
-  Share2,
-  FolderArchive,
-  Plus,
-} from "lucide-react";
+import { Server, Database, Share2, Plus } from "lucide-react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -17,12 +9,39 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import {
+  filterTree,
+  type TreeFilterNode,
+  type TreeFilterResult,
+} from "@/lib/tree-filter";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import { AddStorageDialog } from "@/features/storage/components/AddStorageDialog";
 import { useSidebarStore } from "@/stores/sidebar-store";
 import type { ClusterResponse, StorageResponse } from "@/types/api";
+import {
+  TreeChevron,
+  TreeHeading,
+  TreeNote,
+  TreeRowAside,
+  TreeSkeleton,
+} from "./TreeRow";
+import {
+  TREE_ROW_MAIN,
+  TREE_ROW_TOGGLE,
+  treeIndent,
+  treeRowClass,
+} from "./tree-row-style";
+
+const sharedKeyOf = (clusterId: string) => `storage-shared:${clusterId}`;
+const nodeGroupKeyOf = (clusterId: string, nodeId: string) =>
+  `storage-node:${clusterId}:${nodeId}`;
+const poolKeyOf = (poolId: string) => `pool:${poolId}`;
+const poolModel = (pool: StorageResponse): TreeFilterNode => ({
+  id: poolKeyOf(pool.id),
+  label: pool.storage,
+});
 
 function PoolLeaf({
   pool,
@@ -41,21 +60,14 @@ function PoolLeaf({
       onClick={() => {
         void navigate(path);
       }}
-      className={cn(
-        "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-        isActive && "bg-primary/10 text-foreground",
-      )}
+      className={treeRowClass({ active: isActive })}
+      style={treeIndent(2, true)}
     >
       <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span
-        className={cn(
-          "truncate",
-          !pool.active && "italic text-muted-foreground",
-        )}
-      >
+      <span className={cn("truncate", !pool.active && "text-muted-foreground")}>
         {pool.storage}
-        {!pool.active && " (inactive)"}
       </span>
+      {!pool.active && <TreeRowAside>inactive</TreeRowAside>}
     </button>
   );
 }
@@ -66,6 +78,8 @@ interface PoolGroupProps {
   icon: "shared" | "node";
   pools: StorageResponse[];
   clusterId: string;
+  /** What the filter box keeps and holds open; null when it is empty. */
+  filter: TreeFilterResult | null;
 }
 
 function PoolGroup({
@@ -74,67 +88,72 @@ function PoolGroup({
   icon,
   pools,
   clusterId,
+  filter,
 }: PoolGroupProps) {
   const { expandedNodes, toggleNode } = useSidebarStore();
-  const isExpanded = expandedNodes.has(groupKey);
+  // The filter holds a group open over a match; the stored expansion is left
+  // as it was, and is what shows again when the box is cleared.
+  const heldOpen = filter?.open.has(groupKey) ?? false;
+  const isExpanded = expandedNodes.has(groupKey) || heldOpen;
+  // Held open by the filter, a toggle would change nothing on screen and flip
+  // what clearing the box restores.
+  const toggle = () => {
+    if (!heldOpen) toggleNode(groupKey);
+  };
+  const shownPools =
+    filter === null
+      ? pools
+      : pools.filter((pool) => filter.visible.has(poolKeyOf(pool.id)));
+
+  if (filter !== null && !filter.visible.has(groupKey)) return null;
 
   return (
-    <div className="border-l border-border pl-3 ml-3">
-      <div className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors">
+    <div>
+      <div className={treeRowClass()} style={treeIndent(1)}>
         <button
           aria-label={`${isExpanded ? "Collapse" : "Expand"} ${icon === "node" ? `node ${label}` : label}`}
           aria-expanded={isExpanded}
           onClick={(e) => {
             e.stopPropagation();
-            toggleNode(groupKey);
+            toggle();
           }}
-          className="shrink-0"
+          className={TREE_ROW_TOGGLE}
         >
-          <ChevronRight
-            className={cn(
-              "h-3 w-3 transition-transform",
-              isExpanded && "rotate-90",
-            )}
-          />
+          <TreeChevron expanded={isExpanded} />
         </button>
         <button
           aria-expanded={isExpanded}
-          onClick={() => {
-            toggleNode(groupKey);
-          }}
-          className="flex min-w-0 flex-1 items-center gap-1.5"
+          onClick={toggle}
+          className={TREE_ROW_MAIN}
         >
           {icon === "shared" ? (
             <Share2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           ) : (
             <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="truncate text-muted-foreground">{label}</span>
-          <span className="ml-auto text-[10px] text-muted-foreground/70">
-            {pools.length}
-          </span>
+          <span className="truncate">{label}</span>
+          <TreeRowAside>{pools.length}</TreeRowAside>
         </button>
       </div>
 
-      {isExpanded && pools.length > 0 && (
-        <div className="border-l border-border pl-3 ml-3">
-          {pools
-            .slice()
-            .sort((a, b) => a.storage.localeCompare(b.storage))
-            .map((pool) => (
-              <PoolLeaf key={pool.id} pool={pool} clusterId={clusterId} />
-            ))}
-        </div>
-      )}
+      {isExpanded &&
+        shownPools
+          .slice()
+          .sort((a, b) => a.storage.localeCompare(b.storage))
+          .map((pool) => (
+            <PoolLeaf key={pool.id} pool={pool} clusterId={clusterId} />
+          ))}
     </div>
   );
 }
 
 interface StorageClusterBranchProps {
   cluster: ClusterResponse;
+  /** The filter box's text, normalised; empty when nothing is typed. */
+  filter: string;
 }
 
-function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
+function StorageClusterBranch({ cluster, filter }: StorageClusterBranchProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
@@ -183,15 +202,67 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
     });
   }, [byNode, nodes]);
 
+  const nodeNameOf = (nodeId: string) =>
+    nodes?.find((n) => n.id === nodeId)?.name ?? nodeId;
+
+  // The rows under this cluster, as the filter box sees them. Only what has
+  // loaded: a collapsed cluster has no rows to look through.
+  const filtered = useMemo(() => {
+    if (filter === "" || !isExpanded || pools === undefined) return null;
+    const model: TreeFilterNode = {
+      id: clusterKey,
+      label: cluster.name,
+      children: [
+        ...(shared.length > 0
+          ? [
+              {
+                id: sharedKeyOf(cluster.id),
+                label: "Shared storage",
+                children: shared.map(poolModel),
+              },
+            ]
+          : []),
+        ...Array.from(byNode, ([nodeId, nodePools]) => ({
+          id: nodeGroupKeyOf(cluster.id, nodeId),
+          label: nodes?.find((n) => n.id === nodeId)?.name ?? nodeId,
+          children: nodePools.map(poolModel),
+        })),
+      ],
+    };
+    return filterTree([model], filter);
+  }, [
+    filter,
+    isExpanded,
+    pools,
+    nodes,
+    shared,
+    byNode,
+    cluster.id,
+    cluster.name,
+    clusterKey,
+  ]);
+
+  if (filtered !== null && !filtered.visible.has(clusterKey)) return null;
+  // A collapsed cluster has loaded nothing to look through. It stays, dimmed,
+  // rather than vanish as if nothing in it matched.
+  const unsearched =
+    filter !== "" &&
+    filtered === null &&
+    !cluster.name.toLowerCase().includes(filter);
+
   return (
     <div>
       <ContextMenu modal={false}>
         <ContextMenuTrigger asChild>
           <div
             className={cn(
-              "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-              isClusterActive && "bg-primary/10 text-foreground",
+              treeRowClass({ active: isClusterActive }),
+              unsearched && "opacity-55",
             )}
+            style={treeIndent(0)}
+            title={
+              unsearched ? "Collapsed: open it to filter inside" : undefined
+            }
           >
             <button
               aria-label={`${isExpanded ? "Collapse" : "Expand"} cluster ${cluster.name}`}
@@ -199,23 +270,19 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
               onClick={() => {
                 toggleNode(clusterKey);
               }}
-              className="shrink-0"
+              className={TREE_ROW_TOGGLE}
             >
-              <ChevronRight
-                className={cn(
-                  "h-3 w-3 transition-transform",
-                  isExpanded && "rotate-90",
-                )}
-              />
+              <TreeChevron expanded={isExpanded} />
             </button>
             <button
               onClick={() => {
                 void navigate(`/storage?cluster=${cluster.id}`);
               }}
-              className="flex min-w-0 flex-1 items-center gap-1.5"
+              className={TREE_ROW_MAIN}
             >
-              <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate font-medium">{cluster.name}</span>
+              <span className="truncate font-semibold text-foreground">
+                {cluster.name}
+              </span>
             </button>
           </div>
         </ContextMenuTrigger>
@@ -241,33 +308,31 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
         <div>
           {shared.length > 0 && (
             <PoolGroup
-              groupKey={`storage-shared:${cluster.id}`}
-              label="Shared Storage"
+              groupKey={sharedKeyOf(cluster.id)}
+              label="Shared storage"
               icon="shared"
               pools={shared}
               clusterId={cluster.id}
+              filter={filtered}
             />
           )}
           {sortedNodeIds.map((nodeId) => {
             const nodePools = byNode.get(nodeId);
             if (!nodePools || nodePools.length === 0) return null;
-            const nodeName =
-              nodes?.find((n) => n.id === nodeId)?.name ?? nodeId;
             return (
               <PoolGroup
                 key={nodeId}
-                groupKey={`storage-node:${cluster.id}:${nodeId}`}
-                label={nodeName}
+                groupKey={nodeGroupKeyOf(cluster.id, nodeId)}
+                label={nodeNameOf(nodeId)}
                 icon="node"
                 pools={nodePools}
                 clusterId={cluster.id}
+                filter={filtered}
               />
             );
           })}
           {shared.length === 0 && sortedNodeIds.length === 0 && (
-            <p className="ml-6 py-1 text-xs text-muted-foreground">
-              No storage pools
-            </p>
+            <TreeNote className="pl-[30px]">No storage pools</TreeNote>
           )}
         </div>
       )}
@@ -275,37 +340,35 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
   );
 }
 
-export function StorageTree() {
+export function StorageTree({ filter = "" }: { filter?: string }) {
   const { t } = useTranslation("common");
   const { data: clusters, isLoading } = useClusters();
 
   return (
-    <div className="space-y-1 py-1">
-      <div className="flex items-center justify-between px-2 pb-1">
-        <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-          <FolderArchive className="h-3 w-3" />
-          {t("storage", { defaultValue: "Storage" })}
-        </span>
-      </div>
+    <div>
+      <TreeHeading>{t("storage", { defaultValue: "Storage" })}</TreeHeading>
 
-      {isLoading && (
-        <div className="space-y-1 px-2">
-          {Array.from({ length: 2 }, (_, i) => (
-            <div key={i} className="h-6 animate-pulse rounded bg-muted" />
+      {isLoading && <TreeSkeleton />}
+
+      {clusters?.length === 0 && <TreeNote>No clusters</TreeNote>}
+
+      {clusters !== undefined && clusters.length > 0 && (
+        <div>
+          {clusters.map((cluster) => (
+            <StorageClusterBranch
+              key={cluster.id}
+              cluster={cluster}
+              filter={filter}
+            />
           ))}
+          {/* Alone here once the filter has hidden every cluster. */}
+          {filter !== "" && (
+            <TreeNote className="hidden only:block">
+              Nothing in the tree matches.
+            </TreeNote>
+          )}
         </div>
       )}
-
-      {clusters?.length === 0 && (
-        <p className="flex items-center gap-1.5 px-2 text-xs text-muted-foreground">
-          <HardDrive className="h-3 w-3" />
-          No clusters
-        </p>
-      )}
-
-      {clusters?.map((cluster) => (
-        <StorageClusterBranch key={cluster.id} cluster={cluster} />
-      ))}
     </div>
   );
 }

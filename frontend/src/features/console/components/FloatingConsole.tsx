@@ -18,115 +18,144 @@ import { QuickConnect } from "./QuickConnect";
 import { VNCViewer } from "./VNCViewer";
 import { Terminal } from "./Terminal";
 
+/** A window control in the bar: touch-sized on a phone. */
+function WindowButton({
+  title,
+  danger = false,
+  onClick,
+  children,
+}: {
+  title: string;
+  danger?: boolean;
+  onClick: (e: React.MouseEvent) => void;
+  children: React.ReactNode;
+}) {
+  const isMobile = useIsMobile();
+  return (
+    <button
+      className={cn(
+        "grid shrink-0 place-items-center rounded-md text-muted-foreground outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+        danger
+          ? "hover:bg-destructive/15 hover:text-destructive"
+          : "hover:bg-foreground/[0.08] hover:text-foreground",
+        isMobile ? "h-8 w-8" : "h-7 w-7",
+      )}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(e);
+      }}
+      // Nor does a double-click maximize the window under it.
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+      }}
+      title={title}
+    >
+      {children}
+    </button>
+  );
+}
+
 /**
- * Title bar with drag handle, tab label, and window controls.
+ * The window's one bar: its sessions as tabs, a way to open another, and the
+ * window controls. The space between is what the window is dragged by.
  */
 function TitleBar({
   onPointerDown,
   onPointerMove,
   onPointerUp,
   onPopOut,
-  title,
+  hasTabs,
 }: {
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: (e: React.PointerEvent) => void;
   /** Moves the active session to a browser tab; absent with none open. */
   onPopOut: (() => void) | undefined;
-  title: string;
+  hasTabs: boolean;
 }) {
   const windowMode = useConsoleStore((s) => s.windowMode);
   const setWindowMode = useConsoleStore((s) => s.setWindowMode);
   const isMobile = useIsMobile();
 
-  function handleDoubleClick() {
+  function handleDoubleClick(e: React.MouseEvent) {
+    // React events bubble through portals: a double-click inside the New
+    // console dialog is not one on this bar.
+    if (!e.currentTarget.contains(e.target as Node)) return;
     setWindowMode(windowMode === "maximized" ? "floating" : "maximized");
   }
 
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center gap-2 border-b bg-muted/50 px-2 select-none",
-        isMobile ? "h-10" : "h-8 cursor-grab active:cursor-grabbing",
+        "flex shrink-0 select-none items-stretch border-b bg-card",
+        isMobile ? "h-10" : "h-9 cursor-grab active:cursor-grabbing",
       )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onDoubleClick={handleDoubleClick}
     >
-      <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate text-xs font-medium">
-        {title}
-      </span>
+      <div className="min-w-0 overflow-x-auto overflow-y-hidden">
+        <ConsoleTabBar />
+      </div>
+      {!hasTabs && (
+        <span className="flex items-center pl-3 text-[13px] font-medium">
+          Console
+        </span>
+      )}
+      {/* What is left of the bar: the handle the window is dragged by. */}
+      <div className="min-w-6 flex-1" />
 
-      {/* Window controls — touch-sized on mobile; maximize is meaningless
-          there (the console is always a full-screen takeover) */}
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-0.5 px-1.5">
+        <QuickConnect appearance="compact" />
+        <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
+        {/* Window controls. Maximize is meaningless on a phone, where the
+            console is always a full-screen takeover. */}
         {onPopOut && (
-          <button
-            className={cn(
-              "flex items-center justify-center rounded hover:bg-accent",
-              isMobile ? "h-8 w-8" : "h-6 w-6",
-            )}
+          <WindowButton
+            title="Open in new tab"
             onClick={(e) => {
-              e.stopPropagation();
               // Once per click sequence: the next tab's button takes its place.
               if (e.detail > 1) return;
               onPopOut();
             }}
-            // Nor does a double-click maximize the window under it.
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-            }}
-            title="Open in new tab"
           >
             <ExternalLink className="h-3.5 w-3.5" />
-          </button>
+          </WindowButton>
         )}
-        <button
-          className={cn(
-            "flex items-center justify-center rounded hover:bg-accent",
-            isMobile ? "h-8 w-8" : "h-6 w-6",
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
+        <WindowButton
+          title="Minimize"
+          onClick={() => {
             setWindowMode("minimized");
           }}
-          title="Minimize"
         >
           <Minus className="h-3.5 w-3.5" />
-        </button>
+        </WindowButton>
         {!isMobile && (
-          <button
-            className="flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
-            onClick={(e) => {
-              e.stopPropagation();
+          <WindowButton
+            title={windowMode === "maximized" ? "Restore" : "Maximize"}
+            onClick={() => {
               setWindowMode(
                 windowMode === "maximized" ? "floating" : "maximized",
               );
             }}
-            title={windowMode === "maximized" ? "Restore" : "Maximize"}
           >
             {windowMode === "maximized" ? (
               <Minimize2 className="h-3.5 w-3.5" />
             ) : (
               <Maximize2 className="h-3.5 w-3.5" />
             )}
-          </button>
+          </WindowButton>
         )}
-        <button
-          className={cn(
-            "flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive",
-            isMobile ? "h-8 w-8" : "h-6 w-6",
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
+        <WindowButton
+          title="Close"
+          danger
+          onClick={() => {
             setWindowMode("hidden");
           }}
-          title="Close"
         >
           <X className="h-3.5 w-3.5" />
-        </button>
+        </WindowButton>
       </div>
     </div>
   );
@@ -172,7 +201,11 @@ export function FloatingConsole() {
   const handleDragDown = useCallback(
     (e: React.PointerEvent) => {
       if (isMobile || windowMode !== "floating") return;
-      if ((e.target as HTMLElement).closest("button")) return;
+      // React events bubble through portals: a press inside the New console
+      // dialog reaches this handler without being on the bar at all.
+      if (!e.currentTarget.contains(e.target as Node)) return;
+      // A press on a control or a session's tab is that control's.
+      if ((e.target as HTMLElement).closest("button, [role=tab]")) return;
       e.preventDefault();
       dragRef.current = {
         startX: e.clientX,
@@ -357,31 +390,20 @@ export function FloatingConsole() {
             // matches ANY .group ancestor — so putting it on the window root
             // unconditionally would pop every tab's buttons open at once
             // whenever the pointer was anywhere inside the console.
-            "group rounded-lg border border-border/30 opacity-70 shadow-xl transition-opacity hover:opacity-100"
-          : "bg-background shadow-2xl",
-        !isMinimized && !isMobile && "rounded-lg border",
+            "group rounded-[10px] opacity-70 shadow-xl transition-opacity hover:opacity-100"
+          : "bg-card shadow-2xl",
+        !isMinimized && !isMobile && "rounded-[10px] ring-1 ring-border",
       )}
     >
+      {/* The one bar: tabs, New console, the window controls. */}
       {!isMinimized && (
         <TitleBar
           onPointerDown={handleDragDown}
           onPointerMove={handleDragMove}
           onPointerUp={handleDragUp}
           onPopOut={popOut}
-          title={activeLabel}
+          hasTabs={tabs.length > 0}
         />
-      )}
-
-      {/* Tab bar + Quick Connect */}
-      {!isMinimized && (
-        <div className="flex items-center border-b bg-card">
-          <div className="min-w-0 flex-1 overflow-x-auto">
-            <ConsoleTabBar />
-          </div>
-          <div className="shrink-0 px-2 py-1">
-            <QuickConnect />
-          </div>
-        </div>
       )}
 
       {/* Content area — the one slot every window mode shares. min-h-0 so
@@ -395,9 +417,8 @@ export function FloatingConsole() {
         )}
       >
         {tabs.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-            <TerminalSquare className="h-12 w-12 opacity-30" />
-            <p className="text-sm">No console sessions</p>
+          <div className="flex h-full items-center justify-center text-sm text-neutral-400">
+            No console sessions
           </div>
         ) : (
           tabs.map((tab) =>

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
   Keyboard,
@@ -28,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type RFB from "@novnc/novnc";
+import { cn } from "@/lib/utils";
 import type { ConsoleTab } from "../types/console";
 import { useConsoleSession } from "@/stores/console-store";
 import { useVM, useVMAction, useVMConfig } from "@/features/vms/api/vm-queries";
@@ -81,12 +83,23 @@ interface VNCToolbarProps {
    * own has no window to size; its page offers fullscreen instead.
    */
   windowControls?: boolean;
+  /**
+   * Where the controls go when the console's page has a toolbar of its own:
+   * they join it, so the display has one bar above it and not two. Null until
+   * that toolbar has mounted. Omitted, the controls are a bar of their own.
+   */
+  slot?: HTMLElement | null | undefined;
 }
+
+/** A quiet control: an icon, and its word where the bar has the room. */
+const TOOL =
+  "h-7 shrink-0 gap-1.5 px-2 text-[12.5px] font-normal text-muted-foreground hover:text-foreground";
 
 export function VNCToolbar({
   rfb,
   tab,
   windowControls = true,
+  slot,
 }: VNCToolbarProps) {
   const windowMode = useConsoleSession((s) => s.windowMode);
   const setWindowMode = useConsoleSession((s) => s.setWindowMode);
@@ -228,8 +241,12 @@ export function VNCToolbar({
     }
   }, [rfb, scaleMode]);
 
-  return (
-    <div className="flex items-center gap-1 border-b border-border bg-background px-2 py-1">
+  // The words beside the icons show once the bar they sit in is wide enough:
+  // sooner in a bar of their own than in one shared with the console's name.
+  const word = slot === undefined ? "hidden @2xl:inline" : "hidden @5xl:inline";
+
+  const controls = (
+    <>
       {/* Power controls */}
       {hasResource && visibleActions.length > 0 && (
         <DropdownMenu>
@@ -237,11 +254,13 @@ export function VNCToolbar({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 gap-1 px-2 text-xs"
+              aria-label="Power"
+              title="Power"
+              className={TOOL}
             >
               <Power className="h-3.5 w-3.5" />
-              Power
-              <ChevronDown className="h-3 w-3" />
+              <span className={word}>Power</span>
+              <ChevronDown className="h-3 w-3 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
@@ -272,11 +291,13 @@ export function VNCToolbar({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 gap-1 px-2 text-xs"
+                aria-label="Media"
+                title="Media"
+                className={TOOL}
               >
                 <Disc className="h-3.5 w-3.5" />
-                Media
-                <ChevronDown className="h-3 w-3" />
+                <span className={word}>Media</span>
+                <ChevronDown className="h-3 w-3 opacity-60" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
@@ -329,10 +350,16 @@ export function VNCToolbar({
       {/* Keyboard macros */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Keys"
+            title="Send keys"
+            className={TOOL}
+          >
             <Keyboard className="h-3.5 w-3.5" />
-            Keys
-            <ChevronDown className="h-3 w-3" />
+            <span className={word}>Keys</span>
+            <ChevronDown className="h-3 w-3 opacity-60" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
@@ -392,24 +419,66 @@ export function VNCToolbar({
       <Button
         variant="ghost"
         size="sm"
+        aria-label="Paste text into console"
         title="Paste text into console"
-        className="h-7 px-2"
+        className={TOOL}
         onClick={() => {
           setPasteOpen(true);
         }}
       >
         <ClipboardPaste className="h-3.5 w-3.5" />
+        <span className={word}>Paste</span>
       </Button>
 
       {/* Screenshot */}
       <Button
         variant="ghost"
         size="sm"
+        aria-label="Screenshot"
         title="Screenshot"
-        className="h-7 px-2"
+        className={TOOL}
         onClick={handleScreenshot}
       >
         <Camera className="h-3.5 w-3.5" />
+        <span className={word}>Screenshot</span>
+      </Button>
+
+      {/* Scale toggle */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={handleScaleToggle}
+        aria-label={scaleMode === "scale" ? "Scale" : "Resize"}
+        title={
+          scaleMode === "scale"
+            ? "Switch to resize mode"
+            : "Switch to scale mode"
+        }
+        className={TOOL}
+      >
+        {scaleMode === "scale" ? (
+          <RectangleHorizontal className="h-3.5 w-3.5" />
+        ) : (
+          <Move className="h-3.5 w-3.5" />
+        )}
+        <span className={word}>
+          {scaleMode === "scale" ? "Scale" : "Resize"}
+        </span>
+      </Button>
+
+      {/* Connection info */}
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-label="Connection info"
+        title="Connection info"
+        className={TOOL}
+        onClick={() => {
+          setInfoOpen(true);
+        }}
+      >
+        <Info className="h-3.5 w-3.5" />
+        <span className={word}>Info</span>
       </Button>
 
       {/* Maximize / Restore (console window, not browser) */}
@@ -419,7 +488,7 @@ export function VNCToolbar({
           size="sm"
           onClick={handleToggleMaximize}
           title={isMaximized ? "Restore" : "Maximize"}
-          className="h-7 px-2"
+          className={cn(TOOL, "ml-auto")}
         >
           {isMaximized ? (
             <Minimize2 className="h-3.5 w-3.5" />
@@ -428,40 +497,11 @@ export function VNCToolbar({
           )}
         </Button>
       )}
+    </>
+  );
 
-      {/* Scale toggle */}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={handleScaleToggle}
-        title={
-          scaleMode === "scale"
-            ? "Switch to resize mode"
-            : "Switch to scale mode"
-        }
-        className="h-7 gap-1 px-2 text-xs"
-      >
-        {scaleMode === "scale" ? (
-          <RectangleHorizontal className="h-3.5 w-3.5" />
-        ) : (
-          <Move className="h-3.5 w-3.5" />
-        )}
-        {scaleMode === "scale" ? "Scale" : "Resize"}
-      </Button>
-
-      {/* Connection info */}
-      <Button
-        variant="ghost"
-        size="sm"
-        title="Connection info"
-        className="ml-auto h-7 px-2"
-        onClick={() => {
-          setInfoOpen(true);
-        }}
-      >
-        <Info className="h-3.5 w-3.5" />
-      </Button>
-
+  const dialogs = (
+    <>
       {/* Paste dialog */}
       <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
         <DialogContent
@@ -581,6 +621,25 @@ export function VNCToolbar({
           </div>
         </DialogContent>
       </Dialog>
+    </>
+  );
+
+  // Joined to the page's toolbar. The dialogs stay here: they portal
+  // themselves, and are not the toolbar's to lay out.
+  if (slot !== undefined) {
+    return (
+      <>
+        {slot !== null && createPortal(controls, slot)}
+        {dialogs}
+      </>
+    );
+  }
+  return (
+    <div className="@container border-b bg-card">
+      <div className="flex items-center gap-0.5 overflow-x-auto px-2 py-1">
+        {controls}
+      </div>
+      {dialogs}
     </div>
   );
 }

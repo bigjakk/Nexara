@@ -19,7 +19,7 @@ import type {
 } from "@/lib/changelog";
 
 /**
- * Chip per change type. The shape follows ResourceTypeBadge — a 500/10 fill with
+ * Chip per change type: a 500/10 fill with
  * a 700 foreground in light mode and 400 in dark, which keeps 12px text legible
  * on both without a separate token.
  *

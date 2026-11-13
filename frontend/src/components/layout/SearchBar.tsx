@@ -58,7 +58,6 @@ import {
   Usb,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
 
 // --- Static page definitions ---
 
@@ -339,20 +338,19 @@ interface PageMatch {
   clusterName?: string;
 }
 
-function IconChip({
-  className,
-  children,
-}: {
-  className?: string;
-  children: ReactNode;
-}) {
+/** A result row's glyph: plain and muted, so only a state dot carries colour. */
+function RowIcon({ children }: { children: ReactNode }) {
   return (
-    <span
-      className={cn(
-        "mr-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
-        className,
-      )}
-    >
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
+/** Small print at a row's right edge: what kind of thing it is, and where. */
+function RowAside({ children }: { children: ReactNode }) {
+  return (
+    <span className="ml-auto max-w-[55%] shrink-0 truncate pl-3 text-[12.5px] text-muted-foreground">
       {children}
     </span>
   );
@@ -360,11 +358,15 @@ function IconChip({
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+    <kbd className="rounded-[5px] bg-foreground/[0.08] px-1.5 py-px font-mono text-[11px] text-muted-foreground">
       {children}
     </kbd>
   );
 }
+
+/** A result row: 36px, the selected one in the primary colour at low strength. */
+const ROW_CLASS =
+  "h-9 gap-2.5 rounded-md px-2.5 data-[selected='true']:bg-primary/[0.13] data-[selected=true]:text-foreground";
 
 type PaletteView = "root" | "create-vm" | "create-ct" | "create-import";
 
@@ -468,7 +470,6 @@ export function SearchBar() {
     description: string;
     keywords: string[];
     icon: ReactNode;
-    chipClass: string;
     perform: () => void;
   }
 
@@ -480,7 +481,6 @@ export function SearchBar() {
         description: "New QEMU guest",
         keywords: ["create", "new", "vm", "virtual machine", "qemu"],
         icon: <Plus className="h-4 w-4" />,
-        chipClass: "bg-emerald-500/10 text-emerald-500",
         perform: () => {
           startCreate("vm");
         },
@@ -491,7 +491,6 @@ export function SearchBar() {
         description: "New LXC guest",
         keywords: ["create", "new", "ct", "container", "lxc"],
         icon: <Container className="h-4 w-4" />,
-        chipClass: "bg-sky-500/10 text-sky-500",
         perform: () => {
           startCreate("ct");
         },
@@ -504,7 +503,6 @@ export function SearchBar() {
         description: "From OVA/OVF or ESXi",
         keywords: ["import", "ova", "ovf", "esxi", "vmware", "migrate"],
         icon: <Upload className="h-4 w-4" />,
-        chipClass: "bg-violet-500/10 text-violet-500",
         perform: () => {
           startCreate("import");
         },
@@ -517,7 +515,6 @@ export function SearchBar() {
         description: "Terminal & VNC sessions",
         keywords: ["console", "terminal", "shell", "vnc", "xterm"],
         icon: <TerminalSquare className="h-4 w-4" />,
-        chipClass: "bg-violet-500/10 text-violet-500",
         perform: () => {
           goTo("/console");
         },
@@ -528,7 +525,6 @@ export function SearchBar() {
         description: "Switch to dark mode",
         keywords: ["theme", "dark", "mode", "appearance"],
         icon: <Moon className="h-4 w-4" />,
-        chipClass: "bg-amber-500/10 text-amber-500",
         perform: () => {
           setThemeMode("dark");
           close();
@@ -540,7 +536,6 @@ export function SearchBar() {
         description: "Switch to light mode",
         keywords: ["theme", "light", "mode", "appearance"],
         icon: <Sun className="h-4 w-4" />,
-        chipClass: "bg-amber-500/10 text-amber-500",
         perform: () => {
           setThemeMode("light");
           close();
@@ -552,7 +547,6 @@ export function SearchBar() {
         description: "Follow the OS preference",
         keywords: ["theme", "system", "auto", "mode", "appearance"],
         icon: <MonitorCog className="h-4 w-4" />,
-        chipClass: "bg-amber-500/10 text-amber-500",
         perform: () => {
           setThemeMode("system");
           close();
@@ -661,7 +655,7 @@ export function SearchBar() {
       case "vm":
         return <Monitor className="h-4 w-4" />;
       case "ct":
-        return <Database className="h-4 w-4" />;
+        return <Container className="h-4 w-4" />;
       case "node":
         return <Server className="h-4 w-4" />;
       case "storage":
@@ -697,23 +691,36 @@ export function SearchBar() {
 
   const inPicker = view !== "root";
 
+  /** "VM 101", "CT 204": what a guest row's small print opens with. */
+  const guestKind = (r: SearchResult) =>
+    `${r.type === "ct" ? "CT" : "VM"}${r.vmid ? ` ${String(r.vmid)}` : ""}`;
+  const location = (...parts: (string | undefined)[]) =>
+    parts.filter((p) => p !== undefined && p !== "").join(" · ");
+
   return (
     <>
       <button
+        aria-label="Search or jump to…"
         onClick={() => {
           setOpen(true);
         }}
-        className="flex h-9 w-full max-w-64 items-center gap-2 rounded-md border border-input bg-card px-3 md:max-w-md text-sm text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+        className="flex h-9 w-full max-w-64 items-center gap-2 rounded-lg bg-foreground/[0.07] px-3 text-sm text-muted-foreground outline-hidden transition-colors hover:bg-foreground/[0.1] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:max-w-md"
       >
-        <Search className="h-4 w-4" />
-        <span className="flex-1 text-left">Search or jump to…</span>
-        <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
+        <Search className="h-4 w-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate text-left">
+          <span className="sm:hidden">Search</span>
+          <span className="hidden sm:inline">Search or jump to…</span>
+        </span>
+        <kbd className="pointer-events-none hidden select-none rounded-[5px] bg-foreground/[0.08] px-1.5 py-px font-mono text-[11px] sm:block">
           Ctrl+K
         </kbd>
       </button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="top-[16%] max-h-[calc(84vh-1rem)] max-w-[calc(100%-1.5rem)] translate-y-0 overflow-hidden p-0 sm:max-w-[560px]">
+        {/* The dialog's own close button is hidden: Escape, the scrim and
+            the footer's hint close the palette, and the button sat on the
+            input. */}
+        <DialogContent className="top-[14%] max-h-[calc(86vh-1rem)] max-w-[calc(100%-1.5rem)] translate-y-0 gap-0 overflow-hidden rounded-xl border-0 bg-card p-0 sm:max-w-[660px] [&>button:last-child]:hidden">
           <DialogTitle className="sr-only">Command palette</DialogTitle>
           <Command
             shouldFilter={false}
@@ -723,26 +730,26 @@ export function SearchBar() {
                 setView("root");
               }
             }}
-            className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-2"
+            className="rounded-none bg-transparent [&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:text-[12.5px] [&_[cmdk-group-heading]]:font-normal [&_[cmdk-group]]:px-2 [&_[cmdk-group]]:py-0 [&_[cmdk-input-wrapper]]:px-[18px] [&_[cmdk-input-wrapper]_svg]:mr-3 [&_[cmdk-input-wrapper]_svg]:h-[18px] [&_[cmdk-input-wrapper]_svg]:w-[18px] [&_[cmdk-input]]:h-[52px] [&_[cmdk-input]]:text-[15px]"
           >
             <CommandInput
               placeholder={
                 inPicker
-                  ? "Choose a cluster… (backspace to go back)"
-                  : "Search guests, run an action, jump anywhere…"
+                  ? "Choose a cluster (Backspace goes back)"
+                  : "Search guests, actions and pages"
               }
               value={query}
               onValueChange={setQuery}
             />
-            <CommandList className="max-h-[min(420px,60vh)]">
+            <CommandList className="max-h-[min(460px,60vh)] pb-2">
               {inPicker ? (
                 <CommandGroup
                   heading={
                     view === "create-vm"
-                      ? "Create VM — choose cluster"
+                      ? "Create a VM: choose a cluster"
                       : view === "create-import"
-                        ? "Import VM — choose cluster"
-                        : "Create CT — choose cluster"
+                        ? "Import a VM: choose a cluster"
+                        : "Create a container: choose a cluster"
                   }
                 >
                   {(clusters ?? [])
@@ -752,16 +759,15 @@ export function SearchBar() {
                     .map((c) => (
                       <CommandItem
                         key={c.id}
+                        className={ROW_CLASS}
                         onSelect={() => {
                           pickCreateCluster(c.id);
                         }}
                       >
-                        <StatusIcon status={c.status} className="mr-2" />
-                        <span className="flex-1">{c.name}</span>
+                        <StatusIcon status={c.status} />
+                        <span className="min-w-0 truncate">{c.name}</span>
                         {c.pve_version !== "" && (
-                          <span className="text-xs text-muted-foreground">
-                            PVE {c.pve_version}
-                          </span>
+                          <RowAside>PVE {c.pve_version}</RowAside>
                         )}
                       </CommandItem>
                     ))}
@@ -769,7 +775,7 @@ export function SearchBar() {
               ) : (
                 <>
                   {!hasResults && (
-                    <CommandEmpty>
+                    <CommandEmpty className="px-[18px] py-8 text-center text-sm text-muted-foreground">
                       {searchQuery.isLoading
                         ? "Searching…"
                         : "No results found."}
@@ -778,20 +784,20 @@ export function SearchBar() {
                   {actionMatches.length > 0 && (
                     <CommandGroup heading="Actions">
                       {actionMatches.map((a) => (
-                        <CommandItem key={a.id} onSelect={a.perform}>
-                          <IconChip className={a.chipClass}>{a.icon}</IconChip>
-                          <span className="flex-1">
-                            {a.label}
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {a.description}
-                            </span>
-                          </span>
+                        <CommandItem
+                          key={a.id}
+                          className={ROW_CLASS}
+                          onSelect={a.perform}
+                        >
+                          <RowIcon>{a.icon}</RowIcon>
+                          <span className="min-w-0 truncate">{a.label}</span>
+                          <RowAside>{a.description}</RowAside>
                         </CommandItem>
                       ))}
                     </CommandGroup>
                   )}
                   {grouped.vms.length > 0 && (
-                    <CommandGroup heading="VMs / Containers">
+                    <CommandGroup heading="Guests">
                       {grouped.vms.map((r) => (
                         <VMContextMenu
                           key={`${r.cluster_id}-${r.id}`}
@@ -808,23 +814,17 @@ export function SearchBar() {
                           onAction={close}
                         >
                           <CommandItem
+                            className={ROW_CLASS}
                             onSelect={() => {
                               handleSelect(r);
                             }}
                           >
-                            <StatusIcon
-                              status={r.status ?? "unknown"}
-                              className="mr-2"
-                            />
-                            <IconChip>{getIcon(r.type)}</IconChip>
-                            <span className="flex-1">
-                              {r.name}
-                              {r.vmid ? ` (${String(r.vmid)})` : ""}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              {r.cluster_name}
-                              {r.node ? ` / ${r.node}` : ""}
-                            </span>
+                            <StatusIcon status={r.status ?? "unknown"} />
+                            <RowIcon>{getIcon(r.type)}</RowIcon>
+                            <span className="min-w-0 truncate">{r.name}</span>
+                            <RowAside>
+                              {location(guestKind(r), r.cluster_name, r.node)}
+                            </RowAside>
                           </CommandItem>
                         </VMContextMenu>
                       ))}
@@ -835,19 +835,17 @@ export function SearchBar() {
                       {grouped.nodes.map((r) => (
                         <CommandItem
                           key={`${r.cluster_id}-${r.id}`}
+                          className={ROW_CLASS}
                           onSelect={() => {
                             handleSelect(r);
                           }}
                         >
-                          <StatusIcon
-                            status={r.status ?? "unknown"}
-                            className="mr-2"
-                          />
-                          <IconChip>{getIcon(r.type)}</IconChip>
-                          <span className="flex-1">{r.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {r.cluster_name}
-                          </span>
+                          <StatusIcon status={r.status ?? "unknown"} />
+                          <RowIcon>{getIcon(r.type)}</RowIcon>
+                          <span className="min-w-0 truncate">{r.name}</span>
+                          <RowAside>
+                            {location("Node", r.cluster_name)}
+                          </RowAside>
                         </CommandItem>
                       ))}
                     </CommandGroup>
@@ -857,16 +855,16 @@ export function SearchBar() {
                       {grouped.storage.map((r) => (
                         <CommandItem
                           key={`${r.cluster_id}-${r.id}`}
+                          className={ROW_CLASS}
                           onSelect={() => {
                             handleSelect(r);
                           }}
                         >
-                          <IconChip>{getIcon(r.type)}</IconChip>
-                          <span className="flex-1">{r.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {r.cluster_name}
-                            {r.node ? ` / ${r.node}` : ""}
-                          </span>
+                          <RowIcon>{getIcon(r.type)}</RowIcon>
+                          <span className="min-w-0 truncate">{r.name}</span>
+                          <RowAside>
+                            {location("Storage", r.cluster_name, r.node)}
+                          </RowAside>
                         </CommandItem>
                       ))}
                     </CommandGroup>
@@ -876,13 +874,14 @@ export function SearchBar() {
                       {grouped.ups.map((r) => (
                         <CommandItem
                           key={`ups-${r.id}`}
+                          className={ROW_CLASS}
                           onSelect={() => {
                             handleSelect(r);
                           }}
                         >
-                          <IconChip>{getIcon(r.type)}</IconChip>
-                          <span className="flex-1">{r.name}</span>
-                          <span className="text-xs text-muted-foreground">{r.server}</span>
+                          <RowIcon>{getIcon(r.type)}</RowIcon>
+                          <span className="min-w-0 truncate">{r.name}</span>
+                          <RowAside>{location("UPS", r.server)}</RowAside>
                         </CommandItem>
                       ))}
                     </CommandGroup>
@@ -893,35 +892,38 @@ export function SearchBar() {
                       {grouped.clusters.map((r) => (
                         <CommandItem
                           key={`cluster-${r.cluster_id}`}
+                          className={ROW_CLASS}
                           onSelect={() => {
                             handleSelect(r);
                           }}
                         >
-                          <StatusIcon
-                            status={r.status ?? "unknown"}
-                            className="mr-2"
-                          />
-                          <IconChip>{getIcon(r.type)}</IconChip>
-                          <span className="flex-1">{r.name}</span>
+                          <StatusIcon status={r.status ?? "unknown"} />
+                          <RowIcon>{getIcon(r.type)}</RowIcon>
+                          <span className="min-w-0 truncate">{r.name}</span>
+                          <RowAside>Cluster</RowAside>
                         </CommandItem>
                       ))}
                       {clusterMatches.map((c) => (
                         <CommandItem
                           key={`cl-${c.id}`}
+                          className={ROW_CLASS}
                           onSelect={() => {
                             goTo(`/clusters/${c.id}`);
                           }}
                         >
-                          <StatusIcon status={c.status} className="mr-2" />
-                          <IconChip>
+                          <StatusIcon status={c.status} />
+                          <RowIcon>
                             <Layers className="h-4 w-4" />
-                          </IconChip>
-                          <span className="flex-1">{c.name}</span>
-                          {c.pve_version !== "" && (
-                            <span className="text-xs text-muted-foreground">
-                              PVE {c.pve_version}
-                            </span>
-                          )}
+                          </RowIcon>
+                          <span className="min-w-0 truncate">{c.name}</span>
+                          <RowAside>
+                            {location(
+                              "Cluster",
+                              c.pve_version !== ""
+                                ? `PVE ${c.pve_version}`
+                                : undefined,
+                            )}
+                          </RowAside>
                         </CommandItem>
                       ))}
                     </CommandGroup>
@@ -931,42 +933,33 @@ export function SearchBar() {
                       {pinnedPages.map((p) => (
                         <CommandItem
                           key={p.path}
+                          className={ROW_CLASS}
                           onSelect={() => {
                             goTo(p.path ?? "/");
                           }}
                         >
-                          <IconChip>{p.icon}</IconChip>
-                          <span className="flex-1">
-                            {p.label}
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {p.description}
-                            </span>
-                          </span>
+                          <RowIcon>{p.icon}</RowIcon>
+                          <span className="min-w-0 truncate">{p.label}</span>
+                          <RowAside>{p.description}</RowAside>
                         </CommandItem>
                       ))}
                     </CommandGroup>
                   )}
                   {pageMatches.length > 0 && (
-                    <CommandGroup heading="Pages & Settings">
+                    <CommandGroup heading="Pages and settings">
                       {pageMatches.map((p) => (
                         <CommandItem
                           key={p.path}
+                          className={ROW_CLASS}
                           onSelect={() => {
                             goTo(p.path);
                           }}
                         >
-                          <IconChip>{p.icon}</IconChip>
-                          <span className="flex-1">
-                            {p.label}
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {p.description}
-                            </span>
-                          </span>
-                          {p.clusterName && (
-                            <span className="text-xs text-muted-foreground">
-                              {p.clusterName}
-                            </span>
-                          )}
+                          <RowIcon>{p.icon}</RowIcon>
+                          <span className="min-w-0 truncate">{p.label}</span>
+                          <RowAside>
+                            {location(p.description, p.clusterName)}
+                          </RowAside>
                         </CommandItem>
                       ))}
                     </CommandGroup>
@@ -974,23 +967,23 @@ export function SearchBar() {
                 </>
               )}
             </CommandList>
-            <div className="hidden items-center gap-3 border-t px-3 py-2 text-[11px] text-muted-foreground sm:flex">
-              <span className="flex items-center gap-1">
+            <div className="hidden items-center gap-4 border-t px-[18px] py-2.5 text-[12.5px] text-muted-foreground sm:flex">
+              <span className="flex items-center gap-1.5">
                 <Kbd>↑</Kbd>
                 <Kbd>↓</Kbd> navigate
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1.5">
                 <Kbd>↵</Kbd> select
               </span>
               {inPicker && (
-                <span className="flex items-center gap-1">
+                <span className="flex items-center gap-1.5">
                   <Kbd>⌫</Kbd> back
                 </span>
               )}
               {!inPicker && grouped.vms.length > 0 && (
-                <span>right-click a guest for actions</span>
+                <span>Right-click a guest for its actions</span>
               )}
-              <span className="ml-auto flex items-center gap-1">
+              <span className="ml-auto flex items-center gap-1.5">
                 <Kbd>esc</Kbd> close
               </span>
             </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { FloatingConsole } from "./FloatingConsole";
 import { useConsoleStore } from "@/stores/console-store";
@@ -34,7 +34,15 @@ vi.mock("./Terminal", () => ({
 
 // Chrome that pulls its own server state; irrelevant to tree shape.
 vi.mock("./ConsoleTabBar", () => ({ ConsoleTabBar: () => null }));
-vi.mock("./QuickConnect", () => ({ QuickConnect: () => null }));
+// QuickConnect's dialog is a portal: a React child of the title bar that sits
+// outside it in the DOM. Stood in for by a bare portal child.
+vi.mock("./QuickConnect", async () => {
+  const { createPortal } = await import("react-dom");
+  return {
+    QuickConnect: () =>
+      createPortal(<div data-testid="in-portal" />, document.body),
+  };
+});
 
 const tab = vncTab({ status: "connected" });
 
@@ -125,6 +133,21 @@ describe("FloatingConsole window modes", () => {
     });
 
     expect(content()).toBeNull();
+  });
+});
+
+describe("FloatingConsole title bar and portals", () => {
+  // React events bubble through portals, so a press or a double-click inside
+  // the New console dialog reaches the bar's handlers. Neither is the bar's:
+  // the window must not start a drag behind the modal, nor maximize.
+  it("leaves a press and a double-click inside a portal alone", () => {
+    renderWithProviders(<FloatingConsole />);
+    const inPortal = screen.getByTestId("in-portal");
+
+    // Not cancelled: the drag handler calls preventDefault as it starts one.
+    expect(fireEvent.pointerDown(inPortal)).toBe(true);
+    fireEvent.doubleClick(inPortal);
+    expect(useConsoleStore.getState().windowMode).toBe("floating");
   });
 });
 

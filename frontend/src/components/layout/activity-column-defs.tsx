@@ -7,13 +7,7 @@
  * in a parallel accessor map so a column's heading, width, cell and sort key
  * are one declaration — useDataTable derives the accessors from them.
  */
-import {
-  Activity,
-  CheckCircle2,
-  ChevronRight,
-  Loader2,
-  XCircle,
-} from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { LinkedTaskBadge } from "@/components/LinkedTaskBadge";
 import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
@@ -24,11 +18,36 @@ import {
   activityLabel,
   SEVERITY_LABELS,
   SEVERITY_RANK,
-  SEVERITY_STYLES,
   STATUS_RANK,
   type ActivityRowData,
   type ActivitySortKey,
+  type Severity,
 } from "./activity-columns";
+import { STATUS_LABEL, type DerivedTaskStatus } from "./task-status";
+
+/**
+ * A row's state as a dot: a running task in the data colour, a failed one
+ * red, a finished one quiet. An entry with no task behind it has no state to
+ * show, so it gets a hollow ring: the column still lines up, and says so.
+ */
+const STATUS_DOT: Record<DerivedTaskStatus, string> = {
+  running: "animate-pulse bg-data",
+  ok: "bg-muted-foreground/45",
+  failed: "bg-red-500",
+  none: "ring-[1.5px] ring-inset ring-muted-foreground/40",
+};
+
+/** How loudly a level reads: a dot and a word, and colour only for trouble. */
+const LEVEL_DOT: Record<Severity, string> = {
+  info: "bg-muted-foreground/45",
+  warning: "bg-amber-500",
+  error: "bg-red-500",
+};
+const LEVEL_TEXT: Record<Severity, string> = {
+  info: "text-muted-foreground",
+  warning: "text-amber-600 dark:text-amber-400",
+  error: "text-red-600 dark:text-red-400",
+};
 
 /** Whether this row is expanded, for the leading chevron. */
 export interface ActivityCellCtx {
@@ -54,34 +73,17 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
     width: 84,
     sortValue: (row) => STATUS_RANK[row.status],
     cell: (row, ctx) => (
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2.5">
         <ChevronRight
           className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${ctx.expanded ? "rotate-90" : ""}`}
         />
         <span
-          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${
-            row.status === "running"
-              ? "bg-data/10"
-              : row.status === "ok"
-                ? "bg-muted"
-                : row.status === "failed"
-                  ? "bg-red-500/10"
-                  : "bg-muted"
-          }`}
-        >
-          {row.status === "running" && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />
-          )}
-          {row.status === "ok" && (
-            <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
-          )}
-          {row.status === "failed" && (
-            <XCircle className="h-3.5 w-3.5 text-red-500" />
-          )}
-          {row.status === "none" && (
-            <Activity className="h-3.5 w-3.5 text-muted-foreground" />
-          )}
-        </span>
+          role="img"
+          aria-label={
+            row.status === "none" ? "Not a task" : STATUS_LABEL[row.status]
+          }
+          className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[row.status]}`}
+        />
       </div>
     ),
   },
@@ -92,8 +94,12 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
     sortValue: (row) => SEVERITY_RANK[row.severity],
     cell: (row) => (
       <span
-        className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium ${SEVERITY_STYLES[row.severity]}`}
+        className={`inline-flex items-center gap-1.5 ${LEVEL_TEXT[row.severity]}`}
       >
+        <span
+          aria-hidden="true"
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${LEVEL_DOT[row.severity]}`}
+        />
         {SEVERITY_LABELS[row.severity]}
       </span>
     ),

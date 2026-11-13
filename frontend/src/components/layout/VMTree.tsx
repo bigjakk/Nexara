@@ -1,15 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
-import {
-  ChevronRight,
-  Server,
-  Folder,
-  FolderOpen,
-  Pencil,
-  Trash2,
-  FolderPlus,
-} from "lucide-react";
+import { Folder, FolderOpen, Pencil, Trash2, FolderPlus } from "lucide-react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -19,9 +11,11 @@ import {
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { StatusIcon } from "@/components/StatusIcon";
-import { VMIcon } from "@/components/VMIcon";
-import { OSIcon } from "@/components/OSIcon";
-import { classifyOS } from "@/lib/os-classify";
+import {
+  filterTree,
+  type TreeFilterNode,
+  type TreeFilterResult,
+} from "@/lib/tree-filter";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useClusterVMs,
@@ -35,7 +29,6 @@ import {
 import { useSidebarStore } from "@/stores/sidebar-store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useDragAutoScroll } from "@/hooks/useDragAutoScroll";
-import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { CreateFolderDialog } from "@/features/vms/components/CreateFolderDialog";
 import { RenameFolderDialog } from "@/features/vms/components/RenameFolderDialog";
 import {
@@ -44,65 +37,72 @@ import {
   type FolderNode,
 } from "@/features/vms/lib/folder-tree";
 import type { ClusterResponse, VMFolder, VMResponse } from "@/types/api";
+import {
+  TreeChevron,
+  TreeGuestRow,
+  TreeHeading,
+  TreeNote,
+  TreeRowAside,
+  TreeSkeleton,
+} from "./TreeRow";
+import {
+  TREE_ROW_MAIN,
+  TREE_ROW_TOGGLE,
+  treeIndent,
+  treeRowClass,
+} from "./tree-row-style";
+
+const folderKeyOf = (folderId: string) => `vm-folder:${folderId}`;
+const unassignedKeyOf = (clusterId: string) =>
+  `vm-folder-unassigned:${clusterId}`;
+const guestKeyOf = (vmId: string) => `vm:${vmId}`;
+const guestModel = (vm: VMResponse): TreeFilterNode => ({
+  id: guestKeyOf(vm.id),
+  label: `${String(vm.vmid)} ${vm.name}`,
+});
+
+/** What the filter box keeps of `vms`; all of them when it is empty. */
+function keptGuests(
+  vms: VMResponse[],
+  filter: TreeFilterResult | null,
+): VMResponse[] {
+  const kept =
+    filter === null
+      ? vms.slice()
+      : vms.filter((vm) => filter.visible.has(guestKeyOf(vm.id)));
+  return kept.sort((a, b) => a.vmid - b.vmid);
+}
 
 interface VMLeafProps {
   vm: VMResponse;
   clusterId: string;
+  depth: number;
 }
 
-function VMLeaf({ vm, clusterId }: VMLeafProps) {
-  const navigate = useNavigate();
-  const location = useLocation();
+function VMLeaf({ vm, clusterId, depth }: VMLeafProps) {
   // Resolve the guest's node name from its node_id so context-menu actions that
   // need it (Migrate's source_node, Console) work from the tree. The nodes query
   // is shared/deduped across all leaves of this cluster by TanStack Query.
   const { data: nodes } = useClusterNodes(clusterId);
-  const kind = vm.type === "lxc" ? "lxc" : "qemu";
-  const path = `/inventory/${kind}/${clusterId}/${vm.id}`;
-  const active = location.pathname === path;
   const currentNode = nodes?.find((n) => n.id === vm.node_id)?.name ?? "";
 
   return (
-    <VMContextMenu
-      target={{
-        clusterId,
-        resourceId: vm.id,
-        vmid: vm.vmid,
-        name: vm.name,
-        kind: vm.type === "lxc" ? "ct" : "vm",
-        status: vm.status,
-        currentNode,
-        template: vm.template,
-      }}
-    >
-      <button
-        onClick={() => {
-          void navigate(path);
-        }}
-        className={cn(
-          "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-          active && "bg-primary/10 text-foreground",
-        )}
-      >
-        <StatusIcon status={vm.status} />
-        <VMIcon type={vm.type} template={vm.template} />
-        {(classifyOS(vm.ostype) !== "unknown" ||
-          classifyOS(vm.config_ostype) !== "unknown") && (
-          <OSIcon ostype={vm.ostype} configOstype={vm.config_ostype} />
-        )}
-        <span
-          className={cn("truncate", vm.template && "text-muted-foreground")}
-        >
-          {vm.vmid} {vm.name}
-        </span>
-      </button>
-    </VMContextMenu>
+    <TreeGuestRow
+      vm={vm}
+      clusterId={clusterId}
+      currentNode={currentNode}
+      depth={depth}
+    />
   );
 }
 
 interface FolderRowProps {
   node: FolderNode;
   clusterId: string;
+  /** 1 for a cluster's own folders, one more per level of nesting. */
+  depth: number;
+  /** What the filter box keeps and holds open; null when it is empty. */
+  filter: TreeFilterResult | null;
   vmsByFolder: Map<string, VMResponse[]>;
   onNewSubfolder: (parent: VMFolder) => void;
   onRename: (folder: VMFolder) => void;
@@ -112,6 +112,8 @@ interface FolderRowProps {
 function FolderBranch({
   node,
   clusterId,
+  depth,
+  filter,
   vmsByFolder,
   onNewSubfolder,
   onRename,
@@ -121,8 +123,11 @@ function FolderBranch({
   const location = useLocation();
   const { hasPermission } = usePermissions();
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
-  const key = `vm-folder:${node.folder.id}`;
-  const expanded = expandedNodes.has(key);
+  const key = folderKeyOf(node.folder.id);
+  // The filter holds a folder open over a match; the stored expansion is left
+  // as it was, and is what shows again when the box is cleared.
+  const heldOpen = filter?.open.has(key) ?? false;
+  const expanded = expandedNodes.has(key) || heldOpen;
   const assign = useAssignVMToFolder();
   const [dropActive, setDropActive] = useState(false);
 
@@ -152,19 +157,18 @@ function FolderBranch({
     assign.mutate({ clusterId, vmId, folder_id: node.folder.id });
   }
 
+  if (filter !== null && !filter.visible.has(key)) return null;
+
   return (
-    <div className="border-l border-border pl-3 ml-3">
+    <div>
       <ContextMenu modal={false}>
         <ContextMenuTrigger asChild>
           <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={cn(
-              "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-              active && "bg-primary/10 text-foreground",
-              dropActive && "bg-accent/70 ring-1 ring-primary",
-            )}
+            className={treeRowClass({ active, dropActive })}
+            style={treeIndent(depth)}
           >
             <button
               aria-label={`${expanded ? "Collapse" : "Expand"} folder ${node.folder.name}`}
@@ -172,28 +176,25 @@ function FolderBranch({
               disabled={!hasChildren}
               onClick={(e) => {
                 e.stopPropagation();
+                // Held open by the filter: a toggle would change nothing on
+                // screen and flip what clearing the box restores.
+                if (heldOpen) return;
                 if (hasChildren) toggleNode(key);
               }}
-              className="shrink-0"
+              className={TREE_ROW_TOGGLE}
             >
-              <ChevronRight
-                className={cn(
-                  "h-3 w-3 transition-transform",
-                  !hasChildren && "invisible",
-                  expanded && "rotate-90",
-                )}
-              />
+              <TreeChevron expanded={expanded} hidden={!hasChildren} />
             </button>
             <button
               onClick={() => {
                 if (!canOpen) {
-                  if (hasChildren) toggleNode(key);
+                  if (hasChildren && !heldOpen) toggleNode(key);
                   return;
                 }
                 if (hasChildren) expandNode(key);
                 void navigate(path);
               }}
-              className="flex min-w-0 flex-1 items-center gap-1.5"
+              className={TREE_ROW_MAIN}
             >
               {expanded ? (
                 <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -201,6 +202,7 @@ function FolderBranch({
                 <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
               <span className="truncate">{node.folder.name}</span>
+              {vms.length > 0 && <TreeRowAside>{vms.length}</TreeRowAside>}
             </button>
           </div>
         </ContextMenuTrigger>
@@ -241,36 +243,44 @@ function FolderBranch({
               key={child.folder.id}
               node={child}
               clusterId={clusterId}
+              depth={depth + 1}
+              filter={filter}
               vmsByFolder={vmsByFolder}
               onNewSubfolder={onNewSubfolder}
               onRename={onRename}
               onDelete={onDelete}
             />
           ))}
-          {vms.length > 0 && (
-            <div className="border-l border-border pl-3 ml-3">
-              {vms
-                .slice()
-                .sort((a, b) => a.vmid - b.vmid)
-                .map((vm) => (
-                  <DraggableVM key={vm.id} vm={vm} clusterId={clusterId} />
-                ))}
-            </div>
-          )}
+          {keptGuests(vms, filter).map((vm) => (
+            <DraggableVM
+              key={vm.id}
+              vm={vm}
+              clusterId={clusterId}
+              depth={depth + 1}
+            />
+          ))}
         </>
       )}
     </div>
   );
 }
 
-function DraggableVM({ vm, clusterId }: { vm: VMResponse; clusterId: string }) {
+function DraggableVM({
+  vm,
+  clusterId,
+  depth,
+}: {
+  vm: VMResponse;
+  clusterId: string;
+  depth: number;
+}) {
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData("application/x-nexara-vm", vm.id);
     e.dataTransfer.effectAllowed = "move";
   }
   return (
     <div draggable onDragStart={handleDragStart}>
-      <VMLeaf vm={vm} clusterId={clusterId} />
+      <VMLeaf vm={vm} clusterId={clusterId} depth={depth} />
     </div>
   );
 }
@@ -278,17 +288,19 @@ function DraggableVM({ vm, clusterId }: { vm: VMResponse; clusterId: string }) {
 interface UnassignedBranchProps {
   vms: VMResponse[];
   clusterId: string;
+  filter: TreeFilterResult | null;
 }
 
-function UnassignedBranch({ vms, clusterId }: UnassignedBranchProps) {
+function UnassignedBranch({ vms, clusterId, filter }: UnassignedBranchProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { hasPermission } = usePermissions();
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
   const assign = useAssignVMToFolder();
   const [dropActive, setDropActive] = useState(false);
-  const key = `vm-folder-unassigned:${clusterId}`;
-  const expanded = expandedNodes.has(key);
+  const key = unassignedKeyOf(clusterId);
+  const heldOpen = filter?.open.has(key) ?? false;
+  const expanded = expandedNodes.has(key) || heldOpen;
   const path = `/clusters/${clusterId}/folders/${UNASSIGNED_FOLDER_SEGMENT}`;
   const active = location.pathname === path;
   const canOpen = hasPermission("view", "vm_folder");
@@ -311,72 +323,58 @@ function UnassignedBranch({ vms, clusterId }: UnassignedBranchProps) {
     assign.mutate({ clusterId, vmId, folder_id: null });
   }
 
+  if (filter !== null && !filter.visible.has(key)) return null;
+
   return (
-    <div className="border-l border-border pl-3 ml-3">
+    <div>
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={cn(
-          "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-          active && "bg-primary/10 text-foreground",
-          dropActive && "bg-accent/70 ring-1 ring-primary",
-        )}
+        className={treeRowClass({ active, dropActive })}
+        style={treeIndent(1)}
       >
         <button
           aria-label={`${expanded ? "Collapse" : "Expand"} Discovered`}
           aria-expanded={vms.length > 0 ? expanded : undefined}
           disabled={vms.length === 0}
           onClick={() => {
-            if (vms.length > 0) toggleNode(key);
+            // Held open by the filter: see FolderBranch.
+            if (vms.length > 0 && !heldOpen) toggleNode(key);
           }}
-          className="shrink-0"
+          className={TREE_ROW_TOGGLE}
         >
-          <ChevronRight
-            className={cn(
-              "h-3 w-3 transition-transform",
-              vms.length === 0 && "invisible",
-              expanded && "rotate-90",
-            )}
-          />
+          <TreeChevron expanded={expanded} hidden={vms.length === 0} />
         </button>
         <button
           onClick={() => {
             if (!canOpen) {
-              if (vms.length > 0) toggleNode(key);
+              if (vms.length > 0 && !heldOpen) toggleNode(key);
               return;
             }
             if (vms.length > 0) expandNode(key);
             void navigate(path);
           }}
-          className="flex min-w-0 flex-1 items-center gap-1.5"
+          className={TREE_ROW_MAIN}
         >
           <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-          <span className="truncate italic text-muted-foreground">
-            Discovered
-          </span>
-          <span className="ml-auto text-[10px] text-muted-foreground/70">
-            {vms.length}
-          </span>
+          <span className="truncate text-muted-foreground">Discovered</span>
+          <TreeRowAside>{vms.length}</TreeRowAside>
         </button>
       </div>
 
-      {expanded && vms.length > 0 && (
-        <div className="border-l border-border pl-3 ml-3">
-          {vms
-            .slice()
-            .sort((a, b) => a.vmid - b.vmid)
-            .map((vm) => (
-              <DraggableVM key={vm.id} vm={vm} clusterId={clusterId} />
-            ))}
-        </div>
-      )}
+      {expanded &&
+        keptGuests(vms, filter).map((vm) => (
+          <DraggableVM key={vm.id} vm={vm} clusterId={clusterId} depth={2} />
+        ))}
     </div>
   );
 }
 
 interface VMClusterBranchProps {
   cluster: ClusterResponse;
+  /** The filter box's text, normalised; empty when nothing is typed. */
+  filter: string;
   openCreateAt: (
     parentId: string | null,
     label: string,
@@ -388,6 +386,7 @@ interface VMClusterBranchProps {
 
 function VMClusterBranch({
   cluster,
+  filter,
   openCreateAt,
   openRename,
   openDelete,
@@ -438,15 +437,66 @@ function VMClusterBranch({
     return { vmsByFolder: byFolder, unassigned: orphans };
   }, [vms, folderData]);
 
+  // The rows under this cluster, as the filter box sees them. Only what has
+  // loaded: a collapsed cluster has no rows to look through.
+  const filtered = useMemo(() => {
+    if (filter === "" || !isExpanded) return null;
+    if (vms === undefined || folderData === undefined) return null;
+    const folderModel = (node: FolderNode): TreeFilterNode => ({
+      id: folderKeyOf(node.folder.id),
+      label: node.folder.name,
+      children: [
+        ...node.children.map(folderModel),
+        ...(vmsByFolder.get(node.folder.id) ?? []).map(guestModel),
+      ],
+    });
+    const model: TreeFilterNode = {
+      id: clusterKey,
+      label: cluster.name,
+      children: [
+        ...tree.map(folderModel),
+        {
+          id: unassignedKeyOf(cluster.id),
+          label: "Discovered",
+          children: unassigned.map(guestModel),
+        },
+      ],
+    };
+    return filterTree([model], filter);
+  }, [
+    filter,
+    isExpanded,
+    vms,
+    folderData,
+    tree,
+    vmsByFolder,
+    unassigned,
+    cluster.id,
+    cluster.name,
+    clusterKey,
+  ]);
+
+  if (filtered !== null && !filtered.visible.has(clusterKey)) return null;
+  // A collapsed cluster has loaded nothing to look through. It stays, dimmed,
+  // rather than vanish as if nothing in it matched.
+  const unsearched =
+    filter !== "" &&
+    filtered === null &&
+    !cluster.name.toLowerCase().includes(filter);
+
   return (
     <ContextMenu modal={false}>
       <ContextMenuTrigger asChild>
         <div>
           <div
             className={cn(
-              "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-              isActive && "bg-primary/10 text-foreground",
+              treeRowClass({ active: isActive }),
+              unsearched && "opacity-55",
             )}
+            style={treeIndent(0)}
+            title={
+              unsearched ? "Collapsed: open it to filter inside" : undefined
+            }
           >
             <button
               aria-label={`${isExpanded ? "Collapse" : "Expand"} cluster ${cluster.name}`}
@@ -454,28 +504,24 @@ function VMClusterBranch({
               onClick={() => {
                 toggleNode(clusterKey);
               }}
-              className="shrink-0"
+              className={TREE_ROW_TOGGLE}
             >
-              <ChevronRight
-                className={cn(
-                  "h-3 w-3 transition-transform",
-                  isExpanded && "rotate-90",
-                )}
-              />
+              <TreeChevron expanded={isExpanded} />
             </button>
             <button
               onClick={() => {
                 void navigate(`/clusters/${cluster.id}`);
               }}
-              className="flex min-w-0 flex-1 items-center gap-1.5"
+              className={TREE_ROW_MAIN}
             >
               <StatusIcon
                 status={
                   cluster.status === "degraded" ? "degraded" : cluster.status
                 }
               />
-              <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate font-medium">{cluster.name}</span>
+              <span className="truncate font-semibold text-foreground">
+                {cluster.name}
+              </span>
             </button>
           </div>
 
@@ -486,6 +532,8 @@ function VMClusterBranch({
                   key={node.folder.id}
                   node={node}
                   clusterId={cluster.id}
+                  depth={1}
+                  filter={filtered}
                   vmsByFolder={vmsByFolder}
                   onNewSubfolder={(parent) => {
                     openCreateAt(parent.id, parent.name, cluster.id);
@@ -498,7 +546,11 @@ function VMClusterBranch({
                   }}
                 />
               ))}
-              <UnassignedBranch vms={unassigned} clusterId={cluster.id} />
+              <UnassignedBranch
+                vms={unassigned}
+                clusterId={cluster.id}
+                filter={filtered}
+              />
             </div>
           )}
         </div>
@@ -517,7 +569,7 @@ function VMClusterBranch({
   );
 }
 
-export function VMTree() {
+export function VMTree({ filter = "" }: { filter?: string }) {
   const { t } = useTranslation("common");
   const { data: clusters, isLoading } = useClusters();
   const deleteFolder = useDeleteVMFolder();
@@ -565,34 +617,33 @@ export function VMTree() {
   }
 
   return (
-    <div className="space-y-1 py-1">
-      <div className="flex items-center justify-between px-2 pb-1">
-        <span className="text-xs font-medium text-muted-foreground">
-          {t("vms", { defaultValue: "VMs & Templates" })}
-        </span>
-      </div>
+    <div>
+      <TreeHeading>{t("vms", { defaultValue: "VMs & Templates" })}</TreeHeading>
 
-      {isLoading && (
-        <div className="space-y-1 px-2">
-          {Array.from({ length: 2 }, (_, i) => (
-            <div key={i} className="h-6 animate-pulse rounded bg-muted" />
+      {isLoading && <TreeSkeleton />}
+
+      {clusters?.length === 0 && <TreeNote>No clusters</TreeNote>}
+
+      {clusters !== undefined && clusters.length > 0 && (
+        <div>
+          {clusters.map((cluster) => (
+            <VMClusterBranch
+              key={cluster.id}
+              cluster={cluster}
+              filter={filter}
+              openCreateAt={openCreateAt}
+              openRename={openRename}
+              openDelete={openDelete}
+            />
           ))}
+          {/* Alone here once the filter has hidden every cluster. */}
+          {filter !== "" && (
+            <TreeNote className="hidden only:block">
+              Nothing in the tree matches.
+            </TreeNote>
+          )}
         </div>
       )}
-
-      {clusters?.length === 0 && (
-        <p className="px-2 text-xs text-muted-foreground">No clusters</p>
-      )}
-
-      {clusters?.map((cluster) => (
-        <VMClusterBranch
-          key={cluster.id}
-          cluster={cluster}
-          openCreateAt={openCreateAt}
-          openRename={openRename}
-          openDelete={openDelete}
-        />
-      ))}
 
       {createCtx && (
         <CreateFolderDialog

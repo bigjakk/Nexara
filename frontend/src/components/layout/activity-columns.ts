@@ -70,13 +70,6 @@ export function deriveSeverity(
   return "info";
 }
 
-export const SEVERITY_STYLES: Record<Severity, string> = {
-  // Most rows are this: a filled pill on every one says nothing.
-  info: "text-muted-foreground",
-  warning: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  error: "bg-red-500/15 text-red-600 dark:text-red-400",
-};
-
 export const SEVERITY_LABELS: Record<Severity, string> = {
   info: "info",
   warning: "warn",

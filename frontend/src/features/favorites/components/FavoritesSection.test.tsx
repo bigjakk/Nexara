@@ -126,7 +126,7 @@ describe("FavoritesSection", () => {
     expect(await screen.findByText("Favorites")).toBeInTheDocument();
     expect(screen.getByText("cluster01")).toBeInTheDocument();
     expect(screen.getByText("pve-01")).toBeInTheDocument();
-    expect(screen.getByText("101 linux01")).toBeInTheDocument();
+    expect(screen.getByText("linux01")).toBeInTheDocument();
   });
 
   // The route segment is the difference between a working link and a 404, and
@@ -138,7 +138,7 @@ describe("FavoritesSection", () => {
     serveFavorites([favorite({ vm_kind: kind, target_id: "vm-row-id" })]);
     renderSection();
 
-    await userEvent.click(await screen.findByText("101 linux01"));
+    await userEvent.click(await screen.findByText("linux01"));
     expect(navigateMock).toHaveBeenCalledWith(expected);
   });
 
@@ -186,14 +186,14 @@ describe("FavoritesSection", () => {
     renderSection();
 
     const header = await screen.findByRole("button", { name: /Favorites/ });
-    expect(screen.getByText("101 linux01")).toBeInTheDocument();
+    expect(screen.getByText("linux01")).toBeInTheDocument();
 
     await userEvent.click(header);
-    expect(screen.queryByText("101 linux01")).not.toBeInTheDocument();
+    expect(screen.queryByText("linux01")).not.toBeInTheDocument();
     expect(useSidebarStore.getState().favoritesCollapsed).toBe(true);
 
     await userEvent.click(header);
-    expect(screen.getByText("101 linux01")).toBeInTheDocument();
+    expect(screen.getByText("linux01")).toBeInTheDocument();
   });
 
   /**
@@ -207,7 +207,7 @@ describe("FavoritesSection", () => {
 
     serveFavorites([favorite({ name: "secret-guest" })]);
     const first = renderSection(client);
-    expect(await screen.findByText("101 secret-guest")).toBeInTheDocument();
+    expect(await screen.findByText("secret-guest")).toBeInTheDocument();
     first.unmount();
 
     signIn(USER_B);
@@ -223,6 +223,6 @@ describe("FavoritesSection", () => {
       expect(favoriteFetches()).toBe(2);
     });
     expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByText("101 secret-guest")).not.toBeInTheDocument();
+    expect(screen.queryByText("secret-guest")).not.toBeInTheDocument();
   });
 });

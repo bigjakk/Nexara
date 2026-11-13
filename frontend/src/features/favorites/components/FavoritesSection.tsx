@@ -1,12 +1,18 @@
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ChevronRight, Server, Star, Wrench } from "lucide-react";
+import { Server, Wrench } from "lucide-react";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import { TreeChevron, TreeRowAside } from "@/components/layout/TreeRow";
+import {
+  TREE_ROW_TOGGLE,
+  treeIndent,
+  treeRowClass,
+} from "@/components/layout/tree-row-style";
 import { StatusIcon } from "@/components/StatusIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { VMIcon } from "@/components/VMIcon";
@@ -75,16 +81,18 @@ function FavoriteRow({
           ? fav.name
           : `${fav.name} · ${fav.cluster_name}`
       }
-      className={cn(
-        "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-        isActive && "bg-primary/10 text-foreground",
-      )}
+      // The tree's own row, so the panel reads as one list. A favourite has
+      // nothing to open under it, so it steps in as a leaf does and its dot
+      // lines up with the dots of the cluster rows below.
+      className={treeRowClass({ active: isActive })}
+      style={treeIndent(0, true)}
     >
       {fav.resource_type === "cluster" && (
         <>
           <StatusIcon status={clusterStatus} />
-          <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate font-medium">{fav.name}</span>
+          <span className="truncate font-semibold text-foreground">
+            {fav.name}
+          </span>
         </>
       )}
 
@@ -113,13 +121,18 @@ function FavoriteRow({
           <VMIcon type={fav.vm_kind} template={fav.template} />
           {(classifyOS(fav.ostype) !== "unknown" ||
             classifyOS(fav.config_ostype) !== "unknown") && (
-            <OSIcon ostype={fav.ostype} configOstype={fav.config_ostype} />
+            <OSIcon
+              ostype={fav.ostype}
+              configOstype={fav.config_ostype}
+              className="h-3.5 w-3.5"
+            />
           )}
           <span
             className={cn("truncate", fav.template && "text-muted-foreground")}
           >
-            {fav.vmid} {fav.name}
+            {fav.name}
           </span>
+          <TreeRowAside>{fav.vmid}</TreeRowAside>
         </>
       )}
     </button>
@@ -185,25 +198,24 @@ export function FavoritesSection() {
   }
 
   return (
-    <div className="border-b py-1">
+    <div className="mb-1 border-b pb-1">
+      {/* The heading is the fold: the tree's heading line, with its chevron. */}
       <button
         onClick={toggleCollapsed}
         aria-expanded={!collapsed}
-        className="flex w-full items-center gap-1 px-2 pb-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+        className="group/fav flex h-7 w-full items-center gap-1.5 pl-2.5 pr-2 text-left text-[12.5px] text-muted-foreground outline-hidden hover:text-foreground focus-visible:bg-foreground/[0.07]"
       >
-        <ChevronRight
-          className={cn(
-            "h-3 w-3 transition-transform",
-            !collapsed && "rotate-90",
-          )}
-        />
-        <Star className="h-3 w-3" />
+        <span
+          className={cn(TREE_ROW_TOGGLE, "group-hover/fav:text-foreground")}
+        >
+          <TreeChevron expanded={!collapsed} />
+        </span>
         <span>{t("favorites")}</span>
-        <span className="ml-auto tabular-nums">{favorites.length}</span>
+        <TreeRowAside>{favorites.length}</TreeRowAside>
       </button>
 
       {!collapsed && (
-        <div className="space-y-0.5 px-1">
+        <div>
           {favorites.map((fav) => (
             <FavoriteRow
               key={keyOf(fav)}

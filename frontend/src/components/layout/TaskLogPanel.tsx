@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronUp, ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import {
   useRecentActivity,
@@ -10,10 +10,11 @@ import { auditClusterLabel } from "@/features/audit/lib/audit-cluster";
 import { useTaskStatus, useTaskLog } from "@/features/tasks/api/tasks-queries";
 import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
+import { DetailField } from "@/components/DetailField";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { TaskLogSection } from "@/components/TaskLogSection";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
-import { Button } from "@/components/ui/button";
+import { Segmented, type SegmentedOption } from "@/components/ui/segmented";
 import { useDataTable } from "@/hooks/useDataTable";
 import type { ColumnLayout } from "@/hooks/useColumnLayout";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
@@ -123,10 +124,27 @@ function ActivityRow({
     expanded && hasUpid,
   );
 
+  // What is not the task's id, its node or its guest: those have fields of
+  // their own. Only worked out for the one row that is open.
+  const otherDetails = expanded
+    ? Object.fromEntries(
+        Object.entries(details).filter(
+          ([k]) => !["upid", "node", "vmid"].includes(k),
+        ),
+      )
+    : {};
+
   return (
     <>
       <tr
-        className="cursor-pointer border-b transition-colors hover:bg-muted/30"
+        className={cn(
+          "cursor-pointer border-b border-border/70 transition-colors hover:bg-foreground/[0.04]",
+          // The row's own words take its state: a running task in the data
+          // colour, a failed one red, everything finished plain.
+          status === "running" && "text-data",
+          isFailed && "text-red-600 dark:text-red-400",
+          expanded && "border-transparent bg-foreground/[0.04]",
+        )}
         onClick={onToggle}
         onDoubleClick={(e) => {
           e.stopPropagation();
@@ -134,65 +152,66 @@ function ActivityRow({
         }}
       >
         <DataTableCells row={row} layout={layout} ctx={{ expanded }} />
+        <td aria-hidden="true" className="p-0" />
       </tr>
       {expanded && (
-        <tr className="border-b bg-muted/10">
-          <td colSpan={layout.columns.length} className="px-4 py-2">
-            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-              <span className="text-muted-foreground">Action</span>
-              <span>{entry.action}</span>
-              <span className="text-muted-foreground">Resource</span>
-              <span>
-                {entry.resource_type} / {entry.resource_id}
-              </span>
-              <span className="text-muted-foreground">Cluster</span>
-              <span>{auditClusterLabel(entry, "—")}</span>
-              <span className="text-muted-foreground">User</span>
-              <span>{row.actorLabel || "—"}</span>
-              <span className="text-muted-foreground">Time</span>
-              <span>{formatDateTime(entry.created_at)}</span>
-              {isFailed && row.exitStatusText !== "" && (
-                <>
-                  <span className="text-muted-foreground">Exit Status</span>
-                  <span className="text-red-500">{row.exitStatusText}</span>
-                </>
-              )}
-              {upid && (
-                <>
-                  <span className="text-muted-foreground">UPID</span>
-                  <span className="break-all font-mono text-[10px]">
-                    {upid}
-                  </span>
-                </>
-              )}
-              {details.node && (
-                <>
-                  <span className="text-muted-foreground">Node</span>
-                  <span>{details.node}</span>
-                </>
-              )}
-              {Object.keys(details).filter(
-                (k) => !["upid", "node", "vmid"].includes(k),
-              ).length > 0 && (
-                <>
-                  <span className="text-muted-foreground">{t("details")}</span>
-                  <span className="break-all font-mono text-[10px]">
-                    {JSON.stringify(
-                      Object.fromEntries(
-                        Object.entries(details).filter(
-                          ([k]) => !["upid", "node", "vmid"].includes(k),
-                        ),
-                      ),
-                    )}
-                  </span>
-                </>
+        <tr>
+          {/* One more than the columns: the filler cell (see the table). */}
+          <td colSpan={layout.columns.length + 1} className="!p-0">
+            {/* Recessed: this is the row opened up, not another row. Held to
+                the band's width and pinned to its left edge, so a table
+                wider than a phone does not carry the details off-screen. */}
+            <div className="sticky left-0 max-w-[100cqw] border-b bg-foreground/[0.04] px-[18px] pb-3.5 pt-2 text-[12.5px]">
+              <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(9.5rem,100%),1fr))] gap-x-6 gap-y-2.5 [overflow-wrap:anywhere]">
+                <DetailField label="Action">{entry.action}</DetailField>
+                <DetailField label="Resource">
+                  {entry.resource_type} / {entry.resource_id}
+                </DetailField>
+                <DetailField label="Cluster">
+                  {auditClusterLabel(entry, "—")}
+                </DetailField>
+                {details.node && (
+                  <DetailField label="Node">{details.node}</DetailField>
+                )}
+                <DetailField label="User">{row.actorLabel || "—"}</DetailField>
+                <DetailField label="Time">
+                  {formatDateTime(entry.created_at)}
+                </DetailField>
+                {isFailed && row.exitStatusText !== "" && (
+                  <div className="col-span-full">
+                    <dt className="text-xs text-muted-foreground">
+                      Exit status
+                    </dt>
+                    <dd className="text-red-600 dark:text-red-400">
+                      {row.exitStatusText}
+                    </dd>
+                  </div>
+                )}
+                {upid && (
+                  <div className="col-span-full">
+                    <dt className="text-xs text-muted-foreground">UPID</dt>
+                    <dd className="break-all font-mono text-[11.5px]">
+                      {upid}
+                    </dd>
+                  </div>
+                )}
+                {Object.keys(otherDetails).length > 0 && (
+                  <div className="col-span-full">
+                    <dt className="text-xs text-muted-foreground">
+                      {t("details")}
+                    </dt>
+                    <dd className="break-all font-mono text-[11.5px]">
+                      {JSON.stringify(otherDetails)}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+
+              {/* Task Log Output (for UPID-bearing entries) */}
+              {hasUpid && (
+                <TaskLogSection lines={logLines} isLoading={logLoading} />
               )}
             </div>
-
-            {/* Task Log Output (for UPID-bearing entries) */}
-            {hasUpid && (
-              <TaskLogSection lines={logLines} isLoading={logLoading} />
-            )}
           </td>
         </tr>
       )}
@@ -215,69 +234,55 @@ function ActivityFilterControl({
   onSelect: (filter: ActivityFilter) => void;
 }) {
   const { t } = useTranslation("common");
-  const segments: { value: ActivityFilter; label: string }[] = [
+  const alarming = (errorCount ?? 0) > 0;
+  const options: SegmentedOption<ActivityFilter>[] = [
     { value: "all", label: t("all") },
     {
       value: "errors",
-      label:
-        errorCount === null
-          ? t("activityErrors")
-          : t("activityErrorCount", { count: errorCount }),
+      label: (
+        <span
+          className={alarming ? "text-red-600 dark:text-red-400" : undefined}
+        >
+          {errorCount === null
+            ? t("activityErrors")
+            : t("activityErrorCount", { count: errorCount })}
+        </span>
+      ),
     },
     { value: "other", label: t("others") },
   ];
 
   return (
-    <div
-      role="group"
-      aria-label={t("filterActivity")}
-      className="flex items-center gap-px rounded-md border p-px"
+    <span
+      className="flex shrink-0"
       onClick={(e) => {
-        // The whole header bar toggles the panel; choosing a filter must not
+        // The whole title row toggles the panel; choosing a filter must not
         // also collapse it.
         e.stopPropagation();
       }}
     >
-      {segments.map(({ value, label }) => {
-        const selected = filter === value;
-        const alarming = value === "errors" && (errorCount ?? 0) > 0;
-        return (
-          <Button
-            key={value}
-            type="button"
-            variant="ghost"
-            aria-pressed={selected}
-            className={cn(
-              "h-5 rounded-sm px-1.5 py-0 text-xs font-normal",
-              alarming
-                ? "text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:text-red-400"
-                : "text-muted-foreground",
-              selected && alarming && "bg-red-500/20 font-medium",
-              selected && !alarming && "bg-muted font-medium text-foreground",
-            )}
-            onClick={() => {
-              onSelect(value);
-            }}
-          >
-            {label}
-          </Button>
-        );
-      })}
-    </div>
+      <Segmented
+        aria-label={t("filterActivity")}
+        value={filter}
+        options={options}
+        onValueChange={onSelect}
+        onReselect={onSelect}
+      />
+    </span>
   );
 }
 
 /**
  * The collapsed panel's one line: the task running now with its progress, or
- * failing that the last thing that happened. Left of the filter on purpose —
- * a minimised console sits over the bar's right end.
+ * failing that the last thing that happened. Kept to the row's left on
+ * purpose: a minimised console sits over its right end.
  */
 function ActivitySummaryLine({ summary }: { summary: ActivitySummary }) {
   const { t } = useTranslation("common");
   const { featured, latest } = summary;
   if (featured) {
     return (
-      <span className="hidden min-w-0 items-center gap-2 sm:flex">
+      <span className="hidden min-w-0 items-center gap-2.5 text-[12.5px] sm:flex">
         <span className="truncate">{activityLabel(featured)}</span>
         <span className="shrink-0">
           <TaskProgressCell display="running" value={featured.progress} />
@@ -287,7 +292,7 @@ function ActivitySummaryLine({ summary }: { summary: ActivitySummary }) {
   }
   if (!latest) return null;
   return (
-    <span className="hidden min-w-0 truncate text-muted-foreground sm:inline">
+    <span className="hidden min-w-0 truncate text-[12.5px] text-muted-foreground sm:inline">
       {t("activityLast", {
         label: activityLabel(latest),
         when: formatRelativeTime(latest.entry.created_at),
@@ -437,7 +442,10 @@ export function TaskLogPanel() {
   }, []);
 
   return (
-    <div className="flex flex-col border-t bg-card">
+    <section
+      aria-label={t("activity")}
+      className="relative flex shrink-0 flex-col border-t bg-card"
+    >
       {/* Invisible progress pollers for running tasks */}
       {runningPolls.map((poll) => (
         <ActiveTaskPoller
@@ -448,42 +456,48 @@ export function TaskLogPanel() {
         />
       ))}
 
-      {/* Resize handle — only visible when panel is open */}
+      {/* Resize handle: only while the panel is open. It sits over the
+          band's top hairline, which lights up under the pointer. */}
       {panelOpen && (
         <div
-          className="h-1 cursor-row-resize bg-border hover:bg-primary/30"
+          className="absolute inset-x-0 -top-[3px] z-10 h-[5px] cursor-row-resize transition-colors hover:bg-primary/40 active:bg-primary/60"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
         />
       )}
 
-      {/* Header bar. On a phone it wraps rather than clip Reset columns. */}
+      {/* Title row. The filter sits left of the summary on purpose: a
+          minimised console covers the row's right end. On a phone it wraps
+          rather than clip Reset columns; from sm up it is one line of a fixed
+          height, so the collapsed summary truncates and the strip never
+          changes height as activity comes and goes. */}
       <div
-        className="flex min-h-7 cursor-pointer flex-wrap items-center gap-x-2 border-b px-3 text-xs select-none sm:h-7 sm:flex-nowrap"
+        className="flex min-h-9 cursor-pointer select-none flex-wrap items-center gap-x-3 gap-y-1 py-[3px] pl-[18px] pr-2 sm:h-9 sm:flex-nowrap"
         onClick={() => {
           setPanelOpen(!panelOpen);
         }}
       >
-        <span className="font-medium">{t("activity")}</span>
+        <h2 className="text-[13px] font-semibold">{t("activity")}</h2>
         {runningCount > 0 && (
-          <span className="rounded-full bg-data/15 px-1.5 py-0.5 text-data">
+          <span className="text-[12.5px] font-medium tabular-nums text-data">
             {runningCount} {t("running").toLowerCase()}
           </span>
         )}
-        {/* Only while collapsed: the open list already shows these rows. */}
-        {!panelOpen && <ActivitySummaryLine summary={summary} />}
         {/* Always there: hidden at zero, it read as a feature gone missing. */}
         <ActivityFilterControl
           filter={filter}
           errorCount={errorCount}
           onSelect={selectFilter}
         />
+        {/* Only while collapsed: the open list already shows these rows. */}
+        {!panelOpen && <ActivitySummaryLine summary={summary} />}
         <div className="flex-1" />
         {panelOpen && (
           <span
+            className="[&_button]:h-7 [&_button]:px-2 [&_button]:text-[12.5px] [&_button]:text-muted-foreground"
             onClick={(e) => {
-              // The whole header bar toggles the panel; resetting must not
+              // The whole title row toggles the panel; resetting must not
               // also collapse it.
               e.stopPropagation();
             }}
@@ -491,33 +505,53 @@ export function TaskLogPanel() {
             <ResetColumnsButton layout={layout} />
           </span>
         )}
-        {panelOpen ? (
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-        ) : (
-          <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
+        <button
+          type="button"
+          aria-expanded={panelOpen}
+          aria-label={panelOpen ? t("collapseActivity") : t("expandActivity")}
+          title={panelOpen ? t("collapseActivity") : t("expandActivity")}
+          onClick={(e) => {
+            e.stopPropagation();
+            setPanelOpen(!panelOpen);
+          }}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-hidden transition-colors hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {panelOpen ? (
+            <ChevronDown aria-hidden="true" className="h-4 w-4" />
+          ) : (
+            <ChevronUp aria-hidden="true" className="h-4 w-4" />
+          )}
+        </button>
       </div>
 
       {/* Activity list */}
       {panelOpen && (
-        <div className="overflow-auto" style={{ height: panelHeight }}>
+        <div
+          className="@container overflow-auto border-t"
+          style={{ height: panelHeight }}
+        >
           {visibleRows.length === 0 && (
-            <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+            <div className="flex h-full items-center justify-center text-[12.5px] text-muted-foreground">
               {rows.length === 0 ? t("noActivity") : t("noMatchingActivity")}
             </div>
           )}
           {visibleRows.length > 0 && (
             <table
-              className="table-fixed text-xs"
+              // Dense one-line rows; the headings stay put while the list
+              // scrolls under them. The columns keep the widths they were
+              // given, and an empty last one takes whatever the band has
+              // left, so the hairlines and the hover run to its edge.
+              className="min-w-full table-fixed text-[12.5px] [&_td]:py-[5px] [&_th]:sticky [&_th]:top-0 [&_th]:z-[1] [&_th]:h-7 [&_th]:bg-card [&_th]:shadow-[inset_0_-1px_0_hsl(var(--border))]"
               style={{ width: layout.totalWidth }}
             >
               <thead>
-                <tr className="border-b">
+                <tr>
                   <DataTableHeadCells
                     layout={layout}
                     directionFor={directionFor}
                     onSort={toggle}
                   />
+                  <th aria-hidden="true" className="p-0" />
                 </tr>
               </thead>
               <tbody>
@@ -549,6 +583,6 @@ export function TaskLogPanel() {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }

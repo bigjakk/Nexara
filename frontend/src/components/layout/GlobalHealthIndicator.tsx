@@ -103,28 +103,33 @@ export function GlobalHealthIndicator() {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-0">
-        <div className="border-b px-3 py-2">
-          <p className="text-sm font-semibold">Infrastructure health</p>
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
+      <PopoverContent
+        align="end"
+        className="w-[22rem] max-w-[calc(100vw-1rem)] p-0"
+      >
+        <div className="px-[18px] pb-3 pt-3.5">
+          <p className="text-[15px] font-semibold">Infrastructure health</p>
+          <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+            {subtitle}
+          </p>
         </div>
 
         {hasVisible ? (
-          <ul className="max-h-96 overflow-auto py-1">
+          <ul className="max-h-96 divide-y overflow-auto border-t">
             {visible.map((issue) => (
               <li key={issue.sig} className="group/issue relative">
                 <Link
                   to={issue.to}
-                  className="block py-2 pl-3 pr-14 transition-colors hover:bg-accent/50"
+                  className="block py-2.5 pl-[18px] pr-16 outline-hidden transition-colors hover:bg-foreground/[0.04] focus-visible:bg-foreground/[0.06]"
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-baseline gap-2">
                     <span
                       className={cn(
-                        "h-2 w-2 shrink-0 rounded-full",
+                        "h-2 w-2 shrink-0 self-center rounded-full",
                         severityDotClass[issue.severity],
                       )}
                     />
-                    <span className="truncate text-sm">
+                    <span className="min-w-0 truncate text-sm">
                       <span className="font-medium">{issue.clusterName}</span>
                       {issue.target !== "" && (
                         <span className="text-muted-foreground">
@@ -135,18 +140,18 @@ export function GlobalHealthIndicator() {
                     </span>
                     <span
                       className={cn(
-                        "ml-auto shrink-0 text-xs",
+                        "ml-auto shrink-0 text-[12.5px] font-medium",
                         severityTextClass[issue.severity],
                       )}
                     >
                       {issue.summary}
                     </span>
                   </div>
-                  <p className="mt-1 truncate pl-4 text-xs text-muted-foreground">
+                  <p className="mt-0.5 truncate pl-4 text-[12.5px] text-muted-foreground">
                     {issue.detail}
                   </p>
                 </Link>
-                <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/issue:opacity-100 pointer-coarse:opacity-100">
+                <div className="absolute right-2 top-2 flex items-center gap-0.5 rounded-md bg-popover opacity-0 transition-opacity focus-within:opacity-100 group-hover/issue:opacity-100 pointer-coarse:opacity-100">
                   <button
                     type="button"
                     aria-label={`Mute ${issue.summary} alerts`}
@@ -156,7 +161,7 @@ export function GlobalHealthIndicator() {
                       e.stopPropagation();
                       mute(issue.type);
                     }}
-                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground outline-hidden hover:bg-foreground/[0.08] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <BellOff className="h-3.5 w-3.5" />
                   </button>
@@ -169,7 +174,7 @@ export function GlobalHealthIndicator() {
                       e.stopPropagation();
                       dismiss(issue.sig);
                     }}
-                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground outline-hidden hover:bg-foreground/[0.08] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -178,15 +183,19 @@ export function GlobalHealthIndicator() {
             ))}
           </ul>
         ) : (
-          <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
-            <ShieldCheck className="h-4 w-4 text-emerald-500" />
+          // Healthy is quiet: a dot and a plain sentence.
+          <div className="flex items-center gap-2 border-t px-[18px] py-4 text-sm text-muted-foreground">
+            <span
+              aria-hidden="true"
+              className="h-2 w-2 shrink-0 rounded-full bg-emerald-500"
+            />
             {hasSuppressed ? "No active issues." : "Everything looks healthy."}
           </div>
         )}
 
         {hasSuppressed && (
-          <div className="flex items-center justify-between border-t px-3 py-2">
-            <span className="text-xs text-muted-foreground">
+          <div className="flex items-center justify-between border-t px-[18px] py-2.5">
+            <span className="text-[12.5px] text-muted-foreground">
               {hiddenCount > 0
                 ? `${String(hiddenCount)} hidden`
                 : `${String(mutedTypes.length)} alert type${mutedTypes.length === 1 ? "" : "s"} muted`}
@@ -195,7 +204,7 @@ export function GlobalHealthIndicator() {
               type="button"
               aria-label="Restore dismissed and muted alerts"
               onClick={restoreAll}
-              className="text-xs font-medium text-primary hover:underline"
+              className="rounded-sm text-[12.5px] font-medium text-primary outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
             >
               Restore
             </button>
