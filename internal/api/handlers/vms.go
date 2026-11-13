@@ -641,39 +641,11 @@ func (h *VMHandler) GetTaskStatus(c fiber.Ctx, p *apischema.Params) error {
 		StartTime:  status.StartTime,
 	}
 
-	// For running tasks, fetch the log to extract progress (e.g. clone operations).
-	// Proxmox emits progress in several formats:
-	//   1. "progress 0.50"                                                                  (generic tasks)
-	//   2. "drive-ide0: transferred 1.0 GiB of 32.0 GiB (1.00%) in 5s"                    (move disk)
-	//   3. "transferred 1.0 GiB of 100.0 GiB (1.00%)"                                     (clone)
-	//   4. "migration active, transferred 5.2 GiB of 16.0 GiB VM-state, 833.4 MiB/s"      (live migration)
+	// For a running task, how far it is, as the end of its log says (see
+	// taskLogProgress).
 	if status.Status == "running" {
-		if logEntries, logErr := pxClient.GetTaskLog(c.Context(), nodeName, upid, 0); logErr == nil {
-			for i := len(logEntries) - 1; i >= 0; i-- {
-				line := logEntries[i].T
-				if strings.HasPrefix(line, "progress ") {
-					if pct, parseErr := strconv.ParseFloat(strings.TrimPrefix(line, "progress "), 64); parseErr == nil {
-						resp.Progress = &pct
-					}
-					break
-				}
-				// Parse "(Z%)" anywhere in the line — covers disk move/clone formats.
-				if pctEnd := strings.Index(line, "%)"); pctEnd != -1 {
-					if pctStart := strings.LastIndex(line[:pctEnd], "("); pctStart != -1 {
-						pctStr := line[pctStart+1 : pctEnd]
-						if pct, parseErr := strconv.ParseFloat(pctStr, 64); parseErr == nil {
-							p := pct / 100.0
-							resp.Progress = &p
-						}
-						break
-					}
-				}
-				// Parse "transferred X <unit> of Y <unit>" without percentage — live migrations.
-				if p := parseTransferredProgress(line); p != nil {
-					resp.Progress = p
-					break
-				}
-			}
+		if lines, logErr := taskLogTail(c.Context(), pxClient, nodeName, upid); logErr == nil {
+			resp.Progress = taskLogProgress(status.Type, lines)
 		}
 	}
 
