@@ -40,9 +40,15 @@ const mockDashboardData: DashboardData = {
   totalStorageBytes: 1099511627776,
   totalStorageUsedBytes: 549755813888,
   vmNameMap: new Map(),
+  nodesByCluster: new Map(),
+  vmsByCluster: new Map(),
 };
 
 const mockUseDashboardData = vi.fn();
+
+vi.mock("@/hooks/useHealthIssues", () => ({
+  useHealthIssues: () => ({ visible: [], dismiss: vi.fn(), mute: vi.fn() }),
+}));
 
 vi.mock("../api/dashboard-queries", () => ({
   useDashboardData: (...args: unknown[]) =>
@@ -108,7 +114,7 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
-  it("renders cluster cards when data is loaded", () => {
+  it("names each cluster when data is loaded", () => {
     mockUseDashboardData.mockReturnValue({
       data: mockDashboardData,
       isLoading: false,

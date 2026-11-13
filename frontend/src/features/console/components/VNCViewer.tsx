@@ -454,7 +454,7 @@ function ConsoleStateOverlay({
           <Button
             variant="outline"
             size="sm"
-            className="h-7 gap-1.5 px-3 text-xs"
+            className="h-7 gap-1.5 bg-background px-3 text-xs"
             onClick={onReconnect}
           >
             <RotateCcw className="h-3.5 w-3.5" />
@@ -493,7 +493,7 @@ function ConsoleStateOverlay({
       <Button
         variant="outline"
         size="sm"
-        className="h-7 gap-1.5 px-3 text-xs"
+        className="h-7 gap-1.5 bg-background px-3 text-xs"
         onClick={onReconnect}
       >
         <RotateCcw className="h-3.5 w-3.5" />

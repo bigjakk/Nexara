@@ -18,6 +18,14 @@ export interface WidgetTemplate {
 
 export const widgetTemplates: WidgetTemplate[] = [
   {
+    type: "fleet-board",
+    label: "Fleet",
+    description: "Every node with its load and one cell per guest",
+    defaultLayout: { w: 12, h: 10, minW: 6, minH: 5 },
+    category: "overview",
+    perCluster: false,
+  },
+  {
     type: "stats-overview",
     label: "Stats Overview",
     description: "Total nodes, VMs, containers, and storage",
@@ -144,6 +152,21 @@ export function getWidgetLabel(
 export interface ClusterInfo {
   id: string;
   name: string;
+  /** Sizes the Fleet widget in a default layout; unknown counts as none. */
+  nodeCount?: number;
+}
+
+/**
+ * Grid rows the Fleet widget needs to show every node without scrolling: a
+ * header, a line per cluster and a row per node, at the grid's 30px row and
+ * 16px gap. Clamped, because past that it scrolls inside its cell instead.
+ */
+export function fleetBoardRows(clusters: ClusterInfo[]): number {
+  const px = clusters.reduce(
+    (sum, c) => sum + 54 + 40 * (c.nodeCount ?? 0),
+    96,
+  );
+  return Math.min(20, Math.max(5, Math.ceil((px + 16) / 46)));
 }
 
 function makeLayoutItem(
@@ -160,7 +183,8 @@ function makeLayoutItem(
 
 /** Generate the default widget IDs for the given set of clusters */
 export function getDefaultWidgetIds(clusters: ClusterInfo[]): string[] {
-  const ids: string[] = ["stats-overview", "cluster-cards"];
+  // Fleet stands in for the stat and cluster cards, which stay in the picker.
+  const ids: string[] = ["fleet-board"];
 
   for (const cluster of clusters) {
     ids.push(`cpu-chart:${cluster.id}`);
@@ -181,7 +205,10 @@ export function getDefaultWidgetIds(clusters: ClusterInfo[]): string[] {
 }
 
 /** Generate default layout for the given widget IDs */
-export function getDefaultLayout(widgetIds: string[]): LayoutItem[] {
+export function getDefaultLayout(
+  widgetIds: string[],
+  clusters: ClusterInfo[] = [],
+): LayoutItem[] {
   let y = 0;
   const layouts: LayoutItem[] = [];
 
@@ -189,7 +216,10 @@ export function getDefaultLayout(widgetIds: string[]): LayoutItem[] {
     const template = getTemplate(widgetId);
     if (!template) continue;
 
-    const dl = template.defaultLayout;
+    const dl =
+      template.type === "fleet-board"
+        ? { ...template.defaultLayout, h: fleetBoardRows(clusters) }
+        : template.defaultLayout;
     const isHalfWidth = dl.w <= 6;
     const prevItem = layouts[layouts.length - 1];
 
@@ -268,7 +298,7 @@ export function buildDefaultPreset(clusters: ClusterInfo[]): DashboardPreset {
   return {
     name: "Default",
     widgetIds,
-    layouts: getDefaultLayout(widgetIds),
+    layouts: getDefaultLayout(widgetIds, clusters),
   };
 }
 

@@ -14,6 +14,9 @@ import { useDashboardMetrics } from "@/hooks/useMetrics";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { StatsOverview } from "../components/StatsOverview";
+import { FleetBoard } from "../components/FleetBoard";
+import { NeedsAttention } from "../components/NeedsAttention";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ClusterCard } from "../components/ClusterCard";
 import { EmptyState } from "@/components/EmptyState";
 import { AddClusterDialog } from "../components/AddClusterDialog";
@@ -87,8 +90,11 @@ export function DashboardPage() {
 
   const clusters = useMemo<ClusterInfo[]>(
     () =>
-      data?.clusters.map((s) => ({ id: s.cluster.id, name: s.cluster.name })) ??
-      [],
+      data?.clusters.map((s) => ({
+        id: s.cluster.id,
+        name: s.cluster.name,
+        nodeCount: s.nodeCount,
+      })) ?? [],
     [data?.clusters],
   );
 
@@ -279,6 +285,9 @@ export function DashboardPage() {
         : undefined;
 
       switch (type) {
+        case "fleet-board":
+          return <FleetBoard data={data} metrics={liveMetrics} />;
+
         case "stats-overview":
           return (
             <StatsOverview
@@ -455,6 +464,8 @@ export function DashboardPage() {
             />
           )}
 
+          <NeedsAttention />
+
           {data != null && data.clusters.length > 0 && (
             <DashboardGrid
               preset={effectivePreset}
@@ -469,19 +480,9 @@ export function DashboardPage() {
             </DashboardGrid>
           )}
 
-          {isLoading && !data && (
-            <StatsOverview
-              totalNodes={0}
-              totalNodesOnline={0}
-              totalVMs={0}
-              totalVMsRunning={0}
-              totalContainers={0}
-              totalContainersRunning={0}
-              totalStorageBytes={0}
-              totalStorageUsedBytes={0}
-              isLoading={true}
-            />
-          )}
+          {/* Shaped like nothing in particular: which widgets come next is
+              the viewer's own layout, not yet known. */}
+          {isLoading && !data && <Skeleton className="h-72 w-full rounded-xl" />}
         </>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
@@ -14,96 +14,44 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { issueSig } from "@/lib/health-issues";
-import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useUpsDevices } from "@/features/power/api/ups-queries";
-import { usePermissions } from "@/hooks/usePermissions";
+import { useHealthIssues } from "@/hooks/useHealthIssues";
 import { useHealthDismissStore } from "@/stores/health-dismiss-store";
-import { useHealthMuteStore } from "@/stores/health-mute-store";
 import {
   severityDotClass,
   severityTextClass,
-  worstIssueSeverity,
 } from "@/features/ceph/lib/ceph-health";
-import type { HealthIssue } from "@/types/api";
-
-interface FlatIssue extends HealthIssue {
-  clusterId: string;
-  clusterName: string;
-  sig: string;
-  to: string;
-}
-
-function issueLink(clusterId: string, i: HealthIssue): string {
-  if (i.type === "ceph") return `/clusters/${clusterId}?tab=ceph`;
-  return `/clusters/${clusterId}`;
-}
 
 /**
- * GlobalHealthIndicator is the always-visible header pill that surfaces
- * infrastructure problems (Ceph, HA, disks, storage, failed tasks, …) computed
- * server-side and attached to each cluster as issues[], and each UPS's power
- * issues for view:ups holders. Each issue can be dismissed (this occurrence,
- * until it resolves) or its whole type muted (suppressed everywhere until
- * restored).
+ * GlobalHealthIndicator is the always-visible header pill that surfaces the
+ * open infrastructure issues (see useHealthIssues). Each issue can be dismissed
+ * (this occurrence, until it resolves) or its whole type muted (suppressed
+ * everywhere until restored).
  */
 export function GlobalHealthIndicator() {
-  const { data: clusters } = useClusters();
-  const { hasGlobalPermission } = usePermissions();
-  const canViewUps = hasGlobalPermission("view", "ups");
-  const { data: upsDevices } = useUpsDevices(canViewUps);
-  const dismissed = useHealthDismissStore((s) => s.dismissed);
-  const dismiss = useHealthDismissStore((s) => s.dismiss);
-  const restoreDismissed = useHealthDismissStore((s) => s.restoreAll);
+  const {
+    all,
+    loaded,
+    visible,
+    hiddenCount,
+    mutedTypes,
+    overall,
+    dismiss,
+    mute,
+    restoreAll,
+  } = useHealthIssues();
   const syncActive = useHealthDismissStore((s) => s.syncActive);
-  const mutedTypes = useHealthMuteStore((s) => s.mutedTypes);
-  const mute = useHealthMuteStore((s) => s.mute);
-  const restoreMuted = useHealthMuteStore((s) => s.restoreAll);
-
-  const allIssues = useMemo<FlatIssue[]>(
-    () => [
-      ...(clusters ?? []).flatMap((c) =>
-        (c.issues ?? []).map((iss) => ({
-          ...iss,
-          clusterId: c.id,
-          clusterName: c.name,
-          sig: issueSig(c.id, iss),
-          to: issueLink(c.id, iss),
-        })),
-      ),
-      ...(canViewUps ? (upsDevices ?? []) : []).flatMap((d) =>
-        d.issues.map((iss) => ({
-          ...iss,
-          clusterId: `ups:${d.id}`,
-          clusterName: d.server_name,
-          // The detail carries the charge and runtime left, which change on
-          // every poll; signed on the summary instead, a dismissal holds until
-          // the issue resolves, and "Low battery" turning into "Shutting down"
-          // still shows.
-          sig: issueSig(`ups:${d.id}`, { ...iss, detail: iss.summary }),
-          to: `/power/${d.id}`,
-        })),
-      ),
-    ],
-    [clusters, canViewUps, upsDevices],
-  );
 
   // Forget dismissals whose issue has resolved (so recurrences re-show). Only
   // once every source has loaded, to avoid wiping on the initial empty state.
+  // Here and nowhere else: this pill is mounted on every page, so one owner is
+  // enough, and the dashboard's list reads the same issues without syncing.
   useEffect(() => {
-    if (clusters === undefined || (canViewUps && upsDevices === undefined)) return;
-    syncActive(allIssues.map((i) => i.sig));
-  }, [clusters, canViewUps, upsDevices, allIssues, syncActive]);
+    if (!loaded) return;
+    syncActive(all.map((i) => i.sig));
+  }, [loaded, all, syncActive]);
 
-  const dismissedSet = useMemo(() => new Set(dismissed), [dismissed]);
-  const mutedSet = useMemo(() => new Set(mutedTypes), [mutedTypes]);
-  const visible = allIssues.filter(
-    (i) => !mutedSet.has(i.type) && !dismissedSet.has(i.sig),
-  );
-  const hiddenCount = allIssues.length - visible.length;
   const hasVisible = visible.length > 0;
   const hasSuppressed = hiddenCount > 0 || mutedTypes.length > 0;
-  const overall = worstIssueSeverity(visible);
 
   const Icon =
     overall === "err"
@@ -117,11 +65,6 @@ export function GlobalHealthIndicator() {
     : hasSuppressed
       ? "All clear (some alerts suppressed)"
       : "All systems healthy";
-
-  const restoreAll = () => {
-    restoreDismissed();
-    restoreMuted();
-  };
 
   return (
     <Popover>

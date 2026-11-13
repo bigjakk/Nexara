@@ -6,34 +6,8 @@ import {
 } from "./topology-transform";
 import type { TopologyInput, TopologyFilters } from "./topology-transform";
 import { makeStorage as baseStorage } from "@/test/storage.fixtures";
-import { makeCluster, makeNode } from "@/test/cluster.fixtures";
-import type { VMResponse, StorageResponse } from "@/types/api";
-
-function makeVM(overrides: Partial<VMResponse> = {}): VMResponse {
-  return {
-    id: "v1",
-    cluster_id: "c1",
-    node_id: "n1",
-    vmid: 100,
-    name: "web-01",
-    type: "qemu",
-    status: "running",
-    cpu_count: 4,
-    mem_total: 8589934592,
-    disk_total: 107374182400,
-    uptime: 3600,
-    template: false,
-    tags: "",
-    ha_state: "",
-    pool: "",
-    ostype: "",
-    config_ostype: "",
-    last_seen_at: "2024-01-01T00:00:00Z",
-    created_at: "2024-01-01T00:00:00Z",
-    updated_at: "2024-01-01T00:00:00Z",
-    ...overrides,
-  };
-}
+import { makeCluster, makeNode, makeVM } from "@/test/cluster.fixtures";
+import type { StorageResponse } from "@/types/api";
 
 /**
  * A populated LVM-thin pool. Topology renders capacity, so the shared

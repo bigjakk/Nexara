@@ -50,6 +50,9 @@ export interface DashboardData {
   totalStorageUsedBytes: number;
   /** VM UUID → display name (e.g. "web-01") for resolving metric IDs. */
   vmNameMap: Map<string, string>;
+  /** Every cluster's nodes and guests, as fetched, for the Fleet widget. */
+  nodesByCluster: Map<string, NodeResponse[]>;
+  vmsByCluster: Map<string, VMResponse[]>;
 }
 
 export function useDashboardData() {
@@ -112,11 +115,15 @@ export function useDashboardData() {
     let totalStorageBytes = 0;
     let totalStorageUsedBytes = 0;
     const vmNameMap = new Map<string, string>();
+    const nodesByCluster = new Map<string, NodeResponse[]>();
+    const vmsByCluster = new Map<string, VMResponse[]>();
 
     const clusterSummaries = clusters.map((cluster, i) => {
       const nodes = nodeQueries[i]?.data ?? [];
       const vms = vmQueries[i]?.data ?? [];
       const storage = storageQueries[i]?.data ?? [];
+      nodesByCluster.set(cluster.id, nodes);
+      vmsByCluster.set(cluster.id, vms);
 
       const nodesOnline = nodes.filter((n) => n.status === "online").length;
       const vmCount = vms.filter((v) => v.type === "qemu").length;
@@ -178,6 +185,8 @@ export function useDashboardData() {
       totalStorageBytes,
       totalStorageUsedBytes,
       vmNameMap,
+      nodesByCluster,
+      vmsByCluster,
     };
   }
 

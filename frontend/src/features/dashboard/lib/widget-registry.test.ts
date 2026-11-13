@@ -11,6 +11,7 @@ import {
   getAllAvailableWidgets,
   buildDefaultPreset,
   defaultPreset,
+  fleetBoardRows,
   type ClusterInfo,
 } from "./widget-registry";
 
@@ -147,9 +148,11 @@ describe("getWidgetLabel", () => {
 describe("getDefaultWidgetIds", () => {
   it("includes global widgets", () => {
     const ids = getDefaultWidgetIds(testClusters);
-    expect(ids).toContain("stats-overview");
-    expect(ids).toContain("cluster-cards");
+    expect(ids).toContain("fleet-board");
     expect(ids).toContain("top-consumers");
+    // Fleet stands in for these two; they remain addable, not default.
+    expect(ids).not.toContain("stats-overview");
+    expect(ids).not.toContain("cluster-cards");
   });
 
   it("includes per-cluster widgets for each cluster", () => {
@@ -164,8 +167,7 @@ describe("getDefaultWidgetIds", () => {
 
   it("returns only global widgets when no clusters", () => {
     const ids = getDefaultWidgetIds([]);
-    expect(ids).toContain("stats-overview");
-    expect(ids).toContain("cluster-cards");
+    expect(ids).toContain("fleet-board");
     expect(ids).toContain("top-consumers");
     expect(ids.some((id) => id.includes(":"))).toBe(false);
   });
@@ -272,7 +274,7 @@ describe("defaultPreset (static fallback)", () => {
   });
 
   it("has global widgets only (no clusters)", () => {
-    expect(defaultPreset.widgetIds).toContain("stats-overview");
+    expect(defaultPreset.widgetIds).toContain("fleet-board");
     expect(defaultPreset.widgetIds.every((id) => !id.includes(":"))).toBe(true);
   });
 });
@@ -291,5 +293,35 @@ describe("widgetAllowed", () => {
     expect(widgetAllowed(ups, grants())).toBe(false);
     expect(widgetAllowed(ups, grants("view:ups"))).toBe(true);
     expect(widgetAllowed(stats, grants())).toBe(true);
+  });
+});
+
+describe("fleetBoardRows", () => {
+  const cluster = (nodeCount: number): ClusterInfo => ({
+    id: `c${String(nodeCount)}`,
+    name: "cluster",
+    nodeCount,
+  });
+
+  it.each([
+    { name: "no clusters still gets the minimum", clusters: [], want: 5 },
+    {
+      name: "two clusters of three nodes",
+      clusters: [cluster(3), cluster(3)],
+      want: 10,
+    },
+    {
+      name: "a large estate is capped and scrolls inside its cell",
+      clusters: [cluster(40)],
+      want: 20,
+    },
+  ])("$name", ({ clusters, want }) => {
+    expect(fleetBoardRows(clusters)).toBe(want);
+  });
+
+  it("sizes the Fleet widget in the default layout", () => {
+    const clusters = [cluster(3), cluster(3)];
+    const layout = getDefaultLayout(getDefaultWidgetIds(clusters), clusters);
+    expect(layout.find((l) => l.i === "fleet-board")?.h).toBe(10);
   });
 });

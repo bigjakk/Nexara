@@ -1,6 +1,6 @@
-import type { ClusterResponse, NodeResponse } from "@/types/api";
+import type { ClusterResponse, NodeResponse, VMResponse } from "@/types/api";
 
-// A cluster and a node as the API returns them, with overrides.
+// A cluster, a node and a guest as the API returns them, with overrides.
 export function makeCluster(
   overrides: Partial<ClusterResponse> = {},
 ): ClusterResponse {
@@ -50,6 +50,32 @@ export function makeNode(overrides: Partial<NodeResponse> = {}): NodeResponse {
     load_avg: "0.50, 0.30, 0.20",
     io_wait: 0.02,
     uptime: 86400,
+    last_seen_at: "2024-01-01T00:00:00Z",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeVM(overrides: Partial<VMResponse> = {}): VMResponse {
+  return {
+    id: "v1",
+    cluster_id: "c1",
+    node_id: "n1",
+    vmid: 100,
+    name: "web-01",
+    type: "qemu",
+    status: "running",
+    cpu_count: 4,
+    mem_total: 8589934592,
+    disk_total: 107374182400,
+    uptime: 3600,
+    template: false,
+    tags: "",
+    ha_state: "",
+    pool: "",
+    ostype: "",
+    config_ostype: "",
     last_seen_at: "2024-01-01T00:00:00Z",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
