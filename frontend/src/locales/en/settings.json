@@ -7,7 +7,7 @@
   "dark": "Dark",
   "system": "System",
   "accentColor": "Accent color",
-  "chooseAccentColor": "Choose an accent color for links, selection, and focus.",
+  "chooseAccentColor": "Colors the main button, the active navigation item and tab, links and toggles. Charts keep their own color.",
   "displayPreferences": "Display preferences",
   "configureDataDisplay": "Configure how data is displayed throughout the application.",
   "storageUnits": "Storage units",

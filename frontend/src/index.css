@@ -43,16 +43,20 @@
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
 
-  /* The one primary action on a screen. Deliberately not --primary: that is
-     the data, selection and link blue, and an accent the user picks recolours
-     it, while a primary button stays this high-contrast neutral. */
+  /* The one primary action on a screen. Ink until the user picks an accent
+     (lib/accent.ts), then that accent. Deliberately not --primary, which is
+     the link and selection colour and is blue with no accent picked. */
   --color-action: hsl(var(--action));
   --color-action-foreground: hsl(var(--action-foreground));
 
+  /* "You are here": the rule under the active tab and the selected figure of
+     a stat strip. Ink, or the picked accent in a shade that reads on a page. */
+  --color-marker: hsl(var(--marker));
+
   /* Measured data and in-progress state: usage bars, sparklines, chart lines,
-     a running task. Deliberately not --primary: the accent a user picks
-     recolours --primary, and a usage bar in an amber or red accent would read
-     as a warning or a failure. */
+     a running task. Never the accent: a usage bar in an amber or red accent
+     would read as a warning or a failure, and a running task in a green one
+     as done. */
   --color-data: hsl(var(--data));
 
   /* The navigation rail keeps one dark surface in both themes. */
@@ -60,6 +64,8 @@
   --color-rail-foreground: hsl(var(--rail-foreground));
   --color-rail-muted: hsl(var(--rail-muted));
   --color-rail-accent: hsl(var(--rail-accent));
+  /* The rail's active item: white, or the accent the user picked. */
+  --color-rail-marker: hsl(var(--rail-marker));
 
   /* Per-provider accents. Third-party backup providers get their own hue so a
      page can say "this is Veeam" without shipping a vendor logo — see the
@@ -125,6 +131,7 @@
     --data: 218 78% 44%;
     --action: 216 20% 10%;
     --action-foreground: 0 0% 100%;
+    --marker: var(--foreground);
     --secondary: 216 22% 95%;
     --secondary-foreground: 216 20% 10%;
     --muted: 216 22% 95%;
@@ -141,6 +148,7 @@
     --rail-foreground: 220 19% 94%;
     --rail-muted: 217 14% 70%;
     --rail-accent: 217 14% 18%;
+    --rail-marker: 220 19% 94%;
 
     /* Provider accents — evocative of each vendor's hue family, deliberately
        not their brand values. Two reasons they are ours and not theirs:

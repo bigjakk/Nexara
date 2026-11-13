@@ -64,7 +64,9 @@ export function MobileNav() {
                             : "text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground",
                         )}
                       >
-                        <item.icon className="h-4 w-4" />
+                        <item.icon
+                          className={cn("h-4 w-4", active && "text-marker")}
+                        />
                         {t(item.labelKey)}
                       </Link>
                       {isInventory && (

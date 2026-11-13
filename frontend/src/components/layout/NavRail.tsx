@@ -18,13 +18,17 @@ function RailLink({ item, pathname }: { item: NavItem; pathname: string }) {
       to={item.to}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex w-full shrink-0 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10.5px] font-medium leading-tight transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+        "relative flex w-full shrink-0 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10.5px] font-medium leading-tight transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+        // The active item wears a rule at the rail's edge and its icon in the
+        // accent (white when none is picked).
         active
-          ? "bg-rail-accent text-rail-foreground"
+          ? "bg-rail-accent text-rail-foreground before:absolute before:inset-y-2 before:-left-1.5 before:w-[3px] before:rounded-r-full before:bg-rail-marker"
           : "text-rail-muted hover:bg-rail-accent/60 hover:text-rail-foreground",
       )}
     >
-      <item.icon className="h-[19px] w-[19px]" />
+      <item.icon
+        className={cn("h-[19px] w-[19px]", active && "text-rail-marker")}
+      />
       <span className="max-w-full truncate">{t(item.labelKey)}</span>
     </Link>
   );

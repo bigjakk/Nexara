@@ -20,7 +20,7 @@ export function AdminNav() {
             cn(
               "whitespace-nowrap border-b-2 px-0.5 pb-2 pt-1.5 text-sm font-medium transition-colors",
               isActive
-                ? "border-foreground text-foreground"
+                ? "border-marker text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground",
             )
           }

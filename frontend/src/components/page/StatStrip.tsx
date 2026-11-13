@@ -112,7 +112,7 @@ export function Stat({
           "relative flex min-w-0 flex-col items-stretch border-l px-[18px] pb-4 text-left outline-hidden transition-colors hover:bg-foreground/[0.03] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           // The selected cell wears a rule along its bottom edge, as the
           // selected tab does: what it selects is drawn right below.
-          "after:absolute after:inset-x-[18px] after:bottom-0 after:h-0.5 after:rounded-full aria-pressed:after:bg-foreground",
+          "after:absolute after:inset-x-[18px] after:bottom-0 after:h-0.5 after:rounded-full aria-pressed:after:bg-marker",
           className,
         )}
       >

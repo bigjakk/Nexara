@@ -24,6 +24,7 @@ import {
   useSetting,
   useUpsertSetting,
 } from "@/features/settings/api/settings-queries";
+import { ACCENT_COLORS, applyAccentColor } from "@/lib/accent";
 import { cn } from "@/lib/utils";
 
 const themeModes = [
@@ -32,62 +33,10 @@ const themeModes = [
   { value: "system", labelKey: "system", icon: Monitor },
 ] as const;
 
+// "Default" picks no accent: the theme's own ink, drawn as a neutral swatch.
 const accentColors = [
-  {
-    name: "default",
-    labelKey: "colorDefault",
-    hsl: "240 5.9% 10%",
-    darkHsl: "0 0% 98%",
-  },
-  {
-    name: "blue",
-    labelKey: "colorBlue",
-    hsl: "221 83% 53%",
-    darkHsl: "217 91% 60%",
-  },
-  {
-    name: "green",
-    labelKey: "colorGreen",
-    hsl: "142 71% 45%",
-    darkHsl: "142 71% 45%",
-  },
-  {
-    name: "purple",
-    labelKey: "colorPurple",
-    hsl: "262 83% 58%",
-    darkHsl: "262 83% 58%",
-  },
-  {
-    name: "orange",
-    labelKey: "colorOrange",
-    hsl: "25 95% 53%",
-    darkHsl: "25 95% 53%",
-  },
-  { name: "red", labelKey: "colorRed", hsl: "0 72% 51%", darkHsl: "0 72% 51%" },
-  {
-    name: "pink",
-    labelKey: "colorPink",
-    hsl: "330 81% 60%",
-    darkHsl: "330 81% 60%",
-  },
-  {
-    name: "teal",
-    labelKey: "colorTeal",
-    hsl: "173 80% 40%",
-    darkHsl: "173 80% 40%",
-  },
-  {
-    name: "cyan",
-    labelKey: "colorCyan",
-    hsl: "189 94% 43%",
-    darkHsl: "189 94% 43%",
-  },
-  {
-    name: "amber",
-    labelKey: "colorAmber",
-    hsl: "38 92% 50%",
-    darkHsl: "38 92% 50%",
-  },
+  { name: "default", labelKey: "colorDefault", hsl: null },
+  ...ACCENT_COLORS,
 ] as const;
 
 const byteUnitOptions: {
@@ -136,6 +85,8 @@ export function AppearancePage() {
   useEffect(() => {
     if (prefsQuery.data?.value) {
       loadFromJSON(prefsQuery.data.value);
+      // A browser that has not seen this account's accent yet takes it now.
+      applyAccentColor(usePreferencesStore.getState().preferences.accentColor);
     }
   }, [prefsQuery.data?.value, loadFromJSON]);
 
@@ -196,7 +147,7 @@ export function AppearancePage() {
                 const selected = preferences.accentColor === color.name;
                 // "Default" is the theme's own neutral, so its swatch follows
                 // the theme rather than showing the light theme's near-black.
-                const neutral = color.name === "default";
+                const neutral = color.hsl === null;
                 return (
                   <button
                     key={color.name}
@@ -374,22 +325,4 @@ export function AppearancePage() {
       </div>
     </div>
   );
-}
-
-// Apply accent color to CSS variables
-function applyAccentColor(colorName: string) {
-  const color = accentColors.find((c) => c.name === colorName);
-  if (!color) return;
-
-  const root = document.documentElement;
-  if (colorName === "default") {
-    // Reset to original theme values
-    root.style.removeProperty("--primary");
-    root.style.removeProperty("--ring");
-  } else {
-    const isDark = root.classList.contains("dark");
-    const hsl = isDark ? color.darkHsl : color.hsl;
-    root.style.setProperty("--primary", hsl);
-    root.style.setProperty("--ring", hsl);
-  }
 }
