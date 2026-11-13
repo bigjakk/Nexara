@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -70,92 +72,89 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
   }
 
   return (
-    <div
-      ref={section}
-      role="region"
-      aria-label="Import sources"
-      tabIndex={-1}
-      className="space-y-3 outline-none"
-    >
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Import sources</h2>
-        {canManageImport && !showEsxiForm && (
+    <Panel
+      title="Import sources"
+      aside={groups.length > 0 ? String(groups.length) : undefined}
+      actions={
+        canManageImport && !showEsxiForm ? (
           <Button
             type="button"
             size="sm"
             variant="outline"
+            className="gap-1.5"
             onClick={() => {
               setShowEsxiForm(true);
             }}
           >
-            <Plus className="mr-1 h-4 w-4" /> Add ESXi source
+            <Plus />
+            Add ESXi source
           </Button>
+        ) : undefined
+      }
+    >
+      <div ref={section} tabIndex={-1} className="space-y-3 outline-hidden">
+        {showEsxiForm && (
+          // The form draws its own frame for the import dialog; inside this
+          // panel that would be a box in a box, so it is taken off here.
+          <div className="[&>div]:rounded-none [&>div]:border-0 [&>div]:p-0">
+            <EsxiSourceForm
+              clusterId={clusterId}
+              onRegistered={() => {
+                setShowEsxiForm(false);
+              }}
+              onCancel={() => {
+                setShowEsxiForm(false);
+              }}
+            />
+          </div>
         )}
-      </div>
 
-      {showEsxiForm && (
-        <EsxiSourceForm
-          clusterId={clusterId}
-          onRegistered={() => {
-            setShowEsxiForm(false);
-          }}
-          onCancel={() => {
-            setShowEsxiForm(false);
-          }}
-        />
-      )}
-
-      {groups.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No import sources. Add an ESXi/vCenter host, or enable the
-          &quot;import&quot; content type on a directory/NFS storage.
-        </p>
-      ) : (
-        <div className="rounded-md border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                <th className="px-3 py-2">Storage</th>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2">Visibility</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map((g) => (
-                <tr
-                  key={g.storage}
-                  className="border-b border-border last:border-b-0"
-                >
-                  <td className="px-3 py-2 font-medium">{g.storage}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{g.type}</td>
-                  <td className="px-3 py-2 text-muted-foreground">
+        {groups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No import sources. Add an ESXi/vCenter host, or enable the
+            &quot;import&quot; content type on a directory/NFS storage.
+          </p>
+        ) : (
+          <ul
+            className={cn("divide-y text-sm", showEsxiForm && "border-t pt-3")}
+          >
+            {groups.map((g) => (
+              <li
+                key={g.storage}
+                className="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium" title={g.storage}>
+                    {g.storage}
+                  </div>
+                  <div className="truncate text-[12.5px] text-muted-foreground">
+                    {g.type}
+                    {", "}
                     {g.type === "esxi"
                       ? "ESXi source"
                       : g.shared
                         ? "shared"
                         : g.nodes.join(", ")}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {canManageImport && (
-                      <Button
-                        aria-label={`Delete ${g.storage}`}
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setDeleteTarget(g.storage);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                  </div>
+                </div>
+                {canManageImport && (
+                  <Button
+                    aria-label={`Delete ${g.storage}`}
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => {
+                      setDeleteTarget(g.storage);
+                    }}
+                  >
+                    <Trash2 />
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       <Dialog
         open={deleteTarget !== null}
@@ -203,6 +202,6 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </Panel>
   );
 }

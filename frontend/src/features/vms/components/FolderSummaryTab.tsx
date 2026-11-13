@@ -1,15 +1,9 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Cpu, Folder, Gauge, HardDrive, MemoryStick } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { cn } from "@/lib/utils";
-import { formatBytes } from "@/lib/format";
+import { ChevronRight, Folder } from "lucide-react";
+import { Panel } from "@/components/page/Panel";
+import { Stat, StatStrip } from "@/components/page/StatStrip";
+import { formatBytes, formatPercent } from "@/lib/format";
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import type { VMFolder, VMResponse } from "@/types/api";
 
@@ -24,66 +18,16 @@ interface FolderSummaryTabProps {
   /** VMs of this folder's subtree, templates included. */
   vms: VMResponse[];
   childFolders: ChildFolderSummary[];
-  isUnassigned: boolean;
 }
 
-function barColor(percent: number): string {
-  if (percent >= 90) return "bg-red-500";
-  if (percent >= 75) return "bg-amber-500";
-  return "bg-emerald-500";
-}
-
-function UsageRow({
-  icon,
-  label,
-  valueText,
-  percent,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  valueText: string;
-  /** null hides the bar (metric not applicable, e.g. provisioned storage) */
-  percent: number | null;
-}) {
-  const clamped = percent === null ? null : Math.max(0, Math.min(100, percent));
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          {icon}
-          {label}
-        </span>
-        <span className="text-sm font-medium tabular-nums">{valueText}</span>
-      </div>
-      {clamped !== null && (
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className={cn(
-              "h-full rounded-full transition-all duration-500",
-              barColor(clamped),
-            )}
-            style={{ width: `${String(clamped)}%` }}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium tabular-nums">{value}</span>
-    </div>
-  );
-}
-
+/**
+ * A folder's totals as one strip, and the folders inside it. CPU and memory
+ * are summed over the running guests, from the cluster's live metrics.
+ */
 export function FolderSummaryTab({
   clusterId,
   vms,
   childFolders,
-  isUnassigned,
 }: FolderSummaryTabProps) {
   const metrics = useClusterMetrics(clusterId);
 
@@ -104,7 +48,6 @@ export function FolderSummaryTab({
       guests: guests.length,
       running: running.length,
       stopped: guests.length - running.length,
-      templates: vms.length - guests.length,
       allocVcpu: guests.reduce((s, vm) => s + vm.cpu_count, 0),
       totalMem: guests.reduce((s, vm) => s + vm.mem_total, 0),
       totalDisk: guests.reduce((s, vm) => s + vm.disk_total, 0),
@@ -114,113 +57,92 @@ export function FolderSummaryTab({
     };
   }, [vms, metrics]);
 
+  // A reading exists only once a running guest has reported one: until then
+  // the bar is an empty track and the number a dash, never a false 0%.
+  const hasLive = usage.running > 0 && usage.liveSeen;
+  const cpuPercent =
+    hasLive && usage.allocVcpu > 0
+      ? (usage.usedVcpu / usage.allocVcpu) * 100
+      : null;
+  const memPercent =
+    hasLive && usage.totalMem > 0
+      ? (usage.usedMem / usage.totalMem) * 100
+      : null;
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Folder details</CardTitle>
-          {isUnassigned ? (
-            <CardDescription>
-              VMs discovered on the cluster that aren&apos;t assigned to any
-              folder.
-            </CardDescription>
-          ) : (
-            childFolders.length > 0 && (
-              <CardDescription>Counts include subfolders.</CardDescription>
-            )
-          )}
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <DetailRow label="Virtual machines" value={String(usage.guests)} />
-          <DetailRow label="Running" value={String(usage.running)} />
-          <DetailRow label="Stopped" value={String(usage.stopped)} />
-          <DetailRow label="Templates" value={String(usage.templates)} />
-          {!isUnassigned && (
-            <DetailRow label="Subfolders" value={String(childFolders.length)} />
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Usage</CardTitle>
-          <CardDescription>
-            {usage.running === 0
-              ? "No running VMs."
-              : usage.liveSeen
-                ? "Live usage across running VMs."
-                : "Waiting for live metrics…"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <UsageRow
-            icon={<Cpu className="h-3.5 w-3.5" />}
+    <>
+      <Panel
+        flush
+        title="Totals"
+        aside={
+          usage.running === 0
+            ? "Nothing is running, so there is no live usage."
+            : !usage.liveSeen
+              ? "Waiting for live metrics."
+              : childFolders.length > 0
+                ? "Subfolders included. Usage is summed over the running guests."
+                : "Usage is summed over the running guests."
+        }
+        bodyClassName="pb-4"
+      >
+        <StatStrip>
+          <Stat
+            label="Guests"
+            value={String(usage.guests)}
+            tone={usage.guests === 0 ? "quiet" : "default"}
+            sub={
+              usage.guests === 0
+                ? undefined
+                : `${String(usage.running)} running, ${String(usage.stopped)} stopped`
+            }
+          />
+          <Stat
             label="CPU"
-            valueText={
-              usage.allocVcpu > 0
-                ? `${((usage.usedVcpu / usage.allocVcpu) * 100).toFixed(2)}% of ${String(usage.allocVcpu)} vCPUs`
-                : "—"
-            }
-            percent={
-              usage.allocVcpu > 0
-                ? (usage.usedVcpu / usage.allocVcpu) * 100
-                : null
-            }
+            value={cpuPercent === null ? "—" : formatPercent(cpuPercent)}
+            sub={`of ${String(usage.allocVcpu)} vCPUs`}
+            percent={cpuPercent}
           />
-          <UsageRow
-            icon={<MemoryStick className="h-3.5 w-3.5" />}
+          <Stat
             label="Memory"
-            valueText={
-              usage.totalMem > 0
-                ? `${((usage.usedMem / usage.totalMem) * 100).toFixed(2)}% (${formatBytes(usage.usedMem)} of ${formatBytes(usage.totalMem)})`
-                : "—"
+            value={memPercent === null ? "—" : formatPercent(memPercent)}
+            sub={
+              memPercent === null
+                ? `of ${formatBytes(usage.totalMem)}`
+                : `${formatBytes(usage.usedMem)} of ${formatBytes(usage.totalMem)}`
             }
-            percent={
-              usage.totalMem > 0 ? (usage.usedMem / usage.totalMem) * 100 : null
-            }
+            percent={memPercent}
           />
-          <UsageRow
-            icon={<HardDrive className="h-3.5 w-3.5" />}
+          <Stat
             label="Storage provisioned"
-            valueText={formatBytes(usage.totalDisk)}
-            percent={null}
+            value={formatBytes(usage.totalDisk)}
+            tone={usage.totalDisk === 0 ? "quiet" : "default"}
           />
-          <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <Gauge className="h-3 w-3" />
-            CPU and memory are summed over the folder&apos;s running VMs.
-          </p>
-        </CardContent>
-      </Card>
+        </StatStrip>
+      </Panel>
 
-      {!isUnassigned && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Subfolders</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {childFolders.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No subfolders.</p>
-            ) : (
-              <ul className="space-y-1">
-                {childFolders.map(({ folder, vmCount }) => (
-                  <li key={folder.id}>
-                    <Link
-                      to={`/clusters/${clusterId}/folders/${folder.id}`}
-                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent/50 transition-colors"
-                    >
-                      <Folder className="h-3.5 w-3.5 shrink-0 text-violet-500" />
-                      <span className="min-w-0 truncate">{folder.name}</span>
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {vmCount} VM{vmCount === 1 ? "" : "s"}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+      {childFolders.length > 0 && (
+        <Panel title="Subfolders" aside={String(childFolders.length)}>
+          <ul className="-mx-2 grid grid-cols-[repeat(auto-fill,minmax(min(15rem,100%),1fr))] gap-x-4 gap-y-0.5">
+            {childFolders.map(({ folder, vmCount }) => (
+              <li key={folder.id} className="min-w-0">
+                <Link
+                  to={`/clusters/${clusterId}/folders/${folder.id}`}
+                  className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-foreground/[0.05]"
+                >
+                  <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 truncate font-medium">
+                    {folder.name}
+                  </span>
+                  <span className="ml-auto shrink-0 text-[12.5px] tabular-nums text-muted-foreground">
+                    {vmCount} {vmCount === 1 ? "guest" : "guests"}
+                  </span>
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-foreground" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Panel>
       )}
-    </div>
+    </>
   );
 }

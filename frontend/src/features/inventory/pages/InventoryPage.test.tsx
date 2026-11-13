@@ -99,6 +99,58 @@ describe("InventoryPage", () => {
     expect(screen.getByText("1 resource total")).toBeInTheDocument();
   });
 
+  it("says what the estate holds under the title", () => {
+    const row = {
+      key: "c1:vm:1",
+      id: "vm-1",
+      type: "vm" as const,
+      name: "linux01",
+      status: "running" as const,
+      clusterName: "cluster01",
+      clusterId: "c1",
+      nodeName: "pve-01",
+      vmid: 100,
+      cpuCount: 4,
+      memTotal: 8589934592,
+      diskTotal: 107374182400,
+      uptime: 86400,
+      tags: "",
+      haState: "",
+      pool: "",
+      template: false,
+      ostype: "",
+      configOstype: "",
+      cpuPercent: 50,
+      memPercent: 60,
+      diskReadBps: null,
+      diskWriteBps: null,
+      netInBps: null,
+      netOutBps: null,
+    };
+    mockUseInventoryData.mockReturnValue({
+      rows: [
+        row,
+        { ...row, key: "c1:vm:2", id: "vm-2", status: "stopped" as const },
+        { ...row, key: "c1:vm:3", id: "vm-3", template: true },
+        {
+          ...row,
+          key: "c1:node:1",
+          id: "n-1",
+          type: "node" as const,
+          status: "online" as const,
+          vmid: null,
+        },
+      ],
+      isLoading: false,
+      error: null,
+      failedClusterIds: [],
+    });
+    renderWithProviders(<InventoryPage />);
+    expect(
+      screen.getByText("2 guests on 1 node, 1 running, 1 template"),
+    ).toBeInTheDocument();
+  });
+
   it("shows healthy clusters' rows alongside the unreachable-cluster warning", () => {
     mockUseInventoryData.mockReturnValue({
       rows: [

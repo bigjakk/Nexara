@@ -84,7 +84,7 @@ async function pressCreate() {
   await user.click(await screen.findByRole("option", { name: "pve-01" }));
   await user.type(screen.getByPlaceholderText("100"), "101");
   const button = screen.getByRole("button", {
-    name: "Create & Run Pre-Flight Checks",
+    name: "Run pre-flight checks",
   });
   // Enabled once the nodes are read and a target is picked.
   await waitFor(() => {

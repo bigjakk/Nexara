@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
+import { UsageBar } from "@/components/UsageBar";
 import {
   Select,
   SelectContent,
@@ -44,6 +44,7 @@ import type {
   MigrationMode,
   VMType,
 } from "@/features/migrations/types/migration";
+import { MigrationStatusText } from "@/features/migrations/components/MigrationStatusText";
 import type { InventoryRow } from "../types/inventory";
 import type { Row } from "@tanstack/react-table";
 import { ArrowLeftRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
@@ -588,12 +589,9 @@ export function BulkMigrateDialog({
                     <span className="text-sm">
                       {j.vmName} ({j.vmType.toUpperCase()} {String(j.vmid)})
                     </span>
-                    <Badge
-                      variant="outline"
-                      className="ml-auto bg-red-100 text-red-700"
-                    >
-                      skipped
-                    </Badge>
+                    <span className="ml-auto text-[12.5px] font-medium text-red-700 dark:text-red-400">
+                      Skipped
+                    </span>
                   </div>
                 ))}
             </div>
@@ -1008,7 +1006,7 @@ function ConfigStep({
             Creating Jobs & Running Checks...
           </>
         ) : (
-          "Create & Run Pre-Flight Checks"
+          "Run pre-flight checks"
         )}
       </Button>
     </div>
@@ -1018,15 +1016,6 @@ function ConfigStep({
 // ---------------------------------------------------------------------------
 // Per-job progress row (polls its own migration job)
 // ---------------------------------------------------------------------------
-
-const statusColors: Record<string, string> = {
-  pending: "bg-gray-100 text-gray-700",
-  checking: "bg-blue-100 text-blue-700",
-  migrating: "bg-amber-100 text-amber-700",
-  completed: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
-  cancelled: "bg-gray-100 text-gray-500",
-};
 
 function BulkJobProgress({
   jobId,
@@ -1050,19 +1039,14 @@ function BulkJobProgress({
         <span className="text-sm font-medium">
           {vmName} ({vmType.toUpperCase()} {String(vmid)})
         </span>
-        <Badge variant="outline" className={statusColors[status] ?? ""}>
-          {status}
-        </Badge>
+        <span className="text-[12.5px]">
+          <MigrationStatusText status={status} />
+        </span>
       </div>
+      {/* A sliver even at 0%, so a job that just started is not an empty
+          track. */}
       {(status === "pending" || status === "migrating") && (
-        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full bg-data transition-all"
-            style={{
-              width: `${String(Math.max(progress * 100, 5))}%`,
-            }}
-          />
-        </div>
+        <UsageBar percent={Math.max(progress * 100, 5)} thresholds={false} />
       )}
       {status === "failed" && job?.error_message && (
         <p className="text-xs text-destructive">{job.error_message}</p>

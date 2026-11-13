@@ -88,7 +88,7 @@ async function pressCreate() {
     </QueryClientProvider>,
   );
   const button = await screen.findByRole("button", {
-    name: "Create & Run Pre-Flight Checks",
+    name: "Run pre-flight checks",
   });
   // Enabled once the nodes are read and a target is picked.
   await waitFor(() => {

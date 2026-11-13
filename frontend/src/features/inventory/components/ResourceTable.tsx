@@ -1,4 +1,11 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   useReactTable,
@@ -8,6 +15,7 @@ import {
   getFilteredRowModel,
   flexRender,
   createColumnHelper,
+  type Column,
   type SortingState,
   type ColumnDef,
   type VisibilityState,
@@ -18,11 +26,15 @@ import { Link } from "react-router-dom";
 import {
   ArrowDown,
   ArrowUp,
-  ArrowUpDown,
+  Box,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
+  FileBox,
   Monitor,
   MoreVertical,
+  Server,
+  type LucideIcon,
 } from "lucide-react";
 import {
   Table,
@@ -34,12 +46,14 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { StatusBadge } from "./StatusBadge";
-import { ResourceTypeBadge } from "./ResourceTypeBadge";
+import { Segmented } from "@/components/ui/segmented";
+import { Panel } from "@/components/page/Panel";
+import { StatusIcon } from "@/components/StatusIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { classifyOS } from "@/lib/os-classify";
+import { cn } from "@/lib/utils";
 import { MetricMiniBar } from "./MetricMiniBar";
-import { SearchBar } from "./SearchBar";
+import { SearchBar, SearchFilterChips } from "./SearchBar";
 import { ColumnToggle } from "./ColumnToggle";
 import { BulkActionToolbar } from "./BulkActionToolbar";
 import { menuOpener } from "@/components/ui/return-focus";
@@ -62,13 +76,36 @@ import { FavoritePlainItem } from "@/features/favorites/components/FavoriteMenuI
 import type { VMAction } from "@/features/vms/types/vm";
 import { applyFilter } from "../lib/search-parser";
 import {
+  filterByQuickStatus,
+  type QuickStatus,
+} from "../lib/inventory-summary";
+import {
   loadColumnVisibility,
   saveColumnVisibility,
   getDefaultColumnVisibility,
 } from "../lib/column-presets";
-import type { InventoryRow, ParsedQuery } from "../types/inventory";
+import type {
+  InventoryRow,
+  ParsedQuery,
+  ResourceType,
+} from "../types/inventory";
 import { formatBytes, formatBytesPerSecond, formatUptime } from "@/lib/format";
 
+/** What an empty cell shows: present, not emphasised. */
+const EMPTY = <span className="text-muted-foreground/60">—</span>;
+
+/** A rate short enough for a cell: no decimal once it has three digits. */
+function compactRate(bytesPerSec: number): string {
+  const text = formatBytesPerSecond(bytesPerSec);
+  const match = /^(\d+\.\d+) (.+)$/.exec(text);
+  if (!match?.[1] || !match[2] || Number(match[1]) < 100) return text;
+  return `${String(Math.round(Number(match[1])))} ${match[2]}`;
+}
+
+/**
+ * Both directions of a rate on one line, each in a fixed slot so the two
+ * line up down the column. An idle pair is a dash, not two zeros.
+ */
 function RateCell({
   inBps,
   outBps,
@@ -80,20 +117,116 @@ function RateCell({
   inLabel: "in" | "read";
   outLabel: "out" | "write";
 }) {
-  if (inBps === null && outBps === null) {
-    return <span className="text-xs text-muted-foreground">--</span>;
-  }
+  if ((inBps ?? 0) === 0 && (outBps ?? 0) === 0) return EMPTY;
   return (
-    <div className="flex flex-col text-xs tabular-nums leading-tight">
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ArrowDown className="h-3 w-3" aria-label={inLabel} />
-        {formatBytesPerSecond(inBps ?? 0)}
+    <span className="flex items-center gap-1 text-[12.5px] tabular-nums text-muted-foreground">
+      <span className="flex w-[4.75rem] items-center gap-px">
+        <ArrowDown
+          className="h-3 w-3 shrink-0 opacity-60"
+          aria-label={inLabel}
+        />
+        {compactRate(inBps ?? 0)}
       </span>
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ArrowUp className="h-3 w-3" aria-label={outLabel} />
-        {formatBytesPerSecond(outBps ?? 0)}
+      <span className="flex w-[4.75rem] items-center gap-px">
+        <ArrowUp
+          className="h-3 w-3 shrink-0 opacity-60"
+          aria-label={outLabel}
+        />
+        {compactRate(outBps ?? 0)}
       </span>
-    </div>
+    </span>
+  );
+}
+
+const TYPE_LABEL: Record<ResourceType, { label: string; icon: LucideIcon }> = {
+  vm: { label: "VM", icon: Monitor },
+  ct: { label: "CT", icon: Box },
+  node: { label: "Node", icon: Server },
+};
+
+/** What kind of thing a row is: its OS mark when known, and the kind in words. */
+function TypeCell({ row }: { row: InventoryRow }) {
+  const isGuest = row.type === "vm" || row.type === "ct";
+  const showOS =
+    isGuest &&
+    (classifyOS(row.ostype) !== "unknown" ||
+      classifyOS(row.configOstype) !== "unknown");
+  const { label, icon: Icon } =
+    isGuest && row.template
+      ? { label: "Template", icon: FileBox }
+      : TYPE_LABEL[row.type];
+  return (
+    <span className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+      {showOS ? (
+        <OSIcon ostype={row.ostype} configOstype={row.configOstype} />
+      ) : (
+        <Icon aria-hidden="true" className="h-4 w-4 shrink-0 opacity-70" />
+      )}
+      {label}
+    </span>
+  );
+}
+
+/** States the dot alone says: no word beside the name for these. */
+const QUIET_STATES = new Set(["running", "online"]);
+
+/** The state in words, for a row that is not simply running. */
+function StateText({ status }: { status: string }) {
+  if (QUIET_STATES.has(status)) return null;
+  return (
+    <span
+      className={cn(
+        "shrink-0 text-[12.5px]",
+        status === "stopped" || status === "unknown"
+          ? "text-muted-foreground"
+          : status === "offline"
+            ? "font-medium text-red-700 dark:text-red-400"
+            : "font-medium text-amber-700 dark:text-amber-400",
+      )}
+    >
+      {status.charAt(0).toUpperCase() + status.slice(1)}
+    </span>
+  );
+}
+
+/**
+ * A heading that sorts. Its arrow hangs in the gap after the label instead of
+ * taking width of its own, so a narrow column stays as narrow as its values;
+ * the neutral arrows show on hover and focus only.
+ */
+function SortHeader({
+  column,
+  children,
+}: {
+  column: Column<InventoryRow>;
+  children: ReactNode;
+}) {
+  const sorted = column.getIsSorted();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        column.toggleSorting(sorted === "asc");
+      }}
+      className={cn(
+        "group relative rounded-sm font-medium outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+        sorted !== false && "text-foreground",
+      )}
+    >
+      {children}
+      <span
+        aria-hidden="true"
+        className="absolute left-full top-1/2 -translate-y-1/2 pl-0.5"
+      >
+        {sorted === "asc" ? (
+          <ArrowUp className="h-3 w-3" />
+        ) : sorted === "desc" ? (
+          <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ChevronsUpDown className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-50 group-focus-visible:opacity-50" />
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -325,6 +458,7 @@ const columnHelper = createColumnHelper<InventoryRow>();
 
 function buildColumns(
   isMobile: boolean,
+  singleCluster: boolean,
   openMenu: (
     target: VMContextTarget,
     x: number,
@@ -387,181 +521,118 @@ function buildColumns(
     enableHiding: false,
   });
 
-  return [
-    isMobile ? actionsColumn : selectColumn,
+  // A stopped guest measures nothing: a dash, not a row of zeros.
+  const live = (row: InventoryRow, value: number | null) =>
+    row.status === "stopped" ? null : value;
+
+  const dataColumns = [
+    columnHelper.accessor("name", {
+      header: ({ column }) => <SortHeader column={column}>Name</SortHeader>,
+      cell: ({ row, getValue }) => {
+        const r = row.original;
+        return (
+          <span className="flex min-w-0 items-center gap-2">
+            <StatusIcon status={r.status} />
+            {/* One line on a desktop; on a phone the state drops under the
+                name, which needs the whole width. */}
+            <span className="flex min-w-0 flex-col md:flex-row md:items-center md:gap-2">
+              {r.type === "node" ? (
+                <span className="truncate font-medium" title={getValue()}>
+                  {getValue()}
+                </span>
+              ) : (
+                <Link
+                  to={`/inventory/${r.type}/${r.clusterId}/${r.id}`}
+                  title={getValue()}
+                  className={cn(
+                    "truncate font-medium hover:underline",
+                    r.template && "text-muted-foreground",
+                  )}
+                >
+                  {getValue()}
+                </Link>
+              )}
+              <StateText status={r.status} />
+            </span>
+          </span>
+        );
+      },
+      enableHiding: true,
+    }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("type", {
       header: "Type",
-      cell: ({ row, getValue }) => {
-        const r = row.original;
-        const showOS =
-          (r.type === "vm" || r.type === "ct") &&
-          (classifyOS(r.ostype) !== "unknown" ||
-            classifyOS(r.configOstype) !== "unknown");
-        return (
-          <span className="inline-flex items-center gap-1.5">
-            <ResourceTypeBadge type={getValue()} template={r.template} />
-            {showOS && (
-              <OSIcon ostype={r.ostype} configOstype={r.configOstype} />
-            )}
-          </span>
-        );
-      },
-      enableHiding: true,
-    }) as ColumnDef<InventoryRow>,
-    columnHelper.accessor("name", {
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            column.toggleSorting(column.getIsSorted() === "asc");
-          }}
-        >
-          Name
-          <ArrowUpDown className="ml-1 h-3 w-3" />
-        </Button>
-      ),
-      cell: ({ row, getValue }) => {
-        const r = row.original;
-        if (r.type === "node") {
-          return <span className="font-medium">{getValue()}</span>;
-        }
-        return (
-          <span className="flex items-center gap-1.5">
-            <Link
-              to={`/inventory/${r.type}/${r.clusterId}/${r.id}`}
-              className={`font-medium hover:underline ${r.template ? "text-amber-700 dark:text-amber-400" : "text-primary"}`}
-            >
-              {getValue()}
-            </Link>
-          </span>
-        );
-      },
-      enableHiding: true,
-    }) as ColumnDef<InventoryRow>,
-    columnHelper.accessor("status", {
-      header: "Status",
-      cell: ({ getValue }) => <StatusBadge status={getValue()} />,
-      enableHiding: true,
-    }) as ColumnDef<InventoryRow>,
-    columnHelper.accessor("clusterName", {
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            column.toggleSorting(column.getIsSorted() === "asc");
-          }}
-        >
-          Cluster
-          <ArrowUpDown className="ml-1 h-3 w-3" />
-        </Button>
-      ),
-      enableHiding: true,
-    }) as ColumnDef<InventoryRow>,
-    columnHelper.accessor("nodeName", {
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            column.toggleSorting(column.getIsSorted() === "asc");
-          }}
-        >
-          Node
-          <ArrowUpDown className="ml-1 h-3 w-3" />
-        </Button>
-      ),
+      enableSorting: false,
+      cell: ({ row }) => <TypeCell row={row.original} />,
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("vmid", {
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            column.toggleSorting(column.getIsSorted() === "asc");
-          }}
-        >
-          VMID
-          <ArrowUpDown className="ml-1 h-3 w-3" />
-        </Button>
-      ),
+      header: ({ column }) => <SortHeader column={column}>VMID</SortHeader>,
       cell: ({ getValue }) => {
         const val = getValue();
-        return val !== null ? val : "--";
+        return val !== null ? (
+          <span className="tabular-nums text-muted-foreground">{val}</span>
+        ) : (
+          EMPTY
+        );
       },
+      enableHiding: true,
+    }) as ColumnDef<InventoryRow>,
+    ...(singleCluster
+      ? []
+      : [
+          columnHelper.accessor("clusterName", {
+            header: ({ column }) => (
+              <SortHeader column={column}>Cluster</SortHeader>
+            ),
+            cell: ({ getValue }) => (
+              <span className="text-muted-foreground">{getValue()}</span>
+            ),
+            enableHiding: true,
+          }) as ColumnDef<InventoryRow>,
+        ]),
+    columnHelper.accessor("nodeName", {
+      header: ({ column }) => <SortHeader column={column}>Node</SortHeader>,
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground">{getValue()}</span>
+      ),
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("cpuCount", {
       header: "CPUs",
+      enableSorting: false,
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("memTotal", {
-      header: "Memory",
+      header: "Memory size",
+      enableSorting: false,
       cell: ({ getValue }) => formatBytes(getValue()),
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("diskTotal", {
-      header: "Disk",
+      header: "Disk size",
+      enableSorting: false,
       cell: ({ getValue }) => formatBytes(getValue()),
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("cpuPercent", {
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            column.toggleSorting(column.getIsSorted() === "asc");
-          }}
-        >
-          CPU %
-          <ArrowUpDown className="ml-1 h-3 w-3" />
-        </Button>
+      header: ({ column }) => <SortHeader column={column}>CPU</SortHeader>,
+      cell: ({ row, getValue }) => (
+        <MetricMiniBar value={live(row.original, getValue())} bar={!isMobile} />
       ),
-      cell: ({ getValue }) => <MetricMiniBar value={getValue()} />,
       sortUndefined: "last",
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("memPercent", {
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            column.toggleSorting(column.getIsSorted() === "asc");
-          }}
-        >
-          Mem %
-          <ArrowUpDown className="ml-1 h-3 w-3" />
-        </Button>
+      header: ({ column }) => <SortHeader column={column}>Memory</SortHeader>,
+      cell: ({ row, getValue }) => (
+        <MetricMiniBar value={live(row.original, getValue())} bar={!isMobile} />
       ),
-      cell: ({ getValue }) => <MetricMiniBar value={getValue()} />,
       sortUndefined: "last",
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor((row) => (row.netInBps ?? 0) + (row.netOutBps ?? 0), {
       id: "network",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            column.toggleSorting(column.getIsSorted() === "asc");
-          }}
-        >
-          Network
-          <ArrowUpDown className="ml-1 h-3 w-3" />
-        </Button>
-      ),
+      header: ({ column }) => <SortHeader column={column}>Network</SortHeader>,
       cell: ({ row }) => (
         <RateCell
           inBps={row.original.netInBps}
@@ -578,17 +649,7 @@ function buildColumns(
       {
         id: "disk",
         header: ({ column }) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              column.toggleSorting(column.getIsSorted() === "asc");
-            }}
-          >
-            Disk
-            <ArrowUpDown className="ml-1 h-3 w-3" />
-          </Button>
+          <SortHeader column={column}>Disk I/O</SortHeader>
         ),
         cell: ({ row }) => (
           <RateCell
@@ -603,59 +664,82 @@ function buildColumns(
       },
     ) as ColumnDef<InventoryRow>,
     columnHelper.accessor("uptime", {
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            column.toggleSorting(column.getIsSorted() === "asc");
-          }}
-        >
-          Uptime
-          <ArrowUpDown className="ml-1 h-3 w-3" />
-        </Button>
-      ),
-      cell: ({ getValue }) => (
-        <span className="text-sm tabular-nums">{formatUptime(getValue())}</span>
-      ),
+      header: ({ column }) => <SortHeader column={column}>Uptime</SortHeader>,
+      cell: ({ getValue }) =>
+        getValue() > 0 ? (
+          <span className="tabular-nums text-muted-foreground">
+            {formatUptime(getValue())}
+          </span>
+        ) : (
+          EMPTY
+        ),
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("tags", {
       header: "Tags",
+      enableSorting: false,
       cell: ({ getValue }) => {
         const tags = getValue();
         if (!tags) return null;
-        return <span className="text-xs text-muted-foreground">{tags}</span>;
+        return (
+          <span className="text-[12.5px] text-muted-foreground">{tags}</span>
+        );
       },
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("haState", {
-      header: "HA State",
-      cell: ({ getValue }) => {
-        const val = getValue();
-        return val ? <span className="text-xs">{val}</span> : "--";
-      },
+      header: "HA state",
+      enableSorting: false,
+      cell: ({ getValue }) => getValue() || EMPTY,
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("pool", {
       header: "Pool",
-      cell: ({ getValue }) => getValue() || "--",
+      enableSorting: false,
+      cell: ({ getValue }) => getValue() || EMPTY,
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("template", {
       header: "Template",
+      enableSorting: false,
       cell: ({ getValue }) => (getValue() ? "Yes" : "No"),
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
   ];
+
+  // The row's own control sits where a hand expects it: the checkbox leads
+  // on a desktop, the actions button trails on a phone.
+  return isMobile
+    ? [...dataColumns, actionsColumn]
+    : [selectColumn, ...dataColumns];
 }
+
+const PAGE_SIZE = 25;
 
 interface ResourceTableProps {
   data: InventoryRow[];
+  /**
+   * Names the table for assistive tech. The tab or heading above it is what
+   * names it on screen, so the panel carries no title of its own.
+   */
+  label?: string;
+  /**
+   * Every row is in the same cluster (a cluster's, a node's or a folder's
+   * guests): the Cluster column would say one thing all the way down, so it
+   * is left out.
+   */
+  singleCluster?: boolean;
 }
 
-export function ResourceTable({ data }: ResourceTableProps) {
+/**
+ * The guest and node table, as one flush panel: search and the quick filter
+ * in its title row, the bulk actions in their place while rows are selected.
+ */
+export function ResourceTable({
+  data,
+  label = "Resources",
+  singleCluster = false,
+}: ResourceTableProps) {
   const isMobile = useIsMobile();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -663,6 +747,7 @@ export function ResourceTable({ data }: ResourceTableProps) {
     filters: [],
     freeText: "",
   });
+  const [quickStatus, setQuickStatus] = useState<QuickStatus>("all");
   const [contextMenu, setContextMenu] = useState<MenuState | null>(null);
 
   const openRowMenu = useCallback(
@@ -677,8 +762,8 @@ export function ResourceTable({ data }: ResourceTableProps) {
     [],
   );
   const columns = useMemo(
-    () => buildColumns(isMobile, openRowMenu),
-    [isMobile, openRowMenu],
+    () => buildColumns(isMobile, singleCluster, openRowMenu),
+    [isMobile, singleCluster, openRowMenu],
   );
 
   const savedVisibility = useMemo(() => {
@@ -709,10 +794,32 @@ export function ResourceTable({ data }: ResourceTableProps) {
     [isMobile],
   );
 
-  const filteredData = useMemo(() => applyFilter(data, query), [data, query]);
+  // The search first, then the quick filter over what it left, so each
+  // segment can say how many rows it would show.
+  const searchedData = useMemo(() => applyFilter(data, query), [data, query]);
+  const filteredData = useMemo(
+    () => filterByQuickStatus(searchedData, quickStatus),
+    [searchedData, quickStatus],
+  );
+  const quickCounts = useMemo(
+    () => ({
+      all: searchedData.length,
+      running: filterByQuickStatus(searchedData, "running").length,
+      stopped: filterByQuickStatus(searchedData, "stopped").length,
+    }),
+    [searchedData],
+  );
 
   const handleQueryChange = useCallback((parsed: ParsedQuery) => {
     setQuery(parsed);
+  }, []);
+
+  // A new filter starts with nothing selected. A row ticked under the old
+  // one may have left the view since (it was stopped while only running
+  // guests were listed) and would come back ticked, into the next bulk action.
+  const handleQuickStatusChange = useCallback((next: QuickStatus) => {
+    setQuickStatus(next);
+    setRowSelection({});
   }, []);
 
   // Like Radix's menus, which this one is not: an item chosen, or Escape,
@@ -750,28 +857,95 @@ export function ResourceTable({ data }: ResourceTableProps) {
     getPaginationRowModel: getPaginationRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     initialState: {
-      pagination: { pageSize: 25 },
+      pagination: { pageSize: PAGE_SIZE },
     },
   });
 
+  const selectedCount = table.getFilteredSelectedRowModel().rows.length;
+  const pageCount = table.getPageCount() || 1;
+  const isFiltered = data.length !== filteredData.length;
+  const searching = query.filters.length > 0 || query.freeText !== "";
+  const emptyText =
+    data.length === 0
+      ? "No resources found."
+      : searching || quickStatus === "all"
+        ? "No resources match this search."
+        : quickStatus === "running"
+          ? "No running guests."
+          : "No stopped guests.";
+  // The counts go when the row is short of room: the filter matters more.
+  const count = (n: number) => (
+    <span className="hidden font-normal tabular-nums text-muted-foreground sm:inline">
+      {String(n)}
+    </span>
+  );
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
+    <Panel flush aria-label={label} bodyClassName="pb-0 pt-0">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-[18px] pb-3 pt-3.5">
+        <div className="min-w-[12rem] flex-[1_1_15rem] sm:max-w-md">
           <SearchBar onQueryChange={handleQueryChange} />
         </div>
-        <ColumnToggle table={table} />
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* Returns nothing until a row is selected, then takes the place of
+              the view controls: the row never grows a second line under the
+              checkbox that was just clicked. */}
+          <BulkActionToolbar table={table} />
+          {selectedCount === 0 && (
+            <>
+              <Segmented
+                aria-label="Show"
+                value={quickStatus}
+                onValueChange={handleQuickStatusChange}
+                options={[
+                  {
+                    value: "all",
+                    label: <>All {count(quickCounts.all)}</>,
+                  },
+                  {
+                    value: "running",
+                    label: <>Running {count(quickCounts.running)}</>,
+                  },
+                  {
+                    value: "stopped",
+                    label: <>Stopped {count(quickCounts.stopped)}</>,
+                  },
+                ]}
+              />
+              <ColumnToggle table={table} />
+            </>
+          )}
+        </div>
+        {query.filters.length > 0 && (
+          <div className="basis-full">
+            <SearchFilterChips query={query} />
+          </div>
+        )}
       </div>
 
-      <BulkActionToolbar table={table} />
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
+      <Table>
+        <TableHeader>
+          {table.getHeaderGroups().map((headerGroup) => (
+            <TableRow key={headerGroup.id} className="hover:bg-transparent">
+              {headerGroup.headers.map((header) => {
+                const sorted = header.column.getIsSorted();
+                return (
+                  <TableHead
+                    key={header.id}
+                    aria-sort={
+                      !header.column.getCanSort()
+                        ? undefined
+                        : sorted === "asc"
+                          ? "ascending"
+                          : sorted === "desc"
+                            ? "descending"
+                            : "none"
+                    }
+                    className={cn(
+                      "whitespace-nowrap px-2.5",
+                      header.column.id === "select" && "w-9",
+                    )}
+                  >
                     {header.isPlaceholder
                       ? null
                       : flexRender(
@@ -779,93 +953,105 @@ export function ResourceTable({ data }: ResourceTableProps) {
                           header.getContext(),
                         )}
                   </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows.length > 0 ? (
-              table.getRowModel().rows.map((row) => {
-                const target = toContextTarget(row.original);
-                return (
-                  <TableRow
-                    key={row.id}
-                    data-state={row.getIsSelected() ? "selected" : undefined}
-                    onContextMenu={
-                      target
-                        ? (e) => {
-                            e.preventDefault();
-                            setContextMenu({
-                              target,
-                              x: e.clientX,
-                              y: e.clientY,
-                              opener: menuOpener(e),
-                            });
-                          }
-                        : undefined
-                    }
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext(),
-                        )}
-                      </TableCell>
-                    ))}
-                  </TableRow>
                 );
-              })
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="h-24 text-center text-muted-foreground"
+              })}
+            </TableRow>
+          ))}
+        </TableHeader>
+        <TableBody>
+          {table.getRowModel().rows.length > 0 ? (
+            table.getRowModel().rows.map((row) => {
+              const target = toContextTarget(row.original);
+              return (
+                <TableRow
+                  key={row.id}
+                  data-state={row.getIsSelected() ? "selected" : undefined}
+                  onContextMenu={
+                    target
+                      ? (e) => {
+                          e.preventDefault();
+                          setContextMenu({
+                            target,
+                            x: e.clientX,
+                            y: e.clientY,
+                            opener: menuOpener(e),
+                          });
+                        }
+                      : undefined
+                  }
                 >
-                  No resources found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell
+                      key={cell.id}
+                      className={cn(
+                        "whitespace-nowrap px-2.5 py-2",
+                        // The name is what gives way when the row runs out
+                        // of room, so the row stays one line tall.
+                        cell.column.id === "name" &&
+                          "max-w-[11rem] md:max-w-[15rem]",
+                        cell.column.id === "actions" && "w-10 py-1 pl-0",
+                      )}
+                    >
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              );
+            })
+          ) : (
+            <TableRow className="hover:bg-transparent">
+              <TableCell
+                colSpan={table.getVisibleLeafColumns().length}
+                className="h-24 text-center text-muted-foreground"
+              >
+                {emptyText}
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
 
-      {/* Pagination */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t px-[18px] py-2.5">
+        <p className="text-[12.5px] text-muted-foreground">
           {String(filteredData.length)} resource
           {filteredData.length !== 1 ? "s" : ""} total
-          {data.length !== filteredData.length &&
-            ` (${String(data.length)} unfiltered)`}
+          {isFiltered && ` (${String(data.length)} unfiltered)`}
         </p>
-        <div className="flex items-center gap-2">
-          <p className="text-sm text-muted-foreground">
-            Page {String(table.getState().pagination.pageIndex + 1)} of{" "}
-            {String(table.getPageCount() || 1)}
-          </p>
-          <Button
-            aria-label="Previous page"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              table.previousPage();
-            }}
-            disabled={!table.getCanPreviousPage()}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button
-            aria-label="Next page"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              table.nextPage();
-            }}
-            disabled={!table.getCanNextPage()}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
+        {pageCount > 1 && (
+          <div className="flex items-center gap-1.5">
+            <p className="mr-1.5 text-[12.5px] tabular-nums text-muted-foreground">
+              Page {String(table.getState().pagination.pageIndex + 1)} of{" "}
+              {String(pageCount)}
+            </p>
+            <Button
+              aria-label="Previous page"
+              variant="outline"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={() => {
+                table.previousPage();
+              }}
+              disabled={!table.getCanPreviousPage()}
+            >
+              <ChevronLeft />
+            </Button>
+            <Button
+              aria-label="Next page"
+              variant="outline"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={() => {
+                table.nextPage();
+              }}
+              disabled={!table.getCanNextPage()}
+            >
+              <ChevronRight />
+            </Button>
+          </div>
+        )}
       </div>
 
       {contextMenu && (
@@ -875,6 +1061,6 @@ export function ResourceTable({ data }: ResourceTableProps) {
           onDismiss={handleDismissMenu}
         />
       )}
-    </div>
+    </Panel>
   );
 }

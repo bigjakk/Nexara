@@ -45,12 +45,11 @@ export function getDefaultColumnVisibility(
   // Hide columns not in defaults
   const allColumns = [
     "select",
-    "type",
     "name",
-    "status",
+    "type",
+    "vmid",
     "clusterName",
     "nodeName",
-    "vmid",
     "cpuCount",
     "memTotal",
     "diskTotal",

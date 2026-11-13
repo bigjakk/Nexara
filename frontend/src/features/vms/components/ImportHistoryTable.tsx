@@ -1,7 +1,21 @@
 import { useRef, useState } from "react";
-import { ChevronRight, X } from "lucide-react";
+import { ChevronRight, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { EmptyState } from "@/components/EmptyState";
+import { DetailField } from "@/components/DetailField";
+import { DefGrid, Panel } from "@/components/page/Panel";
+import { formatDateTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -17,22 +31,49 @@ interface ImportHistoryTableProps {
   clusterId: string;
 }
 
-const statusClass: Record<string, string> = {
-  pending: "bg-blue-500/10 text-blue-600",
-  running: "bg-amber-500/10 text-amber-600",
-  completed: "bg-muted text-foreground",
-  failed: "bg-red-500/10 text-red-600",
-  cancelled: "bg-muted text-muted-foreground",
+const STATUS_LABEL: Record<string, string> = {
+  pending: "Pending",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
 };
 
-function StatusBadge({ status }: { status: string }) {
+/**
+ * An import's state. Only one in flight or one that failed takes a colour:
+ * running is the data colour over a moving bar (Proxmox reports no fraction
+ * for an import), failed is red, and a finished one is plain text.
+ */
+function ImportStatus({ status }: { status: string }) {
+  const label = STATUS_LABEL[status] ?? status;
+  if (status === "running") {
+    return (
+      <span className="flex items-center gap-2 font-medium text-data">
+        {label}
+        <span
+          aria-hidden="true"
+          className="h-1.5 w-14 overflow-hidden rounded-full bg-foreground/10"
+        >
+          <span className="block h-full w-[30%] animate-task-indeterminate rounded-full bg-data" />
+        </span>
+      </span>
+    );
+  }
   return (
     <span
-      className={`rounded px-1.5 py-0.5 text-xs font-medium ${statusClass[status] ?? "bg-muted text-muted-foreground"}`}
+      className={cn(
+        status === "failed"
+          ? "font-medium text-red-700 dark:text-red-400"
+          : "text-muted-foreground",
+      )}
     >
-      {status}
+      {label}
     </span>
   );
+}
+
+function importName(job: VMImportJob): string {
+  return job.name || `VM ${String(job.target_vmid)}`;
 }
 
 export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
@@ -47,12 +88,28 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
 
   if (isLoading) {
     return (
-      <p className="text-sm text-muted-foreground">Loading import history…</p>
+      <Panel title="History" aside="Loading...">
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-full" />
+          ))}
+        </div>
+      </Panel>
     );
   }
   if (!jobs || jobs.length === 0) {
-    return <p className="text-sm text-muted-foreground">No imports yet.</p>;
+    return (
+      <EmptyState
+        icon={Upload}
+        title="No imports yet"
+        description="A guest imported from an OVA or OVF appliance, a disk image or an ESXi host is listed here with its outcome."
+      />
+    );
   }
+
+  const active = jobs.filter(
+    (j) => j.status === "pending" || j.status === "running",
+  ).length;
 
   function confirmCancel() {
     if (!cancelTarget) return;
@@ -69,49 +126,58 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
 
   return (
     <>
-      <div
-        ref={table}
-        role="region"
-        aria-label="Import history"
-        tabIndex={-1}
-        className="rounded-md border border-border outline-none"
+      <Panel
+        flush
+        title="History"
+        aside={
+          active > 0
+            ? `${String(jobs.length)}, ${String(active)} in progress`
+            : String(jobs.length)
+        }
       >
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="w-8" />
-              <th className="px-3 py-2">Name</th>
-              <th className="px-3 py-2">Target</th>
-              <th className="px-3 py-2">Source</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Created</th>
-              <th className="px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((job: VMImportJob) => {
-              const isOpen = expanded === job.id;
-              const cancellable =
-                job.status === "pending" || job.status === "running";
-              return (
-                <RowGroup
-                  key={job.id}
-                  job={job}
-                  isOpen={isOpen}
-                  cancellable={cancellable}
-                  onToggle={() => {
-                    setExpanded(isOpen ? null : job.id);
-                  }}
-                  onCancel={() => {
-                    setDeleteVm(false);
-                    setCancelTarget(job);
-                  }}
-                />
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+        <div
+          ref={table}
+          role="region"
+          aria-label="Import history"
+          tabIndex={-1}
+          className="outline-hidden"
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Name</TableHead>
+                <TableHead>Target</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {jobs.map((job: VMImportJob) => {
+                const isOpen = expanded === job.id;
+                const cancellable =
+                  job.status === "pending" || job.status === "running";
+                return (
+                  <RowGroup
+                    key={job.id}
+                    job={job}
+                    isOpen={isOpen}
+                    cancellable={cancellable}
+                    onToggle={() => {
+                      setExpanded(isOpen ? null : job.id);
+                    }}
+                    onCancel={() => {
+                      setDeleteVm(false);
+                      setCancelTarget(job);
+                    }}
+                  />
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </Panel>
 
       <Dialog
         open={cancelTarget !== null}
@@ -192,72 +258,80 @@ function RowGroup({
 }: RowGroupProps) {
   return (
     <>
-      <tr
-        className="cursor-pointer border-b border-border last:border-b-0 hover:bg-muted/40"
-        onClick={onToggle}
-      >
-        <td className="px-2 py-2">
-          <ChevronRight
-            className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : ""}`}
-          />
-        </td>
-        <td className="px-3 py-2">
-          {job.name || `VM ${String(job.target_vmid)}`}
-        </td>
-        <td className="px-3 py-2 text-muted-foreground">
+      <TableRow className="cursor-pointer" onClick={onToggle}>
+        <TableCell className="py-2 font-medium">
+          <span className="flex items-center gap-1.5">
+            <ChevronRight
+              className={cn(
+                "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+                isOpen && "rotate-90",
+              )}
+            />
+            {importName(job)}
+          </span>
+        </TableCell>
+        <TableCell className="py-2 text-muted-foreground">
           {job.target_node} / {job.target_storage}
-        </td>
-        <td className="px-3 py-2 text-muted-foreground">
+        </TableCell>
+        <TableCell className="py-2 text-muted-foreground">
           {job.source_acquisition}
-        </td>
-        <td className="px-3 py-2">
-          <StatusBadge status={job.status} />
-        </td>
-        <td className="px-3 py-2 text-muted-foreground">
-          {new Date(job.created_at).toLocaleString()}
-        </td>
-        <td className="px-3 py-2 text-right">
+        </TableCell>
+        <TableCell className="py-2">
+          <ImportStatus status={job.status} />
+        </TableCell>
+        <TableCell className="whitespace-nowrap py-2 text-[12.5px] text-muted-foreground">
+          {formatDateTime(job.created_at)}
+        </TableCell>
+        <TableCell className="py-1 text-right">
           {cancellable && (
             <Button
-              aria-label={`Cancel import of ${job.name || `VM ${String(job.target_vmid)}`}`}
+              aria-label={`Cancel import of ${importName(job)}`}
               variant="ghost"
               size="sm"
+              className="h-7 w-7 p-0"
               onClick={(e) => {
                 e.stopPropagation();
                 onCancel();
               }}
             >
-              <X className="h-4 w-4" />
+              <X />
             </Button>
           )}
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
       {isOpen && (
-        <tr className="border-b border-border bg-muted/20 last:border-b-0">
-          <td />
-          <td colSpan={6} className="px-3 py-2">
-            <dl className="grid grid-cols-[160px_1fr] gap-x-4 gap-y-1 text-xs">
-              <dt className="text-muted-foreground">VMID</dt>
-              <dd>{job.target_vmid}</dd>
-              <dt className="text-muted-foreground">Source</dt>
-              <dd className="break-all">{job.source_ref}</dd>
-              <dt className="text-muted-foreground">Format</dt>
-              <dd>{job.source_format || "—"}</dd>
+        <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.03]">
+          <TableCell colSpan={6} className="py-3.5 pl-[42px]">
+            <DefGrid>
+              <DetailField label="VMID" variant="mono">
+                {job.target_vmid}
+              </DetailField>
+              <DetailField label="Format">
+                {job.source_format || "—"}
+              </DetailField>
+              <div className="col-span-full">
+                <dt className="text-xs text-muted-foreground">Source</dt>
+                <dd className="break-all">{job.source_ref}</dd>
+              </div>
               {job.upid && (
-                <>
-                  <dt className="text-muted-foreground">Task UPID</dt>
-                  <dd className="break-all font-mono">{job.upid}</dd>
-                </>
+                <div className="col-span-full">
+                  <dt className="text-xs text-muted-foreground">Task UPID</dt>
+                  <dd className="break-all font-mono text-[12.5px]">
+                    {job.upid}
+                  </dd>
+                </div>
               )}
               {job.failure_reason && (
-                <>
-                  <dt className="text-muted-foreground">Failure</dt>
-                  <dd className="text-red-600">{job.failure_reason}</dd>
-                </>
+                <div className="col-span-full">
+                  <dt className="text-xs text-muted-foreground">Failure</dt>
+                  <dd className="text-red-700 dark:text-red-400">
+                    {job.failure_reason}
+                  </dd>
+                </div>
               )}
               {job.warnings.length > 0 && (
-                <>
-                  <dt className="text-muted-foreground">Warnings</dt>
+                <div className="col-span-full">
+                  <dt className="text-xs text-muted-foreground">Warnings</dt>
                   <dd>
                     <ul className="list-inside list-disc">
                       {job.warnings.map((w, i) => (
@@ -268,11 +342,11 @@ function RowGroup({
                       ))}
                     </ul>
                   </dd>
-                </>
+                </div>
               )}
-            </dl>
-          </td>
-        </tr>
+            </DefGrid>
+          </TableCell>
+        </TableRow>
       )}
     </>
   );

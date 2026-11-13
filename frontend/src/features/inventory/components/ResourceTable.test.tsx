@@ -86,10 +86,50 @@ describe("ResourceTable", () => {
       makeRow({ key: "c1:vm:2", name: "db-01", status: "stopped" }),
     ];
     renderWithProviders(<ResourceTable data={data} />);
-    expect(screen.getByText("web-01")).toBeInTheDocument();
+    const running = screen.getByText("web-01").closest("tr");
+    const stopped = screen.getByText("db-01").closest("tr");
+    if (running === null || stopped === null) throw new Error("no row");
+    // A running guest is the dot alone; any other state is also spelled out.
+    expect(
+      within(running).getByRole("img", { name: "Running" }),
+    ).toBeInTheDocument();
+    expect(within(running).queryByText("Running")).not.toBeInTheDocument();
+    expect(within(stopped).getByText("Stopped")).toBeInTheDocument();
+  });
+
+  it("narrows to one power state with the quick filter", async () => {
+    const user = userEvent.setup();
+    const data = [
+      makeRow({ key: "c1:vm:1", name: "web-01", status: "running" }),
+      makeRow({ key: "c1:vm:2", name: "db-01", status: "stopped" }),
+    ];
+    renderWithProviders(<ResourceTable data={data} />);
+
+    await user.click(screen.getByRole("button", { name: /Stopped/ }));
+
     expect(screen.getByText("db-01")).toBeInTheDocument();
-    expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Stopped")).toBeInTheDocument();
+    expect(screen.queryByText("web-01")).not.toBeInTheDocument();
+    expect(screen.getByText("1 resource total (2 unfiltered)")).toBeVisible();
+  });
+
+  // A row ticked under one filter can leave it (stopped while only running
+  // guests were listed); it must not come back ticked into a bulk action.
+  it("drops the selection when the quick filter changes", async () => {
+    const user = userEvent.setup();
+    const web = makeRow({ key: "c1:vm:1", name: "web-01", status: "running" });
+    const db = makeRow({ key: "c1:vm:2", name: "db-01", status: "stopped" });
+    const view = renderWithProviders(<ResourceTable data={[web, db]} />);
+    await user.click(screen.getByRole("button", { name: /Running/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Select row" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    view.rerender(<ResourceTable data={[{ ...web, status: "stopped" }, db]} />);
+    await user.click(screen.getByRole("button", { name: /^All/ }));
+
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+    for (const box of screen.getAllByRole("checkbox", { name: "Select row" })) {
+      expect(box).not.toBeChecked();
+    }
   });
 
   it("shows correct resource count", () => {
@@ -109,16 +149,9 @@ describe("ResourceTable", () => {
     const data = generateRows(50);
     renderWithProviders(<ResourceTable data={data} />);
 
-    // Find the forward navigation button by checking all buttons
-    const buttons = screen.getAllByRole("button");
-    const navButtons = buttons.filter(
-      (b) =>
-        !b.hasAttribute("disabled") && b.closest(".flex.items-center.gap-2"),
-    );
-    if (navButtons.length >= 2 && navButtons[1]) {
-      await user.click(navButtons[1]);
-      expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
-    }
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
   });
 
   it("renders 1000+ rows without error", () => {

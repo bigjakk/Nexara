@@ -17,7 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+import { UsageBar } from "@/components/UsageBar";
+import { MigrationStatusText } from "./MigrationStatusText";
 import { sessionScope } from "@/lib/api-client";
 import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
 import { parseBwlimit } from "@/features/storage/lib/disk-move";
@@ -557,7 +558,7 @@ export function MigrateWizard() {
                   Running Pre-Flight Checks...
                 </>
               ) : (
-                "Create & Run Pre-Flight Checks"
+                "Run pre-flight checks"
               )}
             </Button>
           </div>
@@ -624,18 +625,16 @@ export function MigrateWizard() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Status</span>
-              <StatusBadge status={job.status} />
+              <MigrationStatusText status={job.status} />
             </div>
             {(job.status === "pending" || job.status === "migrating") && (
               <div className="space-y-2">
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-data transition-all"
-                    style={{
-                      width: `${String(Math.max(job.progress * 100, 5))}%`,
-                    }}
-                  />
-                </div>
+                {/* A sliver even at 0%, so a job that just started is not
+                    an empty track. */}
+                <UsageBar
+                  percent={Math.max(job.progress * 100, 5)}
+                  thresholds={false}
+                />
                 <p className="text-center text-xs text-muted-foreground">
                   {job.status === "pending"
                     ? "Starting migration..."
@@ -644,12 +643,10 @@ export function MigrateWizard() {
               </div>
             )}
             {job.status === "completed" && (
-              <p className="text-sm text-emerald-600">
-                Migration completed successfully.
-              </p>
+              <p className="text-sm">Migration completed successfully.</p>
             )}
             {job.status === "failed" && (
-              <p className="text-sm text-red-500">
+              <p className="text-sm text-red-700 dark:text-red-400">
                 Migration failed: {job.error_message}
               </p>
             )}
@@ -666,22 +663,5 @@ export function MigrateWizard() {
         )}
       </DialogContent>
     </Dialog>
-  );
-}
-
-const statusColors: Record<string, string> = {
-  pending: "bg-gray-100 text-gray-700",
-  checking: "bg-blue-100 text-blue-700",
-  migrating: "bg-amber-100 text-amber-700",
-  completed: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
-  cancelled: "bg-gray-100 text-gray-500",
-};
-
-export function StatusBadge({ status }: { status: string }) {
-  return (
-    <Badge variant="outline" className={statusColors[status] ?? ""}>
-      {status}
-    </Badge>
   );
 }

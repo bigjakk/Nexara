@@ -8,42 +8,84 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/EmptyState";
+import { UsageBar } from "@/components/UsageBar";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
+import { formatDateTime } from "@/lib/format";
 import { useMigrationJobs } from "../api/migration-queries";
-import { MigrateWizard, StatusBadge } from "../components/MigrateWizard";
+import { MigrateWizard } from "../components/MigrateWizard";
+import { MigrationStatusText } from "../components/MigrationStatusText";
+import { ACTIVE_MIGRATION_STATUSES, jobSummary } from "../lib/job-summary";
+import type { MigrationJob } from "../types/migration";
+
+const TYPE_LABEL: Record<MigrationJob["migration_type"], string> = {
+  "intra-cluster": "Within the cluster",
+  "cross-cluster": "Between clusters",
+};
+
+/** Only a job that is moving has a bar; a finished one needs no picture. */
+function MigrationProgress({ job }: { job: MigrationJob }) {
+  if (job.status !== "migrating") {
+    return <span className="text-muted-foreground/60">—</span>;
+  }
+  const percent = Math.round(job.progress * 100);
+  return (
+    <div className="flex items-center gap-2">
+      {/* A sliver even at 0%, so a job that just started is not an empty track. */}
+      <UsageBar
+        percent={Math.max(percent, 5)}
+        thresholds={false}
+        className="w-20 shrink-0"
+      />
+      <span className="text-[12.5px] font-medium tabular-nums text-data">
+        {String(percent)}%
+      </span>
+    </div>
+  );
+}
 
 export function MigrationsPage() {
   const { data: jobs, isLoading } = useMigrationJobs();
+  const summary =
+    jobSummary(
+      "migration",
+      (jobs ?? []).map((j) => j.status),
+      ACTIVE_MIGRATION_STATUSES,
+    ) ??
+    "Move a guest to another node or another cluster, after a pre-flight check.";
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <ArrowLeftRight className="h-6 w-6 text-muted-foreground" />
-          <h1 className="text-2xl font-semibold">Migrations</h1>
-        </div>
-        <MigrateWizard />
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Migrations"
+        summary={summary}
+        actions={<MigrateWizard />}
+      />
 
       {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
+        <Panel title="Jobs" aside="Loading...">
+          <div className="space-y-2">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-8 w-full" />
+            ))}
+          </div>
+        </Panel>
       ) : !jobs || jobs.length === 0 ? (
-        <p className="text-muted-foreground">
-          No migration jobs yet. Click &quot;New Migration&quot; to create one.
-        </p>
+        <EmptyState
+          icon={ArrowLeftRight}
+          title="No migration jobs yet"
+          description="A job moves one guest and records its pre-flight checks, its progress and its outcome. New Migration starts one."
+        />
       ) : (
-        <div className="rounded-md border">
+        <Panel flush title="Jobs" aside={String(jobs.length)}>
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>VMID</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Migration</TableHead>
-                <TableHead>Source Node</TableHead>
-                <TableHead>Target Node</TableHead>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Guest</TableHead>
+                <TableHead>From</TableHead>
+                <TableHead>To</TableHead>
+                <TableHead>Scope</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Progress</TableHead>
                 <TableHead>Created</TableHead>
@@ -52,43 +94,35 @@ export function MigrationsPage() {
             <TableBody>
               {jobs.map((job) => (
                 <TableRow key={job.id}>
-                  <TableCell className="font-medium">{job.vmid}</TableCell>
-                  <TableCell>{job.vm_type}</TableCell>
-                  <TableCell>{job.migration_type}</TableCell>
-                  <TableCell>{job.source_node}</TableCell>
-                  <TableCell>{job.target_node || "—"}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={job.status} />
+                  <TableCell className="whitespace-nowrap py-2">
+                    <span className="font-medium tabular-nums">{job.vmid}</span>{" "}
+                    <span className="text-[12.5px] text-muted-foreground">
+                      {job.vm_type === "lxc" ? "CT" : "VM"}
+                    </span>
                   </TableCell>
-                  <TableCell>
-                    {job.status === "migrating" ? (
-                      <div className="flex items-center gap-2">
-                        <div className="h-2 w-20 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full bg-data transition-all"
-                            style={{
-                              width: `${String(Math.max(job.progress * 100, 5))}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          {String(Math.round(job.progress * 100))}%
-                        </span>
-                      </div>
-                    ) : job.status === "completed" ? (
-                      "100%"
-                    ) : (
-                      "—"
+                  <TableCell className="py-2">{job.source_node}</TableCell>
+                  <TableCell className="py-2">
+                    {job.target_node || (
+                      <span className="text-muted-foreground/60">—</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {new Date(job.created_at).toLocaleString()}
+                  <TableCell className="py-2 text-muted-foreground">
+                    {TYPE_LABEL[job.migration_type]}
+                  </TableCell>
+                  <TableCell className="py-2">
+                    <MigrationStatusText status={job.status} />
+                  </TableCell>
+                  <TableCell className="py-2">
+                    <MigrationProgress job={job} />
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap py-2 text-[12.5px] text-muted-foreground">
+                    {formatDateTime(job.created_at)}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        </div>
+        </Panel>
       )}
     </div>
   );

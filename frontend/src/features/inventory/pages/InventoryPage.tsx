@@ -9,9 +9,20 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { EmptyState } from "@/components/EmptyState";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
 import { useInventoryData } from "../api/inventory-queries";
 import { ResourceTable } from "../components/ResourceTable";
+import { countInventory } from "../lib/inventory-summary";
 import { DeployTemplateDialog } from "@/features/vms/components/DeployTemplateDialog";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
@@ -38,18 +49,26 @@ export function InventoryPage() {
   const resourceRows = rows.filter((r) => !r.template);
   const templateRows = rows.filter((r) => r.template);
 
+  // What the estate holds, in one sentence. Only a node that is down is
+  // worth a clause of its own.
+  const counts = countInventory(rows);
+  const summary =
+    rows.length === 0
+      ? t("browseAllResources")
+      : [
+          `${t("summaryGuests", { count: counts.guests })} ${t("summaryOnNodes", { count: counts.nodes })}`,
+          t("summaryRunning", { count: counts.running }),
+          ...(counts.templates > 0
+            ? [t("summaryTemplates", { count: counts.templates })]
+            : []),
+          ...(counts.nodesOffline > 0
+            ? [t("summaryNodesOffline", { count: counts.nodesOffline })]
+            : []),
+        ].join(", ");
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {t("inventory")}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("browseAllResources")}
-          </p>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader title={t("inventory")} summary={summary} />
 
       {isLoading && (
         <div className="flex items-center justify-center py-12">
@@ -58,14 +77,14 @@ export function InventoryPage() {
       )}
 
       {error && (
-        <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="flex items-center gap-2 rounded-[10px] bg-destructive/10 px-[18px] py-3 text-sm text-destructive">
           <AlertCircle className="h-4 w-4 shrink-0" />
           {t("failedLoadInventory")}
         </div>
       )}
 
       {!isLoading && !error && failedClusterIds.length > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
+        <div className="flex items-center gap-2 rounded-[10px] bg-amber-500/10 px-[18px] py-3 text-sm text-amber-700 dark:text-amber-400">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           {t("partialInventoryWarning", { clusters: failedClusterNames })}
         </div>
@@ -101,59 +120,55 @@ export function InventoryPage() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="resources" className="mt-4">
-            <ResourceTable data={resourceRows} />
+          <TabsContent value="resources" className="mt-5">
+            <ResourceTable data={resourceRows} label={t("resources")} />
           </TabsContent>
 
-          <TabsContent value="templates" className="mt-4">
+          <TabsContent value="templates" className="mt-5">
             {templateRows.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                {t("noTemplates")}
-              </p>
+              <EmptyState
+                icon={Package}
+                title={t("noTemplatesTitle")}
+                description={t("noTemplates")}
+              />
             ) : (
-              <div className="overflow-hidden rounded-lg border">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-2 text-left font-medium">
-                        {tc("type")}
-                      </th>
-                      <th className="px-4 py-2 text-left font-medium">
-                        {tc("name")}
-                      </th>
-                      <th className="px-4 py-2 text-left font-medium">VMID</th>
-                      <th className="px-4 py-2 text-left font-medium">
-                        {t("cluster", { ns: "audit" })}
-                      </th>
-                      <th className="px-4 py-2 text-left font-medium">
-                        {t("node")}
-                      </th>
-                      <th className="px-4 py-2 text-right font-medium">
-                        {tc("actions")}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
+              <Panel flush aria-label={t("templates")}>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>{tc("name")}</TableHead>
+                      <TableHead>{tc("type")}</TableHead>
+                      <TableHead>VMID</TableHead>
+                      <TableHead>{t("cluster", { ns: "audit" })}</TableHead>
+                      <TableHead>{t("node")}</TableHead>
+                      <TableHead className="text-right">
+                        <span className="sr-only">{tc("actions")}</span>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {templateRows.map((row) => (
-                      <tr key={row.key} className="border-b last:border-b-0">
-                        <td className="px-4 py-2 uppercase text-muted-foreground">
-                          {row.type}
-                        </td>
-                        <td className="px-4 py-2 font-medium">{row.name}</td>
-                        <td className="px-4 py-2 text-muted-foreground">
-                          {row.vmid !== null ? String(row.vmid) : "--"}
-                        </td>
-                        <td className="px-4 py-2 text-muted-foreground">
+                      <TableRow key={row.key}>
+                        <TableCell className="py-2 font-medium">
+                          {row.name}
+                        </TableCell>
+                        <TableCell className="py-2 text-[12.5px] text-muted-foreground">
+                          {row.type === "ct" ? "CT" : "VM"}
+                        </TableCell>
+                        <TableCell className="py-2 tabular-nums text-muted-foreground">
+                          {row.vmid !== null ? String(row.vmid) : "—"}
+                        </TableCell>
+                        <TableCell className="py-2 text-muted-foreground">
                           {row.clusterName}
-                        </td>
-                        <td className="px-4 py-2 text-muted-foreground">
+                        </TableCell>
+                        <TableCell className="py-2 text-muted-foreground">
                           {row.nodeName}
-                        </td>
-                        <td className="px-4 py-2 text-right">
+                        </TableCell>
+                        <TableCell className="py-1.5 text-right">
                           <Button
                             size="sm"
                             variant="outline"
-                            className="gap-1"
+                            className="gap-1.5"
                             onClick={() => {
                               setDeployTarget({
                                 clusterId: row.clusterId,
@@ -163,15 +178,15 @@ export function InventoryPage() {
                               });
                             }}
                           >
-                            <Rocket className="h-3.5 w-3.5" />
+                            <Rocket />
                             {t("deploy", { ns: "vms" })}
                           </Button>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </TableBody>
+                </Table>
+              </Panel>
             )}
           </TabsContent>
         </Tabs>

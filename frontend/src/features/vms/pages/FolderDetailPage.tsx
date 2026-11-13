@@ -6,16 +6,28 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import {
-  ArrowLeft,
   FolderOpen,
   FolderPlus,
+  FolderSearch,
+  MoreHorizontal,
   Pencil,
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DetailChip } from "@/components/DetailChip";
+import {
+  DetailHeader,
+  Fact,
+  StatusFact,
+  type Crumb,
+} from "@/components/page/DetailHeader";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useClusterVMs } from "@/features/clusters/api/cluster-queries";
@@ -66,6 +78,23 @@ export function FolderDetailPage() {
   const parent = folder?.parent_id
     ? (folderData?.folders.find((f) => f.id === folder.parent_id) ?? null)
     : null;
+
+  // The folders above this one, outermost first, for the breadcrumb trail.
+  // The seen set stops a parent loop in bad data from spinning forever.
+  const ancestors = useMemo(() => {
+    const chain: { id: string; name: string }[] = [];
+    const byId = new Map((folderData?.folders ?? []).map((f) => [f.id, f]));
+    const seen = new Set<string>([folderId]);
+    let next = folder?.parent_id ?? null;
+    while (next !== null && !seen.has(next)) {
+      seen.add(next);
+      const found = byId.get(next);
+      if (!found) break;
+      chain.unshift({ id: found.id, name: found.name });
+      next = found.parent_id;
+    }
+    return chain;
+  }, [folderData, folder, folderId]);
 
   const subtreeIds = useMemo(
     () =>
@@ -152,6 +181,9 @@ export function FolderDetailPage() {
 
   const guestCount = folderVMs.filter((vm) => !vm.template).length;
   const templateCount = folderVMs.length - guestCount;
+  const runningCount = folderVMs.filter(
+    (vm) => !vm.template && vm.status === "running",
+  ).length;
   const canManage = hasPermission("manage", "vm_folder");
   // History is read from the audit log, and its rows open Proxmox task logs:
   // without both grants the tab would be a table of refusals.
@@ -164,12 +196,13 @@ export function FolderDetailPage() {
 
   if (foldersLoading || vmsLoading) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-11 w-11 rounded-xl" />
-          <Skeleton className="h-7 w-48" />
+      <div className="space-y-5">
+        <div className="flex items-center gap-3.5">
+          <Skeleton className="h-11 w-11 rounded-[10px]" />
+          <Skeleton className="h-8 w-48" />
         </div>
-        <Skeleton className="h-48 w-full" />
+        <Skeleton className="h-28 w-full rounded-[10px]" />
+        <Skeleton className="h-64 w-full rounded-[10px]" />
       </div>
     );
   }
@@ -206,138 +239,138 @@ export function FolderDetailPage() {
     );
   }
 
+  const crumbs: Crumb[] = [
+    { label: "Inventory", to: "/inventory" },
+    {
+      label: cluster?.name ?? "Cluster",
+      to: `/clusters/${clusterId}`,
+    },
+    ...ancestors.map((a) => ({
+      label: a.name,
+      to: `/clusters/${clusterId}/folders/${a.id}`,
+    })),
+    { label: name },
+  ];
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <Button
-            aria-label="Back"
-            variant="ghost"
-            size="sm"
-            asChild
-            className="-ml-2 mt-1.5"
-          >
-            <Link to={backPath}>
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
-          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-            <FolderOpen className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <div className="min-w-0 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">
-                {name}
-              </h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <DetailChip>
-                {isUnassigned ? "Auto-discovered VMs" : "VM folder"}
-              </DetailChip>
-              <Link to={`/clusters/${clusterId}`}>
-                <DetailChip className="transition-colors hover:text-foreground">
-                  {cluster?.name ?? clusterId.slice(0, 8)}
-                </DetailChip>
-              </Link>
-              {parent && (
-                <Link to={`/clusters/${clusterId}/folders/${parent.id}`}>
-                  <DetailChip className="transition-colors hover:text-foreground">
-                    in {parent.name}
-                  </DetailChip>
-                </Link>
-              )}
-              <DetailChip>
-                {guestCount} VM{guestCount === 1 ? "" : "s"}
-              </DetailChip>
-              {templateCount > 0 && (
-                <DetailChip>
-                  {templateCount} template{templateCount === 1 ? "" : "s"}
-                </DetailChip>
-              )}
-              {childFolders.length > 0 && (
-                <DetailChip>
-                  {childFolders.length} subfolder
-                  {childFolders.length === 1 ? "" : "s"}
-                </DetailChip>
-              )}
-            </div>
-          </div>
-        </div>
-        {!isUnassigned && canManage && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => {
-                setCreateOpen(true);
-              }}
-            >
-              <FolderPlus className="h-4 w-4" />
-              New subfolder
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => {
-                setRenameOpen(true);
-              }}
-            >
-              <Pencil className="h-4 w-4" />
-              Rename
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-destructive hover:text-destructive"
-              onClick={handleDelete}
-              disabled={deleteFolder.isPending}
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </Button>
-          </div>
-        )}
-      </div>
+    <div className="space-y-5">
+      <DetailHeader
+        crumbs={crumbs}
+        icon={isUnassigned ? <FolderSearch /> : <FolderOpen />}
+        title={name}
+        facts={
+          <>
+            {guestCount === 0 ? (
+              <StatusFact status="unknown" label="No guests" />
+            ) : (
+              <StatusFact
+                status={runningCount > 0 ? "running" : "stopped"}
+                label={
+                  runningCount > 0
+                    ? `${String(runningCount)} running`
+                    : "None running"
+                }
+                detail={`of ${String(guestCount)} ${guestCount === 1 ? "guest" : "guests"}`}
+              />
+            )}
+            {templateCount > 0 && (
+              <Fact label="Templates">{String(templateCount)}</Fact>
+            )}
+            {childFolders.length > 0 && (
+              <Fact label="Subfolders">{String(childFolders.length)}</Fact>
+            )}
+            {isUnassigned && <Fact label="Holds">guests in no folder</Fact>}
+          </>
+        }
+        actions={
+          !isUnassigned && canManage ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  setCreateOpen(true);
+                }}
+              >
+                <FolderPlus />
+                New subfolder
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  setRenameOpen(true);
+                }}
+              >
+                <Pencil />
+                Rename
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="px-2"
+                    aria-label="More actions"
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    className="gap-2 text-destructive focus:text-destructive"
+                    disabled={deleteFolder.isPending}
+                    onClick={handleDelete}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          ) : undefined
+        }
+      />
 
       {/* Tabbed content. Uncontrolled (defaultValue only): a ?tab= deep link
           picks the initial tab, and AppShell keys the route tree by pathname,
-          so navigating to another folder remounts onto Summary. A bogus or
-          permission-hidden ?tab value falls back to Summary instead of
-          leaving Radix with a blank panel. */}
+          so navigating to another folder remounts onto Overview. A bogus or
+          permission-hidden ?tab value falls back to Overview instead of
+          leaving Radix with a blank panel; so does ?tab=vms, from when the
+          guests had a tab of their own. */}
       <Tabs
         defaultValue={folderPageTab(tabParam, [
           "summary",
-          "vms",
           ...(canHistory ? ["history"] : []),
           ...(canViewAlerts ? ["alerts"] : []),
         ])}
       >
         <TabsList>
-          <TabsTrigger value="summary">Summary</TabsTrigger>
-          <TabsTrigger value="vms">VMs ({folderVMs.length})</TabsTrigger>
+          <TabsTrigger value="summary">Overview</TabsTrigger>
           {canHistory && <TabsTrigger value="history">History</TabsTrigger>}
           {canViewAlerts && <TabsTrigger value="alerts">Alerts</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value="summary" className="mt-4">
+        {/* What the folder adds up to, the folders inside it, then its
+            guests: one page, not a summary tab and a list tab. */}
+        <TabsContent value="summary" className="mt-5 space-y-4">
           <FolderSummaryTab
             clusterId={clusterId}
             vms={folderVMs}
             childFolders={childFolders}
-            isUnassigned={isUnassigned}
           />
-        </TabsContent>
-
-        <TabsContent value="vms" className="mt-4">
-          {failedClusterIds.includes(clusterId) && <InventoryUnavailableNote />}
-          <ResourceTable data={tableRows} />
+          <div>
+            {failedClusterIds.includes(clusterId) && (
+              <InventoryUnavailableNote />
+            )}
+            <ResourceTable data={tableRows} label="Guests" singleCluster />
+          </div>
         </TabsContent>
 
         {canHistory && (
-          <TabsContent value="history" className="mt-4">
+          <TabsContent value="history" className="mt-5">
             <FolderHistoryTab
               clusterId={clusterId}
               folderId={folderId}
@@ -348,7 +381,7 @@ export function FolderDetailPage() {
         )}
 
         {canViewAlerts && (
-          <TabsContent value="alerts" className="mt-4">
+          <TabsContent value="alerts" className="mt-5">
             <FolderAlertsTab clusterId={clusterId} vmids={vmids} />
           </TabsContent>
         )}

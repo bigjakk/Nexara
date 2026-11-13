@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Panel } from "@/components/page/Panel";
+import { cn } from "@/lib/utils";
 import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
@@ -44,7 +46,7 @@ function TaskTableHeader({
 }) {
   return (
     <thead>
-      <tr className="border-b bg-muted/50">
+      <tr className="border-b">
         <DataTableHeadCells
           layout={layout}
           directionFor={directionFor}
@@ -107,7 +109,7 @@ function TaskRow({
   return (
     <>
       <tr
-        className="cursor-pointer border-b hover:bg-muted/20"
+        className="cursor-pointer border-b transition-colors hover:bg-foreground/[0.035]"
         onClick={onToggle}
       >
         <DataTableCells
@@ -123,8 +125,8 @@ function TaskRow({
         />
       </tr>
       {expanded && (
-        <tr className="border-b bg-muted/10">
-          <td colSpan={layout.columns.length} className="px-4 py-3">
+        <tr className="border-b bg-foreground/[0.03]">
+          <td colSpan={layout.columns.length} className="px-[18px] py-3">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               <span className="text-muted-foreground">Description</span>
               <span>{task.description || "—"}</span>
@@ -153,8 +155,10 @@ function TaskRow({
 
               {display === "failed" && exitText !== "" && (
                 <>
-                  <span className="text-muted-foreground">Exit Status</span>
-                  <span className="text-red-500">{exitText}</span>
+                  <span className="text-muted-foreground">Exit status</span>
+                  <span className="text-red-700 dark:text-red-400">
+                    {exitText}
+                  </span>
                 </>
               )}
 
@@ -190,6 +194,9 @@ function TaskRow({
   );
 }
 
+/** A filter in a panel's title row: the shared select, a size smaller. */
+const FILTER_SIZE = "h-8 w-[9.5rem] sm:w-40";
+
 /** The status dropdown both task views carry. Resetting to page 0 is the
  *  caller's job — it owns the page state. */
 export function TaskStatusFilter({
@@ -201,7 +208,8 @@ export function TaskStatusFilter({
 }) {
   return (
     <select
-      className={selectClass}
+      aria-label="Status"
+      className={cn(selectClass, FILTER_SIZE)}
       value={value}
       onChange={(e) => {
         onChange(e.target.value);
@@ -271,20 +279,20 @@ export function TaskHistoryTable({
 
   if (isLoading) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-2 px-[18px] pb-1">
         {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-10 w-full" />
+          <Skeleton key={i} className="h-9 w-full" />
         ))}
       </div>
     );
   }
   if (error) {
-    return <p className="text-destructive">{error.message}</p>;
+    return <p className="px-[18px] pb-1 text-destructive">{error.message}</p>;
   }
 
   return (
     <>
-      <div className="overflow-x-auto rounded-md border">
+      <div className="overflow-x-auto">
         <table
           className="table-fixed text-sm"
           style={{ width: layout.totalWidth }}
@@ -312,7 +320,7 @@ export function TaskHistoryTable({
               <tr>
                 <td
                   colSpan={layout.columns.length}
-                  className="px-4 py-8 text-center text-muted-foreground"
+                  className="px-[18px] py-10 text-center text-muted-foreground"
                 >
                   {emptyMessage}
                 </td>
@@ -322,36 +330,38 @@ export function TaskHistoryTable({
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t px-[18px] pt-2.5">
+        <p className="text-[12.5px] text-muted-foreground">
           {String(total)} task{total === 1 ? "" : "s"}
         </p>
         {totalPages > 1 && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="mr-1.5 text-[12.5px] tabular-nums text-muted-foreground">
+              Page {page + 1} of {totalPages}
+            </span>
             <Button
               aria-label="Previous page"
               variant="outline"
               size="sm"
+              className="h-7 w-7 p-0"
               disabled={page === 0}
               onClick={() => {
                 onPageChange(Math.max(0, page - 1));
               }}
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft />
             </Button>
-            <span className="text-sm">
-              Page {page + 1} of {totalPages}
-            </span>
             <Button
               aria-label="Next page"
               variant="outline"
               size="sm"
+              className="h-7 w-7 p-0"
               disabled={page + 1 >= totalPages}
               onClick={() => {
                 onPageChange(page + 1);
               }}
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight />
             </Button>
           </div>
         )}
@@ -388,37 +398,39 @@ export function TasksPanel() {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <select
-          className={selectClass}
-          value={clusterFilter}
-          onChange={(e) => {
-            setClusterFilter(e.target.value);
-            setPage(0);
-          }}
-        >
-          <option value="">All Clusters</option>
-          {clusters?.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+    <Panel
+      flush
+      title="Tasks"
+      actions={
+        <>
+          <ResetColumnsButton layout={layout} />
+          <select
+            aria-label="Cluster"
+            className={cn(selectClass, FILTER_SIZE)}
+            value={clusterFilter}
+            onChange={(e) => {
+              setClusterFilter(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="">All clusters</option>
+            {clusters?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
 
-        <TaskStatusFilter
-          value={statusFilter}
-          onChange={(v) => {
-            setStatusFilter(v);
-            setPage(0);
-          }}
-        />
-
-        <span className="flex-1" />
-        <ResetColumnsButton layout={layout} />
-      </div>
-
+          <TaskStatusFilter
+            value={statusFilter}
+            onChange={(v) => {
+              setStatusFilter(v);
+              setPage(0);
+            }}
+          />
+        </>
+      }
+    >
       <TaskHistoryTable
         layout={layout}
         directionFor={directionFor}
@@ -432,6 +444,6 @@ export function TasksPanel() {
         clusterName={(task) => clusterName(task.cluster_id)}
         emptyMessage="No tasks found."
       />
-    </div>
+    </Panel>
   );
 }

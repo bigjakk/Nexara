@@ -6,7 +6,7 @@ import { AlertTriangle } from "lucide-react";
  * rendering and no note is shown.) */
 export function InventoryUnavailableNote() {
   return (
-    <p className="mb-4 flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+    <p className="mb-4 flex items-center gap-2 rounded-[10px] bg-amber-500/10 px-[18px] py-3 text-sm text-amber-700 dark:text-amber-400">
       <AlertTriangle className="h-4 w-4 shrink-0" />
       Cluster inventory is currently unavailable — guests can&apos;t be listed
       right now.

@@ -6,10 +6,18 @@ import {
   RotateCcw,
   Trash2,
   ArrowLeftRight,
+  MoreHorizontal,
   X,
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -76,7 +84,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
     await Promise.all(promises);
     setTimeout(() => {
       setProgress(null);
-      table.toggleAllRowsSelected(false);
+      table.resetRowSelection(true);
     }, 1500);
   }
 
@@ -104,107 +112,131 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
     await Promise.all(promises);
     setTimeout(() => {
       setProgress(null);
-      table.toggleAllRowsSelected(false);
+      table.resetRowSelection(true);
     }, 1500);
   }
 
   const isBusy = progress !== null;
 
+  const noGuests = isBusy || vmCtRows.length === 0;
+
   return (
     <>
-      <div className="flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-2">
-        <span className="text-sm font-medium">{selectedCount} selected</span>
+      {/* Sits in the table panel's title row, in place of the view controls.
+          The everyday actions are buttons; the forced stop and the delete are
+          one step further away, under More. */}
+      <div
+        role="group"
+        aria-label="Bulk actions"
+        className="flex flex-wrap items-center gap-1.5"
+      >
+        <span className="mr-1 text-sm font-medium tabular-nums">
+          {selectedCount} selected
+        </span>
         {progress ? (
-          <div className="flex items-center gap-2 text-sm">
-            <Loader2 className="h-3 w-3 animate-spin" />
+          <span className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />
             {String(progress.done)}/{String(progress.total)} done
-          </div>
+          </span>
         ) : (
-          <div className="flex gap-1">
+          <>
             <Button
               variant="outline"
               size="sm"
-              className="gap-1"
-              disabled={isBusy || vmCtRows.length === 0}
+              className="gap-1.5"
+              disabled={noGuests}
               onClick={() => {
                 void executeBulkAction("start");
               }}
             >
-              <Play className="h-3 w-3" />
+              <Play />
               Start
             </Button>
             <Button
               variant="outline"
               size="sm"
-              className="gap-1"
-              disabled={isBusy || vmCtRows.length === 0}
-              onClick={() => {
-                setConfirmBulk({ action: "stop", label: "Stop" });
-              }}
-            >
-              <Square className="h-3 w-3" />
-              Stop
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1"
-              disabled={isBusy || vmCtRows.length === 0}
+              className="gap-1.5"
+              disabled={noGuests}
               onClick={() => {
                 setConfirmBulk({ action: "shutdown", label: "Shutdown" });
               }}
             >
-              <PowerOff className="h-3 w-3" />
+              <PowerOff />
               Shutdown
             </Button>
             <Button
               variant="outline"
               size="sm"
-              className="gap-1"
-              disabled={isBusy || vmCtRows.length === 0}
+              className="gap-1.5"
+              disabled={noGuests}
               onClick={() => {
                 void executeBulkAction("reboot");
               }}
             >
-              <RotateCcw className="h-3 w-3" />
+              <RotateCcw />
               Reboot
             </Button>
             <Button
               variant="outline"
               size="sm"
-              className="gap-1"
-              disabled={isBusy || vmCtRows.length === 0}
+              className="gap-1.5"
+              disabled={noGuests}
               onClick={() => {
                 setMigrateOpen(true);
               }}
             >
-              <ArrowLeftRight className="h-3 w-3" />
+              <ArrowLeftRight />
               Migrate
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1 text-destructive"
-              disabled={isBusy || vmCtRows.length === 0}
-              onClick={() => {
-                setConfirmDelete(true);
-              }}
-            >
-              <Trash2 className="h-3 w-3" />
-              Delete
-            </Button>
-          </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="px-2"
+                  aria-label="More bulk actions"
+                  disabled={noGuests}
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  className="gap-2"
+                  onClick={() => {
+                    setConfirmBulk({ action: "stop", label: "Stop" });
+                  }}
+                >
+                  <Square className="h-4 w-4" />
+                  Stop
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="gap-2 text-destructive focus:text-destructive"
+                  onClick={() => {
+                    setConfirmDelete(true);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
         )}
+        {/* Empties the selection itself, here and after each bulk action:
+            unticking the rows on show would leave one that a filter has
+            hidden still selected, to come back ticked later. */}
         <Button
           variant="ghost"
           size="sm"
           onClick={() => {
-            table.toggleAllRowsSelected(false);
+            table.resetRowSelection(true);
           }}
-          className="ml-auto gap-1"
+          className="gap-1 px-2 text-muted-foreground"
           disabled={isBusy}
         >
-          <X className="h-3 w-3" />
+          <X />
           Clear
         </Button>
       </div>
@@ -217,7 +249,9 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirm Bulk {confirmBulk?.label}</DialogTitle>
+            <DialogTitle>
+              Confirm bulk {confirmBulk?.label.toLowerCase()}
+            </DialogTitle>
             <DialogDescription>
               This will {confirmBulk?.label.toLowerCase()}{" "}
               {String(vmCtRows.length)} resource
@@ -252,7 +286,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirm Bulk Delete</DialogTitle>
+            <DialogTitle>Confirm bulk delete</DialogTitle>
             <DialogDescription>
               This will destroy {String(vmCtRows.length)} resource
               {vmCtRows.length !== 1 ? "s" : ""}. This action cannot be undone.
@@ -285,7 +319,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
         onOpenChange={setMigrateOpen}
         rows={vmCtRows}
         onComplete={() => {
-          table.toggleAllRowsSelected(false);
+          table.resetRowSelection(true);
         }}
       />
     </>

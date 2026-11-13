@@ -14,20 +14,19 @@ import type { InventoryRow } from "../types/inventory";
 const COLUMN_LABELS: Record<string, string> = {
   type: "Type",
   name: "Name",
-  status: "Status",
   clusterName: "Cluster",
   nodeName: "Node",
   vmid: "VMID",
   cpuCount: "CPUs",
-  memTotal: "Memory",
-  diskTotal: "Disk",
-  cpuPercent: "CPU %",
-  memPercent: "Mem %",
+  memTotal: "Memory size",
+  diskTotal: "Disk size",
+  cpuPercent: "CPU",
+  memPercent: "Memory",
   network: "Network",
-  disk: "Disk",
+  disk: "Disk I/O",
   uptime: "Uptime",
   tags: "Tags",
-  haState: "HA State",
+  haState: "HA state",
   pool: "Pool",
   template: "Template",
 };
@@ -40,13 +39,13 @@ export function ColumnToggle({ table }: ColumnToggleProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1">
+        <Button variant="outline" size="sm" className="gap-1.5">
           <Settings2 className="h-4 w-4" />
           Columns
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+        <DropdownMenuLabel>Columns shown</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {table
           .getAllColumns()

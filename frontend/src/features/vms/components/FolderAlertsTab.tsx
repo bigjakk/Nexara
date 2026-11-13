@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Panel } from "@/components/page/Panel";
 import { AlertRow } from "@/features/alerts/components/AlertsTable";
 import {
   useAcknowledgeAlert,
@@ -65,91 +66,96 @@ export function FolderAlertsTab({ clusterId, vmids }: FolderAlertsTabProps) {
     return new Date(s).toLocaleString();
   };
 
+  const colSpan = canAcknowledge ? 8 : 7;
+
   return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <Select value={stateFilter} onValueChange={setStateFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All States" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All States</SelectItem>
-            <SelectItem value="firing">Firing</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="acknowledged">Acknowledged</SelectItem>
-            <SelectItem value="resolved">Resolved</SelectItem>
-          </SelectContent>
-        </Select>
+    <Panel
+      flush
+      title="Alerts"
+      aside={folderAlerts.length > 0 ? String(folderAlerts.length) : undefined}
+      actions={
+        <>
+          <Select value={stateFilter} onValueChange={setStateFilter}>
+            <SelectTrigger className="h-8 w-36" aria-label="State">
+              <SelectValue placeholder="All states" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All states</SelectItem>
+              <SelectItem value="firing">Firing</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="acknowledged">Acknowledged</SelectItem>
+              <SelectItem value="resolved">Resolved</SelectItem>
+            </SelectContent>
+          </Select>
 
-        <Select value={severityFilter} onValueChange={setSeverityFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All Severities" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Severities</SelectItem>
-            <SelectItem value="critical">Critical</SelectItem>
-            <SelectItem value="warning">Warning</SelectItem>
-            <SelectItem value="info">Info</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-8" />
-              <TableHead>State</TableHead>
-              <TableHead>Severity</TableHead>
-              <TableHead>Resource</TableHead>
-              <TableHead>Metric</TableHead>
-              <TableHead>Message</TableHead>
-              <TableHead>Time</TableHead>
-              {canAcknowledge && <TableHead>Actions</TableHead>}
+          <Select value={severityFilter} onValueChange={setSeverityFilter}>
+            <SelectTrigger className="h-8 w-36" aria-label="Severity">
+              <SelectValue placeholder="All severities" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All severities</SelectItem>
+              <SelectItem value="critical">Critical</SelectItem>
+              <SelectItem value="warning">Warning</SelectItem>
+              <SelectItem value="info">Info</SelectItem>
+            </SelectContent>
+          </Select>
+        </>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="w-8" />
+            <TableHead>State</TableHead>
+            <TableHead>Severity</TableHead>
+            <TableHead>Resource</TableHead>
+            <TableHead>Metric</TableHead>
+            <TableHead>Message</TableHead>
+            <TableHead>Time</TableHead>
+            {canAcknowledge && <TableHead>Actions</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading && (
+            <TableRow className="hover:bg-transparent">
+              <TableCell
+                colSpan={colSpan}
+                className="py-8 text-center text-muted-foreground"
+              >
+                Loading...
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading && (
-              <TableRow>
-                <TableCell
-                  colSpan={canAcknowledge ? 8 : 7}
-                  className="py-8 text-center text-muted-foreground"
-                >
-                  Loading...
-                </TableCell>
-              </TableRow>
-            )}
-            {!isLoading && folderAlerts.length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={canAcknowledge ? 8 : 7}
-                  className="py-8 text-center text-muted-foreground"
-                >
-                  No alerts for VMs in this folder.
-                </TableCell>
-              </TableRow>
-            )}
-            {folderAlerts.map((alert) => (
-              <AlertRow
-                key={alert.id}
-                alert={alert}
-                expanded={expandedId === alert.id}
-                onToggle={() => {
-                  setExpandedId(expandedId === alert.id ? null : alert.id);
-                }}
-                canAcknowledge={canAcknowledge}
-                onAcknowledge={() => {
-                  ackMutation.mutate(alert.id);
-                }}
-                onResolve={() => {
-                  resolveMutation.mutate(alert.id);
-                }}
-                formatDate={formatDate}
-              />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+          )}
+          {!isLoading && folderAlerts.length === 0 && (
+            <TableRow className="hover:bg-transparent">
+              <TableCell
+                colSpan={colSpan}
+                className="py-8 text-center text-muted-foreground"
+              >
+                No alerts for the guests in this folder.
+              </TableCell>
+            </TableRow>
+          )}
+          {folderAlerts.map((alert) => (
+            <AlertRow
+              key={alert.id}
+              alert={alert}
+              expanded={expandedId === alert.id}
+              onToggle={() => {
+                setExpandedId(expandedId === alert.id ? null : alert.id);
+              }}
+              canAcknowledge={canAcknowledge}
+              onAcknowledge={() => {
+                ackMutation.mutate(alert.id);
+              }}
+              onResolve={() => {
+                resolveMutation.mutate(alert.id);
+              }}
+              formatDate={formatDate}
+            />
+          ))}
+        </TableBody>
+      </Table>
+    </Panel>
   );
 }

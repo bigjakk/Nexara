@@ -5,7 +5,7 @@
  * exports that need a renderer, and keeping the hooks and derivations out of a
  * .tsx keeps fast refresh working for both halves.
  */
-import { CheckCircle2, ChevronDown, Loader2, XCircle } from "lucide-react";
+import { ChevronDown, Loader2, XCircle } from "lucide-react";
 import {
   STATUS_LABEL,
   type DisplayStatus,
@@ -18,19 +18,21 @@ import type { TaskRecord } from "../api/tasks-queries";
 import type { TaskCellCtx, TaskSortKey } from "./task-columns";
 
 /** A plain render helper rather than a component, so this module exports only
- *  data and fast refresh treats it as such. */
+ *  data and fast refresh treats it as such. A finished task gets no mark, only
+ *  the space one takes, so the dates stay in a column. */
 function statusIcon(status: DisplayStatus) {
   if (status === "running")
-    return <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />;
+    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-data" />;
   if (status === "ok")
-    return <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />;
-  return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+    return <span aria-hidden="true" className="w-3.5 shrink-0" />;
+  return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />;
 }
 
-const STATUS_BADGE: Record<DisplayStatus, string> = {
-  running: "bg-data/15 text-data",
-  ok: "bg-muted text-muted-foreground",
-  failed: "bg-red-500/15 text-red-600 dark:text-red-400",
+/** Colour is state: a task in flight and a failed one, never a finished one. */
+const STATUS_TEXT: Record<DisplayStatus, string> = {
+  running: "font-medium text-data",
+  ok: "text-muted-foreground",
+  failed: "font-medium text-red-700 dark:text-red-400",
 };
 
 /**
@@ -51,7 +53,7 @@ export const TASK_COLUMNS_WITH_VM: ColumnDef<
   {
     key: "started",
     label: "Started",
-    width: 210,
+    width: 230,
     sortable: true,
     cell: (task, ctx) => (
       <div className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
@@ -66,14 +68,14 @@ export const TASK_COLUMNS_WITH_VM: ColumnDef<
   {
     key: "cluster",
     label: "Cluster",
-    width: 130,
+    width: 115,
     sortable: true,
     cell: (_task, ctx) => ctx.clusterName,
   },
   {
     key: "type",
     label: "Type",
-    width: 140,
+    width: 125,
     sortable: true,
     cell: (task) => (
       <span className="font-mono text-xs">{task.task_type || "—"}</span>
@@ -82,7 +84,7 @@ export const TASK_COLUMNS_WITH_VM: ColumnDef<
   {
     key: "description",
     label: "Description",
-    width: 300,
+    width: 260,
     sortable: true,
     cell: (task) => (
       <div className="flex items-center gap-2">
@@ -101,7 +103,7 @@ export const TASK_COLUMNS_WITH_VM: ColumnDef<
   {
     key: "node",
     label: "Node",
-    width: 130,
+    width: 110,
     sortable: true,
     cell: (task) => (
       <span className="text-muted-foreground">{task.node || "—"}</span>
@@ -110,21 +112,23 @@ export const TASK_COLUMNS_WITH_VM: ColumnDef<
   {
     key: "progress",
     label: "Progress",
-    width: 130,
+    width: 120,
     sortable: true,
-    cell: (_task, ctx) => (
-      <TaskProgressCell display={ctx.display} value={ctx.progress} />
-    ),
+    // A finished task needs no picture: the Status column beside it says so.
+    cell: (_task, ctx) =>
+      ctx.display === "ok" ? (
+        <span className="text-muted-foreground/60">—</span>
+      ) : (
+        <TaskProgressCell display={ctx.display} value={ctx.progress} />
+      ),
   },
   {
     key: "status",
     label: "Status",
-    width: 120,
+    width: 110,
     sortable: true,
     cell: (_task, ctx) => (
-      <span
-        className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[ctx.display]}`}
-      >
+      <span className={STATUS_TEXT[ctx.display]}>
         {STATUS_LABEL[ctx.display]}
       </span>
     ),
