@@ -7,7 +7,7 @@
   "dark": "Dark",
   "system": "System",
   "accentColor": "Accent Color",
-  "chooseAccentColor": "Choose an accent color for buttons, links, and highlights.",
+  "chooseAccentColor": "Choose an accent color for links, selection, and focus.",
   "displayPreferences": "Display Preferences",
   "configureDataDisplay": "Configure how data is displayed throughout the application.",
   "storageUnits": "Storage Units",
