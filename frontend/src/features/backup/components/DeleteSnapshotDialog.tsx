@@ -48,7 +48,7 @@ export function DeleteSnapshotDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete Snapshot</DialogTitle>
+          <DialogTitle>Delete snapshot</DialogTitle>
           <DialogDescription>
             Are you sure you want to delete{" "}
             <strong>

@@ -13,13 +13,14 @@ type RetentionSource = Partial<
   >
 >;
 
+/** Each keep-* key with the word it reads as after "Keeps": "daily 14". */
 export const RETENTION_KEYS = [
-  ["keep-last", "Keep Last"],
-  ["keep-hourly", "Keep Hourly"],
-  ["keep-daily", "Keep Daily"],
-  ["keep-weekly", "Keep Weekly"],
-  ["keep-monthly", "Keep Monthly"],
-  ["keep-yearly", "Keep Yearly"],
+  ["keep-last", "last"],
+  ["keep-hourly", "hourly"],
+  ["keep-daily", "daily"],
+  ["keep-weekly", "weekly"],
+  ["keep-monthly", "monthly"],
+  ["keep-yearly", "yearly"],
 ] as const;
 
 /** True when a source sets any retention at all. */

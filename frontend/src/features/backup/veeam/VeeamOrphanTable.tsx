@@ -6,17 +6,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ChevronDown, ChevronRight, Ghost } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
+import { DetailField } from "@/components/DetailField";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { DefGrid, Panel } from "@/components/page/Panel";
+import { StateText } from "../components/StateText";
 import { useMapVeeamBackupObject } from "../api/backup-queries";
 import type { VeeamOrphanedObject } from "../types/backup";
 
@@ -67,11 +69,7 @@ const COLUMNS: ColumnDef<VeeamOrphanedObject, OrphanSortKey, OrphanCtx>[] = [
     width: 180,
     // The cell falls back to the platform name, so the column must too.
     sortValue: (object) => object.cluster_name || object.platform_name || null,
-    cell: (object) => (
-      <span className="text-sm">
-        {object.cluster_name || object.platform_name}
-      </span>
-    ),
+    cell: (object) => object.cluster_name || object.platform_name,
   },
   {
     key: "points",
@@ -80,7 +78,7 @@ const COLUMNS: ColumnDef<VeeamOrphanedObject, OrphanSortKey, OrphanCtx>[] = [
     align: "right",
     sortValue: (object) => object.restore_points_count,
     cell: (object) => (
-      <span className="font-mono text-sm">{object.restore_points_count}</span>
+      <span className="tabular-nums">{object.restore_points_count}</span>
     ),
   },
   {
@@ -90,7 +88,7 @@ const COLUMNS: ColumnDef<VeeamOrphanedObject, OrphanSortKey, OrphanCtx>[] = [
     align: "right",
     sortValue: (object) => object.restore_point_bytes,
     cell: (object) => (
-      <span className="font-mono text-sm">
+      <span className="tabular-nums">
         {formatBytes(object.restore_point_bytes)}
       </span>
     ),
@@ -100,11 +98,7 @@ const COLUMNS: ColumnDef<VeeamOrphanedObject, OrphanSortKey, OrphanCtx>[] = [
     label: "Newest point",
     width: 190,
     sortValue: (object) => toEpoch(object.latest_restore_point),
-    cell: (object) => (
-      <span className="text-sm">
-        {formatDateTime(object.latest_restore_point, "Never")}
-      </span>
-    ),
+    cell: (object) => formatDateTime(object.latest_restore_point, "Never"),
   },
 ];
 
@@ -145,72 +139,72 @@ export function VeeamOrphanTable({
 
   if (objects.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        Every backup object on a mapped connection matches a guest. Nothing is
-        holding restore points for a machine that no longer exists.
-      </p>
+      <Panel>
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          Every backup object on a mapped connection matches a guest. Nothing is
+          holding restore points for a machine that no longer exists.
+        </p>
+      </Panel>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-start gap-2 rounded-md border bg-muted/40 p-3">
-        <Ghost className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        <p className="text-xs text-muted-foreground">
-          Veeam still holds backups for these, but nothing on the mapped cluster
-          matches them — the guest was deleted, or rebuilt with a new identity
-          and its old backup left behind. They consume repository space and can
-          usually be removed in the Veeam console. Map one to a guest only if
-          you know the backup really is that guest&apos;s.
-        </p>
-      </div>
+    <Panel
+      flush
+      title="Backups with no guest"
+      actions={
+        layout.isCustomized ? <ResetColumnsButton layout={layout} /> : undefined
+      }
+    >
+      <p className="max-w-4xl px-[18px] pb-3 text-[12.5px] text-muted-foreground">
+        Veeam still holds backups for these, but nothing on the mapped cluster
+        matches them: the guest was deleted, or rebuilt with a new identity and
+        its old backup left behind. They consume repository space and can
+        usually be removed in the Veeam console. Map one to a guest only if you
+        know the backup really is that guest&apos;s.
+      </p>
 
-      <div className="rounded-md border">
-        <div className="flex justify-end px-2 pt-2">
-          <ResetColumnsButton layout={layout} />
-        </div>
-        <Table className="table-fixed" style={{ width: layout.totalWidth }}>
-          <TableHeader>
-            <DataTableHeadRow
-              layout={layout}
-              directionFor={directionFor}
-              onSort={toggleSort}
-            />
-          </TableHeader>
-          <TableBody>
-            {sortedObjects.map((object) => {
-              const isOpen = expanded === object.id;
-              return (
-                <Fragment key={object.id}>
-                  <TableRow
-                    className="cursor-pointer"
-                    onClick={() => {
-                      setExpanded(isOpen ? null : object.id);
-                    }}
-                  >
-                    <DataTableCells
-                      row={object}
-                      layout={layout}
-                      ctx={{ expandedId: expanded }}
-                    />
+      <Table className="table-fixed" style={{ width: layout.totalWidth }}>
+        <TableHeader>
+          <DataTableHeadRow
+            layout={layout}
+            directionFor={directionFor}
+            onSort={toggleSort}
+          />
+        </TableHeader>
+        <TableBody>
+          {sortedObjects.map((object) => {
+            const isOpen = expanded === object.id;
+            return (
+              <Fragment key={object.id}>
+                <TableRow
+                  className="cursor-pointer"
+                  onClick={() => {
+                    setExpanded(isOpen ? null : object.id);
+                  }}
+                >
+                  <DataTableCells
+                    row={object}
+                    layout={layout}
+                    ctx={{ expandedId: expanded }}
+                  />
+                </TableRow>
+                {isOpen && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={layout.columns.length}
+                      className="bg-muted/30"
+                    >
+                      <OrphanDetail serverId={serverId} object={object} />
+                    </TableCell>
                   </TableRow>
-                  {isOpen && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={layout.columns.length}
-                        className="bg-muted/30"
-                      >
-                        <OrphanDetail serverId={serverId} object={object} />
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+                )}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </Panel>
   );
 }
 
@@ -232,40 +226,30 @@ function OrphanDetail({
     parsed <= 2147483647;
 
   return (
-    <div className="space-y-3 py-2">
-      <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">Type</dt>
-          <dd>{object.object_type || "—"}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">Guest size</dt>
-          <dd className="font-mono">{formatBytes(object.size_bytes)}</dd>
-        </div>
-        <div className="flex gap-2 sm:col-span-2">
-          <dt className="shrink-0 text-muted-foreground">SMBIOS UUID</dt>
-          {/*
-            The whole reason this row is here: Veeam recorded this identity,
-            and no guest on the mapped cluster carries it.
-          */}
-          <dd className="truncate font-mono text-xs">
-            {object.smbios_uuid || "none recorded"}
-          </dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">Last seen</dt>
-          <dd>{formatDateTime(object.last_seen_at, "Never")}</dd>
-        </div>
+    <div className="space-y-3 px-2 py-3">
+      <DefGrid>
+        <DetailField label="Type">{object.object_type || "—"}</DetailField>
+        <DetailField label="Guest size" variant="mono">
+          {formatBytes(object.size_bytes)}
+        </DetailField>
+        <DetailField label="Last seen">
+          {formatDateTime(object.last_seen_at, "Never")}
+        </DetailField>
         {object.last_run_failed && (
-          <div className="flex gap-2">
-            <dt className="text-muted-foreground">Last run</dt>
-            <dd>
-              <Badge variant="destructive" className="text-xs">
-                Failed or cancelled
-              </Badge>
-            </dd>
-          </div>
+          <DetailField label="Last run">
+            <StateText tone="bad">Failed or cancelled</StateText>
+          </DetailField>
         )}
+      </DefGrid>
+      <dl className="text-sm">
+        <dt className="text-xs text-muted-foreground">SMBIOS UUID</dt>
+        {/*
+          The whole reason this row is here: Veeam recorded this identity,
+          and no guest on the mapped cluster carries it.
+        */}
+        <dd className="break-all font-mono text-xs">
+          {object.smbios_uuid || "none recorded"}
+        </dd>
       </dl>
 
       <div className="flex flex-wrap items-end gap-2 border-t pt-3">

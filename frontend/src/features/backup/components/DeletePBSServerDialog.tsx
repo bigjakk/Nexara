@@ -45,7 +45,7 @@ export function DeletePBSServerDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete PBS Server</DialogTitle>
+          <DialogTitle>Delete PBS server</DialogTitle>
           <DialogDescription>
             This will permanently remove <CopyableName name={server.name} /> and
             all associated backup data (snapshots, sync jobs, verify jobs,
@@ -55,6 +55,7 @@ export function DeletePBSServerDialog({
         <div className="space-y-4 py-2">
           <Input
             placeholder={server.name}
+            aria-label="Server name, to confirm"
             value={confirmName}
             onChange={(e) => {
               setConfirmName(e.target.value);
@@ -82,7 +83,7 @@ export function DeletePBSServerDialog({
             disabled={confirmName !== server.name || deleteMutation.isPending}
             onClick={handleDelete}
           >
-            {deleteMutation.isPending ? "Deleting..." : "Delete Server"}
+            {deleteMutation.isPending ? "Deleting..." : "Delete server"}
           </Button>
         </DialogFooter>
       </DialogContent>

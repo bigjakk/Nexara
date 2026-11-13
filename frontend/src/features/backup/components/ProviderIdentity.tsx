@@ -26,8 +26,7 @@ import {
  * Chosen for shape, not for the name Lucide files them under:
  *
  * - Veeam: two stacked bars — one copy, then another. Replication.
- * - PBS:   a check. Verifying what it stored is what distinguishes it, and
- *          the page's own header already spends the shield.
+ * - PBS:   a check. Verifying what it stored is what distinguishes it.
  */
 const GLYPHS: Record<BackupProvider, LucideIcon> = {
   veeam: StretchHorizontal,
@@ -36,8 +35,8 @@ const GLYPHS: Record<BackupProvider, LucideIcon> = {
 
 interface ProviderBadgeProps {
   provider: BackupProvider;
-  /** `sm` sits inside a tab label; `lg` anchors a panel header. */
-  size?: "sm" | "lg";
+  /** `sm` sits inside a tab label; `md` leads a server's identity line. */
+  size?: "sm" | "md";
   className?: string;
 }
 
@@ -48,20 +47,20 @@ export function ProviderBadge({
   className,
 }: ProviderBadgeProps) {
   const Glyph = GLYPHS[provider];
-  const isLarge = size === "lg";
+  const isLarge = size === "md";
   return (
     <span
       aria-hidden="true"
       className={cn(
         "inline-flex shrink-0 items-center justify-center",
         PROVIDER_FILL_CLASSES[provider],
-        isLarge ? "h-10 w-10 rounded-lg" : "h-4 w-4 rounded-[4px]",
+        isLarge ? "h-7 w-7 rounded-[7px]" : "h-4 w-4 rounded-[4px]",
         className,
       )}
     >
       <Glyph
-        className={isLarge ? "h-5 w-5" : "h-2.5 w-2.5"}
-        strokeWidth={isLarge ? 2.25 : 3.25}
+        className={isLarge ? "h-4 w-4" : "h-2.5 w-2.5"}
+        strokeWidth={isLarge ? 2.5 : 3.25}
       />
     </span>
   );
@@ -69,52 +68,66 @@ export function ProviderBadge({
 
 interface ProviderHeaderProps {
   provider: BackupProvider;
-  /** The product's full name, spelled the way the vendor spells it. */
-  title: string;
   /**
-   * Host, version, scope — whatever identifies *which* server this is.
-   * Truncated to one line and mirrored into a `title`, so a clipped hostname
-   * stays recoverable on hover.
+   * The product's full name, spelled the way the vendor spells it. Read out
+   * before the server's name; on screen the accent tile stands for it.
    */
-  subtitle?: string;
+  product: string;
+  /** The server's own name. */
+  name: string;
+  /** Where it is reached, in small mono. */
+  address?: string | undefined;
+  /** Version, edition: whatever else says which server this is. */
+  facts?: readonly string[] | undefined;
   /** Connection state, rendered by the caller so it matches its own table. */
   status?: ReactNode;
-  /** Add / edit / delete controls. */
+  /** The choice between servers, when there are several. */
+  switcher?: ReactNode;
+  /** Edit and the rarer controls. */
   actions?: ReactNode;
 }
 
 /**
- * Names what you are looking at before showing you rows of it.
- *
- * Both provider panels previously opened straight onto a bare table, leaving
- * the tab label as the only thing that said which product's state you were
- * reading — and on a narrow viewport that strip scrolls out of view.
+ * Names the server you are looking at before showing you rows of it: one line
+ * on the canvas, not a box. The tab strip above says which product, and it
+ * scrolls out of view on a narrow viewport; the accent tile stays.
  */
 export function ProviderHeader({
   provider,
-  title,
-  subtitle,
+  product,
+  name,
+  address,
+  facts,
   status,
+  switcher,
   actions,
 }: ProviderHeaderProps) {
+  // "" is excluded as well as undefined, so an unknown version leaves no gap.
+  const details = (facts ?? []).filter((fact) => fact !== "");
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border bg-card p-4">
-      <ProviderBadge provider={provider} size="lg" />
-      <div className="min-w-0 flex-1">
-        <h2 className="truncate text-sm font-medium">{title}</h2>
-        {/* "" is excluded as well as undefined: joining an all-empty detail
-            list yields "", which would render a blank row rather than none. */}
-        {subtitle !== undefined && subtitle !== "" && (
-          <div
-            className="truncate text-xs text-muted-foreground"
-            title={subtitle}
-          >
-            {subtitle}
-          </div>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
+      <div className="flex min-w-0 flex-[1_1_280px] flex-wrap items-center gap-x-3 gap-y-1.5">
+        <ProviderBadge provider={provider} size="md" />
+        <h2 className="min-w-0 text-[15px] font-semibold [overflow-wrap:anywhere]">
+          <span className="sr-only">{product}: </span>
+          {name}
+        </h2>
+        {address !== undefined && address !== "" && (
+          <span className="min-w-0 font-mono text-[12.5px] text-muted-foreground [overflow-wrap:anywhere]">
+            {address}
+          </span>
         )}
+        {details.length > 0 && (
+          <span className="text-[12.5px] text-muted-foreground">
+            {details.join(" · ")}
+          </span>
+        )}
+        {status}
       </div>
-      {status}
-      {actions}
+      {switcher}
+      {actions !== undefined && (
+        <div className="flex items-center gap-2">{actions}</div>
+      )}
     </div>
   );
 }

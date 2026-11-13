@@ -134,7 +134,7 @@ export function EditVeeamServerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit Veeam Server</DialogTitle>
+          <DialogTitle>Edit Veeam server</DialogTitle>
           <DialogDescription>
             {certificate !== null
               ? "The address changed. Verify the new host's certificate before saving."
@@ -177,7 +177,7 @@ export function EditVeeamServerDialog({
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-veeam-name">Server Name</Label>
+              <Label htmlFor="edit-veeam-name">Server name</Label>
               <Input
                 id="edit-veeam-name"
                 value={name}

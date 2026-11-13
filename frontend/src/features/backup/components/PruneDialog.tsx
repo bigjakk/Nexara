@@ -11,7 +11,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Scissors } from "lucide-react";
 import { usePruneDatastore } from "../api/backup-queries";
 import type { PBSPruneResult } from "../types/backup";
@@ -24,6 +23,15 @@ interface PruneDialogProps {
 function formatUnixTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString();
 }
+
+/** The five retention counts, in the order PBS applies them. */
+const KEEP_FIELDS = [
+  { id: "last", label: "Last" },
+  { id: "daily", label: "Daily" },
+  { id: "weekly", label: "Weekly" },
+  { id: "monthly", label: "Monthly" },
+  { id: "yearly", label: "Yearly" },
+] as const;
 
 export function PruneDialog({ pbsId, store }: PruneDialogProps) {
   const [open, setOpen] = useState(false);
@@ -68,6 +76,21 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
     );
   };
 
+  const keep = {
+    last: keepLast,
+    daily: keepDaily,
+    weekly: keepWeekly,
+    monthly: keepMonthly,
+    yearly: keepYearly,
+  };
+  const keepSetters = {
+    last: setKeepLast,
+    daily: setKeepDaily,
+    weekly: setKeepWeekly,
+    monthly: setKeepMonthly,
+    yearly: setKeepYearly,
+  };
+
   const toRemove = preview?.filter((r) => !r.keep && !r.protected) ?? [];
   const toKeep = preview?.filter((r) => r.keep || r.protected) ?? [];
 
@@ -80,127 +103,78 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Scissors className="mr-2 h-4 w-4" />
+        <Button variant="outline" size="sm" className="gap-1.5">
+          <Scissors className="h-3.5 w-3.5" />
           Prune
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Prune Datastore: {store}</DialogTitle>
+          <DialogTitle>Prune {store}</DialogTitle>
           <DialogDescription>
-            Configure retention policy and preview which snapshots will be
+            Set how many snapshots to keep, then preview which ones would be
             removed.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="grid grid-cols-5 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Last</Label>
-              <Input
-                type="number"
-                min={0}
-                value={keepLast}
-                onChange={(e) => {
-                  setKeepLast(Number(e.target.value));
-                }}
-                className="h-8 text-sm"
-              />
+        <div className="space-y-4 py-2">
+          <fieldset>
+            <legend className="pb-2 text-sm font-medium">Keep</legend>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(4.5rem,1fr))] gap-3">
+              {KEEP_FIELDS.map((field) => (
+                <div key={field.id} className="space-y-1">
+                  <Label
+                    htmlFor={`prune-${field.id}`}
+                    className="text-xs text-muted-foreground"
+                  >
+                    {field.label}
+                  </Label>
+                  <Input
+                    id={`prune-${field.id}`}
+                    type="number"
+                    min={0}
+                    value={keep[field.id]}
+                    onChange={(e) => {
+                      keepSetters[field.id](Number(e.target.value));
+                    }}
+                    className="h-8 text-sm"
+                  />
+                </div>
+              ))}
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Daily</Label>
-              <Input
-                type="number"
-                min={0}
-                value={keepDaily}
-                onChange={(e) => {
-                  setKeepDaily(Number(e.target.value));
-                }}
-                className="h-8 text-sm"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Weekly</Label>
-              <Input
-                type="number"
-                min={0}
-                value={keepWeekly}
-                onChange={(e) => {
-                  setKeepWeekly(Number(e.target.value));
-                }}
-                className="h-8 text-sm"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Monthly</Label>
-              <Input
-                type="number"
-                min={0}
-                value={keepMonthly}
-                onChange={(e) => {
-                  setKeepMonthly(Number(e.target.value));
-                }}
-                className="h-8 text-sm"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Yearly</Label>
-              <Input
-                type="number"
-                min={0}
-                value={keepYearly}
-                onChange={(e) => {
-                  setKeepYearly(Number(e.target.value));
-                }}
-                className="h-8 text-sm"
-              />
-            </div>
-          </div>
-
-          {!preview && (
-            <Button
-              onClick={handlePreview}
-              disabled={pruneMutation.isPending}
-              className="w-full"
-              variant="outline"
-            >
-              {pruneMutation.isPending ? "Loading..." : "Preview"}
-            </Button>
-          )}
+          </fieldset>
 
           {preview && (
-            <div className="space-y-3">
-              <div className="max-h-48 space-y-1 overflow-auto rounded border p-2">
+            <div className="space-y-2">
+              <p className="text-sm">
+                <span className="font-medium">{toRemove.length} to remove</span>
+                <span className="text-muted-foreground">
+                  , {toKeep.length} kept
+                </span>
+              </p>
+              <ul className="max-h-56 divide-y overflow-auto rounded-[7px] bg-foreground/[0.04] px-3">
                 {preview.map((r) => (
-                  <div
+                  <li
                     key={`${r["backup-type"]}-${r["backup-id"]}-${String(r["backup-time"])}`}
-                    className={`flex items-center justify-between rounded px-2 py-1 text-xs ${
-                      r.keep || r.protected
-                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                        : "bg-red-500/10 text-red-700 dark:text-red-400"
-                    }`}
+                    className="flex items-center justify-between gap-3 py-1.5 text-xs"
                   >
                     <span className="font-mono">
                       {r["backup-type"]}/{r["backup-id"]}{" "}
-                      {formatUnixTime(r["backup-time"])}
+                      <span className="text-muted-foreground">
+                        {formatUnixTime(r["backup-time"])}
+                      </span>
                     </span>
-                    <span>
-                      {r.protected ? (
-                        <Badge variant="outline" className="text-[10px]">
-                          protected
-                        </Badge>
-                      ) : r.keep ? (
-                        "keep"
-                      ) : (
-                        "remove"
-                      )}
-                    </span>
-                  </div>
+                    {r.protected ? (
+                      <span className="text-muted-foreground">protected</span>
+                    ) : r.keep ? (
+                      <span className="text-muted-foreground">keep</span>
+                    ) : (
+                      <span className="font-medium text-red-700 dark:text-red-400">
+                        remove
+                      </span>
+                    )}
+                  </li>
                 ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {toKeep.length} kept, {toRemove.length} to remove
-              </p>
+              </ul>
             </div>
           )}
         </div>
@@ -214,6 +188,11 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
           >
             Cancel
           </Button>
+          {!preview && (
+            <Button onClick={handlePreview} disabled={pruneMutation.isPending}>
+              {pruneMutation.isPending ? "Loading..." : "Preview"}
+            </Button>
+          )}
           {preview && (
             <Button
               variant="destructive"
@@ -222,7 +201,7 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
             >
               {pruneMutation.isPending
                 ? "Pruning..."
-                : `Remove ${String(toRemove.length)} Snapshots`}
+                : `Remove ${String(toRemove.length)} snapshots`}
             </Button>
           )}
         </DialogFooter>

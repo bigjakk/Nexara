@@ -13,7 +13,7 @@ import {
 import type { PBSTask } from "../types/backup";
 
 const OUTCOME_ICON: Record<PBSTaskOutcome, React.ReactNode> = {
-  running: <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />,
+  running: <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />,
   ok: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />,
   warning: <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />,
   failed: <XCircle className="h-3.5 w-3.5 text-red-500" />,
@@ -63,7 +63,7 @@ export function PBSLiveTaskRows({
 
   return (
     <>
-      <tr className="border-b bg-blue-500/5">
+      <tr className="border-b bg-foreground/[0.03]">
         <td
           colSpan={colSpan}
           className="px-4 pt-2 pb-1 text-xs text-muted-foreground"
@@ -80,7 +80,7 @@ export function PBSLiveTaskRows({
           <tr
             key={task.upid}
             data-testid="pbs-live-task"
-            className="border-b bg-blue-500/5"
+            className="border-b bg-foreground/[0.03]"
           >
             <td colSpan={colSpan} className="px-4 py-1.5">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
@@ -96,7 +96,9 @@ export function PBSLiveTaskRows({
                   </span>
                 )}
                 {outcome === "failed" && (
-                  <span className="text-xs text-red-500">{task.status}</span>
+                  <span className="text-xs text-red-700 dark:text-red-400">
+                    {task.status}
+                  </span>
                 )}
                 <span className="ml-auto text-xs text-muted-foreground">
                   {trigger

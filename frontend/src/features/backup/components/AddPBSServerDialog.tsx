@@ -144,9 +144,9 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
   }
 
   const defaultTrigger = (
-    <Button>
-      <Plus className="mr-2 h-4 w-4" />
-      Add PBS Server
+    <Button className="gap-1.5">
+      <Plus className="h-4 w-4" aria-hidden="true" />
+      Add PBS server
     </Button>
   );
 
@@ -157,7 +157,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
       <DialogTrigger asChild>{trigger ?? defaultTrigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add PBS Server</DialogTitle>
+          <DialogTitle>Add PBS server</DialogTitle>
           <DialogDescription>
             {showFingerprint
               ? "Verify the TLS certificate fingerprint before connecting."
@@ -168,7 +168,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
         {!showFingerprint ? (
           <form onSubmit={handleFetchFingerprint} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="pbs-name">Server Name</Label>
+              <Label htmlFor="pbs-name">Server name</Label>
               <Input
                 id="pbs-name"
                 placeholder="Backup Server 1"
@@ -192,7 +192,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="pbs-token-id">API Token ID</Label>
+              <Label htmlFor="pbs-token-id">API token ID</Label>
               <Input
                 id="pbs-token-id"
                 placeholder="root@pam!nexara"
@@ -204,7 +204,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="pbs-token-secret">API Token Secret</Label>
+              <Label htmlFor="pbs-token-secret">API token secret</Label>
               <Input
                 id="pbs-token-secret"
                 type="password"
@@ -217,10 +217,10 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="pbs-cluster">Associated Cluster (optional)</Label>
+              <Label htmlFor="pbs-cluster">Associated cluster (optional)</Label>
               <select
                 id="pbs-cluster"
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                 value={clusterId}
                 onChange={(e) => {
                   setClusterId(e.target.value);
@@ -270,18 +270,18 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
           <div className="space-y-4">
             {fingerprint.self_signed ? (
               <div className="space-y-3 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4">
-                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
                   <ShieldAlert className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Self-Signed Certificate</span>
+                  <span className="font-medium">Self-signed certificate</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  The server at <strong>{apiUrl}</strong> uses a self-signed
-                  certificate. Verify this fingerprint matches your PBS host
-                  before accepting.
+                  The server at <strong className="break-all">{apiUrl}</strong>{" "}
+                  uses a self-signed certificate. Verify this fingerprint
+                  matches your PBS host before accepting.
                 </p>
-                <div className="rounded-md bg-muted p-3">
+                <div>
                   <p className="mb-1 text-xs text-muted-foreground">
-                    SHA-256 Fingerprint
+                    SHA-256 fingerprint
                   </p>
                   <code className="select-all break-all font-mono text-xs">
                     {fingerprint.fingerprint}
@@ -301,14 +301,14 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
                 </div>
               </div>
             ) : (
-              <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 p-4">
-                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-500">
-                  <ShieldCheck className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Trusted Certificate</span>
+              <div>
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-500" />
+                  Trusted certificate
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  The server at <strong>{apiUrl}</strong> has a valid
-                  certificate signed by a trusted CA.
+                  The server at <strong className="break-all">{apiUrl}</strong>{" "}
+                  has a valid certificate signed by a trusted CA.
                 </p>
               </div>
             )}
@@ -329,7 +329,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
                 onClick={handleCreate}
                 disabled={!fingerprintAccepted || createPBS.isPending}
               >
-                {createPBS.isPending ? "Adding..." : "Add Server"}
+                {createPBS.isPending ? "Adding..." : "Add server"}
               </Button>
             </DialogFooter>
           </div>

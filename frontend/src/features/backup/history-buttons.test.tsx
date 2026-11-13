@@ -8,7 +8,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import { useHistoryDrawerStore } from "@/stores/history-drawer-store";
 import { HistoryDrawerHost } from "@/features/history/components/HistoryDrawer";
 import { BackupJobTable } from "./components/BackupJobTable";
-import { DatastoreCards } from "./components/DatastoreCards";
+import { DatastoreOverview } from "./components/DatastoreOverview";
 import { VeeamJobTable } from "./veeam/VeeamJobTable";
 import { VeeamServerTable } from "./veeam/VeeamServerTable";
 import { VeeamSessionTable } from "./veeam/VeeamSessionTable";
@@ -64,8 +64,8 @@ const server = {
   updated_at: "2026-08-26T19:56:00Z",
 };
 
-const datastoreCards = (
-  <DatastoreCards
+const datastoreOverview = (
+  <DatastoreOverview
     key="d"
     pbsId="p1"
     datastores={[{ store: "datastore01", total: 100, used: 10, avail: 90 }]}
@@ -79,7 +79,7 @@ describe("a list row's History button", () => {
   const rows: [string, ReactElement, string, string, boolean][] = [
     [
       "a datastore",
-      datastoreCards,
+      datastoreOverview,
       "datastore01",
       "/api/v1/pbs-servers/p1/history?limit=50&offset=0&datastore=datastore01",
       true,
@@ -197,7 +197,7 @@ describe("a list row's History button", () => {
   // A backup server's rows are mostly the backups': view:pbs alone is not enough.
   it("of a datastore is not offered without view:backup", () => {
     signIn(["view:audit", "view:task", "view:pbs"]);
-    renderWithProviders(datastoreCards);
+    renderWithProviders(datastoreOverview);
     expect(
       screen.queryByRole("button", { name: "History of datastore01" }),
     ).toBeNull();

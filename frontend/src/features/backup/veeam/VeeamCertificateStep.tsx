@@ -29,10 +29,10 @@ export function VeeamCertificateStep({
 }: VeeamCertificateStepProps) {
   if (!fingerprint.self_signed) {
     return (
-      <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 p-4">
-        <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-500">
-          <ShieldCheck className="h-5 w-5 shrink-0" />
-          <span className="font-medium">Trusted Certificate</span>
+      <div>
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-500" />
+          Trusted certificate
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           The server at <strong className="break-all">{url}</strong> has a valid
@@ -46,18 +46,18 @@ export function VeeamCertificateStep({
 
   return (
     <div className="space-y-3 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4">
-      <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
+      <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
         <ShieldAlert className="h-5 w-5 shrink-0" />
-        <span className="font-medium">Self-Signed Certificate</span>
+        <span className="font-medium">Self-signed certificate</span>
       </div>
       <p className="text-sm text-muted-foreground">
         The server at <strong className="break-all">{url}</strong> uses a
-        self-signed certificate — the Veeam default. Verify this fingerprint
+        self-signed certificate, the Veeam default. Verify this fingerprint
         matches your VBR host before accepting.
       </p>
-      <div className="rounded-md bg-muted p-3">
+      <div>
         <p className="mb-1 text-xs text-muted-foreground">
-          SHA-256 Fingerprint
+          SHA-256 fingerprint
         </p>
         <code className="select-all break-all font-mono text-xs">
           {fingerprint.fingerprint}

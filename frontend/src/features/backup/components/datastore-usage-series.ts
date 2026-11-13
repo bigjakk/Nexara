@@ -1,3 +1,4 @@
+import { DATA_COLOR } from "@/lib/chart-colors";
 import type { PBSDatastoreMetric } from "../types/backup";
 
 /**
@@ -10,19 +11,19 @@ import type { PBSDatastoreMetric } from "../types/backup";
  */
 
 /**
- * Series colours, matching DatastoreIOChart's vocabulary so the two charts on
- * this page read as one system. The --chart-N tokens are not defined today, so
- * the inline fallbacks are what actually render; defining them later re-themes
- * both charts at once.
+ * Series colours. The first is the data colour every other chart draws in, so
+ * a server with one datastore looks like the rest of the app; the others only
+ * have to be told apart from it. None is green, amber or red: those are
+ * states, and a store drawn in one would read as running, warning or failed.
  */
-const FIRST_SERIES_COLOR = "hsl(var(--chart-1, 220 70% 50%))";
+const FIRST_SERIES_COLOR = DATA_COLOR;
 
 const SERIES_COLORS: readonly string[] = [
   FIRST_SERIES_COLOR,
-  "hsl(var(--chart-2, 160 60% 45%))",
-  "hsl(var(--chart-3, 30 80% 55%))",
-  "hsl(var(--chart-4, 280 65% 60%))",
-  "hsl(var(--chart-5, 340 75% 55%))",
+  "hsl(var(--muted-foreground))",
+  "hsl(190 70% 45%)",
+  "hsl(265 60% 65%)",
+  "hsl(325 60% 60%)",
 ];
 
 /**

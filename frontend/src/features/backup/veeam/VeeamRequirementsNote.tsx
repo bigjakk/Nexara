@@ -11,8 +11,8 @@ import { Info } from "lucide-react";
  */
 export function VeeamRequirementsNote() {
   return (
-    <div className="flex gap-2 rounded-md border bg-muted/50 p-3 text-xs text-muted-foreground">
-      <Info className="mt-0.5 h-4 w-4 shrink-0" />
+    <div className="panel flex gap-2.5 rounded-[10px] px-[18px] py-3 text-[12.5px] text-muted-foreground">
+      <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <div className="space-y-1">
         <p>
           Requires <strong>Veeam Backup &amp; Replication 13.1 or newer</strong>{" "}

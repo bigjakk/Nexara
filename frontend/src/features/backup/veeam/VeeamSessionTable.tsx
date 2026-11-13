@@ -1,6 +1,5 @@
 import { Fragment } from "react";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
@@ -11,12 +10,14 @@ import { DataTableCells } from "@/components/DataTableCells";
 import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { DefGrid, Panel } from "@/components/page/Panel";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
+import { StateText } from "../components/StateText";
 import { veeamDurationSeconds } from "./veeam-duration";
 import {
   bottleneckLabel,
   processingRateLabel,
-  resultVariant,
+  resultTone,
   sessionResultLabel,
 } from "./veeam-format";
 import { VeeamSessionActions } from "./VeeamSessionActions";
@@ -86,14 +87,20 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
     label: "State",
     width: 130,
     sortValue: (session) => session.state || null,
-    cell: (session) => (
-      <Badge variant="secondary">{session.state || "-"}</Badge>
-    ),
+    // "Stopped" is how every finished run reads, so it is left plain; a run
+    // still in any other state is in flight, by the rule its Stop button and
+    // its guest list follow.
+    cell: (session) =>
+      session.state === "" || session.state === "Stopped" ? (
+        <span className="text-muted-foreground">{session.state || "-"}</span>
+      ) : (
+        <StateText tone="running">{session.state}</StateText>
+      ),
   },
   {
     key: "result",
     label: "Result",
-    width: 190,
+    width: 180,
     sortValue: (session) => {
       const label = sessionResultLabel(session);
       return label === null ? null : (SESSION_RESULT_RANK[label] ?? 99);
@@ -109,46 +116,42 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
       if (label === null) {
         return <span className="text-muted-foreground">—</span>;
       }
-      return <Badge variant={resultVariant(session.result)}>{label}</Badge>;
+      return <StateText tone={resultTone(session.result)}>{label}</StateText>;
     },
   },
   {
     key: "mode",
     label: "Mode",
-    width: 130,
+    width: 110,
     sortValue: (session) => session.algorithm || null,
-    cell: (session) => (
-      <span className="text-sm">{session.algorithm || "—"}</span>
-    ),
+    cell: (session) => session.algorithm || "—",
   },
   {
     key: "started",
     label: "Started",
-    width: 180,
+    width: 170,
     sortValue: (session) => toEpoch(session.creation_time),
-    cell: (session) => (
-      <span className="text-sm">{formatDateTime(session.creation_time)}</span>
-    ),
+    cell: (session) => formatDateTime(session.creation_time),
   },
   {
     key: "duration",
     label: "Duration",
-    width: 120,
+    width: 100,
     // veeamDurationSeconds already answers null for anything it cannot parse,
     // the empty string included.
     sortValue: (session) => veeamDurationSeconds(session.duration),
     cell: (session) => (
-      <span className="font-mono text-sm">{session.duration || "—"}</span>
+      <span className="tabular-nums">{session.duration || "—"}</span>
     ),
   },
   {
     key: "transferred",
     label: "Transferred",
-    width: 130,
+    width: 120,
     align: "right",
     sortValue: (session) => session.transferred_size,
     cell: (session) => (
-      <span className="font-mono text-sm">
+      <span className="tabular-nums">
         {formatBytes(session.transferred_size)}
       </span>
     ),
@@ -156,7 +159,7 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 260,
+    width: 160,
     align: "right",
     fixed: true,
     // The action components render their mutation errors and notices inline
@@ -190,19 +193,23 @@ export function VeeamSessionTable({
 
   if (sessions.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No Proxmox backup runs recorded yet.
-      </p>
+      <Panel>
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No Proxmox backup runs recorded yet.
+        </p>
+      </Panel>
     );
   }
 
   const cellCtx: SessionCtx = { serverId, expanded };
 
   return (
-    <div className="rounded-md border">
-      <div className="flex justify-end px-2 pt-2">
-        <ResetColumnsButton layout={layout} />
-      </div>
+    <Panel
+      flush
+      actions={
+        layout.isCustomized ? <ResetColumnsButton layout={layout} /> : undefined
+      }
+    >
       <DataTableFrame layout={layout}>
         <TableHeader>
           <DataTableHeadRow
@@ -228,7 +235,7 @@ export function VeeamSessionTable({
 
                 {isExpanded && (
                   <ExpandedDetailRow colSpan={layout.columns.length}>
-                    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <DefGrid>
                       <DetailField label="Finished">
                         {formatDateTime(session.end_time)}
                       </DetailField>
@@ -247,7 +254,7 @@ export function VeeamSessionTable({
                       <DetailField label="Read" variant="mono">
                         {formatBytes(session.read_size)}
                       </DetailField>
-                    </dl>
+                    </DefGrid>
 
                     {session.result_message !== "" &&
                       session.result_message !== "Success" && (
@@ -297,6 +304,6 @@ export function VeeamSessionTable({
           })}
         </TableBody>
       </DataTableFrame>
-    </div>
+    </Panel>
   );
 }

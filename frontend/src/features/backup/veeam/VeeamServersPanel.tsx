@@ -1,5 +1,9 @@
 import { useState } from "react";
+import { ServerCog } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Segmented } from "@/components/ui/segmented";
+import { EmptyState } from "@/components/EmptyState";
+import { Panel } from "@/components/page/Panel";
 import { ApiClientError } from "@/lib/api-client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -12,20 +16,19 @@ import {
   useVeeamInfrastructure,
 } from "../api/backup-queries";
 import type { VeeamServer } from "../types/backup";
-import { AddVeeamServerDialog } from "./AddVeeamServerDialog";
 import { EditVeeamServerDialog } from "./EditVeeamServerDialog";
 import { DeleteVeeamServerDialog } from "./DeleteVeeamServerDialog";
 import { VeeamRequirementsNote } from "./VeeamRequirementsNote";
 import { VeeamServerTable } from "./VeeamServerTable";
 import { VeeamJobTable } from "./VeeamJobTable";
 import { VeeamSessionTable } from "./VeeamSessionTable";
-import { VeeamRepositoryCards } from "./VeeamRepositoryCards";
-import { VeeamRepositoryChart } from "./VeeamRepositoryChart";
+import { VeeamRepositoryPanels } from "./VeeamRepositoryPanels";
 import { VeeamPlatformMapping } from "./VeeamPlatformMapping";
 import { VeeamOrphanTable } from "./VeeamOrphanTable";
 import { VeeamServerStatusBadge } from "./VeeamServerStatusBadge";
-import { PROVIDER_FILL_CLASSES } from "../components/provider-accents";
-import { ProviderBadge, ProviderHeader } from "../components/ProviderIdentity";
+import { veeamServerStatus } from "./veeam-server-status";
+import { ProviderHeader } from "../components/ProviderIdentity";
+import { ServerActions } from "../components/ServerActions";
 
 /**
  * Renders a tab's body, distinguishing "still loading", "we could not ask" and
@@ -51,19 +54,21 @@ function VeeamTabBody({
   children: React.ReactNode;
 }) {
   if (query.isLoading) {
-    return <Skeleton className="h-32" />;
+    return <Skeleton className="h-32 rounded-[10px]" />;
   }
   if (query.isError) {
     const status =
       query.error instanceof ApiClientError ? query.error.status : 0;
     return (
-      <p className="py-8 text-center text-sm text-destructive">
-        {status === 403
-          ? `You do not have permission to view ${resource}. This spans every cluster the Veeam server protects, so it requires global Veeam access.`
-          : `Could not load this from Nexara. ${
-              query.error instanceof Error ? query.error.message : ""
-            }`}
-      </p>
+      <Panel>
+        <p className="py-6 text-center text-sm text-destructive">
+          {status === 403
+            ? `You do not have permission to view ${resource}. This spans every cluster the Veeam server protects, so it requires global Veeam access.`
+            : `Could not load this from Nexara. ${
+                query.error instanceof Error ? query.error.message : ""
+              }`}
+        </p>
+      </Panel>
     );
   }
   return <>{children}</>;
@@ -113,36 +118,35 @@ export function VeeamServersPanel() {
 
   if (serversQuery.isLoading) {
     return (
-      <div className="space-y-3">
-        <Skeleton className="h-10" />
-        <Skeleton className="h-24" />
+      <div className="space-y-4">
+        <Skeleton className="h-7 w-72" />
+        <Skeleton className="h-9 w-full max-w-xl" />
+        <Skeleton className="h-40 w-full rounded-[10px]" />
       </div>
     );
   }
 
   if (serversQuery.isError) {
     return (
-      <p className="text-sm text-destructive">
-        Failed to load Veeam servers.{" "}
-        {serversQuery.error instanceof Error ? serversQuery.error.message : ""}
-      </p>
+      <Panel>
+        <p className="text-sm text-destructive">
+          Failed to load Veeam servers.{" "}
+          {serversQuery.error instanceof Error
+            ? serversQuery.error.message
+            : ""}
+        </p>
+      </Panel>
     );
   }
 
   if (servers.length === 0) {
     return (
       <div className="space-y-4">
-        <div className="rounded-md border bg-muted/50 px-6 py-12 text-center">
-          <div className="mb-3 flex justify-center">
-            <ProviderBadge provider="veeam" size="lg" />
-          </div>
-          <h2 className="text-lg font-medium">No Veeam Servers</h2>
-          <p className="mx-auto mt-1 mb-4 max-w-lg text-sm text-muted-foreground">
-            Connect a Veeam Backup &amp; Replication server to see the state of
-            its Proxmox backup jobs alongside your clusters.
-          </p>
-          <AddVeeamServerDialog />
-        </div>
+        <EmptyState
+          icon={ServerCog}
+          title="No Veeam servers yet"
+          description="Connect a Veeam Backup & Replication server to see the state of its Proxmox backup jobs alongside your clusters."
+        />
         <VeeamRequirementsNote />
       </div>
     );
@@ -150,61 +154,75 @@ export function VeeamServersPanel() {
 
   return (
     <div className="space-y-4">
-      {/* Says which product's state the tables below belong to. The tab label
-          used to be the only thing that did, and it scrolls out of view on a
-          narrow viewport. */}
-      <ProviderHeader
-        provider="veeam"
-        title="Veeam Backup & Replication"
-        subtitle={
-          activeServer != null
-            ? [
-                activeServer.base_url,
-                activeServer.product_version !== ""
-                  ? `v${activeServer.product_version}`
-                  : null,
-                activeServer.license_edition !== ""
-                  ? activeServer.license_edition
-                  : null,
-              ]
-                .filter((part): part is string => part != null && part !== "")
-                .join(" · ")
-            : ""
-        }
-        status={
-          activeServer != null && (
-            <VeeamServerStatusBadge server={activeServer} />
-          )
-        }
-        actions={<AddVeeamServerDialog />}
-      />
-
-      {servers.length > 1 && (
-        <div className="flex flex-wrap gap-2">
-          {servers.map((server) => (
-            <button
-              key={server.id}
-              aria-pressed={activeServerId === server.id}
-              onClick={() => {
-                setSelectedServerId(server.id);
+      {/* Says which server's state the tables below belong to: the tab strip
+          above only names the product, and it scrolls out of view on a narrow
+          viewport. */}
+      {activeServer != null && (
+        <ProviderHeader
+          provider="veeam"
+          product="Veeam Backup & Replication"
+          name={activeServer.name}
+          address={activeServer.base_url}
+          facts={[
+            activeServer.product_version !== ""
+              ? `v${activeServer.product_version}`
+              : "",
+            activeServer.license_edition,
+          ]}
+          status={<VeeamServerStatusBadge server={activeServer} />}
+          switcher={
+            servers.length > 1 ? (
+              <Segmented
+                aria-label="Veeam server"
+                value={activeServerId}
+                onValueChange={setSelectedServerId}
+                options={servers.map((server) => ({
+                  value: server.id,
+                  label:
+                    veeamServerStatus(server) === "Error" ? (
+                      // A server that is failing says so on its segment: the
+                      // line above only speaks for the one selected.
+                      <>
+                        <span
+                          aria-hidden="true"
+                          className="h-1.5 w-1.5 rounded-full bg-red-500"
+                        />
+                        {server.name}
+                      </>
+                    ) : (
+                      server.name
+                    ),
+                  title:
+                    veeamServerStatus(server) === "Error"
+                      ? `${server.name}: the last sync failed`
+                      : undefined,
+                }))}
+              />
+            ) : undefined
+          }
+          actions={
+            <ServerActions
+              name={activeServer.name}
+              onEdit={() => {
+                setEditTarget(activeServer);
               }}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeServerId === server.id
-                  ? PROVIDER_FILL_CLASSES.veeam
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              {server.name}
-            </button>
-          ))}
-        </div>
+              onDelete={() => {
+                setDeleteTarget(activeServer);
+              }}
+            />
+          }
+        />
       )}
 
-      <VeeamServerTable
-        servers={servers}
-        onEdit={setEditTarget}
-        onDelete={setDeleteTarget}
-      />
+      {/* The reason a server is in Error, where it is seen without opening
+          the Servers tab. */}
+      {activeServer != null &&
+        activeServer.enabled &&
+        activeServer.last_sync_error !== "" && (
+          <p className="text-sm text-destructive">
+            Last sync failed: {activeServer.last_sync_error}
+          </p>
+        )}
 
       {activeServerId !== "" && (
         <Tabs defaultValue="jobs">
@@ -217,13 +235,16 @@ export function VeeamServersPanel() {
             <TabsTrigger value="clusters">
               Clusters
               {unmappedCount > 0 && (
-                <span className="ml-1.5 rounded-full bg-amber-500/20 px-1.5 text-xs text-amber-600 dark:text-amber-400">
+                <span className="ml-1.5 rounded-full bg-amber-500/20 px-1.5 text-xs text-amber-700 dark:text-amber-400">
                   {unmappedCount}
                 </span>
               )}
             </TabsTrigger>
             <TabsTrigger value="orphans">
               Orphaned ({orphans.length})
+            </TabsTrigger>
+            <TabsTrigger value="servers">
+              Servers ({servers.length})
             </TabsTrigger>
           </TabsList>
 
@@ -267,15 +288,21 @@ export function VeeamServersPanel() {
 
           <TabsContent value="repositories" className="space-y-4">
             <VeeamTabBody query={reposQuery} resource="repositories">
-              <VeeamRepositoryCards repositories={repositories} />
-              {repositories.map((repo) => (
-                <VeeamRepositoryChart
-                  key={repo.id}
-                  serverId={activeServerId}
-                  repository={repo}
-                />
-              ))}
+              <VeeamRepositoryPanels
+                serverId={activeServerId}
+                repositories={repositories}
+              />
             </VeeamTabBody>
+          </TabsContent>
+
+          {/* Every registered server, whichever is selected above: where a
+              connection is tested and its details are read. */}
+          <TabsContent value="servers" className="space-y-4">
+            <VeeamServerTable
+              servers={servers}
+              onEdit={setEditTarget}
+              onDelete={setDeleteTarget}
+            />
           </TabsContent>
         </Tabs>
       )}

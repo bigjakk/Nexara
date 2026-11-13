@@ -1,6 +1,5 @@
 import { Fragment, useState } from "react";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pencil, PlugZap, Trash2 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
@@ -13,6 +12,7 @@ import { DataTableCells } from "@/components/DataTableCells";
 import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { DefGrid, Panel } from "@/components/page/Panel";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { backupHistories } from "@/features/history/lib/backup-histories";
@@ -30,8 +30,6 @@ interface VeeamServerTableProps {
   onEdit: (server: VeeamServer) => void;
   onDelete: (server: VeeamServer) => void;
 }
-
-const REQUIRED_EDITION = "EnterprisePlus";
 
 type ServerSortKey =
   | "expand"
@@ -142,7 +140,9 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
     // row is even about.
     wrap: true,
     cell: (server) => (
-      <span className="font-mono text-xs break-all">{server.base_url}</span>
+      <span className="break-all font-mono text-[12.5px] text-muted-foreground">
+        {server.base_url}
+      </span>
     ),
   },
   {
@@ -151,7 +151,7 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
     width: 140,
     sortValue: (server) => server.product_version || null,
     cell: (server) => (
-      <span className="font-mono text-sm">{server.product_version || "-"}</span>
+      <span className="tabular-nums">{server.product_version || "-"}</span>
     ),
   },
   {
@@ -163,15 +163,7 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
       server.license_edition === "" ? (
         <span className="text-muted-foreground">-</span>
       ) : (
-        <Badge
-          variant={
-            server.license_edition === REQUIRED_EDITION
-              ? "default"
-              : "secondary"
-          }
-        >
-          {server.license_edition}
-        </Badge>
+        server.license_edition
       ),
   },
   {
@@ -179,7 +171,7 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
     label: "Status",
     width: 130,
     sortValue: (server) => STATUS_RANK[veeamServerStatus(server)],
-    cell: (server) => <VeeamServerStatusBadge server={server} />,
+    cell: (server) => <VeeamServerStatusBadge server={server} plain />,
   },
   {
     key: "actions",
@@ -288,10 +280,12 @@ export function VeeamServerTable({
   }
 
   return (
-    <div className="rounded-md border">
-      <div className="flex justify-end px-2 pt-2">
-        <ResetColumnsButton layout={layout} />
-      </div>
+    <Panel
+      flush
+      actions={
+        layout.isCustomized ? <ResetColumnsButton layout={layout} /> : undefined
+      }
+    >
       <DataTableFrame layout={layout}>
         <TableHeader>
           <DataTableHeadRow
@@ -322,7 +316,7 @@ export function VeeamServerTable({
                     colSpan={layout.columns.length}
                     spacing="space-y-4"
                   >
-                    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                    <DefGrid>
                       {/* Withheld from read-only callers: it is half of a
                           domain administrator credential. */}
                       <DetailField
@@ -330,7 +324,7 @@ export function VeeamServerTable({
                         variant={server.username === "" ? "muted" : "mono"}
                       >
                         {server.username === ""
-                          ? "Hidden — requires manage:veeam"
+                          ? "Hidden: requires manage:veeam"
                           : server.username}
                       </DetailField>
                       <DetailField label="API revision" variant="mono">
@@ -349,7 +343,7 @@ export function VeeamServerTable({
                       <DetailField label="Added">
                         {formatDateTime(server.created_at, "Never")}
                       </DetailField>
-                    </dl>
+                    </DefGrid>
 
                     {server.tls_fingerprint !== "" && (
                       <div>
@@ -382,6 +376,6 @@ export function VeeamServerTable({
           })}
         </TableBody>
       </DataTableFrame>
-    </div>
+    </Panel>
   );
 }

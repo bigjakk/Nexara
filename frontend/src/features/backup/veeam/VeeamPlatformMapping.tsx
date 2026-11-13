@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { AlertTriangle, Link2, Server } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -15,13 +14,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Panel } from "@/components/page/Panel";
+import { WarningCallout } from "@/components/WarningCallout";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { ClusterResponse } from "@/types/api";
 import { useMapVeeamPlatform } from "../api/backup-queries";
 import type { VeeamPlatform, VeeamInfrastructureGuest } from "../types/backup";
+import { StateText } from "../components/StateText";
 
 /** Sentinel for "not mapped": Radix Select cannot hold an empty-string value. */
 const UNMAPPED = "__unmapped__";
@@ -59,27 +60,28 @@ export function VeeamPlatformMapping({
 
   if (platforms.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No Proxmox connections seen yet. They appear once the collector has read
-        this server&apos;s backup objects.
-      </p>
+      <Panel>
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No Proxmox connections seen yet. They appear once the collector has
+          read this server&apos;s backup objects.
+        </p>
+      </Panel>
     );
   }
 
   return (
     <div className="space-y-4">
       {unmapped.length > 0 && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-          <p className="text-xs text-amber-600 dark:text-amber-400">
+        <WarningCallout>
+          <p>
             {unmapped.length === 1
               ? "One connection is not mapped to a cluster. Its backups cannot be matched to guests, they are missing from backup coverage, and only administrators with global Veeam access can see them at all."
               : `${String(unmapped.length)} connections are not mapped to a cluster. Their backups cannot be matched to guests, they are missing from backup coverage, and only administrators with global Veeam access can see them at all.`}
           </p>
-        </div>
+        </WarningCallout>
       )}
 
-      <div className="rounded-md border">
+      <Panel flush title="Proxmox connections">
         <Table>
           <TableHeader>
             <TableRow>
@@ -100,7 +102,7 @@ export function VeeamPlatformMapping({
                 <TableCell className="font-mono text-xs text-muted-foreground">
                   {platform.platform_id}
                 </TableCell>
-                <TableCell className="text-right font-mono text-sm">
+                <TableCell className="text-right tabular-nums">
                   {platform.object_count}
                 </TableCell>
                 <TableCell>
@@ -157,10 +159,7 @@ export function VeeamPlatformMapping({
                       </SelectContent>
                     </Select>
                     {platform.cluster_id !== null && (
-                      <Badge variant="outline" className="gap-1 text-xs">
-                        <Link2 className="h-3 w-3" />
-                        Mapped
-                      </Badge>
+                      <StateText tone="ok">Mapped</StateText>
                     )}
                   </div>
                 </TableCell>
@@ -168,7 +167,7 @@ export function VeeamPlatformMapping({
             ))}
           </TableBody>
         </Table>
-      </div>
+      </Panel>
 
       {mapPlatform.isError && (
         <p className="text-sm text-destructive">
@@ -202,52 +201,44 @@ function VeeamOwnGuests({
     return null;
   }
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Server className="h-4 w-4 text-muted-foreground" />
-        <h4 className="text-sm font-medium">Veeam&apos;s own guests</h4>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Excluded from backup coverage, and — unless you turn that off in DRS —
-        never migrated.
-      </p>
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name in Veeam</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Matched guest</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {infrastructure.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="font-medium">{row.name}</TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="text-xs">
-                    {row.role === "backup_server" ? "Backup server" : "Worker"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-sm">
-                  {row.vmid === null ? (
-                    <span className="text-muted-foreground">
-                      No guest on a mapped cluster
+    <Panel
+      flush
+      title="Veeam's own guests"
+      aside="Excluded from backup coverage and, unless you turn that off in DRS, never migrated."
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Name in Veeam</TableHead>
+            <TableHead>Role</TableHead>
+            <TableHead>Matched guest</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {infrastructure.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell className="font-medium">{row.name}</TableCell>
+              <TableCell>
+                {row.role === "backup_server" ? "Backup server" : "Worker"}
+              </TableCell>
+              <TableCell>
+                {row.vmid === null ? (
+                  <span className="text-muted-foreground">
+                    No guest on a mapped cluster
+                  </span>
+                ) : (
+                  <>
+                    {row.guest_name || row.name}{" "}
+                    <span className="font-mono text-xs text-muted-foreground">
+                      ({row.cluster_name} #{row.vmid})
                     </span>
-                  ) : (
-                    <>
-                      {row.guest_name || row.name}{" "}
-                      <span className="font-mono text-xs text-muted-foreground">
-                        ({row.cluster_name} #{row.vmid})
-                      </span>
-                    </>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+                  </>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Panel>
   );
 }

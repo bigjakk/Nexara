@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Table,
   TableBody,
@@ -7,7 +7,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,6 +20,10 @@ import {
   X,
   Loader2,
 } from "lucide-react";
+import { DetailField } from "@/components/DetailField";
+import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
+import { DefGrid, Panel } from "@/components/page/Panel";
+import { StateText } from "./StateText";
 import type { PBSSnapshot } from "../types/backup";
 import { RestoreDialog } from "./RestoreDialog";
 import { DeleteSnapshotDialog } from "./DeleteSnapshotDialog";
@@ -60,9 +63,11 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
 
   if (snapshots.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No snapshots found.
-      </p>
+      <Panel>
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No snapshots found.
+        </p>
+      </Panel>
     );
   }
 
@@ -149,20 +154,21 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
 
   return (
     <>
-      <div className="rounded-md border">
+      <Panel flush>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>Type</TableHead>
-              <TableHead>Backup ID</TableHead>
+              <TableHead>Backup</TableHead>
               <TableHead>Datastore</TableHead>
-              <TableHead>Time</TableHead>
+              <TableHead>Taken</TableHead>
               <TableHead className="text-right">Size</TableHead>
               <TableHead>Verified</TableHead>
               <TableHead>Protected</TableHead>
               <TableHead>Owner</TableHead>
-              <TableHead className="w-32" />
+              <TableHead className="w-32">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -172,63 +178,58 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
               const isEditingThis = editingComment === key;
 
               return (
-                <>
+                <Fragment key={key}>
                   <TableRow
-                    key={key}
                     className="cursor-pointer"
                     onClick={() => {
                       toggleExpand(key);
                     }}
                   >
-                    <TableCell className="px-2">
+                    <TableCell className="pr-0 text-muted-foreground">
                       {isExpanded ? (
                         <ChevronDown className="h-4 w-4" />
                       ) : (
                         <ChevronRight className="h-4 w-4" />
                       )}
                     </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          snap.backup_type === "vm" ? "default" : "secondary"
-                        }
-                      >
+                    <TableCell className="whitespace-nowrap">
+                      <span className="text-muted-foreground">
                         {snap.backup_type.toUpperCase()}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {snap.backup_id}
+                      </span>{" "}
+                      <span className="font-mono font-medium">
+                        {snap.backup_id}
+                      </span>
                     </TableCell>
                     <TableCell>{snap.datastore}</TableCell>
-                    <TableCell className="text-sm">
+                    <TableCell className="whitespace-nowrap">
                       {formatUnixTime(snap.backup_time)}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
                       {formatBytes(snap.size)}
                     </TableCell>
                     <TableCell>
                       {snap.verified ? (
-                        <Badge variant="healthy">Yes</Badge>
+                        <StateText tone="ok">Verified</StateText>
                       ) : (
-                        <Badge variant="secondary">No</Badge>
+                        <StateText tone="idle">Not verified</StateText>
                       )}
                     </TableCell>
                     <TableCell>
                       {isProtected(snap) ? (
-                        <Badge variant="default">
-                          <ShieldCheck className="mr-1 h-3 w-3" />
+                        <span className="inline-flex items-center gap-1.5">
+                          <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
                           Protected
-                        </Badge>
+                        </span>
                       ) : (
                         <span className="text-muted-foreground">No</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {snap.owner || "-"}
                     </TableCell>
                     <TableCell>
                       <div
-                        className="flex items-center gap-1"
+                        className="flex items-center justify-end gap-0.5"
                         onClick={(e) => {
                           e.stopPropagation();
                         }}
@@ -269,122 +270,101 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                     </TableCell>
                   </TableRow>
                   {isExpanded && (
-                    <TableRow key={`${key}-detail`}>
-                      <TableCell colSpan={10} className="bg-muted/30 px-8 py-4">
-                        <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm md:grid-cols-4">
-                          <div>
-                            <span className="text-muted-foreground">
-                              Owner:
-                            </span>{" "}
-                            {snap.owner || "-"}
+                    <ExpandedDetailRow colSpan={9}>
+                      <DefGrid>
+                        <DetailField label="Backup time">
+                          {formatUnixTime(snap.backup_time)}
+                        </DetailField>
+                        <DetailField label="Last seen">
+                          {snap.last_seen_at
+                            ? new Date(snap.last_seen_at).toLocaleString()
+                            : "-"}
+                        </DetailField>
+                        <DetailField label="Size">
+                          {formatBytes(snap.size)}
+                        </DetailField>
+                        <DetailField label="Owner">
+                          {snap.owner || "-"}
+                        </DetailField>
+                        <DetailField label="Verified">
+                          {snap.verified ? "Yes" : "No"}
+                        </DetailField>
+                        <DetailField label="Protected">
+                          {isProtected(snap) ? "Yes" : "No"}
+                        </DetailField>
+                      </DefGrid>
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="text-muted-foreground">Comment</span>
+                        {isEditingThis ? (
+                          <div
+                            className="flex items-center gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
+                          >
+                            <Input
+                              className="h-7 w-64 max-w-full text-sm"
+                              value={commentValue}
+                              onChange={(e) => {
+                                setCommentValue(e.target.value);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveComment(snap);
+                                if (e.key === "Escape") setEditingComment(null);
+                              }}
+                              autoFocus
+                            />
+                            <Button
+                              aria-label={`Save comment for ${snap.backup_type}/${snap.backup_id}`}
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                saveComment(snap);
+                              }}
+                              disabled={notesMutation.isPending}
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              aria-label="Cancel editing comment"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setEditingComment(null);
+                              }}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              Protected:
-                            </span>{" "}
-                            {isProtected(snap) ? "Yes" : "No"}
+                        ) : (
+                          <div
+                            className="flex items-center gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
+                          >
+                            <span>{snap.comment || "-"}</span>
+                            <Button
+                              aria-label={`Edit comment for ${snapKey(snap)}`}
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                startEditComment(snap);
+                              }}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              Verified:
-                            </span>{" "}
-                            {snap.verified ? "Yes" : "No"}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Size:</span>{" "}
-                            {formatBytes(snap.size)}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              Backup Time:
-                            </span>{" "}
-                            {formatUnixTime(snap.backup_time)}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              Last Seen:
-                            </span>{" "}
-                            {snap.last_seen_at
-                              ? new Date(snap.last_seen_at).toLocaleString()
-                              : "-"}
-                          </div>
-                          <div className="col-span-2 flex items-center gap-2">
-                            <span className="text-muted-foreground">
-                              Comment:
-                            </span>
-                            {isEditingThis ? (
-                              <div
-                                className="flex items-center gap-1"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                }}
-                              >
-                                <Input
-                                  className="h-7 w-48 text-sm"
-                                  value={commentValue}
-                                  onChange={(e) => {
-                                    setCommentValue(e.target.value);
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") saveComment(snap);
-                                    if (e.key === "Escape")
-                                      setEditingComment(null);
-                                  }}
-                                  autoFocus
-                                />
-                                <Button
-                                  aria-label={`Save comment for ${snap.backup_type}/${snap.backup_id}`}
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    saveComment(snap);
-                                  }}
-                                  disabled={notesMutation.isPending}
-                                >
-                                  <Check className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  aria-label="Cancel editing comment"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setEditingComment(null);
-                                  }}
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <div
-                                className="flex items-center gap-1"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                }}
-                              >
-                                <span>{snap.comment || "-"}</span>
-                                <Button
-                                  aria-label={`Edit comment for ${snapKey(snap)}`}
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    startEditComment(snap);
-                                  }}
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                        )}
+                      </div>
+                    </ExpandedDetailRow>
                   )}
-                </>
+                </Fragment>
               );
             })}
           </TableBody>
         </Table>
-      </div>
+      </Panel>
       {deleteTarget && (
         <DeleteSnapshotDialog
           snapshot={deleteTarget}

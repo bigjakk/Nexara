@@ -6,17 +6,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
 import { Play } from "lucide-react";
 import { useRunVerifyJob } from "../api/backup-queries";
 import type { PBSVerifyJob } from "../types/backup";
-
-function stateVariant(state: string): "default" | "secondary" | "destructive" {
-  if (state === "ok") return "default";
-  if (state === "error") return "destructive";
-  return "secondary";
-}
+import { RunState } from "./StateText";
 
 interface VerifyJobTableProps {
   jobs: PBSVerifyJob[];
@@ -28,42 +23,43 @@ export function VerifyJobTable({ jobs, pbsId }: VerifyJobTableProps) {
 
   if (jobs.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No verify jobs configured.
-      </p>
+      <Panel>
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No verify jobs configured.
+        </p>
+      </Panel>
     );
   }
 
   return (
-    <div className="rounded-md border">
+    <Panel flush>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Job ID</TableHead>
-            <TableHead>Store</TableHead>
+            <TableHead>Job</TableHead>
+            <TableHead>Datastore</TableHead>
             <TableHead>Schedule</TableHead>
-            <TableHead>Last Run</TableHead>
-            <TableHead className="w-20">Actions</TableHead>
+            <TableHead>Last run</TableHead>
+            <TableHead className="w-12">
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {jobs.map((job) => (
             <TableRow key={job.job_id}>
-              <TableCell className="font-mono text-sm">{job.job_id}</TableCell>
+              <TableCell className="font-mono font-medium">
+                {job.job_id}
+              </TableCell>
               <TableCell>{job.store}</TableCell>
-              <TableCell className="text-sm">{job.schedule || "-"}</TableCell>
+              <TableCell>{job.schedule || "-"}</TableCell>
               <TableCell>
-                {job.last_run_state ? (
-                  <Badge variant={stateVariant(job.last_run_state)}>
-                    {job.last_run_state}
-                  </Badge>
-                ) : (
-                  <span className="text-muted-foreground">-</span>
-                )}
+                <RunState state={job.last_run_state} />
               </TableCell>
               <TableCell>
                 <Button
                   aria-label={`Run verify job ${job.job_id}`}
+                  title="Run now"
                   variant="ghost"
                   size="sm"
                   onClick={() => {
@@ -78,6 +74,6 @@ export function VerifyJobTable({ jobs, pbsId }: VerifyJobTableProps) {
           ))}
         </TableBody>
       </Table>
-    </div>
+    </Panel>
   );
 }

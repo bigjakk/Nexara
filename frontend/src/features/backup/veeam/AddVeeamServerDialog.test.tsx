@@ -48,7 +48,7 @@ describe("AddVeeamServerDialog", () => {
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
     expect(
-      await screen.findByText("Self-Signed Certificate"),
+      await screen.findByText("Self-signed certificate"),
     ).toBeInTheDocument();
     expect(screen.getByText("AA:BB:CC:DD")).toBeInTheDocument();
 
@@ -66,7 +66,7 @@ describe("AddVeeamServerDialog", () => {
     const user = await openAndFill("https://vbr.example.com:9419");
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
-    expect(await screen.findByText("Trusted Certificate")).toBeInTheDocument();
+    expect(await screen.findByText("Trusted certificate")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /add server/i })).toBeEnabled();
     expect(
       screen.queryByLabelText(/I have verified this fingerprint/i),
@@ -103,7 +103,7 @@ describe("AddVeeamServerDialog", () => {
 
     expect(screen.queryByText("AA:BB:CC:DD")).not.toBeInTheDocument();
     expect(
-      screen.queryByText("Self-Signed Certificate"),
+      screen.queryByText("Self-signed certificate"),
     ).not.toBeInTheDocument();
   });
 });

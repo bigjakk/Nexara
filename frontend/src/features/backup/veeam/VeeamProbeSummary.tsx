@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DetailField } from "@/components/DetailField";
+import { DefGrid } from "@/components/page/Panel";
 import type { VeeamProbeResult } from "../types/backup";
 
 interface VeeamProbeSummaryProps {
@@ -25,13 +26,13 @@ function formatDate(value: string): string {
  */
 export function VeeamProbeSummary({ probe }: VeeamProbeSummaryProps) {
   return (
-    <div className="space-y-3 rounded-md border bg-background p-3">
+    <div className="space-y-3 border-t pt-3">
       <div className="flex items-center gap-2 text-sm font-medium">
         <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-500" />
         Connected to {probe.server_name || "the Veeam server"}
       </div>
 
-      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+      <DefGrid>
         <DetailField label="Build" variant="mono">
           {probe.build_version}
         </DetailField>
@@ -49,7 +50,7 @@ export function VeeamProbeSummary({ probe }: VeeamProbeSummaryProps) {
         <DetailField label="Expires">
           {formatDate(probe.license_expiration)}
         </DetailField>
-      </dl>
+      </DefGrid>
 
       <div>
         <p className="mb-1 text-xs text-muted-foreground">
@@ -74,7 +75,7 @@ export function VeeamProbeSummary({ probe }: VeeamProbeSummaryProps) {
           {probe.warnings.map((warning) => (
             <li
               key={warning}
-              className="flex gap-2 text-sm text-amber-600 dark:text-amber-500"
+              className="flex gap-2 text-sm text-amber-700 dark:text-amber-400"
             >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{warning}</span>

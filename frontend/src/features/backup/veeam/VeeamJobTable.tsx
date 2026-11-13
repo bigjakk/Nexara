@@ -1,6 +1,5 @@
 import { Fragment } from "react";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
@@ -11,11 +10,14 @@ import { DataTableCells } from "@/components/DataTableCells";
 import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { DefGrid, Panel } from "@/components/page/Panel";
+import { UsageBar } from "@/components/UsageBar";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
+import { StateText } from "../components/StateText";
 import {
   bottleneckLabel,
   processingRateLabel,
-  resultVariant,
+  resultTone,
 } from "./veeam-format";
 import { VeeamJobActions } from "./VeeamJobActions";
 import { VeeamLiveRunRows } from "./VeeamLiveRunRows";
@@ -125,29 +127,25 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
       // a run is in flight.
       const measured = job.status === "Running";
       if (!isRunning(job)) {
-        return <Badge variant="secondary">{job.status || "-"}</Badge>;
+        return job.status === "Disabled" ? (
+          <StateText tone="idle">Disabled</StateText>
+        ) : (
+          <span className="text-muted-foreground">{job.status || "-"}</span>
+        );
       }
       return (
-        <div className="flex items-center gap-2">
-          <Badge variant="default">Running</Badge>
+        <div className="flex items-center gap-2.5">
+          <StateText tone="running">Running</StateText>
           {/* The bar renders ONLY when Veeam itself reports the job as
               running, because progress_percent is refreshed by the same
               inventory pass that sets status. For a run derived from a live
               session that number is the PREVIOUS run's — normally 100 — so
               drawing it would show a backup that started seconds ago as
-              finished. A badge with no bar says "running, progress not
+              finished. The word with no bar says "running, progress not
               measured yet", which is the truth. */}
           {measured && (
-            <div
-              data-testid="job-progress"
-              className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted"
-            >
-              <div
-                className="h-full rounded-full bg-data transition-all"
-                style={{
-                  width: `${String(Math.min(Math.max(job.progress_percent, 0), 100))}%`,
-                }}
-              />
+            <div data-testid="job-progress" className="w-16 shrink-0">
+              <UsageBar percent={job.progress_percent} thresholds={false} />
             </div>
           )}
         </div>
@@ -156,8 +154,8 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
   },
   {
     key: "result",
-    label: "Last Result",
-    width: 170,
+    label: "Last result",
+    width: 160,
     sortValue: (job) =>
       job.last_result === ""
         ? null
@@ -166,42 +164,36 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
       job.last_result === "" ? (
         <span className="text-muted-foreground">-</span>
       ) : (
-        <Badge variant={resultVariant(job.last_result)}>
+        <StateText tone={resultTone(job.last_result)}>
           {resultLabel(job.last_result)}
-        </Badge>
+        </StateText>
       ),
   },
   {
     key: "lastRun",
-    label: "Last Run",
-    width: 180,
+    label: "Last run",
+    width: 170,
     sortValue: (job) => toEpoch(job.last_run),
-    cell: (job) => (
-      <span className="text-sm">{formatDateTime(job.last_run, "Never")}</span>
-    ),
+    cell: (job) => formatDateTime(job.last_run, "Never"),
   },
   {
     key: "nextRun",
-    label: "Next Run",
-    width: 180,
+    label: "Next run",
+    width: 170,
     sortValue: (job) => toEpoch(job.next_run),
-    cell: (job) => (
-      <span className="text-sm">{formatDateTime(job.next_run, "Never")}</span>
-    ),
+    cell: (job) => formatDateTime(job.next_run, "Never"),
   },
   {
     key: "repository",
     label: "Repository",
-    width: 180,
+    width: 150,
     sortValue: (job) => job.repository_name || null,
-    cell: (job) => (
-      <span className="text-sm">{job.repository_name || "-"}</span>
-    ),
+    cell: (job) => job.repository_name || "-",
   },
   {
     key: "guests",
     label: "Guests",
-    width: 90,
+    width: 80,
     align: "right",
     sortValue: (job) => job.objects_count,
     cell: (job) => job.objects_count,
@@ -209,7 +201,7 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
   {
     key: "actions",
     label: "Actions",
-    width: 260,
+    width: 180,
     align: "right",
     fixed: true,
     // The action components render their mutation errors and notices inline
@@ -248,19 +240,23 @@ export function VeeamJobTable({ jobs, serverId }: VeeamJobTableProps) {
 
   if (jobs.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No Proxmox backup jobs found on this server.
-      </p>
+      <Panel>
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No Proxmox backup jobs found on this server.
+        </p>
+      </Panel>
     );
   }
 
   const cellCtx: JobCtx = { serverId, expanded };
 
   return (
-    <div className="rounded-md border">
-      <div className="flex justify-end px-2 pt-2">
-        <ResetColumnsButton layout={layout} />
-      </div>
+    <Panel
+      flush
+      actions={
+        layout.isCustomized ? <ResetColumnsButton layout={layout} /> : undefined
+      }
+    >
       <DataTableFrame layout={layout}>
         <TableHeader>
           <DataTableHeadRow
@@ -291,7 +287,7 @@ export function VeeamJobTable({ jobs, serverId }: VeeamJobTableProps) {
                         {job.description}
                       </p>
                     )}
-                    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <DefGrid>
                       <DetailField label="Bottleneck">
                         {bottleneckLabel(job.bottleneck)}
                       </DetailField>
@@ -314,7 +310,7 @@ export function VeeamJobTable({ jobs, serverId }: VeeamJobTableProps) {
                         {formatBytes(job.transferred_size)}
                       </DetailField>
                       <DetailField label="Job type">{job.job_type}</DetailField>
-                    </dl>
+                    </DefGrid>
                     {/* Which guests the job's latest run processed, and
                         which failed — the question a job-level "Failed" raises
                         and cannot answer.
@@ -348,6 +344,6 @@ export function VeeamJobTable({ jobs, serverId }: VeeamJobTableProps) {
           })}
         </TableBody>
       </DataTableFrame>
-    </div>
+    </Panel>
   );
 }

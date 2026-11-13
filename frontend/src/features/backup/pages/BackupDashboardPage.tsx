@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { Shield, Pencil, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { DatabaseBackup, ServerOff } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Segmented } from "@/components/ui/segmented";
+import { EmptyState } from "@/components/EmptyState";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
 import { ApiClientError } from "@/lib/api-client";
 import {
   usePBSServers,
@@ -12,9 +15,11 @@ import {
   usePBSVerifyJobs,
   usePBSTasks,
   useBackupJobs,
+  useBackupCoverage,
+  useVeeamServers,
 } from "../api/backup-queries";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { DatastoreCards } from "../components/DatastoreCards";
+import { DatastoreOverview } from "../components/DatastoreOverview";
 import { SnapshotTable } from "../components/SnapshotTable";
 import { SyncJobTable } from "../components/SyncJobTable";
 import { VerifyJobTable } from "../components/VerifyJobTable";
@@ -22,29 +27,66 @@ import { PBSTaskTable } from "../components/PBSTaskTable";
 import { PBSHistoryTabContent } from "../components/PBSHistoryTab";
 import { HistoryTabTrigger } from "@/features/history/components/HistoryTab";
 import { backupHistories } from "@/features/history/lib/backup-histories";
-import { GCDialog } from "../components/GCDialog";
-import { PruneDialog } from "../components/PruneDialog";
-import { DatastoreChart } from "../components/DatastoreChart";
 import { AddPBSServerDialog } from "../components/AddPBSServerDialog";
 import { EditPBSServerDialog } from "../components/EditPBSServerDialog";
 import { DeletePBSServerDialog } from "../components/DeletePBSServerDialog";
 import { BackupJobTable } from "../components/BackupJobTable";
 import { BackupJobDialog } from "../components/BackupJobDialog";
-import { DatastoreIOChart } from "../components/DatastoreIOChart";
-import { DatastoreConfigCard } from "../components/DatastoreConfigCard";
-import { CapacityForecastChart } from "../components/CapacityForecastChart";
 import { BackupCoverageReport } from "../components/BackupCoverageReport";
+import { ServerActions } from "../components/ServerActions";
 import { VeeamServersPanel } from "../veeam/VeeamServersPanel";
+import { AddVeeamServerDialog } from "../veeam/AddVeeamServerDialog";
 import { Badge } from "@/components/ui/badge";
-import { PROVIDER_FILL_CLASSES } from "../components/provider-accents";
 import {
-  ProviderBadge,
   ProviderHeader,
   ProviderTabLabel,
   ProviderTrademarkNote,
 } from "../components/ProviderIdentity";
+import {
+  coverageStats,
+  coverageSummaryLine,
+  pbsSummaryLine,
+  veeamSummaryLine,
+} from "../lib/backup-summary";
+
+type ProviderTab = "pbs" | "veeam" | "coverage";
+
+const PBS_PURPOSE =
+  "Datastores, snapshots and jobs on your Proxmox Backup Servers";
+const VEEAM_PURPOSE =
+  "Proxmox backup jobs on your Veeam Backup & Replication servers";
+const COVERAGE_PURPOSE =
+  "Which guests are backed up, by which provider, and which are not";
+
+/**
+ * The header's sentence while the Veeam tab is open. A component of its own
+ * so the servers are read only then, as the tab's panel reads them.
+ */
+function VeeamSummary() {
+  const { data } = useVeeamServers();
+  return <>{(data && veeamSummaryLine(data)) ?? VEEAM_PURPOSE}</>;
+}
+
+/** The header's sentence while the Coverage tab is open. */
+function CoverageSummary() {
+  const { data } = useBackupCoverage();
+  return (
+    <>{data ? coverageSummaryLine(coverageStats(data)) : COVERAGE_PURPOSE}</>
+  );
+}
+
+/**
+ * The header's Add button on the Veeam tab. Offered once the registry has
+ * been read, as it always was: a caller who cannot list the servers cannot
+ * add one either.
+ */
+function AddVeeamServerAction() {
+  const { isSuccess } = useVeeamServers();
+  return isSuccess ? <AddVeeamServerDialog /> : null;
+}
 
 export function BackupDashboardPage() {
+  const [providerTab, setProviderTab] = useState<ProviderTab>("pbs");
   const serversQuery = usePBSServers();
   const servers = serversQuery.data ?? [];
   const [selectedServerId, setSelectedServerId] = useState<string>("");
@@ -55,8 +97,8 @@ export function BackupDashboardPage() {
   // VeeamServersPanel carries. A bare `selectedServerId || servers[0]` keeps
   // pointing at a server that has just been deleted, because the stale id is
   // still non-empty: every query then targets a 404, no switcher button is
-  // highlighted, and the whole provider header (including the Delete button
-  // that caused it) disappears, with no way back but a reload.
+  // highlighted, and the whole server line (including the Delete item that
+  // caused it) disappears, with no way back but a reload.
   const selectionIsLive = servers.some((srv) => srv.id === selectedServerId);
   const activeServerId = selectionIsLive
     ? selectedServerId
@@ -96,13 +138,13 @@ export function BackupDashboardPage() {
     dsStatusQuery.error.status === 404;
 
   /**
-   * The header badge for the selected PBS server.
+   * The state of the selected PBS server, on its line.
    *
    * Deliberately narrower than "the status query failed". `isNotFound` is a
    * 404 — the server really is unreachable. Any other error is most often a
    * token missing Datastore.Audit, where the server is reachable and
    * authenticated and only the permission is wrong; telling that operator to
-   * check connectivity sends them the wrong way. The unreachable card further
+   * check connectivity sends them the wrong way. The unreachable state further
    * down the tab draws the same distinction.
    */
   function pbsStatusBadge() {
@@ -119,12 +161,38 @@ export function BackupDashboardPage() {
     return <Badge variant="healthy">Connected</Badge>;
   }
 
+  const pbsSummary =
+    pbsSummaryLine({
+      serverCount: servers.length,
+      activeName: activeServer?.name ?? "",
+      datastores: dsStatusQuery.data,
+      snapshotCount: snapshotsQuery.data?.length,
+    }) ?? PBS_PURPOSE;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Shield className="h-6 w-6 text-muted-foreground" />
-        <h1 className="text-2xl font-semibold">Backup</h1>
-      </div>
+    <div className="space-y-5">
+      {/* The sentence and the Add button follow the provider tab: each
+          provider is a system of its own, and the page has one primary
+          action at a time. */}
+      <PageHeader
+        title="Backup"
+        summary={
+          providerTab === "pbs" ? (
+            pbsSummary
+          ) : providerTab === "veeam" ? (
+            <VeeamSummary />
+          ) : (
+            <CoverageSummary />
+          )
+        }
+        actions={
+          providerTab === "pbs" ? (
+            <AddPBSServerDialog />
+          ) : providerTab === "veeam" ? (
+            <AddVeeamServerAction />
+          ) : undefined
+        }
+      />
 
       {/* Provider tabs. PBS and Veeam are independent backup providers with
           nothing in common at the connection level, and either can be
@@ -138,7 +206,12 @@ export function BackupDashboardPage() {
           sub-tab nested inside the `activeServerId && !isError` guard, which
           meant a Veeam-only install, or one whose PBS server was unreachable,
           could not reach the unified report at all. */}
-      <Tabs defaultValue="pbs">
+      <Tabs
+        value={providerTab}
+        onValueChange={(value) => {
+          setProviderTab(value as ProviderTab);
+        }}
+      >
         <TabsList>
           <TabsTrigger value="pbs">
             <ProviderTabLabel provider="pbs">
@@ -154,49 +227,40 @@ export function BackupDashboardPage() {
           <TabsTrigger value="coverage">Coverage</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="pbs" className="space-y-6">
-          {activeServer ? (
-            <ProviderHeader
-              provider="pbs"
-              title="Proxmox Backup Server"
-              subtitle={[activeServer.name, activeServer.api_url]
-                .filter((part) => part !== "")
-                .join(" · ")}
-              status={pbsStatusBadge()}
-              actions={
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setEditOpen(true);
-                    }}
-                  >
-                    <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                    Edit
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setDeleteOpen(true);
-                    }}
-                  >
-                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                    Delete
-                  </Button>
-                  <AddPBSServerDialog />
-                </div>
-              }
-            />
-          ) : (
-            <div className="flex items-center justify-end gap-2">
-              <AddPBSServerDialog />
-            </div>
-          )}
-
+        <TabsContent value="pbs" className="mt-5 space-y-4">
           {activeServer && (
             <>
+              <ProviderHeader
+                provider="pbs"
+                product="Proxmox Backup Server"
+                name={activeServer.name}
+                address={activeServer.api_url}
+                status={pbsStatusBadge()}
+                switcher={
+                  servers.length > 1 ? (
+                    <Segmented
+                      aria-label="Backup server"
+                      value={activeServerId}
+                      onValueChange={setSelectedServerId}
+                      options={servers.map((server) => ({
+                        value: server.id,
+                        label: server.name,
+                      }))}
+                    />
+                  ) : undefined
+                }
+                actions={
+                  <ServerActions
+                    name={activeServer.name}
+                    onEdit={() => {
+                      setEditOpen(true);
+                    }}
+                    onDelete={() => {
+                      setDeleteOpen(true);
+                    }}
+                  />
+                }
+              />
               <EditPBSServerDialog
                 server={activeServer}
                 open={editOpen}
@@ -210,210 +274,133 @@ export function BackupDashboardPage() {
             </>
           )}
 
-          {serversQuery.isLoading && (
-            <div className="grid gap-4 md:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-32" />
-              ))}
+          {(serversQuery.isLoading || dsStatusQuery.isLoading) && (
+            <div className="space-y-4">
+              {serversQuery.isLoading && <Skeleton className="h-7 w-72" />}
+              <Skeleton className="h-9 w-full max-w-xl" />
+              <Skeleton className="h-64 w-full rounded-[10px]" />
             </div>
           )}
 
           {!serversQuery.isLoading && servers.length === 0 && (
-            <div className="rounded-md border bg-muted/50 px-6 py-12 text-center">
-              <div className="mb-3 flex justify-center">
-                <ProviderBadge provider="pbs" size="lg" />
-              </div>
-              <h2 className="text-lg font-medium">No PBS Servers</h2>
-              <p className="mt-1 mb-4 text-sm text-muted-foreground">
-                Register a Proxmox Backup Server to manage backups.
-              </p>
-              <AddPBSServerDialog />
-            </div>
-          )}
-
-          {servers.length > 1 && (
-            <div className="flex gap-2">
-              {servers.map((server) => (
-                <button
-                  key={server.id}
-                  aria-pressed={activeServerId === server.id}
-                  onClick={() => {
-                    setSelectedServerId(server.id);
-                  }}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                    activeServerId === server.id
-                      ? PROVIDER_FILL_CLASSES.pbs
-                      : "bg-muted text-muted-foreground hover:bg-accent"
-                  }`}
-                >
-                  {server.name}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {dsStatusQuery.isLoading && (
-            <div className="grid gap-4 md:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-32" />
-              ))}
-            </div>
+            <EmptyState
+              icon={DatabaseBackup}
+              title="No PBS servers yet"
+              description="Register a Proxmox Backup Server to see its datastores, snapshots and jobs here, and to restore from it."
+            />
           )}
 
           {isNotFound && (
-            <div className="rounded-md border bg-muted/50 px-6 py-12 text-center">
-              {/* Muted shield, not the provider tile its sibling empty state
-                  wears: the accent marks identity, and this is a failure. */}
-              <Shield className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
-              <h2 className="text-lg font-medium">PBS Server Unreachable</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Could not connect to the PBS server. Check credentials and
-                connectivity.
-              </p>
-            </div>
+            <EmptyState
+              icon={ServerOff}
+              title="PBS server unreachable"
+              description="Could not connect to the PBS server. Check credentials and connectivity."
+            />
           )}
 
           {dsStatusQuery.isError && !isNotFound && (
-            <p className="text-sm text-destructive">
-              Could not load PBS data. The server answered, so this is more
-              often a permission than a connectivity problem — check that the
-              API token holds Datastore.Audit.
-            </p>
+            <Panel>
+              <p className="text-sm text-destructive">
+                Could not load PBS data. The server answered, so this is more
+                often a permission than a connectivity problem: check that the
+                API token holds Datastore.Audit.
+              </p>
+            </Panel>
           )}
 
           {activeServerId &&
             !dsStatusQuery.isLoading &&
             !dsStatusQuery.isError && (
-              <>
-                <DatastoreCards
-                  datastores={datastores}
-                  pbsId={activeServerId}
-                />
+              <Tabs defaultValue="overview">
+                <TabsList>
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="snapshots">
+                    Snapshots ({snapshots.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="schedules">
+                    Schedules ({backupJobs.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="replication">
+                    Replication ({syncJobs.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="verification">
+                    Verification ({verifyJobs.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="tasks">
+                    Tasks ({tasks.length})
+                  </TabsTrigger>
+                  <HistoryTabTrigger
+                    history={backupHistories.pbsServer(activeServerId)}
+                  />
+                </TabsList>
 
-                <Tabs defaultValue="overview">
-                  <TabsList>
-                    <TabsTrigger value="overview">Overview</TabsTrigger>
-                    <TabsTrigger value="snapshots">
-                      Snapshots ({snapshots.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="schedules">
-                      Schedules ({backupJobs.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="replication">
-                      Replication ({syncJobs.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="verification">
-                      Verification ({verifyJobs.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="tasks">
-                      Tasks ({tasks.length})
-                    </TabsTrigger>
-                    <HistoryTabTrigger
-                      history={backupHistories.pbsServer(activeServerId)}
-                    />
-                  </TabsList>
+                <TabsContent value="overview">
+                  <DatastoreOverview
+                    datastores={datastores}
+                    pbsId={activeServerId}
+                  />
+                </TabsContent>
 
-                  <TabsContent value="overview" className="space-y-6">
-                    <DatastoreChart pbsId={activeServerId} />
-                    {datastores.map((ds) => (
-                      <DatastoreIOChart
-                        key={ds.store}
-                        pbsId={activeServerId}
-                        store={ds.store}
-                      />
-                    ))}
-                    {datastores.map((ds) => (
-                      <CapacityForecastChart
-                        key={`forecast-${ds.store}`}
-                        pbsId={activeServerId}
-                        store={ds.store}
-                      />
-                    ))}
-                    {datastores.map((ds) => (
-                      <DatastoreConfigCard
-                        key={`config-${ds.store}`}
-                        pbsId={activeServerId}
-                        store={ds.store}
-                      />
-                    ))}
-                    {datastores.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {datastores.map((ds) => (
-                          <div key={ds.store} className="flex gap-1">
-                            <GCDialog pbsId={activeServerId} store={ds.store} />
-                            <PruneDialog
-                              pbsId={activeServerId}
-                              store={ds.store}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </TabsContent>
+                <TabsContent value="snapshots">
+                  <SnapshotTable snapshots={snapshots} pbsId={activeServerId} />
+                </TabsContent>
 
-                  <TabsContent value="snapshots" className="space-y-4">
-                    <SnapshotTable
-                      snapshots={snapshots}
-                      pbsId={activeServerId}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="schedules" className="space-y-4">
-                    {clusters.length > 1 && (
-                      <div className="flex gap-2">
-                        {clusters.map((cluster) => (
-                          <button
-                            key={cluster.id}
-                            aria-pressed={activeClusterId === cluster.id}
-                            onClick={() => {
-                              setSelectedClusterId(cluster.id);
-                            }}
-                            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                              activeClusterId === cluster.id
-                                ? "bg-action text-action-foreground"
-                                : "bg-muted text-muted-foreground hover:bg-accent"
-                            }`}
-                          >
-                            {cluster.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex justify-end">
-                      <BackupJobDialog clusterId={activeClusterId} />
-                    </div>
+                <TabsContent value="schedules">
+                  <Panel
+                    flush
+                    title="Backup schedules"
+                    aside={
+                      clusters.length === 1 ? clusters[0]?.name : undefined
+                    }
+                    actions={
+                      <>
+                        {clusters.length > 1 && (
+                          <Segmented
+                            aria-label="Cluster"
+                            value={activeClusterId}
+                            onValueChange={setSelectedClusterId}
+                            options={clusters.map((cluster) => ({
+                              value: cluster.id,
+                              label: cluster.name,
+                            }))}
+                          />
+                        )}
+                        <BackupJobDialog clusterId={activeClusterId} />
+                      </>
+                    }
+                  >
                     <BackupJobTable
                       jobs={backupJobs}
                       clusterId={activeClusterId}
                     />
-                  </TabsContent>
+                  </Panel>
+                </TabsContent>
 
-                  <TabsContent value="replication" className="space-y-4">
-                    <SyncJobTable jobs={syncJobs} pbsId={activeServerId} />
-                  </TabsContent>
+                <TabsContent value="replication">
+                  <SyncJobTable jobs={syncJobs} pbsId={activeServerId} />
+                </TabsContent>
 
-                  <TabsContent value="verification" className="space-y-4">
-                    <VerifyJobTable jobs={verifyJobs} pbsId={activeServerId} />
-                  </TabsContent>
+                <TabsContent value="verification">
+                  <VerifyJobTable jobs={verifyJobs} pbsId={activeServerId} />
+                </TabsContent>
 
-                  <TabsContent value="tasks" className="space-y-4">
-                    <PBSTaskTable tasks={tasks} pbsId={activeServerId} />
-                  </TabsContent>
+                <TabsContent value="tasks">
+                  <PBSTaskTable tasks={tasks} pbsId={activeServerId} />
+                </TabsContent>
 
-                  <PBSHistoryTabContent pbsId={activeServerId} />
-                </Tabs>
-              </>
+                <PBSHistoryTabContent pbsId={activeServerId} />
+              </Tabs>
             )}
         </TabsContent>
 
-        <TabsContent value="veeam" className="space-y-4">
+        <TabsContent value="veeam" className="mt-5 space-y-4">
           <VeeamServersPanel />
         </TabsContent>
 
         {/* Multi-provider by design: the report asks each cluster's
             /backup-coverage, which answers across PBS and Veeam together and
             models eligibility, so it needs neither provider to be selected. */}
-        <TabsContent value="coverage" className="space-y-4">
+        <TabsContent value="coverage" className="mt-5 space-y-4">
           <BackupCoverageReport />
         </TabsContent>
       </Tabs>

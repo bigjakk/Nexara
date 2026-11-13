@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { Fragment, useState, useMemo } from "react";
 import {
   Table,
   TableBody,
@@ -7,14 +7,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChevronRight, ChevronDown, ChevronLeft, Search } from "lucide-react";
+import { DetailField } from "@/components/DetailField";
+import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
+import { DefGrid, Panel } from "@/components/page/Panel";
 import type { PBSTask } from "../types/backup";
 import { usePBSTaskLog } from "../api/backup-queries";
+import {
+  pbsTaskOutcome,
+  pbsWorkerId,
+  type PBSTaskOutcome,
+} from "../lib/pbs-live-tasks";
+import { StateText } from "./StateText";
 
 const PAGE_SIZE = 25;
+
+/** The outcome each choice of the status filter lists; "all" lists them all. */
+const STATUS_FILTER_OUTCOME: Record<string, PBSTaskOutcome | undefined> = {
+  running: "running",
+  ok: "ok",
+  warning: "warning",
+  error: "failed",
+};
 
 function formatTime(unix: number): string {
   if (!unix) return "-";
@@ -42,7 +58,7 @@ function TaskLogPanel({ pbsId, upid }: { pbsId: string; upid: string }) {
   }
 
   return (
-    <pre className="max-h-64 overflow-auto rounded bg-muted p-3 font-mono text-xs leading-relaxed">
+    <pre className="max-h-64 overflow-auto rounded-[7px] bg-foreground/[0.05] p-3 font-mono text-xs leading-relaxed">
       {entries.map((e) => e.t).join("\n")}
     </pre>
   );
@@ -72,16 +88,12 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
     if (typeFilter !== "all") {
       result = result.filter((t) => t.worker_type === typeFilter);
     }
-    if (statusFilter === "running") {
-      result = result.filter((t) => !t.endtime);
-    } else if (statusFilter === "ok") {
-      result = result.filter(
-        (t) => t.endtime && (t.status === "OK" || t.status === ""),
-      );
-    } else if (statusFilter === "error") {
-      result = result.filter(
-        (t) => t.endtime && t.status !== "OK" && t.status !== "",
-      );
+    // By the outcome the Status cell draws, so a filter never lists a row
+    // under a word its own cell does not wear: a finish with warnings is
+    // amber, and is not an error.
+    const wanted = STATUS_FILTER_OUTCOME[statusFilter];
+    if (wanted !== undefined) {
+      result = result.filter((t) => pbsTaskOutcome(t) === wanted);
     }
     if (search) {
       const q = search.toLowerCase();
@@ -134,9 +146,11 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
 
   if (tasks.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No recent tasks.
-      </p>
+      <Panel>
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No recent tasks.
+        </p>
+      </Panel>
     );
   }
 
@@ -152,167 +166,166 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
     });
   };
 
+  const selectClass =
+    "h-8 rounded-md border bg-transparent px-2 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring";
+
   return (
-    <div className="space-y-3">
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search tasks..."
-            value={search}
+    <Panel
+      flush
+      title="Recent tasks"
+      aside={`${String(filtered.length)} task${filtered.length !== 1 ? "s" : ""}`}
+      actions={
+        <>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search tasks..."
+              aria-label="Search tasks"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+              }}
+              className="h-8 w-48 pl-8"
+            />
+          </div>
+          <select
+            aria-label="Task type"
+            className={selectClass}
+            value={typeFilter}
             onChange={(e) => {
-              setSearch(e.target.value);
+              setTypeFilter(e.target.value);
             }}
-            className="pl-8 h-9"
-          />
-        </div>
-        <select
-          className="rounded-md border bg-background px-3 py-2 text-sm h-9"
-          value={typeFilter}
-          onChange={(e) => {
-            setTypeFilter(e.target.value);
-          }}
-        >
-          <option value="all">All Types</option>
-          {taskTypes.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-        <select
-          className="rounded-md border bg-background px-3 py-2 text-sm h-9"
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
-          }}
-        >
-          <option value="all">All Statuses</option>
-          <option value="running">Running</option>
-          <option value="ok">OK</option>
-          <option value="error">Error</option>
-        </select>
-        <span className="text-xs text-muted-foreground">
-          {filtered.length} task{filtered.length !== 1 ? "s" : ""}
-        </span>
-      </div>
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
+          >
+            <option value="all">All types</option>
+            {taskTypes.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Task status"
+            className={selectClass}
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+            }}
+          >
+            <option value="all">All statuses</option>
+            <option value="running">Running</option>
+            <option value="ok">OK</option>
+            <option value="warning">Warnings</option>
+            <option value="error">Error</option>
+          </select>
+        </>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-8" />
+            <TableHead>Task</TableHead>
+            <TableHead>User</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Started</TableHead>
+            <TableHead>Duration</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {paged.length === 0 && (
             <TableRow>
-              <TableHead className="w-8" />
-              <TableHead>Type</TableHead>
-              <TableHead>User</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Started</TableHead>
-              <TableHead>Duration</TableHead>
+              <TableCell
+                colSpan={6}
+                className="py-8 text-center text-sm text-muted-foreground"
+              >
+                No matching tasks.
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {paged.length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={6}
-                  className="py-8 text-center text-sm text-muted-foreground"
-                >
-                  No matching tasks.
-                </TableCell>
-              </TableRow>
-            )}
-            {paged.map((task) => {
-              const isRunning = !task.endtime;
-              const isOk = task.status === "OK" || task.status === "";
-              const isFailed = !isRunning && !isOk;
-              const isExpanded = expanded.has(task.upid);
+          )}
+          {paged.map((task) => {
+            const outcome = pbsTaskOutcome(task);
+            const isExpanded = expanded.has(task.upid);
+            const worker = pbsWorkerId(task.upid);
 
-              return (
-                <>
-                  <TableRow
-                    key={task.upid}
-                    className="cursor-pointer"
-                    onClick={() => {
-                      toggleExpand(task.upid);
-                    }}
-                  >
-                    <TableCell className="px-2">
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {task.worker_type}
-                    </TableCell>
-                    <TableCell className="text-sm">{task.user}</TableCell>
-                    <TableCell>
-                      {isRunning && <Badge variant="default">Running</Badge>}
-                      {!isRunning && isOk && (
-                        <Badge variant="healthy">OK</Badge>
-                      )}
-                      {isFailed && (
-                        <Badge variant="destructive">
-                          {task.status ?? "Error"}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      {formatTime(task.starttime)}
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      {formatDuration(task.starttime, task.endtime)}
-                    </TableCell>
-                  </TableRow>
-                  {isExpanded && (
-                    <TableRow key={`${task.upid}-log`}>
-                      <TableCell colSpan={6} className="bg-muted/30 px-6 py-3">
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-                            <div>
-                              <span className="text-muted-foreground">
-                                UPID:
-                              </span>{" "}
-                              <span className="font-mono break-all">
-                                {task.upid}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">
-                                PID:
-                              </span>{" "}
-                              {task.pid}
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">
-                                Started:
-                              </span>{" "}
-                              {formatTime(task.starttime)}
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">
-                                Ended:
-                              </span>{" "}
-                              {task.endtime ? formatTime(task.endtime) : "-"}
-                            </div>
-                          </div>
-                          <TaskLogPanel pbsId={pbsId} upid={task.upid} />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+            return (
+              <Fragment key={task.upid}>
+                <TableRow
+                  className="cursor-pointer"
+                  onClick={() => {
+                    toggleExpand(task.upid);
+                  }}
+                >
+                  <TableCell className="pr-0 text-muted-foreground">
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                  </TableCell>
+                  <TableCell className="font-mono text-[12.5px]">
+                    <span className="font-medium">{task.worker_type}</span>
+                    {worker !== "" && (
+                      <span className="ml-2 text-muted-foreground">
+                        {worker}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>{task.user}</TableCell>
+                  <TableCell className="max-w-[20rem]">
+                    {outcome === "running" && (
+                      <StateText tone="running">Running</StateText>
+                    )}
+                    {outcome === "ok" && <StateText tone="ok">OK</StateText>}
+                    {outcome === "warning" && (
+                      <StateText tone="warn" title={task.status}>
+                        {task.status}
+                      </StateText>
+                    )}
+                    {outcome === "failed" && (
+                      <StateText tone="bad" title={task.status}>
+                        {task.status}
+                      </StateText>
+                    )}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {formatTime(task.starttime)}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap tabular-nums">
+                    {formatDuration(task.starttime, task.endtime)}
+                  </TableCell>
+                </TableRow>
+                {isExpanded && (
+                  <ExpandedDetailRow colSpan={6}>
+                    <DefGrid>
+                      <DetailField label="Process ID" variant="mono">
+                        {task.pid}
+                      </DetailField>
+                      <DetailField label="Started">
+                        {formatTime(task.starttime)}
+                      </DetailField>
+                      <DetailField label="Ended">
+                        {task.endtime ? formatTime(task.endtime) : "-"}
+                      </DetailField>
+                    </DefGrid>
+                    <dl className="text-sm">
+                      <dt className="text-xs text-muted-foreground">UPID</dt>
+                      <dd className="break-all font-mono text-xs">
+                        {task.upid}
+                      </dd>
+                    </dl>
+                    <TaskLogPanel pbsId={pbsId} upid={task.upid} />
+                  </ExpandedDetailRow>
+                )}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </Table>
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">
+        <div className="flex items-center justify-between border-t px-[18px] pt-3">
+          <span className="text-[12.5px] text-muted-foreground">
             Page {safePage + 1} of {totalPages}
           </span>
           <div className="flex gap-1">
@@ -341,6 +354,6 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
           </div>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }

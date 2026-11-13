@@ -35,14 +35,14 @@ export function GCDialog({ pbsId, store }: GCDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Trash2 className="mr-2 h-4 w-4" />
+        <Button variant="outline" size="sm" className="gap-1.5">
+          <Trash2 className="h-3.5 w-3.5" />
           Run GC
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Run Garbage Collection</DialogTitle>
+          <DialogTitle>Run garbage collection</DialogTitle>
           <DialogDescription>
             This will start garbage collection on datastore{" "}
             <strong>{store}</strong>. This removes unreferenced chunks and

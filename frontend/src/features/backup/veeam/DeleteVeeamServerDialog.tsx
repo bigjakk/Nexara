@@ -53,7 +53,7 @@ export function DeleteVeeamServerDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete Veeam Server</DialogTitle>
+          <DialogTitle>Delete Veeam server</DialogTitle>
           <DialogDescription>
             This removes <CopyableName name={server.name} /> from Nexara along
             with its stored credential. Backups and jobs on the Veeam server
@@ -64,6 +64,7 @@ export function DeleteVeeamServerDialog({
         <div className="space-y-4 py-2">
           <Input
             placeholder={server.name}
+            aria-label="Server name, to confirm"
             value={confirmName}
             onChange={(e) => {
               setConfirmName(e.target.value);
@@ -92,7 +93,7 @@ export function DeleteVeeamServerDialog({
             disabled={confirmName !== server.name || deleteMutation.isPending}
             onClick={handleDelete}
           >
-            {deleteMutation.isPending ? "Deleting..." : "Delete Server"}
+            {deleteMutation.isPending ? "Deleting..." : "Delete server"}
           </Button>
         </DialogFooter>
       </DialogContent>

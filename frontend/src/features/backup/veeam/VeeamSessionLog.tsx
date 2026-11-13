@@ -1,25 +1,13 @@
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { StateText } from "../components/StateText";
 import { useVeeamSessionLogs } from "../api/backup-queries";
 import type { VeeamSession } from "../types/backup";
+import { resultTone } from "./veeam-format";
 
 interface VeeamSessionLogProps {
   serverId: string;
   session: VeeamSession;
   /** True while the row is expanded. Nothing is fetched until it is. */
   enabled: boolean;
-}
-
-function statusVariant(status: string): BadgeVariant {
-  switch (status) {
-    case "Succeeded":
-      return "default";
-    case "Warning":
-      return "outline";
-    case "Failed":
-      return "destructive";
-    default:
-      return "secondary";
-  }
 }
 
 function formatTime(value: string | null): string {
@@ -75,9 +63,7 @@ export function VeeamSessionLog({
 
   return (
     <div>
-      <p className="mb-2 text-xs font-medium text-muted-foreground">
-        Session log
-      </p>
+      <p className="mb-2 text-[13.5px] font-semibold">Session log</p>
       <ol className="space-y-1">
         {records.map((record) => (
           <li
@@ -87,12 +73,12 @@ export function VeeamSessionLog({
             <span className="w-16 shrink-0 font-mono text-muted-foreground">
               {formatTime(record.start_time)}
             </span>
-            <Badge
-              variant={statusVariant(record.status)}
-              className="shrink-0 px-1.5 py-0 text-[10px]"
+            <StateText
+              tone={resultTone(record.status)}
+              className="w-24 shrink-0"
             >
               {record.status}
-            </Badge>
+            </StateText>
             <span className="min-w-0">
               {record.title}
               {record.description !== "" && (

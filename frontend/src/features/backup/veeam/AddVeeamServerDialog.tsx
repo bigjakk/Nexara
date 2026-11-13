@@ -85,9 +85,9 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
   }
 
   const defaultTrigger = (
-    <Button>
-      <Plus className="mr-2 h-4 w-4" />
-      Add Veeam Server
+    <Button className="gap-1.5">
+      <Plus className="h-4 w-4" aria-hidden="true" />
+      Add Veeam server
     </Button>
   );
 
@@ -102,7 +102,7 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
       <DialogTrigger asChild>{trigger ?? defaultTrigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Veeam Server</DialogTitle>
+          <DialogTitle>Add Veeam server</DialogTitle>
           <DialogDescription>
             {certificate !== null
               ? "Verify the TLS certificate fingerprint before connecting."
@@ -115,7 +115,7 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
             <VeeamRequirementsNote />
 
             <div className="space-y-2">
-              <Label htmlFor="veeam-name">Server Name</Label>
+              <Label htmlFor="veeam-name">Server name</Label>
               <Input
                 id="veeam-name"
                 placeholder="Veeam Primary"
@@ -138,7 +138,7 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
                 required
               />
               <p className="text-xs text-muted-foreground">
-                The REST API listens on port 9419 — not the Veeam console port.
+                The REST API listens on port 9419, not the Veeam console port.
               </p>
             </div>
             <div className="space-y-2">
@@ -226,7 +226,7 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
                 onClick={handleCreate}
                 disabled={!cert.accepted || createServer.isPending}
               >
-                {createServer.isPending ? "Connecting..." : "Add Server"}
+                {createServer.isPending ? "Connecting..." : "Add server"}
               </Button>
             </DialogFooter>
           </div>

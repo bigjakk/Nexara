@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useId } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -10,9 +10,20 @@ import {
   Tooltip,
   ReferenceLine,
 } from "recharts";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { usePBSDatastoreMetrics } from "../api/backup-queries";
+import { DATA_COLOR } from "@/lib/chart-colors";
 import { formatBytes } from "@/lib/format";
+import {
+  FORECAST_HORIZON_DAYS,
+  type CapacityForecast,
+} from "../lib/datastore-facts";
+import {
+  AXIS_TICK,
+  SECOND_SERIES_COLOR,
+  SECOND_SERIES_DASH,
+  TOOLTIP_CURSOR,
+  TOOLTIP_STYLE,
+  unbroken,
+} from "./chart-style";
 
 // Module-scoped, not rebuilt per call: constructing an Intl formatter is far
 // more expensive than using one, and an axis formatter is called per tick.
@@ -25,175 +36,64 @@ function formatDate(ts: number): string {
   return DATE_FMT.format(ts);
 }
 
-interface ForecastPoint {
-  timestamp: number;
-  used: number | null;
-  forecast: number | null;
-  total: number | null;
-}
+/**
+ * A week of a datastore's usage and the straight line through it, drawn out
+ * to capacity or the horizon. The panel it sits in reads the samples, since
+ * its Free figure quotes the same projection.
+ */
+export function CapacityForecastView({
+  forecast,
+  query,
+}: {
+  forecast: CapacityForecast;
+  /** How the read of the samples behind it stands. */
+  query: { isLoading: boolean; isError: boolean };
+}) {
+  const { points, fullDate, totalCapacity } = forecast;
+  // Unique per chart: several datastores each draw one on the same page.
+  const gradientId = useId();
 
-function linearRegression(
-  points: { x: number; y: number }[],
-): { slope: number; intercept: number } | null {
-  const n = points.length;
-  if (n < 2) return null;
-
-  let sumX = 0,
-    sumY = 0,
-    sumXY = 0,
-    sumXX = 0;
-  for (const p of points) {
-    sumX += p.x;
-    sumY += p.y;
-    sumXY += p.x * p.y;
-    sumXX += p.x * p.x;
-  }
-
-  const denom = n * sumXX - sumX * sumX;
-  if (denom === 0) return null;
-
-  const slope = (n * sumXY - sumX * sumY) / denom;
-  const intercept = (sumY - slope * sumX) / n;
-
-  return { slope, intercept };
-}
-
-interface CapacityForecastChartProps {
-  pbsId: string;
-  store: string;
-}
-
-export function CapacityForecastChart({
-  pbsId,
-  store,
-}: CapacityForecastChartProps) {
-  const { data: metrics } = usePBSDatastoreMetrics(pbsId, "7d");
-
-  const { chartData, fullDate, totalCapacity } = useMemo(() => {
-    const metricsList = metrics ?? [];
-    const storeMetrics = metricsList.filter((m) => m.datastore === store);
-
-    if (storeMetrics.length < 3) {
-      return {
-        chartData: [] as ForecastPoint[],
-        fullDate: null,
-        totalCapacity: 0,
-      };
-    }
-
-    // Get total capacity from latest metric
-    const latestTotal = storeMetrics[storeMetrics.length - 1]?.total ?? 0;
-
-    // Build regression data points
-    const regressionPoints = storeMetrics.map((m) => ({
-      x: new Date(m.time).getTime(),
-      y: m.used,
-    }));
-
-    const reg = linearRegression(regressionPoints);
-
-    // Build chart data with actual values
-    const data: ForecastPoint[] = storeMetrics.map((m) => ({
-      timestamp: new Date(m.time).getTime(),
-      used: m.used,
-      forecast: null,
-      total: latestTotal,
-    }));
-
-    let projectedFullDate: Date | null = null;
-
-    if (reg && reg.slope > 0) {
-      // Project forward up to 90 days
-      const lastTs = data[data.length - 1]?.timestamp ?? Date.now();
-      const maxForecastMs = 90 * 24 * 3600 * 1000;
-      const stepMs = 6 * 3600 * 1000; // 6-hour steps
-
-      // Add the transition point (last actual value is also first forecast)
-      const lastUsed = reg.slope * lastTs + reg.intercept;
-      const lastEntry = data[data.length - 1];
-      if (lastEntry) {
-        data[data.length - 1] = {
-          ...lastEntry,
-          forecast: lastUsed,
-        };
-      }
-
-      for (let t = lastTs + stepMs; t <= lastTs + maxForecastMs; t += stepMs) {
-        const projected = reg.slope * t + reg.intercept;
-        if (projected >= latestTotal) {
-          projectedFullDate = new Date(t);
-          data.push({
-            timestamp: t,
-            used: null,
-            forecast: latestTotal,
-            total: latestTotal,
-          });
-          break;
-        }
-        data.push({
-          timestamp: t,
-          used: null,
-          forecast: projected,
-          total: latestTotal,
-        });
-      }
-    }
-
-    return {
-      chartData: data,
-      fullDate: projectedFullDate,
-      totalCapacity: latestTotal,
-    };
-  }, [metrics, store]);
-
-  if (chartData.length === 0) {
-    return null;
+  if (points.length === 0) {
+    return (
+      <p className="grid h-64 place-items-center text-sm text-muted-foreground">
+        {query.isLoading
+          ? "Loading usage..."
+          : query.isError
+            ? "Usage could not be loaded, so there is nothing to project."
+            : "A forecast needs a few more usage samples than have been recorded."}
+      </p>
+    );
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium">
-            {store} — Capacity Forecast
-          </CardTitle>
-          {fullDate ? (
-            <span className="text-xs text-destructive font-medium">
-              Projected full: {fullDate.toLocaleDateString()}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              No capacity issue projected (90d)
-            </span>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={200}>
-          <ComposedChart data={chartData}>
+    <div>
+      <p className="pb-2 text-[12.5px] text-muted-foreground">
+        {fullDate ? (
+          <span className="font-medium text-red-700 dark:text-red-400">
+            Projected full: {fullDate.toLocaleDateString()}
+          </span>
+        ) : (
+          `No capacity issue projected (${String(FORECAST_HORIZON_DAYS)}d)`
+        )}
+        {". "}A straight line through the last 7 days of usage.
+      </p>
+      <div className="h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart
+            data={points}
+            margin={{ top: 12, right: 16, bottom: 0, left: 0 }}
+          >
             <defs>
-              <linearGradient
-                id={`fg-used-${store}`}
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient
-                id={`fg-forecast-${store}`}
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={DATA_COLOR} stopOpacity={0.25} />
+                <stop offset="95%" stopColor={DATA_COLOR} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+            <CartesianGrid
+              strokeDasharray="3 4"
+              className="stroke-border"
+              vertical={false}
+            />
             {/* A time axis, not the default category axis — and here it is
                 a correctness fix, not the performance one. This series splices
                 bucketed history onto 6-hourly forecast steps, and a category
@@ -210,12 +110,16 @@ export function CapacityForecastChart({
               domain={["dataMin", "dataMax"]}
               tickFormatter={formatDate}
               minTickGap={56}
-              tick={{ fontSize: 10 }}
+              tick={AXIS_TICK}
+              axisLine={false}
+              tickLine={false}
             />
             <YAxis
-              tickFormatter={formatBytes}
-              tick={{ fontSize: 10 }}
-              width={60}
+              tickFormatter={(v: number) => unbroken(formatBytes(v))}
+              tick={AXIS_TICK}
+              axisLine={false}
+              tickLine={false}
+              width={64}
             />
             <Tooltip
               labelFormatter={(label) =>
@@ -231,31 +135,28 @@ export function CapacityForecastChart({
                     ? "Forecast"
                     : "Total",
               ]}
-              contentStyle={{
-                backgroundColor: "hsl(var(--popover))",
-                border: "1px solid hsl(var(--border))",
-                borderRadius: "6px",
-                fontSize: "12px",
-              }}
+              cursor={TOOLTIP_CURSOR}
+              contentStyle={TOOLTIP_STYLE}
             />
             {totalCapacity > 0 && (
               <ReferenceLine
                 y={totalCapacity}
-                stroke="#ef4444"
-                strokeDasharray="4 4"
+                stroke="hsl(var(--foreground))"
+                strokeOpacity={0.45}
+                strokeDasharray="2 4"
                 label={{
                   value: "Capacity",
-                  position: "right",
+                  position: "insideTopRight",
                   fontSize: 10,
-                  fill: "#ef4444",
+                  fill: "hsl(var(--muted-foreground))",
                 }}
               />
             )}
             <Area
               type="monotone"
               dataKey="used"
-              stroke="#38bdf8"
-              fill={`url(#fg-used-${store})`}
+              stroke={DATA_COLOR}
+              fill={`url(#${gradientId})`}
               strokeWidth={2}
               isAnimationActive={false}
               connectNulls={false}
@@ -263,16 +164,16 @@ export function CapacityForecastChart({
             <Line
               type="monotone"
               dataKey="forecast"
-              stroke="#f59e0b"
+              stroke={fullDate ? "hsl(0 72% 51%)" : SECOND_SERIES_COLOR}
               strokeWidth={2}
-              strokeDasharray="6 3"
+              strokeDasharray={SECOND_SERIES_DASH}
               dot={false}
               isAnimationActive={false}
               connectNulls={false}
             />
           </ComposedChart>
         </ResponsiveContainer>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

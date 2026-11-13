@@ -157,7 +157,7 @@ describe("a PBS server's History tab", () => {
     mount();
     expect(await screen.findAllByTestId("pbs-live-task")).toHaveLength(2);
 
-    await user.selectOptions(screen.getByLabelText("Time"), "24h");
+    await user.click(screen.getByRole("button", { name: "Last 24 hours" }));
 
     expect(await screen.findAllByTestId("pbs-live-task")).toHaveLength(1);
     expect(screen.getByText("Garbage collection started")).toBeInTheDocument();

@@ -6,21 +6,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
 import { Play } from "lucide-react";
 import { useRunSyncJob } from "../api/backup-queries";
 import type { PBSSyncJob } from "../types/backup";
+import { RunState } from "./StateText";
 
 function formatUnixTime(ts: number): string {
   if (ts === 0) return "-";
   return new Date(ts * 1000).toLocaleString();
-}
-
-function stateVariant(state: string): "default" | "secondary" | "destructive" {
-  if (state === "ok") return "default";
-  if (state === "error") return "destructive";
-  return "secondary";
 }
 
 interface SyncJobTableProps {
@@ -33,50 +28,51 @@ export function SyncJobTable({ jobs, pbsId }: SyncJobTableProps) {
 
   if (jobs.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No sync jobs configured.
-      </p>
+      <Panel>
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No sync jobs configured.
+        </p>
+      </Panel>
     );
   }
 
   return (
-    <div className="rounded-md border">
+    <Panel flush>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Job ID</TableHead>
-            <TableHead>Store</TableHead>
+            <TableHead>Job</TableHead>
+            <TableHead>Datastore</TableHead>
             <TableHead>Remote</TableHead>
-            <TableHead>Remote Store</TableHead>
+            <TableHead>Remote datastore</TableHead>
             <TableHead>Schedule</TableHead>
-            <TableHead>Last Run</TableHead>
-            <TableHead>Next Run</TableHead>
-            <TableHead className="w-20">Actions</TableHead>
+            <TableHead>Last run</TableHead>
+            <TableHead>Next run</TableHead>
+            <TableHead className="w-12">
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {jobs.map((job) => (
             <TableRow key={job.job_id}>
-              <TableCell className="font-mono text-sm">{job.job_id}</TableCell>
+              <TableCell className="font-mono font-medium">
+                {job.job_id}
+              </TableCell>
               <TableCell>{job.store}</TableCell>
               <TableCell>{job.remote || "-"}</TableCell>
               <TableCell>{job.remote_store || "-"}</TableCell>
-              <TableCell className="text-sm">{job.schedule || "-"}</TableCell>
+              <TableCell>{job.schedule || "-"}</TableCell>
               <TableCell>
-                {job.last_run_state ? (
-                  <Badge variant={stateVariant(job.last_run_state)}>
-                    {job.last_run_state}
-                  </Badge>
-                ) : (
-                  <span className="text-muted-foreground">-</span>
-                )}
+                <RunState state={job.last_run_state} />
               </TableCell>
-              <TableCell className="text-sm">
+              <TableCell className="whitespace-nowrap">
                 {formatUnixTime(job.next_run)}
               </TableCell>
               <TableCell>
                 <Button
                   aria-label={`Run sync job ${job.job_id}`}
+                  title="Run now"
                   variant="ghost"
                   size="sm"
                   onClick={() => {
@@ -91,6 +87,6 @@ export function SyncJobTable({ jobs, pbsId }: SyncJobTableProps) {
           ))}
         </TableBody>
       </Table>
-    </div>
+    </Panel>
   );
 }

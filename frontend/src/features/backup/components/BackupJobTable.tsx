@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Table,
   TableBody,
@@ -7,8 +7,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DetailField } from "@/components/DetailField";
+import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
+import { DefGrid } from "@/components/page/Panel";
+import { StateText } from "./StateText";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,6 +58,10 @@ interface BackupJobTableProps {
   clusterId: string;
 }
 
+/**
+ * A cluster's backup job schedules, as rows for the panel that holds them:
+ * the panel's title row carries the cluster choice and the Add button.
+ */
 export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editJob, setEditJob] = useState<BackupJob | null>(null);
@@ -81,7 +88,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
 
   if (jobs.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
+      <p className="px-[18px] py-6 text-center text-sm text-muted-foreground">
         No backup job schedules found.
       </p>
     );
@@ -101,167 +108,148 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
 
   return (
     <>
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-8" />
-              <TableHead>ID</TableHead>
-              <TableHead>Schedule</TableHead>
-              <TableHead>Storage</TableHead>
-              <TableHead>Mode</TableHead>
-              <TableHead>Enabled</TableHead>
-              <TableHead>Next Run</TableHead>
-              <TableHead className="w-32" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {jobs.map((job) => {
-              const isExpanded = expanded.has(job.id);
-              const isEnabled = job.enabled !== 0;
-              const scheduleText = describeSchedule(job.schedule);
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-8" />
+            <TableHead>Job</TableHead>
+            <TableHead>Schedule</TableHead>
+            <TableHead>Storage</TableHead>
+            <TableHead>Mode</TableHead>
+            <TableHead>State</TableHead>
+            <TableHead>Next run</TableHead>
+            <TableHead className="w-32">
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {jobs.map((job) => {
+            const isExpanded = expanded.has(job.id);
+            const isEnabled = job.enabled !== 0;
+            const scheduleText = describeSchedule(job.schedule);
 
-              return (
-                <>
-                  <TableRow
-                    key={job.id}
-                    className="cursor-pointer"
-                    onClick={() => {
-                      toggleExpand(job.id);
-                    }}
-                  >
-                    <TableCell className="px-2">
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {job.id}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {job.schedule ? (
-                        <>
-                          <div>{scheduleText ?? job.schedule}</div>
-                          {scheduleText && (
-                            <div className="font-mono text-xs text-muted-foreground">
-                              {job.schedule}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {job.storage ?? "-"}
-                    </TableCell>
-                    <TableCell className="text-sm">{job.mode ?? "-"}</TableCell>
-                    <TableCell>
-                      {isEnabled ? (
-                        <Badge variant="healthy">Yes</Badge>
-                      ) : (
-                        <Badge variant="secondary">No</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      {formatNextRun(job["next-run"])}
-                    </TableCell>
-                    <TableCell>
-                      <div
-                        className="flex items-center gap-1"
-                        onClick={(e) => {
-                          e.stopPropagation();
+            return (
+              <Fragment key={job.id}>
+                <TableRow
+                  className="cursor-pointer"
+                  onClick={() => {
+                    toggleExpand(job.id);
+                  }}
+                >
+                  <TableCell className="pr-0 text-muted-foreground">
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                  </TableCell>
+                  <TableCell className="font-mono font-medium">
+                    {job.id}
+                  </TableCell>
+                  <TableCell>
+                    {job.schedule ? (
+                      <>
+                        <div>{scheduleText ?? job.schedule}</div>
+                        {scheduleText && (
+                          <div className="font-mono text-xs text-muted-foreground">
+                            {job.schedule}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      "-"
+                    )}
+                  </TableCell>
+                  <TableCell>{job.storage ?? "-"}</TableCell>
+                  <TableCell>{job.mode ?? "-"}</TableCell>
+                  <TableCell>
+                    {isEnabled ? (
+                      <StateText tone="ok">Enabled</StateText>
+                    ) : (
+                      <StateText tone="idle">Disabled</StateText>
+                    )}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {formatNextRun(job["next-run"])}
+                  </TableCell>
+                  <TableCell>
+                    <div
+                      className="flex items-center justify-end gap-0.5"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                    >
+                      <ClusterHistoryButton
+                        history={backupHistories.backupJob(clusterId, job.id)}
+                        title={job.id}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="Run Now"
+                        onClick={() => {
+                          setConfirmRun(job);
+                        }}
+                        disabled={runningJobId === job.id}
+                      >
+                        {runningJobId === job.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Play className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="Edit"
+                        onClick={() => {
+                          setEditJob(job);
                         }}
                       >
-                        <ClusterHistoryButton
-                          history={backupHistories.backupJob(clusterId, job.id)}
-                          title={job.id}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title="Run Now"
-                          onClick={() => {
-                            setConfirmRun(job);
-                          }}
-                          disabled={runningJobId === job.id}
-                        >
-                          {runningJobId === job.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Play className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title="Edit"
-                          onClick={() => {
-                            setEditJob(job);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title="Delete"
-                          onClick={() => {
-                            setConfirmDelete(job);
-                          }}
-                          disabled={deleteMutation.isPending}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  {isExpanded && (
-                    <TableRow key={`${job.id}-detail`}>
-                      <TableCell colSpan={8} className="bg-muted/30 px-8 py-4">
-                        <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm md:grid-cols-4">
-                          <div>
-                            <span className="text-muted-foreground">Type:</span>{" "}
-                            {job.type}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Node:</span>{" "}
-                            {job.node ?? "All"}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              Guests:
-                            </span>{" "}
-                            {formatGuests(job)}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              Compress:
-                            </span>{" "}
-                            {job.compress ?? "-"}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Mail:</span>{" "}
-                            {job.mailto ?? "-"}
-                          </div>
-                          <div className="col-span-2">
-                            <span className="text-muted-foreground">
-                              Comment:
-                            </span>{" "}
-                            {job.comment ?? "-"}
-                          </div>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="Delete"
+                        onClick={() => {
+                          setConfirmDelete(job);
+                        }}
+                        disabled={deleteMutation.isPending}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+                {isExpanded && (
+                  <ExpandedDetailRow colSpan={8}>
+                    <DefGrid>
+                      <DetailField label="Type">{job.type}</DetailField>
+                      <DetailField label="Node">
+                        {job.node ?? "All"}
+                      </DetailField>
+                      <DetailField label="Guests">
+                        {formatGuests(job)}
+                      </DetailField>
+                      <DetailField label="Compression">
+                        {job.compress ?? "-"}
+                      </DetailField>
+                      <DetailField label="Mail to">
+                        {job.mailto ?? "-"}
+                      </DetailField>
+                      <DetailField label="Comment">
+                        {job.comment ?? "-"}
+                      </DetailField>
+                    </DefGrid>
+                  </ExpandedDetailRow>
+                )}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </Table>
       {editJob && (
         <BackupJobDialog
           clusterId={clusterId}

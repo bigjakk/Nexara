@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
-import { DatastoreConfigCard } from "./DatastoreConfigCard";
+import { DatastoreConfig } from "./DatastoreConfig";
 import type { PBSPruneJob } from "../types/backup";
 
 vi.mock("@/lib/api-client", () => ({
@@ -25,7 +25,7 @@ function job(over: Partial<PBSPruneJob> = {}): PBSPruneJob {
   return { id: "j1", store: STORE, schedule: "daily", ...over };
 }
 
-describe("DatastoreConfigCard", () => {
+describe("DatastoreConfig", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -41,12 +41,12 @@ describe("DatastoreConfigCard", () => {
       }),
     ]);
 
-    renderWithProviders(<DatastoreConfigCard pbsId="pbs-1" store={STORE} />);
+    renderWithProviders(<DatastoreConfig pbsId="pbs-1" store={STORE} />);
 
     expect(await screen.findByText(/daily \(prune job\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Keep Daily: 14/)).toBeInTheDocument();
-    expect(screen.getByText(/Last Prune:/)).toBeInTheDocument();
-    expect(screen.getByText(/Next Prune:/)).toBeInTheDocument();
+    expect(screen.getByText("daily 14")).toBeInTheDocument();
+    expect(screen.getByText("Last prune")).toBeInTheDocument();
+    expect(screen.getByText("Next prune")).toBeInTheDocument();
     expect(screen.queryByText(/not set/i)).not.toBeInTheDocument();
   });
 
@@ -54,7 +54,7 @@ describe("DatastoreConfigCard", () => {
     mockedGet.mockResolvedValue(configWithoutPrune);
     mockedList.mockResolvedValue([job({ store: "Other-Datastore" })]);
 
-    renderWithProviders(<DatastoreConfigCard pbsId="pbs-1" store={STORE} />);
+    renderWithProviders(<DatastoreConfig pbsId="pbs-1" store={STORE} />);
     expect(await screen.findByText(/not configured/i)).toBeInTheDocument();
   });
 });

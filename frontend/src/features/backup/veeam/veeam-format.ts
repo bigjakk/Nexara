@@ -1,17 +1,21 @@
-import type { BadgeVariant } from "@/components/ui/badge";
+import type { StateTone } from "../components/StateText";
 import type { VeeamSession } from "../types/backup";
 
-/** How Veeam's own result strings map onto the Badge palette. */
-export function resultVariant(result: string): BadgeVariant {
+/**
+ * What Veeam's own result strings mean, which picks how they are drawn: a
+ * success is quiet, a warning amber, a failure red, anything else plain.
+ */
+export function resultTone(result: string): StateTone {
   switch (result) {
     case "Success":
-      return "default";
+    case "Succeeded":
+      return "ok";
     case "Warning":
-      return "outline";
+      return "warn";
     case "Failed":
-      return "destructive";
+      return "bad";
     default:
-      return "secondary";
+      return "idle";
   }
 }
 

@@ -1,7 +1,7 @@
-import { Badge } from "@/components/ui/badge";
 import { formatBytes } from "@/lib/format";
 import { useVeeamSessionTasks } from "../api/backup-queries";
-import { resultVariant } from "./veeam-format";
+import { StateText } from "../components/StateText";
+import { resultTone } from "./veeam-format";
 
 interface VeeamTaskTableProps {
   serverId: string;
@@ -81,25 +81,28 @@ export function VeeamTaskTable({
 
   return (
     <div>
-      <p className="mb-2 text-xs font-medium text-muted-foreground">
-        Guests in this run ({tasks.length})
+      <p className="mb-2 text-[13.5px] font-semibold">
+        Guests in this run{" "}
+        <span className="font-normal text-muted-foreground">
+          ({tasks.length})
+        </span>
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
             <tr className="text-left text-muted-foreground">
-              <th className="pb-1 pr-4 font-medium">Guest</th>
-              <th className="pb-1 pr-4 font-medium">Result</th>
-              <th className="pb-1 pr-4 font-medium">Started</th>
-              <th className="pb-1 pr-4 font-medium">Finished</th>
-              <th className="pb-1 pr-4 font-medium">Duration</th>
-              <th className="pb-1 text-right font-medium">Transferred</th>
+              <th className="pb-1.5 pr-4 font-normal">Guest</th>
+              <th className="pb-1.5 pr-4 font-normal">Result</th>
+              <th className="pb-1.5 pr-4 font-normal">Started</th>
+              <th className="pb-1.5 pr-4 font-normal">Finished</th>
+              <th className="pb-1.5 pr-4 font-normal">Duration</th>
+              <th className="pb-1.5 text-right font-normal">Transferred</th>
             </tr>
           </thead>
           <tbody>
             {tasks.map((task) => (
-              <tr key={task.id} className="border-t border-border/50">
-                <td className="py-1 pr-4">
+              <tr key={task.id} className="border-t">
+                <td className="py-1.5 pr-4">
                   <span className="font-medium">{task.name}</span>
                   {/* The VMID, where the name resolved to exactly one guest.
                       Deliberately not a link: the VM route keys on vms.id,
@@ -117,28 +120,27 @@ export function VeeamTaskTable({
                     </span>
                   )}
                 </td>
-                <td className="py-1 pr-4">
+                <td className="py-1.5 pr-4">
                   {task.result === "" ? (
-                    <Badge variant="secondary" className="px-1.5 py-0">
+                    <span className="text-muted-foreground">
                       {task.state || "—"}
-                    </Badge>
+                    </span>
                   ) : (
-                    <Badge
-                      variant={resultVariant(task.result)}
-                      className="px-1.5 py-0"
-                    >
+                    <StateText tone={resultTone(task.result)}>
                       {task.result}
-                    </Badge>
+                    </StateText>
                   )}
                 </td>
-                <td className="py-1 pr-4 font-mono">
+                <td className="py-1.5 pr-4 tabular-nums">
                   {formatTime(task.creation_time)}
                 </td>
-                <td className="py-1 pr-4 font-mono">
+                <td className="py-1.5 pr-4 tabular-nums">
                   {formatTime(task.end_time)}
                 </td>
-                <td className="py-1 pr-4 font-mono">{task.duration || "—"}</td>
-                <td className="py-1 text-right font-mono">
+                <td className="py-1.5 pr-4 tabular-nums">
+                  {task.duration || "—"}
+                </td>
+                <td className="py-1.5 text-right tabular-nums">
                   {formatBytes(task.transferred_size)}
                 </td>
               </tr>

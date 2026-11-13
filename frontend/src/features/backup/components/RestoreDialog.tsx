@@ -161,7 +161,7 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Restore Backup</DialogTitle>
+          <DialogTitle>Restore backup</DialogTitle>
           <DialogDescription>
             Restore {snapshot.backup_type.toUpperCase()}/{snapshot.backup_id}{" "}
             from {snapshot.datastore} to a PVE node.
@@ -192,7 +192,7 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
           <>
             {pbsStorage.length === 0 && (
               <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                 <span>
                   No PBS storage found on this PVE cluster. The PBS server must
                   be added as a storage in PVE (Datacenter &gt; Storage &gt; Add
@@ -203,9 +203,10 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
 
             <div className="space-y-4 py-2">
               <div className="space-y-2">
-                <Label>Target Cluster</Label>
+                <Label htmlFor="restore-cluster">Target cluster</Label>
                 <select
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  id="restore-cluster"
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   value={targetClusterId}
                   onChange={(e) => {
                     setTargetClusterId(e.target.value);
@@ -223,9 +224,10 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
               </div>
 
               <div className="space-y-2">
-                <Label>Target Node</Label>
+                <Label htmlFor="restore-node">Target node</Label>
                 <select
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  id="restore-node"
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   value={targetNode}
                   onChange={(e) => {
                     setTargetNode(e.target.value);
@@ -241,15 +243,16 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                 </select>
                 {force && existingVMNode && (
                   <p className="text-xs text-muted-foreground">
-                    Auto-selected {existingVMNode.name} — VM {vmid} exists on
+                    Auto-selected {existingVMNode.name}: VM {vmid} exists on
                     this node.
                   </p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <Label>VMID</Label>
+                <Label htmlFor="restore-vmid">VMID</Label>
                 <Input
+                  id="restore-vmid"
                   value={vmid}
                   onChange={(e) => {
                     setVmid(e.target.value);
@@ -262,9 +265,12 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
               </div>
 
               <div className="space-y-2">
-                <Label>Target Storage (optional)</Label>
+                <Label htmlFor="restore-storage">
+                  Target storage (optional)
+                </Label>
                 <select
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  id="restore-storage"
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   value={storage}
                   onChange={(e) => {
                     setStorage(e.target.value);

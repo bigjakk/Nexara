@@ -209,9 +209,9 @@ export function BackupJobDialog({
 
   const trigger = !isEdit ? (
     <DialogTrigger asChild>
-      <Button variant="outline" size="sm">
-        <Plus className="mr-1.5 h-3.5 w-3.5" />
-        Add Schedule
+      <Button variant="outline" size="sm" className="gap-1.5">
+        <Plus className="h-3.5 w-3.5" />
+        Add schedule
       </Button>
     </DialogTrigger>
   ) : null;
@@ -222,7 +222,7 @@ export function BackupJobDialog({
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? "Edit Backup Job" : "Create Backup Job"}
+            {isEdit ? "Edit backup job" : "Create backup job"}
           </DialogTitle>
           <DialogDescription>
             {isEdit
@@ -409,11 +409,7 @@ export function BackupJobDialog({
             <Label htmlFor="backup-enabled">Enabled</Label>
           </div>
 
-          {error && (
-            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error.message}
-            </p>
-          )}
+          {error && <p className="text-sm text-destructive">{error.message}</p>}
         </div>
         <DialogFooter>
           <Button

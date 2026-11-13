@@ -3,6 +3,7 @@ import { Clock, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Segmented } from "@/components/ui/segmented";
 import {
   Select,
   SelectContent,
@@ -141,27 +142,14 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
   const invalid = value.trim() === "";
 
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <div className="flex flex-wrap gap-1">
-        {FREQUENCIES.map((f) => (
-          <Button
-            key={f.value}
-            type="button"
-            size="sm"
-            variant={spec.frequency === f.value ? "secondary" : "ghost"}
-            aria-pressed={spec.frequency === f.value}
-            className={cn(
-              "h-7 px-3 text-xs font-normal",
-              spec.frequency === f.value && "font-medium",
-            )}
-            onClick={() => {
-              selectFrequency(f.value);
-            }}
-          >
-            {f.label}
-          </Button>
-        ))}
-      </div>
+    <div className="space-y-3">
+      <Segmented
+        aria-label="How often"
+        size="md"
+        value={spec.frequency}
+        onValueChange={selectFrequency}
+        options={FREQUENCIES}
+      />
 
       {spec.frequency === "hourly" && (
         <div className="grid grid-cols-2 gap-4">
@@ -223,9 +211,9 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
                     key={day.value}
                     type="button"
                     size="sm"
-                    variant={active ? "default" : "outline"}
+                    variant="outline"
                     aria-pressed={active}
-                    className="h-7 w-12 px-0 text-xs font-normal"
+                    className="h-7 w-12 px-0 text-xs font-normal aria-pressed:border-foreground/50 aria-pressed:bg-foreground/10 aria-pressed:font-semibold"
                     onClick={() => {
                       toggleWeekday(day.value);
                     }}
@@ -294,7 +282,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
 
       <div
         className={cn(
-          "flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm",
+          "flex items-center gap-2 rounded-[7px] bg-foreground/[0.05] px-3 py-2 text-sm",
           invalid && "text-destructive",
         )}
       >
@@ -311,7 +299,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
             : (description ?? "Custom schedule")}
         </span>
         {!invalid && (
-          <code className="ml-auto shrink-0 rounded bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+          <code className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
             {value}
           </code>
         )}

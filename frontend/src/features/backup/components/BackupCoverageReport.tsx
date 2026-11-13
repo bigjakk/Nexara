@@ -7,14 +7,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/features/inventory/components/StatusBadge";
 import { Input } from "@/components/ui/input";
-import { ShieldAlert, ShieldOff, ShieldQuestion, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Panel } from "@/components/page/Panel";
+import { Stat, StatStrip } from "@/components/page/StatStrip";
 import { useBackupCoverage } from "../api/backup-queries";
+import { coverageStats } from "../lib/backup-summary";
 import type { BackupCoverageEntry, BackupEligibility } from "../types/backup";
+import { StateText } from "./StateText";
+
+/**
+ * "targets" is every guest the Backup targets figure counts: all of them but
+ * Veeam's own, which "all" lists too.
+ */
+type CoverageFilter =
+  "all" | "targets" | BackupCoverageEntry["coverage_status"];
 
 function formatBackupAge(unixTs: number | null): string {
   if (unixTs == null) return "Never";
@@ -53,7 +63,7 @@ const ELIGIBILITY_LABELS: Record<BackupEligibility, string> = {
 function ProtectionCell({ entry }: { entry: BackupCoverageEntry }) {
   if (entry.protection === "not_eligible") {
     return (
-      <span className="text-xs text-muted-foreground">
+      <span className="whitespace-nowrap text-xs text-muted-foreground">
         {ELIGIBILITY_LABELS[entry.eligibility] || "Not a backup target"}
       </span>
     );
@@ -61,18 +71,17 @@ function ProtectionCell({ entry }: { entry: BackupCoverageEntry }) {
   if (entry.protection === "none") {
     return <span className="text-xs text-muted-foreground">—</span>;
   }
+  const providers = [
+    ...(entry.protection === "pbs" || entry.protection === "both"
+      ? ["PBS"]
+      : []),
+    ...(entry.protection === "veeam" || entry.protection === "both"
+      ? ["Veeam"]
+      : []),
+  ];
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      {(entry.protection === "pbs" || entry.protection === "both") && (
-        <Badge variant="outline" className="text-xs">
-          PBS
-        </Badge>
-      )}
-      {(entry.protection === "veeam" || entry.protection === "both") && (
-        <Badge variant="outline" className="text-xs">
-          Veeam
-        </Badge>
-      )}
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span>{providers.join(" and ")}</span>
       {/*
         A name match is a guess: a rebuilt host reuses its name, so the
         backup behind it may be of the machine it replaced. Saying so is the
@@ -82,7 +91,7 @@ function ProtectionCell({ entry }: { entry: BackupCoverageEntry }) {
         <Badge
           variant="secondary"
           className="text-xs"
-          title="Matched by name, not by SMBIOS UUID — verify before relying on it"
+          title="Matched by name, not by SMBIOS UUID. Verify before relying on it."
         >
           name match
         </Badge>
@@ -91,47 +100,35 @@ function ProtectionCell({ entry }: { entry: BackupCoverageEntry }) {
   );
 }
 
-function CoverageBadge({
+/** How fresh a guest's newest backup is. Only a problem takes a colour. */
+function CoverageState({
   status,
 }: {
   status: BackupCoverageEntry["coverage_status"];
 }) {
   switch (status) {
     case "recent":
-      return <Badge variant="healthy">Protected</Badge>;
+      return <StateText tone="ok">Protected</StateText>;
     case "stale":
-      return (
-        <Badge variant="warning" className="gap-1">
-          <ShieldAlert className="h-3 w-3" />
-          Stale
-        </Badge>
-      );
+      return <StateText tone="warn">Stale</StateText>;
     case "none":
-      return (
-        <Badge variant="destructive" className="gap-1">
-          <ShieldOff className="h-3 w-3" />
-          No Backup
-        </Badge>
-      );
+      return <StateText tone="bad">No backup</StateText>;
     case "not_eligible":
-      return (
-        <Badge variant="secondary" className="gap-1">
-          <ShieldQuestion className="h-3 w-3" />
-          Not a target
-        </Badge>
-      );
+      return <StateText tone="idle">Not a target</StateText>;
   }
 }
 
 export function BackupCoverageReport() {
   const { data: entries, isLoading, isError, error } = useBackupCoverage();
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterStatus, setFilterStatus] = useState<CoverageFilter>("all");
 
   const filtered = useMemo(() => {
     if (!entries) return [];
     let result = entries;
-    if (filterStatus !== "all") {
+    if (filterStatus === "targets") {
+      result = result.filter((e) => e.coverage_status !== "not_eligible");
+    } else if (filterStatus !== "all") {
       result = result.filter((e) => e.coverage_status === filterStatus);
     }
     if (search) {
@@ -146,32 +143,13 @@ export function BackupCoverageReport() {
     return result;
   }, [entries, search, filterStatus]);
 
-  const stats = useMemo(() => {
-    if (!entries)
-      return { total: 0, recent: 0, stale: 0, none: 0, notEligible: 0 };
-    const notEligible = entries.filter(
-      (e) => e.coverage_status === "not_eligible",
-    ).length;
-    return {
-      // Backup TARGETS, not rows. Counting Veeam's own appliances here would
-      // make the tiles disagree with each other and overstate the estate.
-      total: entries.length - notEligible,
-      recent: entries.filter((e) => e.coverage_status === "recent").length,
-      stale: entries.filter((e) => e.coverage_status === "stale").length,
-      none: entries.filter((e) => e.coverage_status === "none").length,
-      notEligible,
-    };
-  }, [entries]);
+  const stats = useMemo(() => coverageStats(entries ?? []), [entries]);
 
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-20" />
-          ))}
-        </div>
-        <Skeleton className="h-64" />
+        <Skeleton className="h-24 rounded-[10px]" />
+        <Skeleton className="h-64 rounded-[10px]" />
       </div>
     );
   }
@@ -181,108 +159,113 @@ export function BackupCoverageReport() {
   // an empty page would turn that into a confident all-clear.
   if (isError && !entries) {
     return (
-      <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-        Backup coverage could not be computed
-        {error instanceof Error ? `: ${error.message}` : "."}
-      </div>
+      <Panel>
+        <p className="text-sm text-destructive">
+          Backup coverage could not be computed
+          {error instanceof Error ? `: ${error.message}` : "."}
+        </p>
+      </Panel>
     );
   }
 
+  // Each figure is also the filter for the rows below: pressing one shows
+  // only those guests, pressing it again shows them all.
+  const pick = (status: CoverageFilter) => () => {
+    setFilterStatus(filterStatus === status ? "all" : status);
+  };
+
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-muted-foreground">
-              Backup targets
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold tracking-tight">{stats.total}</p>
-            {stats.notEligible > 0 && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {stats.notEligible} excluded (Veeam infrastructure)
-              </p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-emerald-600">
-              Protected (&lt;24h)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold tracking-tight text-emerald-600">
-              {stats.recent}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-amber-600">
-              Stale (&gt;24h)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold tracking-tight text-amber-600">
-              {stats.stale}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-destructive">
-              No Backup
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold tracking-tight text-destructive">
-              {stats.none}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search VMs..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-            }}
-            className="pl-8"
+      <Panel flush aria-label="Coverage summary" bodyClassName="pt-4 pb-0">
+        <StatStrip>
+          <Stat
+            label="Backup targets"
+            value={stats.total}
+            sub={
+              stats.notEligible > 0
+                ? `${String(stats.notEligible)} excluded (Veeam infrastructure)`
+                : undefined
+            }
+            tone={stats.total === 0 ? "quiet" : "default"}
+            selected={filterStatus === "targets"}
+            onSelect={pick("targets")}
           />
-        </div>
-        <select
-          className="rounded-md border bg-background px-3 py-2 text-sm"
-          value={filterStatus}
-          onChange={(e) => {
-            setFilterStatus(e.target.value);
-          }}
-        >
-          <option value="all">All</option>
-          <option value="recent">Protected</option>
-          <option value="stale">Stale</option>
-          <option value="none">No Backup</option>
-          <option value="not_eligible">Not a target</option>
-        </select>
-      </div>
+          <Stat
+            label="Protected"
+            value={stats.recent}
+            sub="Backed up in the last 24 hours"
+            tone={stats.recent === 0 ? "quiet" : "default"}
+            selected={filterStatus === "recent"}
+            onSelect={pick("recent")}
+          />
+          <Stat
+            label="Stale"
+            value={stats.stale}
+            sub="Last backup over 24 hours ago"
+            tone={stats.stale === 0 ? "quiet" : "warn"}
+            selected={filterStatus === "stale"}
+            onSelect={pick("stale")}
+          />
+          <Stat
+            label="No backup"
+            value={stats.none}
+            sub="No backup from any provider"
+            tone={stats.none === 0 ? "quiet" : "bad"}
+            selected={filterStatus === "none"}
+            onSelect={pick("none")}
+          />
+        </StatStrip>
+      </Panel>
 
-      <div className="rounded-md border">
+      <Panel
+        flush
+        title="Guests"
+        aside={
+          filtered.length === (entries?.length ?? 0)
+            ? undefined
+            : `${String(filtered.length)} of ${String(entries?.length ?? 0)}`
+        }
+        actions={
+          <>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search VMs..."
+                aria-label="Search guests"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                }}
+                className="h-8 w-52 pl-8"
+              />
+            </div>
+            <select
+              aria-label="Coverage"
+              className="h-8 rounded-md border bg-transparent px-2 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              value={filterStatus}
+              onChange={(e) => {
+                setFilterStatus(e.target.value as CoverageFilter);
+              }}
+            >
+              <option value="all">All</option>
+              <option value="targets">Backup targets</option>
+              <option value="recent">Protected</option>
+              <option value="stale">Stale</option>
+              <option value="none">No backup</option>
+              <option value="not_eligible">Not a target</option>
+            </select>
+          </>
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>VMID</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Type</TableHead>
+              <TableHead>Guest</TableHead>
               <TableHead>Cluster</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Coverage</TableHead>
               <TableHead>Protected by</TableHead>
-              <TableHead>Last Backup</TableHead>
+              <TableHead>Last backup</TableHead>
               <TableHead className="text-right">Backups</TableHead>
             </TableRow>
           </TableHeader>
@@ -290,7 +273,7 @@ export function BackupCoverageReport() {
             {filtered.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={7}
                   className="py-8 text-center text-sm text-muted-foreground"
                 >
                   {entries?.length === 0 ? "No VMs found." : "No matching VMs."}
@@ -301,47 +284,40 @@ export function BackupCoverageReport() {
               <TableRow
                 key={`${entry.cluster_id}-${String(entry.vmid)}`}
                 className={
-                  entry.coverage_status === "none"
-                    ? "bg-destructive/5"
-                    : entry.coverage_status === "stale"
-                      ? "bg-amber-500/5"
-                      : entry.coverage_status === "not_eligible"
-                        ? "text-muted-foreground"
-                        : ""
+                  entry.coverage_status === "not_eligible"
+                    ? "text-muted-foreground"
+                    : ""
                 }
               >
-                <TableCell className="font-mono text-xs">
-                  {entry.vmid}
+                <TableCell className="whitespace-nowrap">
+                  <span className="font-medium">
+                    {entry.name || `VM ${String(entry.vmid)}`}
+                  </span>
+                  <span className="ml-2 font-mono text-xs text-muted-foreground">
+                    {entry.type === "qemu" ? "VM" : "CT"} {entry.vmid}
+                  </span>
                 </TableCell>
-                <TableCell className="font-medium">
-                  {entry.name || `VM ${String(entry.vmid)}`}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="text-xs">
-                    {entry.type === "qemu" ? "VM" : "CT"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-sm">{entry.cluster_name}</TableCell>
+                <TableCell>{entry.cluster_name}</TableCell>
                 <TableCell>
                   <StatusBadge status={entry.status} />
                 </TableCell>
                 <TableCell>
-                  <CoverageBadge status={entry.coverage_status} />
+                  <CoverageState status={entry.coverage_status} />
                 </TableCell>
                 <TableCell>
                   <ProtectionCell entry={entry} />
                 </TableCell>
-                <TableCell className="text-sm">
+                <TableCell className="whitespace-nowrap">
                   {formatBackupAge(freshestBackup(entry))}
                 </TableCell>
-                <TableCell className="text-right font-mono text-sm">
+                <TableCell className="text-right tabular-nums">
                   {entry.backup_count + (entry.veeam?.restore_point_count ?? 0)}
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </div>
+      </Panel>
     </div>
   );
 }

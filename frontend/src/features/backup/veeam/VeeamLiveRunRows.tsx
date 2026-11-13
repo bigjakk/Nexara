@@ -7,16 +7,15 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/format";
 import { useVeeamSessions } from "../api/backup-queries";
 import type { VeeamSession } from "../types/backup";
-import { resultVariant, sessionResultLabel } from "./veeam-format";
+import { sessionResultLabel } from "./veeam-format";
 import { latestRuns, runIsActive } from "./veeam-live-runs";
 
 function runIcon(session: VeeamSession) {
   if (runIsActive(session)) {
-    return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />;
+    return <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />;
   }
   switch (session.result) {
     case "Success":
@@ -70,7 +69,7 @@ export function VeeamLiveRunRows({
 
   return (
     <>
-      <tr className="border-b bg-blue-500/5">
+      <tr className="border-b bg-foreground/[0.03]">
         <td
           colSpan={colSpan}
           className="px-4 pt-2 pb-1 text-xs text-muted-foreground"
@@ -85,15 +84,25 @@ export function VeeamLiveRunRows({
           <tr
             key={run.id}
             data-testid="veeam-live-run"
-            className="border-b bg-blue-500/5"
+            className="border-b bg-foreground/[0.03]"
           >
             <td colSpan={colSpan} className="px-4 py-1.5">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 {runIcon(run)}
                 {runIsActive(run) ? (
-                  <Badge variant="secondary">{run.state}</Badge>
+                  <span className="font-medium">{run.state}</span>
                 ) : label !== null ? (
-                  <Badge variant={resultVariant(run.result)}>{label}</Badge>
+                  <span
+                    className={
+                      run.result === "Failed"
+                        ? "font-medium text-red-700 dark:text-red-400"
+                        : run.result === "Warning"
+                          ? "font-medium text-amber-700 dark:text-amber-400"
+                          : "font-medium"
+                    }
+                  >
+                    {label}
+                  </span>
                 ) : null}
                 {run.duration !== "" && (
                   <span className="font-mono text-xs text-muted-foreground">

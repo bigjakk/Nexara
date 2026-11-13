@@ -116,7 +116,7 @@ export function EditPBSServerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit PBS Server</DialogTitle>
+          <DialogTitle>Edit PBS server</DialogTitle>
           <DialogDescription>
             Update the connection settings for <strong>{server.name}</strong>.
           </DialogDescription>
@@ -124,7 +124,7 @@ export function EditPBSServerDialog({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="edit-pbs-name">Server Name</Label>
+            <Label htmlFor="edit-pbs-name">Server name</Label>
             <Input
               id="edit-pbs-name"
               value={name}
@@ -153,7 +153,7 @@ export function EditPBSServerDialog({
             )}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="edit-pbs-token-id">API Token ID</Label>
+            <Label htmlFor="edit-pbs-token-id">API token ID</Label>
             <Input
               id="edit-pbs-token-id"
               value={tokenId}
@@ -165,10 +165,10 @@ export function EditPBSServerDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-pbs-token-secret">
-              API Token Secret{" "}
+              API token secret{" "}
               <span className="text-muted-foreground font-normal">
                 {addressChanged
-                  ? "(required — the address changed)"
+                  ? "(required: the address changed)"
                   : "(leave blank to keep current)"}
               </span>
             </Label>
@@ -188,7 +188,7 @@ export function EditPBSServerDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="edit-pbs-fingerprint">TLS Fingerprint</Label>
+            <Label htmlFor="edit-pbs-fingerprint">TLS fingerprint</Label>
             <Input
               id="edit-pbs-fingerprint"
               value={tlsFingerprint}
@@ -207,7 +207,7 @@ export function EditPBSServerDialog({
             </Label>
             <select
               id="edit-pbs-cluster"
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               value={clusterId}
               onChange={(e) => {
                 setClusterId(e.target.value);

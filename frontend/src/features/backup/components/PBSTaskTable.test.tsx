@@ -62,7 +62,7 @@ describe("PBSTaskTable paging", () => {
 
     // 30 of the 60 are worker_type "backup" — still two pages, so the page
     // number survives clamping and only the reset can move it.
-    await user.selectOptions(screen.getByDisplayValue("All Types"), "backup");
+    await user.selectOptions(screen.getByDisplayValue("All types"), "backup");
     expect(pager()).toBe("Page 1 of 2");
   });
 
@@ -78,7 +78,7 @@ describe("PBSTaskTable paging", () => {
 
     // All 60 are finished with status OK, so "ok" keeps every row and the page
     // number stays in range — only the reset can move it.
-    await user.selectOptions(screen.getByDisplayValue("All Statuses"), "ok");
+    await user.selectOptions(screen.getByDisplayValue("All statuses"), "ok");
     expect(pager()).toBe("Page 1 of 3");
   });
 
@@ -146,4 +146,31 @@ describe("PBSTaskTable paging", () => {
     rerender(<PBSTaskTable tasks={tasks(60)} pbsId="pbs-1" />);
     expect(pager()).toBe("Page 3 of 3");
   });
+});
+
+// The status filter lists rows by the outcome their Status cell draws: a
+// finish with warnings is amber, so it is not listed as an error.
+it("lists a finish with warnings under Warnings, not under Error", async () => {
+  const user = userEvent.setup();
+  const statuses = ["OK", "WARNINGS: 1", "connection refused"];
+  renderWithProviders(
+    <PBSTaskTable
+      tasks={tasks(3).map((task, i) => ({
+        ...task,
+        status: statuses[i] ?? "",
+      }))}
+      pbsId="pbs-1"
+    />,
+  );
+  const status = screen.getByLabelText("Task status");
+
+  await user.selectOptions(status, "error");
+  expect(screen.getByText("1 task")).toBeInTheDocument();
+  expect(screen.getByText("connection refused")).toBeInTheDocument();
+  expect(screen.queryByText("WARNINGS: 1")).not.toBeInTheDocument();
+
+  await user.selectOptions(status, "warning");
+  expect(screen.getByText("1 task")).toBeInTheDocument();
+  expect(screen.getByText("WARNINGS: 1")).toBeInTheDocument();
+  expect(screen.queryByText("connection refused")).not.toBeInTheDocument();
 });
