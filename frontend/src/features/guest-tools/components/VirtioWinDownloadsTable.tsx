@@ -1,8 +1,7 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { History } from "lucide-react";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -24,12 +23,11 @@ type DownloadSortKey =
   | "trigger"
   | "started";
 
-function statusVariant(
-  status: VirtioWinDownloadStatus,
-): "default" | "secondary" | "destructive" {
+function statusVariant(status: VirtioWinDownloadStatus): BadgeVariant {
   switch (status) {
+    // Healthy is quiet: a dot, not a coloured pill.
     case "succeeded":
-      return "default";
+      return "healthy";
     case "failed":
       return "destructive";
     case "running":
@@ -119,39 +117,33 @@ export function VirtioWinDownloadsTable({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <History className="h-5 w-5" />
-          Download history
-          <span className="flex-1" />
-          <ResetColumnsButton layout={layout} />
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {sorted.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No virtio-win downloads yet.
-          </p>
-        ) : (
-          <DataTableFrame layout={layout}>
-            <TableHeader>
-              <DataTableHeadRow
-                layout={layout}
-                directionFor={directionFor}
-                onSort={toggleSort}
-              />
-            </TableHeader>
-            <TableBody>
-              {sorted.map((d) => (
-                <TableRow key={d.id}>
-                  <DataTableCells row={d} layout={layout} ctx={undefined} />
-                </TableRow>
-              ))}
-            </TableBody>
-          </DataTableFrame>
-        )}
-      </CardContent>
-    </Card>
+    <Panel
+      flush
+      title="Download history"
+      actions={<ResetColumnsButton layout={layout} />}
+    >
+      {sorted.length === 0 ? (
+        <p className="px-[18px] py-3 text-sm text-muted-foreground">
+          No virtio-win downloads yet.
+        </p>
+      ) : (
+        <DataTableFrame layout={layout}>
+          <TableHeader>
+            <DataTableHeadRow
+              layout={layout}
+              directionFor={directionFor}
+              onSort={toggleSort}
+            />
+          </TableHeader>
+          <TableBody>
+            {sorted.map((d) => (
+              <TableRow key={d.id}>
+                <DataTableCells row={d} layout={layout} ctx={undefined} />
+              </TableRow>
+            ))}
+          </TableBody>
+        </DataTableFrame>
+      )}
+    </Panel>
   );
 }

@@ -2,22 +2,19 @@ import { useEffect, useLayoutEffect, useState, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Loader2,
-  Save,
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
   Plus,
   Trash2,
   Network,
   HardDrive,
-  ArrowRightLeft,
+  FolderOpen,
 } from "lucide-react";
+import { formatBytes } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Panel } from "@/components/page/Panel";
 import {
   Dialog,
   DialogContent,
@@ -57,9 +54,23 @@ import type { CTNetEdit } from "../lib/ct-net";
 import { parseFeatures, buildFeatures } from "../lib/ct-features";
 import type { CTFeatures } from "../lib/ct-features";
 import type { VMConfig } from "../types/vm";
-
-const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
+import {
+  Check,
+  Checks,
+  DeviceList,
+  DeviceRow,
+  Field,
+  FieldGrid,
+  Group,
+  GroupList,
+  PendingBadge,
+  SaveBar,
+} from "./hardware/HardwareRows";
+import {
+  clearSaveBarClass,
+  fieldInputClass,
+  fieldSelectClass,
+} from "./hardware/field-classes";
 
 interface ContainerResourcesPanelProps {
   clusterId: string;
@@ -177,40 +188,6 @@ function parseMountPoint(raw: string): CTMountPoint {
 }
 
 // ---------------------------------------------------------------------------
-// Section component
-// ---------------------------------------------------------------------------
-
-interface SectionProps {
-  title: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}
-
-function Section({ title, children, defaultOpen = true }: SectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <Card className="overflow-hidden">
-      <CardHeader
-        className="cursor-pointer select-none px-3 py-2"
-        onClick={() => {
-          setOpen(!open);
-        }}
-      >
-        <CardTitle className="flex items-center gap-2 text-xs font-medium">
-          {open ? (
-            <ChevronDown className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
-          {title}
-        </CardTitle>
-      </CardHeader>
-      {open && <CardContent className="px-3 pb-3 pt-0">{children}</CardContent>}
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Move Volume Dialog
 // ---------------------------------------------------------------------------
 
@@ -273,17 +250,16 @@ function MoveVolumeDialog({
       <Button
         size="sm"
         variant="outline"
-        className="h-8 gap-1"
+        aria-label={`Move ${volumeKey} to another storage`}
         onClick={() => {
           setOpen(true);
         }}
       >
-        <ArrowRightLeft className="h-3 w-3" />
-        Move Storage
+        Move
       </Button>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Move Volume: {volumeKey}</DialogTitle>
+          <DialogTitle>Move volume {volumeKey}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           {currentStorage && (
@@ -293,7 +269,7 @@ function MoveVolumeDialog({
             </p>
           )}
           <div className="space-y-2">
-            <Label htmlFor="ct-target-storage">Target Storage</Label>
+            <Label htmlFor="ct-target-storage">Target storage</Label>
             <select
               id="ct-target-storage"
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
@@ -328,7 +304,7 @@ function MoveVolumeDialog({
             }
             className="w-full"
           >
-            {moveMutation.isPending ? "Moving..." : "Move Volume"}
+            {moveMutation.isPending ? "Moving..." : "Move volume"}
           </Button>
           {moveMutation.isError && (
             <p className="text-sm text-destructive">
@@ -342,8 +318,87 @@ function MoveVolumeDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Root FS info row
+// Volume rows: the root disk and the mount points
 // ---------------------------------------------------------------------------
+
+/**
+ * A volume's resize: the size typed and the request, held by the volume's row
+ * so both outlive its fields being shut. Unlike the tab's other edits it is
+ * not staged for Save: Resize sends it at once.
+ */
+function useVolumeResize(clusterId: string, ctId: string, disk: string) {
+  const [resizeSize, setResizeSize] = useState("");
+  const resizeMutation = useResizeContainerDisk();
+  return {
+    size: resizeSize,
+    setSize: setResizeSize,
+    isPending: resizeMutation.isPending,
+    isSuccess: resizeMutation.isSuccess,
+    error: resizeMutation.isError ? resizeMutation.error.message : null,
+    send: () => {
+      resizeMutation.mutate(
+        { clusterId, ctId, disk, size: resizeSize.trim() },
+        {
+          onSuccess: () => {
+            setResizeSize("");
+          },
+        },
+      );
+    },
+  };
+}
+
+type VolumeResize = ReturnType<typeof useVolumeResize>;
+
+/** How the last resize went, on the row itself: it shows with the fields shut. */
+function ResizeResult({ resize }: { resize: VolumeResize }) {
+  if (resize.error !== null) {
+    return (
+      <span className="text-[12.5px] text-destructive">{resize.error}</span>
+    );
+  }
+  if (resize.isSuccess) {
+    return <span className="text-[12.5px] text-muted-foreground">Resized</span>;
+  }
+  return null;
+}
+
+/** The resize fields, under the volume's row. */
+function ResizeEditor({
+  resize,
+  placeholder,
+}: {
+  resize: VolumeResize;
+  placeholder: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <Field label="Resize to" className="w-36">
+        <Input
+          placeholder={placeholder}
+          value={resize.size}
+          onChange={(e) => {
+            resize.setSize(e.target.value);
+          }}
+          className={fieldInputClass}
+        />
+      </Field>
+      <Button
+        size="sm"
+        variant="outline"
+        className="gap-1.5"
+        disabled={!resize.size.trim() || resize.isPending}
+        onClick={resize.send}
+      >
+        {resize.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        Resize
+      </Button>
+      <p className="basis-full text-[12.5px] text-muted-foreground">
+        Applies at once, not on Save. A volume can grow but not shrink.
+      </p>
+    </div>
+  );
+}
 
 function RootFSRow({
   config,
@@ -361,66 +416,28 @@ function RootFSRow({
   const volume = raw.split(",")[0] ?? "";
   const currentStorage = volume.split(":")[0] ?? "";
   const currentSize = kv.get("size") ?? "";
-
-  const [resizeSize, setResizeSize] = useState("");
-  const resizeMutation = useResizeContainerDisk();
+  const [open, setOpen] = useState(false);
+  const resize = useVolumeResize(clusterId, ctId, "rootfs");
 
   return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-3 gap-2 text-sm">
-        <div>
-          <span className="text-muted-foreground">Volume:</span>{" "}
-          <span className="font-mono">{volume || "--"}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Size:</span>{" "}
-          <span className="font-medium">{currentSize || "--"}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Storage:</span>{" "}
-          <span className="font-medium">{currentStorage || "--"}</span>
-        </div>
-      </div>
-      <div className="flex items-end gap-2">
-        <div className="flex-1 max-w-[200px]">
-          <Label className="text-xs">Resize To</Label>
-          <Input
-            placeholder="e.g. 32G"
-            value={resizeSize}
-            onChange={(e) => {
-              setResizeSize(e.target.value);
-            }}
-            className="h-8 text-sm"
-          />
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 gap-1"
-          disabled={!resizeSize.trim() || resizeMutation.isPending}
-          onClick={() => {
-            resizeMutation.mutate(
-              {
-                clusterId,
-                ctId,
-                disk: "rootfs",
-                size: resizeSize.trim(),
-              },
-              {
-                onSuccess: () => {
-                  setResizeSize("");
-                },
-              },
-            );
-          }}
-        >
-          {resizeMutation.isPending ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <HardDrive className="h-3 w-3" />
-          )}
-          Resize
-        </Button>
+    <DeviceRow
+      name="rootfs"
+      icon={HardDrive}
+      title="Root disk"
+      marker={<ResizeResult resize={resize} />}
+      summary={
+        <>
+          <span>{currentSize || "--"}</span>
+          {currentStorage && <span>on {currentStorage}</span>}
+          <span className="break-all font-mono">{volume || "--"}</span>
+        </>
+      }
+      open={open}
+      onToggle={() => {
+        setOpen((was) => !was);
+      }}
+      editLabel="Resize rootfs"
+      actions={
         <MoveVolumeDialog
           clusterId={clusterId}
           ctId={ctId}
@@ -428,22 +445,11 @@ function RootFSRow({
           currentStorage={currentStorage}
           storageOptions={storageOptions}
         />
-        {resizeMutation.isError && (
-          <span className="text-xs text-destructive">
-            {resizeMutation.error.message}
-          </span>
-        )}
-        {resizeMutation.isSuccess && (
-          <span className="text-xs text-emerald-600">Resized</span>
-        )}
-      </div>
-    </div>
+      }
+      editor={<ResizeEditor resize={resize} placeholder="e.g. 32G" />}
+    />
   );
 }
-
-// ---------------------------------------------------------------------------
-// Mount point row (read-only for now, resize support)
-// ---------------------------------------------------------------------------
 
 function MountPointRow({
   deviceKey,
@@ -458,79 +464,38 @@ function MountPointRow({
   ctId: string;
   storageOptions: string[];
 }) {
-  const [resizeSize, setResizeSize] = useState("");
-  const resizeMutation = useResizeContainerDisk();
   const currentStorage = mp.volume.split(":")[0] ?? "";
+  const [open, setOpen] = useState(false);
+  // Only a volume with a size can be resized: a bind or device mount has none.
+  const resizable = mp.size !== "";
+  const resize = useVolumeResize(clusterId, ctId, deviceKey);
 
   return (
-    <div className="space-y-1 rounded border p-2">
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className="font-mono text-xs">
-          {deviceKey}
-        </Badge>
-        <span className="text-xs text-muted-foreground">{mp.path}</span>
-      </div>
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <div>
-          <span className="text-muted-foreground">Volume:</span>{" "}
-          <span className="font-mono">{mp.volume}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Size:</span> {mp.size || "--"}
-        </div>
-        <div className="flex gap-2">
-          {mp.backup && (
-            <Badge variant="secondary" className="text-[10px]">
-              backup
-            </Badge>
-          )}
-          {mp.ro && (
-            <Badge variant="secondary" className="text-[10px]">
-              ro
-            </Badge>
-          )}
-          {mp.quota && (
-            <Badge variant="secondary" className="text-[10px]">
-              quota
-            </Badge>
-          )}
-        </div>
-      </div>
-      <div className="flex items-end gap-2 pt-1">
-        {mp.size && (
-          <>
-            <Input
-              placeholder="e.g. 16G"
-              value={resizeSize}
-              onChange={(e) => {
-                setResizeSize(e.target.value);
-              }}
-              className="h-7 max-w-[150px] text-xs"
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 text-xs"
-              disabled={!resizeSize.trim() || resizeMutation.isPending}
-              onClick={() => {
-                resizeMutation.mutate(
-                  { clusterId, ctId, disk: deviceKey, size: resizeSize.trim() },
-                  {
-                    onSuccess: () => {
-                      setResizeSize("");
-                    },
-                  },
-                );
-              }}
-            >
-              {resizeMutation.isPending ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                "Resize"
-              )}
-            </Button>
-          </>
-        )}
+    <DeviceRow
+      name={deviceKey}
+      icon={FolderOpen}
+      title="Mount point"
+      marker={<ResizeResult resize={resize} />}
+      summary={
+        <>
+          <span className="break-all font-mono">{mp.path}</span>
+          <span>{mp.size || "--"}</span>
+          <span className="break-all font-mono">{mp.volume}</span>
+          {mp.backup && <span>in backups</span>}
+          {mp.ro && <span>read-only</span>}
+          {mp.quota && <span>quota</span>}
+        </>
+      }
+      open={open}
+      onToggle={
+        resizable
+          ? () => {
+              setOpen((was) => !was);
+            }
+          : undefined
+      }
+      editLabel={`Resize ${deviceKey}`}
+      actions={
         <MoveVolumeDialog
           clusterId={clusterId}
           ctId={ctId}
@@ -538,23 +503,41 @@ function MountPointRow({
           currentStorage={currentStorage}
           storageOptions={storageOptions}
         />
-      </div>
-    </div>
+      }
+      editor={
+        resizable ? (
+          <ResizeEditor resize={resize} placeholder="e.g. 16G" />
+        ) : undefined
+      }
+    />
   );
 }
 
 // ---------------------------------------------------------------------------
-// NIC editor row
+// NIC rows
 // ---------------------------------------------------------------------------
 
-function NICRow({
-  deviceKey,
+/** A NIC in a few words, as its row reads while the fields are closed. */
+function NICSummary({ nic }: { nic: CTNetEdit }) {
+  return (
+    <>
+      <span>{nic.name || "no name"}</span>
+      <span>{nic.bridge ? `on ${nic.bridge}` : "no bridge"}</span>
+      {nic.ip && <span>{nic.ip === "dhcp" ? "DHCP" : nic.ip}</span>}
+      {nic.ip6 && <span>IPv6 {nic.ip6}</span>}
+      {nic.tag && <span>VLAN {nic.tag}</span>}
+      {nic.hwaddr && <span className="font-mono">{nic.hwaddr}</span>}
+      {nic.firewall && <span>firewall on</span>}
+    </>
+  );
+}
+
+function NICFields({
   nic,
   onChange,
   bridges,
   macPending = false,
 }: {
-  deviceKey: string;
   nic: CTNetEdit;
   onChange: (updated: CTNetEdit) => void;
   bridges: string[];
@@ -568,43 +551,21 @@ function NICRow({
   macPending?: boolean;
 }) {
   return (
-    <div className="space-y-2 rounded border p-2">
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className="font-mono text-xs">
-          <Network className="mr-1 h-3 w-3" />
-          {deviceKey}
-        </Badge>
-        {nic.hwaddr && (
-          <span className="font-mono text-xs text-muted-foreground">
-            {nic.hwaddr}
-          </span>
-        )}
-        {macPending && (
-          <span className="text-xs text-muted-foreground">
-            Waiting for the MAC address Proxmox gives it; it can be edited once
-            the configuration reloads.
-          </span>
-        )}
-      </div>
-      <fieldset
-        disabled={macPending}
-        className="grid min-w-0 grid-cols-2 gap-2 md:grid-cols-4"
-      >
-        <div>
-          <Label className="text-xs">Name</Label>
+    <fieldset disabled={macPending} className="min-w-0 space-y-3">
+      <FieldGrid>
+        <Field label="Name">
           <Input
             value={nic.name}
             onChange={(e) => {
               onChange({ ...nic, name: e.target.value });
             }}
             placeholder="eth0"
-            className="h-8 text-sm"
+            className={fieldInputClass}
           />
-        </div>
-        <div>
-          <Label className="text-xs">Bridge</Label>
+        </Field>
+        <Field label="Bridge">
           <select
-            className={selectClass + " h-8 text-sm"}
+            className={fieldSelectClass}
             value={nic.bridge}
             onChange={(e) => {
               onChange({ ...nic, bridge: e.target.value });
@@ -620,52 +581,47 @@ function NICRow({
               <option value={nic.bridge}>{nic.bridge}</option>
             )}
           </select>
-        </div>
-        <div>
-          <Label className="text-xs">IPv4 (CIDR or DHCP)</Label>
+        </Field>
+        <Field label="IPv4 (CIDR or DHCP)">
           <Input
             value={nic.ip}
             onChange={(e) => {
               onChange({ ...nic, ip: e.target.value });
             }}
-            placeholder="dhcp or 10.0.0.2/24"
-            className="h-8 text-sm"
+            placeholder="dhcp or 192.0.2.10/24"
+            className={fieldInputClass}
           />
-        </div>
-        <div>
-          <Label className="text-xs">Gateway</Label>
+        </Field>
+        <Field label="IPv4 gateway">
           <Input
             value={nic.gw}
             onChange={(e) => {
               onChange({ ...nic, gw: e.target.value });
             }}
-            placeholder="10.0.0.1"
-            className="h-8 text-sm"
+            placeholder="192.0.2.1"
+            className={fieldInputClass}
           />
-        </div>
-        <div>
-          <Label className="text-xs">IPv6 (CIDR or DHCP)</Label>
+        </Field>
+        <Field label="IPv6 (CIDR or DHCP)">
           <Input
             value={nic.ip6}
             onChange={(e) => {
               onChange({ ...nic, ip6: e.target.value });
             }}
-            placeholder="auto, dhcp, or fd00::2/64"
-            className="h-8 text-sm"
+            placeholder="auto, dhcp, or 2001:db8::2/64"
+            className={fieldInputClass}
           />
-        </div>
-        <div>
-          <Label className="text-xs">Gateway6</Label>
+        </Field>
+        <Field label="IPv6 gateway">
           <Input
             value={nic.gw6}
             onChange={(e) => {
               onChange({ ...nic, gw6: e.target.value });
             }}
-            className="h-8 text-sm"
+            className={fieldInputClass}
           />
-        </div>
-        <div>
-          <Label className="text-xs">VLAN Tag</Label>
+        </Field>
+        <Field label="VLAN tag">
           <Input
             type="number"
             min={1}
@@ -674,11 +630,10 @@ function NICRow({
             onChange={(e) => {
               onChange({ ...nic, tag: e.target.value });
             }}
-            className="h-8 text-sm"
+            className={fieldInputClass}
           />
-        </div>
-        <div>
-          <Label className="text-xs">Rate Limit (MB/s)</Label>
+        </Field>
+        <Field label="Rate limit (MB/s)">
           <Input
             type="number"
             min={0}
@@ -687,11 +642,10 @@ function NICRow({
             onChange={(e) => {
               onChange({ ...nic, rate: e.target.value });
             }}
-            className="h-8 text-sm"
+            className={fieldInputClass}
           />
-        </div>
-        <div>
-          <Label className="text-xs">MTU</Label>
+        </Field>
+        <Field label="MTU">
           <Input
             type="number"
             min={68}
@@ -700,22 +654,20 @@ function NICRow({
             onChange={(e) => {
               onChange({ ...nic, mtu: e.target.value });
             }}
-            className="h-8 text-sm"
+            className={fieldInputClass}
           />
-        </div>
-        <div className="flex items-end pb-1">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              checked={nic.firewall}
-              onCheckedChange={(v) => {
-                onChange({ ...nic, firewall: v === true });
-              }}
-            />
-            <Label className="text-xs">Firewall</Label>
-          </div>
-        </div>
-      </fieldset>
-    </div>
+        </Field>
+      </FieldGrid>
+      <Checks>
+        <Check
+          label="Firewall"
+          checked={nic.firewall}
+          onCheckedChange={(v) => {
+            onChange({ ...nic, firewall: v === true });
+          }}
+        />
+      </Checks>
+    </fieldset>
   );
 }
 
@@ -920,6 +872,10 @@ export function ContainerResourcesPanel({
   // Said beside Save when a Save sent nothing and there was no dialog left
   // to say it in.
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+
+  // Which NIC rows have their fields open. Display only: closing a row keeps
+  // what was typed.
+  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
 
   // Where focus goes when that confirmation closes and Save, which opened it,
   // cannot take it back: after a successful Save it is disabled, having
@@ -1328,18 +1284,16 @@ export function ContainerResourcesPanel({
   }
 
   if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 p-6 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading configuration...
-      </div>
-    );
+    return <Skeleton className="h-96 w-full" />;
   }
 
   if (error) {
     return (
-      <div className="p-6 text-destructive">
-        Failed to load container config: {error.message}
-      </div>
+      <Panel>
+        <p className="text-sm text-destructive">
+          Failed to load container config: {error.message}
+        </p>
+      </Panel>
     );
   }
 
@@ -1349,65 +1303,33 @@ export function ContainerResourcesPanel({
   // change a container's features; see the Features section.
   const unprivileged = num(config["unprivileged"]) === 1;
 
-  return (
-    <div className="space-y-3">
-      {/* Warning banner for running container */}
-      {isRunning && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-sm text-amber-700 dark:text-amber-400">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          Some changes (CPU, memory) take effect immediately on a running
-          container. Others may require a restart.
-        </div>
-      )}
+  function toggleRow(key: string) {
+    setOpenRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
-      {/* Save bar */}
-      <div
-        ref={saveBarRef}
-        role="group"
-        aria-label="Changes"
-        tabIndex={-1}
-        className="flex items-center justify-between outline-none"
-      >
-        <div className="flex items-center gap-2">
-          {hasChanges && (
-            <Badge variant="secondary" className="text-xs">
-              {Object.keys(changedFields).length} change
-              {Object.keys(changedFields).length !== 1 ? "s" : ""}
-            </Badge>
-          )}
-          {setConfigMutation.isSuccess && (
-            <span className="text-xs text-emerald-600">Saved</span>
-          )}
-          {setConfigMutation.isError && (
-            <span className="text-xs text-destructive">
-              {setConfigMutation.error.message}
-            </span>
-          )}
-          {saveNotice !== null && (
-            <span
-              role="status"
-              className="text-xs text-amber-700 dark:text-amber-400"
-            >
-              {saveNotice}
-            </span>
-          )}
-        </div>
-        <Button
-          size="sm"
-          className="gap-1.5"
-          disabled={!hasChanges || memoryMissing || setConfigMutation.isPending}
-          onClick={() => {
-            saveChanges({ confirmed: null });
-          }}
-        >
-          {setConfigMutation.isPending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Save className="h-3.5 w-3.5" />
-          )}
-          Save Changes
-        </Button>
-      </div>
+  // For the tab's opening sentence and the panels' asides. Display only.
+  const changeCount = Object.keys(changedFields).length;
+  const memoryBytes = num(memory) * 1024 * 1024;
+  const nicCount = nics.size + pendingNics.size;
+  const plural = (n: number, one: string, many = `${one}s`) =>
+    `${String(n)} ${n === 1 ? one : many}`;
+  const coresText =
+    cores === "" ? "All of the host's cores" : plural(num(cores), "core");
+
+  return (
+    <div className={`space-y-4 ${clearSaveBarClass}`}>
+      <p className="text-sm text-muted-foreground">
+        {coresText}, {formatBytes(memoryBytes)} of memory,{" "}
+        {plural(mountPoints.length + 1, "volume")} and{" "}
+        {plural(nicCount, "network interface")}.
+        {isRunning &&
+          " The container is running: CPU and memory changes take effect at once, others may need a restart."}
+      </p>
 
       {/* Held open while the Save is in flight: Cancel cannot un-send it, and
           closing would hide whether it worked. Its buttons are disabled
@@ -1503,543 +1425,612 @@ export function ContainerResourcesPanel({
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        {/* CPU */}
-        <Section title="CPU">
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label className="text-xs">Cores</Label>
-              <Input
-                type="number"
-                min={1}
-                max={512}
-                value={cores}
-                onChange={(e) => {
-                  setCores(e.target.value);
-                }}
-                placeholder="all"
-                className="h-8 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">CPU Limit</Label>
-              <Input
-                type="number"
-                min={0}
-                max={128}
-                step={0.1}
-                value={cpulimit}
-                onChange={(e) => {
-                  setCpulimit(e.target.value);
-                }}
-                placeholder="0 = unlimited"
-                className="h-8 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">CPU Units</Label>
-              <Input
-                type="number"
-                min={2}
-                max={500000}
-                value={cpuunits}
-                onChange={(e) => {
-                  setCpuunits(e.target.value);
-                }}
-                placeholder="Default"
-                className="h-8 text-sm"
-              />
-            </div>
-          </div>
-        </Section>
+      {/* Two columns that fold into one: what the container is made of on
+          the left, how it starts and what it may do on the right. */}
+      <div className="flex flex-wrap items-start gap-4">
+        <div className="flex min-w-0 flex-[3_1_520px] flex-col gap-4">
+          <Panel
+            flush
+            title="Processor and memory"
+            aside={`${cores === "" ? "All cores" : plural(num(cores), "core")}, ${formatBytes(memoryBytes)}`}
+          >
+            <GroupList>
+              <Group
+                title="Processor"
+                summary={cores === "" ? "Every core of the host" : undefined}
+              >
+                <FieldGrid>
+                  <Field label="Cores">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={512}
+                      value={cores}
+                      onChange={(e) => {
+                        setCores(e.target.value);
+                      }}
+                      placeholder="all"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="CPU limit">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={128}
+                      step={0.1}
+                      value={cpulimit}
+                      onChange={(e) => {
+                        setCpulimit(e.target.value);
+                      }}
+                      placeholder="0 = unlimited"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="CPU units">
+                    <Input
+                      type="number"
+                      min={2}
+                      max={500000}
+                      value={cpuunits}
+                      onChange={(e) => {
+                        setCpuunits(e.target.value);
+                      }}
+                      placeholder="Default"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                </FieldGrid>
+              </Group>
 
-        {/* Memory */}
-        <Section title="Memory">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs">Memory (MiB)</Label>
-              <Input
-                type="number"
-                min={16}
-                step={16}
-                value={memory}
-                onChange={(e) => {
-                  setMemory(e.target.value);
-                }}
-                className="h-8 text-sm"
-              />
-              {memoryMissing && (
-                <p className="mt-1 text-xs text-destructive">
-                  Proxmox cannot unset a container&apos;s memory: enter an
-                  amount to save.
-                </p>
-              )}
-            </div>
-            <div>
-              <Label className="text-xs">Swap (MiB)</Label>
-              <Input
-                type="number"
-                min={0}
-                step={16}
-                value={swap}
-                onChange={(e) => {
-                  setSwap(e.target.value);
-                }}
-                placeholder="0"
-                className="h-8 text-sm"
-              />
-            </div>
-          </div>
-        </Section>
-      </div>
+              <Group title="Memory" summary={formatBytes(memoryBytes)}>
+                <FieldGrid>
+                  <Field
+                    label="Memory (MiB)"
+                    note={
+                      memoryMissing && (
+                        <p className="mt-1 text-[12.5px] text-destructive">
+                          Proxmox cannot unset a container&apos;s memory: enter
+                          an amount to save.
+                        </p>
+                      )
+                    }
+                  >
+                    <Input
+                      type="number"
+                      min={16}
+                      step={16}
+                      value={memory}
+                      onChange={(e) => {
+                        setMemory(e.target.value);
+                      }}
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Swap (MiB)">
+                    <Input
+                      type="number"
+                      min={0}
+                      step={16}
+                      value={swap}
+                      onChange={(e) => {
+                        setSwap(e.target.value);
+                      }}
+                      placeholder="0"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                </FieldGrid>
+              </Group>
+            </GroupList>
+          </Panel>
 
-      {/* Root Filesystem */}
-      <Section title="Root Filesystem">
-        <RootFSRow
-          config={config}
-          clusterId={clusterId}
-          ctId={ctId}
-          storageOptions={storageOptions}
-        />
-      </Section>
-
-      {/* Mount Points */}
-      {mountPoints.length > 0 && (
-        <Section title="Mount Points" defaultOpen={false}>
-          <div className="space-y-2">
-            {mountPoints.map(({ key, mp }) => (
-              <MountPointRow
-                key={key}
-                deviceKey={key}
-                mp={mp}
+          <Panel
+            flush
+            title="Volumes"
+            aside={`${plural(mountPoints.length + 1, "volume")} mounted${unusedVolumes.length > 0 ? `, ${String(unusedVolumes.length)} unused` : ""}`}
+          >
+            <DeviceList>
+              <RootFSRow
+                config={config}
                 clusterId={clusterId}
                 ctId={ctId}
                 storageOptions={storageOptions}
               />
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* Unused Volumes */}
-      {unusedVolumes.length > 0 && (
-        <Section title="Unused Volumes">
-          <div className="space-y-2">
-            {unusedVolumes.map(({ key, volume }) =>
-              deleteVolumes.has(key) ? (
-                <div
+              {mountPoints.map(({ key, mp }) => (
+                <MountPointRow
                   key={key}
-                  className="flex items-center gap-2 rounded border border-destructive/30 bg-destructive/5 px-2 py-1 text-sm"
-                >
-                  <Badge variant="destructive" className="text-[10px]">
-                    removing
-                  </Badge>
-                  <span className="font-mono text-xs">{key}</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 px-2 text-xs"
-                    onClick={() => {
-                      setDeleteVolumes((prev) => {
-                        const next = new Set(prev);
-                        next.delete(key);
-                        return next;
-                      });
-                    }}
-                  >
-                    Undo
-                  </Button>
-                </div>
-              ) : (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 dark:border-amber-800 dark:bg-amber-950"
-                >
-                  <span className="font-mono text-xs font-medium text-amber-700 dark:text-amber-400">
-                    {key}
-                  </span>
-                  <span className="truncate text-[10px] text-amber-600 dark:text-amber-400">
-                    {volume}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      setDeleteVolumes((prev) => new Set(prev).add(key));
-                    }}
-                    title="Remove volume"
-                  >
-                    <Trash2 className="h-3 w-3" /> Remove
-                  </Button>
-                </div>
-              ),
+                  deviceKey={key}
+                  mp={mp}
+                  clusterId={clusterId}
+                  ctId={ctId}
+                  storageOptions={storageOptions}
+                />
+              ))}
+              {unusedVolumes.map(({ key, volume }) =>
+                deleteVolumes.has(key) ? (
+                  <DeviceRow
+                    key={key}
+                    name={key}
+                    icon={HardDrive}
+                    title="Detached volume"
+                    struck
+                    marker={<PendingBadge>Marked for removal</PendingBadge>}
+                    summary={
+                      <span className="break-all font-mono">{volume}</span>
+                    }
+                    actions={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2"
+                        onClick={() => {
+                          setDeleteVolumes((prev) => {
+                            const next = new Set(prev);
+                            next.delete(key);
+                            return next;
+                          });
+                        }}
+                      >
+                        Undo
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <DeviceRow
+                    key={key}
+                    name={key}
+                    icon={HardDrive}
+                    title="Detached volume"
+                    marker={<Badge variant="warning">Unused</Badge>}
+                    summary={
+                      <span className="break-all font-mono">{volume}</span>
+                    }
+                    actions={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          setDeleteVolumes((prev) => new Set(prev).add(key));
+                        }}
+                        title="Remove volume"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span className="sr-only">Remove</span>
+                      </Button>
+                    }
+                  />
+                ),
+              )}
+            </DeviceList>
+            {unusedVolumes.length > 0 && (
+              <p className="border-t px-[18px] pt-2.5 text-[12.5px] text-muted-foreground">
+                An unused volume still takes space on its storage. Removing one
+                deletes its data. Changes apply on Save.
+              </p>
             )}
-            <p className="text-[10px] text-muted-foreground">
-              Removing a volume deletes its data. Changes apply on Save.
-            </p>
-          </div>
-        </Section>
-      )}
+          </Panel>
 
-      {/* Network */}
-      <Section title="Network Interfaces">
-        <div className="space-y-2">
-          {Array.from(nics.entries())
-            .filter(([key]) => !deleteNics.has(key))
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([key, nic]) => (
-              <div key={key} className="relative">
-                <NICRow
-                  deviceKey={key}
-                  nic={nic}
-                  onChange={(updated) => {
-                    setNics((prev) => {
-                      const next = new Map(prev);
-                      next.set(key, updated);
-                      return next;
-                    });
-                  }}
-                  bridges={bridgeList}
-                  // Shown from what the last Save sent, which created or
-                  // rewrote it with no MAC, and not yet from Proxmox's copy,
-                  // which names the one it gave: config is that Save's
-                  // result until the copy lands.
-                  macPending={
-                    nic.hwaddr === "" &&
-                    str(config[key]) !== str(fetchedConfig?.[key])
-                  }
-                />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-1 top-1 h-6 w-6 p-0 text-destructive"
-                  onClick={() => {
-                    setDeleteNics((prev) => new Set(prev).add(key));
-                  }}
-                  title="Remove NIC"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            ))}
-
-          {/* Pending new NICs */}
-          {Array.from(pendingNics.entries())
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([key, nic]) => (
-              <div key={key} className="relative">
-                <div className="absolute -left-1 -top-1 z-10">
-                  <Badge variant="solid" className="bg-emerald-600 text-[10px]">
-                    new
-                  </Badge>
-                </div>
-                <NICRow
-                  deviceKey={key}
-                  nic={nic}
-                  onChange={(updated) => {
-                    setPendingNics((prev) => {
-                      const next = new Map(prev);
-                      next.set(key, updated);
-                      return next;
-                    });
-                  }}
-                  bridges={bridgeList}
-                />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-1 top-1 h-6 w-6 p-0 text-destructive"
-                  onClick={() => {
-                    setPendingNics((prev) => {
-                      const next = new Map(prev);
-                      next.delete(key);
-                      return next;
-                    });
-                  }}
-                  title="Remove"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            ))}
-
-          {/* Deleted NIC indicators */}
-          {Array.from(deleteNics).map((key) => (
-            <div
-              key={`del-${key}`}
-              className="flex items-center gap-2 rounded border border-destructive/30 bg-destructive/5 p-2 text-sm"
-            >
-              <Badge variant="destructive" className="text-[10px]">
-                removing
-              </Badge>
-              <span className="font-mono">{key}</span>
+          <Panel
+            flush
+            title="Network"
+            aside={plural(nicCount, "interface")}
+            actions={
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                className="ml-auto h-6 px-2 text-xs"
+                className="gap-1.5"
                 onClick={() => {
-                  setDeleteNics((prev) => {
-                    const next = new Set(prev);
-                    next.delete(key);
+                  const key = nextNicKey();
+                  setPendingNics((prev) => {
+                    const next = new Map(prev);
+                    next.set(
+                      key,
+                      emptyCTNet({
+                        name: `eth${key.replace("net", "")}`,
+                        bridge: bridgeList[0] ?? "vmbr0",
+                        ip: "dhcp",
+                        firewall: true,
+                      }),
+                    );
                     return next;
                   });
                 }}
               >
-                Undo
+                <Plus className="h-3.5 w-3.5" /> Add network interface
               </Button>
-            </div>
-          ))}
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => {
-              const key = nextNicKey();
-              setPendingNics((prev) => {
-                const next = new Map(prev);
-                next.set(
-                  key,
-                  emptyCTNet({
-                    name: `eth${key.replace("net", "")}`,
-                    bridge: bridgeList[0] ?? "vmbr0",
-                    ip: "dhcp",
-                    firewall: true,
-                  }),
-                );
-                return next;
-              });
-            }}
+            }
           >
-            <Plus className="h-3 w-3" /> Add Network Interface
-          </Button>
+            {nicCount === 0 && (
+              <p className="border-t px-[18px] py-3 text-sm text-muted-foreground">
+                No network interfaces configured.
+              </p>
+            )}
+            <DeviceList>
+              {Array.from(nics.entries())
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([key, nic]) => {
+                  if (deleteNics.has(key)) {
+                    return (
+                      <DeviceRow
+                        key={key}
+                        name={key}
+                        icon={Network}
+                        title="Network interface"
+                        struck
+                        marker={<PendingBadge>Marked for removal</PendingBadge>}
+                        actions={
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => {
+                              setDeleteNics((prev) => {
+                                const next = new Set(prev);
+                                next.delete(key);
+                                return next;
+                              });
+                            }}
+                          >
+                            Undo
+                          </Button>
+                        }
+                      />
+                    );
+                  }
+                  // Shown from what the last Save sent, which created or
+                  // rewrote it with no MAC, and not yet from Proxmox's copy,
+                  // which names the one it gave: config is that Save's
+                  // result until the copy lands.
+                  const macPending =
+                    nic.hwaddr === "" &&
+                    str(config[key]) !== str(fetchedConfig?.[key]);
+                  const edited =
+                    origFields[key] !== undefined &&
+                    buildCTNet(nic) !== origFields[key];
+                  return (
+                    <DeviceRow
+                      key={key}
+                      name={key}
+                      icon={Network}
+                      title="Network interface"
+                      marker={
+                        edited ? <PendingBadge>Edited</PendingBadge> : null
+                      }
+                      summary={
+                        <>
+                          <NICSummary nic={nic} />
+                          {macPending && (
+                            <span>
+                              Waiting for the MAC address Proxmox gives it; it
+                              can be edited once the configuration reloads.
+                            </span>
+                          )}
+                        </>
+                      }
+                      open={openRows.has(key)}
+                      onToggle={() => {
+                        toggleRow(key);
+                      }}
+                      actions={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            setDeleteNics((prev) => new Set(prev).add(key));
+                          }}
+                          title="Remove NIC"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      }
+                      editor={
+                        <NICFields
+                          nic={nic}
+                          onChange={(updated) => {
+                            setNics((prev) => {
+                              const next = new Map(prev);
+                              next.set(key, updated);
+                              return next;
+                            });
+                          }}
+                          bridges={bridgeList}
+                          macPending={macPending}
+                        />
+                      }
+                    />
+                  );
+                })}
+
+              {/* Pending new NICs: open, as each still has to be filled in. */}
+              {Array.from(pendingNics.entries())
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([key, nic]) => (
+                  <DeviceRow
+                    key={key}
+                    name={key}
+                    icon={Network}
+                    title="Network interface"
+                    marker={<PendingBadge>Added on save</PendingBadge>}
+                    summary={<NICSummary nic={nic} />}
+                    actions={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2"
+                        onClick={() => {
+                          setPendingNics((prev) => {
+                            const next = new Map(prev);
+                            next.delete(key);
+                            return next;
+                          });
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    }
+                    editor={
+                      <NICFields
+                        nic={nic}
+                        onChange={(updated) => {
+                          setPendingNics((prev) => {
+                            const next = new Map(prev);
+                            next.set(key, updated);
+                            return next;
+                          });
+                        }}
+                        bridges={bridgeList}
+                      />
+                    }
+                  />
+                ))}
+            </DeviceList>
+          </Panel>
         </div>
-      </Section>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        {/* DNS */}
-        <Section title="DNS">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs">Nameserver</Label>
-              <Input
-                value={nameserver}
-                onChange={(e) => {
-                  setNameserver(e.target.value);
-                }}
-                placeholder="Host default"
-                className="h-8 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Search Domain</Label>
-              <Input
-                value={searchdomain}
-                onChange={(e) => {
-                  setSearchdomain(e.target.value);
-                }}
-                placeholder="Host default"
-                className="h-8 text-sm"
-              />
-            </div>
-          </div>
-        </Section>
+        <div className="flex min-w-0 flex-[2_1_340px] flex-col gap-4">
+          <Panel flush title="Options">
+            <GroupList>
+              <Group title="Identity">
+                <FieldGrid>
+                  <Field label="Hostname" className="col-span-2">
+                    <Input
+                      value={hostname}
+                      onChange={(e) => {
+                        setHostname(e.target.value);
+                      }}
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Console mode">
+                    <select
+                      className={fieldSelectClass}
+                      value={cmode}
+                      onChange={(e) => {
+                        setCmode(e.target.value);
+                      }}
+                    >
+                      {consoleModes.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </FieldGrid>
+              </Group>
 
-        {/* Features. check_ct_modify_config_perm (pve-container
-            src/PVE/LXC.pm) lets nobody but root@pam change a privileged
-            container's features, or any but nesting on an unprivileged one,
-            and Nexara connects with an API token, which never is root@pam. So
-            those show what is set and say why they are locked: a change to
-            one would fail the whole Save. */}
-        <Section title="Features">
-          <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex items-center gap-2">
-                <Checkbox
+              <Group
+                title="Startup"
+                summary={onboot ? "Starts with the node" : "Started by hand"}
+              >
+                <Checks>
+                  <Check
+                    label="Start at boot"
+                    checked={onboot}
+                    onCheckedChange={(v) => {
+                      setOnboot(v === true);
+                    }}
+                  />
+                  <Check
+                    label="Protection"
+                    checked={protection}
+                    onCheckedChange={(v) => {
+                      setProtection(v === true);
+                    }}
+                  />
+                </Checks>
+                <FieldGrid>
+                  <Field label="Startup order">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={startup.order}
+                      onChange={(e) => {
+                        setStartup((s) => ({ ...s, order: e.target.value }));
+                      }}
+                      placeholder="—"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Up delay (s)">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={startup.up}
+                      onChange={(e) => {
+                        setStartup((s) => ({ ...s, up: e.target.value }));
+                      }}
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Down delay (s)">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={startup.down}
+                      onChange={(e) => {
+                        setStartup((s) => ({ ...s, down: e.target.value }));
+                      }}
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                </FieldGrid>
+              </Group>
+
+              <Group title="DNS">
+                <FieldGrid>
+                  <Field label="Nameserver">
+                    <Input
+                      value={nameserver}
+                      onChange={(e) => {
+                        setNameserver(e.target.value);
+                      }}
+                      placeholder="Host default"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Search domain">
+                    <Input
+                      value={searchdomain}
+                      onChange={(e) => {
+                        setSearchdomain(e.target.value);
+                      }}
+                      placeholder="Host default"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                </FieldGrid>
+              </Group>
+            </GroupList>
+          </Panel>
+
+          {/* Features. check_ct_modify_config_perm (pve-container
+              src/PVE/LXC.pm) lets nobody but root@pam change a privileged
+              container's features, or any but nesting on an unprivileged one,
+              and Nexara connects with an API token, which never is root@pam. So
+              those show what is set and say why they are locked: a change to
+              one would fail the whole Save. */}
+          <Panel
+            title="Features"
+            aside={unprivileged ? "Unprivileged" : "Privileged"}
+          >
+            <div className="space-y-3">
+              <Checks>
+                <Check
                   id="ct-feature-nesting"
+                  label="Nesting"
                   checked={features.nesting}
                   disabled={!unprivileged}
                   onCheckedChange={(v) => {
                     setFeatures((f) => ({ ...f, nesting: v === true }));
                   }}
                 />
-                <Label htmlFor="ct-feature-nesting" className="text-xs">
-                  Nesting
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
+                <Check
                   id="ct-feature-fuse"
+                  label="FUSE"
                   checked={features.fuse}
                   disabled
                 />
-                <Label htmlFor="ct-feature-fuse" className="text-xs">
-                  FUSE
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
+                <Check
                   id="ct-feature-keyctl"
+                  label="Keyctl"
                   checked={features.keyctl}
                   disabled
                 />
-                <Label htmlFor="ct-feature-keyctl" className="text-xs">
-                  Keyctl
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
+                <Check
                   id="ct-feature-mknod"
+                  label="Mknod"
                   checked={features.mknod}
                   disabled
                 />
-                <Label htmlFor="ct-feature-mknod" className="text-xs">
-                  Mknod
+              </Checks>
+              <div className="space-y-1">
+                <Label
+                  htmlFor="ct-feature-mount"
+                  className="block text-[12.5px] font-normal text-muted-foreground"
+                >
+                  Allowed mount types
                 </Label>
+                <Input
+                  id="ct-feature-mount"
+                  value={features.mount}
+                  disabled
+                  className={fieldInputClass}
+                />
               </div>
+              <p className="text-[12.5px] text-muted-foreground">
+                {unprivileged
+                  ? "Proxmox lets only root@pam change FUSE, Keyctl, Mknod and the mount types, and Nexara connects with an API token. Set them in Proxmox, as root@pam."
+                  : "On a privileged container Proxmox lets only root@pam change features, Nesting included, and Nexara connects with an API token. Set them in Proxmox, as root@pam."}
+              </p>
             </div>
-            <div>
-              <Label htmlFor="ct-feature-mount" className="text-xs">
-                Allowed Mount Types
-              </Label>
-              <Input
-                id="ct-feature-mount"
-                value={features.mount}
-                disabled
-                className="h-8 text-sm"
-              />
+          </Panel>
+
+          <Panel title="Description and tags">
+            <div className="space-y-3">
+              <Field label="Description">
+                <textarea
+                  value={description}
+                  onChange={(e) => {
+                    setDescription(e.target.value);
+                  }}
+                  rows={3}
+                  className="flex w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </Field>
+              <Field label="Tags">
+                <Input
+                  value={tags}
+                  onChange={(e) => {
+                    setTags(e.target.value);
+                  }}
+                  placeholder="tag1;tag2"
+                  className={fieldInputClass}
+                />
+              </Field>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {unprivileged
-                ? "Proxmox lets only root@pam change FUSE, Keyctl, Mknod and the mount types, and Nexara connects with an API token. Set them in Proxmox, as root@pam."
-                : "On a privileged container Proxmox lets only root@pam change features, Nesting included, and Nexara connects with an API token. Set them in Proxmox, as root@pam."}
-            </p>
-          </div>
-        </Section>
+          </Panel>
+        </div>
       </div>
 
-      {/* Options */}
-      <Section title="Options">
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div>
-              <Label className="text-xs">Hostname</Label>
-              <Input
-                value={hostname}
-                onChange={(e) => {
-                  setHostname(e.target.value);
-                }}
-                className="h-8 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Console Mode</Label>
-              <select
-                className={selectClass + " h-8 text-sm"}
-                value={cmode}
-                onChange={(e) => {
-                  setCmode(e.target.value);
-                }}
-              >
-                {consoleModes.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={onboot}
-                onCheckedChange={(v) => {
-                  setOnboot(v === true);
-                }}
-              />
-              <Label className="text-xs">Start at Boot</Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={protection}
-                onCheckedChange={(v) => {
-                  setProtection(v === true);
-                }}
-              />
-              <Label className="text-xs">Protection</Label>
-            </div>
-          </div>
-
-          {/* Startup Order */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label className="text-xs">Startup Order</Label>
-              <Input
-                type="number"
-                min={0}
-                value={startup.order}
-                onChange={(e) => {
-                  setStartup((s) => ({ ...s, order: e.target.value }));
-                }}
-                placeholder="—"
-                className="h-8 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Up Delay (s)</Label>
-              <Input
-                type="number"
-                min={0}
-                value={startup.up}
-                onChange={(e) => {
-                  setStartup((s) => ({ ...s, up: e.target.value }));
-                }}
-                className="h-8 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Down Delay (s)</Label>
-              <Input
-                type="number"
-                min={0}
-                value={startup.down}
-                onChange={(e) => {
-                  setStartup((s) => ({ ...s, down: e.target.value }));
-                }}
-                className="h-8 text-sm"
-              />
-            </div>
-          </div>
-
-          {/* Description & Tags */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs">Description</Label>
-              <textarea
-                value={description}
-                onChange={(e) => {
-                  setDescription(e.target.value);
-                }}
-                rows={3}
-                className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Tags</Label>
-              <Input
-                value={tags}
-                onChange={(e) => {
-                  setTags(e.target.value);
-                }}
-                placeholder="tag1;tag2"
-                className="h-8 text-sm"
-              />
-            </div>
-          </div>
-        </div>
-      </Section>
+      <SaveBar
+        ref={saveBarRef}
+        dirty={hasChanges}
+        dirtyLabel={`${plural(changeCount, "change")} to save`}
+        saving={setConfigMutation.isPending}
+        disabled={!hasChanges || memoryMissing || setConfigMutation.isPending}
+        onSave={() => {
+          saveChanges({ confirmed: null });
+        }}
+        hideIdle={
+          setConfigMutation.isSuccess ||
+          setConfigMutation.isError ||
+          saveNotice !== null
+        }
+      >
+        {setConfigMutation.isSuccess && (
+          <span className="text-muted-foreground">Saved</span>
+        )}
+        {setConfigMutation.isError && (
+          <span className="text-destructive">
+            {setConfigMutation.error.message}
+          </span>
+        )}
+        {saveNotice !== null && (
+          <span role="status" className="text-amber-700 dark:text-amber-400">
+            {saveNotice}
+          </span>
+        )}
+        {/* Said here too: the Memory field may be a screen away from Save. */}
+        {memoryMissing && (
+          <span className="text-destructive">
+            Memory is empty, so Save is held: enter an amount.
+          </span>
+        )}
+      </SaveBar>
     </div>
   );
 }

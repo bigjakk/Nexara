@@ -144,12 +144,12 @@ describe("guestToolsState", () => {
       guestToolsState(
         g({ installed_version: "", up_to_date: false, needs_update: true }),
       ),
-    ).toMatchObject({ label: "Unknown", variant: "secondary" });
+    ).toMatchObject({ label: "Unknown", variant: "warning" });
     expect(
       guestToolsState(
         g({ installed_version: "", up_to_date: true, needs_update: false }),
       ),
-    ).toMatchObject({ label: "Unknown", variant: "default" });
+    ).toMatchObject({ label: "Unknown", variant: "healthy" });
   });
 
   it("tells never-read apart from up-to-date", () => {
@@ -158,11 +158,11 @@ describe("guestToolsState", () => {
     ).toMatchObject({ label: "Unknown", variant: "outline" });
     expect(guestToolsState(g())).toMatchObject({
       label: "Up to date",
-      variant: "default",
+      variant: "healthy",
     });
     expect(
       guestToolsState(g({ up_to_date: false, needs_update: true })),
-    ).toMatchObject({ label: "Update available", variant: "secondary" });
+    ).toMatchObject({ label: "Update available", variant: "warning" });
   });
 
   // A pending reboot is not a failure and must not read as one; anything else

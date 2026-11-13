@@ -19,6 +19,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Panel } from "@/components/page/Panel";
+import { Stat, StatStrip } from "@/components/page/StatStrip";
 import {
   usePBSSnapshotsByBackupID,
   useTriggerBackup,
@@ -28,7 +30,7 @@ import { useClusterStorage } from "@/features/clusters/api/cluster-queries";
 import { RestoreDialog } from "@/features/backup/components/RestoreDialog";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { PBSSnapshot } from "@/features/backup/types/backup";
-import { Archive, Play, Trash2, Loader2, Star } from "lucide-react";
+import { Play, Trash2, Loader2 } from "lucide-react";
 import { formatBytes } from "@/lib/format";
 
 function formatUnixTime(ts: number): string {
@@ -92,171 +94,149 @@ export function BackupPanel({
   };
 
   if (isLoading) {
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-      </div>
-    );
+    return <Skeleton className="h-40 w-full" />;
   }
 
-  if (error) {
-    return (
-      <p className="py-8 text-center text-sm text-destructive">
-        Failed to load backups: {error.message}
-      </p>
-    );
-  }
-
-  const hasSnapshots = snapshots && snapshots.length > 0;
+  const hasSnapshots = !error && snapshots && snapshots.length > 0;
   const sorted = hasSnapshots
     ? [...snapshots].sort((a, b) => b.backup_time - a.backup_time)
     : [];
   const latest: PBSSnapshot | undefined = sorted[0];
+  const unverified = sorted.filter((snap) => !snap.verified).length;
 
   return (
     <div className="space-y-4">
-      {/* Header with Backup Now button */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">PBS Backups</h3>
-        <Button
-          size="sm"
-          className="gap-1.5"
-          onClick={() => {
-            setBackupDialogOpen(true);
-          }}
-        >
-          <Play className="h-4 w-4" />
-          Backup Now
-        </Button>
-      </div>
-
-      {!hasSnapshots ? (
-        <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
-          <Archive className="h-10 w-10" />
-          <p className="text-sm">No PBS backups found for VMID {backupId}.</p>
-          <p className="text-xs">
-            Backups appear here when a Proxmox Backup Server is configured and
-            backups have been synced.
+      <Panel
+        flush
+        title="PBS backups"
+        aside={
+          hasSnapshots
+            ? `${String(sorted.length)} on Proxmox Backup Server${unverified > 0 ? `, ${String(unverified)} not verified` : ", all verified"}`
+            : undefined
+        }
+        actions={
+          // As before the rebuild: a list that failed to load offers nothing.
+          error ? undefined : (
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => {
+                setBackupDialogOpen(true);
+              }}
+            >
+              <Play className="h-4 w-4" />
+              Back up now
+            </Button>
+          )
+        }
+      >
+        {error ? (
+          <p className="px-[18px] py-6 text-sm text-destructive">
+            Failed to load backups: {error.message}
           </p>
-        </div>
-      ) : (
-        <>
-          {/* Summary */}
-          <div className="flex items-center gap-4 rounded-lg border p-4">
-            <div>
-              <p className="text-xs text-muted-foreground">Total Backups</p>
-              <p className="text-lg font-semibold">
-                {String(snapshots.length)}
-              </p>
-            </div>
+        ) : !hasSnapshots ? (
+          <div className="px-[18px] py-6 text-sm text-muted-foreground">
+            <p>No PBS backups found for VMID {backupId}.</p>
+            <p className="mt-1 text-[12.5px]">
+              Backups appear here when a Proxmox Backup Server is configured and
+              backups have been synced.
+            </p>
+          </div>
+        ) : (
+          <>
             {latest && (
-              <>
-                <div>
-                  <p className="text-xs text-muted-foreground">Latest Backup</p>
-                  <p className="text-sm font-medium">
-                    {timeAgo(latest.backup_time)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatUnixTime(latest.backup_time)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Latest Size</p>
-                  <p className="text-sm font-medium">
-                    {formatBytes(latest.size)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Datastore</p>
-                  <p className="text-sm font-medium">{latest.datastore}</p>
-                </div>
-              </>
+              <StatStrip className="pb-4">
+                <Stat label="Backups" value={String(sorted.length)} />
+                <Stat
+                  label="Latest"
+                  value={timeAgo(latest.backup_time)}
+                  sub={formatUnixTime(latest.backup_time)}
+                />
+                <Stat
+                  label="Latest size"
+                  value={formatBytes(latest.size)}
+                  sub={`on ${latest.datastore}`}
+                />
+              </StatStrip>
             )}
-          </div>
-
-          {/* Table */}
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Datastore</TableHead>
-                  <TableHead className="text-right">Size</TableHead>
-                  <TableHead>Verified</TableHead>
-                  <TableHead>Protected</TableHead>
-                  <TableHead className="w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sorted.map((snap) => (
-                  <TableRow
-                    key={`${snap.backup_type}-${snap.backup_id}-${String(snap.backup_time)}`}
-                  >
-                    <TableCell>
-                      <div>
-                        <p className="text-sm">
-                          {formatUnixTime(snap.backup_time)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {timeAgo(snap.backup_time)}
-                        </p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          snap.backup_type === "vm" ? "default" : "secondary"
-                        }
-                      >
-                        {snap.backup_type.toUpperCase()}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">{snap.datastore}</TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {formatBytes(snap.size)}
-                    </TableCell>
-                    <TableCell>
-                      {snap.verified ? (
-                        <Badge variant="healthy">Yes</Badge>
-                      ) : (
-                        <Badge variant="secondary">No</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {snap.protected ? (
-                        <Badge variant="default">Yes</Badge>
-                      ) : (
-                        <span className="text-muted-foreground">No</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <RestoreDialog
-                          snapshot={snap}
-                          pbsId={snap.pbs_server_id}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title="Delete backup"
-                          onClick={() => {
-                            setDeleteTarget(snap);
-                          }}
-                          disabled={snap.protected}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </TableCell>
+            <div className="border-t">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead className="hidden sm:table-cell">Type</TableHead>
+                    <TableHead>Datastore</TableHead>
+                    <TableHead className="text-right">Size</TableHead>
+                    <TableHead>Verified</TableHead>
+                    <TableHead>Protected</TableHead>
+                    <TableHead className="w-24">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </>
-      )}
+                </TableHeader>
+                <TableBody>
+                  {sorted.map((snap) => (
+                    <TableRow
+                      key={`${snap.backup_type}-${snap.backup_id}-${String(snap.backup_time)}`}
+                    >
+                      <TableCell className="whitespace-nowrap">
+                        <span className="tabular-nums">
+                          {formatUnixTime(snap.backup_time)}
+                        </span>
+                        <span className="ml-2 text-[12.5px] text-muted-foreground">
+                          {timeAgo(snap.backup_time)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden text-muted-foreground sm:table-cell">
+                        {snap.backup_type.toUpperCase()}
+                      </TableCell>
+                      <TableCell>{snap.datastore}</TableCell>
+                      <TableCell className="text-right font-mono text-[12.5px]">
+                        {formatBytes(snap.size)}
+                      </TableCell>
+                      <TableCell>
+                        {snap.verified ? (
+                          <Badge variant="healthy">Verified</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">No</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {snap.protected ? (
+                          <Badge variant="outline">Protected</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">No</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1">
+                          <RestoreDialog
+                            snapshot={snap}
+                            pbsId={snap.pbs_server_id}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                            title="Delete backup"
+                            aria-label="Delete backup"
+                            onClick={() => {
+                              setDeleteTarget(snap);
+                            }}
+                            disabled={snap.protected}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        )}
+      </Panel>
 
       {/* Backup Now Dialog */}
       <BackupNowDialog
@@ -281,7 +261,7 @@ export function BackupPanel({
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Delete Backup</DialogTitle>
+              <DialogTitle>Delete backup</DialogTitle>
               <DialogDescription>
                 Are you sure you want to delete the backup from{" "}
                 <strong>{formatUnixTime(deleteTarget.backup_time)}</strong> on{" "}
@@ -418,7 +398,7 @@ function BackupNowDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Backup Now</DialogTitle>
+          <DialogTitle>Back up now</DialogTitle>
           <DialogDescription>
             Start a vzdump backup of {kind.toUpperCase()} {String(vmid)} on{" "}
             {nodeName}.
@@ -475,8 +455,7 @@ function BackupNowDialog({
                     );
                     if (selected?.type === "pbs") {
                       return (
-                        <p className="flex items-center gap-1 text-xs text-emerald-600">
-                          <Star className="h-3 w-3" />
+                        <p className="text-xs text-muted-foreground">
                           PBS storage provides deduplication and incremental
                           backups.
                         </p>
@@ -546,7 +525,7 @@ function BackupNowDialog({
                     Starting...
                   </>
                 ) : (
-                  "Start Backup"
+                  "Start backup"
                 )}
               </Button>
             </DialogFooter>

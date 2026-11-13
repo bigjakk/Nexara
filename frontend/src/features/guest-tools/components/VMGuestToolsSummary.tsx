@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { DetailField } from "@/components/DetailField";
 import { classifyOS } from "@/lib/os-classify";
 import { useGuestToolsGuest } from "../api/guest-tools-queries";
 import { guestToolsState } from "../lib/guest-tools-state";
@@ -35,13 +36,13 @@ export function VMGuestToolsSummary({
   if (!isWindows || !guest) return null;
 
   const { label, variant } = guestToolsState(guest);
+  // One of the guest agent panel's DefGrid fields on the Overview tab.
   return (
-    <div>
-      <p className="text-xs text-muted-foreground">Guest Tools</p>
-      <div className="flex items-center gap-2">
-        <p className="text-sm">{guest.installed_version || "Not installed"}</p>
+    <DetailField label="Guest tools">
+      <span className="flex flex-wrap items-center gap-2">
+        {guest.installed_version || "Not installed"}
         <Badge variant={variant}>{label}</Badge>
-      </div>
-    </div>
+      </span>
+    </DetailField>
   );
 }

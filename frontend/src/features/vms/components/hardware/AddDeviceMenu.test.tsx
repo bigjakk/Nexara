@@ -736,7 +736,7 @@ describe("AddUSBDialog", () => {
     });
 
     expect(
-      within(dialog).getByRole("heading", { name: "Add USB Device (usb2)" }),
+      within(dialog).getByRole("heading", { name: "Add USB device (usb2)" }),
     ).toBeInTheDocument();
     await user.type(device(dialog), "5555:0004");
     expect(

@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
+import { Panel, PropertyList, PropertyRow } from "@/components/page/Panel";
+import { SettingRow, SettingsSection } from "@/components/page/Settings";
 import {
   Select,
   SelectContent,
@@ -65,13 +66,13 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
 
   if (isLoading || !guest) {
     return (
-      <div className="rounded-lg border p-4">
+      <Panel title="Guest tools">
         <p className="text-sm text-muted-foreground">
           {isLoading
             ? "Checking..."
             : "No guest tools information for this guest yet."}
         </p>
-      </div>
+      </Panel>
     );
   }
 
@@ -105,131 +106,152 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
   // withdrawing the staging it superseded.
   const stagedMismatch = guestToolsStagedMismatch(guest);
 
-  return (
-    <div className="rounded-lg border p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">virtio-win guest tools</h3>
-        <Badge variant={variant}>{label}</Badge>
-      </div>
+  const excludeId = `gt-exclude-${String(vmid)}`;
+  const pinId = `gt-pin-${String(vmid)}`;
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div>
-          <p className="text-xs text-muted-foreground">Installed</p>
-          <p className="text-sm">{guest.installed_version || "--"}</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Target</p>
-          <p className="text-sm">
-            {guest.target_version || "--"}
+  return (
+    // What is installed and what to do about it on the left, this guest's
+    // standing policy on the right; the two fold into one column.
+    <div className="flex flex-wrap items-start gap-4">
+      <Panel
+        className="flex-[1_1_380px]"
+        title="Guest tools"
+        aside="virtio-win drivers and the QEMU guest agent"
+        actions={<Badge variant={variant}>{label}</Badge>}
+      >
+        <PropertyList>
+          <PropertyRow label="Installed">
+            <span className="font-mono text-[12.5px]">
+              {guest.installed_version || "--"}
+            </span>
+          </PropertyRow>
+          <PropertyRow label="Target">
+            <span className="font-mono text-[12.5px]">
+              {guest.target_version || "--"}
+            </span>
             {guest.policy_target_version ? (
-              <span className="ml-1 text-xs text-muted-foreground">
+              <span className="ml-1 text-[12.5px] text-muted-foreground">
                 (pinned)
               </span>
             ) : null}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Guest agent</p>
-          <p className="text-sm">
-            {guest.agent_version || "--"}
+          </PropertyRow>
+          <PropertyRow label="Guest agent">
+            <span className="font-mono text-[12.5px]">
+              {guest.agent_version || "--"}
+            </span>
             {guest.agent_running ? "" : " (not running)"}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Last checked</p>
-          <p className="text-sm">
+          </PropertyRow>
+          <PropertyRow label="Last checked">
             {guest.detected_at
               ? new Date(guest.detected_at).toLocaleString()
               : "Never"}
-          </p>
-        </div>
-      </div>
+          </PropertyRow>
+        </PropertyList>
 
-      {stagedMismatch ? (
-        <p
-          role="status"
-          className="mt-3 text-xs text-amber-600 dark:text-amber-400"
-        >
-          {stagedMismatch}
-        </p>
-      ) : null}
-
-      {guest.last_error ? (
-        <p className={`mt-3 text-xs ${errorTone}`}>{guest.last_error}</p>
-      ) : null}
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || !running}
-          title={
-            running
-              ? "Re-read the installed version from the guest"
-              : "The guest must be running"
-          }
-          onClick={() => {
-            void run(() => detect.mutateAsync(vmid), "Version re-read.");
-          }}
-        >
-          <RefreshCw className="mr-2 h-3.5 w-3.5" />
-          Re-check
-        </Button>
-
-        {inFlight ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || !mayExecute}
-            onClick={() => {
-              void run(
-                () => cancel.mutateAsync(vmid),
-                "Staged update cancelled.",
-              );
-            }}
+        {stagedMismatch ? (
+          <p
+            role="status"
+            className="mt-3 text-[12.5px] text-amber-700 dark:text-amber-400"
           >
-            <X className="mr-2 h-3.5 w-3.5" />
-            Cancel staged update
-          </Button>
-        ) : (
-          <>
-            <Button
-              size="sm"
-              disabled={busy || !mayExecute || guest.excluded || !running}
-              title={`${stageLabel} at the guest's next boot`}
-              onClick={() => {
-                void run(
-                  () => stage.mutateAsync({ vmid, body: { run_now: false } }),
-                  "Staged for the next boot.",
-                );
-              }}
-            >
-              <Download className="mr-2 h-3.5 w-3.5" />
-              {stageLabel} at next boot
-            </Button>
+            {stagedMismatch}
+          </p>
+        ) : null}
+
+        {guest.last_error ? (
+          <p className={`mt-3 text-[12.5px] ${errorTone}`}>
+            {guest.last_error}
+          </p>
+        ) : null}
+
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
+          {inFlight ? (
             <Button
               size="sm"
               variant="outline"
-              disabled={busy || !mayExecute || guest.excluded || !running}
-              title="Install now, without waiting for a reboot. Replacing the network driver briefly drops the guest's network."
+              className="gap-1.5"
+              disabled={busy || !mayExecute}
               onClick={() => {
                 void run(
-                  () => stage.mutateAsync({ vmid, body: { run_now: true } }),
-                  "Update started in the guest.",
+                  () => cancel.mutateAsync(vmid),
+                  "Staged update cancelled.",
                 );
               }}
             >
-              <Play className="mr-2 h-3.5 w-3.5" />
-              Update now
+              <X className="h-3.5 w-3.5" />
+              Cancel staged update
             </Button>
-          </>
-        )}
-      </div>
+          ) : (
+            <>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                disabled={busy || !mayExecute || guest.excluded || !running}
+                title={`${stageLabel} at the guest's next boot`}
+                onClick={() => {
+                  void run(
+                    () => stage.mutateAsync({ vmid, body: { run_now: false } }),
+                    "Staged for the next boot.",
+                  );
+                }}
+              >
+                <Download className="h-3.5 w-3.5" />
+                {stageLabel} at next boot
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                disabled={busy || !mayExecute || guest.excluded || !running}
+                title="Install now, without waiting for a reboot. Replacing the network driver briefly drops the guest's network."
+                onClick={() => {
+                  void run(
+                    () => stage.mutateAsync({ vmid, body: { run_now: true } }),
+                    "Update started in the guest.",
+                  );
+                }}
+              >
+                <Play className="h-3.5 w-3.5" />
+                Update now
+              </Button>
+            </>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1.5"
+            disabled={busy || !running}
+            title={
+              running
+                ? "Re-read the installed version from the guest"
+                : "The guest must be running"
+            }
+            onClick={() => {
+              void run(() => detect.mutateAsync(vmid), "Version re-read.");
+            }}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Re-check
+          </Button>
+        </div>
 
-      <div className="mt-4 space-y-3 border-t pt-3">
-        <div className="flex items-start gap-2">
+        {note ? (
+          <p className="mt-3 text-[12.5px] text-muted-foreground">{note}</p>
+        ) : null}
+      </Panel>
+
+      <SettingsSection
+        className="flex-[1_1_380px]"
+        title="Policy for this guest"
+        description="The cluster's guest tools policy decides when updates are staged. These two settings change that for this guest alone."
+      >
+        <SettingRow
+          label="Exclude from automatic updates"
+          description="The guest stays visible in the fleet view; nothing is staged for it automatically."
+          htmlFor={excludeId}
+          className="sm:grid-cols-[minmax(0,1fr)_auto]"
+        >
           <Checkbox
-            id={`gt-exclude-${String(vmid)}`}
+            id={excludeId}
             checked={guest.excluded}
             disabled={busy || !mayManage}
             onCheckedChange={(v) => {
@@ -243,19 +265,14 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
               );
             }}
           />
-          <div className="space-y-1">
-            <Label htmlFor={`gt-exclude-${String(vmid)}`}>
-              Exclude from automatic updates
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              The guest stays visible in the fleet view; nothing is staged for
-              it automatically.
-            </p>
-          </div>
-        </div>
+        </SettingRow>
 
-        <div className="space-y-1">
-          <Label>Pinned version</Label>
+        <SettingRow
+          label="Pinned version"
+          description="A pin here outranks the cluster policy for this guest only."
+          htmlFor={pinId}
+          className="sm:grid-cols-1"
+        >
           <Select
             value={
               guest.policy_target_version === ""
@@ -276,7 +293,7 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
               );
             }}
           >
-            <SelectTrigger className="max-w-sm">
+            <SelectTrigger id={pinId}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -291,15 +308,8 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">
-            A pin here outranks the cluster policy for this guest only.
-          </p>
-        </div>
-      </div>
-
-      {note ? (
-        <p className="mt-3 text-xs text-muted-foreground">{note}</p>
-      ) : null}
+        </SettingRow>
+      </SettingsSection>
     </div>
   );
 }

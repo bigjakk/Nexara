@@ -69,9 +69,11 @@ export function guestToolsState(g: GuestToolsGuest): GuestToolsState {
       : g.up_to_date
         ? "Up to date"
         : "Unknown";
+  // Healthy is quiet (a dot, not a coloured pill); an update waiting is the
+  // one of these that asks for something, so it is the amber one.
   return state(
     label,
-    g.needs_update ? "secondary" : g.up_to_date ? "default" : "outline",
+    g.needs_update ? "warning" : g.up_to_date ? "healthy" : "outline",
   );
 }
 

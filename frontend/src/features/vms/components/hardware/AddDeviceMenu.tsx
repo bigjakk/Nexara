@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  ChevronDown,
   Plus,
   Network,
   Usb,
@@ -154,27 +155,28 @@ export function AddDeviceMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="h-7 gap-1 text-xs">
-            <Plus className="h-3 w-3" /> Add Device
+          <Button size="sm" className="gap-1.5">
+            <Plus className="h-4 w-4" /> Add device
+            <ChevronDown className="h-3.5 w-3.5 opacity-70" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-48">
+        <DropdownMenuContent align="end" className="w-48">
           <DropdownMenuItem onClick={onAddDisk}>
-            <HardDrive className="mr-2 h-4 w-4" /> Hard Disk
+            <HardDrive className="mr-2 h-4 w-4" /> Hard disk
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDialog("cdrom");
             }}
           >
-            <Disc className="mr-2 h-4 w-4" /> CD/DVD Drive
+            <Disc className="mr-2 h-4 w-4" /> CD/DVD drive
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDialog("nic");
             }}
           >
-            <Network className="mr-2 h-4 w-4" /> Network Device
+            <Network className="mr-2 h-4 w-4" /> Network device
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -182,21 +184,21 @@ export function AddDeviceMenu({
               setDialog("usb");
             }}
           >
-            <Usb className="mr-2 h-4 w-4" /> USB Device
+            <Usb className="mr-2 h-4 w-4" /> USB device
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDialog("pci");
             }}
           >
-            <Cpu className="mr-2 h-4 w-4" /> PCI Device
+            <Cpu className="mr-2 h-4 w-4" /> PCI device
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDialog("serial");
             }}
           >
-            <Terminal className="mr-2 h-4 w-4" /> Serial Port
+            <Terminal className="mr-2 h-4 w-4" /> Serial port
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -204,7 +206,7 @@ export function AddDeviceMenu({
               setDialog("cloudinit");
             }}
           >
-            <Monitor className="mr-2 h-4 w-4" /> Cloud-Init Drive
+            <Monitor className="mr-2 h-4 w-4" /> Cloud-init drive
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
@@ -219,7 +221,7 @@ export function AddDeviceMenu({
               setDialog("virtiofs");
             }}
           >
-            <FolderOpen className="mr-2 h-4 w-4" /> VirtioFS Share
+            <FolderOpen className="mr-2 h-4 w-4" /> VirtioFS share
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -228,7 +230,7 @@ export function AddDeviceMenu({
             }}
             disabled={hasEfi}
           >
-            <Key className="mr-2 h-4 w-4" /> EFI Disk {hasEfi && "(exists)"}
+            <Key className="mr-2 h-4 w-4" /> EFI disk {hasEfi && "(exists)"}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
@@ -236,7 +238,7 @@ export function AddDeviceMenu({
             }}
             disabled={hasTpm}
           >
-            <Shield className="mr-2 h-4 w-4" /> TPM State {hasTpm && "(exists)"}
+            <Shield className="mr-2 h-4 w-4" /> TPM state {hasTpm && "(exists)"}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -389,7 +391,7 @@ function AddNICDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Network Device (net{String(idx)})</DialogTitle>
+          <DialogTitle>Add network device (net{String(idx)})</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid grid-cols-2 gap-3">
@@ -698,7 +700,7 @@ function AddUSBDialog({
     >
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add USB Device (usb{String(idx)})</DialogTitle>
+          <DialogTitle>Add USB device (usb{String(idx)})</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <fieldset className="grid gap-1.5" disabled={busy}>
@@ -1147,7 +1149,7 @@ function AddPCIDialog({
     >
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add PCI Device (hostpci{String(idx)})</DialogTitle>
+          <DialogTitle>Add PCI device (hostpci{String(idx)})</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <fieldset className="grid gap-1.5" disabled={busy}>
@@ -1417,7 +1419,7 @@ function AddSerialDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add Serial Port (serial{String(idx)})</DialogTitle>
+          <DialogTitle>Add serial port (serial{String(idx)})</DialogTitle>
         </DialogHeader>
         <div className="space-y-1">
           <Label className="text-xs">Type</Label>
@@ -1566,7 +1568,7 @@ function AddVirtioFSDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add VirtioFS Share (virtiofs{String(idx)})</DialogTitle>
+          <DialogTitle>Add VirtioFS share (virtiofs{String(idx)})</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
@@ -1656,7 +1658,7 @@ function AddEFIDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add EFI Disk</DialogTitle>
+          <DialogTitle>Add EFI disk</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
@@ -1750,7 +1752,7 @@ function AddTPMDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add TPM State</DialogTitle>
+          <DialogTitle>Add TPM state</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
@@ -1838,7 +1840,7 @@ function AddCloudInitDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add Cloud-Init Drive</DialogTitle>
+          <DialogTitle>Add cloud-init drive</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
@@ -1938,7 +1940,7 @@ function AddCDROMDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add CD/DVD Drive</DialogTitle>
+          <DialogTitle>Add CD/DVD drive</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">

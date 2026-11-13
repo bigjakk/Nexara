@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { UsageBar } from "@/components/UsageBar";
 import { formatBytes, formatBytesPerSecond } from "@/lib/format";
 import { ApiClientError } from "@/lib/api-client";
 import { useBlockJobs } from "../api/vm-queries";
@@ -36,7 +37,10 @@ export function LiveBlockJobRows({
   if (error) {
     return (
       <tr className="border-b">
-        <td colSpan={colSpan} className="px-4 py-2 text-xs text-destructive">
+        <td
+          colSpan={colSpan}
+          className="px-[18px] py-2.5 text-[12.5px] text-destructive"
+        >
           {error instanceof ApiClientError
             ? error.message
             : "Could not read the block jobs."}
@@ -52,15 +56,17 @@ export function LiveBlockJobRows({
         const pct = job.total > 0 ? (job.completed / job.total) * 100 : 0;
         const p = pace.get(job.device);
         return (
-          <tr key={job.device} className="border-b bg-blue-500/5">
-            <td colSpan={colSpan} className="px-4 py-2">
-              <div data-testid="block-job" className="space-y-1">
+          // What is happening now, on a faintly raised row; the measured
+          // progress is in the data colour like every other bar.
+          <tr key={job.device} className="border-b bg-foreground/[0.03]">
+            <td colSpan={colSpan} className="px-[18px] py-2.5">
+              <div data-testid="block-job" className="space-y-1.5">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin self-center text-blue-500" />
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin self-center text-muted-foreground" />
                   <span className="font-medium">
                     Block job: <span className="capitalize">{job.type}</span>
                   </span>
-                  <span className="font-mono text-xs text-muted-foreground">
+                  <span className="font-mono text-[12.5px] text-muted-foreground">
                     {job.device}
                   </span>
                   <span className="ml-auto tabular-nums">
@@ -68,13 +74,8 @@ export function LiveBlockJobRows({
                     {pct.toFixed(1)}%)
                   </span>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded bg-muted">
-                  <div
-                    className="h-full bg-data"
-                    style={{ width: `${String(Math.min(100, pct))}%` }}
-                  />
-                </div>
-                <div className="flex flex-wrap gap-x-4 text-xs text-muted-foreground">
+                <UsageBar percent={pct} thresholds={false} />
+                <div className="flex flex-wrap gap-x-4 text-[12.5px] text-muted-foreground">
                   <span>
                     Speed limit:{" "}
                     {job.speed_limit > 0
@@ -92,10 +93,12 @@ export function LiveBlockJobRows({
         );
       })}
       {data.unparsed.length > 0 && (
-        <tr className="border-b bg-blue-500/5">
-          <td colSpan={colSpan} className="px-4 py-2">
-            <p className="text-xs text-muted-foreground">QEMU also reported:</p>
-            <pre className="mt-1 whitespace-pre-wrap font-mono text-xs">
+        <tr className="border-b bg-foreground/[0.03]">
+          <td colSpan={colSpan} className="px-[18px] py-2.5">
+            <p className="text-[12.5px] text-muted-foreground">
+              QEMU also reported:
+            </p>
+            <pre className="mt-1 whitespace-pre-wrap font-mono text-[12.5px]">
               {data.unparsed.join("\n")}
             </pre>
           </td>

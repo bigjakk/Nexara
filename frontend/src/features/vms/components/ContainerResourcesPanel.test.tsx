@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useQuery } from "@tanstack/react-query";
 import { renderWithProviders } from "@/test/test-utils";
@@ -77,6 +77,7 @@ describe("ContainerResourcesPanel unused volumes", () => {
     renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
     expect(screen.getByText("unused0")).toBeInTheDocument();
     expect(screen.getByText("local-lvm:vm-200-disk-0")).toBeInTheDocument();
+    expect(screen.getByText("Unused")).toBeInTheDocument();
   });
 
   // Saving a removal, and the confirmation that comes first, are tested in
@@ -87,17 +88,17 @@ describe("ContainerResourcesPanel unused volumes", () => {
     renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
     await user.click(screen.getByTitle("Remove volume"));
     await user.click(screen.getByRole("button", { name: "Undo" }));
-    expect(screen.queryByText("removing")).not.toBeInTheDocument();
+    expect(screen.queryByText("Marked for removal")).not.toBeInTheDocument();
     expect(screen.getByTitle("Remove volume")).toBeInTheDocument();
   });
 
-  it("omits the section when there is nothing unused", () => {
+  it("lists no unused volume when there is nothing unused", () => {
     state.config = {
       hostname: "ct200",
       rootfs: "ceph:vm-200-disk-0,size=8G",
     };
     renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
-    expect(screen.queryByText("Unused Volumes")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unused")).not.toBeInTheDocument();
   });
 });
 
@@ -157,21 +158,21 @@ describe("ContainerResourcesPanel change tracking", () => {
     [
       "keeps a bare startup order when a delay is edited",
       { startup: "1,up=30" },
-      "Up Delay (s)",
+      "Up delay (s)",
       "45",
       { startup: "1,up=45" },
     ],
     [
       "deletes a startup cleared",
       { startup: "1" },
-      "Startup Order",
+      "Startup order",
       "",
       { delete: "startup" },
     ],
     [
       "deletes a CPU limit, the other numbers and the hostname cleared",
       { cpulimit: 2, cpuunits: 200, swap: 512 },
-      ["Cores", "CPU Limit", "CPU Units", "Swap (MiB)", "Hostname"],
+      ["Cores", "CPU limit", "CPU units", "Swap (MiB)", "Hostname"],
       "",
       { delete: "cores,cpulimit,cpuunits,swap,hostname" },
     ],
@@ -219,7 +220,7 @@ describe("ContainerResourcesPanel change tracking", () => {
       return el;
     };
     expect(input("Cores")).toHaveValue(null);
-    expect(input("CPU Units")).toHaveValue(null);
+    expect(input("CPU units")).toHaveValue(null);
     expect(input("Swap (MiB)")).toHaveValue(0);
     const save = screen.getByRole("button", { name: /save/i });
     expect(save).toBeDisabled();
@@ -228,6 +229,12 @@ describe("ContainerResourcesPanel change tracking", () => {
 
     expect(
       screen.getByText(/cannot unset a container's memory/),
+    ).toBeInTheDocument();
+    // And beside the held Save itself, which may be a screen from the field.
+    expect(
+      within(screen.getByRole("group", { name: "Changes" })).getByText(
+        /Memory is empty, so Save is held/,
+      ),
     ).toBeInTheDocument();
     expect(save).toBeDisabled();
   });
@@ -247,7 +254,7 @@ describe("ContainerResourcesPanel change tracking", () => {
       for (const name of ["FUSE", "Keyctl", "Mknod"]) {
         expect(screen.getByRole("checkbox", { name })).toBeDisabled();
       }
-      expect(screen.getByLabelText("Allowed Mount Types")).toBeDisabled();
+      expect(screen.getByLabelText("Allowed mount types")).toBeDisabled();
       expect(screen.getByRole("checkbox", { name: "Nesting" })).toHaveProperty(
         "disabled",
         !nestingOpen,

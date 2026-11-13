@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MonitorCog, RefreshCw, Download, X } from "lucide-react";
+import { RefreshCw, Download, X } from "lucide-react";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableFrame } from "@/components/DataTableFrame";
@@ -283,41 +283,44 @@ export function GuestToolsFleetTable({ clusterId }: GuestToolsFleetTableProps) {
     },
   };
 
+  const behind = sorted.filter((g) => g.needs_update).length;
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <MonitorCog className="h-5 w-5" />
-          Windows guests
-          <span className="flex-1" />
-          <ResetColumnsButton layout={layout} />
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {note ? <p className="text-xs text-destructive">{note}</p> : null}
-        {sorted.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No Windows guests found on this cluster.
-          </p>
-        ) : (
-          <DataTableFrame layout={layout}>
-            <TableHeader>
-              <DataTableHeadRow
-                layout={layout}
-                directionFor={directionFor}
-                onSort={toggleSort}
-              />
-            </TableHeader>
-            <TableBody>
-              {sorted.map((g) => (
-                <TableRow key={g.vmid}>
-                  <DataTableCells row={g} layout={layout} ctx={cellCtx} />
-                </TableRow>
-              ))}
-            </TableBody>
-          </DataTableFrame>
-        )}
-      </CardContent>
-    </Card>
+    <Panel
+      flush
+      title="Windows guests"
+      aside={
+        sorted.length === 0
+          ? undefined
+          : `${String(sorted.length)} on this cluster${behind > 0 ? `, ${String(behind)} with an update waiting` : ""}`
+      }
+      actions={<ResetColumnsButton layout={layout} />}
+    >
+      {note ? (
+        <p className="px-[18px] pb-3 text-[12.5px] text-destructive">{note}</p>
+      ) : null}
+      {sorted.length === 0 ? (
+        <p className="px-[18px] py-3 text-sm text-muted-foreground">
+          No Windows guests found on this cluster.
+        </p>
+      ) : (
+        <DataTableFrame layout={layout}>
+          <TableHeader>
+            <DataTableHeadRow
+              layout={layout}
+              directionFor={directionFor}
+              onSort={toggleSort}
+            />
+          </TableHeader>
+          <TableBody>
+            {sorted.map((g) => (
+              <TableRow key={g.vmid}>
+                <DataTableCells row={g} layout={layout} ctx={cellCtx} />
+              </TableRow>
+            ))}
+          </TableBody>
+        </DataTableFrame>
+      )}
+    </Panel>
   );
 }

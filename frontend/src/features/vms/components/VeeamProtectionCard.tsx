@@ -1,6 +1,7 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DetailField } from "@/components/DetailField";
+import { DefGrid, Panel } from "@/components/page/Panel";
 import {
   Table,
   TableBody,
@@ -48,33 +49,23 @@ function MatchBadge({
   switch (method) {
     case "smbios":
       return (
-        <Badge
-          variant="outline"
-          className="text-xs"
-          title="Matched on the guest's SMBIOS UUID"
-        >
-          verified match
-        </Badge>
+        <span title="Matched on the guest's SMBIOS UUID">Verified match</span>
       );
     case "manual":
       return (
-        <Badge
-          variant="outline"
-          className="text-xs"
-          title="An operator mapped this backup to this guest"
-        >
-          manual match
-        </Badge>
+        <span title="An operator mapped this backup to this guest">
+          Manual match
+        </span>
       );
     case "name":
       return (
         <Badge
-          variant="secondary"
-          className="gap-1 text-xs"
-          title="Matched by name only — this guest has no SMBIOS UUID recorded, so the backup may belong to a machine it replaced"
+          variant="warning"
+          className="gap-1"
+          title="Matched by name only. This guest has no SMBIOS UUID recorded, so the backup may belong to a machine it replaced"
         >
           <AlertTriangle className="h-3 w-3" />
-          name match
+          Name match
         </Badge>
       );
     default:
@@ -87,8 +78,8 @@ function MalwareBadge({ status }: { status: string }) {
   const severe = status === "Infected";
   return (
     <Badge
-      variant={severe ? "destructive" : "outline"}
-      className="gap-1 text-xs"
+      variant={severe ? "destructive" : "warning"}
+      className="gap-1"
       title="Veeam's verdict on the newest restore point"
     >
       <AlertTriangle className="h-3 w-3" />
@@ -126,16 +117,11 @@ export function VeeamProtectionCard({
       return null;
     }
     return (
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Veeam protection</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-destructive">
-            Could not load Veeam protection for this guest.
-          </p>
-        </CardContent>
-      </Card>
+      <Panel title="Veeam protection">
+        <p className="text-sm text-destructive">
+          Could not load Veeam protection for this guest.
+        </p>
+      </Panel>
     );
   }
   if (!data || data.object_count === 0) {
@@ -145,121 +131,134 @@ export function VeeamProtectionCard({
     return null;
   }
 
+  const matched = data.match_method !== "none";
+  const scanned = data.malware_status !== "";
+
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <CardTitle className="text-sm">Veeam protection</CardTitle>
-          {data.protected ? (
-            <Badge variant="healthy">Protected</Badge>
-          ) : (
-            <Badge variant="destructive" className="gap-1">
-              <ShieldOff className="h-3 w-3" />
-              No restore points
-            </Badge>
-          )}
-          <MatchBadge method={data.match_method} />
-          <MalwareBadge status={data.malware_status} />
-          {data.last_run_failed && (
-            <Badge variant="destructive" className="text-xs">
-              Last run failed or cancelled
-            </Badge>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Panel
+      flush
+      title="Veeam protection"
+      // Quiet when protected, as a healthy thing is everywhere else.
+      actions={
+        data.protected ? (
+          <span className="flex items-center gap-[7px] text-sm text-muted-foreground">
+            <span
+              aria-hidden="true"
+              className="h-[7px] w-[7px] rounded-full bg-emerald-500"
+            />
+            Protected
+          </span>
+        ) : (
+          <Badge variant="destructive" className="gap-1">
+            <ShieldOff className="h-3 w-3" />
+            No restore points
+          </Badge>
+        )
+      }
+    >
+      <div className="space-y-4 px-[18px] pb-1">
         {!data.protected && (
-          <p className="text-sm text-muted-foreground">
-            Veeam knows this guest but holds no restore points for it — every
-            one has been pruned. Nothing here can be recovered.
+          <p className="max-w-[65ch] text-sm text-muted-foreground">
+            Veeam knows this guest but holds no restore points for it: every one
+            has been pruned. Nothing here can be recovered.
           </p>
         )}
 
-        <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
-          <div className="flex gap-2">
-            <dt className="text-muted-foreground">Newest point</dt>
-            <dd>
-              {formatTime(data.latest_restore_point)}
-              {ageLabel(data.latest_restore_point) !== "" && (
-                <span className="ml-1 text-muted-foreground">
-                  ({ageLabel(data.latest_restore_point)})
-                </span>
-              )}
-            </dd>
-          </div>
-          <div className="flex gap-2">
-            <dt className="text-muted-foreground">Restore points</dt>
-            <dd className="font-mono">{data.restore_point_count}</dd>
-          </div>
-          <div className="flex gap-2">
-            <dt className="text-muted-foreground">Size</dt>
-            <dd className="font-mono">
-              {formatBytes(data.restore_point_bytes)}
-            </dd>
-          </div>
-        </dl>
-
-        {data.restore_points.length > 0 && (
-          <div className="space-y-1">
-            {data.restore_point_count > data.restore_points.length && (
-              // Said out loud. The summary above reports the true total, and
-              // an operator scanning this list for a specific date would
-              // otherwise conclude that point does not exist.
-              <p className="text-xs text-muted-foreground">
-                Showing the newest {data.restore_points.length} of{" "}
-                {data.restore_point_count}.
-              </p>
+        <DefGrid>
+          <DetailField label="Newest point">
+            {formatTime(data.latest_restore_point)}
+            {ageLabel(data.latest_restore_point) !== "" && (
+              <span className="ml-1 text-muted-foreground">
+                ({ageLabel(data.latest_restore_point)})
+              </span>
             )}
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Type</TableHead>
-                    {/*
-                    No "Backup" column. The collector folds Veeam's listing to
-                    one backup object per guest, so the object name is just the
-                    guest's own — a column repeating "linux03" on every row
-                    under a header promising to say which job produced the
-                    point. The point's backup id is a bare UUID and no more
-                    use. Better to omit it than to imply an answer.
-                  */}
-                    <TableHead>Malware</TableHead>
-                    <TableHead className="text-right">Size</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.restore_points.map((point) => (
-                    <TableRow key={point.id}>
-                      <TableCell className="text-sm">
-                        {formatTime(point.creation_time)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">
-                          {point.point_type || "—"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {point.malware_status === "Clean" ||
-                        point.malware_status === "" ? (
-                          <span className="text-muted-foreground">
-                            {point.malware_status || "—"}
-                          </span>
-                        ) : (
-                          <MalwareBadge status={point.malware_status} />
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        {formatBytes(point.size_bytes)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+          </DetailField>
+          <DetailField label="Restore points" variant="mono">
+            {data.restore_point_count}
+          </DetailField>
+          <DetailField label="Size" variant="mono">
+            {formatBytes(data.restore_point_bytes)}
+          </DetailField>
+          {matched && (
+            <DetailField label="Matched to this guest by">
+              <MatchBadge method={data.match_method} />
+            </DetailField>
+          )}
+          {scanned && (
+            <DetailField label="Malware scan">
+              {data.malware_status === "Clean" ? (
+                "Clean"
+              ) : (
+                <MalwareBadge status={data.malware_status} />
+              )}
+            </DetailField>
+          )}
+          {data.last_run_failed && (
+            <DetailField label="Last run">
+              <span className="text-red-700 dark:text-red-400">
+                Failed or cancelled
+              </span>
+            </DetailField>
+          )}
+        </DefGrid>
+      </div>
+
+      {data.restore_points.length > 0 && (
+        <div className="mt-3 border-t">
+          {data.restore_point_count > data.restore_points.length && (
+            // Said out loud. The summary above reports the true total, and
+            // an operator scanning this list for a specific date would
+            // otherwise conclude that point does not exist.
+            <p className="px-[18px] pt-3 text-[12.5px] text-muted-foreground">
+              Showing the newest {data.restore_points.length} of{" "}
+              {data.restore_point_count}.
+            </p>
+          )}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Created</TableHead>
+                <TableHead>Type</TableHead>
+                {/*
+                  No "Backup" column. The collector folds Veeam's listing to
+                  one backup object per guest, so the object name is just the
+                  guest's own — a column repeating "linux03" on every row
+                  under a header promising to say which job produced the
+                  point. The point's backup id is a bare UUID and no more
+                  use. Better to omit it than to imply an answer.
+                */}
+                <TableHead>Malware</TableHead>
+                <TableHead className="text-right">Size</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.restore_points.map((point) => (
+                <TableRow key={point.id}>
+                  <TableCell className="whitespace-nowrap tabular-nums">
+                    {formatTime(point.creation_time)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {point.point_type || "—"}
+                  </TableCell>
+                  <TableCell>
+                    {point.malware_status === "Clean" ||
+                    point.malware_status === "" ? (
+                      <span className="text-muted-foreground">
+                        {point.malware_status || "—"}
+                      </span>
+                    ) : (
+                      <MalwareBadge status={point.malware_status} />
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-[12.5px]">
+                    {formatBytes(point.size_bytes)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </Panel>
   );
 }

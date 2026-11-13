@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Wrench } from "lucide-react";
 import { WarningCallout } from "@/components/WarningCallout";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useVirtioWinReleases } from "../api/virtio-win-queries";
@@ -84,15 +83,9 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
   const noStorage = mode !== "disabled" && !config?.iso_storage;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Wrench className="h-5 w-5" />
-          Guest tools updates
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <p className="text-sm text-muted-foreground">
+    <Panel title="Guest tools updates">
+      <div className="max-w-2xl space-y-6">
+        <p className="max-w-[65ch] text-sm text-muted-foreground">
           Tracks the virtio drivers and QEMU guest agent installed in Windows
           guests. Updates are staged and installed at the guest&apos;s next
           reboot &mdash; Nexara never reboots a guest itself.
@@ -213,7 +206,7 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Button
             onClick={handleSave}
             disabled={readOnly || updateConfig.isPending}
@@ -229,7 +222,7 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
             </span>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }

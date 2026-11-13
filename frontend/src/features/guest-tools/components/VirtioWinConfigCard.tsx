@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel, PropertyList, PropertyRow } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Disc3, Download, RefreshCw } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import { WarningCallout } from "@/components/WarningCallout";
 import { formatBytes } from "@/lib/format";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
@@ -206,15 +206,10 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Disc3 className="h-5 w-5" />
-          virtio-win ISO
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <p className="text-sm text-muted-foreground">
+    <Panel title="virtio-win ISO">
+      {/* One readable column, not fields as wide as the page. */}
+      <div className="max-w-2xl space-y-6">
+        <p className="max-w-[65ch] text-sm text-muted-foreground">
           Keeps a virtio-win ISO on this cluster&apos;s storage so Windows
           guests have drivers and the QEMU guest agent available. The Proxmox
           node fetches it directly &mdash; roughly 840&nbsp;MiB per release.
@@ -338,34 +333,33 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
           </div>
         </div>
 
-        <div className="space-y-1 border-t pt-4 text-xs text-muted-foreground">
-          <p>
-            <span className="font-medium text-foreground">Last checked</span>{" "}
+        <PropertyList className="border-t pt-4">
+          <PropertyRow label="Last checked">
             {config?.last_check_at
               ? new Date(config.last_check_at).toLocaleString()
               : "never"}
-          </p>
-          <p>
-            <span className="font-medium text-foreground">Next check</span>{" "}
+          </PropertyRow>
+          <PropertyRow label="Next check">
             {!enabled
               ? "not scheduled — automatic downloads are off"
               : config?.next_check_at
                 ? new Date(config.next_check_at).toLocaleString()
                 : "within a minute"}
-          </p>
+          </PropertyRow>
           {config?.source_url ? (
-            <p className="break-all">
-              <span className="font-medium text-foreground">Source</span>{" "}
-              {config.source_url}
-            </p>
+            <PropertyRow label="Source">
+              <span className="break-all font-mono text-[12.5px]">
+                {config.source_url}
+              </span>
+            </PropertyRow>
           ) : null}
-        </div>
+        </PropertyList>
 
         {downloadNote ? (
           <p className="text-xs text-muted-foreground">{downloadNote}</p>
         ) : null}
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Button
             onClick={handleSave}
             disabled={readOnly || updateConfig.isPending}
@@ -403,7 +397,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
             </span>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }

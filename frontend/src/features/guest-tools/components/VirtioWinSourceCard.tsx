@@ -1,15 +1,10 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Globe,
-  AlertTriangle,
-  ShieldAlert,
-  type LucideIcon,
-} from "lucide-react";
+import { AlertTriangle, ShieldAlert, type LucideIcon } from "lucide-react";
 import { WarningCallout } from "@/components/WarningCallout";
 import {
   confirmRequiredFromError,
@@ -171,15 +166,9 @@ export function VirtioWinSourceCard() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Globe className="h-5 w-5" />
-          Download source
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
+    <Panel title="Download source">
+      <div className="max-w-2xl space-y-4">
+        <p className="max-w-[65ch] text-sm text-muted-foreground">
           Where releases are discovered and ISOs fetched from. Applies to{" "}
           <span className="font-medium text-foreground">every cluster</span> on
           this install. Leave it empty to follow upstream; point it at a mirror
@@ -205,7 +194,7 @@ export function VirtioWinSourceCard() {
           </p>
         </div>
 
-        <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+        <div className="rounded-md bg-foreground/[0.04] p-3 text-[12.5px] text-muted-foreground">
           <p className="font-medium text-foreground">
             What the mirror has to look like
           </p>
@@ -231,7 +220,7 @@ export function VirtioWinSourceCard() {
           />
         )}
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Button
             onClick={() => {
               save();
@@ -263,7 +252,7 @@ export function VirtioWinSourceCard() {
             Changing the source needs the Manage settings permission.
           </p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }

@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
-import { Loader2, Save } from "lucide-react";
+import { Disc, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/EmptyState";
+import {
+  SettingRow,
+  SettingsFooter,
+  SettingsSection,
+} from "@/components/page/Settings";
 import { useVMConfig, useSetVMConfig } from "../api/vm-queries";
 
 interface CloudInitPanelProps {
@@ -72,117 +78,135 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
   }
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <Skeleton className="h-72 w-full max-w-3xl" />;
   }
 
   if (!hasCloudInit) {
     return (
-      <div className="rounded-lg border p-6 text-center">
-        <p className="text-sm text-muted-foreground">
-          No cloud-init drive detected. Add a cloud-init drive (IDE, SCSI, etc.)
-          to this VM to configure cloud-init settings.
-        </p>
-      </div>
+      <EmptyState
+        icon={Disc}
+        title="No cloud-init drive"
+        description="No cloud-init drive detected. Add a cloud-init drive (IDE, SCSI, etc.) to this VM on the Hardware tab to configure cloud-init settings."
+      />
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="ci-user">User</Label>
-          <Input
-            id="ci-user"
-            value={ciuser}
-            onChange={(e) => {
-              setCiuser(e.target.value);
-            }}
-            placeholder="root"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="ci-password">Password</Label>
-          <Input
-            id="ci-password"
-            type="password"
-            value={cipassword}
-            onChange={(e) => {
-              setCipassword(e.target.value);
-            }}
-            placeholder="Leave blank to keep current"
-          />
-        </div>
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="ci-ipconfig">IP Config (ipconfig0)</Label>
-          <Input
-            id="ci-ipconfig"
-            value={ipconfig0}
-            onChange={(e) => {
-              setIpconfig0(e.target.value);
-            }}
-            placeholder="ip=dhcp or ip=192.168.1.100/24,gw=192.168.1.1"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="ci-nameserver">DNS Server</Label>
-          <Input
-            id="ci-nameserver"
-            value={nameserver}
-            onChange={(e) => {
-              setNameserver(e.target.value);
-            }}
-            placeholder="8.8.8.8"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="ci-searchdomain">Search Domain</Label>
-          <Input
-            id="ci-searchdomain"
-            value={searchdomain}
-            onChange={(e) => {
-              setSearchdomain(e.target.value);
-            }}
-            placeholder="example.com"
-          />
-        </div>
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="ci-sshkeys">SSH Public Keys</Label>
-          <textarea
-            id="ci-sshkeys"
-            value={sshkeys}
-            onChange={(e) => {
-              setSshkeys(e.target.value);
-            }}
-            placeholder="ssh-rsa AAAA... user@host"
-            rows={3}
-            className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-          />
-        </div>
-      </div>
-
-      {setConfigMutation.isError && (
-        <p className="text-sm text-destructive">
-          {setConfigMutation.error.message}
-        </p>
-      )}
-      {setConfigMutation.isSuccess && (
-        <p className="text-sm text-emerald-600 dark:text-emerald-500">
-          Cloud-init configuration saved.
-        </p>
-      )}
-
-      <Button
-        className="gap-2"
-        onClick={handleSave}
-        disabled={setConfigMutation.isPending}
+    <SettingsSection
+      title="Cloud-init"
+      description="What the guest is given on its cloud-init drive: an account, its network and the keys that may sign in. Proxmox regenerates the drive when the VM next starts."
+      className="max-w-3xl"
+    >
+      <SettingRow
+        label="User"
+        description="The account cloud-init sets up. Empty keeps the image's default user."
+        htmlFor="ci-user"
       >
-        <Save className="h-4 w-4" />
-        {setConfigMutation.isPending ? "Saving..." : "Save"}
-      </Button>
-    </div>
+        <Input
+          id="ci-user"
+          value={ciuser}
+          onChange={(e) => {
+            setCiuser(e.target.value);
+          }}
+          placeholder="root"
+        />
+      </SettingRow>
+      <SettingRow
+        label="Password"
+        description="Proxmox stores only a hash, so the current one is never shown."
+        htmlFor="ci-password"
+      >
+        <Input
+          id="ci-password"
+          type="password"
+          value={cipassword}
+          onChange={(e) => {
+            setCipassword(e.target.value);
+          }}
+          placeholder="Leave blank to keep current"
+        />
+      </SettingRow>
+      <SettingRow
+        label="IP config (ipconfig0)"
+        description="The first interface's address: DHCP, or a static address and gateway."
+        htmlFor="ci-ipconfig"
+      >
+        <Input
+          id="ci-ipconfig"
+          value={ipconfig0}
+          onChange={(e) => {
+            setIpconfig0(e.target.value);
+          }}
+          placeholder="ip=dhcp or ip=192.0.2.10/24,gw=192.0.2.1"
+          className="font-mono"
+        />
+      </SettingRow>
+      <SettingRow
+        label="DNS server"
+        description="Empty uses the host's own."
+        htmlFor="ci-nameserver"
+      >
+        <Input
+          id="ci-nameserver"
+          value={nameserver}
+          onChange={(e) => {
+            setNameserver(e.target.value);
+          }}
+          placeholder="8.8.8.8"
+        />
+      </SettingRow>
+      <SettingRow
+        label="Search domain"
+        description="Empty uses the host's own."
+        htmlFor="ci-searchdomain"
+      >
+        <Input
+          id="ci-searchdomain"
+          value={searchdomain}
+          onChange={(e) => {
+            setSearchdomain(e.target.value);
+          }}
+          placeholder="example.com"
+        />
+      </SettingRow>
+      <SettingRow
+        label="SSH public keys"
+        description="One key per line. They are added to the user's authorized keys."
+        htmlFor="ci-sshkeys"
+        className="sm:grid-cols-1"
+      >
+        <textarea
+          id="ci-sshkeys"
+          value={sshkeys}
+          onChange={(e) => {
+            setSshkeys(e.target.value);
+          }}
+          placeholder="ssh-rsa AAAA... user@host"
+          rows={4}
+          className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-[12.5px] placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+        />
+      </SettingRow>
+
+      <SettingsFooter>
+        {setConfigMutation.isError && (
+          <p className="mr-auto text-sm text-destructive">
+            {setConfigMutation.error.message}
+          </p>
+        )}
+        {setConfigMutation.isSuccess && (
+          <p className="mr-auto text-sm text-muted-foreground">
+            Cloud-init configuration saved.
+          </p>
+        )}
+        <Button
+          className="gap-2"
+          onClick={handleSave}
+          disabled={setConfigMutation.isPending}
+        >
+          <Save className="h-4 w-4" />
+          {setConfigMutation.isPending ? "Saving..." : "Save"}
+        </Button>
+      </SettingsFooter>
+    </SettingsSection>
   );
 }

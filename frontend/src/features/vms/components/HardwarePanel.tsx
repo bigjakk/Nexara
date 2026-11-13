@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
-  Loader2,
-  Save,
   AlertTriangle,
   ChevronDown,
-  ChevronRight,
   Plus,
   Trash2,
   ArrowUp,
@@ -12,14 +9,24 @@ import {
   HardDrive,
   Network,
   Disc,
+  Usb,
+  Cpu,
+  Terminal,
+  Dice1,
+  FolderOpen,
+  Key,
+  Shield,
+  Monitor,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatBytes } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Panel } from "@/components/page/Panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +54,25 @@ import {
 import { useNodeBridges } from "@/features/clusters/api/cluster-queries";
 import { MoveDiskDialog } from "@/features/storage/components/DiskActions";
 import { AddDeviceMenu } from "./hardware/AddDeviceMenu";
+import {
+  Check,
+  Checks,
+  DeviceList,
+  DeviceRow,
+  DisclosureRow,
+  Field,
+  FieldGrid,
+  Group,
+  GroupList,
+  IconAction,
+  PendingBadge,
+  SaveBar,
+} from "./hardware/HardwareRows";
+import {
+  clearSaveBarClass,
+  fieldInputClass,
+  fieldSelectClass,
+} from "./hardware/field-classes";
 import {
   cpuTypes as fallbackCpuTypes,
   cpuFlags as fallbackCpuFlags,
@@ -112,9 +138,6 @@ import type {
   SMBIOSTextField,
 } from "../lib/vm-config-parsers";
 import type { VMConfig } from "../types/vm";
-
-const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 const DISK_KEY_RE = /^(scsi|ide|sata|virtio|efidisk|tpmstate|unused)\d+$/;
 
@@ -282,35 +305,23 @@ function CurrentValueOption({
   return <option value={value}>{value} (current)</option>;
 }
 
-interface SectionProps {
-  title: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}
+/** The hotplug option's values, as the tab names them. */
+const HOTPLUG_LABELS = {
+  network: "Network",
+  disk: "Disk",
+  usb: "USB",
+  memory: "Memory",
+  cpu: "CPU",
+} as const;
 
-function Section({ title, children, defaultOpen = true }: SectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <Card className="overflow-hidden">
-      <CardHeader
-        className="cursor-pointer select-none px-3 py-2"
-        onClick={() => {
-          setOpen(!open);
-        }}
-      >
-        <CardTitle className="flex items-center gap-2 text-xs font-medium">
-          {open ? (
-            <ChevronDown className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
-          {title}
-        </CardTitle>
-      </CardHeader>
-      {open && <CardContent className="px-3 pb-3 pt-0">{children}</CardContent>}
-    </Card>
-  );
-}
+const SMBIOS_LABELS: Record<SMBIOSTextField, string> = {
+  manufacturer: "Manufacturer",
+  product: "Product",
+  version: "Version",
+  serial: "Serial",
+  sku: "SKU",
+  family: "Family",
+};
 
 /** Returns a human-readable label for a bootable device key. */
 function bootDeviceLabel(
@@ -386,6 +397,11 @@ export function HardwarePanel({
   // Where focus goes once that confirmation stages the removal: the Remove
   // button that opened it is gone, replaced by the row's Undo.
   const cdromList = useRef<HTMLDivElement>(null);
+
+  // Which device rows have their editor open, and whether the rarely used
+  // options are showing. Display only: closing a row keeps what was typed.
+  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // USB/PCI device listing from node
   const { data: usbDevices } = useNodeUSBDevices(clusterId, nodeName);
@@ -1575,2375 +1591,2133 @@ export function HardwarePanel({
   ]);
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <Skeleton className="h-96 w-full" />;
   }
 
   if (!config) {
     return (
-      <div className="rounded-lg border p-6 text-center">
+      <Panel>
         <p className="text-sm text-muted-foreground">
           Unable to load VM configuration.
         </p>
-      </div>
+      </Panel>
     );
   }
 
-  const compactSelect = selectClass + " h-8 text-xs";
+  function toggleRow(key: string) {
+    setOpenRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  // How the panels below split what the config holds. Display only: Save
+  // reads none of these.
+  const totalVcpus = num(cores) * num(sockets);
+  const hardDisks = diskEntries.filter(
+    ({ key }) => !/^(efidisk|tpmstate|unused)/.test(key),
+  );
+  const firmwareDisks = diskEntries.filter(({ key }) =>
+    /^(efidisk|tpmstate)/.test(key),
+  );
+  const unusedDisks = diskEntries.filter(({ key }) => key.startsWith("unused"));
+  const cdromEntries = Object.entries(cdromEdits).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  const pendingOf = (re: RegExp) =>
+    Object.entries(pendingDeviceAdds).filter(([k]) => re.test(k));
+  // Staged adds with no list of their own kind: an EFI disk, a TPM state, a
+  // cloud-init drive. All are drives, so they wait among the disks.
+  const pendingDrives = Object.entries(pendingDeviceAdds).filter(
+    ([k]) => !/^(net|usb|hostpci|serial|virtiofs)\d+$/.test(k) && k !== "rng0",
+  );
+  const hasOtherDevices =
+    usbKeys.length > 0 ||
+    pciKeys.length > 0 ||
+    serialKeys.length > 0 ||
+    virtiofsKeys.length > 0 ||
+    config["rng0"] != null ||
+    pendingDeviceAdds["rng0"] != null ||
+    pendingOf(/^(usb|hostpci|serial|virtiofs)\d+$/).length > 0;
+  const otherDeviceCount =
+    usbKeys.length +
+    pciKeys.length +
+    serialKeys.length +
+    virtiofsKeys.length +
+    (config["rng0"] != null ? 1 : 0);
+  const bootEnabled = bootOrder.filter((b) => b.enabled).length;
+  const plural = (n: number, one: string, many = `${one}s`) =>
+    `${String(n)} ${n === 1 ? one : many}`;
+
+  const undoButton = (onClick: () => void) => (
+    <Button variant="ghost" size="sm" className="h-7 px-2" onClick={onClick}>
+      Undo
+    </Button>
+  );
+  const cancelButton = (onClick: () => void) => (
+    <Button variant="ghost" size="sm" className="h-7 px-2" onClick={onClick}>
+      Cancel
+    </Button>
+  );
+  const removedMarker = <PendingBadge>Marked for removal</PendingBadge>;
+  /** A staged add of one kind, as rows after the devices of that kind. */
+  const pendingRows = (re: RegExp, icon: LucideIcon, title: string) =>
+    pendingOf(re).map(([key, val]) => (
+      <DeviceRow
+        key={key}
+        name={key}
+        icon={icon}
+        title={title}
+        marker={<PendingBadge>Added on save</PendingBadge>}
+        summary={<span className="break-all font-mono">{val}</span>}
+        actions={cancelButton(() => {
+          handleCancelPendingDevice(key);
+        })}
+      />
+    ));
 
   return (
-    <div className="space-y-3">
-      {isRunning && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          <span>
-            Running VM — hardware changes will be pending until restart.
-          </span>
-        </div>
-      )}
+    <div className={cn("space-y-4", clearSaveBarClass)}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <p className="min-w-0 flex-[1_1_18rem] text-sm text-muted-foreground">
+          {plural(totalVcpus, "vCPU")}, {formatBytes(num(memory) * 1024 * 1024)}{" "}
+          of memory, {plural(hardDisks.length, "hard disk")} and{" "}
+          {plural(nicKeys.length, "network device")}.
+          {isRunning &&
+            " The VM is running, so hardware changes stay pending until it restarts."}
+        </p>
+        {/* Add device: the tab's one primary action. */}
+        <AddDeviceMenu
+          // Staged adds count as taken — devices, and CD/DVD drives, which are
+          // staged separately — so two added before a Save land in two slots
+          // rather than the second replacing the first. The machine type is the
+          // staged one too: it is saved in the same write as a device added
+          // now, and PCIe is offered by it.
+          config={{ ...config, ...pendingDeviceAdds, ...cdromEdits, machine }}
+          clusterId={clusterId}
+          nodeName={nodeName}
+          diskStorages={diskStorages.map((s) => ({
+            storage: s.storage,
+            type: s.type,
+            id: s.id,
+          }))}
+          usbDevices={usbDevices}
+          pciDevices={pciDevices}
+          bridges={bridgeNames}
+          isoFiles={isoFiles}
+          onAddDevice={handleAddDevice}
+          onAddCDROM={handleAddCDROM}
+          onAddDisk={() => {
+            setShowAddDisk(true);
+          }}
+        />
+      </div>
 
-      {/* Add Device button — always visible at top */}
-      <AddDeviceMenu
-        // Staged adds count as taken — devices, and CD/DVD drives, which are
-        // staged separately — so two added before a Save land in two slots
-        // rather than the second replacing the first. The machine type is the
-        // staged one too: it is saved in the same write as a device added
-        // now, and PCIe is offered by it.
-        config={{ ...config, ...pendingDeviceAdds, ...cdromEdits, machine }}
-        clusterId={clusterId}
-        nodeName={nodeName}
-        diskStorages={diskStorages.map((s) => ({
-          storage: s.storage,
-          type: s.type,
-          id: s.id,
-        }))}
-        usbDevices={usbDevices}
-        pciDevices={pciDevices}
-        bridges={bridgeNames}
-        isoFiles={isoFiles}
-        onAddDevice={handleAddDevice}
-        onAddCDROM={handleAddCDROM}
-        onAddDisk={() => {
-          setShowAddDisk(true);
-        }}
-      />
-
-      {/* 2-column grid for compact cards */}
-      <div className="grid gap-3 lg:grid-cols-2">
-        {/* CPU */}
-        <Section title="CPU">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Cores</Label>
-              <Input
-                type="number"
-                min={1}
-                value={cores}
-                onChange={(e) => {
-                  setCores(e.target.value);
-                }}
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Sockets</Label>
-              <Input
-                type="number"
-                min={1}
-                value={sockets}
-                onChange={(e) => {
-                  setSockets(e.target.value);
-                }}
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Type</Label>
-              <select
-                className={compactSelect}
-                value={cpuType}
-                onChange={(e) => {
-                  setCpuType(e.target.value);
-                }}
-              >
-                {cpuTypes.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Limit</Label>
-              <Input
-                type="number"
-                min={0}
-                max={128}
-                step={0.1}
-                value={cpulimit}
-                onChange={(e) => {
-                  setCpulimit(e.target.value);
-                }}
-                placeholder="0 (none)"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Units</Label>
-              <Input
-                type="number"
-                min={1}
-                max={262144}
-                value={cpuunits}
-                onChange={(e) => {
-                  setCpuunits(e.target.value);
-                }}
-                placeholder="100"
-                className="h-8 text-xs"
-              />
-            </div>
-          </div>
-          <div className="mt-2 flex items-center gap-4">
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-numa"
-                checked={numa}
-                onCheckedChange={(v) => {
-                  setNuma(v === true);
-                }}
-              />
-              <Label htmlFor="hw-numa" className="cursor-pointer text-xs">
-                NUMA
-              </Label>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Label className="text-xs whitespace-nowrap">Hotplug vCPUs</Label>
-              <Input
-                type="number"
-                min={1}
-                max={Math.max(1, num(cores) * num(sockets))}
-                value={vcpus}
-                onChange={(e) => {
-                  setVcpus(e.target.value);
-                }}
-                placeholder={`all (${String(num(cores) * num(sockets))})`}
-                className="h-8 w-28 text-xs"
-              />
-            </div>
-            <span className="text-[10px] text-muted-foreground">
-              Total vCPUs: {num(cores) * num(sockets)}
-            </span>
-          </div>
-
-          <details className="mt-3 border-t pt-2">
-            <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-              CPU Flags
-              {setCpuFlagCount > 0 && (
-                <Badge
-                  variant="secondary"
-                  className="ml-2 h-4 px-1 text-[10px]"
-                >
-                  {setCpuFlagCount}
-                </Badge>
-              )}
-            </summary>
-            <div className="mt-2 space-y-1.5">
-              {cpuFlagRows.map((flag) => {
-                const state = cpuFlagStates[flag.name] ?? "default";
-                // Three outcomes, not two: null is "Proxmox did not say"
-                // (old cluster or the fallback list), an empty list is
-                // "checked, and no node supports it", and a list without this
-                // node is "supported in the cluster, but not here".
-                const support: "unknown" | "nowhere" | "elsewhere" | "here" =
-                  flag.supportedOn === null
-                    ? "unknown"
-                    : flag.supportedOn.length === 0
-                      ? "nowhere"
-                      : flag.supportedOn.includes(nodeName)
-                        ? "here"
-                        : "elsewhere";
-                return (
-                  <div key={flag.name} className="space-y-0.5">
-                    {/* Name and control share one row; the description spans
-                        the full width beneath, so a long one does not squeeze
-                        the name into a one-word-per-line column. */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        <code className="text-xs">{flag.name}</code>
-                        {support === "elsewhere" && (
-                          <span
-                            className="text-[10px] text-amber-600 dark:text-amber-500"
-                            title={`Not supported on ${nodeName}. Available on: ${(flag.supportedOn ?? []).join(", ")}`}
-                          >
-                            unsupported here
-                          </span>
-                        )}
-                        {support === "nowhere" && (
-                          <span
-                            className="text-[10px] text-red-600 dark:text-red-500"
-                            title={`No node in this cluster reports supporting ${flag.name}.`}
-                          >
-                            unsupported on any node
-                          </span>
-                        )}
-                      </div>
-                      <select
-                        // cn(), not concatenation: compactSelect carries
-                        // w-full, and only tailwind-merge lets w-24 win.
-                        className={cn(compactSelect, "w-24 shrink-0")}
-                        value={state}
-                        aria-label={`${flag.name} CPU flag`}
-                        onChange={(e) => {
-                          const v = e.target.value as CPUFlagState;
-                          setCpuFlagStates((prev) => {
-                            // Rebuilt by filter rather than delete: "default"
-                            // means absent from flags=, not a stored value.
-                            const next = Object.fromEntries(
-                              Object.entries(prev).filter(
-                                ([name]) => name !== flag.name,
-                              ),
-                            );
-                            if (v !== "default") next[flag.name] = v;
-                            return next;
-                          });
-                        }}
-                      >
-                        <option value="default">Default</option>
-                        <option value="on">On</option>
-                        <option value="off">Off</option>
-                      </select>
-                    </div>
-                    {flag.description && (
-                      <p className="text-[10px] leading-snug text-muted-foreground">
-                        {flag.description}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </details>
-        </Section>
-
-        {/* Memory */}
-        <Section title="Memory">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Memory (MiB)</Label>
-              <Input
-                type="number"
-                min={64}
-                step={64}
-                value={memory}
-                onChange={(e) => {
-                  setMemory(e.target.value);
-                }}
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Balloon Min (MiB)</Label>
-              <Input
-                type="number"
-                min={0}
-                step={64}
-                value={balloon}
-                onChange={(e) => {
-                  setBalloon(e.target.value);
-                }}
-                placeholder="0=disabled"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="col-span-2 space-y-1">
-              <Label className="text-xs">Ballooning Shares</Label>
-              <Input
-                type="number"
-                min={0}
-                max={50000}
-                value={shares}
-                onChange={(e) => {
-                  setShares(e.target.value);
-                }}
-                placeholder="1000 (default)"
-                className="h-8 text-xs"
-              />
-            </div>
-          </div>
-          <div className="mt-2 flex items-center gap-1.5">
-            <Checkbox
-              id="hw-allow-ksm"
-              checked={allowKsm}
-              onCheckedChange={(v) => {
-                setAllowKsm(v === true);
-              }}
-            />
-            <Label htmlFor="hw-allow-ksm" className="cursor-pointer text-xs">
-              Allow KSM page merging
-            </Label>
-          </div>
-        </Section>
-
-        {/* System */}
-        <Section title="System">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">BIOS</Label>
-              <select
-                className={compactSelect}
-                value={bios}
-                onChange={(e) => {
-                  setBios(e.target.value);
-                }}
-              >
-                {biosOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Machine</Label>
-              <select
-                className={compactSelect}
-                value={machine}
-                onChange={(e) => {
-                  setMachine(e.target.value);
-                }}
-              >
-                <CurrentValueOption
-                  value={storedSelects.machine}
-                  known={machineTypes.map((o) => o.value)}
-                />
-                {machineTypes.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              {/* Saved, buildMachine takes it off: Proxmox refuses an Intel
-                  vIOMMU beside a type without q35 in it. */}
-              {dropsIntelViommu(machine, str(original?.["machine"] ?? "")) && (
-                <p className="text-[10px] leading-snug text-amber-700 dark:text-amber-400">
-                  This VM&apos;s Intel vIOMMU needs a q35 machine type, so
-                  saving this one removes it.
-                </p>
-              )}
-            </div>
-            <div className="col-span-2 space-y-1">
-              <Label className="text-xs">SCSI Controller</Label>
-              <select
-                className={compactSelect}
-                value={scsihw}
-                onChange={(e) => {
-                  setScsihw(e.target.value);
-                }}
-              >
-                <CurrentValueOption
-                  value={storedSelects.scsihw}
-                  known={scsiControllers.map((o) => o.value)}
-                />
-                {scsiControllers.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-agent"
-                checked={agentEnabled}
-                onCheckedChange={(v) => {
-                  setAgentEnabled(v === true);
-                }}
-              />
-              <Label htmlFor="hw-agent" className="cursor-pointer text-xs">
-                Agent
-              </Label>
-            </div>
-            {agentEnabled && (
-              <div className="flex items-center gap-1.5">
-                <Checkbox
-                  id="hw-agent-fstrim"
-                  checked={agentFstrim}
-                  onCheckedChange={(v) => {
-                    setAgentFstrim(v === true);
-                  }}
-                />
-                <Label
-                  htmlFor="hw-agent-fstrim"
-                  className="cursor-pointer text-xs"
-                >
-                  FSTRIM
-                </Label>
-              </div>
-            )}
-            {config["tpmstate0"] != null && (
-              <span className="text-[10px] text-muted-foreground">
-                TPM:{" "}
-                {str(config["tpmstate0"]).includes("v2.0") ? "v2.0" : "v1.2"}
-              </span>
-            )}
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-kvm"
-                checked={kvmEnabled}
-                onCheckedChange={(v) => {
-                  setKvmEnabled(v === true);
-                }}
-              />
-              <Label htmlFor="hw-kvm" className="cursor-pointer text-xs">
-                KVM
-              </Label>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-acpi"
-                checked={acpi}
-                onCheckedChange={(v) => {
-                  setAcpi(v === true);
-                }}
-              />
-              <Label htmlFor="hw-acpi" className="cursor-pointer text-xs">
-                ACPI
-              </Label>
-            </div>
-          </div>
-        </Section>
-
-        {/* Boot / Options */}
-        <Section title="Boot / Options">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">OS Type</Label>
-              <select
-                className={compactSelect}
-                value={ostype}
-                onChange={(e) => {
-                  setOstype(e.target.value);
-                }}
-              >
-                {osTypes.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Hotplug</Label>
-              <div className="flex flex-wrap gap-x-3 gap-y-1 pt-1">
-                {(["network", "disk", "usb", "memory", "cpu"] as const).map(
-                  (opt) => {
-                    const parts = hotplug
-                      ? hotplug.split(",").filter(Boolean)
-                      : [];
-                    const checked = parts.includes(opt);
-                    return (
-                      <div key={opt} className="flex items-center gap-1">
-                        <Checkbox
-                          id={`hp-${opt}`}
-                          checked={checked}
-                          onCheckedChange={(v) => {
-                            const next =
-                              v === true
-                                ? [...parts, opt]
-                                : parts.filter((p) => p !== opt);
-                            setHotplug(next.join(","));
-                          }}
-                        />
-                        <Label
-                          htmlFor={`hp-${opt}`}
-                          className="cursor-pointer text-xs capitalize"
-                        >
-                          {opt}
-                        </Label>
-                      </div>
-                    );
-                  },
-                )}
-              </div>
-            </div>
-            <div className="col-span-2 space-y-1">
-              <Label className="text-xs">Boot Order</Label>
-              <div className="space-y-1 rounded-md border p-1.5">
-                {bootOrder.length === 0 && (
-                  <p className="px-1 text-[10px] text-muted-foreground">
-                    No bootable devices
-                  </p>
-                )}
-                {bootOrder.map((entry, idx) => {
-                  const info = bootDeviceLabel(entry.device, config);
-                  const DeviceIcon =
-                    info.type === "net"
-                      ? Network
-                      : info.type === "cdrom"
-                        ? Disc
-                        : HardDrive;
-                  return (
-                    <div
-                      key={entry.device}
-                      className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-xs ${entry.enabled ? "bg-muted/50" : "opacity-50"}`}
-                    >
-                      <Checkbox
-                        id={`boot-${entry.device}`}
-                        checked={entry.enabled}
-                        onCheckedChange={(v) => {
-                          setBootOrder((prev) =>
-                            prev.map((b, i) =>
-                              i === idx ? { ...b, enabled: v === true } : b,
-                            ),
-                          );
-                        }}
-                      />
-                      <DeviceIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate">
-                        {info.label}
-                      </span>
-                      <span className="shrink-0 text-[10px] text-muted-foreground">
-                        #{String(idx + 1)}
-                      </span>
-                      <Button
-                        aria-label={`Move ${info.label} earlier in the boot order`}
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0"
-                        disabled={idx === 0}
-                        onClick={() => {
-                          setBootOrder((prev) => {
-                            const next = [...prev];
-                            const a = next[idx];
-                            const b = next[idx - 1];
-                            if (a && b) {
-                              next[idx] = b;
-                              next[idx - 1] = a;
-                            }
-                            return next;
-                          });
-                        }}
-                      >
-                        <ArrowUp className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        aria-label={`Move ${info.label} later in the boot order`}
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0"
-                        disabled={idx === bootOrder.length - 1}
-                        onClick={() => {
-                          setBootOrder((prev) => {
-                            const next = [...prev];
-                            const a = next[idx];
-                            const b = next[idx + 1];
-                            if (a && b) {
-                              next[idx] = b;
-                              next[idx + 1] = a;
-                            }
-                            return next;
-                          });
-                        }}
-                      >
-                        <ArrowDown className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-onboot"
-                checked={onboot}
-                onCheckedChange={(v) => {
-                  setOnboot(v === true);
-                }}
-              />
-              <Label htmlFor="hw-onboot" className="cursor-pointer text-xs">
-                Start at boot
-              </Label>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-tablet"
-                checked={tablet}
-                onCheckedChange={(v) => {
-                  setTablet(v === true);
-                }}
-              />
-              <Label htmlFor="hw-tablet" className="cursor-pointer text-xs">
-                Tablet
-              </Label>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-protection"
-                checked={protection}
-                onCheckedChange={(v) => {
-                  setProtection(v === true);
-                }}
-              />
-              <Label htmlFor="hw-protection" className="cursor-pointer text-xs">
-                Protection
-              </Label>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-localtime"
-                checked={localtime}
-                onCheckedChange={(v) => {
-                  setLocaltime(v === true);
-                }}
-              />
-              <Label htmlFor="hw-localtime" className="cursor-pointer text-xs">
-                Local Time
-              </Label>
-            </div>
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Startup Order</Label>
-              <Input
-                type="number"
-                min={0}
-                value={startupOrder}
-                onChange={(e) => {
-                  setStartupOrder(e.target.value);
-                }}
-                placeholder="#"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Up Delay (s)</Label>
-              <Input
-                type="number"
-                min={0}
-                value={startupUp}
-                onChange={(e) => {
-                  setStartupUp(e.target.value);
-                }}
-                placeholder="0"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Down (s)</Label>
-              <Input
-                type="number"
-                min={0}
-                value={startupDown}
-                onChange={(e) => {
-                  setStartupDown(e.target.value);
-                }}
-                placeholder="0"
-                className="h-8 text-xs"
-              />
-            </div>
-          </div>
-        </Section>
-
-        {/* Advanced Options */}
-        <Section title="Advanced Options" defaultOpen={false}>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">RTC Start Date</Label>
-              <Input
-                value={startdate}
-                onChange={(e) => {
-                  setStartdate(e.target.value);
-                }}
-                placeholder="now"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Keyboard Layout</Label>
-              <select
-                className={compactSelect}
-                value={keyboard}
-                onChange={(e) => {
-                  setKeyboard(e.target.value);
-                }}
-              >
-                <option value="">Default (guest-handled)</option>
-                <CurrentValueOption
-                  value={storedSelects.keyboard}
-                  known={keyboardLayouts}
-                />
-                {keyboardLayouts.map((k) => (
-                  <option key={k} value={k}>
-                    {k}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-span-2 space-y-1">
-              <Label className="text-xs">VM State Storage</Label>
-              <select
-                className={compactSelect}
-                value={vmstatestorage}
-                onChange={(e) => {
-                  setVmstatestorage(e.target.value);
-                }}
-              >
-                <option value="">Automatic</option>
-                <CurrentValueOption
-                  value={storedSelects.vmstatestorage}
-                  known={diskStorages.map((st) => st.storage)}
-                />
-                {diskStorages.map((st) => (
-                  <option key={st.id} value={st.storage}>
-                    {st.storage} ({st.type})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Migrate Downtime (s)</Label>
-              <Input
-                type="number"
-                min={0}
-                step={0.1}
-                value={migrateDowntime}
-                onChange={(e) => {
-                  setMigrateDowntime(e.target.value);
-                }}
-                placeholder="0.1 (default)"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Migrate Speed (MB/s)</Label>
-              <Input
-                type="number"
-                min={0}
-                value={migrateSpeed}
-                onChange={(e) => {
-                  setMigrateSpeed(e.target.value);
-                }}
-                placeholder="0 (unlimited)"
-                className="h-8 text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="mt-2 flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-reboot"
-                checked={reboot}
-                onCheckedChange={(v) => {
-                  setReboot(v === true);
-                }}
-              />
-              <Label htmlFor="hw-reboot" className="cursor-pointer text-xs">
-                Allow reboot
-              </Label>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-tdf"
-                checked={tdf}
-                onCheckedChange={(v) => {
-                  setTdf(v === true);
-                }}
-              />
-              <Label htmlFor="hw-tdf" className="cursor-pointer text-xs">
-                Time drift fix
-              </Label>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="hw-freeze"
-                checked={freeze}
-                onCheckedChange={(v) => {
-                  setFreeze(v === true);
-                }}
-              />
-              <Label htmlFor="hw-freeze" className="cursor-pointer text-xs">
-                Freeze CPU at startup
-              </Label>
-            </div>
-          </div>
-
-          <div className="mt-3 border-t pt-2">
-            <Label className="text-xs font-medium">Watchdog</Label>
-            <div className="mt-1 grid grid-cols-2 gap-2">
-              <select
-                className={compactSelect}
-                value={watchdogModel}
-                aria-label="Watchdog device"
-                onChange={(e) => {
-                  setWatchdogModel(e.target.value);
-                }}
-              >
-                <option value="">None</option>
-                <CurrentValueOption
-                  value={storedSelects.watchdogModel}
-                  known={watchdogModels.map((m) => m.value)}
-                />
-                {watchdogModels.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                className={compactSelect}
-                value={watchdogAction}
-                aria-label="Watchdog action"
-                disabled={!watchdogModel}
-                onChange={(e) => {
-                  setWatchdogAction(e.target.value);
-                }}
-              >
-                <CurrentValueOption
-                  value={storedSelects.watchdogAction}
-                  known={watchdogActions.map((a) => a.value)}
-                />
-                {watchdogActions.map((a) => (
-                  <option key={a.value} value={a.value}>
-                    {a.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <details className="mt-3 border-t pt-2">
-            <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-              SMBIOS (type 1)
-            </summary>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <div className="col-span-2 space-y-1">
-                <Label className="text-xs">UUID</Label>
-                <Input
-                  value={smbiosUuid}
-                  onChange={(e) => {
-                    setSmbiosUuid(e.target.value);
-                  }}
-                  placeholder={
-                    originalSmbiosUuid
-                      ? originalSmbiosUuid
-                      : "auto-generated on first boot"
-                  }
-                  className="h-8 font-mono text-xs"
-                />
-                {smbiosUuidChanged && (
-                  <p className="flex items-start gap-1.5 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] leading-snug text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-                    <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
-                    <span>
-                      {smbiosUuid
-                        ? "Changing the SMBIOS UUID"
-                        : "Clearing this removes the SMBIOS UUID, and Proxmox will generate a new one"}
-                      {
-                        " — the guest sees different hardware on next boot. This can deactivate Windows, and it breaks Veeam backup correlation, which matches Proxmox guests on exactly this value."
-                      }
-                    </span>
-                  </p>
-                )}
-              </div>
-              {SMBIOS_TEXT_FIELDS.map((field) => (
-                <div key={field} className="space-y-1">
-                  <Label className="text-xs capitalize">{field}</Label>
-                  <Input
-                    value={smbios[field]}
-                    onChange={(e) => {
-                      setSmbios((prev) => ({
-                        ...prev,
-                        [field]: e.target.value,
-                      }));
-                    }}
-                    className="h-8 text-xs"
-                  />
-                </div>
-              ))}
-            </div>
-          </details>
-        </Section>
-
-        {/* Network (multi-NIC) */}
-        <Section
-          title={`Network (${String(nicKeys.length)} NIC${nicKeys.length !== 1 ? "s" : ""})`}
-        >
-          {nicKeys.length > 0 ? (
-            <div className="space-y-3">
-              {nicKeys.map((nicKey) => {
-                const nic = nicEdits[nicKey];
-                if (!nic) return null;
-                const isRemoved = deviceRemovals.has(nicKey);
-                if (isRemoved) {
-                  return (
-                    <div
-                      key={nicKey}
-                      className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950"
-                    >
-                      <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
-                        {nicKey}
-                      </span>
-                      <span className="text-[10px] text-red-600 dark:text-red-400">
-                        marked for removal
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="ml-auto h-6 px-2 text-[10px]"
-                        onClick={() => {
-                          handleUndoRemoveDevice(nicKey);
-                        }}
-                      >
-                        Undo
-                      </Button>
-                    </div>
-                  );
-                }
-                return (
-                  <div key={nicKey} className="rounded border p-2">
-                    <div className="mb-1.5 flex items-center gap-2">
-                      <span className="font-mono text-xs font-medium">
-                        {nicKey}
-                      </span>
-                      {nic.mac && (
-                        <span className="text-[10px] text-muted-foreground">
-                          {nic.mac}
-                        </span>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                        onClick={() => {
-                          handleRemoveDevice(nicKey);
-                        }}
-                      >
-                        <Trash2 className="h-3 w-3" /> Remove
-                      </Button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Model</Label>
-                        <select
-                          className={compactSelect}
-                          value={nic.model}
-                          onChange={(e) => {
-                            updateNicEdit(nicKey, { model: e.target.value });
-                          }}
-                        >
-                          <CurrentValueOption
-                            value={storedNics[nicKey]?.model ?? ""}
-                            known={netModels.map((m) => m.value)}
-                          />
-                          {netModels.map((m) => (
-                            <option key={m.value} value={m.value}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Bridge</Label>
-                        {bridgeNames.length > 0 ? (
-                          <select
-                            className={compactSelect}
-                            value={nic.bridge}
-                            onChange={(e) => {
-                              updateNicEdit(nicKey, { bridge: e.target.value });
-                            }}
-                          >
-                            {/* No bridge is qemu's user-mode network,
-                                NATed, with its own DHCP and DNS ($net_fmt's
-                                bridge, src/PVE/QemuServer/Network.pm). */}
-                            <option value="">No bridge (NAT)</option>
-                            <CurrentValueOption
-                              value={storedNics[nicKey]?.bridge ?? ""}
-                              known={bridgeNames}
-                            />
-                            {/* One typed before the list arrived, neither
-                                listed nor stored, which the select would
-                                otherwise show as its first option. */}
-                            {nic.bridge &&
-                              nic.bridge !== storedNics[nicKey]?.bridge &&
-                              !bridgeNames.includes(nic.bridge) && (
-                                <option value={nic.bridge}>{nic.bridge}</option>
-                              )}
-                            {bridgeNames.map((b) => (
-                              <option key={b} value={b}>
-                                {b}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <Input
-                            value={nic.bridge}
-                            onChange={(e) => {
-                              updateNicEdit(nicKey, { bridge: e.target.value });
-                            }}
-                            placeholder="vmbr0"
-                            className="h-8 text-xs"
-                          />
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">VLAN</Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={4094}
-                          value={nic.vlanTag}
-                          onChange={(e) => {
-                            updateNicEdit(nicKey, { vlanTag: e.target.value });
-                          }}
-                          placeholder="None"
-                          className="h-8 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Rate (MB/s)</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={nic.rateLimit}
-                          onChange={(e) => {
-                            updateNicEdit(nicKey, {
-                              rateLimit: e.target.value,
-                            });
-                          }}
-                          placeholder="Unlimited"
-                          className="h-8 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">MTU</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={nic.mtu}
-                          onChange={(e) => {
-                            updateNicEdit(nicKey, { mtu: e.target.value });
-                          }}
-                          placeholder="Default"
-                          className="h-8 text-xs"
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <Checkbox
-                          id={`hw-${nicKey}-fw`}
-                          checked={nic.firewall}
-                          onCheckedChange={(v) => {
-                            updateNicEdit(nicKey, { firewall: v === true });
-                          }}
-                        />
-                        <Label
-                          htmlFor={`hw-${nicKey}-fw`}
-                          className="cursor-pointer text-xs"
-                        >
-                          Firewall
-                        </Label>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Checkbox
-                          id={`hw-${nicKey}-linkdown`}
-                          checked={nic.linkDown}
-                          onCheckedChange={(v) => {
-                            updateNicEdit(nicKey, { linkDown: v === true });
-                          }}
-                        />
-                        <Label
-                          htmlFor={`hw-${nicKey}-linkdown`}
-                          className="cursor-pointer text-xs"
-                        >
-                          Disconnect
-                        </Label>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              No network devices configured.
-            </p>
-          )}
-          {/* Pending NIC adds */}
-          {Object.entries(pendingDeviceAdds)
-            .filter(([k]) => /^net\d+$/.test(k))
-            .map(([key, val]) => (
-              <div
-                key={key}
-                className="mt-1 flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950"
-              >
-                <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                  {key}
-                </span>
-                <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
-                  {val}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                  onClick={() => {
-                    handleCancelPendingDevice(key);
-                  }}
-                >
-                  <Trash2 className="h-3 w-3" /> Cancel
-                </Button>
-              </div>
-            ))}
-        </Section>
-
-        {/* Display / Audio */}
-        <Section title="Display / Audio">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">VGA</Label>
-              <select
-                className={compactSelect}
-                value={vgaType}
-                onChange={(e) => {
-                  setVgaType(e.target.value);
-                }}
-              >
-                {/* No type set: no vga line, or one with only other options
-                    (memory=32, clipboard=vnc). qemu-server picks the type
-                    when the VM starts (get_vga_properties,
-                    src/PVE/QemuServer.pm): virtio on aarch64; cirrus for
-                    ostype w2k, wxp and w2k3 and, on a machine version below
-                    2.9, for every guest but Windows Vista/2008 and newer; std
-                    otherwise. Not always std, so it is not shown as std:
-                    Proxmox's own GUI calls it "Default" too (kvm_vga_drivers,
-                    pve-manager www/manager6/Utils.js). */}
-                <option value="">Default</option>
-                <CurrentValueOption
-                  value={storedVgaType}
-                  known={vgaTypes.map((v) => v.value)}
-                />
-                {vgaTypes.map((v) => (
-                  <option key={v.value} value={v.value}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {vgaType === "qxl" ? (
-              <div className="space-y-1">
-                <Label className="text-xs">QXL Memory (MiB)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={vgaMemory}
-                  onChange={(e) => {
-                    setVgaMemory(e.target.value);
-                  }}
-                  placeholder="Default"
-                  className="h-8 text-xs"
-                />
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <Label className="text-xs">Audio</Label>
-                <select
-                  className={compactSelect}
-                  value={audioDevice}
-                  onChange={(e) => {
-                    setAudioDevice(e.target.value);
-                  }}
-                >
-                  {audioDevices.map((a) => (
-                    <option key={a.value} value={a.value}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {vgaType === "qxl" && (
-              <div className="col-span-2 space-y-1">
-                <Label className="text-xs">Audio</Label>
-                <select
-                  className={compactSelect}
-                  value={audioDevice}
-                  onChange={(e) => {
-                    setAudioDevice(e.target.value);
-                  }}
-                >
-                  {audioDevices.map((a) => (
-                    <option key={a.value} value={a.value}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-        </Section>
-
-        {/* CD/DVD Drives */}
-        <Section
-          title={`CD/DVD Drives (${String(Object.keys(cdromEdits).length)})`}
-        >
-          <div
-            ref={cdromList}
-            role="region"
-            aria-label="CD/DVD drives"
-            tabIndex={-1}
-            className="space-y-3 outline-none"
+      {/* Two columns that fold into one: what the VM is made of on the left,
+          how it is shown and started on the right. */}
+      <div className="flex flex-wrap items-start gap-4">
+        <div className="flex min-w-0 flex-[3_1_520px] flex-col gap-4">
+          <Panel
+            flush
+            title="Processor and memory"
+            aside={`${plural(totalVcpus, "vCPU")}, ${formatBytes(num(memory) * 1024 * 1024)}`}
           >
-            {Object.entries(cdromEdits)
-              .sort(([a], [b]) => a.localeCompare(b))
-              .map(([key, isoVal]) => {
-                if (deviceRemovals.has(key)) {
-                  return (
-                    <div
-                      key={key}
-                      className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950"
+            <GroupList>
+              <Group
+                title="Processor"
+                summary={`${plural(num(sockets), "socket")} of ${plural(num(cores), "core")}`}
+              >
+                <FieldGrid>
+                  <Field label="Sockets">
+                    <Input
+                      type="number"
+                      min={1}
+                      value={sockets}
+                      onChange={(e) => {
+                        setSockets(e.target.value);
+                      }}
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Cores">
+                    <Input
+                      type="number"
+                      min={1}
+                      value={cores}
+                      onChange={(e) => {
+                        setCores(e.target.value);
+                      }}
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="CPU type">
+                    <select
+                      className={fieldSelectClass}
+                      value={cpuType}
+                      onChange={(e) => {
+                        setCpuType(e.target.value);
+                      }}
                     >
-                      <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
-                        {key}
+                      {cpuTypes.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="CPU limit">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={128}
+                      step={0.1}
+                      value={cpulimit}
+                      onChange={(e) => {
+                        setCpulimit(e.target.value);
+                      }}
+                      placeholder="0 (none)"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="CPU units">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={262144}
+                      value={cpuunits}
+                      onChange={(e) => {
+                        setCpuunits(e.target.value);
+                      }}
+                      placeholder="100"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Hotplug vCPUs">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={Math.max(1, totalVcpus)}
+                      value={vcpus}
+                      onChange={(e) => {
+                        setVcpus(e.target.value);
+                      }}
+                      placeholder={`all (${String(totalVcpus)})`}
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                </FieldGrid>
+                <Checks>
+                  <Check
+                    id="hw-numa"
+                    label="NUMA"
+                    checked={numa}
+                    onCheckedChange={(v) => {
+                      setNuma(v === true);
+                    }}
+                  />
+                </Checks>
+
+                <details className="group">
+                  <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                    <ChevronDown
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5 -rotate-90 transition-transform group-open:rotate-0"
+                    />
+                    CPU flags
+                    {setCpuFlagCount > 0 && (
+                      <span className="font-normal">
+                        ({setCpuFlagCount} set)
                       </span>
-                      <span className="text-[10px] text-red-600 dark:text-red-400">
-                        marked for removal
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="ml-auto h-6 px-2 text-[10px]"
-                        onClick={() => {
-                          handleUndoRemoveDevice(key);
-                        }}
-                      >
-                        Undo
-                      </Button>
-                    </div>
-                  );
-                }
-                // A cloud-init drive holds the volume Proxmox generates, not
-                // an ISO: picking one would free it, as removing it does.
-                const cloudInit = isCloudInitVolume(isoVal);
-                return (
-                  <div key={key} className="space-y-1.5 rounded border p-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-medium">
-                        {key}
-                      </span>
-                      <Badge variant="secondary" className="text-[10px]">
-                        {cloudInit ? "Cloud-Init" : "CD/DVD"}
-                      </Badge>
-                      {cloudInit && (
-                        <span className="truncate text-[10px] text-muted-foreground">
-                          {isoVal}
-                        </span>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                        onClick={() => {
-                          if (cloudInit) {
-                            setCloudInitToRemove({ key, volume: isoVal });
-                          } else {
-                            handleRemoveCDROM(key);
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-3 w-3" /> Remove
-                      </Button>
-                    </div>
-                    {!cloudInit && (
-                      <select
-                        className={compactSelect}
-                        value={isoVal}
-                        onChange={(e) => {
-                          setCdromEdits((prev) => ({
-                            ...prev,
-                            [key]: e.target.value,
-                          }));
-                        }}
-                      >
-                        <option value="none">No media (empty drive)</option>
-                        {isoVal !== "none" &&
-                          !isoFiles.some((iso) => iso.volid === isoVal) && (
-                            <option value={isoVal}>{isoVal} (current)</option>
-                          )}
-                        {isoFiles.map((iso) => (
-                          <option key={iso.volid} value={iso.volid}>
-                            {iso.volid}
-                          </option>
-                        ))}
-                      </select>
                     )}
+                  </summary>
+                  <div className="mt-2 divide-y">
+                    {cpuFlagRows.map((flag) => {
+                      const state = cpuFlagStates[flag.name] ?? "default";
+                      // Three outcomes, not two: null is "Proxmox did not say"
+                      // (old cluster or the fallback list), an empty list is
+                      // "checked, and no node supports it", and a list without this
+                      // node is "supported in the cluster, but not here".
+                      const support:
+                        "unknown" | "nowhere" | "elsewhere" | "here" =
+                        flag.supportedOn === null
+                          ? "unknown"
+                          : flag.supportedOn.length === 0
+                            ? "nowhere"
+                            : flag.supportedOn.includes(nodeName)
+                              ? "here"
+                              : "elsewhere";
+                      return (
+                        <div key={flag.name} className="space-y-0.5 py-2">
+                          {/* Name and control share one row; the description spans
+                              the full width beneath, so a long one does not squeeze
+                              the name into a one-word-per-line column. */}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                              <code className="text-[12.5px]">{flag.name}</code>
+                              {support === "elsewhere" && (
+                                <span
+                                  className="text-xs text-amber-700 dark:text-amber-400"
+                                  title={`Not supported on ${nodeName}. Available on: ${(flag.supportedOn ?? []).join(", ")}`}
+                                >
+                                  unsupported here
+                                </span>
+                              )}
+                              {support === "nowhere" && (
+                                <span
+                                  className="text-xs text-red-700 dark:text-red-400"
+                                  title={`No node in this cluster reports supporting ${flag.name}.`}
+                                >
+                                  unsupported on any node
+                                </span>
+                              )}
+                            </div>
+                            <select
+                              // cn(), not concatenation: the shared class carries
+                              // w-full, and only tailwind-merge lets w-24 win.
+                              className={cn(fieldSelectClass, "w-24 shrink-0")}
+                              value={state}
+                              aria-label={`${flag.name} CPU flag`}
+                              onChange={(e) => {
+                                const v = e.target.value as CPUFlagState;
+                                setCpuFlagStates((prev) => {
+                                  // Rebuilt by filter rather than delete: "default"
+                                  // means absent from flags=, not a stored value.
+                                  const next = Object.fromEntries(
+                                    Object.entries(prev).filter(
+                                      ([name]) => name !== flag.name,
+                                    ),
+                                  );
+                                  if (v !== "default") next[flag.name] = v;
+                                  return next;
+                                });
+                              }}
+                            >
+                              <option value="default">Default</option>
+                              <option value="on">On</option>
+                              <option value="off">Off</option>
+                            </select>
+                          </div>
+                          {flag.description && (
+                            <p className="text-xs leading-snug text-muted-foreground">
+                              {flag.description}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            {Object.keys(cdromEdits).length === 0 && (
-              <p className="text-xs text-muted-foreground">
-                No CD/DVD drives configured. Use &quot;Add Device&quot; to add
-                one.
+                </details>
+              </Group>
+
+              <Group
+                title="Memory"
+                summary={formatBytes(num(memory) * 1024 * 1024)}
+              >
+                <FieldGrid>
+                  <Field label="Memory (MiB)">
+                    <Input
+                      type="number"
+                      min={64}
+                      step={64}
+                      value={memory}
+                      onChange={(e) => {
+                        setMemory(e.target.value);
+                      }}
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Balloon minimum (MiB)">
+                    <Input
+                      type="number"
+                      min={0}
+                      step={64}
+                      value={balloon}
+                      onChange={(e) => {
+                        setBalloon(e.target.value);
+                      }}
+                      placeholder="0 = disabled"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Ballooning shares">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={50000}
+                      value={shares}
+                      onChange={(e) => {
+                        setShares(e.target.value);
+                      }}
+                      placeholder="1000 (default)"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                </FieldGrid>
+                <Checks>
+                  <Check
+                    id="hw-allow-ksm"
+                    label="Allow KSM page merging"
+                    checked={allowKsm}
+                    onCheckedChange={(v) => {
+                      setAllowKsm(v === true);
+                    }}
+                  />
+                </Checks>
+              </Group>
+            </GroupList>
+          </Panel>
+
+          <Panel
+            flush
+            title="Disks"
+            aside={`${plural(hardDisks.length, "hard disk")}, ${plural(cdromEntries.length, "CD/DVD drive")}`}
+            actions={
+              showAddDisk ? undefined : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    setShowAddDisk(true);
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add disk
+                </Button>
+              )
+            }
+          >
+            {diskEntries.length === 0 && pendingNewDisks.length === 0 && (
+              <p className="border-t px-[18px] py-3 text-sm text-muted-foreground">
+                No disks configured.
               </p>
             )}
-            {isoStorages.length > 1 && Object.keys(cdromEdits).length > 0 && (
-              <div className="space-y-1">
-                <Label className="text-xs">Browse storage</Label>
-                <select
-                  className={compactSelect}
-                  value={cdromStorageId}
-                  onChange={(e) => {
-                    setCdromStorageId(e.target.value);
-                  }}
-                >
-                  {isoStorages.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.storage}
-                    </option>
-                  ))}
-                </select>
+            <DeviceList>
+              {hardDisks.map(({ key, parsed }) => {
+                if (disksToRemove.has(key)) {
+                  return (
+                    <DeviceRow
+                      key={key}
+                      name={key}
+                      icon={HardDrive}
+                      title="Hard disk"
+                      struck
+                      marker={removedMarker}
+                      summary={
+                        <>
+                          <span>{parsed.size || "--"}</span>
+                          {parsed.storage && <span>on {parsed.storage}</span>}
+                        </>
+                      }
+                      actions={undoButton(() => {
+                        handleUndoRemoveDisk(key);
+                      })}
+                    />
+                  );
+                }
+                const edit = diskEdits[key] ?? {
+                  cache: parsed.cache,
+                  discard: parsed.discard,
+                  ssd: parsed.ssd,
+                  iothread: parsed.iothread,
+                  newSize: "",
+                };
+                const edited =
+                  edit.newSize !== "" ||
+                  edit.cache !== parsed.cache ||
+                  edit.discard !== parsed.discard ||
+                  edit.ssd !== parsed.ssd ||
+                  edit.iothread !== parsed.iothread;
+                return (
+                  <DeviceRow
+                    key={key}
+                    name={key}
+                    icon={HardDrive}
+                    title="Hard disk"
+                    marker={edited ? <PendingBadge>Edited</PendingBadge> : null}
+                    summary={
+                      <>
+                        <span>{parsed.size || "--"}</span>
+                        <span>{parsed.format || "raw"}</span>
+                        {parsed.storage && <span>on {parsed.storage}</span>}
+                        {edit.newSize && <span>resize to {edit.newSize}</span>}
+                        {edit.cache && <span>cache {edit.cache}</span>}
+                        {edit.discard && <span>discard</span>}
+                        {edit.ssd && <span>SSD emulation</span>}
+                        {edit.iothread && <span>IO thread</span>}
+                      </>
+                    }
+                    open={openRows.has(key)}
+                    onToggle={() => {
+                      toggleRow(key);
+                    }}
+                    actions={
+                      <>
+                        <MoveDiskDialog
+                          clusterId={clusterId}
+                          vmId={vmId}
+                          diskName={key}
+                          storageOptions={diskStorages.map((s) => ({
+                            storage: s.storage,
+                            type: s.type,
+                          }))}
+                          currentStorage={parsed.storage}
+                          currentFormat={parsed.format}
+                        />
+                        <IconAction
+                          label={`Remove ${key}`}
+                          icon={Trash2}
+                          destructive
+                          onClick={() => {
+                            handleRemoveDisk(key);
+                          }}
+                        />
+                      </>
+                    }
+                    editor={
+                      <>
+                        <FieldGrid>
+                          <Field label="Resize to">
+                            <Input
+                              type="text"
+                              value={edit.newSize}
+                              onChange={(e) => {
+                                updateDiskEdit(key, {
+                                  newSize: e.target.value,
+                                });
+                              }}
+                              placeholder={parsed.size || "e.g. 64G"}
+                              className={fieldInputClass}
+                            />
+                          </Field>
+                          <Field label="Cache">
+                            <select
+                              className={fieldSelectClass}
+                              value={edit.cache}
+                              onChange={(e) => {
+                                updateDiskEdit(key, { cache: e.target.value });
+                              }}
+                            >
+                              <option value="">Default</option>
+                              {cacheModes.map((c) => (
+                                <option key={c.value} value={c.value}>
+                                  {c.label}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        </FieldGrid>
+                        <Checks>
+                          <Check
+                            id={`hw-disk-${key}-discard`}
+                            label="Discard"
+                            checked={edit.discard}
+                            onCheckedChange={(v) => {
+                              updateDiskEdit(key, { discard: v === true });
+                            }}
+                          />
+                          <Check
+                            id={`hw-disk-${key}-ssd`}
+                            label="SSD emulation"
+                            checked={edit.ssd}
+                            onCheckedChange={(v) => {
+                              updateDiskEdit(key, { ssd: v === true });
+                            }}
+                          />
+                          <Check
+                            id={`hw-disk-${key}-iothread`}
+                            label="IO thread"
+                            checked={edit.iothread}
+                            onCheckedChange={(v) => {
+                              updateDiskEdit(key, { iothread: v === true });
+                            }}
+                          />
+                        </Checks>
+                      </>
+                    }
+                  />
+                );
+              })}
+              {pendingNewDisks.map((d) => (
+                <DeviceRow
+                  key={d.key}
+                  name={d.key}
+                  icon={HardDrive}
+                  title="Hard disk"
+                  marker={<PendingBadge>Created on save</PendingBadge>}
+                  summary={
+                    <>
+                      <span>{d.size}G</span>
+                      {d.format && <span>{d.format}</span>}
+                      <span>on {d.storage}</span>
+                      {d.cache && <span>cache {d.cache}</span>}
+                      {d.discard && <span>discard</span>}
+                      {d.ssd && <span>SSD emulation</span>}
+                      {d.iothread && <span>IO thread</span>}
+                    </>
+                  }
+                  actions={cancelButton(() => {
+                    handleRemovePendingDisk(d.key);
+                  })}
+                />
+              ))}
+            </DeviceList>
+
+            {showAddDisk && (
+              <div className="border-t px-[18px] py-4">
+                <p className="mb-3 text-sm font-medium">New hard disk</p>
+                <FieldGrid>
+                  <Field label="Bus">
+                    <select
+                      className={fieldSelectClass}
+                      value={addDiskBus}
+                      onChange={(e) => {
+                        setAddDiskBus(e.target.value);
+                      }}
+                    >
+                      {diskBusTypes.map((b) => (
+                        <option key={b.value} value={b.value}>
+                          {b.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Storage">
+                    <select
+                      className={fieldSelectClass}
+                      value={addDiskStorage}
+                      onChange={(e) => {
+                        setAddDiskStorage(e.target.value);
+                      }}
+                    >
+                      <option value="">Select...</option>
+                      {diskStorages.map((s) => (
+                        <option key={s.id} value={s.storage}>
+                          {s.storage} ({s.type})
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Size (GiB)">
+                    <Input
+                      type="number"
+                      min={1}
+                      className={fieldInputClass}
+                      value={addDiskSize}
+                      onChange={(e) => {
+                        setAddDiskSize(e.target.value);
+                      }}
+                    />
+                  </Field>
+                  <Field label="Format">
+                    <select
+                      className={fieldSelectClass}
+                      value={addDiskFormat}
+                      onChange={(e) => {
+                        setAddDiskFormat(e.target.value);
+                      }}
+                    >
+                      {diskFormats.map((f) => (
+                        <option key={f.value} value={f.value}>
+                          {f.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Cache">
+                    <select
+                      className={fieldSelectClass}
+                      value={addDiskCache}
+                      onChange={(e) => {
+                        setAddDiskCache(e.target.value);
+                      }}
+                    >
+                      <option value="">Default</option>
+                      {cacheModes.map((c) => (
+                        <option key={c.value} value={c.value}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </FieldGrid>
+                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+                  <Check
+                    id="hw-add-disk-discard"
+                    label="Discard"
+                    checked={addDiskDiscard}
+                    onCheckedChange={(v) => {
+                      setAddDiskDiscard(v === true);
+                    }}
+                  />
+                  <Check
+                    id="hw-add-disk-ssd"
+                    label="SSD emulation"
+                    checked={addDiskSsd}
+                    onCheckedChange={(v) => {
+                      setAddDiskSsd(v === true);
+                    }}
+                  />
+                  <Check
+                    id="hw-add-disk-iothread"
+                    label="IO thread"
+                    checked={addDiskIothread}
+                    onCheckedChange={(v) => {
+                      setAddDiskIothread(v === true);
+                    }}
+                  />
+                  <div className="ml-auto flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setShowAddDisk(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={handleAddDisk}
+                      disabled={!addDiskStorage || !addDiskSize}
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
-          </div>
-        </Section>
 
-        {/* Description / Tags */}
-        <Section title="Description / Tags" defaultOpen={false}>
-          <div className="space-y-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Description</Label>
-              <textarea
-                value={description}
-                onChange={(e) => {
-                  setDescription(e.target.value);
-                }}
-                rows={2}
-                className="flex w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-xs shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Tags</Label>
-              <Input
-                value={tags}
-                onChange={(e) => {
-                  setTags(e.target.value);
-                }}
-                placeholder="Semicolon-separated"
-                className="h-8 text-xs"
-              />
-            </div>
-          </div>
-        </Section>
-      </div>
-      {/* end 2-col grid */}
-
-      {/* Disks — full width */}
-      <Section title="Disks">
-        {diskEntries.length > 0 && (
-          <div className="space-y-2">
-            {diskEntries.map(({ key, parsed }) => {
-              const isRemoved = disksToRemove.has(key);
-              if (key.startsWith("efidisk")) {
-                const efi = parseEFIDisk(str(config[key]));
-                return (
-                  <div
-                    key={key}
-                    className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
+            <div
+              ref={cdromList}
+              role="region"
+              aria-label="CD/DVD drives"
+              tabIndex={-1}
+              className="outline-none"
+            >
+              <DeviceList>
+                {cdromEntries.map(([key, isoVal]) => {
+                  // A cloud-init drive holds the volume Proxmox generates, not
+                  // an ISO: picking one would free it, as removing it does.
+                  const cloudInit = isCloudInitVolume(isoVal);
+                  const title = cloudInit ? "Cloud-init drive" : "CD/DVD drive";
+                  const icon = cloudInit ? Monitor : Disc;
+                  if (deviceRemovals.has(key)) {
+                    return (
+                      <DeviceRow
+                        key={key}
+                        name={key}
+                        icon={icon}
+                        title={title}
+                        struck
+                        marker={removedMarker}
+                        actions={undoButton(() => {
+                          handleUndoRemoveDevice(key);
+                        })}
+                      />
+                    );
+                  }
+                  const stored = original?.[key];
+                  const edited =
+                    stored != null &&
+                    buildCDROM(isoVal, str(stored)) !== str(stored);
+                  return (
+                    <DeviceRow
+                      key={key}
+                      name={key}
+                      icon={icon}
+                      title={title}
+                      marker={
+                        stored == null ? (
+                          <PendingBadge>Added on save</PendingBadge>
+                        ) : edited ? (
+                          <PendingBadge>Edited</PendingBadge>
+                        ) : null
+                      }
+                      summary={
+                        cloudInit ? (
+                          <span className="break-all font-mono">{isoVal}</span>
+                        ) : undefined
+                      }
+                      actions={
+                        <>
+                          {!cloudInit && (
+                            <select
+                              className={cn(
+                                fieldSelectClass,
+                                "w-64 max-w-full",
+                              )}
+                              aria-label={`Media in ${key}`}
+                              value={isoVal}
+                              onChange={(e) => {
+                                setCdromEdits((prev) => ({
+                                  ...prev,
+                                  [key]: e.target.value,
+                                }));
+                              }}
+                            >
+                              <option value="none">
+                                No media (empty drive)
+                              </option>
+                              {isoVal !== "none" &&
+                                !isoFiles.some(
+                                  (iso) => iso.volid === isoVal,
+                                ) && (
+                                  <option value={isoVal}>
+                                    {isoVal} (current)
+                                  </option>
+                                )}
+                              {isoFiles.map((iso) => (
+                                <option key={iso.volid} value={iso.volid}>
+                                  {iso.volid}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <IconAction
+                            label={`Remove ${key}`}
+                            icon={Trash2}
+                            destructive
+                            onClick={() => {
+                              if (cloudInit) {
+                                setCloudInitToRemove({ key, volume: isoVal });
+                              } else {
+                                handleRemoveCDROM(key);
+                              }
+                            }}
+                          />
+                        </>
+                      }
+                    />
+                  );
+                })}
+              </DeviceList>
+              {isoStorages.length > 1 && cdromEntries.length > 0 && (
+                <label className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-[18px] py-2.5 pl-[44px] text-[12.5px] text-muted-foreground">
+                  List ISO images from
+                  <select
+                    className={cn(fieldSelectClass, "w-48")}
+                    value={cdromStorageId}
+                    onChange={(e) => {
+                      setCdromStorageId(e.target.value);
+                    }}
                   >
-                    <span className="font-mono font-medium">{key}</span>
-                    <Badge variant="secondary" className="text-[10px]">
-                      EFI
-                    </Badge>
-                    <span className="text-[10px] text-muted-foreground">
-                      {efi.storage} | {efi.efitype}
-                      {efi.preEnrolledKeys ? " | Secure Boot keys" : ""}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                      onClick={() => {
-                        handleRemoveDevice(key);
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
-                  </div>
-                );
-              }
-              if (key.startsWith("tpmstate")) {
+                    {isoStorages.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.storage}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+
+            <DeviceList>
+              {firmwareDisks.map(({ key }) => {
+                // Staged like any other device removal, so marked like one.
+                if (deviceRemovals.has(key)) {
+                  return (
+                    <DeviceRow
+                      key={key}
+                      name={key}
+                      icon={key.startsWith("efidisk") ? Key : Shield}
+                      title={
+                        key.startsWith("efidisk") ? "EFI disk" : "TPM state"
+                      }
+                      struck
+                      marker={removedMarker}
+                      actions={undoButton(() => {
+                        handleUndoRemoveDevice(key);
+                      })}
+                    />
+                  );
+                }
+                if (key.startsWith("efidisk")) {
+                  const efi = parseEFIDisk(str(config[key]));
+                  return (
+                    <DeviceRow
+                      key={key}
+                      name={key}
+                      icon={Key}
+                      title="EFI disk"
+                      summary={
+                        <>
+                          <span>on {efi.storage}</span>
+                          <span>{efi.efitype}</span>
+                          {efi.preEnrolledKeys && (
+                            <span>Secure Boot keys enrolled</span>
+                          )}
+                        </>
+                      }
+                      actions={
+                        <IconAction
+                          label={`Remove ${key}`}
+                          icon={Trash2}
+                          destructive
+                          onClick={() => {
+                            handleRemoveDevice(key);
+                          }}
+                        />
+                      }
+                    />
+                  );
+                }
                 const tpm = parseTPMState(str(config[key]));
                 return (
-                  <div
+                  <DeviceRow
                     key={key}
-                    className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
-                  >
-                    <span className="font-mono font-medium">{key}</span>
-                    <Badge variant="secondary" className="text-[10px]">
-                      TPM
-                    </Badge>
-                    <span className="text-[10px] text-muted-foreground">
-                      {tpm.storage} | {tpm.version}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                      onClick={() => {
-                        handleRemoveDevice(key);
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
-                  </div>
+                    name={key}
+                    icon={Shield}
+                    title="TPM state"
+                    summary={
+                      <>
+                        <span>on {tpm.storage}</span>
+                        <span>{tpm.version}</span>
+                      </>
+                    }
+                    actions={
+                      <IconAction
+                        label={`Remove ${key}`}
+                        icon={Trash2}
+                        destructive
+                        onClick={() => {
+                          handleRemoveDevice(key);
+                        }}
+                      />
+                    }
+                  />
                 );
-              }
-              if (key.startsWith("unused")) {
+              })}
+              {unusedDisks.map(({ key, parsed }) => {
                 // Never staged, so never "marked for removal": the Remove
                 // button asks first and then deletes (see unusedToDelete).
                 const volume = parsed.volume || str(config[key] ?? "");
                 return (
-                  <div
+                  <DeviceRow
                     key={key}
-                    className="flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 dark:border-amber-800 dark:bg-amber-950"
-                  >
-                    <span className="font-mono text-xs font-medium text-amber-700 dark:text-amber-400">
-                      {key}
-                    </span>
-                    <span className="truncate text-[10px] text-amber-600 dark:text-amber-400">
-                      {volume}
-                    </span>
-                    <span className="rounded bg-amber-200 px-1 py-0.5 text-[9px] font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-300">
-                      Unused
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                      onClick={() => {
-                        openUnusedDelete(key, volume);
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
-                  </div>
-                );
-              }
-              if (isRemoved) {
-                return (
-                  <div
-                    key={key}
-                    className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950"
-                  >
-                    <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
-                      {key}
-                    </span>
-                    <span className="text-[10px] text-red-600 dark:text-red-400">
-                      {parsed.storage} &middot; {parsed.size} — marked for
-                      removal
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 px-2 text-[10px]"
-                      onClick={() => {
-                        handleUndoRemoveDisk(key);
-                      }}
-                    >
-                      Undo
-                    </Button>
-                  </div>
-                );
-              }
-              const edit = diskEdits[key] ?? {
-                cache: parsed.cache,
-                discard: parsed.discard,
-                ssd: parsed.ssd,
-                iothread: parsed.iothread,
-                newSize: "",
-              };
-              return (
-                <div key={key} className="rounded border p-2">
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <span className="font-mono text-xs font-medium">{key}</span>
-                    {parsed.storage && (
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">
-                        {parsed.storage}
-                      </span>
-                    )}
-                    <span className="text-[10px] text-muted-foreground">
-                      {parsed.size || "--"} &middot; {parsed.format || "raw"}
-                    </span>
-                    <div className="ml-auto flex items-center gap-1">
-                      <MoveDiskDialog
-                        clusterId={clusterId}
-                        vmId={vmId}
-                        diskName={key}
-                        storageOptions={diskStorages.map((s) => ({
-                          storage: s.storage,
-                          type: s.type,
-                        }))}
-                        currentStorage={parsed.storage}
-                        currentFormat={parsed.format}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
+                    name={key}
+                    icon={HardDrive}
+                    title="Detached disk"
+                    marker={<Badge variant="warning">Unused</Badge>}
+                    summary={
+                      <>
+                        <span className="break-all font-mono">{volume}</span>
+                        <span>still takes space on its storage</span>
+                      </>
+                    }
+                    actions={
+                      <IconAction
+                        label={`Remove ${key}`}
+                        icon={Trash2}
+                        destructive
                         onClick={() => {
-                          handleRemoveDisk(key);
+                          openUnusedDelete(key, volume);
                         }}
-                      >
-                        <Trash2 className="h-3 w-3" /> Remove
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-                    <div className="space-y-0.5">
-                      <Label className="text-[10px]">Resize To</Label>
-                      <Input
-                        type="text"
-                        value={edit.newSize}
-                        onChange={(e) => {
-                          updateDiskEdit(key, { newSize: e.target.value });
-                        }}
-                        placeholder={parsed.size || "e.g. 64G"}
-                        className="h-7 text-xs"
                       />
-                    </div>
-                    <div className="space-y-0.5">
-                      <Label className="text-[10px]">Cache</Label>
-                      <select
-                        className={compactSelect + " h-7!"}
-                        value={edit.cache}
+                    }
+                  />
+                );
+              })}
+              {pendingDrives.map(([key, val]) => (
+                <DeviceRow
+                  key={key}
+                  name={key}
+                  icon={
+                    key.startsWith("efidisk")
+                      ? Key
+                      : key.startsWith("tpmstate")
+                        ? Shield
+                        : isCloudInitVolume(val)
+                          ? Monitor
+                          : HardDrive
+                  }
+                  title={
+                    key.startsWith("efidisk")
+                      ? "EFI disk"
+                      : key.startsWith("tpmstate")
+                        ? "TPM state"
+                        : isCloudInitVolume(val)
+                          ? "Cloud-init drive"
+                          : "Drive"
+                  }
+                  marker={<PendingBadge>Added on save</PendingBadge>}
+                  summary={<span className="break-all font-mono">{val}</span>}
+                  actions={cancelButton(() => {
+                    handleCancelPendingDevice(key);
+                  })}
+                />
+              ))}
+            </DeviceList>
+          </Panel>
+
+          <Panel flush title="Network" aside={plural(nicKeys.length, "device")}>
+            {nicKeys.length === 0 && (
+              <p className="border-t px-[18px] py-3 text-sm text-muted-foreground">
+                No network devices configured.
+              </p>
+            )}
+            <DeviceList>
+              {nicKeys.map((nicKey) => {
+                const nic = nicEdits[nicKey];
+                if (!nic) return null;
+                if (deviceRemovals.has(nicKey)) {
+                  return (
+                    <DeviceRow
+                      key={nicKey}
+                      name={nicKey}
+                      icon={Network}
+                      title="Network device"
+                      struck
+                      marker={removedMarker}
+                      actions={undoButton(() => {
+                        handleUndoRemoveDevice(nicKey);
+                      })}
+                    />
+                  );
+                }
+                const stored = str(original?.[nicKey] ?? "");
+                const edited = buildNet(nic, stored) !== stored;
+                return (
+                  <DeviceRow
+                    key={nicKey}
+                    name={nicKey}
+                    icon={Network}
+                    title="Network device"
+                    marker={edited ? <PendingBadge>Edited</PendingBadge> : null}
+                    summary={
+                      <>
+                        <span>
+                          {netModels.find((m) => m.value === nic.model)
+                            ?.label ?? nic.model}
+                        </span>
+                        <span>
+                          {nic.bridge ? `on ${nic.bridge}` : "no bridge (NAT)"}
+                        </span>
+                        {nic.vlanTag && <span>VLAN {nic.vlanTag}</span>}
+                        {nic.mac && (
+                          <span className="font-mono">{nic.mac}</span>
+                        )}
+                        {nic.firewall && <span>firewall on</span>}
+                        {nic.linkDown && <span>disconnected</span>}
+                      </>
+                    }
+                    open={openRows.has(nicKey)}
+                    onToggle={() => {
+                      toggleRow(nicKey);
+                    }}
+                    actions={
+                      <IconAction
+                        label={`Remove ${nicKey}`}
+                        icon={Trash2}
+                        destructive
+                        onClick={() => {
+                          handleRemoveDevice(nicKey);
+                        }}
+                      />
+                    }
+                    editor={
+                      <>
+                        <FieldGrid>
+                          <Field label="Model">
+                            <select
+                              className={fieldSelectClass}
+                              value={nic.model}
+                              onChange={(e) => {
+                                updateNicEdit(nicKey, {
+                                  model: e.target.value,
+                                });
+                              }}
+                            >
+                              <CurrentValueOption
+                                value={storedNics[nicKey]?.model ?? ""}
+                                known={netModels.map((m) => m.value)}
+                              />
+                              {netModels.map((m) => (
+                                <option key={m.value} value={m.value}>
+                                  {m.label}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                          <Field label="Bridge">
+                            {bridgeNames.length > 0 ? (
+                              <select
+                                className={fieldSelectClass}
+                                value={nic.bridge}
+                                onChange={(e) => {
+                                  updateNicEdit(nicKey, {
+                                    bridge: e.target.value,
+                                  });
+                                }}
+                              >
+                                {/* No bridge is qemu's user-mode network,
+                                    NATed, with its own DHCP and DNS ($net_fmt's
+                                    bridge, src/PVE/QemuServer/Network.pm). */}
+                                <option value="">No bridge (NAT)</option>
+                                <CurrentValueOption
+                                  value={storedNics[nicKey]?.bridge ?? ""}
+                                  known={bridgeNames}
+                                />
+                                {/* One typed before the list arrived, neither
+                                    listed nor stored, which the select would
+                                    otherwise show as its first option. */}
+                                {nic.bridge &&
+                                  nic.bridge !== storedNics[nicKey]?.bridge &&
+                                  !bridgeNames.includes(nic.bridge) && (
+                                    <option value={nic.bridge}>
+                                      {nic.bridge}
+                                    </option>
+                                  )}
+                                {bridgeNames.map((b) => (
+                                  <option key={b} value={b}>
+                                    {b}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <Input
+                                value={nic.bridge}
+                                onChange={(e) => {
+                                  updateNicEdit(nicKey, {
+                                    bridge: e.target.value,
+                                  });
+                                }}
+                                placeholder="vmbr0"
+                                className={fieldInputClass}
+                              />
+                            )}
+                          </Field>
+                          <Field label="VLAN tag">
+                            <Input
+                              type="number"
+                              min={1}
+                              max={4094}
+                              value={nic.vlanTag}
+                              onChange={(e) => {
+                                updateNicEdit(nicKey, {
+                                  vlanTag: e.target.value,
+                                });
+                              }}
+                              placeholder="None"
+                              className={fieldInputClass}
+                            />
+                          </Field>
+                          <Field label="Rate limit (MB/s)">
+                            <Input
+                              type="number"
+                              min={0}
+                              value={nic.rateLimit}
+                              onChange={(e) => {
+                                updateNicEdit(nicKey, {
+                                  rateLimit: e.target.value,
+                                });
+                              }}
+                              placeholder="Unlimited"
+                              className={fieldInputClass}
+                            />
+                          </Field>
+                          <Field label="MTU">
+                            <Input
+                              type="number"
+                              min={0}
+                              value={nic.mtu}
+                              onChange={(e) => {
+                                updateNicEdit(nicKey, { mtu: e.target.value });
+                              }}
+                              placeholder="Default"
+                              className={fieldInputClass}
+                            />
+                          </Field>
+                        </FieldGrid>
+                        <Checks>
+                          <Check
+                            id={`hw-${nicKey}-fw`}
+                            label="Firewall"
+                            checked={nic.firewall}
+                            onCheckedChange={(v) => {
+                              updateNicEdit(nicKey, { firewall: v === true });
+                            }}
+                          />
+                          <Check
+                            id={`hw-${nicKey}-linkdown`}
+                            label="Disconnect"
+                            checked={nic.linkDown}
+                            onCheckedChange={(v) => {
+                              updateNicEdit(nicKey, { linkDown: v === true });
+                            }}
+                          />
+                        </Checks>
+                      </>
+                    }
+                  />
+                );
+              })}
+              {pendingRows(/^net\d+$/, Network, "Network device")}
+            </DeviceList>
+          </Panel>
+
+          {hasOtherDevices && (
+            <Panel
+              flush
+              title="Other devices"
+              aside={plural(otherDeviceCount, "device")}
+            >
+              <DeviceList>
+                {usbKeys.map((key) => {
+                  const parsed = parseUSB(str(config[key]));
+                  if (deviceRemovals.has(key)) {
+                    return (
+                      <DeviceRow
+                        key={key}
+                        name={key}
+                        icon={Usb}
+                        title="USB device"
+                        struck
+                        marker={removedMarker}
+                        actions={undoButton(() => {
+                          handleUndoRemoveDevice(key);
+                        })}
+                      />
+                    );
+                  }
+                  // qemu-server's check_usb_perm refuses to change or delete a
+                  // raw host passthrough for anyone but root@pam, and a Nexara
+                  // token never is — so a Remove would fail, and take the rest of
+                  // the Save down with it. The row says why in its place, as text:
+                  // a disabled button's title never shows (Button takes no pointer
+                  // events when disabled).
+                  const rootOnly = isRawUSBPassthrough(parsed);
+                  return (
+                    <DeviceRow
+                      key={key}
+                      name={key}
+                      icon={Usb}
+                      title="USB device"
+                      summary={
+                        <>
+                          {parsed.spice ? (
+                            <span>SPICE redirection</span>
+                          ) : parsed.mapping ? (
+                            <>
+                              <span>Mapped</span>
+                              <span className="font-mono">
+                                {parsed.mapping}
+                              </span>
+                            </>
+                          ) : (
+                            <span>{usbHostLabel(parsed.host, usbDevices)}</span>
+                          )}
+                          {parsed.usb3 && <span>USB 3</span>}
+                          {rootOnly && (
+                            <span>
+                              Passed through directly; only root@pam can remove
+                              it, in Proxmox
+                            </span>
+                          )}
+                        </>
+                      }
+                      actions={
+                        rootOnly ? undefined : (
+                          <IconAction
+                            label={`Remove ${key}`}
+                            icon={Trash2}
+                            destructive
+                            onClick={() => {
+                              handleRemoveDevice(key);
+                            }}
+                          />
+                        )
+                      }
+                    />
+                  );
+                })}
+                {pendingRows(/^usb\d+$/, Usb, "USB device")}
+
+                {pciKeys.map((key) => {
+                  const parsed = parsePCI(str(config[key]));
+                  if (deviceRemovals.has(key)) {
+                    return (
+                      <DeviceRow
+                        key={key}
+                        name={key}
+                        icon={Cpu}
+                        title="PCI device"
+                        struck
+                        marker={removedMarker}
+                        actions={undoButton(() => {
+                          handleUndoRemoveDevice(key);
+                        })}
+                      />
+                    );
+                  }
+                  // check_hostpci_perm refuses to change or delete a host
+                  // device, or a romfile, for anyone but root@pam — the USB rows'
+                  // reason, and said the same way.
+                  const rootOnly = isRootOnlyPCI(parsed);
+                  return (
+                    <DeviceRow
+                      key={key}
+                      name={key}
+                      icon={Cpu}
+                      title="PCI device"
+                      summary={
+                        <>
+                          {parsed.mapping ? (
+                            <>
+                              <span>Mapped</span>
+                              <span className="font-mono">
+                                {parsed.mapping}
+                              </span>
+                            </>
+                          ) : (
+                            <span>{pciHostLabel(parsed.host, pciDevices)}</span>
+                          )}
+                          {parsed.pcie && <span>PCIe</span>}
+                          {parsed.xvga && <span>x-vga</span>}
+                          {rootOnly && (
+                            <span>
+                              {parsed.host
+                                ? "Passed through directly; only root@pam can remove it, in Proxmox"
+                                : "Uses a ROM file; only root@pam can remove it, in Proxmox"}
+                            </span>
+                          )}
+                        </>
+                      }
+                      actions={
+                        rootOnly ? undefined : (
+                          <IconAction
+                            label={`Remove ${key}`}
+                            icon={Trash2}
+                            destructive
+                            onClick={() => {
+                              handleRemoveDevice(key);
+                            }}
+                          />
+                        )
+                      }
+                    />
+                  );
+                })}
+                {pendingRows(/^hostpci\d+$/, Cpu, "PCI device")}
+
+                {serialKeys.map((key) => {
+                  const val = str(config[key]);
+                  // $update_vm_api (src/PVE/API2/Qemu.pm) lets nobody but
+                  // root@pam delete a serialN that is not a socket: the USB rows'
+                  // reason, said the same way.
+                  const rootOnly = val !== "socket";
+                  if (deviceRemovals.has(key)) {
+                    return (
+                      <DeviceRow
+                        key={key}
+                        name={key}
+                        icon={Terminal}
+                        title="Serial port"
+                        struck
+                        marker={removedMarker}
+                        actions={undoButton(() => {
+                          handleUndoRemoveDevice(key);
+                        })}
+                      />
+                    );
+                  }
+                  return (
+                    <DeviceRow
+                      key={key}
+                      name={key}
+                      icon={Terminal}
+                      title="Serial port"
+                      summary={
+                        <>
+                          <span className="font-mono">{val}</span>
+                          {rootOnly && (
+                            <span>
+                              A host serial port; only root@pam can remove it,
+                              in Proxmox
+                            </span>
+                          )}
+                        </>
+                      }
+                      actions={
+                        rootOnly ? undefined : (
+                          <IconAction
+                            label={`Remove ${key}`}
+                            icon={Trash2}
+                            destructive
+                            onClick={() => {
+                              handleRemoveDevice(key);
+                            }}
+                          />
+                        )
+                      }
+                    />
+                  );
+                })}
+                {pendingRows(/^serial\d+$/, Terminal, "Serial port")}
+
+                {config["rng0"] != null && !deviceRemovals.has("rng0") ? (
+                  (() => {
+                    const rng = parseRNG(str(config["rng0"]));
+                    return (
+                      <DeviceRow
+                        name="rng0"
+                        icon={Dice1}
+                        title="VirtIO RNG"
+                        summary={
+                          <>
+                            <span className="font-mono">{rng.source}</span>
+                            {rng.maxBytes && (
+                              <span>at most {rng.maxBytes} bytes</span>
+                            )}
+                            {rng.period && <span>every {rng.period} ms</span>}
+                          </>
+                        }
+                        actions={
+                          <IconAction
+                            label="Remove rng0"
+                            icon={Trash2}
+                            destructive
+                            onClick={() => {
+                              handleRemoveDevice("rng0");
+                            }}
+                          />
+                        }
+                      />
+                    );
+                  })()
+                ) : deviceRemovals.has("rng0") ? (
+                  <DeviceRow
+                    name="rng0"
+                    icon={Dice1}
+                    title="VirtIO RNG"
+                    struck
+                    marker={removedMarker}
+                    actions={undoButton(() => {
+                      handleUndoRemoveDevice("rng0");
+                    })}
+                  />
+                ) : pendingDeviceAdds["rng0"] ? (
+                  <DeviceRow
+                    name="rng0"
+                    icon={Dice1}
+                    title="VirtIO RNG"
+                    marker={<PendingBadge>Added on save</PendingBadge>}
+                    summary={
+                      <span className="break-all font-mono">
+                        {pendingDeviceAdds["rng0"]}
+                      </span>
+                    }
+                    actions={cancelButton(() => {
+                      handleCancelPendingDevice("rng0");
+                    })}
+                  />
+                ) : null}
+
+                {virtiofsKeys.map((key) => {
+                  const parsed = parseVirtioFS(str(config[key]));
+                  if (deviceRemovals.has(key)) {
+                    return (
+                      <DeviceRow
+                        key={key}
+                        name={key}
+                        icon={FolderOpen}
+                        title="VirtioFS share"
+                        struck
+                        marker={removedMarker}
+                        actions={undoButton(() => {
+                          handleUndoRemoveDevice(key);
+                        })}
+                      />
+                    );
+                  }
+                  return (
+                    <DeviceRow
+                      key={key}
+                      name={key}
+                      icon={FolderOpen}
+                      title="VirtioFS share"
+                      summary={
+                        <>
+                          <span className="font-mono">{parsed.dirid}</span>
+                          <span>cache {parsed.cache}</span>
+                          {parsed.directIo && <span>direct I/O</span>}
+                        </>
+                      }
+                      actions={
+                        <IconAction
+                          label={`Remove ${key}`}
+                          icon={Trash2}
+                          destructive
+                          onClick={() => {
+                            handleRemoveDevice(key);
+                          }}
+                        />
+                      }
+                    />
+                  );
+                })}
+                {pendingRows(/^virtiofs\d+$/, FolderOpen, "VirtioFS share")}
+              </DeviceList>
+            </Panel>
+          )}
+
+          <Panel flush title="Options">
+            <GroupList>
+              <Group title="Guest">
+                <FieldGrid>
+                  <Field label="OS type" className="col-span-2">
+                    <select
+                      className={fieldSelectClass}
+                      value={ostype}
+                      onChange={(e) => {
+                        setOstype(e.target.value);
+                      }}
+                    >
+                      {osTypes.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </FieldGrid>
+                <Checks>
+                  <Check
+                    id="hw-agent"
+                    label="Agent"
+                    checked={agentEnabled}
+                    onCheckedChange={(v) => {
+                      setAgentEnabled(v === true);
+                    }}
+                  />
+                  {agentEnabled && (
+                    <Check
+                      id="hw-agent-fstrim"
+                      label="FSTRIM"
+                      checked={agentFstrim}
+                      onCheckedChange={(v) => {
+                        setAgentFstrim(v === true);
+                      }}
+                    />
+                  )}
+                  <Check
+                    id="hw-tablet"
+                    label="Tablet"
+                    checked={tablet}
+                    onCheckedChange={(v) => {
+                      setTablet(v === true);
+                    }}
+                  />
+                  <Check
+                    id="hw-localtime"
+                    label="Local time"
+                    checked={localtime}
+                    onCheckedChange={(v) => {
+                      setLocaltime(v === true);
+                    }}
+                  />
+                </Checks>
+              </Group>
+
+              <Group title="Virtualization">
+                <Checks>
+                  <Check
+                    id="hw-kvm"
+                    label="KVM"
+                    checked={kvmEnabled}
+                    onCheckedChange={(v) => {
+                      setKvmEnabled(v === true);
+                    }}
+                  />
+                  <Check
+                    id="hw-acpi"
+                    label="ACPI"
+                    checked={acpi}
+                    onCheckedChange={(v) => {
+                      setAcpi(v === true);
+                    }}
+                  />
+                </Checks>
+                <div className="space-y-1.5">
+                  <p className="text-[12.5px] text-muted-foreground">Hotplug</p>
+                  <Checks>
+                    {(["network", "disk", "usb", "memory", "cpu"] as const).map(
+                      (opt) => {
+                        const parts = hotplug
+                          ? hotplug.split(",").filter(Boolean)
+                          : [];
+                        const checked = parts.includes(opt);
+                        return (
+                          <Check
+                            key={opt}
+                            id={`hp-${opt}`}
+                            label={HOTPLUG_LABELS[opt]}
+                            checked={checked}
+                            onCheckedChange={(v) => {
+                              const next =
+                                v === true
+                                  ? [...parts, opt]
+                                  : parts.filter((p) => p !== opt);
+                              setHotplug(next.join(","));
+                            }}
+                          />
+                        );
+                      },
+                    )}
+                  </Checks>
+                </div>
+              </Group>
+
+              <Group
+                title="Startup"
+                summary={onboot ? "Starts with the node" : "Started by hand"}
+              >
+                <Checks>
+                  <Check
+                    id="hw-onboot"
+                    label="Start at boot"
+                    checked={onboot}
+                    onCheckedChange={(v) => {
+                      setOnboot(v === true);
+                    }}
+                  />
+                  <Check
+                    id="hw-protection"
+                    label="Protection"
+                    checked={protection}
+                    onCheckedChange={(v) => {
+                      setProtection(v === true);
+                    }}
+                  />
+                </Checks>
+                <FieldGrid>
+                  <Field label="Startup order">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={startupOrder}
+                      onChange={(e) => {
+                        setStartupOrder(e.target.value);
+                      }}
+                      placeholder="#"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Up delay (s)">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={startupUp}
+                      onChange={(e) => {
+                        setStartupUp(e.target.value);
+                      }}
+                      placeholder="0"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                  <Field label="Down delay (s)">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={startupDown}
+                      onChange={(e) => {
+                        setStartupDown(e.target.value);
+                      }}
+                      placeholder="0"
+                      className={fieldInputClass}
+                    />
+                  </Field>
+                </FieldGrid>
+              </Group>
+            </GroupList>
+
+            <DisclosureRow
+              open={advancedOpen}
+              onToggle={() => {
+                setAdvancedOpen((open) => !open);
+              }}
+            >
+              Advanced options
+            </DisclosureRow>
+            {advancedOpen && (
+              <GroupList>
+                <Group title="Clock and keyboard">
+                  <FieldGrid>
+                    <Field label="RTC start date">
+                      <Input
+                        value={startdate}
                         onChange={(e) => {
-                          updateDiskEdit(key, { cache: e.target.value });
+                          setStartdate(e.target.value);
+                        }}
+                        placeholder="now"
+                        className={fieldInputClass}
+                      />
+                    </Field>
+                    <Field label="Keyboard layout">
+                      <select
+                        className={fieldSelectClass}
+                        value={keyboard}
+                        onChange={(e) => {
+                          setKeyboard(e.target.value);
                         }}
                       >
-                        <option value="">Default</option>
-                        {cacheModes.map((c) => (
-                          <option key={c.value} value={c.value}>
-                            {c.label}
+                        <option value="">Default (guest-handled)</option>
+                        <CurrentValueOption
+                          value={storedSelects.keyboard}
+                          known={keyboardLayouts}
+                        />
+                        {keyboardLayouts.map((k) => (
+                          <option key={k} value={k}>
+                            {k}
                           </option>
                         ))}
                       </select>
-                    </div>
-                    <div className="flex items-end gap-1.5 pb-0.5">
-                      <Checkbox
-                        id={`hw-disk-${key}-discard`}
-                        checked={edit.discard}
-                        onCheckedChange={(v) => {
-                          updateDiskEdit(key, { discard: v === true });
+                    </Field>
+                  </FieldGrid>
+                  <Checks>
+                    <Check
+                      id="hw-tdf"
+                      label="Time drift fix"
+                      checked={tdf}
+                      onCheckedChange={(v) => {
+                        setTdf(v === true);
+                      }}
+                    />
+                  </Checks>
+                </Group>
+
+                <Group title="Migration and saved state">
+                  <FieldGrid>
+                    <Field label="VM state storage" className="col-span-2">
+                      <select
+                        className={fieldSelectClass}
+                        value={vmstatestorage}
+                        onChange={(e) => {
+                          setVmstatestorage(e.target.value);
                         }}
-                      />
-                      <Label
-                        htmlFor={`hw-disk-${key}-discard`}
-                        className="cursor-pointer text-[10px]"
                       >
-                        Discard
-                      </Label>
-                    </div>
-                    <div className="flex items-end gap-1.5 pb-0.5">
-                      <Checkbox
-                        id={`hw-disk-${key}-ssd`}
-                        checked={edit.ssd}
-                        onCheckedChange={(v) => {
-                          updateDiskEdit(key, { ssd: v === true });
+                        <option value="">Automatic</option>
+                        <CurrentValueOption
+                          value={storedSelects.vmstatestorage}
+                          known={diskStorages.map((st) => st.storage)}
+                        />
+                        {diskStorages.map((st) => (
+                          <option key={st.id} value={st.storage}>
+                            {st.storage} ({st.type})
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Migrate downtime (s)">
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={migrateDowntime}
+                        onChange={(e) => {
+                          setMigrateDowntime(e.target.value);
                         }}
+                        placeholder="0.1 (default)"
+                        className={fieldInputClass}
                       />
-                      <Label
-                        htmlFor={`hw-disk-${key}-ssd`}
-                        className="cursor-pointer text-[10px]"
-                      >
-                        SSD
-                      </Label>
-                    </div>
-                    <div className="flex items-end gap-1.5 pb-0.5">
-                      <Checkbox
-                        id={`hw-disk-${key}-iothread`}
-                        checked={edit.iothread}
-                        onCheckedChange={(v) => {
-                          updateDiskEdit(key, { iothread: v === true });
+                    </Field>
+                    <Field label="Migrate speed (MB/s)">
+                      <Input
+                        type="number"
+                        min={0}
+                        value={migrateSpeed}
+                        onChange={(e) => {
+                          setMigrateSpeed(e.target.value);
                         }}
+                        placeholder="0 (unlimited)"
+                        className={fieldInputClass}
                       />
-                      <Label
-                        htmlFor={`hw-disk-${key}-iothread`}
-                        className="cursor-pointer text-[10px]"
+                    </Field>
+                  </FieldGrid>
+                </Group>
+
+                <Group title="Power and watchdog">
+                  <Checks>
+                    <Check
+                      id="hw-reboot"
+                      label="Allow reboot"
+                      checked={reboot}
+                      onCheckedChange={(v) => {
+                        setReboot(v === true);
+                      }}
+                    />
+                    <Check
+                      id="hw-freeze"
+                      label="Freeze CPU at startup"
+                      checked={freeze}
+                      onCheckedChange={(v) => {
+                        setFreeze(v === true);
+                      }}
+                    />
+                  </Checks>
+                  <FieldGrid>
+                    <Field label="Watchdog device">
+                      <select
+                        className={fieldSelectClass}
+                        value={watchdogModel}
+                        aria-label="Watchdog device"
+                        onChange={(e) => {
+                          setWatchdogModel(e.target.value);
+                        }}
                       >
-                        IO Thread
-                      </Label>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {diskEntries.length === 0 && pendingNewDisks.length === 0 && (
-          <p className="text-xs text-muted-foreground">No disks configured.</p>
-        )}
-        {pendingNewDisks.length > 0 && (
-          <div
-            className={
-              diskEntries.length > 0 ? "mt-2 space-y-1.5" : "space-y-1.5"
-            }
-          >
-            <p className="text-[10px] font-medium text-muted-foreground">
-              New disks (created on save)
-            </p>
-            {pendingNewDisks.map((d) => (
-              <div
-                key={d.key}
-                className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950"
+                        <option value="">None</option>
+                        <CurrentValueOption
+                          value={storedSelects.watchdogModel}
+                          known={watchdogModels.map((m) => m.value)}
+                        />
+                        {watchdogModels.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Watchdog action">
+                      <select
+                        className={fieldSelectClass}
+                        value={watchdogAction}
+                        aria-label="Watchdog action"
+                        disabled={!watchdogModel}
+                        onChange={(e) => {
+                          setWatchdogAction(e.target.value);
+                        }}
+                      >
+                        <CurrentValueOption
+                          value={storedSelects.watchdogAction}
+                          known={watchdogActions.map((a) => a.value)}
+                        />
+                        {watchdogActions.map((a) => (
+                          <option key={a.value} value={a.value}>
+                            {a.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  </FieldGrid>
+                </Group>
+
+                <Group
+                  title="SMBIOS"
+                  summary="Type 1: what the guest reads as its system"
+                >
+                  <Field
+                    label="UUID"
+                    note={
+                      smbiosUuidChanged && (
+                        <p className="mt-1.5 flex items-start gap-1.5 text-[12.5px] leading-snug text-amber-700 dark:text-amber-400">
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            {smbiosUuid
+                              ? "Changing the SMBIOS UUID"
+                              : "Clearing this removes the SMBIOS UUID, and Proxmox will generate a new one"}
+                            {
+                              " — the guest sees different hardware on next boot. This can deactivate Windows, and it breaks Veeam backup correlation, which matches Proxmox guests on exactly this value."
+                            }
+                          </span>
+                        </p>
+                      )
+                    }
+                  >
+                    <Input
+                      value={smbiosUuid}
+                      onChange={(e) => {
+                        setSmbiosUuid(e.target.value);
+                      }}
+                      placeholder={
+                        originalSmbiosUuid
+                          ? originalSmbiosUuid
+                          : "auto-generated on first boot"
+                      }
+                      className={cn(fieldInputClass, "font-mono")}
+                    />
+                  </Field>
+                  <FieldGrid>
+                    {SMBIOS_TEXT_FIELDS.map((field) => (
+                      <Field key={field} label={SMBIOS_LABELS[field]}>
+                        <Input
+                          value={smbios[field]}
+                          onChange={(e) => {
+                            setSmbios((prev) => ({
+                              ...prev,
+                              [field]: e.target.value,
+                            }));
+                          }}
+                          className={fieldInputClass}
+                        />
+                      </Field>
+                    ))}
+                  </FieldGrid>
+                </Group>
+              </GroupList>
+            )}
+          </Panel>
+        </div>
+
+        <div className="flex min-w-0 flex-[2_1_340px] flex-col gap-4">
+          <Panel flush title="Display and boot">
+            <GroupList>
+              <Group title="Display">
+                <FieldGrid>
+                  <Field label="Graphics card">
+                    <select
+                      className={fieldSelectClass}
+                      value={vgaType}
+                      onChange={(e) => {
+                        setVgaType(e.target.value);
+                      }}
+                    >
+                      {/* No type set: no vga line, or one with only other options
+                          (memory=32, clipboard=vnc). qemu-server picks the type
+                          when the VM starts (get_vga_properties,
+                          src/PVE/QemuServer.pm): virtio on aarch64; cirrus for
+                          ostype w2k, wxp and w2k3 and, on a machine version below
+                          2.9, for every guest but Windows Vista/2008 and newer; std
+                          otherwise. Not always std, so it is not shown as std:
+                          Proxmox's own GUI calls it "Default" too (kvm_vga_drivers,
+                          pve-manager www/manager6/Utils.js). */}
+                      <option value="">Default</option>
+                      <CurrentValueOption
+                        value={storedVgaType}
+                        known={vgaTypes.map((v) => v.value)}
+                      />
+                      {vgaTypes.map((v) => (
+                        <option key={v.value} value={v.value}>
+                          {v.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {vgaType === "qxl" && (
+                    <Field label="QXL memory (MiB)">
+                      <Input
+                        type="number"
+                        min={0}
+                        value={vgaMemory}
+                        onChange={(e) => {
+                          setVgaMemory(e.target.value);
+                        }}
+                        placeholder="Default"
+                        className={fieldInputClass}
+                      />
+                    </Field>
+                  )}
+                  <Field label="Audio">
+                    <select
+                      className={fieldSelectClass}
+                      value={audioDevice}
+                      onChange={(e) => {
+                        setAudioDevice(e.target.value);
+                      }}
+                    >
+                      {audioDevices.map((a) => (
+                        <option key={a.value} value={a.value}>
+                          {a.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </FieldGrid>
+              </Group>
+
+              <Group title="Firmware and chipset">
+                <FieldGrid>
+                  <Field label="BIOS">
+                    <select
+                      className={fieldSelectClass}
+                      value={bios}
+                      onChange={(e) => {
+                        setBios(e.target.value);
+                      }}
+                    >
+                      {biosOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field
+                    label="Machine"
+                    note={
+                      /* Saved, buildMachine takes it off: Proxmox refuses an
+                         Intel vIOMMU beside a type without q35 in it. */
+                      dropsIntelViommu(
+                        machine,
+                        str(original?.["machine"] ?? ""),
+                      ) && (
+                        <p className="mt-1.5 text-[12.5px] leading-snug text-amber-700 dark:text-amber-400">
+                          This VM&apos;s Intel vIOMMU needs a q35 machine type,
+                          so saving this one removes it.
+                        </p>
+                      )
+                    }
+                  >
+                    <select
+                      className={fieldSelectClass}
+                      value={machine}
+                      onChange={(e) => {
+                        setMachine(e.target.value);
+                      }}
+                    >
+                      <CurrentValueOption
+                        value={storedSelects.machine}
+                        known={machineTypes.map((o) => o.value)}
+                      />
+                      {machineTypes.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="SCSI controller" className="col-span-full">
+                    <select
+                      className={fieldSelectClass}
+                      value={scsihw}
+                      onChange={(e) => {
+                        setScsihw(e.target.value);
+                      }}
+                    >
+                      <CurrentValueOption
+                        value={storedSelects.scsihw}
+                        known={scsiControllers.map((o) => o.value)}
+                      />
+                      {scsiControllers.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </FieldGrid>
+              </Group>
+
+              <Group
+                title="Boot order"
+                summary={
+                  bootOrder.length === 0
+                    ? undefined
+                    : `${String(bootEnabled)} of ${plural(bootOrder.length, "device")} tried, in this order`
+                }
               >
-                <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                  {d.key}
-                </span>
-                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
-                  {d.storage}:{d.size}G &middot; {d.format}
-                  {d.cache ? ` &middot; ${d.cache}` : ""}
-                  {d.discard ? " &middot; discard" : ""}
-                  {d.ssd ? " &middot; ssd" : ""}
-                  {d.iothread ? " &middot; iothread" : ""}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                  onClick={() => {
-                    handleRemovePendingDisk(d.key);
-                  }}
-                >
-                  <Trash2 className="h-3 w-3" /> Cancel
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-        {showAddDisk ? (
-          <div className="mt-2 rounded border border-dashed p-2">
-            <p className="mb-2 text-xs font-medium">Add New Disk</p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              <div className="space-y-0.5">
-                <Label className="text-[10px]">Bus</Label>
-                <select
-                  className={compactSelect + " h-7!"}
-                  value={addDiskBus}
+                {bootOrder.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No bootable devices
+                  </p>
+                )}
+                <ol className="-mx-1.5 space-y-0.5">
+                  {bootOrder.map((entry, idx) => {
+                    const info = bootDeviceLabel(entry.device, config);
+                    const DeviceIcon =
+                      info.type === "net"
+                        ? Network
+                        : info.type === "cdrom"
+                          ? Disc
+                          : HardDrive;
+                    return (
+                      <li
+                        key={entry.device}
+                        className={cn(
+                          "flex items-center gap-2 rounded-md px-1.5 py-1 text-sm",
+                          !entry.enabled && "text-muted-foreground",
+                        )}
+                      >
+                        <Checkbox
+                          id={`boot-${entry.device}`}
+                          checked={entry.enabled}
+                          onCheckedChange={(v) => {
+                            setBootOrder((prev) =>
+                              prev.map((b, i) =>
+                                i === idx ? { ...b, enabled: v === true } : b,
+                              ),
+                            );
+                          }}
+                        />
+                        <DeviceIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate">
+                          {info.label}
+                        </span>
+                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                          {String(idx + 1)}
+                        </span>
+                        <IconAction
+                          label={`Move ${info.label} earlier in the boot order`}
+                          icon={ArrowUp}
+                          className="h-6 w-6"
+                          disabled={idx === 0}
+                          onClick={() => {
+                            setBootOrder((prev) => {
+                              const next = [...prev];
+                              const a = next[idx];
+                              const b = next[idx - 1];
+                              if (a && b) {
+                                next[idx] = b;
+                                next[idx - 1] = a;
+                              }
+                              return next;
+                            });
+                          }}
+                        />
+                        <IconAction
+                          label={`Move ${info.label} later in the boot order`}
+                          icon={ArrowDown}
+                          className="h-6 w-6"
+                          disabled={idx === bootOrder.length - 1}
+                          onClick={() => {
+                            setBootOrder((prev) => {
+                              const next = [...prev];
+                              const a = next[idx];
+                              const b = next[idx + 1];
+                              if (a && b) {
+                                next[idx] = b;
+                                next[idx + 1] = a;
+                              }
+                              return next;
+                            });
+                          }}
+                        />
+                      </li>
+                    );
+                  })}
+                </ol>
+              </Group>
+            </GroupList>
+          </Panel>
+
+          <Panel title="Description and tags">
+            <div className="space-y-3">
+              <Field label="Description">
+                <textarea
+                  value={description}
                   onChange={(e) => {
-                    setAddDiskBus(e.target.value);
+                    setDescription(e.target.value);
                   }}
-                >
-                  {diskBusTypes.map((b) => (
-                    <option key={b.value} value={b.value}>
-                      {b.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-0.5">
-                <Label className="text-[10px]">Storage</Label>
-                <select
-                  className={compactSelect + " h-7!"}
-                  value={addDiskStorage}
-                  onChange={(e) => {
-                    setAddDiskStorage(e.target.value);
-                  }}
-                >
-                  <option value="">Select...</option>
-                  {diskStorages.map((s) => (
-                    <option key={s.id} value={s.storage}>
-                      {s.storage} ({s.type})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-0.5">
-                <Label className="text-[10px]">Size (GiB)</Label>
+                  rows={3}
+                  className="flex w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </Field>
+              <Field label="Tags">
                 <Input
-                  type="number"
-                  min={1}
-                  className="h-7 text-xs"
-                  value={addDiskSize}
+                  value={tags}
                   onChange={(e) => {
-                    setAddDiskSize(e.target.value);
+                    setTags(e.target.value);
                   }}
+                  placeholder="Semicolon-separated"
+                  className={fieldInputClass}
                 />
-              </div>
-              <div className="space-y-0.5">
-                <Label className="text-[10px]">Format</Label>
-                <select
-                  className={compactSelect + " h-7!"}
-                  value={addDiskFormat}
-                  onChange={(e) => {
-                    setAddDiskFormat(e.target.value);
-                  }}
-                >
-                  {diskFormats.map((f) => (
-                    <option key={f.value} value={f.value}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-0.5">
-                <Label className="text-[10px]">Cache</Label>
-                <select
-                  className={compactSelect + " h-7!"}
-                  value={addDiskCache}
-                  onChange={(e) => {
-                    setAddDiskCache(e.target.value);
-                  }}
-                >
-                  <option value="">Default</option>
-                  {cacheModes.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              </Field>
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <div className="flex items-center gap-1.5">
-                <Checkbox
-                  id="hw-add-disk-discard"
-                  checked={addDiskDiscard}
-                  onCheckedChange={(v) => {
-                    setAddDiskDiscard(v === true);
-                  }}
-                />
-                <Label
-                  htmlFor="hw-add-disk-discard"
-                  className="cursor-pointer text-[10px]"
-                >
-                  Discard
-                </Label>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Checkbox
-                  id="hw-add-disk-ssd"
-                  checked={addDiskSsd}
-                  onCheckedChange={(v) => {
-                    setAddDiskSsd(v === true);
-                  }}
-                />
-                <Label
-                  htmlFor="hw-add-disk-ssd"
-                  className="cursor-pointer text-[10px]"
-                >
-                  SSD
-                </Label>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Checkbox
-                  id="hw-add-disk-iothread"
-                  checked={addDiskIothread}
-                  onCheckedChange={(v) => {
-                    setAddDiskIothread(v === true);
-                  }}
-                />
-                <Label
-                  htmlFor="hw-add-disk-iothread"
-                  className="cursor-pointer text-[10px]"
-                >
-                  IO Thread
-                </Label>
-              </div>
-              <div className="ml-auto flex gap-1.5">
-                <Button
-                  size="sm"
-                  className="h-6 gap-1 px-2 text-[10px]"
-                  onClick={handleAddDisk}
-                  disabled={!addDiskStorage || !addDiskSize}
-                >
-                  <Plus className="h-3 w-3" /> Add
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-[10px]"
-                  onClick={() => {
-                    setShowAddDisk(false);
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1 text-xs"
-              onClick={() => {
-                setShowAddDisk(true);
-              }}
-            >
-              <Plus className="h-3 w-3" /> Add Disk
-            </Button>
-          </div>
-        )}
-        {resizeMutation.isError && (
-          <p className="mt-1 text-xs text-destructive">
-            Resize failed: {resizeMutation.error.message}
-          </p>
-        )}
-        {resizeMutation.isSuccess && (
-          <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-500">
-            Disk resized successfully.
-          </p>
-        )}
-      </Section>
-
-      {/* USB Devices */}
-      {(usbKeys.length > 0 ||
-        Object.keys(pendingDeviceAdds).some((k) => /^usb\d+$/.test(k))) && (
-        <Section
-          title={`USB Devices (${String(usbKeys.length)})`}
-          defaultOpen={false}
-        >
-          <div className="space-y-1.5">
-            {usbKeys.map((key) => {
-              const parsed = parseUSB(str(config[key]));
-              const isRemoved = deviceRemovals.has(key);
-              if (isRemoved) {
-                return (
-                  <div
-                    key={key}
-                    className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950"
-                  >
-                    <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
-                      {key}
-                    </span>
-                    <span className="text-[10px] text-red-600 dark:text-red-400">
-                      marked for removal
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 px-2 text-[10px]"
-                      onClick={() => {
-                        handleUndoRemoveDevice(key);
-                      }}
-                    >
-                      Undo
-                    </Button>
-                  </div>
-                );
-              }
-              // qemu-server's check_usb_perm refuses to change or delete a
-              // raw host passthrough for anyone but root@pam, and a Nexara
-              // token never is — so a Remove would fail, and take the rest of
-              // the Save down with it. The row says why in its place, as text:
-              // a disabled button's title never shows (Button takes no pointer
-              // events when disabled).
-              const rootOnly = isRawUSBPassthrough(parsed);
-              return (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border px-2 py-1"
-                >
-                  <span className="font-mono text-xs font-medium">{key}</span>
-                  {parsed.spice ? (
-                    <Badge variant="secondary" className="text-[10px]">
-                      SPICE
-                    </Badge>
-                  ) : parsed.mapping ? (
-                    <>
-                      <Badge variant="secondary" className="text-[10px]">
-                        Mapped
-                      </Badge>
-                      <span className="truncate text-[10px] text-muted-foreground">
-                        {parsed.mapping}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="truncate text-[10px] text-muted-foreground">
-                      {usbHostLabel(parsed.host, usbDevices)}
-                    </span>
-                  )}
-                  {parsed.usb3 && (
-                    <Badge variant="outline" className="text-[10px]">
-                      USB3
-                    </Badge>
-                  )}
-                  {rootOnly ? (
-                    // Wraps rather than shrink-0: on a phone the row is too
-                    // narrow for it, and a fixed width would squeeze the
-                    // device's name out of the row first.
-                    <span className="ml-auto min-w-0 text-right text-[10px] text-muted-foreground">
-                      Passed through directly; only root@pam can remove it, in
-                      Proxmox
-                    </span>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                      onClick={() => {
-                        handleRemoveDevice(key);
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-            {Object.entries(pendingDeviceAdds)
-              .filter(([k]) => /^usb\d+$/.test(k))
-              .map(([key, val]) => (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950"
-                >
-                  <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                    {key}
-                  </span>
-                  <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
-                    {val}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleCancelPendingDevice(key);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Cancel
-                  </Button>
-                </div>
-              ))}
-          </div>
-        </Section>
-      )}
-
-      {/* PCI Devices */}
-      {(pciKeys.length > 0 ||
-        Object.keys(pendingDeviceAdds).some((k) => /^hostpci\d+$/.test(k))) && (
-        <Section
-          title={`PCI Devices (${String(pciKeys.length)})`}
-          defaultOpen={false}
-        >
-          <div className="space-y-1.5">
-            {pciKeys.map((key) => {
-              const parsed = parsePCI(str(config[key]));
-              const isRemoved = deviceRemovals.has(key);
-              if (isRemoved) {
-                return (
-                  <div
-                    key={key}
-                    className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950"
-                  >
-                    <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
-                      {key}
-                    </span>
-                    <span className="text-[10px] text-red-600 dark:text-red-400">
-                      marked for removal
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 px-2 text-[10px]"
-                      onClick={() => {
-                        handleUndoRemoveDevice(key);
-                      }}
-                    >
-                      Undo
-                    </Button>
-                  </div>
-                );
-              }
-              // check_hostpci_perm refuses to change or delete a host
-              // device, or a romfile, for anyone but root@pam — the USB rows'
-              // reason, and said the same way.
-              const rootOnly = isRootOnlyPCI(parsed);
-              return (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border px-2 py-1"
-                >
-                  <span className="font-mono text-xs font-medium">{key}</span>
-                  {parsed.mapping ? (
-                    <>
-                      <Badge variant="secondary" className="text-[10px]">
-                        Mapped
-                      </Badge>
-                      <span className="truncate text-[10px] text-muted-foreground">
-                        {parsed.mapping}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="truncate text-[10px] text-muted-foreground">
-                      {pciHostLabel(parsed.host, pciDevices)}
-                    </span>
-                  )}
-                  {parsed.pcie && (
-                    <Badge variant="outline" className="text-[10px]">
-                      PCIe
-                    </Badge>
-                  )}
-                  {parsed.xvga && (
-                    <Badge variant="outline" className="text-[10px]">
-                      x-vga
-                    </Badge>
-                  )}
-                  {rootOnly ? (
-                    <span className="ml-auto min-w-0 text-right text-[10px] text-muted-foreground">
-                      {parsed.host
-                        ? "Passed through directly; only root@pam can remove it, in Proxmox"
-                        : "Uses a ROM file; only root@pam can remove it, in Proxmox"}
-                    </span>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                      onClick={() => {
-                        handleRemoveDevice(key);
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-            {Object.entries(pendingDeviceAdds)
-              .filter(([k]) => /^hostpci\d+$/.test(k))
-              .map(([key, val]) => (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950"
-                >
-                  <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                    {key}
-                  </span>
-                  <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
-                    {val}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleCancelPendingDevice(key);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Cancel
-                  </Button>
-                </div>
-              ))}
-          </div>
-        </Section>
-      )}
-
-      {/* Serial Ports */}
-      {(serialKeys.length > 0 ||
-        Object.keys(pendingDeviceAdds).some((k) => /^serial\d+$/.test(k))) && (
-        <Section
-          title={`Serial Ports (${String(serialKeys.length)})`}
-          defaultOpen={false}
-        >
-          <div className="space-y-1.5">
-            {serialKeys.map((key) => {
-              const val = str(config[key]);
-              const isRemoved = deviceRemovals.has(key);
-              // $update_vm_api (src/PVE/API2/Qemu.pm) lets nobody but
-              // root@pam delete a serialN that is not a socket: the USB rows'
-              // reason, said the same way.
-              const rootOnly = val !== "socket";
-              if (isRemoved) {
-                return (
-                  <div
-                    key={key}
-                    className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950"
-                  >
-                    <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
-                      {key}
-                    </span>
-                    <span className="text-[10px] text-red-600 dark:text-red-400">
-                      marked for removal
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 px-2 text-[10px]"
-                      onClick={() => {
-                        handleUndoRemoveDevice(key);
-                      }}
-                    >
-                      Undo
-                    </Button>
-                  </div>
-                );
-              }
-              return (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border px-2 py-1"
-                >
-                  <span className="font-mono text-xs font-medium">{key}</span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {val}
-                  </span>
-                  {rootOnly ? (
-                    <span className="ml-auto min-w-0 text-right text-[10px] text-muted-foreground">
-                      A host serial port; only root@pam can remove it, in
-                      Proxmox
-                    </span>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                      onClick={() => {
-                        handleRemoveDevice(key);
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-            {Object.entries(pendingDeviceAdds)
-              .filter(([k]) => /^serial\d+$/.test(k))
-              .map(([key, val]) => (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950"
-                >
-                  <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                    {key}
-                  </span>
-                  <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
-                    {val}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleCancelPendingDevice(key);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Cancel
-                  </Button>
-                </div>
-              ))}
-          </div>
-        </Section>
-      )}
-
-      {/* VirtIO RNG */}
-      {(config["rng0"] != null || pendingDeviceAdds["rng0"] != null) && (
-        <Section title="VirtIO RNG" defaultOpen={false}>
-          {config["rng0"] != null && !deviceRemovals.has("rng0") ? (
-            (() => {
-              const rng = parseRNG(str(config["rng0"]));
-              return (
-                <div className="flex items-center gap-2 rounded border px-2 py-1">
-                  <span className="font-mono text-xs font-medium">rng0</span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {rng.source}
-                    {rng.maxBytes ? ` | max: ${rng.maxBytes}` : ""}
-                    {rng.period ? ` | period: ${rng.period}ms` : ""}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleRemoveDevice("rng0");
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Remove
-                  </Button>
-                </div>
-              );
-            })()
-          ) : deviceRemovals.has("rng0") ? (
-            <div className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950">
-              <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
-                rng0
-              </span>
-              <span className="text-[10px] text-red-600 dark:text-red-400">
-                marked for removal
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto h-6 px-2 text-[10px]"
-                onClick={() => {
-                  handleUndoRemoveDevice("rng0");
-                }}
-              >
-                Undo
-              </Button>
-            </div>
-          ) : pendingDeviceAdds["rng0"] ? (
-            <div className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950">
-              <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                rng0
-              </span>
-              <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
-                {pendingDeviceAdds["rng0"]}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                onClick={() => {
-                  handleCancelPendingDevice("rng0");
-                }}
-              >
-                <Trash2 className="h-3 w-3" /> Cancel
-              </Button>
-            </div>
-          ) : null}
-        </Section>
-      )}
-
-      {/* VirtioFS Shares */}
-      {(virtiofsKeys.length > 0 ||
-        Object.keys(pendingDeviceAdds).some((k) =>
-          /^virtiofs\d+$/.test(k),
-        )) && (
-        <Section
-          title={`VirtioFS Shares (${String(virtiofsKeys.length)})`}
-          defaultOpen={false}
-        >
-          <div className="space-y-1.5">
-            {virtiofsKeys.map((key) => {
-              const parsed = parseVirtioFS(str(config[key]));
-              const isRemoved = deviceRemovals.has(key);
-              if (isRemoved) {
-                return (
-                  <div
-                    key={key}
-                    className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950"
-                  >
-                    <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
-                      {key}
-                    </span>
-                    <span className="text-[10px] text-red-600 dark:text-red-400">
-                      marked for removal
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 px-2 text-[10px]"
-                      onClick={() => {
-                        handleUndoRemoveDevice(key);
-                      }}
-                    >
-                      Undo
-                    </Button>
-                  </div>
-                );
-              }
-              return (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border px-2 py-1"
-                >
-                  <span className="font-mono text-xs font-medium">{key}</span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {parsed.dirid} | cache: {parsed.cache}
-                    {parsed.directIo ? " | direct-io" : ""}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleRemoveDevice(key);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Remove
-                  </Button>
-                </div>
-              );
-            })}
-            {Object.entries(pendingDeviceAdds)
-              .filter(([k]) => /^virtiofs\d+$/.test(k))
-              .map(([key, val]) => (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950"
-                >
-                  <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                    {key}
-                  </span>
-                  <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
-                    {val}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleCancelPendingDevice(key);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Cancel
-                  </Button>
-                </div>
-              ))}
-          </div>
-        </Section>
-      )}
-
-      {/* Pending device adds that aren't shown in other sections */}
-      {Object.entries(pendingDeviceAdds).filter(
-        ([k]) =>
-          !/^(net|usb|hostpci|serial|virtiofs)\d+$/.test(k) && k !== "rng0",
-      ).length > 0 && (
-        <Section title="Pending Devices" defaultOpen>
-          <div className="space-y-1.5">
-            {Object.entries(pendingDeviceAdds)
-              .filter(
-                ([k]) =>
-                  !/^(net|usb|hostpci|serial|virtiofs)\d+$/.test(k) &&
-                  k !== "rng0",
-              )
-              .map(([key, val]) => (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950"
-                >
-                  <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                    {key}
-                  </span>
-                  <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">
-                    {val}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleCancelPendingDevice(key);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Cancel
-                  </Button>
-                </div>
-              ))}
-          </div>
-        </Section>
-      )}
+          </Panel>
+        </div>
+      </div>
 
       {/* Held open while the delete is in flight: Cancel cannot un-send it,
           and closing would hide whether it worked. That also keeps one
@@ -4009,7 +3783,7 @@ export function HardwarePanel({
                 );
               }}
             >
-              {detachDisk.isPending ? "Deleting..." : "Delete Disk"}
+              {detachDisk.isPending ? "Deleting..." : "Delete disk"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -4044,33 +3818,45 @@ export function HardwarePanel({
                 if (cloudInitToRemove) handleRemoveCDROM(cloudInitToRemove.key);
               }}
             >
-              Remove Drive
+              Remove drive
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Feedback + Save */}
-      {setConfigMutation.isError && (
-        <p className="text-xs text-destructive">
-          {setConfigMutation.error.message}
-        </p>
-      )}
-      {setConfigMutation.isSuccess && (
-        <p className="text-xs text-emerald-600 dark:text-emerald-500">
-          Saved.{isRunning ? " Some changes need a restart." : ""}
-        </p>
-      )}
-
-      <Button
-        size="sm"
-        className="gap-1.5"
-        onClick={handleSave}
+      <SaveBar
+        dirty={hasChanges}
+        saving={setConfigMutation.isPending}
         disabled={!hasChanges || setConfigMutation.isPending}
+        onSave={handleSave}
+        hideIdle={
+          setConfigMutation.isError ||
+          setConfigMutation.isSuccess ||
+          resizeMutation.isError ||
+          resizeMutation.isSuccess
+        }
       >
-        <Save className="h-3.5 w-3.5" />
-        {setConfigMutation.isPending ? "Saving..." : "Save Changes"}
-      </Button>
+        {setConfigMutation.isError && (
+          <span className="text-destructive">
+            {setConfigMutation.error.message}
+          </span>
+        )}
+        {setConfigMutation.isSuccess && (
+          <span className="text-muted-foreground">
+            Saved.{isRunning ? " Some changes need a restart." : ""}
+          </span>
+        )}
+        {resizeMutation.isError && (
+          <span className="text-destructive">
+            Resize failed: {resizeMutation.error.message}
+          </span>
+        )}
+        {resizeMutation.isSuccess && (
+          <span className="text-muted-foreground">
+            Disk resized successfully.
+          </span>
+        )}
+      </SaveBar>
     </div>
   );
 }

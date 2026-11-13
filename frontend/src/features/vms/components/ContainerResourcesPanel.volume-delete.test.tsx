@@ -106,7 +106,7 @@ function unusedRow(key: string): HTMLElement {
 }
 
 function isStaged(key: string): boolean {
-  return within(unusedRow(key)).queryByText("removing") !== null;
+  return within(unusedRow(key)).queryByText("Marked for removal") !== null;
 }
 
 async function stage(key: string) {
@@ -120,17 +120,22 @@ async function stage(key: string) {
 async function openPanel() {
   const queryClient = renderPanel();
   await screen.findByText("unused1");
-  const save = screen.getByText("Save Changes", { selector: "button" });
+  const save = screen.getByText("Save changes", { selector: "button" });
   // The fixture opens clean, so Save being enabled later is the staging.
   expect(save).toBeDisabled();
   return { queryClient, save };
 }
 
-/** The Name input of the NIC `key`. */
+/** The Name input of the NIC `key`, its fields opened if they are shut. */
 function nameOf(key: string): HTMLInputElement {
   const row = screen.getByText(key, { exact: true }).parentElement
     ?.parentElement;
   if (!row) throw new Error(`no row for ${key}`);
+  // A NIC not yet saved has its fields open and no pencil.
+  const edit = within(row).queryByRole("button", { name: `Edit ${key}` });
+  if (edit && edit.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(edit);
+  }
   const name = within(row)
     .getByText("Name")
     .parentElement?.querySelector("input");
@@ -504,7 +509,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     const { rerender, queryClient } = renderWithProviders(panel("visible"));
     await screen.findByText("unused1");
     fill(fieldInput("Cores"), "4");
-    await user.click(screen.getByText("Save Changes", { selector: "button" }));
+    await user.click(screen.getByText("Save changes", { selector: "button" }));
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalledTimes(1);
     });
@@ -526,7 +531,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
 
     const memory = await waitFor(() => fieldInput("Memory (MiB)"));
     fill(memory, "2048");
-    await user.click(screen.getByText("Save Changes", { selector: "button" }));
+    await user.click(screen.getByText("Save changes", { selector: "button" }));
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalledTimes(2);
     });
@@ -704,7 +709,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     fill(nameOf("net0"), "eth5");
     const net0 = String(serverConfig["net0"]).replace("name=eth0", "name=eth5");
     await user.click(
-      screen.getByRole("button", { name: "Add Network Interface" }),
+      screen.getByRole("button", { name: "Add network interface" }),
     );
     await user.click(save);
     await screen.findByText("Saved");

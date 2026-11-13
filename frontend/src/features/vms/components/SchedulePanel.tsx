@@ -1,13 +1,16 @@
 import { useCallback, useState } from "react";
-import {
-  Trash2,
-  Plus,
-  Clock,
-  AlertCircle,
-  CheckCircle2,
-  Loader2,
-} from "lucide-react";
+import { Trash2, Plus, AlertCircle, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -110,99 +113,117 @@ export function SchedulePanel({
     deleteSchedule.mutate({ clusterId, scheduleId });
   }
 
+  const guestWord = kind === "ct" ? "container" : "VM";
+  const count = mySchedules?.length ?? 0;
+  const paused = mySchedules?.filter((s) => !s.enabled).length ?? 0;
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Scheduled Tasks</h3>
-        <Button
-          size="sm"
-          className="gap-2"
-          onClick={() => {
-            setDialogOpen(true);
-          }}
-        >
-          <Plus className="h-4 w-4" />
-          Add Schedule
-        </Button>
-      </div>
-
-      {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading...</p>
-      ) : !mySchedules?.length ? (
-        <p className="text-sm text-muted-foreground">
-          No scheduled tasks for this resource.
-        </p>
-      ) : (
-        <div className="rounded-md border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="px-4 py-2 text-left font-medium">Action</th>
-                <th className="px-4 py-2 text-left font-medium">Schedule</th>
-                <th className="px-4 py-2 text-left font-medium">Status</th>
-                <th className="px-4 py-2 text-left font-medium">Next Run</th>
-                <th className="px-4 py-2 text-left font-medium">Last Run</th>
-                <th className="px-4 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+      <Panel
+        flush
+        title="Schedules"
+        aside={
+          isLoading
+            ? "Loading..."
+            : count === 0
+              ? undefined
+              : `${String(count)} for this ${guestWord}${paused > 0 ? `, ${String(paused)} disabled` : ""}`
+        }
+        actions={
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => {
+              setDialogOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            Add schedule
+          </Button>
+        }
+      >
+        {isLoading ? (
+          <p className="px-[18px] py-6 text-sm text-muted-foreground">
+            Reading the cluster&apos;s schedules.
+          </p>
+        ) : !mySchedules?.length ? (
+          <p className="px-[18px] py-6 text-sm text-muted-foreground">
+            No scheduled tasks for this {guestWord}. A schedule takes a snapshot
+            or reboots it on a cron expression.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Action</TableHead>
+                <TableHead>Schedule</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Next run</TableHead>
+                <TableHead>Last run</TableHead>
+                <TableHead className="w-12">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {mySchedules.map((s) => (
-                <tr key={s.id} className="border-b">
-                  <td className="px-4 py-2 font-medium capitalize">
+                <TableRow key={s.id}>
+                  <TableCell className="font-medium capitalize">
                     {s.action}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs">{s.schedule}</td>
-                  <td className="px-4 py-2">
+                  </TableCell>
+                  <TableCell className="font-mono text-[12.5px]">
+                    {s.schedule}
+                  </TableCell>
+                  <TableCell>
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2">
-                        <StatusIcon status={s.last_status} />
+                        <RunState status={s.last_status} />
                         {/* The scheduler disables a task whose cron can never
                             fire. Without this the row just stops, with a failed
                             icon and no next run, and nothing saying why. */}
                         {!s.enabled && (
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                            Disabled
-                          </span>
+                          <Badge variant="secondary">Disabled</Badge>
                         )}
                       </div>
                       {s.last_error ? (
                         <span
-                          className="max-w-[22rem] truncate text-xs text-destructive"
+                          className="max-w-[22rem] truncate text-[12.5px] text-destructive"
                           title={s.last_error}
                         >
                           {s.last_error}
                         </span>
                       ) : null}
                     </div>
-                  </td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-[12.5px] tabular-nums text-muted-foreground">
                     {s.next_run_at
                       ? new Date(s.next_run_at).toLocaleString()
                       : "--"}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-[12.5px] tabular-nums text-muted-foreground">
                     {s.last_run_at
                       ? new Date(s.last_run_at).toLocaleString()
                       : "--"}
-                  </td>
-                  <td className="px-4 py-2 text-right">
+                  </TableCell>
+                  <TableCell className="text-right">
                     <Button
                       aria-label={`Delete ${s.action} schedule ${s.schedule}`}
                       variant="ghost"
                       size="sm"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
                       onClick={() => {
                         setPendingDelete(s);
                       }}
                     >
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            </TableBody>
+          </Table>
+        )}
+      </Panel>
 
       <ConfirmDeleteDialog
         target={pendingDelete}
@@ -225,7 +246,7 @@ export function SchedulePanel({
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create Scheduled Task</DialogTitle>
+            <DialogTitle>Add a schedule</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -242,7 +263,7 @@ export function SchedulePanel({
               </select>
             </div>
             <div>
-              <Label>Cron Expression</Label>
+              <Label>Cron expression</Label>
               <Input
                 value={cronExpr}
                 onChange={(e) => {
@@ -258,7 +279,7 @@ export function SchedulePanel({
             {action === "snapshot" && (
               <div>
                 <Label htmlFor="schedule-snap-name">
-                  Snapshot Name Prefix (optional)
+                  Snapshot name prefix (optional)
                 </Label>
                 <Input
                   id="schedule-snap-name"
@@ -320,33 +341,32 @@ export function SchedulePanel({
 // starting the run, "running" — the row shows Running. It used to show Failed
 // for "running", and Success as soon as Proxmox accepted the call, however the
 // task then went.
-function StatusIcon({ status }: { status: string | null }) {
+function RunState({ status }: { status: string | null }) {
   switch (scheduleRunState(status)) {
     case "pending":
-      return (
-        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Clock className="h-3 w-3" />
-          Pending
-        </span>
-      );
+      return <span className="text-muted-foreground">Pending</span>;
     case "running":
       return (
-        <span className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
-          <Loader2 className="h-3 w-3 animate-spin" />
+        <span className="flex items-center gap-1.5">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           Running
         </span>
       );
     case "success":
+      // Healthy is quiet: a dot and plain text.
       return (
-        <span className="flex items-center gap-1 text-xs text-emerald-600">
-          <CheckCircle2 className="h-3 w-3" />
+        <span className="flex items-center gap-[7px]">
+          <span
+            aria-hidden="true"
+            className="h-[7px] w-[7px] rounded-full bg-emerald-500"
+          />
           Success
         </span>
       );
     case "failed":
       return (
-        <span className="flex items-center gap-1 text-xs text-destructive">
-          <AlertCircle className="h-3 w-3" />
+        <span className="flex items-center gap-1.5 text-red-700 dark:text-red-400">
+          <AlertCircle className="h-3.5 w-3.5" />
           Failed
         </span>
       );

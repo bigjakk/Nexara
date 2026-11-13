@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Camera, RotateCcw, Trash2, Loader2, ChevronRight } from "lucide-react";
+import { Camera, CornerDownRight, RotateCcw, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
 import {
   useSnapshots,
   useDeleteSnapshot,
@@ -102,6 +104,21 @@ export function SnapshotPanel({
     return { roots, childrenMap };
   }
 
+  // "current" is Proxmox's marker for the running state, not a snapshot.
+  const taken = (snapshots ?? []).filter((snap) => snap.name !== "current");
+  const newest = taken.reduce<number | undefined>(
+    (latest, snap) =>
+      snap.snap_time !== undefined &&
+      (latest === undefined || snap.snap_time > latest)
+        ? snap.snap_time
+        : latest,
+    undefined,
+  );
+  const tree =
+    !isLoading && snapshots && snapshots.length > 0
+      ? buildTree(snapshots)
+      : null;
+
   return (
     <div className="space-y-4">
       {upid && (
@@ -113,20 +130,64 @@ export function SnapshotPanel({
         />
       )}
 
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">Snapshots</h3>
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-2"
-          onClick={() => {
-            setCreateOpen(true);
-          }}
-        >
-          <Camera className="h-4 w-4" />
-          Take Snapshot
-        </Button>
-      </div>
+      <Panel
+        flush
+        title="Snapshots"
+        aside={
+          isLoading
+            ? "Loading..."
+            : taken.length === 0
+              ? undefined
+              : `${String(taken.length)} taken${newest !== undefined ? `, the newest on ${new Date(newest * 1000).toLocaleDateString()}` : ""}`
+        }
+        actions={
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => {
+              setCreateOpen(true);
+            }}
+          >
+            <Camera className="h-4 w-4" />
+            Take snapshot
+          </Button>
+        }
+      >
+        {isLoading && (
+          <p className="px-[18px] py-6 text-sm text-muted-foreground">
+            Reading this guest&apos;s snapshots...
+          </p>
+        )}
+
+        {!isLoading && snapshots && snapshots.length === 0 && (
+          <p className="px-[18px] py-6 text-sm text-muted-foreground">
+            No snapshots found. Take one before a risky change, so there is a
+            state to roll back to.
+          </p>
+        )}
+
+        {tree && (
+          <ul className="divide-y border-t">
+            {tree.roots.map((snap) => (
+              <SnapshotNode
+                key={snap.name}
+                snap={snap}
+                depth={0}
+                childrenMap={tree.childrenMap}
+                confirmDelete={confirmDelete}
+                confirmRollback={confirmRollback}
+                onConfirmDelete={setConfirmDelete}
+                onConfirmRollback={setConfirmRollback}
+                onDelete={handleDelete}
+                onRollback={handleRollback}
+                deletePending={deleteMutation.isPending}
+                rollbackPending={rollbackMutation.isPending}
+                formatDate={formatDate}
+              />
+            ))}
+          </ul>
+        )}
+      </Panel>
 
       <CreateSnapshotDialog
         open={createOpen}
@@ -136,46 +197,6 @@ export function SnapshotPanel({
         kind={kind}
         resourceName={resourceName}
       />
-
-      {isLoading && (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      )}
-
-      {!isLoading && snapshots && snapshots.length === 0 && (
-        <p className="py-4 text-center text-sm text-muted-foreground">
-          No snapshots found.
-        </p>
-      )}
-
-      {!isLoading &&
-        snapshots &&
-        snapshots.length > 0 &&
-        (() => {
-          const { roots, childrenMap } = buildTree(snapshots);
-          return (
-            <div className="space-y-1">
-              {roots.map((snap) => (
-                <SnapshotNode
-                  key={snap.name}
-                  snap={snap}
-                  depth={0}
-                  childrenMap={childrenMap}
-                  confirmDelete={confirmDelete}
-                  confirmRollback={confirmRollback}
-                  onConfirmDelete={setConfirmDelete}
-                  onConfirmRollback={setConfirmRollback}
-                  onDelete={handleDelete}
-                  onRollback={handleRollback}
-                  deletePending={deleteMutation.isPending}
-                  rollbackPending={rollbackMutation.isPending}
-                  formatDate={formatDate}
-                />
-              ))}
-            </div>
-          );
-        })()}
     </div>
   );
 }
@@ -213,25 +234,46 @@ function SnapshotNode({
   const isCurrent = snap.name === "current";
 
   return (
-    <div>
-      <div
-        className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
-        style={{ marginLeft: `${String(depth * 24)}px` }}
+    <>
+      <li
+        className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 pr-[18px] text-sm"
+        // Each level of the tree steps in; the gutter is the panel's 18px.
+        style={{ paddingLeft: `${String(18 + depth * 22)}px` }}
       >
-        {depth > 0 && (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <div className="flex min-w-0 flex-[1_1_16rem] items-center gap-2">
+          {depth > 0 && (
+            <CornerDownRight
+              aria-hidden="true"
+              className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
+            />
+          )}
+          <span
+            className={
+              isCurrent
+                ? "text-muted-foreground"
+                : "min-w-0 truncate font-medium"
+            }
+          >
+            {isCurrent ? "Current state" : snap.name}
+          </span>
+          {snap.vmstate ? <Badge variant="outline">With RAM</Badge> : null}
+          {snap.description ? (
+            <span
+              className="min-w-0 truncate text-muted-foreground"
+              title={snap.description}
+            >
+              {snap.description}
+            </span>
+          ) : null}
+        </div>
+        {!isCurrent && (
+          <span className="text-[12.5px] tabular-nums text-muted-foreground">
+            {formatDate(snap.snap_time)}
+          </span>
         )}
-        <span className="font-medium">{snap.name}</span>
-        <span className="text-muted-foreground">{snap.description || ""}</span>
-        <span className="text-muted-foreground">
-          {formatDate(snap.snap_time)}
-        </span>
-        {snap.vmstate ? (
-          <span className="text-xs text-muted-foreground">(RAM)</span>
-        ) : null}
 
         {!isCurrent && (
-          <div className="ml-auto flex gap-1">
+          <div className="flex gap-1">
             {confirmRollback === snap.name ? (
               <>
                 <Button
@@ -258,7 +300,7 @@ function SnapshotNode({
               <Button
                 size="sm"
                 variant="ghost"
-                className="gap-1"
+                className="gap-1.5 px-2"
                 onClick={() => {
                   onConfirmRollback(snap.name);
                 }}
@@ -293,7 +335,7 @@ function SnapshotNode({
               <Button
                 size="sm"
                 variant="ghost"
-                className="gap-1 text-destructive hover:text-destructive"
+                className="gap-1.5 px-2 text-muted-foreground hover:text-destructive"
                 onClick={() => {
                   onConfirmDelete(snap.name);
                 }}
@@ -304,7 +346,7 @@ function SnapshotNode({
             )}
           </div>
         )}
-      </div>
+      </li>
       {children.map((child) => (
         <SnapshotNode
           key={child.name}
@@ -322,6 +364,6 @@ function SnapshotNode({
           formatDate={formatDate}
         />
       ))}
-    </div>
+    </>
   );
 }

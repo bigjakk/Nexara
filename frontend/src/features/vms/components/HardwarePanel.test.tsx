@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { deferred } from "@/test/fake-server";
@@ -107,10 +113,17 @@ function diskRow(key: string): HTMLElement {
   return row;
 }
 
-/** The card of disk `key` — the element holding its Cache and Resize To. */
+/** Open the editor under device `key`'s row, if it is not open already. */
+function openEditor(card: HTMLElement, key: string) {
+  const edit = within(card).getByRole("button", { name: `Edit ${key}` });
+  if (edit.getAttribute("aria-expanded") !== "true") fireEvent.click(edit);
+}
+
+/** The card of disk `key`, opened: the element holding its Cache and Resize to. */
 function diskCard(key: string): HTMLElement {
   const card = diskRow(key).parentElement;
   if (!card) throw new Error(`no disk card for ${key}`);
+  openEditor(card, key);
   return card;
 }
 
@@ -132,8 +145,8 @@ async function stageOneOfEachKind() {
   await user.click(
     within(diskRow("efidisk0")).getByRole("button", { name: /remove/i }),
   );
-  await user.click(screen.getByRole("button", { name: "Add Disk" }));
-  const addDiskForm = screen.getByText("Add New Disk").parentElement;
+  await user.click(screen.getByRole("button", { name: "Add disk" }));
+  const addDiskForm = screen.getByText("New hard disk").parentElement;
   if (!addDiskForm) throw new Error("Add Disk form not found");
   fill(within(addDiskForm).getByDisplayValue("Select..."), "store01");
   await user.click(within(addDiskForm).getByRole("button", { name: "Add" }));
@@ -146,19 +159,22 @@ async function stageOneOfEachKind() {
       name: "Add",
     }),
   );
-  // The removed EFI disk has no marker of its own; it reaches the tests
-  // through Save's enabled state and the request Save sends.
-  expect(screen.getByText(/marked for\s+removal/i)).toBeInTheDocument();
-  expect(screen.getByText("New disks (created on save)")).toBeInTheDocument();
-  expect(screen.getByText("Serial Ports (0)")).toBeInTheDocument();
+  // Both removals say so on their rows: the disk's and the EFI disk's.
+  expect(screen.getAllByText(/marked for\s+removal/i)).toHaveLength(2);
+  expect(
+    within(
+      screen.getByText("efidisk0", { exact: true }).parentElement ??
+        document.body,
+    ).getByRole("button", { name: "Undo" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Created on save")).toBeInTheDocument();
+  expect(screen.getByText("serial0")).toBeInTheDocument();
 }
 
 function expectNothingStaged() {
   expect(screen.queryByText(/marked for\s+removal/i)).not.toBeInTheDocument();
-  expect(
-    screen.queryByText("New disks (created on save)"),
-  ).not.toBeInTheDocument();
-  expect(screen.queryByText("Serial Ports (0)")).not.toBeInTheDocument();
+  expect(screen.queryByText("Created on save")).not.toBeInTheDocument();
+  expect(screen.queryByText("serial0")).not.toBeInTheDocument();
 }
 
 beforeEach(() => {
@@ -220,7 +236,7 @@ describe("HardwarePanel unused disk removal", () => {
 
     let dialog = await openDeleteDialog();
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Disk" }),
+      within(dialog).getByRole("button", { name: "Delete disk" }),
     );
 
     expect(
@@ -230,7 +246,7 @@ describe("HardwarePanel unused disk removal", () => {
 
     // A retry is the same request again, from the same open dialog.
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Disk" }),
+      within(dialog).getByRole("button", { name: "Delete disk" }),
     );
     await waitFor(() => {
       expect(mockedPost).toHaveBeenCalledTimes(2);
@@ -251,7 +267,7 @@ describe("HardwarePanel unused disk removal", () => {
 
     // Once more, held in flight.
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Disk" }),
+      within(dialog).getByRole("button", { name: "Delete disk" }),
     );
     const confirm = await within(dialog).findByRole("button", {
       name: "Deleting...",
@@ -293,7 +309,7 @@ describe("HardwarePanel unused disk removal", () => {
     mockedPost.mockImplementation(serverDropsUnused0);
     renderWithProviders(<HardwarePanel {...props} />);
     await screen.findByText("unused0");
-    const save = screen.getByText("Save Changes", { selector: "button" });
+    const save = screen.getByText("Save changes", { selector: "button" });
     // The fixture opens clean, so Save being disabled at the end is the
     // panel having nothing to send, not the panel never having had anything.
     expect(save).toBeDisabled();
@@ -314,7 +330,7 @@ describe("HardwarePanel unused disk removal", () => {
       /unsaved changes in this panel will be discarded/i,
     );
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Disk" }),
+      within(dialog).getByRole("button", { name: "Delete disk" }),
     );
     await waitFor(() => {
       expect(screen.queryByText("unused0")).not.toBeInTheDocument();
@@ -339,7 +355,7 @@ describe("HardwarePanel unused disk removal", () => {
   it("discards what is staged when the config changes under the panel, as a disk move's does", async () => {
     const { queryClient } = renderWithProviders(<HardwarePanel {...props} />);
     await screen.findByText("unused0");
-    const save = screen.getByText("Save Changes", { selector: "button" });
+    const save = screen.getByText("Save changes", { selector: "button" });
     await stageOneOfEachKind();
     expect(save).toBeEnabled();
 
@@ -370,7 +386,7 @@ describe("HardwarePanel unused disk removal", () => {
     mockedPut.mockResolvedValue({ status: "ok" });
     renderWithProviders(<HardwarePanel {...props} />);
     await screen.findByText("unused0");
-    const save = screen.getByText("Save Changes", { selector: "button" });
+    const save = screen.getByText("Save changes", { selector: "button" });
     expect(save).toBeDisabled();
 
     await stageOneOfEachKind();
@@ -421,18 +437,20 @@ function nicVM(extra: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
-/** The card of NIC `key` — the element holding its controls. */
+/** The card of NIC `key`, opened: the element holding its controls. */
 function nicCard(key: string): HTMLElement {
   const cards = screen
     .getAllByText(key, { exact: true })
     .map((label) => label.parentElement?.parentElement)
     .filter(
       (card): card is HTMLElement =>
-        card != null && within(card).queryByText("Bridge") !== null,
+        card != null &&
+        within(card).queryByRole("button", { name: `Edit ${key}` }) !== null,
     );
   expect(cards).toHaveLength(1);
   const [card] = cards;
   if (!card) throw new Error(`no NIC card for ${key}`);
+  openEditor(card, key);
   return card;
 }
 
@@ -459,7 +477,7 @@ async function renderPanel(config: Record<string, unknown>) {
   // same pass as the snapshot Save compares against. Once net0's MAC is on
   // screen, Save's state is about the config, not a panel still loading.
   await screen.findByText(MAC0);
-  return screen.getByText("Save Changes", { selector: "button" });
+  return screen.getByText("Save changes", { selector: "button" });
 }
 
 async function saveAndGetFields(save: HTMLElement) {
@@ -482,15 +500,20 @@ describe("HardwarePanel dirty check", () => {
   it("sends only what was edited: a NIC as stored but for the edited option, and vga as picked, and not the other NIC", async () => {
     const save = await renderPanel(nicVM());
     expect(save).toBeDisabled();
-    const vga = control(document.body, "VGA");
+    const vga = control(document.body, "Graphics card");
     // No vga line reads as Proxmox's default, not as a type it may not be;
     // no scsihw and no ostype read as the ones Proxmox runs.
     expect(vga).toHaveValue("");
-    expect(control(document.body, "SCSI Controller")).toHaveValue("lsi");
-    expect(control(document.body, "OS Type")).toHaveValue("other");
+    expect(control(document.body, "SCSI controller")).toHaveValue("lsi");
+    expect(control(document.body, "OS type")).toHaveValue("other");
+    expect(screen.queryByText("Edited")).not.toBeInTheDocument();
 
     moveNet0ToVmbr1();
     fill(vga, "qxl");
+    // A row's fields can be shut again, so the edited row says so itself,
+    // and only that row.
+    expect(within(nicCard("net0")).getByText("Edited")).toBeInTheDocument();
+    expect(screen.getAllByText("Edited")).toHaveLength(1);
 
     expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { net0: NET0_ON_VMBR1, vga: "qxl" } }],
@@ -501,7 +524,7 @@ describe("HardwarePanel dirty check", () => {
     const save = await renderPanel(nicVM({ vga: "std,clipboard=vnc" }));
     expect(save).toBeDisabled();
 
-    fill(control(document.body, "VGA"), "qxl");
+    fill(control(document.body, "Graphics card"), "qxl");
 
     expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { vga: "qxl,clipboard=vnc" } }],
@@ -582,9 +605,9 @@ describe("HardwarePanel dirty check", () => {
   it("keeps a bare startup order when a delay is edited", async () => {
     const save = await renderPanel(nicVM({ startup: "1,up=30" }));
     expect(save).toBeDisabled();
-    expect(control(document.body, "Startup Order")).toHaveValue(1);
+    expect(control(document.body, "Startup order")).toHaveValue(1);
 
-    fill(control(document.body, "Up Delay (s)"), "45");
+    fill(control(document.body, "Up delay (s)"), "45");
 
     expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { startup: "1,up=45" } }],
@@ -593,7 +616,7 @@ describe("HardwarePanel dirty check", () => {
 
   it("deletes vga when it is set back to the default", async () => {
     const save = await renderPanel(nicVM({ vga: "qxl" }));
-    const vga = control(document.body, "VGA");
+    const vga = control(document.body, "Graphics card");
     expect(vga).toHaveValue("qxl");
 
     fill(vga, "");
@@ -641,7 +664,7 @@ describe("HardwarePanel dirty check", () => {
     });
     expect(control(nicCard("net3"), "Bridge")).toHaveValue("");
     // The Advanced Options section starts closed.
-    await user.click(screen.getByText("Advanced Options"));
+    await user.click(screen.getByText("Advanced options"));
 
     const stored: [
       name: string,
@@ -673,28 +696,28 @@ describe("HardwarePanel dirty check", () => {
       ],
       [
         "SCSI controller",
-        () => control(document.body, "SCSI Controller"),
+        () => control(document.body, "SCSI controller"),
         "megasas2",
         "pvscsi",
         "VMware PVSCSI",
       ],
       [
         "vga type",
-        () => control(document.body, "VGA"),
+        () => control(document.body, "Graphics card"),
         "qxl2",
         "std",
         "Standard VGA",
       ],
       [
         "keyboard layout",
-        () => control(document.body, "Keyboard Layout"),
+        () => control(document.body, "Keyboard layout"),
         "ko",
         "de",
         "de",
       ],
       [
         "VM state storage",
-        () => control(document.body, "VM State Storage"),
+        () => control(document.body, "VM state storage"),
         "store09",
         "store01",
         "store01 (lvmthin)",
@@ -774,7 +797,7 @@ describe("HardwarePanel dirty check", () => {
     );
     fill(control(diskCard("scsi0"), "Cache"), "writeback");
     fill(control(diskCard("scsi1"), "Cache"), "writeback");
-    fill(control(diskCard("scsi1"), "Resize To"), "40G");
+    fill(control(diskCard("scsi1"), "Resize to"), "40G");
     await user.click(
       within(diskRow("scsi1")).getByRole("button", { name: /remove/i }),
     );
@@ -808,7 +831,7 @@ describe("HardwarePanel dirty check", () => {
       nicVM({ scsi0: "store01:vm-101-disk-0,size=32G" }),
     );
 
-    fill(control(diskCard("scsi0"), "Resize To"), "40G");
+    fill(control(diskCard("scsi0"), "Resize to"), "40G");
     expect(save).toBeEnabled();
     await user.click(save);
 
@@ -947,7 +970,7 @@ describe("HardwarePanel dirty check", () => {
       if (!label) throw new Error("no row for ide2");
       return label;
     };
-    expect(within(row()).getByText("Cloud-Init")).toBeInTheDocument();
+    expect(within(row()).getByText("Cloud-init drive")).toBeInTheDocument();
     expect(row().parentElement?.querySelector("select")).toBeNull();
 
     await user.click(within(row()).getByRole("button", { name: /remove/i }));
@@ -959,7 +982,7 @@ describe("HardwarePanel dirty check", () => {
     await user.click(within(row()).getByRole("button", { name: /remove/i }));
     dialog = await screen.findByRole("alertdialog");
     await user.click(
-      within(dialog).getByRole("button", { name: "Remove Drive" }),
+      within(dialog).getByRole("button", { name: "Remove drive" }),
     );
     expect(
       within(row()).getByText(/marked for\s+removal/i),
@@ -977,7 +1000,7 @@ describe("HardwarePanel dirty check", () => {
     await user.click(within(row()).getByRole("button", { name: /remove/i }));
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Remove Drive",
+        name: "Remove drive",
       }),
     );
 
@@ -990,7 +1013,6 @@ describe("HardwarePanel dirty check", () => {
   // socket, or delete one, and Nexara's API token never is root@pam.
   it("offers only a socket to add, saying why, and no Remove for a host serial port", async () => {
     await renderPanel(nicVM({ serial0: "/dev/ttyS0", serial1: "socket" }));
-    await user.click(screen.getByText("Serial Ports (2)"));
     const host = screen.getByText("serial0", { exact: true }).parentElement;
     if (!host) throw new Error("no row for serial0");
     expect(
@@ -1067,7 +1089,7 @@ describe("HardwarePanel USB devices", () => {
 
   it("will not offer to remove a raw passthrough, and says why, but removes a mapped device on Save", async () => {
     renderWithProviders(<HardwarePanel {...props} />);
-    await user.click(await screen.findByText("USB Devices (3)"));
+    await screen.findByText("usb0");
 
     // The raw row has no button to find it by, so by its key's own row.
     const label = screen.getByText("usb0", { exact: true });
@@ -1098,7 +1120,7 @@ describe("HardwarePanel USB devices", () => {
     await user.click(
       within(diskRow("usb1")).getByRole("button", { name: /remove/i }),
     );
-    await user.click(screen.getByText("Save Changes", { selector: "button" }));
+    await user.click(screen.getByText("Save changes", { selector: "button" }));
 
     expect(mockedPut.mock.calls).toEqual([
       [CONFIG_URL, { fields: { delete: "usb1" } }],
@@ -1112,7 +1134,7 @@ describe("HardwarePanel USB devices", () => {
   // first.
   it("puts two devices of a kind added before a Save into two slots: USB devices and CD/DVD drives", async () => {
     renderWithProviders(<HardwarePanel {...props} />);
-    await screen.findByText("USB Devices (3)");
+    await screen.findByText("usb0");
 
     async function add(
       menuItem: RegExp,
@@ -1137,7 +1159,7 @@ describe("HardwarePanel USB devices", () => {
     });
     await add(/cd\/dvd drive/i);
     await add(/cd\/dvd drive/i);
-    await user.click(screen.getByText("Save Changes", { selector: "button" }));
+    await user.click(screen.getByText("Save changes", { selector: "button" }));
 
     expect(mockedPut.mock.calls).toEqual([
       [
@@ -1199,7 +1221,7 @@ describe("HardwarePanel PCI devices", () => {
 
   it("will not offer to remove a raw passthrough or a ROM file, and says why, removes a mapped device on Save, and offers PCIe for a q35 machine type staged but not yet saved", async () => {
     renderWithProviders(<HardwarePanel {...props} />);
-    await user.click(await screen.findByText("PCI Devices (3)"));
+    await screen.findByText("hostpci0");
 
     // Named from the node's own PCI list — the whole device by function 0,
     // the domain qemu-server takes as optional filled in.
@@ -1233,7 +1255,7 @@ describe("HardwarePanel PCI devices", () => {
     await user.click(
       within(diskRow("hostpci1")).getByRole("button", { name: /remove/i }),
     );
-    await user.click(screen.getByText("Save Changes", { selector: "button" }));
+    await user.click(screen.getByText("Save changes", { selector: "button" }));
 
     expect(mockedPut.mock.calls).toEqual([
       [CONFIG_URL, { fields: { delete: "hostpci1" } }],
