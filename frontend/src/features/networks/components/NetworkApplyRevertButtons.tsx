@@ -36,7 +36,7 @@ export function NetworkApplyRevertButtons({
         }}
         disabled={revert.isPending}
       >
-        <RotateCcw className="mr-1 h-4 w-4" />
+        <RotateCcw className="h-4 w-4" />
         Revert
       </Button>
       <Button
@@ -47,7 +47,7 @@ export function NetworkApplyRevertButtons({
         }}
         disabled={apply.isPending}
       >
-        <Check className="mr-1 h-4 w-4" />
+        <Check className="h-4 w-4" />
         Apply Config
       </Button>
       <ConfirmDeleteDialog

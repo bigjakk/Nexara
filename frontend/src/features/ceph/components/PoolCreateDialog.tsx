@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -50,17 +51,19 @@ export function PoolCreateDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm">
-          <Plus className="mr-1 h-4 w-4" /> Create Pool
+          <Plus className="h-4 w-4" />
+          Create pool
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Create Ceph Pool</DialogTitle>
+          <DialogTitle>Create Ceph pool</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div>
-            <Label>Pool Name</Label>
+            <Label htmlFor="ceph-pool-name">Pool name</Label>
             <Input
+              id="ceph-pool-name"
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
@@ -71,8 +74,9 @@ export function PoolCreateDialog({
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Replication Size</Label>
+              <Label htmlFor="ceph-pool-size">Replicas</Label>
               <Input
+                id="ceph-pool-size"
                 type="number"
                 value={size}
                 min={1}
@@ -84,8 +88,9 @@ export function PoolCreateDialog({
               />
             </div>
             <div>
-              <Label>PG Number</Label>
+              <Label htmlFor="ceph-pool-pgs">Placement groups</Label>
               <Input
+                id="ceph-pool-pgs"
                 type="number"
                 value={pgNum}
                 min={1}
@@ -104,24 +109,23 @@ export function PoolCreateDialog({
               {createPool.error.message}
             </p>
           )}
-
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreate}
-              disabled={!name || createPool.isPending}
-            >
-              {createPool.isPending ? "Creating..." : "Create Pool"}
-            </Button>
-          </div>
         </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleCreate}
+            disabled={!name || createPool.isPending}
+          >
+            {createPool.isPending ? "Creating..." : "Create pool"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

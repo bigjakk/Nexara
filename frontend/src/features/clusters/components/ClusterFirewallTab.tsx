@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Panel } from "@/components/page/Panel";
+import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -24,6 +25,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { Plus, Trash2 } from "lucide-react";
+import { FirewallStatusStrip } from "@/features/networks/components/FirewallStatusStrip";
 import { FirewallRulesTable } from "@/features/networks/components/FirewallRulesTable";
 import { FirewallOptionsCard } from "@/features/networks/components/FirewallOptionsCard";
 import { FirewallTemplatesTable } from "@/features/networks/components/FirewallTemplatesTable";
@@ -47,10 +49,8 @@ import {
   type FirewallSecurityGroup,
 } from "@/features/networks/api/firewall-extra-queries";
 import { useClusterNodes } from "../api/cluster-queries";
-import {
-  HistoryTabContent,
-  HistoryTabTrigger,
-} from "@/features/history/components/HistoryTab";
+import { HistoryTabContent } from "@/features/history/components/HistoryTab";
+import { useCanViewHistory } from "@/features/history/hooks/useCanViewHistory";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
@@ -58,42 +58,105 @@ interface ClusterFirewallTabProps {
   clusterId: string;
 }
 
+/** The views of the tab, in the order the switch shows them. */
+const VIEWS = [
+  { value: "rules", label: "Rules" },
+  { value: "templates", label: "Templates" },
+  { value: "aliases", label: "Aliases" },
+  { value: "ipsets", label: "IP sets" },
+  { value: "groups", label: "Security groups" },
+  { value: "log", label: "Log" },
+  { value: "options", label: "Options" },
+] as const;
+
+/** Count of a list for a panel's aside: "3 aliases", or nothing while unread. */
+function countLabel(
+  count: number | undefined,
+  one: string,
+  many: string,
+): string | undefined {
+  if (count === undefined || count === 0) return undefined;
+  return `${String(count)} ${count === 1 ? one : many}`;
+}
+
+/** The trash button at the end of a row: quiet until it is pointed at. */
+const ROW_DELETE_CLASS = "h-8 w-8 text-muted-foreground hover:text-destructive";
+
 export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
+  // The panels are Radix tab panels, so only the view on show is mounted and
+  // reads its data; the switch above them is what picks it.
+  const [view, setView] = useState("rules");
+  const history = clusterHistories.firewall(clusterId);
+  const canHistory = useCanViewHistory(
+    history.permission,
+    history.target.clusterId === null,
+  );
+  const shown = view === "history" && !canHistory ? "rules" : view;
+
   return (
-    <Tabs defaultValue="rules">
-      <TabsList>
-        <TabsTrigger value="rules">Cluster Rules</TabsTrigger>
-        <TabsTrigger value="templates">Templates</TabsTrigger>
-        <TabsTrigger value="aliases">Aliases</TabsTrigger>
-        <TabsTrigger value="ipsets">IP Sets</TabsTrigger>
-        <TabsTrigger value="groups">Security Groups</TabsTrigger>
-        <TabsTrigger value="log">Log</TabsTrigger>
-        <TabsTrigger value="options">Options</TabsTrigger>
-        <HistoryTabTrigger history={clusterHistories.firewall(clusterId)} />
-      </TabsList>
-      <TabsContent value="rules" className="mt-4">
-        <FirewallRulesTable clusterId={clusterId} />
-      </TabsContent>
-      <TabsContent value="templates" className="mt-4">
-        <FirewallTemplatesTable clusterId={clusterId} />
-      </TabsContent>
-      <TabsContent value="aliases" className="mt-4">
-        <FirewallAliasesSection clusterId={clusterId} />
-      </TabsContent>
-      <TabsContent value="ipsets" className="mt-4">
-        <FirewallIPSetsSection clusterId={clusterId} />
-      </TabsContent>
-      <TabsContent value="groups" className="mt-4">
-        <FirewallSecurityGroupsSection clusterId={clusterId} />
-      </TabsContent>
-      <TabsContent value="log" className="mt-4">
-        <FirewallLogSection clusterId={clusterId} />
-      </TabsContent>
-      <TabsContent value="options" className="mt-4">
-        <FirewallOptionsCard clusterId={clusterId} />
-      </TabsContent>
-      <HistoryTabContent history={clusterHistories.firewall(clusterId)} />
-    </Tabs>
+    <div className="space-y-4">
+      <FirewallStatusStrip clusterId={clusterId} />
+      <Tabs value={shown} onValueChange={setView}>
+        <Segmented
+          aria-label="Firewall view"
+          size="md"
+          value={shown}
+          onValueChange={setView}
+          options={[
+            ...VIEWS,
+            ...(canHistory ? [{ value: "history", label: "History" }] : []),
+          ]}
+        />
+        {/* Each panel is named by its view: a dialog whose opener is gone
+            when it closes (a deleted row) sends focus to the panel. */}
+        <TabsContent
+          value="rules"
+          aria-label="Rules"
+          aria-labelledby={undefined}
+        >
+          <FirewallRulesTable clusterId={clusterId} />
+        </TabsContent>
+        <TabsContent
+          value="templates"
+          aria-label="Templates"
+          aria-labelledby={undefined}
+        >
+          <FirewallTemplatesTable clusterId={clusterId} />
+        </TabsContent>
+        <TabsContent
+          value="aliases"
+          aria-label="Aliases"
+          aria-labelledby={undefined}
+        >
+          <FirewallAliasesSection clusterId={clusterId} />
+        </TabsContent>
+        <TabsContent
+          value="ipsets"
+          aria-label="IP sets"
+          aria-labelledby={undefined}
+        >
+          <FirewallIPSetsSection clusterId={clusterId} />
+        </TabsContent>
+        <TabsContent
+          value="groups"
+          aria-label="Security groups"
+          aria-labelledby={undefined}
+        >
+          <FirewallSecurityGroupsSection clusterId={clusterId} />
+        </TabsContent>
+        <TabsContent value="log" aria-label="Log" aria-labelledby={undefined}>
+          <FirewallLogSection clusterId={clusterId} />
+        </TabsContent>
+        <TabsContent
+          value="options"
+          aria-label="Options"
+          aria-labelledby={undefined}
+        >
+          <FirewallOptionsCard clusterId={clusterId} />
+        </TabsContent>
+        <HistoryTabContent history={history} label="History" />
+      </Tabs>
+    </div>
   );
 }
 
@@ -126,24 +189,27 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
   };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle>Firewall Aliases</CardTitle>
+    <Panel
+      flush
+      title="Aliases"
+      aside={countLabel(aliasesQuery.data?.length, "alias", "aliases")}
+      actions={
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm">
-              <Plus className="mr-2 h-4 w-4" />
+              <Plus className="h-4 w-4" />
               Add Alias
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create Alias</DialogTitle>
+              <DialogTitle>Add alias</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Name</Label>
+                <Label htmlFor="fw-alias-name">Name</Label>
                 <Input
+                  id="fw-alias-name"
                   value={name}
                   onChange={(e) => {
                     setName(e.target.value);
@@ -151,8 +217,9 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
                 />
               </div>
               <div className="space-y-2">
-                <Label>CIDR</Label>
+                <Label htmlFor="fw-alias-cidr">CIDR</Label>
                 <Input
+                  id="fw-alias-cidr"
                   value={cidr}
                   onChange={(e) => {
                     setCidr(e.target.value);
@@ -161,8 +228,9 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Comment</Label>
+                <Label htmlFor="fw-alias-comment">Comment</Label>
                 <Input
+                  id="fw-alias-comment"
                   value={comment}
                   onChange={(e) => {
                     setComment(e.target.value);
@@ -180,10 +248,13 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </CardHeader>
-      <CardContent>
+      }
+    >
+      <>
         {aliasesQuery.isLoading ? (
-          <Skeleton className="h-20 w-full" />
+          <div className="px-[18px] pb-1">
+            <Skeleton className="h-20 w-full" />
+          </div>
         ) : aliasesQuery.data && aliasesQuery.data.length > 0 ? (
           <Table>
             <TableHeader>
@@ -191,7 +262,9 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
                 <TableHead>Name</TableHead>
                 <TableHead>CIDR</TableHead>
                 <TableHead>Comment</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -207,22 +280,23 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
                       title={a.name}
                     />
                   </TableCell>
-                  <TableCell>
-                    <code className="text-xs">{a.cidr}</code>
+                  <TableCell className="font-mono text-[12.5px]">
+                    {a.cidr}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {a.comment}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="py-1 text-right">
                     <Button
                       aria-label={`Delete alias ${a.name}`}
                       variant="ghost"
-                      size="sm"
+                      size="icon"
+                      className={ROW_DELETE_CLASS}
                       onClick={() => {
                         setPendingDelete(a);
                       }}
                     >
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -230,7 +304,9 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
             </TableBody>
           </Table>
         ) : (
-          <p className="text-sm text-muted-foreground">No aliases defined.</p>
+          <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+            No aliases defined.
+          </p>
         )}
         {/* Proxmox's remove_alias (pve-firewall
             src/PVE/API2/Firewall/Aliases.pm) deletes the alias from the
@@ -250,8 +326,8 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
           }
           confirmLabel="Delete Alias"
         />
-      </CardContent>
-    </Card>
+      </>
+    </Panel>
   );
 }
 
@@ -281,24 +357,31 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle>IP Sets</CardTitle>
+      <Panel
+        flush
+        title="IP sets"
+        aside={
+          setsQuery.data && setsQuery.data.length > 0
+            ? `${String(setsQuery.data.length)} ${setsQuery.data.length === 1 ? "set" : "sets"}. Select one to see its entries.`
+            : undefined
+        }
+        actions={
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
+                <Plus className="h-4 w-4" />
                 Add IP Set
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Create IP Set</DialogTitle>
+                <DialogTitle>Add IP set</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Name</Label>
+                  <Label htmlFor="fw-ipset-name">Name</Label>
                   <Input
+                    id="fw-ipset-name"
                     value={name}
                     onChange={(e) => {
                       setName(e.target.value);
@@ -306,8 +389,9 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Comment</Label>
+                  <Label htmlFor="fw-ipset-comment">Comment</Label>
                   <Input
+                    id="fw-ipset-comment"
                     value={comment}
                     onChange={(e) => {
                       setComment(e.target.value);
@@ -325,17 +409,22 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </CardHeader>
-        <CardContent>
+        }
+      >
+        <>
           {setsQuery.isLoading ? (
-            <Skeleton className="h-20 w-full" />
+            <div className="px-[18px] pb-1">
+              <Skeleton className="h-20 w-full" />
+            </div>
           ) : setsQuery.data && setsQuery.data.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Comment</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="w-0">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -343,16 +432,13 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
                   <TableRow
                     key={s.name}
                     className="cursor-pointer"
+                    data-state={selectedSet === s.name ? "selected" : undefined}
                     onClick={() => {
                       setSelectedSet(selectedSet === s.name ? "" : s.name);
                     }}
                   >
                     <TableCell className="font-medium">
-                      <Badge
-                        variant={selectedSet === s.name ? "default" : "outline"}
-                      >
-                        {s.name}
-                      </Badge>
+                      {s.name}
                       <ClusterHistoryButton
                         history={clusterHistories.firewallIpset(
                           clusterId,
@@ -364,17 +450,18 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
                     <TableCell className="text-muted-foreground">
                       {s.comment}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="py-1 text-right">
                       <Button
                         aria-label={`Delete IPSet ${s.name}`}
                         variant="ghost"
-                        size="sm"
+                        size="icon"
+                        className={ROW_DELETE_CLASS}
                         onClick={(e) => {
                           e.stopPropagation();
                           setPendingDelete(s);
                         }}
                       >
-                        <Trash2 className="h-4 w-4 text-destructive" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -382,10 +469,12 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
               </TableBody>
             </Table>
           ) : (
-            <p className="text-sm text-muted-foreground">No IP sets defined.</p>
+            <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+              No IP sets defined.
+            </p>
           )}
-        </CardContent>
-      </Card>
+        </>
+      </Panel>
       {/* Proxmox's delete_ipset (pve-firewall src/PVE/API2/Firewall/IPSet.pm)
           dies "IPSet '<name>' is not empty" unless force is set, and
           proxmox.Client DeleteFirewallIPSet never sends it. It checks nothing
@@ -440,45 +529,54 @@ function IPSetEntriesCard({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Entries in &ldquo;{setName}&rdquo;</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex gap-2">
+    <Panel
+      flush
+      title={<>Entries in &ldquo;{setName}&rdquo;</>}
+      aside={countLabel(entriesQuery.data?.length, "entry", "entries")}
+      actions={
+        <>
           <Input
+            aria-label="CIDR to add"
             value={cidr}
             onChange={(e) => {
               setCidr(e.target.value);
             }}
             placeholder="CIDR (e.g. 10.0.0.0/8)"
-            className="max-w-xs"
+            className="h-8 w-56 max-w-full"
           />
           <Button
             size="sm"
+            variant="outline"
             onClick={handleAdd}
             disabled={!cidr || addEntry.isPending}
           >
             Add
           </Button>
-        </div>
+        </>
+      }
+    >
+      <>
         {entriesQuery.isLoading ? (
-          <Skeleton className="h-16 w-full" />
+          <div className="px-[18px] pb-1">
+            <Skeleton className="h-16 w-full" />
+          </div>
         ) : entriesQuery.data && entriesQuery.data.length > 0 ? (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>CIDR</TableHead>
-                <TableHead>No Match</TableHead>
+                <TableHead>Match</TableHead>
                 <TableHead>Comment</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {entriesQuery.data.map((e) => (
                 <TableRow key={e.cidr}>
-                  <TableCell>
-                    <code className="text-xs">{e.cidr}</code>
+                  <TableCell className="font-mono text-[12.5px]">
+                    {e.cidr}
                   </TableCell>
                   <TableCell>
                     {e.nomatch ? (
@@ -488,16 +586,17 @@ function IPSetEntriesCard({
                   <TableCell className="text-muted-foreground">
                     {e.comment}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="py-1 text-right">
                     <Button
                       aria-label={`Delete entry ${e.cidr}`}
                       variant="ghost"
-                      size="sm"
+                      size="icon"
+                      className={ROW_DELETE_CLASS}
                       onClick={() => {
                         setPendingDelete(e);
                       }}
                     >
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -505,7 +604,9 @@ function IPSetEntriesCard({
             </TableBody>
           </Table>
         ) : (
-          <p className="text-sm text-muted-foreground">No entries.</p>
+          <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+            No entries.
+          </p>
         )}
         {/* Proxmox's remove_ip (pve-firewall src/PVE/API2/Firewall/IPSet.pm)
             rewrites the set without that cidr; pve-firewall reads the change
@@ -533,8 +634,8 @@ function IPSetEntriesCard({
           }
           confirmLabel="Remove Entry"
         />
-      </CardContent>
-    </Card>
+      </>
+    </Panel>
   );
 }
 
@@ -561,24 +662,27 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
   };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle>Security Groups</CardTitle>
+    <Panel
+      flush
+      title="Security groups"
+      aside={countLabel(groupsQuery.data?.length, "group", "groups")}
+      actions={
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm">
-              <Plus className="mr-2 h-4 w-4" />
+              <Plus className="h-4 w-4" />
               Add Group
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create Security Group</DialogTitle>
+              <DialogTitle>Add security group</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Name</Label>
+                <Label htmlFor="fw-group-name">Name</Label>
                 <Input
+                  id="fw-group-name"
                   value={group}
                   onChange={(e) => {
                     setGroup(e.target.value);
@@ -586,8 +690,9 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Comment</Label>
+                <Label htmlFor="fw-group-comment">Comment</Label>
                 <Input
+                  id="fw-group-comment"
                   value={comment}
                   onChange={(e) => {
                     setComment(e.target.value);
@@ -605,17 +710,22 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </CardHeader>
-      <CardContent>
+      }
+    >
+      <>
         {groupsQuery.isLoading ? (
-          <Skeleton className="h-20 w-full" />
+          <div className="px-[18px] pb-1">
+            <Skeleton className="h-20 w-full" />
+          </div>
         ) : groupsQuery.data && groupsQuery.data.length > 0 ? (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Group</TableHead>
                 <TableHead>Comment</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -634,16 +744,17 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
                   <TableCell className="text-muted-foreground">
                     {g.comment}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="py-1 text-right">
                     <Button
                       aria-label={`Delete security group ${g.group}`}
                       variant="ghost"
-                      size="sm"
+                      size="icon"
+                      className={ROW_DELETE_CLASS}
                       onClick={() => {
                         setPendingDelete(g);
                       }}
                     >
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -651,7 +762,7 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
             </TableBody>
           </Table>
         ) : (
-          <p className="text-sm text-muted-foreground">
+          <p className="px-[18px] pb-1 text-sm text-muted-foreground">
             No security groups defined.
           </p>
         )}
@@ -675,8 +786,8 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
           }
           confirmLabel="Delete Group"
         />
-      </CardContent>
-    </Card>
+      </>
+    </Panel>
   );
 }
 
@@ -692,43 +803,49 @@ function FirewallLogSection({ clusterId }: { clusterId: string }) {
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle>Firewall Log</CardTitle>
-        <div className="flex gap-2">
-          {nodes.map((n) => (
-            <Button
-              key={n.name}
-              size="sm"
-              variant={selectedNode === n.name ? "default" : "outline"}
-              onClick={() => {
-                setSelectedNode(n.name);
-              }}
+    <Panel
+      flush
+      title="Firewall log"
+      aside={
+        selectedNode !== "" && logQuery.data && logQuery.data.length > 0
+          ? `${String(logQuery.data.length)} ${logQuery.data.length === 1 ? "line" : "lines"} on ${selectedNode}`
+          : undefined
+      }
+      actions={
+        nodes.length > 0 ? (
+          <Segmented
+            aria-label="Node"
+            value={selectedNode}
+            onValueChange={setSelectedNode}
+            options={nodes.map((n) => ({ value: n.name, label: n.name }))}
+          />
+        ) : undefined
+      }
+    >
+      {!selectedNode ? (
+        <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+          Select a node to view logs.
+        </p>
+      ) : logQuery.isLoading ? (
+        <div className="px-[18px] pb-1">
+          <Skeleton className="h-32 w-full" />
+        </div>
+      ) : logQuery.data && logQuery.data.length > 0 ? (
+        <div className="max-h-[28rem] overflow-y-auto border-t px-[18px] pt-3 font-mono text-[12.5px] leading-relaxed">
+          {logQuery.data.map((entry, i) => (
+            <div
+              key={i}
+              className="whitespace-pre-wrap [overflow-wrap:anywhere]"
             >
-              {n.name}
-            </Button>
+              {entry.t}
+            </div>
           ))}
         </div>
-      </CardHeader>
-      <CardContent>
-        {!selectedNode ? (
-          <p className="text-sm text-muted-foreground">
-            Select a node to view logs.
-          </p>
-        ) : logQuery.isLoading ? (
-          <Skeleton className="h-32 w-full" />
-        ) : logQuery.data && logQuery.data.length > 0 ? (
-          <div className="max-h-96 overflow-y-auto rounded border bg-muted/50 p-2 font-mono text-xs">
-            {logQuery.data.map((entry, i) => (
-              <div key={i} className="whitespace-pre-wrap py-0.5">
-                {entry.t}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">No log entries.</p>
-        )}
-      </CardContent>
-    </Card>
+      ) : (
+        <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+          No log entries.
+        </p>
+      )}
+    </Panel>
   );
 }

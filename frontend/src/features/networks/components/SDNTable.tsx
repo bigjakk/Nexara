@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Table,
   TableBody,
@@ -7,16 +7,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Panel } from "@/components/page/Panel";
+import { Segmented } from "@/components/ui/segmented";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Trash2, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import {
   useSDNZones,
@@ -48,6 +51,16 @@ interface SDNTableProps {
   clusterId: string;
 }
 
+/** The trash button at the end of a row: quiet until it is pointed at. */
+const ROW_DELETE_CLASS = "h-8 w-8 text-muted-foreground hover:text-destructive";
+
+/** A notice in place of a table, inside the flush panel's gutters. */
+function Note({ children }: { children: ReactNode }) {
+  return (
+    <p className="px-[18px] pb-1 text-sm text-muted-foreground">{children}</p>
+  );
+}
+
 interface DeleteConfirmButtonProps {
   name: string;
   kind: string;
@@ -69,11 +82,12 @@ function DeleteConfirmButton({
         aria-label={`Delete ${kind} ${name}`}
         variant="ghost"
         size="icon"
+        className={ROW_DELETE_CLASS}
         onClick={() => {
           setOpen(true);
         }}
       >
-        <Trash2 className="h-4 w-4 text-destructive" />
+        <Trash2 className="h-4 w-4" />
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
@@ -84,7 +98,7 @@ function DeleteConfirmButton({
               action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex justify-end gap-2">
+          <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {
@@ -103,7 +117,7 @@ function DeleteConfirmButton({
             >
               Delete
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
@@ -135,7 +149,7 @@ function VNetSubnetsRow({
           setExpanded(!expanded);
         }}
       >
-        <TableCell className="w-8">
+        <TableCell className="w-8 text-muted-foreground">
           {expanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
@@ -153,7 +167,7 @@ function VNetSubnetsRow({
         <TableCell>{vnet.tag ?? "-"}</TableCell>
         <TableCell>{vnet.alias || "-"}</TableCell>
         <TableCell
-          className="text-right"
+          className="py-1 text-right"
           onClick={(e) => {
             e.stopPropagation();
           }}
@@ -172,11 +186,14 @@ function VNetSubnetsRow({
         </TableCell>
       </TableRow>
       {expanded && (
-        <TableRow>
-          <TableCell colSpan={6} className="bg-muted/50 p-4">
+        <TableRow className="hover:bg-transparent">
+          <TableCell
+            colSpan={6}
+            className="bg-foreground/[0.03] py-3 pl-[3.25rem]"
+          >
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Subnets</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold">Subnets</span>
                 <CreateSDNSubnetDialog clusterId={clusterId} vnet={vnet.vnet} />
               </div>
               {isLoading ? (
@@ -186,20 +203,22 @@ function VNetSubnetsRow({
                   No subnets configured.
                 </p>
               ) : (
-                <div className="rounded-md border">
+                <div>
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Subnet</TableHead>
+                        <TableHead className="pl-0">Subnet</TableHead>
                         <TableHead>Gateway</TableHead>
                         <TableHead>SNAT</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
+                        <TableHead className="w-0 pr-0">
+                          <span className="sr-only">Actions</span>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {subnets.map((s) => (
                         <TableRow key={s.subnet}>
-                          <TableCell className="font-medium">
+                          <TableCell className="pl-0 font-mono text-[12.5px] font-medium">
                             {s.subnet}
                             <ClusterHistoryButton
                               history={clusterHistories.sdnSubnet(
@@ -210,15 +229,11 @@ function VNetSubnetsRow({
                               title={s.subnet}
                             />
                           </TableCell>
-                          <TableCell>{s.gateway || "-"}</TableCell>
-                          <TableCell>
-                            {s.snat === 1 ? (
-                              <Badge variant="default">Yes</Badge>
-                            ) : (
-                              "No"
-                            )}
+                          <TableCell className="font-mono text-[12.5px]">
+                            {s.gateway || "-"}
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell>{s.snat === 1 ? "Yes" : "No"}</TableCell>
+                          <TableCell className="py-1 pr-0 text-right">
                             <div className="flex justify-end gap-1">
                               <CreateSDNSubnetDialog
                                 clusterId={clusterId}
@@ -229,12 +244,13 @@ function VNetSubnetsRow({
                                 aria-label={`Delete Subnet ${s.subnet}`}
                                 variant="ghost"
                                 size="icon"
+                                className={ROW_DELETE_CLASS}
                                 onClick={() => {
                                   setPendingSubnetDelete(s);
                                 }}
                                 disabled={deleteSubnet.isPending}
                               >
-                                <Trash2 className="h-4 w-4 text-destructive" />
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
                           </TableCell>
@@ -297,20 +313,15 @@ function ControllersTab({ clusterId }: { clusterId: string }) {
   const deleteController = useDeleteSDNController(clusterId);
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
+    return <Note>Loading...</Note>;
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <CreateSDNControllerDialog clusterId={clusterId} />
-      </div>
+    <>
       {!controllers || controllers.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No SDN controllers configured.
-        </p>
+        <Note>No SDN controllers configured.</Note>
       ) : (
-        <div className="rounded-md border">
+        <div>
           <Table>
             <TableHeader>
               <TableRow>
@@ -319,7 +330,9 @@ function ControllersTab({ clusterId }: { clusterId: string }) {
                 <TableHead>ASN</TableHead>
                 <TableHead>Peers</TableHead>
                 <TableHead>Nodes</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -335,13 +348,11 @@ function ControllersTab({ clusterId }: { clusterId: string }) {
                       title={ctrl.controller}
                     />
                   </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{ctrl.type}</Badge>
-                  </TableCell>
+                  <TableCell>{ctrl.type}</TableCell>
                   <TableCell>{ctrl.asn ?? "-"}</TableCell>
                   <TableCell>{ctrl.peers || "-"}</TableCell>
                   <TableCell>{ctrl.nodes || "-"}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="py-1 text-right">
                     <div className="flex justify-end gap-1">
                       <CreateSDNControllerDialog
                         clusterId={clusterId}
@@ -363,7 +374,7 @@ function ControllersTab({ clusterId }: { clusterId: string }) {
           </Table>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -372,27 +383,24 @@ function IPAMTab({ clusterId }: { clusterId: string }) {
   const deleteIPAM = useDeleteSDNIPAM(clusterId);
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
+    return <Note>Loading...</Note>;
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <CreateSDNIPAMDialog clusterId={clusterId} />
-      </div>
+    <>
       {!ipams || ipams.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No IPAM plugins configured.
-        </p>
+        <Note>No IPAM plugins configured.</Note>
       ) : (
-        <div className="rounded-md border">
+        <div>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>IPAM</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>URL</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -405,11 +413,9 @@ function IPAMTab({ clusterId }: { clusterId: string }) {
                       title={ipam.ipam}
                     />
                   </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{ipam.type}</Badge>
-                  </TableCell>
+                  <TableCell>{ipam.type}</TableCell>
                   <TableCell>{ipam.url || "-"}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="py-1 text-right">
                     <div className="flex justify-end gap-1">
                       <CreateSDNIPAMDialog
                         clusterId={clusterId}
@@ -431,7 +437,7 @@ function IPAMTab({ clusterId }: { clusterId: string }) {
           </Table>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -440,27 +446,24 @@ function DNSTab({ clusterId }: { clusterId: string }) {
   const deleteDNS = useDeleteSDNDNS(clusterId);
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
+    return <Note>Loading...</Note>;
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <CreateSDNDNSDialog clusterId={clusterId} />
-      </div>
+    <>
       {!dnsPlugins || dnsPlugins.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No DNS plugins configured.
-        </p>
+        <Note>No DNS plugins configured.</Note>
       ) : (
-        <div className="rounded-md border">
+        <div>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>DNS</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>URL</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -473,11 +476,9 @@ function DNSTab({ clusterId }: { clusterId: string }) {
                       title={dns.dns}
                     />
                   </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{dns.type}</Badge>
-                  </TableCell>
+                  <TableCell>{dns.type}</TableCell>
                   <TableCell>{dns.url || "-"}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="py-1 text-right">
                     <div className="flex justify-end gap-1">
                       <CreateSDNDNSDialog
                         clusterId={clusterId}
@@ -499,8 +500,21 @@ function DNSTab({ clusterId }: { clusterId: string }) {
           </Table>
         </div>
       )}
-    </div>
+    </>
   );
+}
+
+/** The kinds of SDN object, in the order the switch shows them. */
+const SDN_VIEWS = [
+  { value: "zones", label: "Zones" },
+  { value: "vnets", label: "VNets" },
+  { value: "controllers", label: "Controllers" },
+  { value: "ipam", label: "IPAM" },
+  { value: "dns", label: "DNS" },
+] as const;
+
+function countOf(count: number, one: string, many: string): string {
+  return `${String(count)} ${count === 1 ? one : many}`;
 }
 
 export function SDNTable({ clusterId }: SDNTableProps) {
@@ -510,37 +524,201 @@ export function SDNTable({ clusterId }: SDNTableProps) {
   const applySDN = useApplySDN(clusterId);
   const [applyOpen, setApplyOpen] = useState(false);
 
+  // The panels are Radix tab panels, so only the kind on show is mounted and
+  // reads its data; the switch in the panel picks it.
+  const [view, setView] = useState("zones");
+
   if (zonesLoading || vnetsLoading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
+    return (
+      <Panel title="SDN" aside="Loading...">
+        <Skeleton className="h-24 w-full" />
+      </Panel>
+    );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setApplyOpen(true);
-          }}
-          disabled={applySDN.isPending}
+    <>
+      <Tabs value={view} onValueChange={setView}>
+        <Panel
+          flush
+          title="SDN"
+          aside={`${countOf(zones?.length ?? 0, "zone", "zones")}, ${countOf(vnets?.length ?? 0, "VNet", "VNets")}. A change reaches the nodes when it is applied.`}
+          actions={
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setApplyOpen(true);
+                }}
+                disabled={applySDN.isPending}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Apply Changes
+              </Button>
+              {view === "zones" && (
+                <CreateSDNZoneDialog clusterId={clusterId} />
+              )}
+              {view === "vnets" && (
+                <CreateSDNVNetDialog clusterId={clusterId} />
+              )}
+              {view === "controllers" && (
+                <CreateSDNControllerDialog clusterId={clusterId} />
+              )}
+              {view === "ipam" && <CreateSDNIPAMDialog clusterId={clusterId} />}
+              {view === "dns" && <CreateSDNDNSDialog clusterId={clusterId} />}
+            </>
+          }
         >
-          <RefreshCw className="mr-1 h-4 w-4" />
-          Apply Changes
-        </Button>
-      </div>
+          <div className="px-[18px] pb-3">
+            <Segmented
+              aria-label="SDN objects"
+              value={view}
+              onValueChange={setView}
+              options={SDN_VIEWS}
+            />
+          </div>
+
+          {/* Each panel is named by its kind: a dialog whose opener is gone
+              when it closes (a deleted row) sends focus to the panel. */}
+          <TabsContent
+            value="zones"
+            aria-label="Zones"
+            aria-labelledby={undefined}
+            className="mt-0"
+          >
+            {!zones || zones.length === 0 ? (
+              <Note>
+                No SDN zones configured. SDN may not be enabled on this cluster.
+              </Note>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Zone</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Nodes</TableHead>
+                    <TableHead>Bridge</TableHead>
+                    <TableHead>MTU</TableHead>
+                    <TableHead className="w-0">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {zones.map((zone) => (
+                    <TableRow key={zone.zone}>
+                      <TableCell className="font-medium">
+                        {zone.zone}
+                        <ClusterHistoryButton
+                          history={clusterHistories.sdnZone(
+                            clusterId,
+                            zone.zone,
+                          )}
+                          title={zone.zone}
+                        />
+                      </TableCell>
+                      <TableCell>{zone.type}</TableCell>
+                      <TableCell>{zone.nodes || "All"}</TableCell>
+                      <TableCell>{zone.bridge || "-"}</TableCell>
+                      <TableCell>{zone.mtu || "-"}</TableCell>
+                      <TableCell className="py-1 text-right">
+                        <div className="flex justify-end gap-1">
+                          <CreateSDNZoneDialog
+                            clusterId={clusterId}
+                            initialData={zone}
+                          />
+                          <DeleteConfirmButton
+                            name={zone.zone}
+                            kind="Zone"
+                            onConfirm={() => {
+                              deleteZone.mutate(zone.zone);
+                            }}
+                            isPending={deleteZone.isPending}
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </TabsContent>
+
+          <TabsContent
+            value="vnets"
+            aria-label="VNets"
+            aria-labelledby={undefined}
+            className="mt-0"
+          >
+            {!vnets || vnets.length === 0 ? (
+              <Note>No VNets configured.</Note>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8" />
+                    <TableHead>VNet</TableHead>
+                    <TableHead>Zone</TableHead>
+                    <TableHead>VLAN tag</TableHead>
+                    <TableHead>Alias</TableHead>
+                    <TableHead className="w-0">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {vnets.map((vnet) => (
+                    <VNetSubnetsRow
+                      key={vnet.vnet}
+                      clusterId={clusterId}
+                      vnet={vnet}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </TabsContent>
+
+          <TabsContent
+            value="controllers"
+            aria-label="Controllers"
+            aria-labelledby={undefined}
+            className="mt-0"
+          >
+            <ControllersTab clusterId={clusterId} />
+          </TabsContent>
+
+          <TabsContent
+            value="ipam"
+            aria-label="IPAM"
+            aria-labelledby={undefined}
+            className="mt-0"
+          >
+            <IPAMTab clusterId={clusterId} />
+          </TabsContent>
+
+          <TabsContent
+            value="dns"
+            aria-label="DNS"
+            aria-labelledby={undefined}
+            className="mt-0"
+          >
+            <DNSTab clusterId={clusterId} />
+          </TabsContent>
+        </Panel>
+      </Tabs>
 
       <Dialog open={applyOpen} onOpenChange={setApplyOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Apply SDN Changes</DialogTitle>
+            <DialogTitle>Apply SDN changes</DialogTitle>
             <DialogDescription>
               This will apply all pending SDN configuration changes to the
               cluster. Are you sure?
             </DialogDescription>
           </DialogHeader>
-          <div className="flex justify-end gap-2">
+          <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {
@@ -561,130 +739,9 @@ export function SDNTable({ clusterId }: SDNTableProps) {
             >
               Apply
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <Tabs defaultValue="zones">
-        <TabsList>
-          <TabsTrigger value="zones">Zones</TabsTrigger>
-          <TabsTrigger value="vnets">VNets</TabsTrigger>
-          <TabsTrigger value="controllers">Controllers</TabsTrigger>
-          <TabsTrigger value="ipam">IPAM</TabsTrigger>
-          <TabsTrigger value="dns">DNS</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="zones" className="space-y-4">
-          <div className="flex justify-end">
-            <CreateSDNZoneDialog clusterId={clusterId} />
-          </div>
-          {!zones || zones.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No SDN zones configured. SDN may not be enabled on this cluster.
-            </p>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Zone</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Nodes</TableHead>
-                    <TableHead>Bridge</TableHead>
-                    <TableHead>MTU</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {zones.map((zone) => (
-                    <TableRow key={zone.zone}>
-                      <TableCell className="font-medium">
-                        {zone.zone}
-                        <ClusterHistoryButton
-                          history={clusterHistories.sdnZone(
-                            clusterId,
-                            zone.zone,
-                          )}
-                          title={zone.zone}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{zone.type}</Badge>
-                      </TableCell>
-                      <TableCell>{zone.nodes || "All"}</TableCell>
-                      <TableCell>{zone.bridge || "-"}</TableCell>
-                      <TableCell>{zone.mtu || "-"}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <CreateSDNZoneDialog
-                            clusterId={clusterId}
-                            initialData={zone}
-                          />
-                          <DeleteConfirmButton
-                            name={zone.zone}
-                            kind="Zone"
-                            onConfirm={() => {
-                              deleteZone.mutate(zone.zone);
-                            }}
-                            isPending={deleteZone.isPending}
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="vnets" className="space-y-4">
-          <div className="flex justify-end">
-            <CreateSDNVNetDialog clusterId={clusterId} />
-          </div>
-          {!vnets || vnets.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No VNets configured.
-            </p>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-8" />
-                    <TableHead>VNet</TableHead>
-                    <TableHead>Zone</TableHead>
-                    <TableHead>VLAN Tag</TableHead>
-                    <TableHead>Alias</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {vnets.map((vnet) => (
-                    <VNetSubnetsRow
-                      key={vnet.vnet}
-                      clusterId={clusterId}
-                      vnet={vnet}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="controllers" className="space-y-4">
-          <ControllersTab clusterId={clusterId} />
-        </TabsContent>
-
-        <TabsContent value="ipam" className="space-y-4">
-          <IPAMTab clusterId={clusterId} />
-        </TabsContent>
-
-        <TabsContent value="dns" className="space-y-4">
-          <DNSTab clusterId={clusterId} />
-        </TabsContent>
-      </Tabs>
-    </div>
+    </>
   );
 }

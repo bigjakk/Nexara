@@ -62,13 +62,13 @@ export function CreateTemplateDialog() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm">
-          <Plus className="mr-1 h-4 w-4" />
+          <Plus className="h-4 w-4" />
           Create Template
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Create Firewall Template</DialogTitle>
+          <DialogTitle>Create firewall template</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
@@ -96,7 +96,7 @@ export function CreateTemplateDialog() {
             <div className="flex items-center justify-between">
               <Label>Rules</Label>
               <Button variant="outline" size="sm" onClick={addRule}>
-                <Plus className="mr-1 h-3 w-3" />
+                <Plus className="h-3 w-3" />
                 Add Rule
               </Button>
             </div>
@@ -109,7 +109,7 @@ export function CreateTemplateDialog() {
                 {rules.map((rule, i) => (
                   <div
                     key={i}
-                    className="flex items-center gap-2 rounded-md border p-2"
+                    className="panel flex flex-wrap items-center gap-2 rounded-[8px] p-2"
                   >
                     <Select
                       value={rule.type}
@@ -121,8 +121,8 @@ export function CreateTemplateDialog() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="in">IN</SelectItem>
-                        <SelectItem value="out">OUT</SelectItem>
+                        <SelectItem value="in">In</SelectItem>
+                        <SelectItem value="out">Out</SelectItem>
                       </SelectContent>
                     </Select>
                     <Select
@@ -168,11 +168,12 @@ export function CreateTemplateDialog() {
                       aria-label={`Remove rule ${String(i + 1)}`}
                       variant="ghost"
                       size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       onClick={() => {
                         removeRule(i);
                       }}
                     >
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 ))}

@@ -71,13 +71,13 @@ export function CreateFirewallRuleDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm">
-          <Plus className="mr-1 h-4 w-4" />
+          <Plus className="h-4 w-4" />
           Add Rule
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create Firewall Rule</DialogTitle>
+          <DialogTitle>Add firewall rule</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -88,9 +88,9 @@ export function CreateFirewallRuleDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="in">IN</SelectItem>
-                  <SelectItem value="out">OUT</SelectItem>
-                  <SelectItem value="group">GROUP</SelectItem>
+                  <SelectItem value="in">In</SelectItem>
+                  <SelectItem value="out">Out</SelectItem>
+                  <SelectItem value="group">Group</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -149,7 +149,7 @@ export function CreateFirewallRuleDialog({
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Destination Port (optional)</Label>
+            <Label>Destination port (optional)</Label>
             <Input
               placeholder="e.g. 80, 443, 8000-9000"
               value={dport}

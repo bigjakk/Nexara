@@ -1,7 +1,4 @@
-import { Info } from "lucide-react";
-
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -25,65 +22,70 @@ import { useAccessDomains } from "../api/access-queries";
  */
 export function AccessRealmsSection({ clusterId }: { clusterId: string }) {
   const domainsQuery = useAccessDomains(clusterId);
+  const count = domainsQuery.data?.length ?? 0;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Authentication Realms</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-start gap-2 rounded-md border bg-muted/40 p-3">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            Realms are read-only here. Editing them needs the{" "}
-            <code className="font-mono">Realm.Allocate</code> privilege, which
-            only the Administrator role carries — manage them in the Proxmox UI
-            under <em>Datacenter → Permissions → Realms</em>.
-          </p>
-        </div>
+    <Panel
+      flush
+      title="Authentication realms"
+      aside={
+        count === 0
+          ? undefined
+          : `${String(count)} ${count === 1 ? "realm" : "realms"}, read-only here`
+      }
+    >
+      <p className="max-w-[75ch] px-[18px] pb-3 text-sm text-muted-foreground">
+        Editing a realm needs the{" "}
+        <code className="font-mono text-[12.5px]">Realm.Allocate</code>{" "}
+        privilege, which only the Administrator role carries. Manage realms in
+        the Proxmox UI under <em>Datacenter → Permissions → Realms</em>.
+      </p>
 
-        {domainsQuery.isLoading ? (
+      {domainsQuery.isLoading ? (
+        <div className="px-[18px] pb-1">
           <Skeleton className="h-20 w-full" />
-        ) : !domainsQuery.data || domainsQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No realms found.</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Realm</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Two-Factor</TableHead>
-                <TableHead>Comment</TableHead>
+        </div>
+      ) : !domainsQuery.data || domainsQuery.data.length === 0 ? (
+        <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+          No realms found.
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Realm</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Two-factor</TableHead>
+              <TableHead>Comment</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {domainsQuery.data.map((domain) => (
+              <TableRow key={domain.realm}>
+                <TableCell className="font-medium">
+                  <span className="flex items-center gap-2">
+                    {domain.realm}
+                    {domain.default && (
+                      <span className="text-[12.5px] font-normal text-muted-foreground">
+                        Default
+                      </span>
+                    )}
+                  </span>
+                </TableCell>
+                <TableCell className="font-mono text-[12.5px]">
+                  {domain.type || "—"}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {domain.tfa || "—"}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {domain.comment || "—"}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {domainsQuery.data.map((domain) => (
-                <TableRow key={domain.realm}>
-                  <TableCell className="font-medium">
-                    <span className="flex items-center gap-2">
-                      {domain.realm}
-                      {domain.default && (
-                        <Badge variant="secondary">Default</Badge>
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <code className="font-mono text-xs">
-                      {domain.type || "—"}
-                    </code>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {domain.tfa || "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {domain.comment || "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Panel>
   );
 }

@@ -75,9 +75,9 @@ export function TokenSecretDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/20">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <p className="text-sm text-amber-800 dark:text-amber-200">
+          <div className="flex items-start gap-2.5 rounded-[8px] bg-amber-500/10 px-3.5 py-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
+            <p className="min-w-0 text-sm">
               Copy this secret now. Proxmox shows it only once — there is no way
               to retrieve it later, and recovering from a lost secret means
               regenerating the token.
@@ -85,7 +85,7 @@ export function TokenSecretDialog({
           </div>
 
           <div className="flex items-center gap-2">
-            <code className="flex-1 rounded-md bg-muted px-3 py-2 font-mono text-sm break-all select-all">
+            <code className="panel flex-1 rounded-[8px] px-3 py-2 font-mono text-sm break-all select-all">
               {secret}
             </code>
             <Button

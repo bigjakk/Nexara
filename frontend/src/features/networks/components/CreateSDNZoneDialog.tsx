@@ -160,19 +160,20 @@ export function CreateSDNZoneDialog({
             aria-label={`Edit Zone ${initialData.zone}`}
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-muted-foreground"
           >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
           <Button size="sm">
-            <Plus className="mr-1 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             Create Zone
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Zone" : "Create SDN Zone"}</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit zone" : "Create SDN zone"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           {/* Zone ID & Type */}
@@ -222,7 +223,7 @@ export function CreateSDNZoneDialog({
           {/* Service VLAN Tag — qinq */}
           {showTag && (
             <div className="space-y-2">
-              <Label>Service VLAN Tag</Label>
+              <Label>Service VLAN tag</Label>
               <Input
                 type="number"
                 placeholder="100"
@@ -263,7 +264,7 @@ export function CreateSDNZoneDialog({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>VRF VXLAN Tag</Label>
+                  <Label>VRF VXLAN tag</Label>
                   <Input
                     type="number"
                     placeholder="10000"
@@ -276,7 +277,7 @@ export function CreateSDNZoneDialog({
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Exit Nodes</Label>
+                  <Label>Exit nodes</Label>
                   <Input
                     placeholder="node1,node2"
                     value={exitnodes}
@@ -286,7 +287,7 @@ export function CreateSDNZoneDialog({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>MAC Address</Label>
+                  <Label>MAC address</Label>
                   <Input
                     placeholder="auto"
                     value={mac}
@@ -388,7 +389,7 @@ export function CreateSDNZoneDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label>DNS Zone (optional)</Label>
+              <Label>DNS zone (optional)</Label>
               <Input
                 placeholder="myzone.example.com"
                 value={dnszone}

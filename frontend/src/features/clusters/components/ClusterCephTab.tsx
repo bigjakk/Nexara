@@ -1,8 +1,18 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
+import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Database } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { CircleAlert, Database } from "lucide-react";
 import {
   useCephStatus,
   useCephOSDs,
@@ -11,8 +21,7 @@ import {
   useCephFS,
   useCephCrushRules,
 } from "@/features/ceph/api/ceph-queries";
-import { CephStatusCards } from "@/features/ceph/components/CephStatusCards";
-import { OSDGrid } from "@/features/ceph/components/OSDGrid";
+import { CephStatusPanel } from "@/features/ceph/components/CephStatusPanel";
 import { OSDTable } from "@/features/ceph/components/OSDTable";
 import { PoolTable } from "@/features/ceph/components/PoolTable";
 import { PoolCreateDialog } from "@/features/ceph/components/PoolCreateDialog";
@@ -23,10 +32,8 @@ import { ApiClientError } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import { retryState, useSettledQueryError } from "@/hooks/useSettledQueryError";
 import { formatTimestamp } from "@/lib/format";
-import {
-  HistoryTabContent,
-  HistoryTabTrigger,
-} from "@/features/history/components/HistoryTab";
+import { HistoryTabContent } from "@/features/history/components/HistoryTab";
+import { useCanViewHistory } from "@/features/history/hooks/useCanViewHistory";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface ClusterCephTabProps {
@@ -54,10 +61,14 @@ function CephNotice({
   busy = false,
 }: CephNoticeProps) {
   return (
-    <div className="rounded-md border bg-muted/50 px-6 py-12 text-center">
-      <Database className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
-      <h2 className="text-lg font-medium">{title}</h2>
-      <div className="mx-auto mt-1 max-w-prose text-sm text-muted-foreground">
+    <div className="panel flex flex-col items-center rounded-[10px] px-6 py-14 text-center">
+      <div className="flex h-11 w-11 items-center justify-center rounded-[10px] bg-foreground/[0.06]">
+        <Database className="h-5 w-5 text-muted-foreground" />
+      </div>
+      <h2 className="mt-4 text-base font-semibold [font-stretch:108%]">
+        {title}
+      </h2>
+      <div className="mt-1.5 max-w-prose text-sm text-muted-foreground">
         {children}
       </div>
       {/* Query.fetch() early-returns into continueRetry() whenever fetchStatus
@@ -69,7 +80,7 @@ function CephNotice({
         <Button
           variant="outline"
           size="sm"
-          className="mt-4"
+          className="mt-6"
           disabled={busy}
           onClick={onRetry}
         >
@@ -115,14 +126,22 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
   const retryStatus = () => void statusQuery.refetch();
   const retry = retryState(statusQuery);
 
+  // Which view of the tab is on show. The panels are Radix tab panels, so only
+  // the one on show is mounted and reads its data.
+  const [view, setView] = useState("overview");
+  const history = clusterHistories.ceph(clusterId);
+  const canHistory = useCanViewHistory(
+    history.permission,
+    history.target.clusterId === null,
+  );
+
   // Skeletons are for the first load only: once there is an outcome to show,
   // a background refetch must not take it off the screen.
   if (statusQuery.isLoading && settledError === null) {
     return (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-32" />
-        ))}
+      <div role="status" aria-label="Loading Ceph status" className="space-y-4">
+        <Skeleton className="h-[104px] rounded-[10px]" />
+        <Skeleton className="h-72 rounded-[10px]" />
       </div>
     );
   }
@@ -130,14 +149,14 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
   // Both error branches are deliberately gated on there being no data to show.
   // TanStack keeps the last good `data` through a failed refetch, so without
   // the guard one dropped 60s poll would replace a live Ceph dashboard with
-  // "Ceph Not Available" — a flat contradiction of what the operator was
+  // "Ceph is not available" — a flat contradiction of what the operator was
   // looking at a second earlier. With data in hand the banner below says the
   // refresh failed and the dashboard stays up.
   if (settledError !== null && !status) {
     if (isCephNotFound) {
       return (
         <CephNotice
-          title="Ceph Not Available"
+          title="Ceph is not available"
           onRetry={retryStatus}
           busy={retry.busy}
         >
@@ -146,7 +165,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
             installed or configured, or the cluster may be unreachable.
           </p>
           {serverMessage !== "" && (
-            <p className="mt-2 font-mono text-xs break-words">
+            <p className="mt-2 font-mono text-[12.5px] break-words">
               {serverMessage}
             </p>
           )}
@@ -158,13 +177,15 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
     // must not presume the cause. The server's message names it.
     return (
       <CephNotice
-        title="Failed to Load Ceph Status"
+        title="Could not load Ceph status"
         onRetry={retryStatus}
         busy={retry.busy}
       >
         <p>Nexara could not read Ceph status from this cluster.</p>
         {serverMessage !== "" && (
-          <p className="mt-2 font-mono text-xs break-words">{serverMessage}</p>
+          <p className="mt-2 font-mono text-[12.5px] break-words">
+            {serverMessage}
+          </p>
         )}
       </CephNotice>
     );
@@ -180,7 +201,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
   if (!status) {
     return (
       <CephNotice
-        title="Ceph Status Unavailable"
+        title="Ceph status is unavailable"
         onRetry={retry.offer ? retryStatus : undefined}
         busy={retry.busy}
       >
@@ -198,96 +219,146 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
     );
   }
 
+  // A view that is no longer on offer (the last CephFS gone, History no longer
+  // granted) falls back to the overview instead of an empty tab.
+  const shown =
+    (view === "fs" && filesystems.length === 0) ||
+    (view === "history" && !canHistory)
+      ? "overview"
+      : view;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {settledError !== null && (
         <p
           role="status"
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          className="flex items-start gap-2.5 rounded-[8px] bg-destructive/[0.08] px-3.5 py-2.5 text-sm"
         >
+          <CircleAlert
+            aria-hidden="true"
+            className="mt-0.5 h-4 w-4 shrink-0 text-destructive"
+          />
           {/* One interpolation, so no JSX whitespace collapses into the join.
               The timestamp matters: a stale HEALTH_OK is the reading most
               likely to be believed and most likely to be wrong. */}
-          {`Ceph status as of ${formatTimestamp(statusQuery.dataUpdatedAt)} — the most recent refresh failed${serverMessage !== "" ? `: ${serverMessage}` : "."}`}
+          <span className="min-w-0 [overflow-wrap:anywhere]">
+            {`Ceph status as of ${formatTimestamp(statusQuery.dataUpdatedAt)} — the most recent refresh failed${serverMessage !== "" ? `: ${serverMessage}` : "."}`}
+          </span>
         </p>
       )}
 
-      <CephStatusCards status={status} />
+      <CephStatusPanel status={status} />
 
-      <Tabs defaultValue="overview">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="osds">
-            OSDs ({status.osdmap.num_osds})
-          </TabsTrigger>
-          <TabsTrigger value="pools">Pools ({pools.length})</TabsTrigger>
-          <TabsTrigger value="monitors">
-            Monitors ({status.monmap.num_mons})
-          </TabsTrigger>
-          {filesystems.length > 0 && (
-            <TabsTrigger value="fs">CephFS ({filesystems.length})</TabsTrigger>
-          )}
-          <HistoryTabTrigger history={clusterHistories.ceph(clusterId)} />
-        </TabsList>
+      <Tabs value={shown} onValueChange={setView}>
+        <Segmented
+          aria-label="Ceph view"
+          size="md"
+          value={shown}
+          onValueChange={setView}
+          options={[
+            { value: "overview", label: "Overview" },
+            {
+              value: "osds",
+              label: `OSDs (${String(status.osdmap.num_osds)})`,
+            },
+            { value: "pools", label: `Pools (${String(pools.length)})` },
+            {
+              value: "monitors",
+              label: `Monitors (${String(status.monmap.num_mons)})`,
+            },
+            ...(filesystems.length > 0
+              ? [
+                  {
+                    value: "fs",
+                    label: `CephFS (${String(filesystems.length)})`,
+                  },
+                ]
+              : []),
+            ...(canHistory ? [{ value: "history", label: "History" }] : []),
+          ]}
+        />
 
-        <TabsContent value="overview" className="space-y-6">
+        <TabsContent
+          value="overview"
+          aria-label="Overview"
+          aria-labelledby={undefined}
+          className="space-y-4"
+        >
           <CephMetricsChart clusterId={clusterId} status={status} />
           {osds.length > 0 && <CrushTree osds={osds} crushRules={crushRules} />}
         </TabsContent>
 
-        <TabsContent value="osds" className="space-y-4">
-          <OSDGrid osds={osds} />
+        <TabsContent value="osds" aria-label="OSDs" aria-labelledby={undefined}>
           <OSDTable osds={osds} clusterId={clusterId} />
         </TabsContent>
 
-        <TabsContent value="pools" className="space-y-4">
-          <div className="flex justify-end">
-            <PoolCreateDialog
-              clusterId={clusterId}
-              osdCount={status.osdmap.num_osds}
-            />
-          </div>
-          <PoolTable pools={pools} clusterId={clusterId} />
+        <TabsContent
+          value="pools"
+          aria-label="Pools"
+          aria-labelledby={undefined}
+        >
+          <PoolTable
+            pools={pools}
+            clusterId={clusterId}
+            actions={
+              <PoolCreateDialog
+                clusterId={clusterId}
+                osdCount={status.osdmap.num_osds}
+              />
+            }
+          />
         </TabsContent>
 
-        <TabsContent value="monitors" className="space-y-4">
+        <TabsContent
+          value="monitors"
+          aria-label="Monitors"
+          aria-labelledby={undefined}
+        >
           <MonitorList monitors={monitors} clusterId={clusterId} />
         </TabsContent>
 
         {filesystems.length > 0 && (
-          <TabsContent value="fs" className="space-y-4">
-            <div className="rounded-md border">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/30">
-                    <th className="px-4 py-2 text-left font-medium">Name</th>
-                    <th className="px-4 py-2 text-left font-medium">
-                      Metadata Pool
-                    </th>
-                    <th className="px-4 py-2 text-left font-medium">
-                      Data Pool
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+          <TabsContent
+            value="fs"
+            aria-label="CephFS"
+            aria-labelledby={undefined}
+          >
+            <Panel
+              flush
+              title="CephFS"
+              aside={
+                filesystems.length === 1
+                  ? "1 file system"
+                  : `${String(filesystems.length)} file systems`
+              }
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Metadata pool</TableHead>
+                    <TableHead>Data pool</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {filesystems.map((fs) => (
-                    <tr key={fs.name} className="border-b">
-                      <td className="px-4 py-2 font-medium">{fs.name}</td>
-                      <td className="px-4 py-2 text-muted-foreground">
+                    <TableRow key={fs.name}>
+                      <TableCell className="font-medium">{fs.name}</TableCell>
+                      <TableCell className="text-muted-foreground">
                         {fs.metadata_pool}
-                      </td>
-                      <td className="px-4 py-2 text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
                         {fs.data_pool}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </TableBody>
+              </Table>
+            </Panel>
           </TabsContent>
         )}
 
-        <HistoryTabContent history={clusterHistories.ceph(clusterId)} />
+        <HistoryTabContent history={history} label="History" />
       </Tabs>
     </div>
   );

@@ -101,12 +101,13 @@ export function CreateSDNSubnetDialog({
             aria-label={`Edit Subnet ${initialData.subnet}`}
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-muted-foreground"
           >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
           <Button variant="outline" size="sm">
-            <Plus className="mr-1 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             Add Subnet
           </Button>
         )}
@@ -114,7 +115,7 @@ export function CreateSDNSubnetDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? "Edit Subnet" : `Add Subnet to ${vnet}`}
+            {isEdit ? "Edit subnet" : `Add subnet to ${vnet}`}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
@@ -150,7 +151,7 @@ export function CreateSDNSubnetDialog({
             <Label htmlFor="snat">Enable SNAT</Label>
           </div>
           <div className="space-y-2">
-            <Label>DHCP Range (optional)</Label>
+            <Label>DHCP range (optional)</Label>
             <Input
               placeholder="start-address=10.0.0.50,end-address=10.0.0.200"
               value={dhcpRange}
@@ -160,7 +161,7 @@ export function CreateSDNSubnetDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label>DHCP DNS Server (optional)</Label>
+            <Label>DHCP DNS server (optional)</Label>
             <Input
               placeholder="8.8.8.8"
               value={dhcpDnsServer}

@@ -7,8 +7,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Trash2 } from "lucide-react";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
@@ -34,22 +35,31 @@ export function FirewallTemplatesTable({
     null,
   );
 
-  if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
-  }
+  const count = templates?.length ?? 0;
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <CreateTemplateDialog />
-      </div>
-
-      {!templates || templates.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No firewall templates. Create one to define reusable rule sets.
-        </p>
-      ) : (
-        <div className="rounded-md border">
+    <>
+      <Panel
+        flush
+        title="Templates"
+        aside={
+          isLoading
+            ? "Loading..."
+            : count === 0
+              ? "Reusable rule sets, shared by every cluster"
+              : `${String(count)} ${count === 1 ? "template" : "templates"}, shared by every cluster`
+        }
+        actions={<CreateTemplateDialog />}
+      >
+        {isLoading ? (
+          <div className="px-[18px] pb-1">
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : !templates || templates.length === 0 ? (
+          <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+            No firewall templates. Create one to define reusable rule sets.
+          </p>
+        ) : (
           <Table>
             <TableHeader>
               <TableRow>
@@ -57,7 +67,9 @@ export function FirewallTemplatesTable({
                 <TableHead>Description</TableHead>
                 <TableHead>Rules</TableHead>
                 <TableHead>Updated</TableHead>
-                <TableHead className="w-32" />
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -70,20 +82,18 @@ export function FirewallTemplatesTable({
                       title={tmpl.name}
                     />
                   </TableCell>
-                  <TableCell className="max-w-[300px] truncate text-sm text-muted-foreground">
+                  <TableCell className="max-w-[300px] truncate text-muted-foreground">
                     {tmpl.description || "-"}
                   </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {tmpl.rules.length} rule
-                      {tmpl.rules.length !== 1 ? "s" : ""}
-                    </Badge>
+                  <TableCell className="tabular-nums">
+                    {tmpl.rules.length} rule
+                    {tmpl.rules.length !== 1 ? "s" : ""}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="text-muted-foreground">
                     {new Date(tmpl.updated_at).toLocaleDateString()}
                   </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
+                  <TableCell className="py-1">
+                    <div className="flex items-center justify-end gap-1">
                       <ApplyTemplateDialog
                         clusterId={clusterId}
                         template={tmpl}
@@ -92,12 +102,13 @@ export function FirewallTemplatesTable({
                         aria-label={`Delete template ${tmpl.name}`}
                         variant="ghost"
                         size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
                         onClick={() => {
                           setPendingDelete(tmpl);
                         }}
                         disabled={deleteTemplate.isPending}
                       >
-                        <Trash2 className="h-4 w-4 text-destructive" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
@@ -105,8 +116,8 @@ export function FirewallTemplatesTable({
               ))}
             </TableBody>
           </Table>
-        </div>
-      )}
+        )}
+      </Panel>
 
       {/* A template is a Nexara row, not Proxmox state: the handler
           (NetworkHandler.DeleteTemplate) deletes it from firewall_templates
@@ -128,6 +139,6 @@ export function FirewallTemplatesTable({
         }
         confirmLabel="Delete Template"
       />
-    </div>
+    </>
   );
 }

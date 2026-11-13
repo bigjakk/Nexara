@@ -39,7 +39,7 @@ async function renderOnTab(tab: string) {
   api = stubApi(LISTS);
   const user = userEvent.setup();
   renderWithProviders(<ClusterFirewallTab clusterId={CLUSTER} />);
-  await user.click(await screen.findByRole("tab", { name: tab }));
+  await user.click(await screen.findByRole("button", { name: tab }));
   return user;
 }
 
@@ -102,7 +102,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
   });
 
   it("IP set", async () => {
-    const user = await renderOnTab("IP Sets");
+    const user = await renderOnTab("IP sets");
     await expectConfirmedDelete(user, {
       button: "Delete IPSet set02",
       heading: "Delete IP set set02?",
@@ -119,7 +119,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
   });
 
   it("IP set entry", async () => {
-    const user = await renderOnTab("IP Sets");
+    const user = await renderOnTab("IP sets");
     await user.click(await screen.findByText("set02"));
     await expectConfirmedDelete(user, {
       button: "Delete entry 192.0.2.0/24",
@@ -135,7 +135,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
 
   // A nomatch entry is an exclusion: removing it makes the set match MORE.
   it("nomatch IP set entry", async () => {
-    const user = await renderOnTab("IP Sets");
+    const user = await renderOnTab("IP sets");
     await user.click(await screen.findByText("set02"));
     await expectConfirmedDelete(user, {
       button: "Delete entry 192.0.2.77",
@@ -150,7 +150,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
   });
 
   it("security group", async () => {
-    const user = await renderOnTab("Security Groups");
+    const user = await renderOnTab("Security groups");
     await expectConfirmedDelete(user, {
       button: "Delete security group grp02",
       heading: "Delete security group grp02?",
@@ -181,7 +181,7 @@ describe("ClusterFirewallTab — focus after a delete", () => {
     api = stubApi(reads);
     const user = userEvent.setup();
     renderWithProviders(<ClusterFirewallTab clusterId={CLUSTER} />);
-    await user.click(await screen.findByRole("tab", { name: "Aliases" }));
+    await user.click(await screen.findByRole("button", { name: "Aliases" }));
     await user.click(
       await screen.findByRole("button", { name: "Delete alias net02" }),
     );

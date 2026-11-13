@@ -140,12 +140,13 @@ export function CreateSDNControllerDialog({
             aria-label={`Edit Controller ${initialData.controller}`}
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-muted-foreground"
           >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
           <Button size="sm">
-            <Plus className="mr-1 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             Create Controller
           </Button>
         )}
@@ -153,7 +154,7 @@ export function CreateSDNControllerDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? "Edit Controller" : "Create SDN Controller"}
+            {isEdit ? "Edit controller" : "Create SDN controller"}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
@@ -212,7 +213,7 @@ export function CreateSDNControllerDialog({
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>eBGP Multihop (optional)</Label>
+                  <Label>eBGP multihop (optional)</Label>
                   <Input
                     type="number"
                     placeholder="10"
@@ -239,7 +240,7 @@ export function CreateSDNControllerDialog({
             <>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>ISIS Domain</Label>
+                  <Label>ISIS domain</Label>
                   <Input
                     placeholder="example.com"
                     value={isisDomain}
@@ -249,7 +250,7 @@ export function CreateSDNControllerDialog({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>ISIS Interfaces</Label>
+                  <Label>ISIS interfaces</Label>
                   <Input
                     placeholder="eth0,eth1"
                     value={isisIfaces}

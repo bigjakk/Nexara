@@ -103,12 +103,13 @@ export function CreateSDNIPAMDialog({
             aria-label={`Edit IPAM ${initialData.ipam}`}
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-muted-foreground"
           >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
           <Button size="sm">
-            <Plus className="mr-1 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             Create IPAM
           </Button>
         )}

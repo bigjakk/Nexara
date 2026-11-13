@@ -31,7 +31,7 @@ export function PCIRiskConfirm({
 }) {
   if (risks.length === 0) return null;
   return (
-    <div className="space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+    <div className="space-y-1.5 rounded-[8px] bg-amber-500/10 px-3 py-2.5 text-[12.5px] text-amber-800 dark:text-amber-300">
       <p>
         {lead ?? (
           <>

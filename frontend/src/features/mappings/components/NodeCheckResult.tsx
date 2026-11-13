@@ -1,4 +1,3 @@
-import { CheckCircle2 } from "lucide-react";
 import type { MappingCheck } from "../api/mapping-queries";
 import { ownValue } from "../lib/mapping-edits";
 import { cleanDeviceText } from "../lib/usb-mapping";
@@ -60,8 +59,12 @@ export function NodeCheckResult({
   }
   if (!showOK) return null;
   return (
-    <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
-      <CheckCircle2 className="h-3.5 w-3.5" />
+    // Quiet when healthy: a dot and the word, not a line of green.
+    <span className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+      <span
+        aria-hidden="true"
+        className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+      />
       OK
     </span>
   );

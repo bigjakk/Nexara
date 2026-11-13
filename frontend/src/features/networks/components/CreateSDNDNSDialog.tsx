@@ -95,12 +95,13 @@ export function CreateSDNDNSDialog({
             aria-label={`Edit DNS ${initialData.dns}`}
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-muted-foreground"
           >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
           <Button size="sm">
-            <Plus className="mr-1 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             Create DNS
           </Button>
         )}
@@ -108,7 +109,7 @@ export function CreateSDNDNSDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? "Edit DNS" : "Create SDN DNS Plugin"}
+            {isEdit ? "Edit DNS" : "Create SDN DNS plugin"}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
@@ -151,7 +152,7 @@ export function CreateSDNDNSDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label>API Key</Label>
+            <Label>API key</Label>
             <Input
               type="password"
               placeholder="API key"

@@ -41,7 +41,7 @@ async function openDeleteFor(subnet: string) {
   });
   const user = userEvent.setup();
   renderWithProviders(<SDNTable clusterId={CLUSTER} />);
-  await user.click(await screen.findByRole("tab", { name: "VNets" }));
+  await user.click(await screen.findByRole("button", { name: "VNets" }));
   // Expand both VNets, so both subnet lists are on screen.
   await user.click(await screen.findByText("vnet01"));
   await user.click(screen.getByText("vnet02"));
@@ -131,7 +131,7 @@ describe("SDNTable — focus after a delete", () => {
     api = stubApi(reads);
     const user = userEvent.setup();
     renderWithProviders(<SDNTable clusterId={CLUSTER} />);
-    await user.click(await screen.findByRole("tab", { name: "VNets" }));
+    await user.click(await screen.findByRole("button", { name: "VNets" }));
     await user.click(
       await screen.findByRole("button", { name: "Delete VNet vnet02" }),
     );

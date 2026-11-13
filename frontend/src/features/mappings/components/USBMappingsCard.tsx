@@ -1,12 +1,6 @@
 import { Fragment, useRef, useState } from "react";
 import { Pencil, Plus, Replace, Trash2, X } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -245,37 +239,44 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
   };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-4">
-        <div className="space-y-1.5">
-          <CardTitle>USB Devices</CardTitle>
-          <CardDescription>
-            A VM passes a host USB device through as usbN: mapping=&lt;name&gt;.
-            Each node needs its own entry — a VM will not start on a node the
-            mapping has none for. Proxmox lists only the mappings Nexara&apos;s
-            API token may see.
-          </CardDescription>
-          {!canEdit && (
-            <p className="text-xs text-muted-foreground">
-              Viewing only: changing mappings needs the Manage Cluster
-              permission.
-            </p>
-          )}
-        </div>
-        {canEdit && (
+    <Panel
+      flush
+      title="USB devices"
+      aside={
+        mappings.length === 0
+          ? undefined
+          : `${String(mappings.length)} ${mappings.length === 1 ? "mapping" : "mappings"}`
+      }
+      actions={
+        canEdit ? (
           <Button
             size="sm"
+            variant="outline"
             onClick={() => {
               setActionError("");
               setCreating(true);
             }}
           >
-            <Plus className="mr-2 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             New mapping
           </Button>
+        ) : undefined
+      }
+    >
+      <div className="max-w-[80ch] space-y-1 px-[18px] pb-3 text-sm text-muted-foreground">
+        <p>
+          A VM passes a host USB device through as usbN: mapping=&lt;name&gt;.
+          Each node needs its own entry — a VM will not start on a node the
+          mapping has none for. Proxmox lists only the mappings Nexara&apos;s
+          API token may see.
+        </p>
+        {!canEdit && (
+          <p className="text-[12.5px]">
+            Viewing only: changing mappings needs the Manage Cluster permission.
+          </p>
         )}
-      </CardHeader>
-      <CardContent
+      </div>
+      <div
         ref={regionRef}
         role="region"
         aria-label="USB mappings"
@@ -285,9 +286,11 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
         {actionError !== "" && (
           <div
             role="alert"
-            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            className="mx-[18px] flex items-start gap-2 rounded-[8px] bg-destructive/[0.08] px-3.5 py-2.5 text-sm"
           >
-            <p className="min-w-0 flex-1">{actionError}</p>
+            <p className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+              {actionError}
+            </p>
             <button
               type="button"
               aria-label="Dismiss"
@@ -302,7 +305,11 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
         )}
         {mappings.length > 0 ? (
           <>
-            <QueryFailureNote query={listQuery} subject="the USB mappings" />
+            <QueryFailureNote
+              query={listQuery}
+              subject="the USB mappings"
+              className="px-[18px]"
+            />
             <div>
               <Table>
                 <TableHeader>
@@ -311,7 +318,9 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
                     <TableHead>Device</TableHead>
                     <TableHead>Port</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="w-0" />
+                    <TableHead className="w-0">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -346,17 +355,19 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
             </div>
           </>
         ) : (
-          <QueryStateNotice
-            query={listQuery}
-            subject="the USB mappings"
-            empty={
-              canEdit
-                ? "This cluster has no USB mappings yet. Create one here, or add a host USB device to a VM."
-                : "This cluster has no USB mappings yet."
-            }
-          />
+          <div className="px-[18px] pb-1">
+            <QueryStateNotice
+              query={listQuery}
+              subject="the USB mappings"
+              empty={
+                canEdit
+                  ? "This cluster has no USB mappings yet. Create one here, or add a host USB device to a VM."
+                  : "This cluster has no USB mappings yet."
+              }
+            />
+          </div>
         )}
-      </CardContent>
+      </div>
 
       {creating && (
         <NewMappingDialog
@@ -434,7 +445,7 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
         confirmLabel="Delete mapping"
         onCloseAutoFocus={focusAfterConfirm}
       />
-    </Card>
+    </Panel>
   );
 }
 
@@ -483,7 +494,7 @@ function MappingRows({
 
   return (
     <Fragment>
-      <TableRow className="bg-muted/30 hover:bg-muted/30">
+      <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.03]">
         <TableCell colSpan={4}>
           <span className="font-mono font-medium">{mapping.id}</span>
           {addressable && (
@@ -516,7 +527,7 @@ function MappingRows({
                 disabled={!nodeFree || busy}
                 onClick={onAddNode}
               >
-                <Plus className="mr-1 h-3.5 w-3.5" />
+                <Plus className="h-3.5 w-3.5" />
                 Add node
               </Button>
               <Button
@@ -525,17 +536,17 @@ function MappingRows({
                 disabled={busy}
                 onClick={onEditDescription}
               >
-                <Pencil className="mr-1 h-3.5 w-3.5" />
+                <Pencil className="h-3.5 w-3.5" />
                 Edit description
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-destructive hover:text-destructive"
+                className="text-muted-foreground hover:text-destructive"
                 disabled={busy}
                 onClick={onDelete}
               >
-                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5" />
                 {working === "deleting" ? "Deleting…" : "Delete"}
               </Button>
             </div>
@@ -544,7 +555,10 @@ function MappingRows({
       </TableRow>
       {entries.length === 0 && (
         <TableRow>
-          <TableCell colSpan={5} className="pl-6 text-xs text-muted-foreground">
+          <TableCell
+            colSpan={5}
+            className="pl-9 text-[12.5px] text-muted-foreground"
+          >
             No node entries: no VM can use this mapping anywhere.
           </TableCell>
         </TableRow>
@@ -553,7 +567,7 @@ function MappingRows({
         // The raw entry is not unique on its own — a mapping can hold one
         // twice — so its position among the shown rows keys it.
         <TableRow key={`${e.raw}#${String(i)}`}>
-          <TableCell className="pl-6">{e.node || "—"}</TableCell>
+          <TableCell className="pl-9">{e.node || "—"}</TableCell>
           <TableCell>
             <span className="font-mono">{e.id || "—"}</span>
             {e.description !== "" && (
@@ -588,20 +602,20 @@ function MappingRows({
                       onReplace(e);
                     }}
                   >
-                    <Replace className="mr-1 h-3.5 w-3.5" />
+                    <Replace className="h-3.5 w-3.5" />
                     Replace device
                   </Button>
                 )}
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-destructive hover:text-destructive"
+                  className="text-muted-foreground hover:text-destructive"
                   disabled={busy}
                   onClick={() => {
                     onRemove(e);
                   }}
                 >
-                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                  <Trash2 className="h-3.5 w-3.5" />
                   Remove
                 </Button>
               </div>

@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { ShieldAlert } from "lucide-react";
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Panel } from "@/components/page/Panel";
+import { Segmented } from "@/components/ui/segmented";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
 import { useAccessCapabilities } from "@/features/access/api/access-queries";
 import { AccessACLSection } from "@/features/access/components/AccessACLSection";
@@ -8,10 +11,8 @@ import { AccessGroupsSection } from "@/features/access/components/AccessGroupsSe
 import { AccessRealmsSection } from "@/features/access/components/AccessRealmsSection";
 import { AccessRolesSection } from "@/features/access/components/AccessRolesSection";
 import { AccessUsersSection } from "@/features/access/components/AccessUsersSection";
-import {
-  HistoryTabContent,
-  HistoryTabTrigger,
-} from "@/features/history/components/HistoryTab";
+import { HistoryTabContent } from "@/features/history/components/HistoryTab";
+import { useCanViewHistory } from "@/features/history/hooks/useCanViewHistory";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface ClusterAccessTabProps {
@@ -36,48 +37,80 @@ interface ClusterAccessTabProps {
 export function ClusterAccessTab({ clusterId }: ClusterAccessTabProps) {
   const { canView } = useAuth();
   const capabilities = useAccessCapabilities(clusterId);
+  // The panels are Radix tab panels, so only the view on show is mounted and
+  // reads its data; the switch above them is what picks it.
+  const [view, setView] = useState("users");
+  const history = clusterHistories.access(clusterId);
+  const canHistory = useCanViewHistory(
+    history.permission,
+    history.target.clusterId === null,
+  );
 
   if (!canView("access")) {
     return (
-      <div className="flex items-start gap-2 rounded-md border p-4">
-        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
+      <Panel>
+        <p className="flex items-start gap-2.5 text-sm text-muted-foreground">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
           You do not have permission to view this cluster&apos;s access control.
         </p>
-      </div>
+      </Panel>
     );
   }
 
-  return (
-    <Tabs defaultValue="users">
-      <TabsList>
-        <TabsTrigger value="users">Users &amp; Tokens</TabsTrigger>
-        <TabsTrigger value="groups">Groups</TabsTrigger>
-        <TabsTrigger value="roles">Roles</TabsTrigger>
-        <TabsTrigger value="permissions">Permissions</TabsTrigger>
-        <TabsTrigger value="realms">Realms</TabsTrigger>
-        <HistoryTabTrigger history={clusterHistories.access(clusterId)} />
-      </TabsList>
+  const shown = view === "history" && !canHistory ? "users" : view;
 
-      <TabsContent value="users" className="mt-4">
+  return (
+    <Tabs value={shown} onValueChange={setView}>
+      <Segmented
+        aria-label="Access control view"
+        size="md"
+        value={shown}
+        onValueChange={setView}
+        options={[
+          { value: "users", label: "Users and tokens" },
+          { value: "groups", label: "Groups" },
+          { value: "roles", label: "Roles" },
+          { value: "permissions", label: "Permissions" },
+          { value: "realms", label: "Realms" },
+          ...(canHistory ? [{ value: "history", label: "History" }] : []),
+        ]}
+      />
+
+      <TabsContent
+        value="users"
+        aria-label="Users and tokens"
+        aria-labelledby={undefined}
+      >
         <AccessUsersSection clusterId={clusterId} capabilities={capabilities} />
       </TabsContent>
-      <TabsContent value="groups" className="mt-4">
+      <TabsContent
+        value="groups"
+        aria-label="Groups"
+        aria-labelledby={undefined}
+      >
         <AccessGroupsSection
           clusterId={clusterId}
           capabilities={capabilities}
         />
       </TabsContent>
-      <TabsContent value="roles" className="mt-4">
+      <TabsContent value="roles" aria-label="Roles" aria-labelledby={undefined}>
         <AccessRolesSection clusterId={clusterId} capabilities={capabilities} />
       </TabsContent>
-      <TabsContent value="permissions" className="mt-4">
+      <TabsContent
+        value="permissions"
+        aria-label="Permissions"
+        aria-labelledby={undefined}
+      >
         <AccessACLSection clusterId={clusterId} capabilities={capabilities} />
       </TabsContent>
-      <TabsContent value="realms" className="mt-4">
+      <TabsContent
+        value="realms"
+        aria-label="Realms"
+        aria-labelledby={undefined}
+      >
         <AccessRealmsSection clusterId={clusterId} />
       </TabsContent>
-      <HistoryTabContent history={clusterHistories.access(clusterId)} />
+      <HistoryTabContent history={history} label="History" />
     </Tabs>
   );
 }

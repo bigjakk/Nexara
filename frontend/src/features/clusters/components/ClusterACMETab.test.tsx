@@ -161,9 +161,9 @@ function serve(reads: (NodeACMEConfig | Error)[]) {
   });
 }
 
-/** Opens the Node Certificates tab and waits for the first config read. */
+/** Picks the Node certificates view and waits for the first config read. */
 async function openCertificatesTab(user: UserEvent) {
-  await user.click(screen.getByRole("tab", { name: "Node Certificates" }));
+  await user.click(screen.getByRole("button", { name: "Node certificates" }));
   await waitFor(() => {
     expect(getMock).toHaveBeenCalledWith(CONFIG_PATH);
   });
@@ -181,6 +181,25 @@ async function pressSave(user: UserEvent) {
 beforeEach(() => {
   vi.resetAllMocks();
   putMock.mockResolvedValue({ status: "ok" });
+});
+
+describe("ClusterACMETab node certificates view", () => {
+  // A role may view certificates without being able to list nodes: the view
+  // then has no node to ask, and must not report that as "none found".
+  it("says the node list could not be read instead of reporting no certificates", async () => {
+    listMock.mockImplementation((path: string) =>
+      path === NODES_PATH ? Promise.reject(denied()) : Promise.resolve([]),
+    );
+    getMock.mockResolvedValue(null);
+    renderTab();
+
+    expect(
+      await screen.findByText(/nodes could not be read, so there is no node/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No certificates found on this node."),
+    ).toBeNull();
+  });
 });
 
 describe("ClusterACMETab domain save", () => {
@@ -507,8 +526,8 @@ async function cancelDialog(user: UserEvent) {
 /** Cancel, then another tab: the tab is gone, the dialog with it. */
 async function leaveForAccounts(user: UserEvent) {
   await cancelDialog(user);
-  await user.click(screen.getByRole("tab", { name: "Accounts" }));
-  expect(screen.queryByText("ACME Domain Configuration")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Accounts" }));
+  expect(screen.queryByText("ACME domains")).toBeNull();
 }
 
 /** The page is left with the dialog open. */
@@ -519,7 +538,7 @@ function leavePage() {
 
 /** The tab is back, with a dialog of its own open, before the save lands. */
 async function returnAndOpenSecond(user: UserEvent) {
-  await user.click(screen.getByRole("tab", { name: "Node Certificates" }));
+  await user.click(screen.getByRole("button", { name: "Node certificates" }));
   await openEdit(user, 1);
   return screen.findByRole("dialog");
 }
@@ -833,7 +852,7 @@ describe("a save that settles after the tab was left", () => {
         await waitFor(() => {
           expect(screen.queryByRole("dialog")).toBeNull();
         });
-        await user.click(screen.getByRole("tab", { name: "Accounts" }));
+        await user.click(screen.getByRole("button", { name: "Accounts" }));
       },
       // How fetch rejects when the connection drops: describeError has no words for it.
       new TypeError("Failed to fetch"),
@@ -850,7 +869,7 @@ describe("a save that settles after the tab was left", () => {
 
       const held = await saveHeld(user);
       await leave(user);
-      expect(screen.queryByText("ACME Domain Configuration")).toBeNull();
+      expect(screen.queryByText("ACME domains")).toBeNull();
       held.reject(failure);
 
       await expectOneToast(failedToast(said));

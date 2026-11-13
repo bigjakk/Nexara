@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
 import {
   Table,
   TableBody,
@@ -13,6 +13,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -67,32 +68,42 @@ export function ClusterMetricServersTab({
     );
   };
 
+  const servers = serversQuery.data ?? [];
+  const disabledCount = servers.filter((sv) => sv.disable).length;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>
-          Metric Servers
+    <Panel
+      flush
+      title="Metric servers"
+      aside={
+        <span className="flex flex-wrap items-center gap-x-2">
           <ClusterHistoryButton
             history={clusterHistories.metrics(clusterId)}
             title="metric servers"
           />
-        </CardTitle>
-        {canManage("cluster") && (
+          {servers.length === 0
+            ? "Where Proxmox sends this cluster's metrics, besides Nexara"
+            : `${String(servers.length)} ${servers.length === 1 ? "server" : "servers"}${disabledCount > 0 ? `, ${String(disabledCount)} disabled` : ""}`}
+        </span>
+      }
+      actions={
+        canManage("cluster") ? (
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
+                <Plus className="h-4 w-4" />
                 Add Server
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-sm">
               <DialogHeader>
-                <DialogTitle>Add Metric Server</DialogTitle>
+                <DialogTitle>Add metric server</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleCreate} className="space-y-4">
-                <div>
-                  <Label>ID</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="metric-server-id">ID</Label>
                   <Input
+                    id="metric-server-id"
                     value={id}
                     onChange={(e) => {
                       setId(e.target.value);
@@ -100,10 +111,11 @@ export function ClusterMetricServersTab({
                     required
                   />
                 </div>
-                <div>
-                  <Label>Type</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="metric-server-type">Type</Label>
                   <select
-                    className="w-full rounded border bg-background px-2 py-2 text-sm"
+                    id="metric-server-type"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                     value={type}
                     onChange={(e) => {
                       setType(e.target.value);
@@ -113,9 +125,10 @@ export function ClusterMetricServersTab({
                     <option value="graphite">Graphite</option>
                   </select>
                 </div>
-                <div>
-                  <Label>Server</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="metric-server-host">Server</Label>
                   <Input
+                    id="metric-server-host"
                     value={server}
                     onChange={(e) => {
                       setServer(e.target.value);
@@ -123,9 +136,10 @@ export function ClusterMetricServersTab({
                     required
                   />
                 </div>
-                <div>
-                  <Label>Port</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="metric-server-port">Port</Label>
                   <Input
+                    id="metric-server-port"
                     value={port}
                     onChange={(e) => {
                       setPort(e.target.value);
@@ -134,16 +148,19 @@ export function ClusterMetricServersTab({
                     required
                   />
                 </div>
-                <Button type="submit" disabled={createServer.isPending}>
-                  {createServer.isPending ? "Creating..." : "Create"}
-                </Button>
+                <DialogFooter>
+                  <Button type="submit" disabled={createServer.isPending}>
+                    {createServer.isPending ? "Creating..." : "Create"}
+                  </Button>
+                </DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
-        )}
-      </CardHeader>
-      <CardContent>
-        {!serversQuery.data || serversQuery.data.length === 0 ? (
+        ) : undefined
+      }
+    >
+      {servers.length === 0 ? (
+        <div className="px-[18px] pb-1">
           <QueryStateNotice
             query={serversQuery}
             subject="this cluster's metric servers"
@@ -151,60 +168,65 @@ export function ClusterMetricServersTab({
             identity={clusterId}
             skeletonClassName="h-20 w-full"
           />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Server</TableHead>
-                <TableHead>Port</TableHead>
-                <TableHead>Status</TableHead>
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>ID</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Server</TableHead>
+              <TableHead>Port</TableHead>
+              <TableHead>State</TableHead>
+              {canManage("cluster") && (
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {servers.map((s) => (
+              <TableRow key={s.id}>
+                <TableCell className="font-medium">
+                  {s.id}
+                  <ClusterHistoryButton
+                    history={clusterHistories.metricServer(clusterId, s.id)}
+                    title={s.id}
+                  />
+                </TableCell>
+                <TableCell>{s.type}</TableCell>
+                <TableCell className="font-mono text-[12.5px]">
+                  {s.server}
+                </TableCell>
+                <TableCell className="font-mono text-[12.5px] tabular-nums">
+                  {s.port}
+                </TableCell>
+                <TableCell>
+                  <Badge variant={s.disable ? "secondary" : "healthy"}>
+                    {s.disable ? "Disabled" : "Active"}
+                  </Badge>
+                </TableCell>
                 {canManage("cluster") && (
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableCell className="py-1 text-right">
+                    <Button
+                      aria-label={`Delete ${s.id}`}
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => {
+                        setPendingDelete(s);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
                 )}
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {serversQuery.data.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell className="font-medium">
-                    {s.id}
-                    <ClusterHistoryButton
-                      history={clusterHistories.metricServer(clusterId, s.id)}
-                      title={s.id}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{s.type}</Badge>
-                  </TableCell>
-                  <TableCell>{s.server}</TableCell>
-                  <TableCell>{s.port}</TableCell>
-                  <TableCell>
-                    <Badge variant={s.disable ? "secondary" : "default"}>
-                      {s.disable ? "Disabled" : "Active"}
-                    </Badge>
-                  </TableCell>
-                  {canManage("cluster") && (
-                    <TableCell className="text-right">
-                      <Button
-                        aria-label={`Delete ${s.id}`}
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setPendingDelete(s);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
+            ))}
+          </TableBody>
+        </Table>
+      )}
       {/*
         pve-manager PVE/API2/Cluster/MetricServer.pm "delete" drops the entry
         from status.cfg after the plugin's on_delete_hook, which for InfluxDB
@@ -228,6 +250,6 @@ export function ClusterMetricServersTab({
           } Its settings are gone, including any InfluxDB token Proxmox stored for it. Metrics already sent stay on ${s.server}. To undo, add the server again.`
         }
       />
-    </Card>
+    </Panel>
   );
 }

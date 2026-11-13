@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Table,
   TableBody,
@@ -9,6 +9,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Trash2, Pencil } from "lucide-react";
 import {
   useNetworkInterfaces,
@@ -32,6 +34,10 @@ interface NetworkInterfaceTableProps {
   clusterId: string;
 }
 
+/** The native node filter, sized to sit in a panel's title row. */
+const FILTER_CLASS =
+  "h-8 max-w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring";
+
 export function NetworkInterfaceTable({
   clusterId,
 }: NetworkInterfaceTableProps) {
@@ -39,14 +45,20 @@ export function NetworkInterfaceTable({
   const [selectedNode, setSelectedNode] = useState("");
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
+    return (
+      <Panel title="Interfaces" aside="Loading...">
+        <Skeleton className="h-24 w-full" />
+      </Panel>
+    );
   }
 
   if (!nodeInterfaces || nodeInterfaces.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No network interfaces found.
-      </p>
+      <Panel title="Interfaces">
+        <p className="text-sm text-muted-foreground">
+          No network interfaces found.
+        </p>
+      </Panel>
     );
   }
 
@@ -54,15 +66,25 @@ export function NetworkInterfaceTable({
   const filteredInterfaces = selectedNode
     ? nodeInterfaces.filter((ni) => ni.node === selectedNode)
     : nodeInterfaces;
+  const shownCount = filteredInterfaces.reduce(
+    (sum, ni) => sum + ni.interfaces.length,
+    0,
+  );
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Filter by node:</span>
+    <Panel
+      flush
+      title="Interfaces"
+      aside={
+        selectedNode
+          ? `${String(shownCount)} on ${selectedNode}`
+          : `${String(shownCount)} on ${String(nodes.length)} ${nodes.length === 1 ? "node" : "nodes"}. Pick a node to add an interface or apply its pending changes.`
+      }
+      actions={
+        <>
           <select
             aria-label="Filter by node"
-            className="rounded-md border bg-background px-3 py-1.5 text-sm"
+            className={FILTER_CLASS}
             value={selectedNode}
             onChange={(e) => {
               setSelectedNode(e.target.value);
@@ -75,8 +97,6 @@ export function NetworkInterfaceTable({
               </option>
             ))}
           </select>
-        </div>
-        <div className="flex items-center gap-2">
           {selectedNode && (
             <>
               <NetworkApplyRevertButtons
@@ -89,42 +109,62 @@ export function NetworkInterfaceTable({
               />
             </>
           )}
-        </div>
-      </div>
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Node</TableHead>
-              <TableHead>Interface</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>CIDR / Address</TableHead>
-              <TableHead>Gateway</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>VLAN aware</TableHead>
-              <TableHead>Ports / Slaves</TableHead>
-              <TableHead>Bond Mode</TableHead>
-              <TableHead>Comment</TableHead>
-              <TableHead className="w-24" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredInterfaces.flatMap((ni) =>
-              ni.interfaces.map((iface: NetworkInterface) => (
+        </>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Interface</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Address</TableHead>
+            <TableHead>Gateway</TableHead>
+            <TableHead>State</TableHead>
+            <TableHead>Ports</TableHead>
+            <TableHead>Comment</TableHead>
+            <TableHead className="w-0">
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filteredInterfaces.map((ni) => (
+            <Fragment key={ni.node}>
+              {/* One band per node: the node is the group, not a column
+                  repeated on every row. */}
+              <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.03]">
+                <TableCell colSpan={8} className="py-1.5">
+                  <span className="font-semibold">{ni.node}</span>
+                  <span className="ml-2 text-[12.5px] text-muted-foreground">
+                    {`${String(ni.interfaces.length)} ${ni.interfaces.length === 1 ? "interface" : "interfaces"}`}
+                  </span>
+                </TableCell>
+              </TableRow>
+              {ni.interfaces.map((iface: NetworkInterface) => (
                 <InterfaceRow
                   key={`${ni.node}-${iface.iface}`}
                   nodeName={ni.node}
                   iface={iface}
                   clusterId={clusterId}
                 />
-              )),
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+              ))}
+            </Fragment>
+          ))}
+        </TableBody>
+      </Table>
+    </Panel>
   );
+}
+
+/** What a bridge or bond adds to its ports: VLAN awareness, the bond mode. */
+function portsNote(iface: NetworkInterface): string {
+  const notes = [
+    ...(iface.type === "bridge" && iface.bridge_vlan_aware
+      ? ["VLAN aware"]
+      : []),
+    ...(iface.bond_mode ? [iface.bond_mode] : []),
+  ];
+  return notes.join(", ");
 }
 
 function InterfaceRow({
@@ -141,11 +181,11 @@ function InterfaceRow({
   const [pendingDelete, setPendingDelete] = useState<NetworkInterface | null>(
     null,
   );
+  const note = portsNote(iface);
 
   return (
     <TableRow>
-      <TableCell className="font-medium">{nodeName}</TableCell>
-      <TableCell className="font-mono text-sm">
+      <TableCell className="whitespace-nowrap pl-9 font-mono text-[12.5px] font-medium">
         {iface.iface}
         <ClusterHistoryButton
           history={clusterHistories.networkInterface(
@@ -156,38 +196,38 @@ function InterfaceRow({
           title={`${iface.iface} on ${nodeName}`}
         />
       </TableCell>
-      <TableCell>
-        <Badge variant="outline">{interfaceTypeLabel(iface.type)}</Badge>
+      <TableCell className="whitespace-nowrap">
+        {interfaceTypeLabel(iface.type)}
       </TableCell>
-      <TableCell className="font-mono text-sm">
+      <TableCell className="font-mono text-[12.5px]">
         {interfaceAddresses(iface)}
       </TableCell>
-      <TableCell className="font-mono text-sm">
+      <TableCell className="font-mono text-[12.5px]">
         {interfaceGateways(iface)}
       </TableCell>
       <TableCell>
-        <Badge variant={iface.active ? "default" : "secondary"}>
+        <Badge variant={iface.active ? "healthy" : "secondary"}>
           {iface.active ? "Active" : "Inactive"}
         </Badge>
       </TableCell>
-      <TableCell className="text-sm">
-        {iface.type === "bridge"
-          ? iface.bridge_vlan_aware
-            ? "Yes"
-            : "No"
-          : "--"}
-      </TableCell>
-      <TableCell className="font-mono text-sm">
-        {interfacePorts(iface)}
-      </TableCell>
-      <TableCell className="text-sm">{iface.bond_mode ?? "--"}</TableCell>
-      <TableCell className="text-sm">{iface.comments ?? "--"}</TableCell>
       <TableCell>
-        <div className="flex gap-1">
+        <span className="font-mono text-[12.5px]">{interfacePorts(iface)}</span>
+        {note !== "" && (
+          <span className="block text-[12.5px] text-muted-foreground">
+            {note}
+          </span>
+        )}
+      </TableCell>
+      <TableCell className="text-muted-foreground">
+        {iface.comments ?? "--"}
+      </TableCell>
+      <TableCell className="py-1">
+        <div className="flex justify-end gap-1">
           <Button
             aria-label={`Edit ${iface.iface} on ${nodeName}`}
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-muted-foreground"
             onClick={() => {
               setEditing(true);
             }}
@@ -198,12 +238,13 @@ function InterfaceRow({
             aria-label={`Delete ${iface.iface} on ${nodeName}`}
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-muted-foreground hover:text-destructive"
             onClick={() => {
               setPendingDelete(iface);
             }}
             disabled={deleteIface.isPending}
           >
-            <Trash2 className="h-4 w-4 text-destructive" />
+            <Trash2 className="h-4 w-4" />
           </Button>
         </div>
         {editing && (

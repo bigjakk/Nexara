@@ -37,7 +37,7 @@ export function PoolDeleteDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete Pool &quot;{poolName}&quot;?</DialogTitle>
+          <DialogTitle>Delete pool &quot;{poolName}&quot;?</DialogTitle>
           <DialogDescription>
             This will permanently delete the Ceph pool and all data stored in
             it. This action cannot be undone.
@@ -52,7 +52,7 @@ export function PoolDeleteDialog({
             onClick={handleDelete}
             disabled={deletePool.isPending}
           >
-            {deletePool.isPending ? "Deleting..." : "Delete Pool"}
+            {deletePool.isPending ? "Deleting..." : "Delete pool"}
           </Button>
         </DialogFooter>
       </DialogContent>

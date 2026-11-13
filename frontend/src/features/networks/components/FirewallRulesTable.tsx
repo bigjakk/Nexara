@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
 import { Trash2 } from "lucide-react";
 import {
   useClusterFirewallRules,
@@ -29,90 +30,99 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
   const deleteRule = useDeleteClusterFirewallRule(clusterId);
   const [pendingDelete, setPendingDelete] = useState<FirewallRule | null>(null);
 
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <CreateFirewallRuleDialog clusterId={clusterId} />
-      </div>
+  const disabled = (rules ?? []).filter((r) => !r.enable).length;
 
-      {!rules || rules.length === 0 ? (
-        <QueryStateNotice
-          query={rulesQuery}
-          subject="the cluster firewall rules"
-          empty="No firewall rules configured."
-        />
-      ) : (
-        <div className="rounded-md border">
+  return (
+    <>
+      <Panel
+        flush
+        title="Cluster rules"
+        aside={
+          !rules || rules.length === 0
+            ? undefined
+            : `${String(rules.length)} ${rules.length === 1 ? "rule" : "rules"}${disabled > 0 ? `, ${String(disabled)} disabled` : ""}`
+        }
+        actions={<CreateFirewallRuleDialog clusterId={clusterId} />}
+      >
+        {!rules || rules.length === 0 ? (
+          <div className="px-[18px] pb-1">
+            <QueryStateNotice
+              query={rulesQuery}
+              subject="the cluster firewall rules"
+              empty="No firewall rules configured."
+            />
+          </div>
+        ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-16">#</TableHead>
-                <TableHead>Type</TableHead>
+                <TableHead className="w-12">#</TableHead>
+                <TableHead>Direction</TableHead>
                 <TableHead>Action</TableHead>
                 <TableHead>Protocol</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead>Destination</TableHead>
-                <TableHead>D.Port</TableHead>
+                <TableHead>Port</TableHead>
                 <TableHead>Macro</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>State</TableHead>
                 <TableHead>Comment</TableHead>
-                <TableHead className="w-16" />
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rules.map((rule) => (
-                <TableRow key={rule.pos}>
-                  <TableCell>{rule.pos}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{rule.type}</Badge>
+                <TableRow
+                  key={rule.pos}
+                  className={rule.enable ? undefined : "text-muted-foreground"}
+                >
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {rule.pos}
                   </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        rule.action === "ACCEPT" ? "default" : "destructive"
-                      }
-                    >
-                      {rule.action}
-                    </Badge>
+                  <TableCell>{rule.type}</TableCell>
+                  <TableCell className="font-mono text-[12.5px] font-semibold">
+                    {rule.action}
                   </TableCell>
                   <TableCell>{rule.proto || "any"}</TableCell>
-                  <TableCell className="font-mono text-sm">
+                  <TableCell className="font-mono text-[12.5px]">
                     {rule.source || "any"}
                   </TableCell>
-                  <TableCell className="font-mono text-sm">
+                  <TableCell className="font-mono text-[12.5px]">
                     {rule.dest || "any"}
                   </TableCell>
-                  <TableCell className="font-mono text-sm">
+                  <TableCell className="font-mono text-[12.5px]">
                     {rule.dport || "-"}
                   </TableCell>
                   <TableCell>{rule.macro || "-"}</TableCell>
                   <TableCell>
-                    <Badge variant={rule.enable ? "default" : "secondary"}>
+                    <Badge variant={rule.enable ? "healthy" : "secondary"}>
                       {rule.enable ? "Enabled" : "Disabled"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
+                  <TableCell className="max-w-[200px] truncate text-muted-foreground">
                     {rule.comment || "-"}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-1 text-right">
                     <Button
                       aria-label={`Delete rule ${String(rule.pos)}`}
                       variant="ghost"
                       size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       onClick={() => {
                         setPendingDelete(rule);
                       }}
                       disabled={deleteRule.isPending}
                     >
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        </div>
-      )}
+        )}
+      </Panel>
 
       <ConfirmFirewallRuleDeleteDialog
         target={pendingDelete}
@@ -125,6 +135,6 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
         owner="the cluster"
         current={rules}
       />
-    </div>
+    </>
   );
 }

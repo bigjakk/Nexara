@@ -1,9 +1,8 @@
 import { Fragment, useState } from "react";
 import {
-  AlertTriangle,
   ChevronDown,
   ChevronRight,
-  KeyRound,
+  CircleAlert,
   Pencil,
   Plus,
   RefreshCw,
@@ -25,15 +24,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Panel } from "@/components/page/Panel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -142,12 +142,17 @@ function ErrorBanner({
   onDismiss: () => void;
 }) {
   return (
-    <div className="mb-3 flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
-      <div className="flex items-start gap-2">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-        <p className="text-sm text-destructive">{message}</p>
+    <div className="mb-3 flex items-start justify-between gap-2 rounded-[8px] bg-destructive/[0.08] px-3.5 py-2.5">
+      <div className="flex min-w-0 items-start gap-2.5">
+        <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+        <p className="min-w-0 text-sm [overflow-wrap:anywhere]">{message}</p>
       </div>
-      <Button variant="ghost" size="sm" onClick={onDismiss}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 shrink-0"
+        onClick={onDismiss}
+      >
         Dismiss
       </Button>
     </div>
@@ -250,11 +255,20 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
     });
   };
 
+  const users = usersQuery.data ?? [];
+  const disabledUsers = users.filter((u) => u.enable === false).length;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Proxmox Users</CardTitle>
-        {manageable && (
+    <Panel
+      flush
+      title="Users"
+      aside={
+        users.length === 0
+          ? undefined
+          : `${String(users.length)} ${users.length === 1 ? "user" : "users"}${disabledUsers > 0 ? `, ${String(disabledUsers)} disabled` : ""}. Open a user to see its API tokens.`
+      }
+      actions={
+        manageable ? (
           <Dialog
             open={createOpen}
             onOpenChange={(open) => {
@@ -264,7 +278,7 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
           >
             <DialogTrigger asChild>
               <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
+                <Plus className="h-4 w-4" />
                 Create User
               </Button>
             </DialogTrigger>
@@ -276,7 +290,7 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleCreate} className="space-y-4">
-                <div>
+                <div className="space-y-2">
                   <Label htmlFor="access-userid">User ID</Label>
                   <Input
                     id="access-userid"
@@ -291,7 +305,7 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                     Must be <code className="font-mono">name@realm</code>.
                   </p>
                 </div>
-                <div>
+                <div className="space-y-2">
                   <Label htmlFor="access-comment">Comment</Label>
                   <Input
                     id="access-comment"
@@ -301,7 +315,7 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                     }}
                   />
                 </div>
-                <div>
+                <div className="space-y-2">
                   <Label htmlFor="access-password">Password</Label>
                   <Input
                     id="access-password"
@@ -320,32 +334,38 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                 {createError && (
                   <p className="text-sm text-destructive">{createError}</p>
                 )}
-                <Button
-                  type="submit"
-                  disabled={!userid.trim() || createUser.isPending}
-                >
-                  {createUser.isPending ? "Creating..." : "Create"}
-                </Button>
+                <DialogFooter>
+                  <Button
+                    type="submit"
+                    disabled={!userid.trim() || createUser.isPending}
+                  >
+                    {createUser.isPending ? "Creating..." : "Create"}
+                  </Button>
+                </DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
-        )}
-      </CardHeader>
-
-      <CardContent>
+        ) : undefined
+      }
+    >
+      <>
         {sectionError && (
-          <ErrorBanner
-            message={sectionError}
-            onDismiss={() => {
-              setSectionError("");
-            }}
-          />
+          <div className="px-[18px]">
+            <ErrorBanner
+              message={sectionError}
+              onDismiss={() => {
+                setSectionError("");
+              }}
+            />
+          </div>
         )}
 
         {usersQuery.isLoading ? (
-          <Skeleton className="h-24 w-full" />
+          <div className="px-[18px] pb-1">
+            <Skeleton className="h-24 w-full" />
+          </div>
         ) : !usersQuery.data || usersQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="px-[18px] pb-1 text-sm text-muted-foreground">
             No Proxmox users found.
           </p>
         ) : (
@@ -354,11 +374,13 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
               <TableRow>
                 <TableHead className="w-8" />
                 <TableHead>User ID</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>State</TableHead>
                 <TableHead>Groups</TableHead>
                 <TableHead>Comment</TableHead>
                 {manageable && (
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="w-0">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 )}
               </TableRow>
             </TableHeader>
@@ -373,14 +395,14 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                         setExpanded(isOpen ? null : user.userid);
                       }}
                     >
-                      <TableCell>
+                      <TableCell className="text-muted-foreground">
                         {isOpen ? (
                           <ChevronDown className="h-4 w-4" />
                         ) : (
                           <ChevronRight className="h-4 w-4" />
                         )}
                       </TableCell>
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="font-mono text-[12.5px] font-medium">
                         {user.userid}
                         <ClusterHistoryButton
                           history={clusterHistories.accessUser(
@@ -393,7 +415,7 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                       <TableCell>
                         <Badge
                           variant={
-                            user.enable === false ? "secondary" : "default"
+                            user.enable === false ? "secondary" : "healthy"
                           }
                         >
                           {user.enable === false ? "Disabled" : "Enabled"}
@@ -406,10 +428,11 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                         {user.comment || "—"}
                       </TableCell>
                       {manageable && (
-                        <TableCell className="text-right">
+                        <TableCell className="whitespace-nowrap py-1 text-right">
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground"
                             aria-label={`Edit ${user.userid}`}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -420,21 +443,25 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
                             aria-label={`Delete ${user.userid}`}
                             onClick={(e) => {
                               e.stopPropagation();
                               setDeleteTarget(user);
                             }}
                           >
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </TableCell>
                       )}
                     </TableRow>
                     {isOpen && (
-                      <TableRow>
-                        <TableCell colSpan={columns} className="bg-muted/30">
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell
+                          colSpan={columns}
+                          className="bg-foreground/[0.03] py-3 pl-[3.25rem]"
+                        >
                           <UserTokens
                             clusterId={clusterId}
                             userid={user.userid}
@@ -531,8 +558,8 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
             }}
           />
         )}
-      </CardContent>
-    </Card>
+      </>
+    </Panel>
   );
 }
 
@@ -704,11 +731,8 @@ function UserTokens({
   };
 
   return (
-    <div className="space-y-3 py-1">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <KeyRound className="h-4 w-4" />
-        API Tokens
-      </div>
+    <div className="space-y-3">
+      <div className="text-sm font-semibold">API tokens</div>
 
       {tokensQuery.isLoading ? (
         <Skeleton className="h-12 w-full" />
@@ -720,25 +744,31 @@ function UserTokens({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Token</TableHead>
-              <TableHead>Privilege Separation</TableHead>
+              <TableHead className="pl-0">Token</TableHead>
+              <TableHead>Privileges</TableHead>
               <TableHead>Expires</TableHead>
               <TableHead>Comment</TableHead>
               {manageable && (
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-0 pr-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {tokensQuery.data.map((token) => (
               <TableRow key={token.tokenid}>
-                <TableCell className="font-mono text-xs">
+                <TableCell className="pl-0 font-mono text-[12.5px]">
                   {fullTokenId(token.tokenid)}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={token.privsep ? "default" : "destructive"}>
-                    {token.privsep ? "Separated" : "Full user privileges"}
-                  </Badge>
+                  {/* A token that carries all of its user's privileges is the
+                      one worth a second look; a separated one is the norm. */}
+                  {token.privsep ? (
+                    "Separated"
+                  ) : (
+                    <Badge variant="warning">Full user privileges</Badge>
+                  )}
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {expiryLabel(token.expire)}
@@ -747,10 +777,11 @@ function UserTokens({
                   {token.comment || "—"}
                 </TableCell>
                 {manageable && (
-                  <TableCell className="text-right">
+                  <TableCell className="whitespace-nowrap py-1 pr-0 text-right">
                     <Button
                       variant="ghost"
-                      size="sm"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground"
                       aria-label={`Regenerate ${token.tokenid}`}
                       onClick={() => {
                         setRegenTarget(token.tokenid);
@@ -760,13 +791,14 @@ function UserTokens({
                     </Button>
                     <Button
                       variant="ghost"
-                      size="sm"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       aria-label={`Revoke ${token.tokenid}`}
                       onClick={() => {
                         setRevokeTarget(token.tokenid);
                       }}
                     >
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
                 )}
@@ -821,6 +853,7 @@ function UserTokens({
           <Button
             type="submit"
             size="sm"
+            variant="outline"
             disabled={!tokenName.trim() || createToken.isPending}
           >
             {createToken.isPending ? "Creating..." : "Create Token"}
@@ -1087,7 +1120,7 @@ function EditUserDialog({
                 the details as last read.
               </p>
             )}
-            <div>
+            <div className="space-y-2">
               <Label htmlFor="edit-comment">Comment</Label>
               <Input
                 id="edit-comment"
@@ -1097,7 +1130,7 @@ function EditUserDialog({
                 }}
               />
             </div>
-            <div>
+            <div className="space-y-2">
               <Label htmlFor="edit-email">Email</Label>
               <Input
                 id="edit-email"
@@ -1125,14 +1158,14 @@ function EditUserDialog({
               </p>
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="flex justify-end gap-2">
+            <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancel
               </Button>
               <Button type="submit" disabled={!touched || updateUser.isPending}>
                 {updateUser.isPending ? "Saving..." : "Save"}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         ) : userQuery.isError ? (
           <div className="space-y-4">

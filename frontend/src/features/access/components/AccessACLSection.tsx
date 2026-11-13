@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +17,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -190,19 +190,19 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
     );
   };
 
+  const entryCount = aclQuery.data?.length ?? 0;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle>Permissions</CardTitle>
-          {!capabilities.loading && !capabilities.canModifyACL && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Read-only: Nexara&apos;s token lacks{" "}
-              <code className="font-mono">Permissions.Modify</code>.
-            </p>
-          )}
-        </div>
-        {manageable && (
+    <Panel
+      flush
+      title="Permissions"
+      aside={
+        entryCount === 0
+          ? undefined
+          : `${String(entryCount)} ${entryCount === 1 ? "entry" : "entries"}: a role held by a user, group or token on a path`
+      }
+      actions={
+        manageable ? (
           <Dialog
             open={grantOpen}
             onOpenChange={(open) => {
@@ -214,7 +214,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
           >
             <DialogTrigger asChild>
               <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
+                <Plus className="h-4 w-4" />
                 Grant Access
               </Button>
             </DialogTrigger>
@@ -226,7 +226,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleGrant} className="space-y-4">
-                <div>
+                <div className="space-y-2">
                   <Label htmlFor="acl-path">Path</Label>
                   <Input
                     id="acl-path"
@@ -245,7 +245,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                   </p>
                 </div>
 
-                <div>
+                <div className="space-y-2">
                   <Label htmlFor="acl-role">Role</Label>
                   <Select value={role} onValueChange={setRole}>
                     <SelectTrigger id="acl-role">
@@ -261,7 +261,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                   </Select>
                 </div>
 
-                <div>
+                <div className="space-y-2">
                   <Label htmlFor="acl-kind">Subject type</Label>
                   <Select
                     value={subjectKind}
@@ -281,7 +281,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                   </Select>
                 </div>
 
-                <div>
+                <div className="space-y-2">
                   <Label htmlFor="acl-subject">
                     {subjectKind === "user"
                       ? "User"
@@ -340,30 +340,41 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
                 {error && <p className="text-sm text-destructive">{error}</p>}
 
-                <Button
-                  type="submit"
-                  disabled={
-                    !path.trim() ||
-                    !role ||
-                    !subject.trim() ||
-                    updateACL.isPending
-                  }
-                >
-                  {updateACL.isPending ? "Granting..." : "Grant"}
-                </Button>
+                <DialogFooter>
+                  <Button
+                    type="submit"
+                    disabled={
+                      !path.trim() ||
+                      !role ||
+                      !subject.trim() ||
+                      updateACL.isPending
+                    }
+                  >
+                    {updateACL.isPending ? "Granting..." : "Grant"}
+                  </Button>
+                </DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
+        ) : undefined
+      }
+    >
+      <>
+        {!capabilities.loading && !capabilities.canModifyACL && (
+          <p className="max-w-[75ch] px-[18px] pb-3 text-[12.5px] text-muted-foreground">
+            Read-only: Nexara&apos;s token lacks{" "}
+            <code className="font-mono">Permissions.Modify</code>.
+          </p>
         )}
-      </CardHeader>
-
-      <CardContent>
         {revokeError && (
-          <div className="mb-3 flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
-            <p className="text-sm text-destructive">{revokeError}</p>
+          <div className="mx-[18px] mb-3 flex items-start justify-between gap-2 rounded-[8px] bg-destructive/[0.08] px-3.5 py-2.5">
+            <p className="min-w-0 text-sm [overflow-wrap:anywhere]">
+              {revokeError}
+            </p>
             <Button
               variant="ghost"
               size="sm"
+              className="h-7 shrink-0"
               onClick={() => {
                 setRevokeError("");
               }}
@@ -374,9 +385,11 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
         )}
 
         {aclQuery.isLoading ? (
-          <Skeleton className="h-24 w-full" />
+          <div className="px-[18px] pb-1">
+            <Skeleton className="h-24 w-full" />
+          </div>
         ) : !aclQuery.data || aclQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="px-[18px] pb-1 text-sm text-muted-foreground">
             No access control entries.
           </p>
         ) : (
@@ -389,20 +402,22 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                 <TableHead>Role</TableHead>
                 <TableHead>Propagate</TableHead>
                 {manageable && (
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="w-0">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {aclQuery.data.map((entry) => (
                 <TableRow key={entryKey(entry)}>
-                  <TableCell className="font-mono text-xs">
+                  <TableCell className="font-mono text-[12.5px] font-medium">
                     {entry.path}
                   </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{entry.type}</Badge>
+                  <TableCell className="text-muted-foreground">
+                    {entry.type}
                   </TableCell>
-                  <TableCell className="font-mono text-xs">
+                  <TableCell className="font-mono text-[12.5px]">
                     {entry.ugid}
                   </TableCell>
                   <TableCell>{entry.roleid}</TableCell>
@@ -410,16 +425,17 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                     {entry.propagate ? "Yes" : "No"}
                   </TableCell>
                   {manageable && (
-                    <TableCell className="text-right">
+                    <TableCell className="py-1 text-right">
                       <Button
                         variant="ghost"
-                        size="sm"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
                         aria-label={`Revoke ${entry.roleid} on ${entry.path}`}
                         onClick={() => {
                           setRevokeTarget(entry);
                         }}
                       >
-                        <Trash2 className="h-4 w-4 text-destructive" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   )}
@@ -464,7 +480,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </CardContent>
-    </Card>
+      </>
+    </Panel>
   );
 }

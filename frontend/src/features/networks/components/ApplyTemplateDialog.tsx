@@ -3,12 +3,12 @@ import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { WarningCallout } from "@/components/WarningCallout";
 import { Play } from "lucide-react";
 import { useApplyFirewallTemplate } from "../api/network-queries";
@@ -64,6 +64,7 @@ export function ApplyTemplateDialog({
           aria-label={`Apply template ${template.name}`}
           variant="ghost"
           size="icon"
+          className="h-8 w-8"
           disabled={clusterId.length === 0}
         >
           <Play className="h-4 w-4" />
@@ -71,7 +72,7 @@ export function ApplyTemplateDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Apply Template: {template.name}</DialogTitle>
+          <DialogTitle>Apply template {template.name}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
@@ -92,40 +93,45 @@ export function ApplyTemplateDialog({
             </WarningCallout>
           )}
 
-          <div className="space-y-2">
+          <ol className="divide-y text-sm">
             {template.rules.map((rule, i) => (
-              <div key={i} className="flex items-center gap-2 text-sm">
-                <Badge variant="outline">{rule.type}</Badge>
-                <Badge
-                  variant={rule.action === "ACCEPT" ? "default" : "destructive"}
-                >
+              <li
+                key={i}
+                className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5"
+              >
+                <span className="w-10 text-muted-foreground">{rule.type}</span>
+                <span className="w-16 font-mono text-[12.5px] font-semibold">
                   {rule.action}
-                </Badge>
-                <span>{rule.proto || "any"}</span>
-                {rule.dport && <span className="font-mono">:{rule.dport}</span>}
+                </span>
+                <span>
+                  {rule.proto || "any"}
+                  {rule.dport && (
+                    <span className="font-mono">:{rule.dport}</span>
+                  )}
+                </span>
                 {rule.comment && (
                   <span className="text-muted-foreground">
                     ({rule.comment})
                   </span>
                 )}
-              </div>
+              </li>
             ))}
-          </div>
+          </ol>
 
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleApply} disabled={apply.isPending}>
-              Apply to Cluster
-            </Button>
-          </div>
         </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button onClick={handleApply} disabled={apply.isPending}>
+            Apply to Cluster
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

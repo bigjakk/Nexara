@@ -1,114 +1,156 @@
-import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { UsageBar } from "@/components/UsageBar";
 import { Trash2 } from "lucide-react";
 import { PoolDeleteDialog } from "./PoolDeleteDialog";
 import type { CephPool } from "../types/ceph";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatBytesPerSecond, formatPercent } from "@/lib/format";
 import { unaddressableHint } from "@/lib/api-path";
+import { USAGE_TEXT_CLASS, usageLevel } from "@/lib/usage-level";
+import { cn } from "@/lib/utils";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 
 interface PoolTableProps {
   pools: CephPool[];
   clusterId: string;
+  /** Controls for the panel's title row: the Create pool button. */
+  actions?: ReactNode;
 }
 
-export function PoolTable({ pools, clusterId }: PoolTableProps) {
+export function PoolTable({ pools, clusterId, actions }: PoolTableProps) {
   const [deletePool, setDeletePool] = useState<string | null>(null);
 
   return (
     <>
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="px-4 py-2 text-left font-medium">Name</th>
-              <th className="px-4 py-2 text-right font-medium">Size</th>
-              <th className="px-4 py-2 text-right font-medium">PGs</th>
-              <th className="px-4 py-2 text-right font-medium">Used</th>
-              <th className="px-4 py-2 text-right font-medium">% Used</th>
-              <th className="px-4 py-2 text-right font-medium">IOPS (R/W)</th>
-              <th className="px-4 py-2 text-right font-medium">
-                Throughput (R/W)
-              </th>
-              <th className="px-4 py-2 text-center font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pools.map((pool) => (
-              <tr key={pool.pool} className="border-b last:border-0">
-                <td className="px-4 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{pool.pool_name}</span>
-                    <ClusterHistoryButton
-                      history={clusterHistories.cephPool(
-                        clusterId,
-                        pool.pool_name,
+      <Panel
+        flush
+        title="Pools"
+        aside={
+          pools.length === 0
+            ? undefined
+            : pools.length === 1
+              ? "1 pool"
+              : `${String(pools.length)} pools`
+        }
+        actions={actions}
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead className="text-right">Replicas</TableHead>
+              <TableHead className="text-right">PGs</TableHead>
+              <TableHead className="text-right">Used</TableHead>
+              <TableHead>% used</TableHead>
+              <TableHead className="text-right">IOPS, read / write</TableHead>
+              <TableHead className="text-right">
+                Throughput, read / write
+              </TableHead>
+              <TableHead className="w-0">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pools.map((pool) => {
+              const percent = pool.percent_used * 100;
+              return (
+                <TableRow key={pool.pool}>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{pool.pool_name}</span>
+                      <ClusterHistoryButton
+                        history={clusterHistories.cephPool(
+                          clusterId,
+                          pool.pool_name,
+                        )}
+                        title={pool.pool_name}
+                      />
+                      {pool.pg_autoscale_mode === "on" && (
+                        <span className="text-[12.5px] text-muted-foreground">
+                          autoscale
+                        </span>
                       )}
-                      title={pool.pool_name}
-                    />
-                    {pool.pg_autoscale_mode === "on" && (
-                      <Badge variant="outline" className="text-[10px]">
-                        autoscale
-                      </Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {pool.size}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {pool.pg_num}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
+                    {formatBytes(pool.bytes_used)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <UsageBar percent={percent} className="w-16 shrink-0" />
+                      <span
+                        className={cn(
+                          "text-[12.5px] tabular-nums text-muted-foreground",
+                          USAGE_TEXT_CLASS[usageLevel(percent)],
+                        )}
+                      >
+                        {formatPercent(percent)}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
+                    {pool.read_op_per_sec} / {pool.write_op_per_sec}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
+                    {formatBytesPerSecond(pool.read_bytes_sec)} /{" "}
+                    {formatBytesPerSecond(pool.write_bytes_sec)}
+                  </TableCell>
+                  <TableCell className="py-1 text-right">
+                    {/* Ceph and Proxmox both admit a pool named "." or "..";
+                        Nexara cannot address one (lib/api-path.ts), so the
+                        row shows why in place of the delete — as text, since a
+                        disabled button's title never shows. */}
+                    {unaddressableHint(pool.pool_name) !== null ? (
+                      <span className="text-xs text-muted-foreground">
+                        {unaddressableHint(pool.pool_name)}
+                      </span>
+                    ) : (
+                      <Button
+                        aria-label={`Delete pool ${pool.pool_name}`}
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          setDeletePool(pool.pool_name);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     )}
-                  </div>
-                </td>
-                <td className="px-4 py-2 text-right font-mono">{pool.size}</td>
-                <td className="px-4 py-2 text-right font-mono">
-                  {pool.pg_num}
-                </td>
-                <td className="px-4 py-2 text-right font-mono">
-                  {formatBytes(pool.bytes_used)}
-                </td>
-                <td className="px-4 py-2 text-right font-mono">
-                  {(pool.percent_used * 100).toFixed(1)}%
-                </td>
-                <td className="px-4 py-2 text-right font-mono">
-                  {pool.read_op_per_sec} / {pool.write_op_per_sec}
-                </td>
-                <td className="px-4 py-2 text-right font-mono">
-                  {formatBytes(pool.read_bytes_sec)}/s /{" "}
-                  {formatBytes(pool.write_bytes_sec)}/s
-                </td>
-                <td className="px-4 py-2 text-center">
-                  {/* Ceph and Proxmox both admit a pool named "." or "..";
-                      Nexara cannot address one (lib/api-path.ts), so the
-                      row shows why in place of the delete — as text, since a
-                      disabled button's title never shows. */}
-                  {unaddressableHint(pool.pool_name) !== null ? (
-                    <span className="text-xs text-muted-foreground">
-                      {unaddressableHint(pool.pool_name)}
-                    </span>
-                  ) : (
-                    <Button
-                      aria-label={`Delete pool ${pool.pool_name}`}
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setDeletePool(pool.pool_name);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            ))}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
             {pools.length === 0 && (
-              <tr>
-                <td
+              <TableRow className="hover:bg-transparent">
+                <TableCell
                   colSpan={8}
-                  className="px-4 py-8 text-center text-muted-foreground"
+                  className="py-8 text-center text-muted-foreground"
                 >
                   No pools found.
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Panel>
 
       {deletePool !== null && (
         <PoolDeleteDialog

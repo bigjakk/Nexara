@@ -93,53 +93,28 @@ vi.mock("@/components/ui/select", async () => {
 });
 
 vi.mock("@/components/ui/tabs", async () => {
-  const { createContext, createElement, useContext, useState } =
-    await import("react");
+  const { createContext, createElement, useContext } = await import("react");
   type Slot = { children?: ReactNode };
-  const Selected = createContext<{
-    value: string;
-    select: (value: string) => void;
-  }>({ value: "", select: () => undefined });
+  const Selected = createContext("");
   return {
-    Tabs: function Tabs({
-      defaultValue,
-      children,
-    }: Slot & { defaultValue: string }) {
-      const [value, select] = useState(defaultValue);
+    Tabs: function Tabs({ value, children }: Slot & { value: string }) {
       return createElement(
         Selected.Provider,
-        { value: { value, select } },
+        { value },
         createElement("div", null, children),
-      );
-    },
-    TabsList: ({ children }: Slot) =>
-      createElement("div", { role: "tablist" }, children),
-    TabsTrigger: function TabsTrigger({
-      value,
-      children,
-    }: Slot & { value: string }) {
-      const tabs = useContext(Selected);
-      return createElement(
-        "button",
-        {
-          role: "tab",
-          "aria-selected": tabs.value === value,
-          onClick: () => {
-            tabs.select(value);
-          },
-        },
-        children,
       );
     },
     TabsContent: function TabsContent({
       value,
       children,
     }: Slot & { value: string }) {
-      const tabs = useContext(Selected);
-      return tabs.value === value
+      return useContext(Selected) === value
         ? createElement("div", { role: "tabpanel" }, children)
         : null;
     },
+    // Imported by the History tab's module, never rendered by this tab.
+    TabsList: () => null,
+    TabsTrigger: () => null,
   };
 });
 
@@ -277,7 +252,7 @@ describe("a save that settles in the gap after the commit that removed its tab",
       />,
     );
 
-    await user.click(screen.getByRole("tab", { name: "Node Certificates" }));
+    await user.click(screen.getByRole("button", { name: "Node certificates" }));
     await user.click(await screen.findByRole("button", { name: "Edit" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(

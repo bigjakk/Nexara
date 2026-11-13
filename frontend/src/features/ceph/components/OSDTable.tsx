@@ -1,6 +1,14 @@
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,7 +27,9 @@ import {
 import { usePermissions } from "@/hooks/usePermissions";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
+import { cn } from "@/lib/utils";
 import { OSDActionDialog } from "./OSDActionDialog";
+import { OSDGrid } from "./OSDGrid";
 import type { CephOSD, CephOSDAction } from "../types/ceph";
 
 interface OSDTableProps {
@@ -37,73 +47,97 @@ export function OSDTable({ osds, clusterId }: OSDTableProps) {
   const canManageCeph = canManage("ceph");
   const sorted = [...osds].sort((a, b) => a.id - b.id);
   const columnCount = canManageCeph ? 6 : 5;
+  const upCount = sorted.filter((o) => o.up === 1).length;
+  const inCount = sorted.filter((o) => o.in === 1).length;
+  const downCount = sorted.length - upCount;
+  const outCount = sorted.length - inCount;
 
   return (
     <>
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="px-4 py-2 text-left font-medium">ID</th>
-              <th className="px-4 py-2 text-left font-medium">Name</th>
-              <th className="px-4 py-2 text-left font-medium">Host</th>
-              <th className="px-4 py-2 text-left font-medium">Status</th>
-              <th className="px-4 py-2 text-right font-medium">CRUSH Weight</th>
-              {canManageCeph && (
-                <th className="px-4 py-2 text-center font-medium">Actions</th>
+      <Panel
+        flush
+        title="OSDs"
+        aside={
+          sorted.length === 0 ? undefined : (
+            <>
+              {`${String(upCount)} of ${String(sorted.length)} up, ${String(inCount)} in`}
+              {downCount > 0 && (
+                <span className="ml-2 font-semibold text-red-700 dark:text-red-400">
+                  {`${String(downCount)} down`}
+                </span>
               )}
-            </tr>
-          </thead>
-          <tbody>
+              {outCount > 0 && (
+                <span className="ml-2 font-semibold text-amber-700 dark:text-amber-400">
+                  {`${String(outCount)} out`}
+                </span>
+              )}
+            </>
+          )
+        }
+      >
+        {sorted.length > 0 && (
+          <div className="px-[18px] pb-4">
+            <OSDGrid osds={sorted} />
+          </div>
+        )}
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>ID</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Host</TableHead>
+              <TableHead>State</TableHead>
+              <TableHead className="text-right">CRUSH weight</TableHead>
+              {canManageCeph && (
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {sorted.map((osd) => (
-              <tr key={osd.id} className="border-b last:border-0">
-                <td className="px-4 py-2 font-mono">
+              <TableRow key={osd.id}>
+                <TableCell className="font-mono tabular-nums">
                   {osd.id}
                   <ClusterHistoryButton
                     history={clusterHistories.cephOsd(clusterId, osd.id)}
                     title={osd.name || `osd.${String(osd.id)}`}
                   />
-                </td>
-                <td className="px-4 py-2">{osd.name}</td>
-                <td className="px-4 py-2">{osd.host}</td>
-                <td className="px-4 py-2">
-                  <div className="flex gap-1">
-                    <Badge variant={osd.up === 1 ? "default" : "destructive"}>
-                      {osd.up === 1 ? "Up" : "Down"}
-                    </Badge>
-                    <Badge variant={osd.in === 1 ? "default" : "secondary"}>
-                      {osd.in === 1 ? "In" : "Out"}
-                    </Badge>
-                  </div>
-                </td>
-                <td className="px-4 py-2 text-right font-mono">
+                </TableCell>
+                <TableCell className="font-medium">{osd.name}</TableCell>
+                <TableCell>{osd.host}</TableCell>
+                <TableCell>
+                  <OSDState osd={osd} />
+                </TableCell>
+                <TableCell className="text-right font-mono tabular-nums">
                   {osd.crush_weight.toFixed(4)}
-                </td>
+                </TableCell>
                 {canManageCeph && (
-                  <td className="px-4 py-2 text-center">
+                  <TableCell className="py-1 text-right">
                     <OSDActionsMenu
                       osd={osd}
                       onSelect={(action) => {
                         setPending({ osd, action });
                       }}
                     />
-                  </td>
+                  </TableCell>
                 )}
-              </tr>
+              </TableRow>
             ))}
             {sorted.length === 0 && (
-              <tr>
-                <td
+              <TableRow className="hover:bg-transparent">
+                <TableCell
                   colSpan={columnCount}
-                  className="px-4 py-8 text-center text-muted-foreground"
+                  className="py-8 text-center text-muted-foreground"
                 >
                   No OSDs found.
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Panel>
 
       <OSDActionDialog
         clusterId={clusterId}
@@ -114,6 +148,31 @@ export function OSDTable({ osds, clusterId }: OSDTableProps) {
         }}
       />
     </>
+  );
+}
+
+/** Up and in is the quiet state; down is red and out is amber. */
+function OSDState({ osd }: { osd: CephOSD }) {
+  const isUp = osd.up === 1;
+  const isIn = osd.in === 1;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 whitespace-nowrap",
+        !isUp
+          ? "font-semibold text-red-700 dark:text-red-400"
+          : !isIn && "font-semibold text-amber-700 dark:text-amber-400",
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "h-2 w-2 shrink-0 rounded-full",
+          !isUp ? "bg-red-500" : !isIn ? "bg-amber-500" : "bg-emerald-500",
+        )}
+      />
+      {`${isUp ? "Up" : "Down"}, ${isIn ? "in" : "out"}`}
+    </span>
   );
 }
 
@@ -145,7 +204,7 @@ function OSDActionsMenu({
             }}
           >
             <LogOut className="mr-2 h-4 w-4" />
-            Mark Out
+            Mark out
           </DropdownMenuItem>
         ) : (
           <DropdownMenuItem
@@ -154,7 +213,7 @@ function OSDActionsMenu({
             }}
           >
             <LogIn className="mr-2 h-4 w-4" />
-            Mark In
+            Mark in
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
@@ -165,7 +224,7 @@ function OSDActionsMenu({
             }}
           >
             <Square className="mr-2 h-4 w-4" />
-            Stop Daemon
+            Stop daemon
           </DropdownMenuItem>
         ) : (
           <DropdownMenuItem
@@ -174,7 +233,7 @@ function OSDActionsMenu({
             }}
           >
             <Play className="mr-2 h-4 w-4" />
-            Start Daemon
+            Start daemon
           </DropdownMenuItem>
         )}
         <DropdownMenuItem
@@ -183,7 +242,7 @@ function OSDActionsMenu({
           }}
         >
           <RotateCw className="mr-2 h-4 w-4" />
-          Restart Daemon
+          Restart daemon
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

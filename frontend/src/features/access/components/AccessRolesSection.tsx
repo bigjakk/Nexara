@@ -1,9 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { Lock, Plus, Trash2 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +17,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -185,38 +185,49 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
     );
   };
 
+  const roleCount = rolesQuery.data?.length ?? 0;
+  const builtInCount = (rolesQuery.data ?? []).filter((r) => r.special).length;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle>Roles</CardTitle>
-          {!capabilities.loading && !capabilities.canModifyRoles && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Read-only: Nexara&apos;s token lacks{" "}
-              <code className="font-mono">Sys.Modify</code> on{" "}
-              <code className="font-mono">/access</code>, which Proxmox requires
-              to manage roles.
-            </p>
-          )}
-        </div>
-        {manageable && (
+    <Panel
+      flush
+      title="Roles"
+      aside={
+        roleCount === 0
+          ? undefined
+          : `${String(roleCount)} ${roleCount === 1 ? "role" : "roles"}, ${String(builtInCount)} built in`
+      }
+      actions={
+        manageable ? (
           <Button
             size="sm"
             onClick={() => {
               openEditor({ roleid: "", privs: [], isNew: true });
             }}
           >
-            <Plus className="mr-2 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             Create Role
           </Button>
+        ) : undefined
+      }
+    >
+      <>
+        {!capabilities.loading && !capabilities.canModifyRoles && (
+          <p className="max-w-[75ch] px-[18px] pb-3 text-[12.5px] text-muted-foreground">
+            Read-only: Nexara&apos;s token lacks{" "}
+            <code className="font-mono">Sys.Modify</code> on{" "}
+            <code className="font-mono">/access</code>, which Proxmox requires
+            to manage roles.
+          </p>
         )}
-      </CardHeader>
-
-      <CardContent>
         {rolesQuery.isLoading ? (
-          <Skeleton className="h-24 w-full" />
+          <div className="px-[18px] pb-1">
+            <Skeleton className="h-24 w-full" />
+          </div>
         ) : !rolesQuery.data || rolesQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No roles found.</p>
+          <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+            No roles found.
+          </p>
         ) : (
           <Table>
             <TableHeader>
@@ -224,7 +235,9 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                 <TableHead>Role</TableHead>
                 <TableHead>Privileges</TableHead>
                 {manageable && (
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="w-0">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 )}
               </TableRow>
             </TableHeader>
@@ -246,18 +259,18 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                           title={role.roleid}
                         />
                         {role.special && (
-                          <Badge variant="secondary" className="gap-1">
+                          <span className="flex items-center gap-1 whitespace-nowrap text-[12.5px] font-normal text-muted-foreground">
                             <Lock className="h-3 w-3" />
-                            Built-in
-                          </Badge>
+                            Built in
+                          </span>
                         )}
                       </span>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
                       {count} {count === 1 ? "privilege" : "privileges"}
                     </TableCell>
                     {manageable && (
-                      <TableCell className="text-right">
+                      <TableCell className="whitespace-nowrap py-1 text-right">
                         {/* Built-in roles are immutable in Proxmox — offering
                             the controls would only produce a confusing 403.
                             Proxmox also admits a role named "." or "..",
@@ -290,13 +303,14 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                             </Button>
                             <Button
                               variant="ghost"
-                              size="sm"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
                               aria-label={`Delete ${role.roleid}`}
                               onClick={() => {
                                 setDeleteTarget(role.roleid);
                               }}
                             >
-                              <Trash2 className="h-4 w-4 text-destructive" />
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </>
                         )}
@@ -332,7 +346,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
 
               <div className="space-y-4">
                 {editing.isNew && (
-                  <div>
+                  <div className="space-y-2">
                     <Label htmlFor="role-id">Role ID</Label>
                     <Input
                       id="role-id"
@@ -345,13 +359,13 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                   </div>
                 )}
 
-                <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+                <div className="max-h-80 space-y-3.5 overflow-y-auto pr-1">
                   {Object.entries(catalogue).map(([category, privs]) => (
                     <div key={category}>
-                      <p className="mb-1 text-xs font-semibold text-muted-foreground">
+                      <p className="mb-1.5 text-[12.5px] font-semibold">
                         {category}
                       </p>
-                      <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+                      <div className="grid grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))] gap-x-3 gap-y-1.5">
                         {privs.map((priv) => (
                           <label
                             key={priv}
@@ -389,31 +403,30 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                 </p>
 
                 {error && <p className="text-sm text-destructive">{error}</p>}
-
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setEditing(null);
-                      setError("");
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleSave}
-                    disabled={
-                      (editing.isNew && !editing.roleid.trim()) ||
-                      createRole.isPending ||
-                      updateRole.isPending
-                    }
-                  >
-                    {createRole.isPending || updateRole.isPending
-                      ? "Saving..."
-                      : "Save"}
-                  </Button>
-                </div>
               </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditing(null);
+                    setError("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  disabled={
+                    (editing.isNew && !editing.roleid.trim()) ||
+                    createRole.isPending ||
+                    updateRole.isPending
+                  }
+                >
+                  {createRole.isPending || updateRole.isPending
+                    ? "Saving..."
+                    : "Save"}
+                </Button>
+              </DialogFooter>
             </DialogContent>
           </Dialog>
         )}
@@ -460,7 +473,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </CardContent>
-    </Card>
+      </>
+    </Panel>
   );
 }

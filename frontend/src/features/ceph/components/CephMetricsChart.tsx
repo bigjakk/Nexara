@@ -8,12 +8,17 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
+import { Panel } from "@/components/page/Panel";
+import { Stat, StatStrip } from "@/components/page/StatStrip";
+import { Segmented } from "@/components/ui/segmented";
+import {
+  getTimestampFormatter,
+  timeAxisProps,
+} from "@/features/dashboard/components/time-axis";
+import { DATA_COLOR } from "@/lib/chart-colors";
 import { useCephMetrics } from "../api/ceph-queries";
 import type { CephStatus } from "../types/ceph";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatBytesPerSecond, formatPercent } from "@/lib/format";
 
 interface CephMetricsChartProps {
   clusterId: string;
@@ -29,28 +34,24 @@ const TIMEFRAMES = [
 
 type Timeframe = (typeof TIMEFRAMES)[number]["value"];
 
-// Built once. Constructing an Intl formatter dwarfs the cost of using one, and
-// an axis formatter is called per tick.
-const CLOCK_FMT = new Intl.DateTimeFormat([], {
-  hour: "2-digit",
-  minute: "2-digit",
-});
-const DAY_FMT = new Intl.DateTimeFormat([], {
-  month: "short",
-  day: "numeric",
-});
+/** Which measure the large chart under the strip is drawing. */
+type Focus = "iops" | "throughput" | "capacity" | "osds";
 
-// Both branches are module-level constants, so the tickFormatter prop keeps a
-// stable identity across renders instead of handing Recharts a fresh closure
-// every time.
-const formatAxisClock = (ts: number): string => CLOCK_FMT.format(ts);
-const formatAxisDay = (ts: number): string => DAY_FMT.format(ts);
-
-// A clock reading repeated across seven days names no point in particular, so
-// the week view labels by date.
-function axisFormatter(timeframe: Timeframe) {
-  return timeframe === "7d" ? formatAxisDay : formatAxisClock;
+interface ChartPoint {
+  timestamp: number;
+  readOps: number;
+  writeOps: number;
+  readBytes: number;
+  writeBytes: number;
+  usedPct: number;
+  osdsUp: number;
+  osdsTotal: number;
 }
+
+type SeriesKey = Exclude<keyof ChartPoint, "timestamp">;
+
+/** How many of the newest points a strip's sparkline draws. */
+const TREND_POINTS = 60;
 
 function formatOps(ops: number): string {
   if (ops >= 1000000) return `${(ops / 1000000).toFixed(1)}M`;
@@ -58,167 +59,144 @@ function formatOps(ops: number): string {
   return String(Math.round(ops));
 }
 
-interface MiniChartProps {
-  title: string;
-  data: Array<Record<string, unknown>>;
-  dataKey: string;
-  color: string;
-  formatter: (v: number) => string;
-  timeframe: Timeframe;
-  secondaryDataKey?: string;
-  secondaryColor?: string;
-  secondaryName?: string;
-  primaryName?: string;
+function formatCount(v: number): string {
+  return String(Math.round(v));
 }
 
-function MiniChart({
+interface SeriesChartProps {
+  title: string;
+  data: ChartPoint[];
+  dataKey: SeriesKey;
+  formatter: (v: number) => string;
+  timeframe: Timeframe;
+  /** The axis ceiling, where the series has one: 100 for a percentage. */
+  max?: number | undefined;
+  /** A count: whole-number ticks, so a small range is not "0, 0, 1, 1". */
+  whole?: boolean | undefined;
+}
+
+/** One measured series over time, in the data colour. */
+function SeriesChart({
   title,
   data,
   dataKey,
-  color,
   formatter,
   timeframe,
-  secondaryDataKey,
-  secondaryColor,
-  secondaryName,
-  primaryName,
-}: MiniChartProps) {
-  if (data.length === 0) {
-    return (
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-            Waiting for data...
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  max,
+  whole = false,
+}: SeriesChartProps) {
+  const last = data[data.length - 1]?.[dataKey];
+  const labelFormatter = getTimestampFormatter(timeframe);
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={data}>
-            <defs>
-              <linearGradient
-                id={`ceph-grad-${dataKey}`}
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                <stop offset="95%" stopColor={color} stopOpacity={0} />
-              </linearGradient>
-              {secondaryDataKey && secondaryColor && (
+    <div className="flex h-64 min-w-0 flex-col">
+      <div className="flex items-center gap-2 pb-2">
+        <span
+          aria-hidden="true"
+          className="h-2 w-2 shrink-0 rounded-full bg-data"
+        />
+        <h3 className="truncate text-xs font-medium text-muted-foreground">
+          {title}
+        </h3>
+        {last !== undefined && (
+          <span className="ml-auto shrink-0 text-base font-semibold tabular-nums tracking-tight">
+            {formatter(last)}
+          </span>
+        )}
+      </div>
+      {data.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          Waiting for data...
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart
+              data={data}
+              margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+            >
+              <defs>
                 <linearGradient
-                  id={`ceph-grad-${secondaryDataKey}`}
+                  id={`ceph-grad-${dataKey}`}
                   x1="0"
                   y1="0"
                   x2="0"
                   y2="1"
                 >
-                  <stop
-                    offset="5%"
-                    stopColor={secondaryColor}
-                    stopOpacity={0.3}
-                  />
-                  <stop
-                    offset="95%"
-                    stopColor={secondaryColor}
-                    stopOpacity={0}
-                  />
+                  <stop offset="5%" stopColor={DATA_COLOR} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={DATA_COLOR} stopOpacity={0} />
                 </linearGradient>
-              )}
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-            {/* A time axis, not the default category axis. This is a
-                correctness change, not the performance fix — server-side
-                bucketing is what stopped this page freezing, and a number axis
-                on a horizontal chart still maps one tick candidate per datum
-                (combineCategoricalDomain in recharts' axisSelectors). What it
-                buys: a category axis spaces points evenly whatever time they
-                stand for, so a gap in collection — and bucketing emits no row
-                for an empty bucket — collapsed to nothing instead of showing
-                as one. minTickGap is the part that cuts work and clutter: it
-                thins the labels actually drawn, and the same tick list drives
-                CartesianGrid's vertical lines. */}
-            <XAxis
-              dataKey="timestamp"
-              type="number"
-              scale="time"
-              domain={["dataMin", "dataMax"]}
-              tickFormatter={axisFormatter(timeframe)}
-              minTickGap={48}
-              tick={{ fontSize: 10 }}
-            />
-            <YAxis
-              tickFormatter={formatter}
-              tick={{ fontSize: 10 }}
-              width={60}
-            />
-            {/* Number(), not String(), in labelFormatter: the X dataKey is
-                epoch milliseconds now, and new Date("1757116800000") is an
-                Invalid Date. */}
-            <Tooltip
-              labelFormatter={(label: unknown) =>
-                new Date(Number(label)).toLocaleString()
-              }
-              formatter={(value: unknown, name: unknown) => [
-                value != null ? formatter(Number(value)) : "0",
-                typeof name === "string" ? name : "",
-              ]}
-              contentStyle={{
-                backgroundColor: "hsl(var(--popover))",
-                border: "1px solid hsl(var(--border))",
-                borderRadius: "6px",
-                fontSize: "12px",
-              }}
-            />
-            <Area
-              type="monotone"
-              dataKey={dataKey}
-              name={primaryName ?? dataKey}
-              stroke={color}
-              fill={`url(#ceph-grad-${dataKey})`}
-              strokeWidth={2}
-              isAnimationActive={false}
-            />
-            {secondaryDataKey && secondaryColor && (
+              </defs>
+              <CartesianGrid
+                strokeDasharray="3 4"
+                className="stroke-border"
+                vertical={false}
+              />
+              {/* A time axis, not the default category axis: a category axis
+                  spaces points evenly whatever time they stand for, so a gap
+                  in collection (bucketing emits no row for an empty bucket)
+                  collapsed to nothing instead of showing as one. */}
+              <XAxis {...timeAxisProps(timeframe)} />
+              <YAxis
+                tickFormatter={formatter}
+                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                axisLine={false}
+                tickLine={false}
+                width={60}
+                {...(max === undefined ? {} : { domain: [0, max] })}
+                allowDecimals={!whole}
+              />
+              {/* Number(), not String(), in labelFormatter: the X dataKey is
+                  epoch milliseconds, and new Date("1757116800000") is an
+                  Invalid Date. */}
+              <Tooltip
+                labelFormatter={(label: unknown) =>
+                  labelFormatter(Number(label))
+                }
+                formatter={(value: unknown) => [
+                  value != null ? formatter(Number(value)) : "0",
+                  title,
+                ]}
+                cursor={{
+                  stroke: "hsl(var(--muted-foreground))",
+                  strokeOpacity: 0.4,
+                }}
+                contentStyle={{
+                  backgroundColor: "hsl(var(--popover))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+                }}
+              />
               <Area
                 type="monotone"
-                dataKey={secondaryDataKey}
-                name={secondaryName ?? secondaryDataKey}
-                stroke={secondaryColor}
-                fill={`url(#ceph-grad-${secondaryDataKey})`}
+                dataKey={dataKey}
+                name={title}
+                stroke={DATA_COLOR}
+                fill={`url(#ceph-grad-${dataKey})`}
                 strokeWidth={2}
                 isAnimationActive={false}
               />
-            )}
-          </AreaChart>
-        </ResponsiveContainer>
-      </CardContent>
-    </Card>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
   );
 }
 
 export function CephMetricsChart({ clusterId, status }: CephMetricsChartProps) {
   const [timeframe, setTimeframe] = useState<Timeframe>("1h");
+  const [focus, setFocus] = useState<Focus>("iops");
   const metricsQuery = useCephMetrics(clusterId, timeframe);
 
-  // Keyed on metricsQuery.data, not on `metrics`: the `?? []` above mints a
-  // fresh array whenever data is undefined, which would make the memo recompute
-  // on every render. Worth having — all four charts below share this array and
-  // the query refetches on a 60s interval. Timestamps stay numeric and are
-  // formatted at the axis, so only the ticks actually drawn pay for formatting.
-  const chartData = useMemo(
+  // Keyed on metricsQuery.data, not on a `?? []` of it, which would mint a
+  // fresh array whenever data is undefined and recompute on every render.
+  // Worth having: the strip and the charts share this array and the query
+  // refetches on a 60s interval. Timestamps stay numeric and are formatted at
+  // the axis, so only the ticks actually drawn pay for formatting.
+  const chartData = useMemo<ChartPoint[]>(
     () =>
       (metricsQuery.data ?? []).map((m) => ({
         timestamp: new Date(m.time).getTime(),
@@ -232,139 +210,138 @@ export function CephMetricsChart({ clusterId, status }: CephMetricsChartProps) {
       })),
     [metricsQuery.data],
   );
+  const recent = chartData.slice(-TREND_POINTS);
 
-  // Live values from status (30s refetch)
-  const liveReadOps = status?.pgmap.read_op_per_sec ?? 0;
-  const liveWriteOps = status?.pgmap.write_op_per_sec ?? 0;
-  const liveReadBytes = status?.pgmap.read_bytes_sec ?? 0;
-  const liveWriteBytes = status?.pgmap.write_bytes_sec ?? 0;
-  const liveCapPct =
-    status && status.pgmap.bytes_total > 0
-      ? (status.pgmap.bytes_used / status.pgmap.bytes_total) * 100
-      : null;
+  // The headline numbers are live, from status (30s refetch); the trends and
+  // the chart are the stored history for the chosen range.
+  const pg = status?.pgmap;
+  const capacityPct =
+    pg && pg.bytes_total > 0 ? (pg.bytes_used / pg.bytes_total) * 100 : null;
+  const osdsTotal = status?.osdmap.num_osds;
+
+  const chart = (
+    title: string,
+    dataKey: SeriesKey,
+    formatter: (v: number) => string,
+    opts: { max?: number | undefined; whole?: boolean } = {},
+  ) => (
+    <SeriesChart
+      title={title}
+      data={chartData}
+      dataKey={dataKey}
+      formatter={formatter}
+      timeframe={timeframe}
+      max={opts.max}
+      whole={opts.whole}
+    />
+  );
 
   return (
-    <div className="space-y-4">
-      {/* Live gauges */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-foreground/60">
-            Read IOPS (Live)
+    <Panel
+      flush
+      title="Performance"
+      aside={metricsQuery.isLoading ? "Loading..." : undefined}
+      actions={
+        <Segmented
+          aria-label="Time range"
+          value={timeframe}
+          onValueChange={setTimeframe}
+          options={TIMEFRAMES}
+        />
+      }
+    >
+      {/* The strip is the summary and the chart's selector in one: each
+          measure's live reading over its recent shape, and the one that is
+          pressed drawn large below. */}
+      <StatStrip>
+        <Stat
+          label="IOPS"
+          value={pg ? formatOps(pg.read_op_per_sec + pg.write_op_per_sec) : "—"}
+          sub={
+            pg
+              ? `${formatOps(pg.read_op_per_sec)} read, ${formatOps(pg.write_op_per_sec)} write`
+              : undefined
+          }
+          trend={recent.map((p) => p.readOps + p.writeOps)}
+          selected={focus === "iops"}
+          onSelect={() => {
+            setFocus("iops");
+          }}
+        />
+        <Stat
+          label="Throughput"
+          value={
+            pg
+              ? formatBytesPerSecond(pg.read_bytes_sec + pg.write_bytes_sec)
+              : "—"
+          }
+          sub={
+            pg
+              ? `${formatBytesPerSecond(pg.read_bytes_sec)} read, ${formatBytesPerSecond(pg.write_bytes_sec)} write`
+              : undefined
+          }
+          trend={recent.map((p) => p.readBytes + p.writeBytes)}
+          selected={focus === "throughput"}
+          onSelect={() => {
+            setFocus("throughput");
+          }}
+        />
+        <Stat
+          label="Capacity used"
+          value={capacityPct === null ? "—" : formatPercent(capacityPct)}
+          sub={
+            pg
+              ? `${formatBytes(pg.bytes_used)} of ${formatBytes(pg.bytes_total)}`
+              : undefined
+          }
+          trend={recent.map((p) => p.usedPct)}
+          trendMax={100}
+          selected={focus === "capacity"}
+          onSelect={() => {
+            setFocus("capacity");
+          }}
+        />
+        <Stat
+          label="OSDs up"
+          value={
+            status
+              ? `${String(status.osdmap.num_up_osds)} of ${String(status.osdmap.num_osds)}`
+              : "—"
+          }
+          trend={recent.map((p) => p.osdsUp)}
+          trendMax={osdsTotal}
+          selected={focus === "osds"}
+          onSelect={() => {
+            setFocus("osds");
+          }}
+        />
+      </StatStrip>
+      <div className="-mt-px border-t px-[18px] pt-4">
+        {focus === "iops" && (
+          <div className="grid gap-6 sm:grid-cols-2">
+            {chart("Read IOPS", "readOps", formatOps, { whole: true })}
+            {chart("Write IOPS", "writeOps", formatOps, { whole: true })}
+          </div>
+        )}
+        {focus === "throughput" && (
+          <div className="grid gap-6 sm:grid-cols-2">
+            {chart("Read throughput", "readBytes", formatBytesPerSecond)}
+            {chart("Write throughput", "writeBytes", formatBytesPerSecond)}
+          </div>
+        )}
+        {focus === "capacity" &&
+          chart("Capacity used", "usedPct", formatPercent, { max: 100 })}
+        {focus === "osds" &&
+          chart("OSDs up", "osdsUp", formatCount, {
+            max: osdsTotal || undefined,
+            whole: true,
+          })}
+        {chartData.length === 0 && !metricsQuery.isLoading && (
+          <p className="pt-2 text-center text-[12.5px] text-muted-foreground">
+            No historical metrics available yet.
           </p>
-          <p className="text-lg font-semibold tabular-nums">
-            {status ? formatOps(liveReadOps) : "--"}
-          </p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-foreground/60">
-            Write IOPS (Live)
-          </p>
-          <p className="text-lg font-semibold tabular-nums">
-            {status ? formatOps(liveWriteOps) : "--"}
-          </p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-foreground/60">
-            Throughput (Live)
-          </p>
-          <p className="text-lg font-semibold tabular-nums">
-            {status
-              ? `R: ${formatBytes(liveReadBytes)}/s  W: ${formatBytes(liveWriteBytes)}/s`
-              : "--"}
-          </p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-foreground/60">
-            Capacity (Live)
-          </p>
-          <MetricMiniBar value={liveCapPct} />
-          <p className="mt-1 text-xs text-foreground/60">
-            {status
-              ? `${formatBytes(status.pgmap.bytes_used)} / ${formatBytes(status.pgmap.bytes_total)}`
-              : "No live data"}
-          </p>
-        </div>
-      </div>
-
-      {/* Time range selector */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-foreground/60">
-          Historical:
-        </span>
-        <div className="flex gap-1">
-          {TIMEFRAMES.map((tf) => (
-            <Button
-              key={tf.value}
-              size="sm"
-              variant={timeframe === tf.value ? "default" : "outline"}
-              className="h-7 px-2.5 text-xs"
-              onClick={() => {
-                setTimeframe(tf.value);
-              }}
-            >
-              {tf.label}
-            </Button>
-          ))}
-        </div>
-        {metricsQuery.isLoading && (
-          <span className="text-xs text-foreground/60">Loading...</span>
         )}
       </div>
-
-      {/* Historical charts */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <MiniChart
-          title="IOPS"
-          data={chartData}
-          dataKey="readOps"
-          primaryName="Read"
-          color="hsl(221, 83%, 53%)"
-          secondaryDataKey="writeOps"
-          secondaryName="Write"
-          secondaryColor="hsl(262, 83%, 58%)"
-          formatter={formatOps}
-          timeframe={timeframe}
-        />
-        <MiniChart
-          title="Throughput"
-          data={chartData}
-          dataKey="readBytes"
-          primaryName="Read"
-          color="hsl(38, 92%, 50%)"
-          secondaryDataKey="writeBytes"
-          secondaryName="Write"
-          secondaryColor="hsl(0, 84%, 60%)"
-          formatter={(v) => `${formatBytes(v)}/s`}
-          timeframe={timeframe}
-        />
-        <MiniChart
-          title="Capacity Usage %"
-          data={chartData}
-          dataKey="usedPct"
-          primaryName="Used %"
-          color="hsl(330, 81%, 60%)"
-          formatter={(v) => `${v.toFixed(1)}%`}
-          timeframe={timeframe}
-        />
-        <MiniChart
-          title="OSDs Up"
-          data={chartData}
-          dataKey="osdsUp"
-          primaryName="Up"
-          color="hsl(142, 71%, 45%)"
-          secondaryDataKey="osdsTotal"
-          secondaryName="Total"
-          secondaryColor="hsl(240, 5%, 34%)"
-          formatter={(v) => String(Math.round(v))}
-          timeframe={timeframe}
-        />
-      </div>
-
-      {chartData.length === 0 && !metricsQuery.isLoading && (
-        <p className="text-center text-sm text-muted-foreground">
-          No historical metrics available yet.
-        </p>
-      )}
-    </div>
+    </Panel>
   );
 }

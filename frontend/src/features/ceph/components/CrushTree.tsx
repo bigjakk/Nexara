@@ -1,4 +1,5 @@
-import { Server, HardDrive } from "lucide-react";
+import { Panel, PropertyList, PropertyRow } from "@/components/page/Panel";
+import { cn } from "@/lib/utils";
 import type { CephOSD, CephCrushRule } from "../types/ceph";
 
 interface CrushTreeProps {
@@ -6,18 +7,37 @@ interface CrushTreeProps {
   crushRules: CephCrushRule[];
 }
 
-function getOSDStatusColor(osd: CephOSD): string {
-  if (osd.up === 0) return "text-destructive";
-  if (osd.in === 0) return "text-amber-500";
-  return "text-emerald-500";
-}
-
-function getOSDStatusDot(osd: CephOSD): string {
-  if (osd.up === 0) return "bg-destructive";
+function osdDotClass(osd: CephOSD): string {
+  if (osd.up === 0) return "bg-red-500";
   if (osd.in === 0) return "bg-amber-500";
   return "bg-emerald-500";
 }
 
+function osdStateLabel(osd: CephOSD): string {
+  if (osd.up === 0) return "down";
+  if (osd.in === 0) return "out";
+  return "up and in";
+}
+
+/**
+ * A rule's id, type and size range. Ceph releases since Quincy report no
+ * size range, which arrives here as zeroes: left out, not shown as "0 to 0".
+ * The same goes for a type that was not reported.
+ */
+function crushRuleSummary(rule: CephCrushRule): string {
+  const parts = [`ID ${String(rule.rule_id)}`];
+  // Ceph's rule types start at 1 (replicated); 0 is a type nobody reported.
+  if (rule.type > 0) parts.push(`type ${String(rule.type)}`);
+  if (rule.max_size > 0) {
+    parts.push(`size ${String(rule.min_size)} to ${String(rule.max_size)}`);
+  }
+  return parts.join(", ");
+}
+
+/**
+ * The CRUSH hierarchy as Nexara can read it: the default root, its hosts and
+ * each host's OSDs, with the CRUSH rules beside it.
+ */
 export function CrushTree({ osds, crushRules }: CrushTreeProps) {
   // Group OSDs by host
   const hostMap = new Map<string, CephOSD[]>();
@@ -34,22 +54,13 @@ export function CrushTree({ osds, crushRules }: CrushTreeProps) {
   const hosts = [...hostMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
   return (
-    <div className="space-y-4">
-      <h3 className="text-sm font-medium">CRUSH Topology</h3>
-
-      {/* Root node */}
-      <div className="rounded-md border p-3">
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-          <span className="rounded bg-primary/10 px-2 py-0.5 text-primary">
-            root
-          </span>
-          <span>default</span>
-          <span className="text-muted-foreground">
-            ({osds.length} OSDs across {hosts.length} hosts)
-          </span>
-        </div>
-
-        <div className="ml-4 space-y-3 border-l pl-4">
+    <div className="flex flex-wrap items-start gap-4">
+      <Panel
+        title="CRUSH topology"
+        aside={`Root default: ${String(osds.length)} ${osds.length === 1 ? "OSD" : "OSDs"} across ${String(hosts.length)} ${hosts.length === 1 ? "host" : "hosts"}`}
+        className="flex-[999_1_560px]"
+      >
+        <ul className="divide-y">
           {hosts.map(([host, hostOsds]) => {
             const sortedOsds = [...hostOsds].sort((a, b) => a.id - b.id);
             const upCount = sortedOsds.filter((o) => o.up === 1).length;
@@ -59,64 +70,66 @@ export function CrushTree({ osds, crushRules }: CrushTreeProps) {
             );
 
             return (
-              <div key={host}>
-                <div className="mb-1.5 flex items-center gap-2 text-sm">
-                  <Server className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-xs text-blue-600 dark:text-blue-400">
-                    host
-                  </span>
-                  <span className="font-medium">{host}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {upCount}/{sortedOsds.length} up &middot; weight{" "}
-                    {totalWeight.toFixed(4)}
-                  </span>
+              <li
+                key={host}
+                className="flex flex-wrap items-center gap-x-5 gap-y-2 py-3 first:pt-0 last:pb-0"
+              >
+                <div className="min-w-0 flex-[0_1_13rem]">
+                  <div className="truncate text-sm font-medium" title={host}>
+                    {host}
+                  </div>
+                  <div
+                    className={cn(
+                      "text-[12.5px] text-muted-foreground",
+                      upCount < sortedOsds.length &&
+                        "font-semibold text-red-700 dark:text-red-400",
+                    )}
+                  >
+                    {`${String(upCount)} of ${String(sortedOsds.length)} up, weight ${totalWeight.toFixed(4)}`}
+                  </div>
                 </div>
-                <div className="ml-6 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-1">
+                <ul className="flex min-w-0 flex-[1_1_16rem] flex-wrap gap-1.5">
                   {sortedOsds.map((osd) => (
-                    <div
+                    <li
                       key={osd.id}
-                      className="flex items-center gap-1.5 rounded border px-2 py-1 text-xs"
+                      className="flex items-center gap-1.5 rounded-[5px] bg-foreground/[0.07] px-2 py-1 font-mono text-[12.5px]"
+                      title={`osd.${String(osd.id)}: ${osdStateLabel(osd)}`}
                     >
                       <span
-                        className={`inline-block h-2 w-2 rounded-full ${getOSDStatusDot(osd)}`}
+                        aria-hidden="true"
+                        className={cn(
+                          "h-1.5 w-1.5 shrink-0 rounded-full",
+                          osdDotClass(osd),
+                        )}
                       />
-                      <HardDrive
-                        className={`h-3 w-3 ${getOSDStatusColor(osd)}`}
-                      />
-                      <span className="font-mono font-medium">
-                        osd.{osd.id}
-                      </span>
+                      <span className="font-medium">osd.{osd.id}</span>
                       <span className="text-muted-foreground">
                         {osd.crush_weight.toFixed(4)}
                       </span>
-                    </div>
+                    </li>
                   ))}
-                </div>
-              </div>
+                </ul>
+              </li>
             );
           })}
-        </div>
-      </div>
+        </ul>
+      </Panel>
 
-      {/* CRUSH Rules summary */}
       {crushRules.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium">CRUSH Rules</h3>
-          <div className="flex flex-wrap gap-2">
+        <Panel title="CRUSH rules" className="flex-[1_1_300px]">
+          <PropertyList>
             {crushRules.map((rule) => (
-              <div
+              <PropertyRow
                 key={rule.rule_id}
-                className="rounded-md border px-3 py-1.5 text-xs"
+                label={rule.rule_name || `Rule ${String(rule.rule_id)}`}
               >
-                <span className="font-medium">{rule.rule_name}</span>
-                <span className="ml-2 text-muted-foreground">
-                  ID {rule.rule_id} &middot; type {rule.type} &middot; size{" "}
-                  {rule.min_size}-{rule.max_size}
+                <span className="text-muted-foreground">
+                  {crushRuleSummary(rule)}
                 </span>
-              </div>
+              </PropertyRow>
             ))}
-          </div>
-        </div>
+          </PropertyList>
+        </Panel>
       )}
     </div>
   );

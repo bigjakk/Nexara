@@ -1,12 +1,6 @@
 import { Fragment, useRef, useState } from "react";
 import { Pencil, Plus, Replace, Trash2, X } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -277,24 +271,31 @@ export function PCIMappingsCard({ clusterId }: { clusterId: string }) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>PCI Devices</CardTitle>
-        <CardDescription>
+    <Panel
+      flush
+      title="PCI devices"
+      aside={
+        mappings.length === 0
+          ? undefined
+          : `${String(mappings.length)} ${mappings.length === 1 ? "mapping" : "mappings"}`
+      }
+    >
+      <div className="max-w-[80ch] space-y-1 px-[18px] pb-3 text-sm text-muted-foreground">
+        <p>
           A VM passes a host PCI device through as hostpciN:
           mapping=&lt;name&gt;. A node may have several entries — a VM starting
           there takes the first device not in use — and a VM will not start on a
           node the mapping has none for. Add PCI Device on a VM creates a
           mapping; Proxmox lists only the mappings Nexara&apos;s API token may
           see.
-        </CardDescription>
+        </p>
         {!canEdit && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[12.5px]">
             Viewing only: changing mappings needs the Manage Cluster permission.
           </p>
         )}
-      </CardHeader>
-      <CardContent
+      </div>
+      <div
         ref={regionRef}
         role="region"
         aria-label="PCI mappings"
@@ -304,9 +305,11 @@ export function PCIMappingsCard({ clusterId }: { clusterId: string }) {
         {actionError !== "" && (
           <div
             role="alert"
-            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            className="mx-[18px] flex items-start gap-2 rounded-[8px] bg-destructive/[0.08] px-3.5 py-2.5 text-sm"
           >
-            <p className="min-w-0 flex-1">{actionError}</p>
+            <p className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+              {actionError}
+            </p>
             <button
               type="button"
               aria-label="Dismiss"
@@ -321,13 +324,18 @@ export function PCIMappingsCard({ clusterId }: { clusterId: string }) {
         )}
         {mappings.length > 0 ? (
           <>
-            <QueryFailureNote query={listQuery} subject="the PCI mappings" />
+            <QueryFailureNote
+              query={listQuery}
+              subject="the PCI mappings"
+              className="px-[18px]"
+            />
             {/* Only for a user Replace is offered to: the node list needs
                 view:node, which a role with view:cluster may not have. */}
             {canEdit && nodesQuery.data === undefined && (
               <QueryFailureNote
                 query={nodesQuery}
                 subject="the cluster's nodes, which Replace device needs"
+                className="px-[18px]"
               />
             )}
             <div>
@@ -338,7 +346,9 @@ export function PCIMappingsCard({ clusterId }: { clusterId: string }) {
                     <TableHead>Device</TableHead>
                     <TableHead>IOMMU group</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="w-0" />
+                    <TableHead className="w-0">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -373,17 +383,19 @@ export function PCIMappingsCard({ clusterId }: { clusterId: string }) {
             </div>
           </>
         ) : (
-          <QueryStateNotice
-            query={listQuery}
-            subject="the PCI mappings"
-            empty={
-              canEdit
-                ? "This cluster has no PCI mappings yet. Add a host PCI device to a VM to create one."
-                : "This cluster has no PCI mappings yet."
-            }
-          />
+          <div className="px-[18px] pb-1">
+            <QueryStateNotice
+              query={listQuery}
+              subject="the PCI mappings"
+              empty={
+                canEdit
+                  ? "This cluster has no PCI mappings yet. Add a host PCI device to a VM to create one."
+                  : "This cluster has no PCI mappings yet."
+              }
+            />
+          </div>
         )}
-      </CardContent>
+      </div>
 
       {edit !== null && (
         <EditMappingDialog
@@ -441,7 +453,7 @@ export function PCIMappingsCard({ clusterId }: { clusterId: string }) {
         confirmLabel="Delete mapping"
         onCloseAutoFocus={focusAfterConfirm}
       />
-    </Card>
+    </Panel>
   );
 }
 
@@ -529,7 +541,7 @@ function MappingRows({
 
   return (
     <Fragment>
-      <TableRow className="bg-muted/30 hover:bg-muted/30">
+      <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.03]">
         <TableCell colSpan={4}>
           <span className="font-mono font-medium">{mapping.id}</span>
           {addressable && (
@@ -579,7 +591,7 @@ function MappingRows({
                 disabled={blocked}
                 onClick={onAddDevice}
               >
-                <Plus className="mr-1 h-3.5 w-3.5" />
+                <Plus className="h-3.5 w-3.5" />
                 Add device
               </Button>
               <Button
@@ -588,17 +600,17 @@ function MappingRows({
                 disabled={blocked}
                 onClick={onEditDescription}
               >
-                <Pencil className="mr-1 h-3.5 w-3.5" />
+                <Pencil className="h-3.5 w-3.5" />
                 Edit description
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-destructive hover:text-destructive"
+                className="text-muted-foreground hover:text-destructive"
                 disabled={busy}
                 onClick={onDelete}
               >
-                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5" />
                 {working === "deleting" ? "Deleting…" : "Delete"}
               </Button>
             </div>
@@ -607,7 +619,10 @@ function MappingRows({
       </TableRow>
       {entries.length === 0 && (
         <TableRow>
-          <TableCell colSpan={5} className="pl-6 text-xs text-muted-foreground">
+          <TableCell
+            colSpan={5}
+            className="pl-9 text-[12.5px] text-muted-foreground"
+          >
             No node entries: no VM can use this mapping anywhere. Nexara saves a
             mapping only with at least one entry, so it can only delete this
             one; give it an entry in Proxmox to keep it.
@@ -618,7 +633,7 @@ function MappingRows({
         g.entries.map((e, i) => (
           <TableRow key={`${e.raw}#${String(e.index)}`}>
             {i === 0 && (
-              <TableCell rowSpan={g.entries.length} className="pl-6 align-top">
+              <TableCell rowSpan={g.entries.length} className="pl-9 align-top">
                 {cleanDeviceText(g.node) || "—"}
                 {g.entries.length > 1 && (
                   <span className="block text-xs text-muted-foreground">
@@ -679,20 +694,20 @@ function MappingRows({
                           onReplace(e);
                         }}
                       >
-                        <Replace className="mr-1 h-3.5 w-3.5" />
+                        <Replace className="h-3.5 w-3.5" />
                         Replace device
                       </Button>
                     )}
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-destructive hover:text-destructive"
+                    className="text-muted-foreground hover:text-destructive"
                     disabled={e.unreadable === undefined ? blocked : busy}
                     onClick={() => {
                       onRemove(e);
                     }}
                   >
-                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                    <Trash2 className="h-3.5 w-3.5" />
                     Remove
                   </Button>
                 </div>

@@ -18,12 +18,14 @@ export function ClusterResourceMappingsTab({
 }: ClusterResourceMappingsTabProps) {
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
+        Named host devices a VM can pass through. A mapping is the only way
+        Nexara can attach one.
         <ClusterHistoryButton
           history={clusterHistories.mappings(clusterId)}
           title="resource mappings"
         />
-      </div>
+      </p>
       <USBMappingsCard clusterId={clusterId} />
       <PCIMappingsCard clusterId={clusterId} />
     </div>

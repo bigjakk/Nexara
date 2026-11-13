@@ -107,12 +107,13 @@ export function CreateSDNVNetDialog({
             aria-label={`Edit VNet ${initialData.vnet}`}
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-muted-foreground"
           >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
           <Button size="sm">
-            <Plus className="mr-1 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             Create VNet
           </Button>
         )}
@@ -152,7 +153,7 @@ export function CreateSDNVNetDialog({
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>VLAN Tag (optional)</Label>
+              <Label>VLAN tag (optional)</Label>
               <Input
                 type="number"
                 placeholder="100"
@@ -181,7 +182,7 @@ export function CreateSDNVNetDialog({
                 setVlanaware(checked === true);
               }}
             />
-            <Label htmlFor="vlanaware">VLAN Aware</Label>
+            <Label htmlFor="vlanaware">VLAN aware</Label>
           </div>
           <div className="flex items-center gap-2">
             <Checkbox
@@ -191,7 +192,7 @@ export function CreateSDNVNetDialog({
                 setIsolate(checked === true);
               }}
             />
-            <Label htmlFor="isolate">Isolate Ports</Label>
+            <Label htmlFor="isolate">Isolate ports</Label>
           </div>
           {errorMessage && (
             <p className="text-sm text-destructive">{errorMessage}</p>

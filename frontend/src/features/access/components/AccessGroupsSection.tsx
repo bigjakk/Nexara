@@ -2,7 +2,7 @@ import { Fragment, useState } from "react";
 import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,6 +16,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -115,11 +116,19 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
     );
   };
 
+  const groupCount = groupsQuery.data?.length ?? 0;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Groups</CardTitle>
-        {manageable && (
+    <Panel
+      flush
+      title="Groups"
+      aside={
+        groupCount === 0
+          ? undefined
+          : `${String(groupCount)} ${groupCount === 1 ? "group" : "groups"}. Open a group to see its members.`
+      }
+      actions={
+        manageable ? (
           <Dialog
             open={createOpen}
             onOpenChange={(open) => {
@@ -129,7 +138,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
           >
             <DialogTrigger asChild>
               <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
+                <Plus className="h-4 w-4" />
                 Create Group
               </Button>
             </DialogTrigger>
@@ -138,7 +147,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                 <DialogTitle>Create Group</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleCreate} className="space-y-4">
-                <div>
+                <div className="space-y-2">
                   <Label htmlFor="group-id">Group ID</Label>
                   <Input
                     id="group-id"
@@ -149,7 +158,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                     required
                   />
                 </div>
-                <div>
+                <div className="space-y-2">
                   <Label htmlFor="group-comment">Comment</Label>
                   <Input
                     id="group-comment"
@@ -160,23 +169,29 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                   />
                 </div>
                 {error && <p className="text-sm text-destructive">{error}</p>}
-                <Button
-                  type="submit"
-                  disabled={!groupid.trim() || createGroup.isPending}
-                >
-                  {createGroup.isPending ? "Creating..." : "Create"}
-                </Button>
+                <DialogFooter>
+                  <Button
+                    type="submit"
+                    disabled={!groupid.trim() || createGroup.isPending}
+                  >
+                    {createGroup.isPending ? "Creating..." : "Create"}
+                  </Button>
+                </DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
-        )}
-      </CardHeader>
-
-      <CardContent>
+        ) : undefined
+      }
+    >
+      <>
         {groupsQuery.isLoading ? (
-          <Skeleton className="h-20 w-full" />
+          <div className="px-[18px] pb-1">
+            <Skeleton className="h-20 w-full" />
+          </div>
         ) : !groupsQuery.data || groupsQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No groups configured.</p>
+          <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+            No groups configured.
+          </p>
         ) : (
           <Table>
             <TableHeader>
@@ -185,7 +200,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                 <TableHead>Group</TableHead>
                 <TableHead>Comment</TableHead>
                 {manageable && (
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="w-0">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 )}
               </TableRow>
             </TableHeader>
@@ -200,7 +217,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                         setExpanded(isOpen ? null : group.groupid);
                       }}
                     >
-                      <TableCell>
+                      <TableCell className="text-muted-foreground">
                         {isOpen ? (
                           <ChevronDown className="h-4 w-4" />
                         ) : (
@@ -221,7 +238,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                         {group.comment || "—"}
                       </TableCell>
                       {manageable && (
-                        <TableCell className="text-right">
+                        <TableCell className="whitespace-nowrap py-1 text-right">
                           {/* Proxmox admits a group named "." or "..";
                               Nexara cannot address one (lib/api-path.ts), so
                               the row shows why in place of its actions — as
@@ -235,7 +252,8 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                             <>
                               <Button
                                 variant="ghost"
-                                size="sm"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground"
                                 aria-label={`Edit ${group.groupid}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -249,14 +267,15 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                               </Button>
                               <Button
                                 variant="ghost"
-                                size="sm"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
                                 aria-label={`Delete ${group.groupid}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setDeleteTarget(group.groupid);
                                 }}
                               >
-                                <Trash2 className="h-4 w-4 text-destructive" />
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </>
                           )}
@@ -264,8 +283,11 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                       )}
                     </TableRow>
                     {isOpen && (
-                      <TableRow>
-                        <TableCell colSpan={columns} className="bg-muted/30">
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell
+                          colSpan={columns}
+                          className="bg-foreground/[0.03] py-3 pl-[3.25rem]"
+                        >
                           <GroupMembers
                             clusterId={clusterId}
                             groupid={group.groupid}
@@ -339,8 +361,8 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </CardContent>
-    </Card>
+      </>
+    </Panel>
   );
 }
 
@@ -352,7 +374,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
 function GroupMembers(props: { clusterId: string; groupid: string }) {
   const hint = unaddressableHint(props.groupid);
   if (hint !== null) {
-    return <p className="py-1 text-sm text-muted-foreground">{hint}</p>;
+    return <p className="text-sm text-muted-foreground">{hint}</p>;
   }
   return <AddressableGroupMembers {...props} />;
 }
@@ -370,17 +392,17 @@ function AddressableGroupMembers({
 
   const members = groupQuery.data?.members ?? [];
   if (members.length === 0) {
-    return <p className="py-1 text-sm text-muted-foreground">No members.</p>;
+    return <p className="text-sm text-muted-foreground">No members.</p>;
   }
 
   return (
-    <div className="py-1">
-      <p className="mb-2 text-sm font-medium">Members</p>
-      <div className="flex flex-wrap gap-1">
+    <div>
+      <p className="mb-2 text-sm font-semibold">Members</p>
+      <div className="flex flex-wrap gap-1.5">
         {members.map((m) => (
           <code
             key={m}
-            className="rounded bg-background px-2 py-1 font-mono text-xs"
+            className="rounded-[5px] bg-foreground/[0.07] px-1.5 py-0.5 font-mono text-[12.5px]"
           >
             {m}
           </code>
@@ -451,7 +473,7 @@ function EditGroupDialog({
           <DialogTitle>Edit {groupid}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSave} className="space-y-4">
-          <div>
+          <div className="space-y-2">
             <Label htmlFor="edit-group-comment">Comment</Label>
             <Input
               id="edit-group-comment"
@@ -462,14 +484,14 @@ function EditGroupDialog({
             />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <div className="flex justify-end gap-2">
+          <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit" disabled={updateGroup.isPending}>
               {updateGroup.isPending ? "Saving..." : "Save"}
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

@@ -23,7 +23,7 @@ export function CreateInterfaceDialog({
           setOpen(true);
         }}
       >
-        <Plus className="mr-1 h-4 w-4" />
+        <Plus className="h-4 w-4" />
         Create Interface
       </Button>
       <InterfaceFormDialog

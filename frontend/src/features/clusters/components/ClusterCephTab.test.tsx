@@ -119,7 +119,7 @@ beforeEach(() => {
 });
 
 describe("ClusterCephTab", () => {
-  it("renders the skeleton grid while the status query is loading", () => {
+  it("renders the loading skeleton while the status query is loading", () => {
     mockUseCephStatus.mockReturnValue(
       queryResult({
         isLoading: true,
@@ -128,15 +128,15 @@ describe("ClusterCephTab", () => {
       }),
     );
 
-    const { container } = renderWithProviders(
-      <ClusterCephTab clusterId="test-cluster-id" />,
-    );
+    renderWithProviders(<ClusterCephTab clusterId="test-cluster-id" />);
 
-    expect(container.querySelectorAll(".h-32")).toHaveLength(4);
+    expect(
+      screen.getByRole("status", { name: "Loading Ceph status" }),
+    ).toBeInTheDocument();
   });
 
   it.each([404, 500, 502])(
-    "shows the Ceph Not Available card with the server's message on a %i",
+    "shows the Ceph is not available notice with the server's message on a %i",
     (httpStatus) => {
       mockUseCephStatus.mockReturnValue(
         failedResult(
@@ -149,7 +149,7 @@ describe("ClusterCephTab", () => {
 
       renderWithProviders(<ClusterCephTab clusterId="test-cluster-id" />);
 
-      expect(screen.getByText("Ceph Not Available")).toBeInTheDocument();
+      expect(screen.getByText("Ceph is not available")).toBeInTheDocument();
       // 404/500/502 all mean "no Ceph status", but mapProxmoxError gives an
       // unreachable cluster and a Proxmox-side error the same 502, so the
       // message is the operator's only way to tell them apart.
@@ -171,12 +171,12 @@ describe("ClusterCephTab", () => {
 
     renderWithProviders(<ClusterCephTab clusterId="test-cluster-id" />);
 
-    expect(screen.getByText("Failed to Load Ceph Status")).toBeInTheDocument();
+    expect(screen.getByText("Could not load Ceph status")).toBeInTheDocument();
     expect(screen.getByText("Insufficient permissions")).toBeInTheDocument();
     expect(screen.queryByText(/connectivity/i)).not.toBeInTheDocument();
   });
 
-  it("names the status in the Ceph Not Available card when the body carried no message", () => {
+  it("names the status in the Ceph is not available notice when the body carried no message", () => {
     mockUseCephStatus.mockReturnValue(
       failedResult(new ApiClientError(502, { error: "unknown", message: "" })),
     );
@@ -205,8 +205,10 @@ describe("ClusterCephTab", () => {
 
     renderWithProviders(<ClusterCephTab clusterId="test-cluster-id" />);
 
-    expect(screen.getByRole("tab", { name: /OSDs \(6\)/ })).toBeInTheDocument();
-    expect(screen.queryByText("Ceph Not Available")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /OSDs \(6\)/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Ceph is not available")).not.toBeInTheDocument();
     // Exact, not a regex: the age and the ": message" join are one template
     // literal precisely so JSX cannot eat the spacing around them.
     expect(
@@ -230,7 +232,7 @@ describe("ClusterCephTab", () => {
     );
 
     expect(container.innerHTML).not.toBe("");
-    expect(screen.getByText("Ceph Status Unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Ceph status is unavailable")).toBeInTheDocument();
     // Names both gates: neither re-renders this tree when it shuts, so a
     // single deduced cause could be stale by the time it is painted.
     expect(
@@ -272,7 +274,7 @@ describe("ClusterCephTab", () => {
 
     renderWithProviders(<ClusterCephTab clusterId="test-cluster-id" />);
 
-    expect(screen.getByText("Failed to Load Ceph Status")).toBeInTheDocument();
+    expect(screen.getByText("Could not load Ceph status")).toBeInTheDocument();
     expect(screen.getByText("HTTP 403")).toBeInTheDocument();
   });
 
@@ -302,10 +304,10 @@ describe("ClusterCephTab", () => {
       ),
     );
 
-    const { container, rerender } = renderWithProviders(
+    const { rerender } = renderWithProviders(
       <ClusterCephTab clusterId="test-cluster-id" />,
     );
-    expect(screen.getByText("Ceph Not Available")).toBeInTheDocument();
+    expect(screen.getByText("Ceph is not available")).toBeInTheDocument();
 
     mockUseCephStatus.mockReturnValue(
       queryResult({
@@ -316,8 +318,10 @@ describe("ClusterCephTab", () => {
     );
     rerender(<ClusterCephTab clusterId="test-cluster-id" />);
 
-    expect(container.querySelectorAll(".h-32")).toHaveLength(0);
-    expect(screen.getByText("Ceph Not Available")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Loading Ceph status" }),
+    ).toBeNull();
+    expect(screen.getByText("Ceph is not available")).toBeInTheDocument();
     expect(
       screen.getByText("binary not installed: /usr/bin/ceph-mon"),
     ).toBeInTheDocument();
@@ -337,10 +341,10 @@ describe("ClusterCephTab", () => {
       ),
     );
 
-    const { container, rerender } = renderWithProviders(
+    const { rerender } = renderWithProviders(
       <ClusterCephTab clusterId="cluster-a" />,
     );
-    expect(screen.getByText("Ceph Not Available")).toBeInTheDocument();
+    expect(screen.getByText("Ceph is not available")).toBeInTheDocument();
 
     mockUseCephStatus.mockReturnValue(
       queryResult({
@@ -352,8 +356,10 @@ describe("ClusterCephTab", () => {
     rerender(<ClusterCephTab clusterId="cluster-b" />);
 
     // A cluster with no outcome of its own is a genuine first load.
-    expect(container.querySelectorAll(".h-32")).toHaveLength(4);
-    expect(screen.queryByText("Ceph Not Available")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: "Loading Ceph status" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Ceph is not available")).not.toBeInTheDocument();
   });
 
   it("forgets the failure once status resolves", () => {
@@ -369,16 +375,18 @@ describe("ClusterCephTab", () => {
     const { rerender } = renderWithProviders(
       <ClusterCephTab clusterId="test-cluster-id" />,
     );
-    expect(screen.getByText("Ceph Not Available")).toBeInTheDocument();
+    expect(screen.getByText("Ceph is not available")).toBeInTheDocument();
 
     mockUseCephStatus.mockReturnValue(succeededResult(healthyStatus));
     rerender(<ClusterCephTab clusterId="test-cluster-id" />);
 
-    expect(screen.queryByText("Ceph Not Available")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ceph is not available")).not.toBeInTheDocument();
     expect(
       screen.queryByText(/most recent refresh failed/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /OSDs \(6\)/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /OSDs \(6\)/ }),
+    ).toBeInTheDocument();
   });
 
   it("renders the Ceph dashboard once status resolves", () => {
@@ -386,9 +394,11 @@ describe("ClusterCephTab", () => {
 
     renderWithProviders(<ClusterCephTab clusterId="test-cluster-id" />);
 
-    expect(screen.getByRole("tab", { name: /OSDs \(6\)/ })).toBeInTheDocument();
     expect(
-      screen.getByRole("tab", { name: /Monitors \(3\)/ }),
+      screen.getByRole("button", { name: /OSDs \(6\)/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Monitors \(3\)/ }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/last known Ceph status/i),

@@ -26,13 +26,13 @@ const actionCopy: Record<
 > = {
   in: {
     title: "Mark %s in",
-    verb: "Mark In",
+    verb: "Mark in",
     description:
       "Ceph will start backfilling placement groups onto this OSD. Expect recovery traffic until the cluster rebalances.",
   },
   out: {
     title: "Mark %s out",
-    verb: "Mark Out",
+    verb: "Mark out",
     description:
       "The daemon keeps running, but Ceph remaps its placement groups onto the remaining OSDs. Use this to drain an OSD before maintenance.",
   },
@@ -126,8 +126,8 @@ function OSDActionDialogContent({
           {preflight.isLoading && <Skeleton className="h-28 w-full" />}
 
           {preflight.isError && (
-            <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm">
-              <div className="flex items-center gap-2 font-medium text-amber-600 dark:text-amber-500">
+            <div className="rounded-[8px] bg-amber-500/10 px-3.5 py-3 text-sm">
+              <div className="flex items-center gap-2 font-medium text-amber-700 dark:text-amber-400">
                 <AlertTriangle className="h-4 w-4" />
                 Safety check unavailable
               </div>
@@ -180,7 +180,7 @@ function PreflightSummary({ assessment }: { assessment: CephOSDPreflight }) {
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 rounded-lg border p-3 text-sm">
+      <div className="panel grid grid-cols-2 gap-3 rounded-[8px] px-3.5 py-3 text-sm">
         <Projection
           label="Hosts serving data"
           before={assessment.hosts_serving}
@@ -193,13 +193,13 @@ function PreflightSummary({ assessment }: { assessment: CephOSDPreflight }) {
           total={assessment.osds_total}
         />
         {assessment.pools.length > 0 && (
-          <div className="col-span-2 border-t pt-2">
+          <div className="col-span-2 border-t pt-2.5">
             <div className="text-xs text-muted-foreground">Pool redundancy</div>
             <div className="mt-1 space-y-0.5">
               {assessment.pools.map((pool) => (
                 <div
                   key={pool.pool_name}
-                  className="flex justify-between font-mono text-xs"
+                  className="flex justify-between gap-3 font-mono text-[12.5px]"
                 >
                   <span>{pool.pool_name}</span>
                   <span className="text-muted-foreground">
@@ -215,10 +215,8 @@ function PreflightSummary({ assessment }: { assessment: CephOSDPreflight }) {
       {assessment.warnings.length > 0 && (
         <div
           className={cn(
-            "rounded-lg border p-4 text-sm",
-            critical
-              ? "border-destructive/50 bg-destructive/10"
-              : "border-amber-500/50 bg-amber-500/10",
+            "rounded-[8px] px-3.5 py-3 text-sm",
+            critical ? "bg-destructive/10" : "bg-amber-500/10",
           )}
         >
           <div
@@ -226,7 +224,7 @@ function PreflightSummary({ assessment }: { assessment: CephOSDPreflight }) {
               "flex items-center gap-2 font-medium",
               critical
                 ? "text-destructive"
-                : "text-amber-600 dark:text-amber-500",
+                : "text-amber-700 dark:text-amber-400",
             )}
           >
             {critical ? (
@@ -276,7 +274,7 @@ function Projection({
         <span className="mx-1 text-muted-foreground">&rarr;</span>
         <span
           className={cn(
-            drops && "font-semibold text-amber-600 dark:text-amber-500",
+            drops && "font-semibold text-amber-700 dark:text-amber-400",
           )}
         >
           {after}
