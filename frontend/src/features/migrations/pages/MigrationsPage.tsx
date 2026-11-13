@@ -15,10 +15,10 @@ export function MigrationsPage() {
   const { data: jobs, isLoading } = useMigrationJobs();
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <ArrowLeftRight className="h-6 w-6 text-primary" />
+          <ArrowLeftRight className="h-6 w-6 text-muted-foreground" />
           <h1 className="text-2xl font-semibold">Migrations</h1>
         </div>
         <MigrateWizard />

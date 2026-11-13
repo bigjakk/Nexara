@@ -160,7 +160,7 @@ export function SchedulePanel({
                             fire. Without this the row just stops, with a failed
                             icon and no next run, and nothing saying why. */}
                         {!s.enabled && (
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                             Disabled
                           </span>
                         )}

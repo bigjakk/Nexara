@@ -41,7 +41,7 @@ export function UsersPage() {
   return (
     <div>
       <AdminNav />
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
@@ -94,13 +94,7 @@ export function UsersPage() {
                 </TableCell>
                 <TableCell>
                   {user.totp_enabled ? (
-                    <Badge
-                      variant="solid"
-                      className="bg-emerald-600 hover:bg-emerald-700"
-                    >
-                      <ShieldCheck className="mr-1 h-3 w-3" />
-                      Enabled
-                    </Badge>
+                    <Badge variant="healthy">Enabled</Badge>
                   ) : (
                     <span className="text-sm text-muted-foreground">Off</span>
                   )}

@@ -92,7 +92,7 @@ export function APIDocsPage() {
     // max-w-6xl rather than the old max-w-4xl: an expanded row carries a
     // five-column parameter table, and at 4xl the description column was
     // narrower than the sentences it holds.
-    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">API Reference</h1>
         <p className="text-muted-foreground">

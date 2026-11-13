@@ -116,17 +116,13 @@ export function BackupDashboardPage() {
     if (dsStatusQuery.isError) {
       return <Badge variant="secondary">Status unavailable</Badge>;
     }
-    return (
-      <Badge variant="solid" className="bg-emerald-600">
-        Connected
-      </Badge>
-    );
+    return <Badge variant="healthy">Connected</Badge>;
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Shield className="h-6 w-6 text-primary" />
+        <Shield className="h-6 w-6 text-muted-foreground" />
         <h1 className="text-2xl font-semibold">Backup</h1>
       </div>
 

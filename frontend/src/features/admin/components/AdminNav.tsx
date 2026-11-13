@@ -11,17 +11,17 @@ const tabs = [
 
 export function AdminNav() {
   return (
-    <nav className="flex gap-1 overflow-x-auto border-b px-6 pt-4">
+    <nav className="mb-6 flex gap-5 overflow-x-auto shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
       {tabs.map((tab) => (
         <NavLink
           key={tab.to}
           to={tab.to}
           className={({ isActive }) =>
             cn(
-              "whitespace-nowrap px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+              "whitespace-nowrap border-b-2 px-0.5 pb-2 pt-1.5 text-sm font-medium transition-colors",
               isActive
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/50",
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
             )
           }
         >

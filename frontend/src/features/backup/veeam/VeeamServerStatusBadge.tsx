@@ -30,10 +30,6 @@ export function VeeamServerStatusBadge({ server }: { server: VeeamServer }) {
         </Badge>
       );
     default:
-      return (
-        <Badge variant="solid" className="bg-emerald-600">
-          Connected
-        </Badge>
-      );
+      return <Badge variant="healthy">Connected</Badge>;
   }
 }

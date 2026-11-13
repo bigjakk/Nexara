@@ -22,7 +22,7 @@ export function AlertsPage() {
     (dlqSummary?.pending ?? 0) + (dlqSummary?.rate_limited ?? 0);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">{t("alerts")}</h1>
         <div className="flex flex-wrap gap-2">

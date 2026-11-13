@@ -467,7 +467,7 @@ export function TaskLogPanel() {
       >
         <span className="font-medium">{t("activity")}</span>
         {runningCount > 0 && (
-          <span className="rounded-full bg-blue-500/20 px-1.5 py-0.5 text-blue-600 dark:text-blue-400">
+          <span className="rounded-full bg-data/15 px-1.5 py-0.5 text-data">
             {runningCount} {t("running").toLowerCase()}
           </span>
         )}

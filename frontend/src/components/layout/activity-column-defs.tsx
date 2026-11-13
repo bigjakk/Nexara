@@ -61,19 +61,19 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
         <span
           className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${
             row.status === "running"
-              ? "bg-blue-500/10"
+              ? "bg-data/10"
               : row.status === "ok"
-                ? "bg-emerald-500/10"
+                ? "bg-muted"
                 : row.status === "failed"
                   ? "bg-red-500/10"
                   : "bg-muted"
           }`}
         >
           {row.status === "running" && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />
           )}
           {row.status === "ok" && (
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+            <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
           )}
           {row.status === "failed" && (
             <XCircle className="h-3.5 w-3.5 text-red-500" />

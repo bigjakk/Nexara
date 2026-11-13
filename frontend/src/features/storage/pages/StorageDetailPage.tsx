@@ -183,8 +183,8 @@ export function StorageDetailPage() {
             <ChevronLeft className="h-4 w-4" />
             All Pools
           </button>
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/10">
-            <Database className="h-6 w-6 text-amber-500" />
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
+            <Database className="h-6 w-6 text-muted-foreground" />
           </div>
           <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">
             {pool.storage}

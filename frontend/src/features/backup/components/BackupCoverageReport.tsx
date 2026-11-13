@@ -9,14 +9,9 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/features/inventory/components/StatusBadge";
 import { Input } from "@/components/ui/input";
-import {
-  ShieldCheck,
-  ShieldAlert,
-  ShieldOff,
-  ShieldQuestion,
-  Search,
-} from "lucide-react";
+import { ShieldAlert, ShieldOff, ShieldQuestion, Search } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBackupCoverage } from "../api/backup-queries";
 import type { BackupCoverageEntry, BackupEligibility } from "../types/backup";
@@ -103,15 +98,10 @@ function CoverageBadge({
 }) {
   switch (status) {
     case "recent":
-      return (
-        <Badge variant="solid" className="gap-1 bg-emerald-600">
-          <ShieldCheck className="h-3 w-3" />
-          Protected
-        </Badge>
-      );
+      return <Badge variant="healthy">Protected</Badge>;
     case "stale":
       return (
-        <Badge variant="solid" className="gap-1 bg-amber-700">
+        <Badge variant="warning" className="gap-1">
           <ShieldAlert className="h-3 w-3" />
           Stale
         </Badge>
@@ -333,14 +323,7 @@ export function BackupCoverageReport() {
                 </TableCell>
                 <TableCell className="text-sm">{entry.cluster_name}</TableCell>
                 <TableCell>
-                  <Badge
-                    variant={entry.status === "running" ? "solid" : "secondary"}
-                    className={
-                      entry.status === "running" ? "bg-emerald-600" : ""
-                    }
-                  >
-                    {entry.status}
-                  </Badge>
+                  <StatusBadge status={entry.status} />
                 </TableCell>
                 <TableCell>
                   <CoverageBadge status={entry.coverage_status} />

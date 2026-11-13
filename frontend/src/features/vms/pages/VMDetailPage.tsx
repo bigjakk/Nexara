@@ -64,6 +64,7 @@ import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
 import type { VmLiveMetric } from "@/types/ws";
 import { formatBytes, formatUptime } from "@/lib/format";
+import { DATA_COLOR } from "@/lib/chart-colors";
 
 export function VMDetailPage() {
   const {
@@ -144,7 +145,7 @@ export function VMDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4 p-6">
+      <div className="space-y-4">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-48 w-full" />
       </div>
@@ -153,7 +154,7 @@ export function VMDetailPage() {
 
   if (error || !vm) {
     return (
-      <div className="p-6">
+      <div>
         <p className="text-destructive">
           {error?.message ?? "Resource not found"}
         </p>
@@ -189,7 +190,7 @@ export function VMDetailPage() {
   }
 
   return (
-    <div className="relative space-y-6 p-6">
+    <div className="relative space-y-6">
       {/* Floating live console preview — absolute so it doesn't stretch the
           header row. Desktop-only: at phone widths it would sit on top of
           the header; the VNC Console button stays as the mobile entry. */}
@@ -198,7 +199,7 @@ export function VMDetailPage() {
         consoleAllowed &&
         normalizedStatus === "running" &&
         nodeName !== "" && (
-          <div className="absolute right-6 top-6 z-10">
+          <div className="absolute right-0 top-0 z-10">
             <VMConsolePreview
               clusterId={clusterId}
               node={nodeName}
@@ -771,7 +772,7 @@ function VMMetricsPanel({
             title="CPU Usage"
             data={chartData}
             dataKey="cpuPercent"
-            color="hsl(221, 83%, 53%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>
@@ -780,7 +781,7 @@ function VMMetricsPanel({
             title="Memory Usage"
             data={chartData}
             dataKey="memPercent"
-            color="hsl(142, 71%, 45%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
             headerDetail={memDetail}
           />
@@ -790,7 +791,7 @@ function VMMetricsPanel({
             title="Disk Read"
             data={chartData}
             dataKey="diskReadBps"
-            color="hsl(38, 92%, 50%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>
@@ -799,7 +800,7 @@ function VMMetricsPanel({
             title="Disk Write"
             data={chartData}
             dataKey="diskWriteBps"
-            color="hsl(0, 84%, 60%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>
@@ -808,7 +809,7 @@ function VMMetricsPanel({
             title="Network In"
             data={chartData}
             dataKey="netInBps"
-            color="hsl(262, 83%, 58%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>
@@ -817,7 +818,7 @@ function VMMetricsPanel({
             title="Network Out"
             data={chartData}
             dataKey="netOutBps"
-            color="hsl(330, 81%, 60%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>

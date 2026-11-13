@@ -189,7 +189,7 @@ export function FavoritesSection() {
       <button
         onClick={toggleCollapsed}
         aria-expanded={!collapsed}
-        className="flex w-full items-center gap-1 px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70 hover:text-muted-foreground"
+        className="flex w-full items-center gap-1 px-2 pb-1 text-xs font-medium text-muted-foreground hover:text-foreground"
       >
         <ChevronRight
           className={cn(

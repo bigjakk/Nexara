@@ -23,12 +23,12 @@ import {
  * wears RUNNING_RING, which clears 3:1 against the card in both themes.
  */
 const LOAD_CLASS: Record<FleetLoad, string> = {
-  1: "bg-primary/25",
-  2: "bg-primary/50",
-  3: "bg-primary/75",
-  4: "bg-primary",
+  1: "bg-data/25",
+  2: "bg-data/50",
+  3: "bg-data/75",
+  4: "bg-data",
 };
-const RUNNING_RING = "ring-1 ring-inset ring-primary/80";
+const RUNNING_RING = "ring-1 ring-inset ring-data/80";
 const STOPPED_RING = "ring-1 ring-inset ring-muted-foreground/70";
 
 /** One column template for the header line and every node row, from md up. */
@@ -69,7 +69,7 @@ function Meter({
                 ? "bg-red-500"
                 : level === "warn"
                   ? "bg-amber-500"
-                  : "bg-primary",
+                  : "bg-data",
             )}
             style={{ width: `${String(Math.round(clamped))}%` }}
           />
@@ -245,7 +245,7 @@ export function FleetBoard({ data, metrics }: FleetBoardProps) {
           </span>
           <span className="flex items-center gap-1.5">
             <span
-              className={cn("h-3 w-3 rounded-full bg-primary/50", RUNNING_RING)}
+              className={cn("h-3 w-3 rounded-full bg-data/50", RUNNING_RING)}
             />
             {t("fleetLegendContainer")}
           </span>
@@ -314,7 +314,7 @@ export function FleetBoard({ data, metrics }: FleetBoardProps) {
                             ? "bg-red-500"
                             : cluster.storagePercent >= 75
                               ? "bg-amber-500"
-                              : "bg-primary",
+                              : "bg-data",
                         )}
                         style={{
                           width: `${String(Math.round(cluster.storagePercent))}%`,

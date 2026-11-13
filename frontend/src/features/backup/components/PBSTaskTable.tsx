@@ -248,15 +248,9 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
                     </TableCell>
                     <TableCell className="text-sm">{task.user}</TableCell>
                     <TableCell>
-                      {isRunning && (
-                        <Badge variant="solid" className="bg-blue-600">
-                          Running
-                        </Badge>
-                      )}
+                      {isRunning && <Badge variant="default">Running</Badge>}
                       {!isRunning && isOk && (
-                        <Badge variant="solid" className="bg-emerald-600">
-                          OK
-                        </Badge>
+                        <Badge variant="healthy">OK</Badge>
                       )}
                       {isFailed && (
                         <Badge variant="destructive">

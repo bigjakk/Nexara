@@ -160,9 +160,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                     <TableCell className="text-sm">{job.mode ?? "-"}</TableCell>
                     <TableCell>
                       {isEnabled ? (
-                        <Badge variant="solid" className="bg-emerald-600">
-                          Yes
-                        </Badge>
+                        <Badge variant="healthy">Yes</Badge>
                       ) : (
                         <Badge variant="secondary">No</Badge>
                       )}

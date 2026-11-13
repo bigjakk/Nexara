@@ -198,7 +198,7 @@ export function StatsOverview({
             : t("statAcrossClusters", { count: clusterMetrics.length })}
         </div>
         <div className="mt-auto pt-2">
-          <Sparkline points={cpuSeries} className="h-7 w-full text-primary" />
+          <Sparkline points={cpuSeries} className="h-7 w-full text-data" />
         </div>
       </StatCard>
 
@@ -223,7 +223,7 @@ export function StatsOverview({
               })}
         </div>
         <div className="mt-auto pt-2">
-          <Sparkline points={memSeries} className="h-7 w-full text-primary" />
+          <Sparkline points={memSeries} className="h-7 w-full text-data" />
         </div>
       </StatCard>
 
@@ -247,7 +247,7 @@ export function StatsOverview({
                   ? "bg-red-500"
                   : storagePercent >= 75
                     ? "bg-amber-500"
-                    : "bg-primary",
+                    : "bg-data",
               )}
               style={{ width: `${String(storagePercent)}%` }}
             />

@@ -3,8 +3,8 @@ import { cn } from "@/lib/utils";
 import type { UpsDevice } from "../types/ups";
 import { upsFlagChips, upsStatus, type UpsLabel, type UpsTone } from "../lib/ups-state";
 
-const TONE: Record<UpsTone, { variant: "default" | "solid" | "secondary" | "destructive"; className?: string }> = {
-  ok: { variant: "solid", className: "bg-emerald-600 hover:bg-emerald-600" },
+const TONE: Record<UpsTone, { variant: "default" | "healthy" | "secondary" | "destructive"; className?: string }> = {
+  ok: { variant: "healthy" },
   warn: { variant: "default", className: "bg-amber-500 text-amber-950 hover:bg-amber-500" },
   err: { variant: "destructive" },
   idle: { variant: "secondary" },

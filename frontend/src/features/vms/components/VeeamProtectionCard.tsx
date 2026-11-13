@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
+import { ShieldOff, AlertTriangle } from "lucide-react";
 import { ApiClientError } from "@/lib/api-client";
 import { formatBytes } from "@/lib/format";
 import { useVeeamGuestProtection } from "@/features/backup/api/backup-queries";
@@ -151,10 +151,7 @@ export function VeeamProtectionCard({
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="text-sm">Veeam protection</CardTitle>
           {data.protected ? (
-            <Badge variant="solid" className="gap-1 bg-emerald-600">
-              <ShieldCheck className="h-3 w-3" />
-              Protected
-            </Badge>
+            <Badge variant="healthy">Protected</Badge>
           ) : (
             <Badge variant="destructive" className="gap-1">
               <ShieldOff className="h-3 w-3" />

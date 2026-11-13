@@ -10,6 +10,7 @@ import {
 import { PressureChart } from "@/features/dashboard/components/PressureChart";
 import { useLiveSeries } from "@/features/dashboard/hooks/useLiveSeries";
 import { latestValue } from "@/lib/metric-series";
+import { DATA_COLOR } from "@/lib/chart-colors";
 import type { TimeRange } from "@/types/api";
 import type { VmLiveMetric } from "@/types/ws";
 
@@ -89,7 +90,7 @@ export function NodeMetricsPanel({
             title="CPU Usage"
             data={chartData}
             dataKey="cpuPercent"
-            color="hsl(221, 83%, 53%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>
@@ -98,7 +99,7 @@ export function NodeMetricsPanel({
             title="Memory Usage"
             data={chartData}
             dataKey="memPercent"
-            color="hsl(142, 71%, 45%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
             headerDetail={memDetail}
           />
@@ -108,7 +109,7 @@ export function NodeMetricsPanel({
             title="Disk Read"
             data={chartData}
             dataKey="diskReadBps"
-            color="hsl(38, 92%, 50%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>
@@ -117,7 +118,7 @@ export function NodeMetricsPanel({
             title="Disk Write"
             data={chartData}
             dataKey="diskWriteBps"
-            color="hsl(0, 84%, 60%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>
@@ -126,7 +127,7 @@ export function NodeMetricsPanel({
             title="Network In"
             data={chartData}
             dataKey="netInBps"
-            color="hsl(262, 83%, 58%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>
@@ -135,7 +136,7 @@ export function NodeMetricsPanel({
             title="Network Out"
             data={chartData}
             dataKey="netOutBps"
-            color="hsl(330, 81%, 60%)"
+            color={DATA_COLOR}
             timeRange={timeRange}
           />
         </div>

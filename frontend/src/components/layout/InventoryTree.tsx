@@ -481,7 +481,7 @@ export function InventoryTree() {
         className="space-y-1 py-1 outline-none"
       >
         <div className="flex items-center justify-between px-2 pb-1">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+          <span className="text-xs font-medium text-muted-foreground">
             {t("datacenter")}
           </span>
           <AddClusterDialog

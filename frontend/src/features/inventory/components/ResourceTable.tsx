@@ -413,7 +413,7 @@ function buildColumns(
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
             column.toggleSorting(column.getIsSorted() === "asc");
           }}
@@ -450,7 +450,7 @@ function buildColumns(
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
             column.toggleSorting(column.getIsSorted() === "asc");
           }}
@@ -466,7 +466,7 @@ function buildColumns(
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
             column.toggleSorting(column.getIsSorted() === "asc");
           }}
@@ -482,7 +482,7 @@ function buildColumns(
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
             column.toggleSorting(column.getIsSorted() === "asc");
           }}
@@ -516,7 +516,7 @@ function buildColumns(
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
             column.toggleSorting(column.getIsSorted() === "asc");
           }}
@@ -534,7 +534,7 @@ function buildColumns(
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
             column.toggleSorting(column.getIsSorted() === "asc");
           }}
@@ -553,7 +553,7 @@ function buildColumns(
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
             column.toggleSorting(column.getIsSorted() === "asc");
           }}
@@ -581,7 +581,7 @@ function buildColumns(
           <Button
             variant="ghost"
             size="sm"
-            className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+            className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
             onClick={() => {
               column.toggleSorting(column.getIsSorted() === "asc");
             }}
@@ -607,7 +607,7 @@ function buildColumns(
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="-ml-3 h-8 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => {
             column.toggleSorting(column.getIsSorted() === "asc");
           }}

@@ -174,7 +174,7 @@ export function UpsDetailPage() {
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-4">
-            <BatteryCharging className="h-6 w-6 text-primary" aria-hidden="true" />
+            <BatteryCharging className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-3">
                 <h1 className="text-2xl font-semibold">{d.name}</h1>

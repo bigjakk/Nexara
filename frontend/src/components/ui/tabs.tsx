@@ -66,7 +66,10 @@ const TabsList = React.forwardRef<
       // justify-start + overflow-x-auto (not center): when the strip is wider
       // than a phone viewport it scrolls within itself instead of widening
       // the page; centered content inside a scroll container clips its start.
-      "inline-flex h-9 max-w-full items-center justify-start overflow-x-auto rounded-lg bg-muted p-1 text-muted-foreground",
+      // An underlined strip the width of its container. The rule is an inset
+      // shadow, not a border: with overflow-x-auto a border would need a
+      // negative margin on the active tab, and that makes the strip scroll.
+      "flex h-9 max-w-full items-stretch justify-start gap-5 overflow-x-auto text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]",
       className,
     )}
     {...props}
@@ -81,7 +84,7 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm",
+      "inline-flex items-center justify-center whitespace-nowrap border-b-2 border-transparent px-0.5 text-sm font-medium transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-[state=active]:border-foreground data-[state=active]:text-foreground",
       className,
     )}
     {...props}
@@ -96,7 +99,7 @@ const TabsContent = React.forwardRef<
   <TabsPrimitive.Content
     ref={ref}
     className={cn(
-      "mt-2 ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      "mt-4 ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
       className,
     )}
     {...props}

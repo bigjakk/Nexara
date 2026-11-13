@@ -28,11 +28,11 @@ interface Ctx {
   onDelete: (s: NutServer) => void;
 }
 
-function serverStatus(s: NutServer): { label: string; rank: number; variant: "solid" | "secondary" | "destructive" } {
+function serverStatus(s: NutServer): { label: string; rank: number; variant: "healthy" | "secondary" | "destructive" } {
   if (!s.enabled) return { label: "Disabled", rank: 1, variant: "secondary" };
   if (s.last_poll_error !== "") return { label: "Failing", rank: 0, variant: "destructive" };
   if (s.last_poll_at === null) return { label: "Waiting", rank: 2, variant: "secondary" };
-  return { label: "Connected", rank: 3, variant: "solid" };
+  return { label: "Connected", rank: 3, variant: "healthy" };
 }
 
 /** Its own mutation per row, so two rows tested at once each keep their result. */
@@ -99,7 +99,7 @@ const COLUMNS: ColumnDef<NutServer, SortKey, Ctx>[] = [
       const st = serverStatus(s);
       return (
         <div className="flex items-center gap-2">
-          <Badge variant={st.variant} className={st.label === "Connected" ? "bg-emerald-600" : undefined}>{st.label}</Badge>
+          <Badge variant={st.variant}>{st.label}</Badge>
           {s.last_poll_at !== null && <span className="text-xs text-muted-foreground">{formatRelativeTime(s.last_poll_at)}</span>}
         </div>
       );

@@ -77,7 +77,7 @@ export function PowerPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <BatteryCharging className="h-6 w-6 text-primary" aria-hidden="true" />
+            <BatteryCharging className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
             <h1 className="text-2xl font-semibold">Power</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">

@@ -115,7 +115,7 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
                   <div className="mt-auto pt-2">
                     <Sparkline
                       points={card.spark}
-                      className="h-7 w-full text-primary"
+                      className="h-7 w-full text-data"
                     />
                   </div>
                 </>

@@ -567,7 +567,7 @@ export function VMTree() {
   return (
     <div className="space-y-1 py-1">
       <div className="flex items-center justify-between px-2 pb-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-xs font-medium text-muted-foreground">
           {t("vms", { defaultValue: "VMs & Templates" })}
         </span>
       </div>

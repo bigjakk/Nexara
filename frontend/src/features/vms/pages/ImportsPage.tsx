@@ -18,7 +18,7 @@ export function ImportsPage() {
   }, [clusters, clusterId]);
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold">VM Imports</h1>
         <p className="text-sm text-muted-foreground">

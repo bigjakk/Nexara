@@ -181,7 +181,7 @@ export function NodeDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4 p-6">
+      <div className="space-y-4">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-48 w-full" />
       </div>
@@ -190,7 +190,7 @@ export function NodeDetailPage() {
 
   if (!node) {
     return (
-      <div className="p-6">
+      <div>
         <p className="text-destructive">Node not found</p>
         <Button variant="link" asChild className="mt-2 px-0">
           <Link to={`/clusters/${clusterId}`}>Back to Cluster</Link>
@@ -210,7 +210,7 @@ export function NodeDetailPage() {
   const canEditSettings = node.status === "online" && canManage("node");
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
@@ -225,8 +225,8 @@ export function NodeDetailPage() {
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
-          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-500/10">
-            <Server className="h-6 w-6 text-sky-500" />
+          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
+            <Server className="h-6 w-6 text-muted-foreground" />
           </div>
           <div className="min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

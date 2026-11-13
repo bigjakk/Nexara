@@ -1142,7 +1142,7 @@ export function ImportVMDialog({
                 </p>
 
                 <div className="space-y-2">
-                  <Label className="text-xs uppercase text-muted-foreground">
+                  <Label className="text-xs text-muted-foreground">
                     OS &amp; System
                   </Label>
                   <div className="grid grid-cols-2 gap-3">
@@ -1227,7 +1227,7 @@ export function ImportVMDialog({
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-xs uppercase text-muted-foreground">
+                  <Label className="text-xs text-muted-foreground">
                     CPU &amp; Memory
                   </Label>
                   <div className="grid grid-cols-3 gap-3">
@@ -1294,7 +1294,7 @@ export function ImportVMDialog({
 
                 {bridge ? (
                   <div className="space-y-2">
-                    <Label className="text-xs uppercase text-muted-foreground">
+                    <Label className="text-xs text-muted-foreground">
                       Network (on {bridge})
                     </Label>
                     <div className="grid grid-cols-2 gap-3">
@@ -1389,7 +1389,7 @@ export function ImportVMDialog({
                 )}
 
                 <div className="space-y-2">
-                  <Label className="text-xs uppercase text-muted-foreground">
+                  <Label className="text-xs text-muted-foreground">
                     Identity &amp; options
                   </Label>
                   <div className="space-y-1">

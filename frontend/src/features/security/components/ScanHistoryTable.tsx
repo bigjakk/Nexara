@@ -14,7 +14,7 @@ interface ScanHistoryTableProps {
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    completed: "bg-emerald-500/10 text-emerald-500",
+    completed: "bg-muted text-muted-foreground",
     running: "bg-blue-500/10 text-blue-500",
     pending: "bg-amber-500/10 text-amber-500",
     failed: "bg-red-500/10 text-red-500",

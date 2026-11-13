@@ -282,7 +282,7 @@ export function StorageTree() {
   return (
     <div className="space-y-1 py-1">
       <div className="flex items-center justify-between px-2 pb-1">
-        <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
           <FolderArchive className="h-3 w-3" />
           {t("storage", { defaultValue: "Storage" })}
         </span>

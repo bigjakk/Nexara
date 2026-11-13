@@ -15,9 +15,9 @@ export function EventsPage() {
   const canTasks = canView("task");
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <Activity className="h-6 w-6 text-primary" />
+        <Activity className="h-6 w-6 text-muted-foreground" />
         <h1 className="text-2xl font-bold tracking-tight">Events</h1>
       </div>
 

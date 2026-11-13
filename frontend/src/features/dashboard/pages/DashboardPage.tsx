@@ -44,10 +44,7 @@ import {
 import type { TimeRange } from "@/types/api";
 import type { AggregatedMetrics, MetricSeriesPoint } from "@/types/ws";
 import { LIVE_WINDOW_MS, spliceLive } from "@/lib/metric-series";
-
-// Every measured series draws in the data colour: amber and green are states,
-// so a chart wearing them would read as a warning or as "running".
-const DATA_COLOR = "hsl(var(--primary))";
+import { DATA_COLOR } from "@/lib/chart-colors";
 
 function ConnectionDot({
   status,

@@ -20,7 +20,7 @@ interface ImportHistoryTableProps {
 const statusClass: Record<string, string> = {
   pending: "bg-blue-500/10 text-blue-600",
   running: "bg-amber-500/10 text-amber-600",
-  completed: "bg-emerald-500/10 text-emerald-600",
+  completed: "bg-muted text-foreground",
   failed: "bg-red-500/10 text-red-600",
   cancelled: "bg-muted text-muted-foreground",
 };

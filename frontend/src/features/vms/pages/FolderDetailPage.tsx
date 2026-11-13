@@ -164,7 +164,7 @@ export function FolderDetailPage() {
 
   if (foldersLoading || vmsLoading) {
     return (
-      <div className="space-y-4 p-6">
+      <div className="space-y-4">
         <div className="flex items-center gap-3">
           <Skeleton className="h-11 w-11 rounded-xl" />
           <Skeleton className="h-7 w-48" />
@@ -176,7 +176,7 @@ export function FolderDetailPage() {
 
   if (!isUnassigned && !folder) {
     return (
-      <div className="p-6">
+      <div>
         <p className="text-destructive">Folder not found</p>
         <Button variant="link" asChild className="mt-2 px-0">
           <Link to={`/clusters/${clusterId}`}>Back to Cluster</Link>
@@ -207,7 +207,7 @@ export function FolderDetailPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
@@ -222,8 +222,8 @@ export function FolderDetailPage() {
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
-          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/10">
-            <FolderOpen className="h-6 w-6 text-violet-500" />
+          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
+            <FolderOpen className="h-6 w-6 text-muted-foreground" />
           </div>
           <div className="min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

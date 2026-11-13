@@ -98,7 +98,7 @@ export function ReportViewerPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4 p-6">
+      <div className="space-y-4">
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-[70vh] w-full" />
       </div>
@@ -106,7 +106,7 @@ export function ReportViewerPage() {
   }
   if (error || !run) {
     return (
-      <div className="space-y-4 p-6">
+      <div className="space-y-4">
         <Button variant="ghost" size="sm" asChild>
           <Link to="/reports">
             <ArrowLeft className="mr-2 h-4 w-4" />

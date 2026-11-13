@@ -149,11 +149,11 @@ export function ClusterCard({ summary, metrics }: ClusterCardProps) {
       </div>
 
       <div className="mt-4 space-y-2">
-        <UtilBar label={t("cpu")} percent={cpuPercent} barClass="bg-primary" />
+        <UtilBar label={t("cpu")} percent={cpuPercent} barClass="bg-data" />
         <UtilBar
           label={t("memory")}
           percent={memPercent}
-          barClass="bg-primary"
+          barClass="bg-data"
           detail={
             metrics && metrics.memTotal > 0
               ? t("statBytesUsedOf", {
@@ -166,7 +166,7 @@ export function ClusterCard({ summary, metrics }: ClusterCardProps) {
         <UtilBar
           label={t("storage")}
           percent={storagePercent}
-          barClass="bg-primary"
+          barClass="bg-data"
         />
       </div>
 

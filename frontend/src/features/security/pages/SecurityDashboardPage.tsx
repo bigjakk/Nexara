@@ -102,7 +102,7 @@ export function SecurityDashboardPage() {
 
   if (!clusters || clusters.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center p-6">
+      <div className="flex h-full items-center justify-center">
         <EmptyState
           icon={ShieldAlert}
           title={td("noClustersRegistered")}
@@ -116,7 +116,7 @@ export function SecurityDashboardPage() {
   // Rolling update progress detail view
   if (selectedJobId) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <div className="flex items-center gap-3">
           <ShieldAlert className="h-6 w-6" />
           <h1 className="text-2xl font-bold tracking-tight">{t("security")}</h1>
@@ -138,7 +138,7 @@ export function SecurityDashboardPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
         <ShieldAlert className="h-6 w-6" />

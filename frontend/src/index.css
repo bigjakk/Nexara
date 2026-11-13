@@ -49,6 +49,12 @@
   --color-action: hsl(var(--action));
   --color-action-foreground: hsl(var(--action-foreground));
 
+  /* Measured data and in-progress state: usage bars, sparklines, chart lines,
+     a running task. Deliberately not --primary: the accent a user picks
+     recolours --primary, and a usage bar in an amber or red accent would read
+     as a warning or a failure. */
+  --color-data: hsl(var(--data));
+
   /* The navigation rail keeps one dark surface in both themes. */
   --color-rail: hsl(var(--rail));
   --color-rail-foreground: hsl(var(--rail-foreground));
@@ -116,6 +122,7 @@
     --popover-foreground: 216 20% 10%;
     --primary: 218 78% 44%;
     --primary-foreground: 0 0% 100%;
+    --data: 218 78% 44%;
     --action: 216 20% 10%;
     --action-foreground: 0 0% 100%;
     --secondary: 216 22% 95%;
@@ -167,6 +174,7 @@
     --popover-foreground: 220 19% 94%;
     --primary: 216 100% 69%;
     --primary-foreground: 220 40% 10%;
+    --data: 216 100% 69%;
     --action: 220 21% 95%;
     --action-foreground: 214 15% 9%;
     --secondary: 217 14% 18%;

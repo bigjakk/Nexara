@@ -237,9 +237,7 @@ function SummaryTile({
       className={`rounded-md border bg-card p-3 text-left transition hover:bg-accent ${active ? "ring-2 ring-primary" : ""}`}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs uppercase text-muted-foreground tracking-wide">
-          {label}
-        </span>
+        <span className="text-xs text-muted-foreground">{label}</span>
         <Badge variant={variant}>{count}</Badge>
       </div>
     </button>

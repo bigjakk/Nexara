@@ -43,11 +43,7 @@ function AgeBadge({ days }: { days: number | null }) {
     case "month":
       return <Badge variant="destructive">{label}</Badge>;
     case "week":
-      return (
-        <Badge variant="solid" className="bg-amber-700">
-          {label}
-        </Badge>
-      );
+      return <Badge variant="warning">{label}</Badge>;
     case "fresh":
       return <span className="text-sm">{label}</span>;
     case "unknown":
