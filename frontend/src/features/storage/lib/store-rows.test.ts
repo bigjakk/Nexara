@@ -5,6 +5,7 @@ import {
   contentList,
   storageSummary,
   storageTotals,
+  storeGroups,
   storeRows,
 } from "./store-rows";
 
@@ -35,15 +36,81 @@ describe("storeRows", () => {
   });
 });
 
+// The list shows each storage definition once, as Proxmox's Datacenter >
+// Storage does: a local store stands for its fullest node and its worst state.
+describe("storeGroups", () => {
+  it("lists a local store once with its nodes, by cluster, shared first", () => {
+    const pools = [
+      ...SHARED,
+      // local: the node with more used stands for the store.
+      makeStorage({
+        id: "b1",
+        node_id: "n1",
+        storage: "local",
+        total: 50 * GIB,
+        used: 10 * GIB,
+      }),
+      makeStorage({
+        id: "b2",
+        node_id: "n2",
+        storage: "local",
+        total: 50 * GIB,
+        used: 40 * GIB,
+      }),
+      // local-lvm: unreachable on one node is unreachable.
+      makeStorage({
+        id: "d1",
+        node_id: "n1",
+        storage: "local-lvm",
+        total: 50 * GIB,
+        used: 25 * GIB,
+      }),
+      makeStorage({
+        id: "d2",
+        node_id: "n2",
+        storage: "local-lvm",
+        active: false,
+      }),
+      // Restricted to n2: Proxmox reports it on n1 too, disabled there.
+      makeStorage({
+        id: "f1",
+        node_id: "n1",
+        storage: "store02",
+        enabled: false,
+      }),
+      makeStorage({ id: "f2", node_id: "n2", storage: "store02" }),
+      // The same id in another cluster is another store.
+      makeStorage({ id: "e1", cluster_id: "c2", storage: "local" }),
+    ];
+    const groups = storeGroups(storeRows(pools, NODES));
+    expect(
+      groups.map((g) => [
+        `${g.lead.pool.cluster_id}/${g.lead.pool.storage}`,
+        g.rows.map((r) => r.pool.id),
+        g.lead.pool.id,
+        g.fullest?.pool.id ?? null,
+        g.state,
+      ]),
+    ).toEqual([
+      ["c1/store01", ["a1"], "a1", null, "active"],
+      ["c1/local", ["b1", "b2"], "b2", "b2", "active"],
+      ["c2/local", ["e1"], "e1", null, "active"],
+      // Only one node reports a size, so none is the fullest.
+      ["c1/local-lvm", ["d1", "d2"], "d1", null, "inactive"],
+      ["c1/store02", ["f2"], "f2", null, "active"],
+    ]);
+  });
+});
+
 describe("storageSummary", () => {
   it.each([
     ["no stores", [], 1, 0, undefined],
     [
-      "counts a shared store's space once",
+      "counts a shared store's space once, and a local store once with every node's space",
       [...SHARED, ...LOCAL],
       1,
       0,
-      "3 stores on 1 cluster, 100.0 GiB of 200.0 GiB used, 1 near full",
+      "2 stores on 1 cluster, 100.0 GiB of 200.0 GiB used, 1 near full",
     ],
     [
       "leaves out what is zero",
@@ -54,7 +121,10 @@ describe("storageSummary", () => {
     ],
     [
       "says an enabled store Proxmox cannot reach, and no size when none reports one",
-      [makeStorage({ active: false }), makeStorage({ enabled: false })],
+      [
+        makeStorage({ storage: "store01", active: false }),
+        makeStorage({ id: "s2", storage: "store02", enabled: false }),
+      ],
       1,
       0,
       "2 stores on 1 cluster, 1 inactive",

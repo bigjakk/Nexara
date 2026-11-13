@@ -102,7 +102,7 @@ Removing a cluster leaves its audit entries untouched, so it takes no longer for
 
 ### The Cluster Page
 
-Click a cluster in the inventory tree. Its tabs are **Overview**, **VMs**, **Storage**, **Options**, **HA**, **Pools**, **Resource Mappings**, **Access Control**, **Replication**, **Ceph**, **Networks**, **Firewall**, **Certificates**, **Metrics**, **DRS**, **Guest Tools** and **History**, each covered in its own section below.
+Click a cluster in the inventory tree. Its tabs are **Overview**, **VMs**, **Storage**, **Backup**, **Options**, **HA**, **Pools**, **Resource Mappings**, **Access Control**, **Replication**, **Ceph**, **Networks**, **Firewall**, **Certificates**, **Metrics**, **DRS**, **Guest Tools** and **History**, each covered in its own section below.
 
 ### When a Node's Certificate Changes
 
@@ -824,8 +824,10 @@ On Proxmox VE 9.2+, the **HA Maintenance** card on the HA tab's **Status** sub-t
 ## Storage Management
 
 Open a cluster's **Storage** tab, switch the inventory tree to its **Storage** view
-and click a cluster, or search for "Storage" with Ctrl+K. The pool list groups
-shared storage at the top and per-node storage below.
+and click a cluster, or search for "Storage" with Ctrl+K. The pool list shows each
+storage once, as Proxmox's Datacenter > Storage does, shared storage first. A local
+store on several nodes, such as `local`, stands for its fullest node and the worst
+state of its nodes, and opens to a row per node, each leading to that node's store.
 
 ### Adding Storage
 
@@ -1155,8 +1157,8 @@ The Backup page's top tabs are **Proxmox Backup Server**, **Veeam** and **Covera
 
 ### Backup Jobs
 
-1. Navigate to **Backup** from the sidebar and select a PBS server. The jobs are Proxmox's own, per cluster, but this tab is only reached through a registered PBS server that answers
-2. Open the **Schedules** tab (pick the cluster if you have more than one) and click **Add Schedule**
+1. Open the cluster's **Backup** tab. The jobs are Proxmox's own vzdump jobs, per cluster, and write to any storage that holds backups, so no PBS server is needed. The same list is under **Backup** in the sidebar, on a registered PBS server's **Schedules** tab (pick the cluster if you have more than one)
+2. Click **Add schedule** (`manage:backup`)
 3. Configure:
    - **Schedule** — pick **Hourly**, **Daily**, **Weekly** or **Monthly** and the time; the builder writes the Proxmox calendar event for you and shows it in plain English. Switch to **Custom** to type a calendar event directly (e.g. `mon..fri 02:00`). Note that these are systemd calendar events, *not* cron — `0 2 * * *` is not valid here
    - **Storage** — the PVE storage ID the backup writes to (`local`, or a PBS-backed storage such as `datastore01`)

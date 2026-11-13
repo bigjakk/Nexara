@@ -58,6 +58,14 @@ vi.mock("@/features/storage/components/ClusterStoresPanel", () => ({
     </section>
   ),
 }));
+vi.mock("@/features/backup/components/ClusterBackupTab", () => ({
+  ClusterBackupTab: (props: { clusterId: string; canManage: boolean }) => (
+    <section aria-label={`backup of ${props.clusterId}`}>
+      Backup schedules
+      {props.canManage && <button type="button">Add schedule</button>}
+    </section>
+  ),
+}));
 vi.mock("@/features/storage/components/AddStorageDialog", () => ({
   AddStorageDialog: (props: { clusterId: string }) => (
     <button type="button">Add storage to {props.clusterId}</button>
@@ -181,13 +189,28 @@ describe("ClusterDetailPage", () => {
     ).not.toBeInTheDocument();
   });
 
-  // Where Proxmox has Datacenter > Storage; adding one takes manage:storage.
+  // Where Proxmox has Datacenter > Storage and > Backup; adding to either
+  // takes its manage grant.
+  const STORAGE = {
+    tab: "Storage",
+    region: "stores of test-cluster-id",
+    title: "Storage",
+    add: "Add storage to test-cluster-id",
+  };
+  const BACKUP = {
+    tab: "Backup",
+    region: "backup of test-cluster-id",
+    title: "Backup schedules",
+    add: "Add schedule",
+  };
   it.each([
-    { permissions: ["manage:storage"], canAdd: true },
-    { permissions: [], canAdd: false },
+    { ...STORAGE, permissions: ["manage:storage"], canAdd: true },
+    { ...STORAGE, permissions: ["manage:backup"], canAdd: false },
+    { ...BACKUP, permissions: ["manage:backup"], canAdd: true },
+    { ...BACKUP, permissions: ["manage:storage"], canAdd: false },
   ])(
-    "?tab=storage lists this cluster's stores, with Add storage: $canAdd",
-    ({ permissions, canAdd }) => {
+    "?tab=$tab with $permissions shows its panel, with its Add: $canAdd",
+    ({ tab, region, title, add, permissions, canAdd }) => {
       useAuthStore.setState({ user: null, permissions });
       mockUseCluster.mockReturnValue({
         data: makeCluster({ id: "test-cluster-id" }),
@@ -201,20 +224,20 @@ describe("ClusterDetailPage", () => {
       });
 
       renderWithProviders(<ClusterDetailPage />, {
-        router: { initialEntries: ["/clusters/test-cluster-id?tab=storage"] },
+        router: {
+          initialEntries: [
+            `/clusters/test-cluster-id?tab=${tab.toLowerCase()}`,
+          ],
+        },
       });
 
       expect(
-        screen.getByRole("tab", { name: "Storage", selected: true }),
+        screen.getByRole("tab", { name: tab, selected: true }),
       ).toBeInTheDocument();
-      expect(
-        screen.getByRole("region", { name: "stores of test-cluster-id" }),
-      ).toHaveTextContent("Storage");
-      expect(
-        screen.queryByRole("button", {
-          name: "Add storage to test-cluster-id",
-        }) !== null,
-      ).toBe(canAdd);
+      expect(screen.getByRole("region", { name: region })).toHaveTextContent(
+        title,
+      );
+      expect(screen.queryByRole("button", { name: add }) !== null).toBe(canAdd);
     },
   );
 

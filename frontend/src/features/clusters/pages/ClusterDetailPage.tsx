@@ -65,6 +65,7 @@ import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { storageTotals, storeRows } from "@/features/storage/lib/store-rows";
 import { AddStorageDialog } from "@/features/storage/components/AddStorageDialog";
 import { ClusterStoresPanel } from "@/features/storage/components/ClusterStoresPanel";
+import { ClusterBackupTab } from "@/features/backup/components/ClusterBackupTab";
 import type {
   ClusterResponse,
   HealthIssue,
@@ -183,6 +184,7 @@ export function ClusterDetailPage() {
   // Delete routes ask for these.
   const canEditCluster = hasPermission("manage", "cluster");
   const canManageStorage = hasPermission("manage", "storage");
+  const canManageBackup = hasPermission("manage", "backup");
   const canDeleteCluster = hasPermission("delete", "cluster");
 
   const clusterMetrics = useClusterMetrics(clusterId ?? "");
@@ -366,6 +368,7 @@ export function ClusterDetailPage() {
                 VMs ({clusterVmRows.length})
               </TabsTrigger>
               <TabsTrigger value="storage">Storage</TabsTrigger>
+              <TabsTrigger value="backup">Backup</TabsTrigger>
               <TabsTrigger value="options">Options</TabsTrigger>
               <TabsTrigger value="ha">HA</TabsTrigger>
               <TabsTrigger value="pools">Pools</TabsTrigger>
@@ -486,6 +489,15 @@ export function ClusterDetailPage() {
                     <AddStorageDialog clusterId={clusterId ?? ""} />
                   ) : undefined
                 }
+              />
+            </TabsContent>
+
+            {/* Where Proxmox has Datacenter > Backup: the cluster's backup
+                schedules, with or without a PBS server. */}
+            <TabsContent value="backup">
+              <ClusterBackupTab
+                clusterId={clusterId ?? ""}
+                canManage={canManageBackup}
               />
             </TabsContent>
 

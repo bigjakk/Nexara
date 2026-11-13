@@ -130,9 +130,10 @@ export interface StoreRow {
 }
 
 /**
- * The stores of one cluster as the list shows them. A shared store is one
- * store reported by every node, so it is kept once; a local store is a
- * different one on each node. Shared first, then by node, then by name.
+ * The stores of one cluster, a row per disk. A shared store is one store
+ * reported by every node, so it is kept once; a local store is a different one
+ * on each node. Shared first, then by node, then by name. The list shows them
+ * gathered into storage definitions (storeGroups).
  */
 export function storeRows(
   pools: readonly StorageResponse[],
@@ -161,37 +162,119 @@ export function storeRows(
   );
 }
 
+/**
+ * One storage definition, as Proxmox's Datacenter > Storage lists it: a shared
+ * store once, and a local one once with a row for each node it is on.
+ */
+export interface StoreGroup {
+  /** One row for a shared store; one per node, by node name, for a local one. */
+  rows: StoreRow[];
+  /**
+   * The row its figures stand for: the shared one, or the fullest node's, so a
+   * node close to full is what the list shows.
+   */
+  lead: StoreRow;
+  /**
+   * The lead, when its usage stands out from another node's that reports a
+   * size; null for one row, nodes alike in usage, or only one node sized.
+   */
+  fullest: StoreRow | null;
+  /** The worst state any of its rows is in: unreachable on one node is unreachable. */
+  state: StoreState;
+}
+
+const STATE_RANK: Record<StoreState, number> = {
+  disabled: 0,
+  active: 1,
+  inactive: 2,
+};
+
+/**
+ * storeRows gathered into the definitions they belong to, keyed by cluster and
+ * storage id: shared first, then by name.
+ */
+export function storeGroups(rows: readonly StoreRow[]): StoreGroup[] {
+  const byID = new Map<string, StoreRow[]>();
+  for (const row of rows) {
+    const key = `${row.pool.cluster_id}/${row.pool.storage}`;
+    const members = byID.get(key);
+    if (members === undefined) byID.set(key, [row]);
+    else members.push(row);
+  }
+  const groups: StoreGroup[] = [];
+  for (const members of byID.values()) {
+    // A store restricted to some nodes (its `nodes` option) is reported on the
+    // rest too, disabled there. Disabling is the store's own setting, the same
+    // on every node, so a disabled row beside an enabled one is a node the
+    // store is not on.
+    const on = members.some((row) => row.pool.enabled)
+      ? members.filter((row) => row.pool.enabled)
+      : members;
+    const sorted = [...on].sort((a, b) => a.nodeName.localeCompare(b.nodeName));
+    const [first] = sorted;
+    if (first === undefined) continue;
+    let lead = first;
+    let state = storeState(first.pool);
+    for (const row of sorted) {
+      if ((row.percent ?? -1) > (lead.percent ?? -1)) lead = row;
+      const rowState = storeState(row.pool);
+      if (STATE_RANK[rowState] > STATE_RANK[state]) state = rowState;
+    }
+    const leadPercent = lead.percent;
+    const fullest =
+      leadPercent !== null &&
+      sorted.some((row) => row.percent !== null && row.percent < leadPercent)
+        ? lead
+        : null;
+    groups.push({ rows: sorted, lead, fullest, state });
+  }
+  return groups.sort(
+    (a, b) =>
+      Number(b.lead.pool.shared) - Number(a.lead.pool.shared) ||
+      a.lead.pool.storage.localeCompare(b.lead.pool.storage),
+  );
+}
+
 export interface StorageTotals {
+  /** Storage definitions: a local store counts once, however many nodes it is on. */
   stores: number;
   total: number;
   used: number;
   free: number;
   percent: number | null;
-  /** Stores at or past the amber threshold, the full ones included. */
+  /** Stores whose fullest node is at or past the amber threshold, the full ones included. */
   nearFull: number;
-  /** Stores at or past the red threshold. */
+  /** Stores whose fullest node is at or past the red threshold. */
   full: number;
-  /** Enabled stores Proxmox cannot reach. */
+  /** Enabled stores Proxmox cannot reach on at least one node. */
   inactive: number;
 }
 
+/**
+ * What a list of storeRows adds up to: the space of every disk, a local store
+ * once per node it is on, and the stores counted as the list shows them, once
+ * each (storeGroups).
+ */
 export function storageTotals(rows: readonly StoreRow[]): StorageTotals {
   let total = 0;
   let used = 0;
   let free = 0;
-  let nearFull = 0;
-  let full = 0;
-  let inactive = 0;
   for (const row of rows) {
     total += row.pool.total;
     used += row.pool.used;
     free += row.pool.avail;
-    if (row.level !== "ok") nearFull++;
-    if (row.level === "err") full++;
-    if (storeState(row.pool) === "inactive") inactive++;
+  }
+  const groups = storeGroups(rows);
+  let nearFull = 0;
+  let full = 0;
+  let inactive = 0;
+  for (const group of groups) {
+    if (group.lead.level !== "ok") nearFull++;
+    if (group.lead.level === "err") full++;
+    if (group.state === "inactive") inactive++;
   }
   return {
-    stores: rows.length,
+    stores: groups.length,
     total,
     used,
     free,
