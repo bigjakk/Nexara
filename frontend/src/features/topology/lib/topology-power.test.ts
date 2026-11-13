@@ -73,6 +73,23 @@ describe("withPower", () => {
     expect(nodes.find((n) => n.id === "ups-u2")?.position).toEqual(second);
   });
 
+  // Clusters wrap into rows: a UPS goes under the card of the cluster whose
+  // hosts it powers, not under the topmost one.
+  it("places a UPS in its own cluster's lane", () => {
+    const rows: Node[] = [
+      ...canvas,
+      { id: "cluster-c2", type: "clusterNode", position: { x: 120, y: 500 }, data: { kind: "cluster" } },
+      { id: "host-n3", type: "hostNode", position: { x: 0, y: 730 }, data: { kind: "host", clusterId: "c2" } },
+    ];
+    const overlay = buildPowerOverlay(
+      [upsDevice({ id: "u9", name: "ups09", feeds: [upsFeed({ id: "f9", cluster_id: "c2" })] })],
+      hostIdByName,
+      new Set(["host-n3"]),
+      "TB",
+    );
+    expect(withPower(rows, overlay, "TB").find((n) => n.id === "ups-u9")?.position.y).toBe(576);
+  });
+
   it("keeps a dragged UPS node where it is through a poll, and removes the overlay when it goes", () => {
     const device = (state: UpsDevice["state"]) => [upsDevice({ name: "ups01", state, feeds: [upsFeed({ protection: "not_protected" })] })];
     const dragged = withPower(canvas, overlayOf(device("online")), "TB").map((n) =>

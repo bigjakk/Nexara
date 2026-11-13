@@ -22,26 +22,38 @@ const metrics: AggregatedMetrics = {
 };
 
 describe("LiveMetricCards", () => {
-  it("renders all four metric cards with values", () => {
-    renderWithProviders(<LiveMetricCards metrics={metrics} />);
+  it("renders all four readings in one titled strip", () => {
+    renderWithProviders(
+      <LiveMetricCards metrics={metrics} title="cluster01" />,
+    );
 
-    expect(screen.getByText("CPU Usage")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "cluster01" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("CPU")).toBeInTheDocument();
     expect(screen.getByText("12.5%")).toBeInTheDocument();
-    expect(screen.getByText("Memory Usage")).toBeInTheDocument();
+    expect(screen.getByText("Memory")).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument();
+    // Disk and network lead with the combined rate and split it underneath.
     expect(screen.getByText("Disk I/O")).toBeInTheDocument();
-    expect(screen.getByText("1.0 MiB/s / 2.0 MiB/s")).toBeInTheDocument();
+    expect(screen.getByText("3.0 MiB/s")).toBeInTheDocument();
+    expect(
+      screen.getByText("1.0 MiB/s read, 2.0 MiB/s write"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Network")).toBeInTheDocument();
-    expect(screen.getByText("512.0 KiB/s / 256.0 KiB/s")).toBeInTheDocument();
+    expect(screen.getByText("768.0 KiB/s")).toBeInTheDocument();
+    expect(
+      screen.getByText("512.0 KiB/s in, 256.0 KiB/s out"),
+    ).toBeInTheDocument();
   });
 
-  it("shows used/total bytes under the memory card", () => {
+  it("shows used/total bytes under the memory reading", () => {
     renderWithProviders(<LiveMetricCards metrics={metrics} />);
 
     expect(screen.getByText("32.0 GiB of 64.0 GiB used")).toBeInTheDocument();
   });
 
-  it("renders a sparkline per card once history spans 2+ minutes", () => {
+  it("renders a sparkline per reading once history spans 2+ minutes", () => {
     const point = {
       timestamp: 0,
       cpuPercent: 10,

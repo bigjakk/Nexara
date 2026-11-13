@@ -1,77 +1,66 @@
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { AlertTriangle, CircleX } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
-import { Badge } from "@/components/ui/badge";
+import { UsageBar } from "@/components/UsageBar";
 import { worstIssueSeverity } from "@/features/ceph/lib/ceph-health";
 import { visibleClusterIssues } from "@/lib/health-issues";
+import { usageLevel, USAGE_TEXT_CLASS } from "@/lib/usage-level";
 import { useHealthDismissStore } from "@/stores/health-dismiss-store";
 import { useHealthMuteStore } from "@/stores/health-mute-store";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { ClusterResponse } from "@/types/api";
+import type { VMResponse } from "@/types/api";
 import type { AggregatedMetrics } from "@/types/ws";
 import type { ClusterSummary } from "../api/dashboard-queries";
+import { guestCounts } from "../lib/estate-summary";
 
 interface ClusterCardProps {
   summary: ClusterSummary;
   /** Live WS metrics for this cluster; CPU/memory bars show a placeholder until the first message arrives. */
   metrics?: AggregatedMetrics | undefined;
+  /**
+   * The cluster's guest list. With it the VM and container counts come from
+   * the list, templates left out, as the header and the Fleet widget count
+   * them; the summary's totals are only the fallback without it.
+   */
+  guests?: readonly VMResponse[] | undefined;
 }
 
-const statusDotClass: Record<ClusterResponse["status"], string> = {
-  online: "bg-emerald-500 shadow-[0_0_8px_2px] shadow-emerald-500/40",
-  degraded: "bg-amber-500 shadow-[0_0_8px_2px] shadow-amber-500/40",
-  offline: "bg-red-500 shadow-[0_0_8px_2px] shadow-red-500/40",
-  inactive: "bg-muted-foreground/50",
-  unknown: "bg-muted-foreground/50",
-};
-
-function UtilBar({
+/**
+ * A labelled utilisation bar, its reading, and the exact amount on a line
+ * under it. No reading yet draws an empty track and a dash, never 0%.
+ */
+function Meter({
   label,
   percent,
-  barClass,
   detail,
 }: {
   label: string;
   percent: number | null;
-  barClass: string;
-  /** Optional exact-amount line rendered under the bar (e.g. "210.0 GiB of 361.0 GiB"). */
-  detail?: string | null | undefined;
+  detail?: string | undefined;
 }) {
   const clamped = percent === null ? null : Math.min(100, Math.max(0, percent));
-  const fillClass =
-    clamped === null
-      ? barClass
-      : clamped >= 90
-        ? "bg-red-500"
-        : clamped >= 75
-          ? "bg-amber-500"
-          : barClass;
-
+  const level = usageLevel(clamped);
   return (
     <div>
       <div className="flex items-center gap-2.5">
         <span className="w-14 shrink-0 text-xs text-muted-foreground">
           {label}
         </span>
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
-          {clamped !== null && (
-            <div
-              className={cn(
-                "h-full rounded-full transition-[width] duration-700",
-                fillClass,
-              )}
-              style={{ width: `${String(Math.round(clamped))}%` }}
-            />
+        <UsageBar percent={clamped} className="flex-1" />
+        <span
+          className={cn(
+            "w-9 shrink-0 text-right text-xs",
+            level === "ok" ? "text-muted-foreground" : USAGE_TEXT_CLASS[level],
           )}
-        </div>
-        <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+        >
           {clamped === null ? "—" : `${String(Math.round(clamped))}%`}
         </span>
       </div>
-      {detail != null && (
-        <div className="mt-0.5 text-right text-[11px] leading-none tabular-nums text-muted-foreground/80">
+      {detail !== undefined && (
+        <div className="text-right text-[11.5px] leading-tight text-muted-foreground/75">
           {detail}
         </div>
       )}
@@ -79,8 +68,11 @@ function UtilBar({
   );
 }
 
-export function ClusterCard({ summary, metrics }: ClusterCardProps) {
-  const navigate = useNavigate();
+/**
+ * One cluster in the Fleet board's language: its name and state, what it
+ * holds, and how full it is. The whole panel opens the cluster.
+ */
+export function ClusterCard({ summary, metrics, guests }: ClusterCardProps) {
   const { t } = useTranslation("dashboard");
   const dismissed = useHealthDismissStore((s) => s.dismissed);
   const mutedTypes = useHealthMuteStore((s) => s.mutedTypes);
@@ -88,115 +80,96 @@ export function ClusterCard({ summary, metrics }: ClusterCardProps) {
     cluster,
     nodeCount,
     nodesOnline,
-    vmCount,
-    containerCount,
     storageTotalBytes,
     storageUsedBytes,
   } = summary;
+  const counted = guests !== undefined ? guestCounts([guests]) : null;
+  const vmCount = counted?.vms ?? summary.vmCount;
+  const containerCount = counted?.containers ?? summary.containerCount;
 
   const cpuPercent = metrics ? metrics.cpuPercent : null;
   const memPercent = metrics ? metrics.memPercent : null;
   const storagePercent =
     storageTotalBytes > 0 ? (storageUsedBytes / storageTotalBytes) * 100 : null;
 
-  const dotCount = Math.min(nodeCount, 8);
-  // Respect dismissed/muted so the badge matches what the health pill shows.
+  // Respect dismissed/muted so the count matches what the health pill shows.
   const issues = visibleClusterIssues(
     cluster.id,
     cluster.issues ?? [],
     new Set(dismissed),
     new Set(mutedTypes),
   );
-  const worstSeverity = worstIssueSeverity(issues);
+  const failed = worstIssueSeverity(issues) === "err";
+  const IssueIcon = failed ? CircleX : AlertTriangle;
 
   return (
     <Card
-      className="cursor-pointer p-4 transition-all hover:-translate-y-0.5 hover:border-muted-foreground/30 hover:shadow-md"
-      onClick={() => {
-        void navigate(`/clusters/${cluster.id}`);
-      }}
+      className="group relative px-[18px] py-3.5 focus-within:ring-2 focus-within:ring-ring"
       data-testid="cluster-card"
     >
-      <div className="flex items-center gap-2">
-        <span
-          className={cn(
-            "h-2 w-2 shrink-0 rounded-full",
-            statusDotClass[cluster.status],
-          )}
-        />
-        <span className="truncate text-base font-semibold tracking-tight">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        {/* The link's ::after covers the panel, so a click anywhere on it
+            opens the cluster and the keyboard still finds one named link. */}
+        <Link
+          to={`/clusters/${cluster.id}`}
+          className="min-w-0 truncate text-base font-semibold tracking-tight outline-hidden [font-stretch:108%] after:absolute after:inset-0 after:rounded-[10px] group-hover:underline"
+        >
           {cluster.name}
-        </span>
-        {cluster.pve_version !== "" && (
-          <span className="max-w-24 shrink-0 truncate rounded-md border px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
-            PVE {cluster.pve_version}
+        </Link>
+        {issues.length > 0 && (
+          <span
+            className={cn(
+              "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold",
+              failed
+                ? "bg-red-500/15 text-red-700 dark:text-red-400"
+                : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+            )}
+          >
+            <IssueIcon className="h-3 w-3" aria-hidden="true" />
+            {t("fleetIssueCount", { count: issues.length })}
           </span>
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {issues.length > 0 && (
-            <Badge
-              variant={worstSeverity === "err" ? "destructive" : "outline"}
-              className={cn(
-                worstSeverity === "warn" &&
-                  "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400",
-              )}
-            >
-              {issues.length} issue{issues.length === 1 ? "" : "s"}
-            </Badge>
-          )}
+        <span className="ml-auto shrink-0">
           <ClusterStatusBadge status={cluster.status} />
-        </div>
+        </span>
       </div>
+      <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+        {[
+          ...(cluster.pve_version !== "" ? [`PVE ${cluster.pve_version}`] : []),
+          t("fleetNodesOnline", { online: nodesOnline, count: nodeCount }),
+          [
+            t("fleetVmCount", { count: vmCount }),
+            t("fleetContainerCount", { count: containerCount }),
+          ].join(", "),
+        ].join(" · ")}
+      </p>
 
-      <div className="mt-4 space-y-2">
-        <UtilBar label={t("cpu")} percent={cpuPercent} barClass="bg-data" />
-        <UtilBar
+      <div className="mt-3 space-y-1.5">
+        <Meter label={t("cpu")} percent={cpuPercent} />
+        <Meter
           label={t("memory")}
           percent={memPercent}
-          barClass="bg-data"
           detail={
             metrics && metrics.memTotal > 0
               ? t("statBytesUsedOf", {
                   used: formatBytes(metrics.memUsed),
                   total: formatBytes(metrics.memTotal),
                 })
-              : null
+              : undefined
           }
         />
-        <UtilBar
+        <Meter
           label={t("storage")}
           percent={storagePercent}
-          barClass="bg-data"
+          detail={
+            storageTotalBytes > 0
+              ? t("statBytesUsedOf", {
+                  used: formatBytes(storageUsedBytes),
+                  total: formatBytes(storageTotalBytes),
+                })
+              : undefined
+          }
         />
-      </div>
-
-      <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1" data-testid="node-dots">
-          {Array.from({ length: dotCount }, (_, i) => (
-            <span
-              key={i}
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                i < nodesOnline ? "bg-emerald-500" : "bg-red-500",
-              )}
-            />
-          ))}
-          {nodeCount > dotCount && <span>+{nodeCount - dotCount}</span>}
-        </span>
-        <span>
-          {nodeCount} {nodeCount === 1 ? "node" : "nodes"}
-        </span>
-        <span className="ml-auto flex items-center gap-1.5 truncate">
-          <span>
-            {vmCount} {vmCount === 1 ? "VM" : "VMs"}
-          </span>
-          <span className="text-border">·</span>
-          <span>
-            {containerCount} {containerCount === 1 ? "CT" : "CTs"}
-          </span>
-          <span className="text-border">·</span>
-          <span>{formatBytes(storageTotalBytes)}</span>
-        </span>
       </div>
     </Card>
   );

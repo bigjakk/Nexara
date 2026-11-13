@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { makeVM } from "@/test/cluster.fixtures";
 import { DashboardPage } from "./DashboardPage";
 import type { DashboardData } from "../api/dashboard-queries";
 
@@ -122,7 +123,34 @@ describe("DashboardPage", () => {
     });
 
     renderWithProviders(<DashboardPage />);
-    expect(screen.getByText("Prod Cluster")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Prod Cluster" }),
+    ).toBeInTheDocument();
+  });
+
+  it("summarises the estate under the title, leaving templates out", () => {
+    mockUseDashboardData.mockReturnValue({
+      data: {
+        ...mockDashboardData,
+        vmsByCluster: new Map([
+          [
+            "c1",
+            [
+              makeVM({ id: "v1", name: "linux01" }),
+              makeVM({ id: "v2", name: "linux02", status: "stopped" }),
+              makeVM({ id: "v3", name: "linux03", template: true }),
+            ],
+          ],
+        ]),
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithProviders(<DashboardPage />);
+    expect(
+      screen.getByText("1 cluster, 3 nodes, 2 guests, 1 running"),
+    ).toBeInTheDocument();
   });
 
   it("shows empty state when no clusters", () => {

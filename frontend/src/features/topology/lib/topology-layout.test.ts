@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { applyHierarchicalLayout } from "./topology-layout";
+import {
+  applyHierarchicalLayout,
+  bestRowCount,
+  HOST_WIDTH,
+  LEAF_WIDTH,
+  STACK_INSET,
+  withStackEdges,
+} from "./topology-layout";
 import type { Node, Edge } from "@xyflow/react";
 import type {
   ClusterNodeData,
@@ -223,7 +230,98 @@ describe("applyHierarchicalLayout", () => {
     const hostPos = getPosition(result, "host-1");
     const guestPos = getPosition(result, "guest-1");
 
+    // The host is under its cluster, and the guest's chip beside the host.
     expect(hostPos.y).toBeGreaterThan(clusterPos.y);
-    expect(guestPos.y).toBeGreaterThan(hostPos.y);
+    expect(guestPos.x).toBeGreaterThan(hostPos.x);
+    expect(guestPos.y).toBe(hostPos.y);
+  });
+});
+
+describe("stacked chips", () => {
+  const node = (id: string, type: string, kind: string): Node =>
+    makeFlowNode(id, type, { kind });
+  // cluster01 holds two hosts and a shared store; the first host has two
+  // stores of its own.
+  const nodes = [
+    node("cluster-1", "clusterNode", "cluster"),
+    node("host-1", "hostNode", "host"),
+    node("host-2", "hostNode", "host"),
+    node("local-1", "storageNode", "storage"),
+    node("local-2", "storageNode", "storage"),
+    node("shared-1", "storageNode", "storage"),
+  ];
+  const edges: Edge[] = [
+    { id: "e1", source: "cluster-1", target: "host-1" },
+    { id: "e2", source: "cluster-1", target: "host-2" },
+    { id: "e3", source: "host-1", target: "local-1" },
+    { id: "e4", source: "host-1", target: "local-2" },
+    { id: "e5", source: "cluster-1", target: "shared-1" },
+  ];
+
+  it("stacks a host's chips beside it, and the shared storage after the last host", () => {
+    const result = applyHierarchicalLayout(nodes, edges);
+    const host1 = getPosition(result, "host-1");
+    const host2 = getPosition(result, "host-2");
+    const first = getPosition(result, "local-1");
+    const second = getPosition(result, "local-2");
+    const shared = getPosition(result, "shared-1");
+
+    expect(first).toEqual({
+      x: host1.x + HOST_WIDTH + STACK_INSET,
+      y: host1.y,
+    });
+    expect(second.x).toBe(first.x);
+    expect(second.y).toBeGreaterThan(first.y);
+    // The next host starts clear of the stack, in the same row.
+    expect(host2.x).toBeGreaterThan(first.x + LEAF_WIDTH);
+    expect(host2.y).toBe(host1.y);
+    expect(shared.x).toBeGreaterThan(host2.x + HOST_WIDTH);
+    expect(shared.y).toBe(host1.y);
+    // Only the cluster's own stack is reached by the bus-and-trunk edge.
+    expect(withStackEdges(result, edges).map((e) => e.type ?? "plain")).toEqual(
+      ["plain", "plain", "plain", "plain", "stack"],
+    );
+  });
+
+  it.each([
+    { reserveLane: false, drop: 120 },
+    { reserveLane: true, drop: 230 },
+  ])(
+    "drops the hosts $drop below their cluster with reserveLane $reserveLane",
+    ({ reserveLane, drop }) => {
+      const result = applyHierarchicalLayout(nodes, edges, {
+        direction: "TB",
+        reserveLane,
+      });
+      expect(
+        getPosition(result, "host-1").y - getPosition(result, "cluster-1").y,
+      ).toBe(drop);
+    },
+  );
+});
+
+describe("bestRowCount", () => {
+  const wide = { w: 1500, h: 300 };
+  const tall = { w: 400, h: 900 };
+  it.each([
+    { name: "one cluster", boxes: [wide], rows: 1 },
+    {
+      name: "two wide clusters, one above the other",
+      boxes: [wide, wide],
+      rows: 2,
+    },
+    {
+      name: "four wide clusters as a column",
+      boxes: [wide, wide, wide, wide],
+      rows: 4,
+    },
+    { name: "two tall clusters side by side", boxes: [tall, tall], rows: 1 },
+    {
+      name: "four tall clusters in one row",
+      boxes: [tall, tall, tall, tall],
+      rows: 1,
+    },
+  ])("packs $name", ({ boxes, rows }) => {
+    expect(bestRowCount(boxes)).toBe(rows);
   });
 });

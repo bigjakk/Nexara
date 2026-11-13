@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { makeVM } from "@/test/cluster.fixtures";
 import { ClusterCard } from "./ClusterCard";
 import type { ClusterSummary } from "../api/dashboard-queries";
 
@@ -30,9 +31,11 @@ const mockSummary: ClusterSummary = {
 };
 
 describe("ClusterCard", () => {
-  it("renders cluster name", () => {
+  it("names the cluster as the link that opens it", () => {
     renderWithProviders(<ClusterCard summary={mockSummary} />);
-    expect(screen.getByText("Production Cluster")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Production Cluster" }),
+    ).toHaveAttribute("href", "/clusters/test-id-1");
   });
 
   it("shows online badge for online cluster", () => {
@@ -49,12 +52,30 @@ describe("ClusterCard", () => {
     expect(screen.getByText("Inactive")).toBeInTheDocument();
   });
 
-  it("renders resource counts", () => {
+  it("says what the cluster holds", () => {
     renderWithProviders(<ClusterCard summary={mockSummary} />);
-    expect(screen.getByText("3 nodes")).toBeInTheDocument();
-    expect(screen.getByText("12 VMs")).toBeInTheDocument();
-    expect(screen.getByText("5 CTs")).toBeInTheDocument();
-    expect(screen.getByText("5.0 TiB")).toBeInTheDocument();
+    expect(
+      screen.getByText("3 of 3 nodes online · 12 VMs, 5 containers"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("2.5 TiB of 5.0 TiB used")).toBeInTheDocument();
+  });
+
+  // The same rule as the header and the Fleet widget, so the page's guest
+  // totals agree: the list wins over the summary, and a template is no guest.
+  it("counts guests from the cluster's list, leaving templates out", () => {
+    renderWithProviders(
+      <ClusterCard
+        summary={mockSummary}
+        guests={[
+          makeVM({ id: "v1", name: "linux01" }),
+          makeVM({ id: "v2", name: "linux02", template: true }),
+          makeVM({ id: "v3", name: "linux03", type: "lxc" }),
+        ]}
+      />,
+    );
+    expect(
+      screen.getByText("3 of 3 nodes online · 1 VM, 1 container"),
+    ).toBeInTheDocument();
   });
 
   it("uses singular form for count of 1", () => {
@@ -68,9 +89,9 @@ describe("ClusterCard", () => {
       containersRunning: 1,
     };
     renderWithProviders(<ClusterCard summary={single} />);
-    expect(screen.getByText("1 node")).toBeInTheDocument();
-    expect(screen.getByText("1 VM")).toBeInTheDocument();
-    expect(screen.getByText("1 CT")).toBeInTheDocument();
+    expect(
+      screen.getByText("1 of 1 node online · 1 VM, 1 container"),
+    ).toBeInTheDocument();
   });
 
   it("shows storage utilization from REST data", () => {
@@ -108,18 +129,12 @@ describe("ClusterCard", () => {
     expect(screen.getByText("32.0 GiB of 64.0 GiB used")).toBeInTheDocument();
   });
 
-  it("renders a PVE version chip when version is known", () => {
+  it("leads the facts with the PVE version when it is known", () => {
     const versioned: ClusterSummary = {
       ...mockSummary,
       cluster: { ...mockSummary.cluster, pve_version: "8.4.1" },
     };
     renderWithProviders(<ClusterCard summary={versioned} />);
-    expect(screen.getByText("PVE 8.4.1")).toBeInTheDocument();
-  });
-
-  it("renders one status dot per node", () => {
-    renderWithProviders(<ClusterCard summary={mockSummary} />);
-    const dots = screen.getByTestId("node-dots");
-    expect(dots.querySelectorAll("span")).toHaveLength(3);
+    expect(screen.getByText(/^PVE 8\.4\.1 · /)).toBeInTheDocument();
   });
 });

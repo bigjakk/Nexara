@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookMarked, Save, Trash2 } from "lucide-react";
+import { ChevronDown, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -53,13 +53,19 @@ export function DashboardPresetSelector({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="outline" className="gap-1">
-            <BookMarked className="h-4 w-4" />
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            aria-label={`Layout: ${activePreset.name}`}
+          >
+            <span className="font-normal text-muted-foreground">Layout</span>
             {activePreset.name}
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuLabel>Dashboard Presets</DropdownMenuLabel>
+          <DropdownMenuLabel>Saved layouts</DropdownMenuLabel>
           <DropdownMenuSeparator />
 
           <DropdownMenuItem onClick={onReset}>Default</DropdownMenuItem>
@@ -102,7 +108,7 @@ export function DashboardPresetSelector({
             }}
           >
             <Save className="mr-2 h-4 w-4" />
-            Save Current as Preset
+            Save current as preset
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -110,9 +116,9 @@ export function DashboardPresetSelector({
       <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Save Dashboard Preset</DialogTitle>
+            <DialogTitle>Save dashboard preset</DialogTitle>
             <DialogDescription>
-              Give your dashboard layout a name to save it for later.
+              Name this layout to switch back to it later.
             </DialogDescription>
           </DialogHeader>
           <Input

@@ -1,5 +1,10 @@
 {
   "topology": "Topology",
+  "topologyPurpose": "Every cluster, its hosts, and the storage and guests on them, drawn as one map.",
+  "summaryStorageCount_one": "{{count}} storage pool",
+  "summaryStorageCount_other": "{{count}} storage pools",
+  "summaryMigrations_one": "{{count}} migration in flight",
+  "summaryMigrations_other": "{{count}} migrations in flight",
   "loadingTopology": "Loading topology...",
   "failedLoadTopology": "Failed to load topology: {{error}}",
   "noClustersTopology": "No clusters configured. Add a cluster to see the topology.",

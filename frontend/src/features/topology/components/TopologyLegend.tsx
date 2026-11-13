@@ -1,43 +1,93 @@
 import { memo } from "react";
+import { StatusIcon } from "@/components/StatusIcon";
+import { GuestCellSwatch } from "@/features/dashboard/components/GuestCell";
+import { DATA_COLOR } from "@/lib/chart-colors";
+import { cn } from "@/lib/utils";
 import { TONE_COLOR } from "../lib/topology-power";
 
-const legendItems = [
-  { color: "#10b981", label: "Online / Running" },
-  { color: "#f59e0b", label: "Warning / Paused" },
-  { color: "#ef4444", label: "Offline" },
-  { color: "#6b7280", label: "Stopped / Unknown" },
-];
+const STATES = [
+  { status: "online", label: "Online" },
+  { status: "degraded", label: "Degraded or paused" },
+  { status: "offline", label: "Offline" },
+  { status: "stopped", label: "Stopped" },
+] as const;
 
-function PowerLine({ label, color, dashed = false }: { label: string; color: string; dashed?: boolean }) {
+function Line({
+  label,
+  color,
+  dash,
+}: {
+  label: string;
+  color: string;
+  dash?: string;
+}) {
   return (
-    <div className="flex items-center gap-1.5">
+    <span className="flex items-center gap-1.5">
       <svg width="18" height="4" aria-hidden="true">
-        <line x1="0" y1="2" x2="18" y2="2" stroke={color} strokeWidth="1.5" strokeDasharray={dashed ? "6 4" : undefined} />
+        <line
+          x1="0"
+          y1="2"
+          x2="18"
+          y2="2"
+          style={{ stroke: color }}
+          strokeWidth="1.5"
+          strokeDasharray={dash}
+        />
       </svg>
-      <span>{label}</span>
-    </div>
+      {label}
+    </span>
   );
 }
 
-/** Status colours, and with the power overlay on, how its edges read. */
-export const TopologyLegend = memo(function TopologyLegend({ power = false }: { power?: boolean }) {
+/**
+ * How to read the map: the state dots, the guest cells, and the lines that
+ * are only there some of the time (a migration, the power overlay).
+ */
+export const TopologyLegend = memo(function TopologyLegend({
+  power = false,
+  migrating = false,
+  className,
+}: {
+  power?: boolean;
+  migrating?: boolean;
+  className?: string;
+}) {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground">
-      <span className="font-medium">Status:</span>
-      {legendItems.map((item) => (
-        <div key={item.color} className="flex items-center gap-1.5">
-          <div
-            className="h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: item.color }}
-          />
-          <span>{item.label}</span>
-        </div>
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[10px] bg-card px-3 py-1.5 text-xs text-muted-foreground ring-1 ring-border",
+        className,
+      )}
+    >
+      {STATES.map((s) => (
+        // The dot is decoration beside its own label here.
+        <span key={s.status} className="flex items-center gap-1.5">
+          <span aria-hidden="true" className="flex">
+            <StatusIcon status={s.status} />
+          </span>
+          {s.label}
+        </span>
       ))}
+      <span className="flex items-center gap-1.5">
+        Guest CPU: idle
+        <span aria-hidden="true" className="flex gap-0.5">
+          {([1, 2, 3, 4] as const).map((level) => (
+            <GuestCellSwatch key={level} load={level} />
+          ))}
+        </span>
+        busy
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span aria-hidden="true" className="flex">
+          <GuestCellSwatch load={2} container />
+        </span>
+        container
+      </span>
+      {migrating && <Line label="Migrating" color={DATA_COLOR} dash="4 4" />}
       {power && (
         <>
-          <span className="font-medium">Power:</span>
-          <PowerLine label="On mains" color={TONE_COLOR.ok} />
-          <PowerLine label="On battery" color={TONE_COLOR.warn} dashed />
+          <Line label="On mains" color={TONE_COLOR.ok} />
+          <Line label="On battery" color={TONE_COLOR.warn} dash="6 4" />
         </>
       )}
     </div>

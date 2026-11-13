@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { makeVM } from "@/test/cluster.fixtures";
 import { StatsOverview } from "./StatsOverview";
 
 describe("StatsOverview", () => {
@@ -22,7 +23,42 @@ describe("StatsOverview", () => {
     expect(screen.getByText("5")).toBeInTheDocument();
     expect(screen.getByText("23")).toBeInTheDocument();
     expect(screen.getByText("/30")).toBeInTheDocument();
-    expect(screen.getByText("1.0 TiB")).toBeInTheDocument();
+    expect(screen.getByText("512.0 GiB of 1.0 TiB used")).toBeInTheDocument();
+  });
+
+  // The same rule as the header and the Fleet widget, so the page's guest
+  // totals agree: the lists win over the totals, and a template is no guest.
+  it("counts guests from the cluster lists, leaving templates out", () => {
+    renderWithProviders(
+      <StatsOverview
+        totalNodes={5}
+        totalNodesOnline={5}
+        totalVMs={20}
+        totalVMsRunning={15}
+        totalContainers={10}
+        totalContainersRunning={8}
+        totalStorageBytes={1099511627776}
+        totalStorageUsedBytes={549755813888}
+        isLoading={false}
+        vmsByCluster={
+          new Map([
+            [
+              "c1",
+              [
+                makeVM({ id: "v1", name: "linux01" }),
+                makeVM({ id: "v2", name: "linux02", status: "stopped" }),
+                makeVM({ id: "v3", name: "linux03", template: true }),
+              ],
+            ],
+            ["c2", [makeVM({ id: "v4", name: "linux04", type: "lxc" })]],
+          ])
+        }
+      />,
+    );
+
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("/3")).toBeInTheDocument();
+    expect(screen.getByText("2 VMs · 1 CTs")).toBeInTheDocument();
   });
 
   it("renders status sublines", () => {
@@ -42,7 +78,7 @@ describe("StatsOverview", () => {
 
     expect(screen.getByText("4/5 online")).toBeInTheDocument();
     expect(screen.getByText("20 VMs · 10 CTs")).toBeInTheDocument();
-    expect(screen.getByText("50% used")).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
   });
 
   it("shows placeholders on the CPU and memory cards until live metrics arrive", () => {
@@ -143,8 +179,8 @@ describe("StatsOverview", () => {
 
     expect(screen.getByText("Nodes")).toBeInTheDocument();
     expect(screen.getByText("Guests")).toBeInTheDocument();
-    expect(screen.getByText("Datacenter CPU")).toBeInTheDocument();
-    expect(screen.getByText("Datacenter Memory")).toBeInTheDocument();
-    expect(screen.getByText("Total Storage")).toBeInTheDocument();
+    expect(screen.getByText("CPU")).toBeInTheDocument();
+    expect(screen.getByText("Memory")).toBeInTheDocument();
+    expect(screen.getByText("Storage")).toBeInTheDocument();
   });
 });

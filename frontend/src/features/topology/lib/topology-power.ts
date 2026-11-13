@@ -12,11 +12,15 @@ const UPS_GAP = 40;
 const CLUSTER_CARD_HEIGHT = 64;
 const CLEARANCE = 12;
 
+/**
+ * A power edge's stroke. On mains is neutral, a little stronger than a tree
+ * edge so the two nets read apart; colour is kept for a UPS in trouble.
+ */
 export const TONE_COLOR: Record<UpsTone, string> = {
-  ok: "#10b981",
+  ok: "hsl(var(--foreground) / 0.5)",
   warn: "#f59e0b",
   err: "#ef4444",
-  idle: "#6b7280",
+  idle: "hsl(var(--foreground) / 0.3)",
 };
 
 export interface PowerOverlay {
@@ -132,21 +136,41 @@ function placeInLane(
   if (ups.length === 0 || nodes.length === 0) return out;
   const tb = direction === "TB";
   const pos = new Map(nodes.map((n) => [n.id, n.position]));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
   const clusters = nodes.filter((n) => n.type === "clusterNode");
   // Top-down, just under the cluster cards: the layout gives a cluster a
   // host's height, which its card does not fill, and the tree's edges turn
   // towards the hosts halfway down, below this lane. So no tree edge runs
   // behind a UPS, once each UPS also steps clear of the line a cluster drops
   // from its foot. Left-right the depth step leaves no such room, so the lane
-  // goes before the cluster column. (Without a cluster, which the graph never
-  // has, just above the hosts.)
+  // goes before the cluster. Clusters wrap into rows, so either way the lane
+  // is the one belonging to the cluster of the hosts a UPS powers; the layout
+  // reserves it (reserveLane). (Without a cluster, which the graph never has,
+  // just above the hosts.)
   const hostTop = Math.min(...ups.flatMap((u) => u.hosts.map((h) => pos.get(h)?.y ?? 0)));
-  const lane = !tb
+  const fallback = !tb
     ? Math.min(...nodes.map((n) => n.position.x)) - UPS_WIDTH - HORIZONTAL_GAP * 2
     : clusters.length > 0
       ? Math.min(...clusters.map((c) => c.position.y)) + CLUSTER_CARD_HEIGHT + CLEARANCE
       : hostTop - UPS_HEIGHT - CLEARANCE;
-  const drops = tb ? clusters.map((c) => c.position.x + CLUSTER_WIDTH / 2).sort((a, b) => a - b) : [];
+  const laneOf = (hosts: string[]): number => {
+    for (const h of hosts) {
+      const clusterId = (byId.get(h)?.data as Partial<HostNodeData> | undefined)?.clusterId;
+      const cluster = clusterId === undefined ? undefined : byId.get(`cluster-${clusterId}`);
+      if (cluster === undefined) continue;
+      return tb
+        ? cluster.position.y + CLUSTER_CARD_HEIGHT + CLEARANCE
+        : cluster.position.x - UPS_WIDTH - HORIZONTAL_GAP * 2;
+    }
+    return fallback;
+  };
+  const dropsIn = (lane: number) =>
+    tb
+      ? clusters
+          .filter((c) => c.position.y + CLUSTER_CARD_HEIGHT + CLEARANCE === lane)
+          .map((c) => c.position.x + CLUSTER_WIDTH / 2)
+          .sort((a, b) => a - b)
+      : [];
   const size = tb ? UPS_WIDTH : UPS_HEIGHT;
   const wanted = ups
     .map((u) => {
@@ -154,17 +178,17 @@ function placeInLane(
         const p = pos.get(h) ?? { x: 0, y: 0 };
         return tb ? p.x + HOST_WIDTH / 2 : p.y + HOST_HEIGHT / 2;
       });
-      return { id: u.id, at: centres.reduce((a, b) => a + b, 0) / centres.length - size / 2 };
+      return { id: u.id, lane: laneOf(u.hosts), at: centres.reduce((a, b) => a + b, 0) / centres.length - size / 2 };
     })
     .sort((a, b) => a.at - b.at);
-  let next = -Infinity;
+  const nextIn = new Map<number, number>();
   for (const w of wanted) {
-    let at = Math.max(w.at, next);
-    for (const x of drops) {
+    let at = Math.max(w.at, nextIn.get(w.lane) ?? -Infinity);
+    for (const x of dropsIn(w.lane)) {
       if (at - CLEARANCE < x && x < at + size + CLEARANCE) at = x + CLEARANCE;
     }
-    next = at + size + UPS_GAP;
-    out.set(w.id, tb ? { x: at, y: lane } : { x: lane, y: at });
+    nextIn.set(w.lane, at + size + UPS_GAP);
+    out.set(w.id, tb ? { x: at, y: w.lane } : { x: w.lane, y: at });
   }
   return out;
 }

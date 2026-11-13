@@ -15,6 +15,15 @@ vi.mock("@/hooks/useMetrics", () => {
   return { useDashboardMetrics: () => none };
 });
 
+// jsdom has no DOMMatrixReadOnly. React Flow reads the canvas zoom from one
+// when a change of direction moves a node's handles to another side.
+vi.stubGlobal(
+  "DOMMatrixReadOnly",
+  class {
+    m22 = 1;
+  },
+);
+
 const upsListed = () => vi.mocked(apiClient.list).mock.calls.some(([p]) => String(p).includes("ups-devices"));
 
 describe("TopologyPage power overlay", () => {
@@ -34,14 +43,14 @@ describe("TopologyPage power overlay", () => {
     const user = setupUser();
     renderWithProviders(<TopologyPage />);
 
-    await user.click(await screen.findByRole("checkbox", { name: "Power" }));
+    await user.click(await screen.findByRole("switch", { name: "Power" }));
 
     expect(await screen.findByText("ups01")).toBeInTheDocument();
     expect(screen.getByText("No upsmon")).toBeInTheDocument();
 
     // A re-layout (here a new direction; the clusters refetch does it every
     // 30 s) drops the overlay, which must be applied again after it.
-    await user.selectOptions(screen.getByDisplayValue("Top-Down"), "LR");
+    await user.click(screen.getByRole("button", { name: "Left-right" }));
     expect(await screen.findByText("ups01")).toBeInTheDocument();
     expect(screen.getByText("No upsmon")).toBeInTheDocument();
   });
@@ -51,7 +60,7 @@ describe("TopologyPage power overlay", () => {
     renderWithProviders(<TopologyPage />);
 
     expect(await screen.findByText("pve-01")).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", { name: "Power" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Power" })).not.toBeInTheDocument();
     expect(upsListed()).toBe(false);
   });
 });

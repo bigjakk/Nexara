@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
+  getNodesBounds,
   useNodesState,
+  useReactFlow,
+  useStore,
   BackgroundVariant,
 } from "@xyflow/react";
 import type { Node, Edge } from "@xyflow/react";
@@ -16,6 +19,7 @@ import { HostNode } from "./HostNode";
 import { GuestNode } from "./GuestNode";
 import { StorageNode } from "./StorageNode";
 import { MigrationEdge } from "./MigrationEdge";
+import { StackEdge } from "./StackEdge";
 import { UpsNode } from "./UpsNode";
 import type { UpsDevice } from "@/features/power/types/ups";
 import type {
@@ -25,7 +29,10 @@ import type {
   HostNodeData,
 } from "../lib/topology-transform";
 import { buildTopologyGraph } from "../lib/topology-transform";
-import { applyHierarchicalLayout } from "../lib/topology-layout";
+import {
+  applyHierarchicalLayout,
+  withStackEdges,
+} from "../lib/topology-layout";
 import { buildPowerOverlay, withPower } from "../lib/topology-power";
 
 const nodeTypes = {
@@ -38,7 +45,59 @@ const nodeTypes = {
 
 const edgeTypes = {
   migration: MigrationEdge,
+  stack: StackEdge,
 };
+
+/**
+ * Room for what floats over the canvas: the options along the top, the legend
+ * along the bottom, the zoom buttons down the right. The graph is fitted
+ * inside it.
+ */
+const FIT_OPTIONS = {
+  padding: { top: "72px", bottom: "64px", left: "28px", right: "64px" },
+  maxZoom: 1.1,
+} as const;
+
+/**
+ * Fits the graph to the canvas again whenever its shape changes (a filter, the
+ * direction, the power overlay). Not on a refetch or a metric tick: those
+ * must not take the view away from wherever the viewer has panned.
+ *
+ * It waits until the canvas holds the new layout and has measured every node
+ * of it. This component's effects run before its parent has handed the canvas
+ * the new nodes, so fitting on the change itself would frame the old ones.
+ */
+function FitOnChange({
+  shape,
+  layout,
+  count,
+}: {
+  /** What the graph is made of; a new value asks for a new fit. */
+  shape: string;
+  layout: Node[];
+  /** How many nodes the canvas holds once the overlay is on it too. */
+  count: number;
+}) {
+  const { fitView } = useReactFlow();
+  const [fitted, setFitted] = useState<string | null>(null);
+  const pending = fitted !== shape;
+  const applied = useStore(
+    (s) =>
+      pending &&
+      s.nodes.length === count &&
+      s.nodes.every((n) => n.measured?.width !== undefined) &&
+      layout.every((n) => {
+        const held = s.nodeLookup.get(n.id)?.position;
+        return held?.x === n.position.x && held.y === n.position.y;
+      }),
+  );
+  useEffect(() => {
+    if (!pending || !applied) return;
+    setFitted(shape);
+    void fitView({ ...FIT_OPTIONS, duration: fitted === null ? 0 : 250 });
+  }, [pending, applied, shape, fitted, fitView]);
+  return null;
+}
 
 /** A running migrate task rendered as an in-flight edge between two hosts. */
 export interface MigrationFlight {
@@ -60,20 +119,40 @@ interface TopologyCanvasProps {
   power: UpsDevice[] | null;
 }
 
+/** The minimap is a shape to steer by, not a second legend: all neutral. */
 function minimapColor(node: Node): string {
-  const data = node.data as TopologyNodeData;
-  switch (data.kind) {
-    case "cluster":
-      return "#10b981";
-    case "host":
-      return "#38bdf8";
-    case "storage":
-      return "#a78bfa";
-    case "ups":
-      return "#f59e0b";
-    default:
-      return "#6b7280";
-  }
+  return (node.data as TopologyNodeData).kind === "cluster"
+    ? "hsl(var(--foreground) / 0.55)"
+    : "hsl(var(--foreground) / 0.25)";
+}
+
+/**
+ * The minimap, only while part of the map is out of view: fitted, the canvas
+ * already shows all of it and a second, smaller copy would only cover a
+ * corner of the first.
+ */
+function MiniMapWhenOutOfView() {
+  const outOfView = useStore((s) => {
+    if (s.nodes.length === 0 || s.width === 0) return false;
+    const bounds = getNodesBounds(s.nodes);
+    const [x, y, zoom] = s.transform;
+    return (
+      bounds.x * zoom + x < -1 ||
+      bounds.y * zoom + y < -1 ||
+      (bounds.x + bounds.width) * zoom + x > s.width + 1 ||
+      (bounds.y + bounds.height) * zoom + y > s.height + 1
+    );
+  });
+  if (!outOfView) return null;
+  return (
+    <MiniMap
+      pannable
+      zoomable
+      nodeColor={minimapColor}
+      nodeStrokeWidth={0}
+      className="m-3! bg-card! ring-1 ring-border max-md:hidden!"
+    />
+  );
 }
 
 export function TopologyCanvas({
@@ -86,13 +165,23 @@ export function TopologyCanvas({
 }: TopologyCanvasProps) {
   const navigate = useNavigate();
 
+  // The layout leaves room for the UPS lanes only while the overlay is on,
+  // so turning it on or off re-lays the map out; a UPS poll does not.
+  const reserveLane = power !== null;
   const { layoutNodes, layoutEdges } = useMemo(() => {
     const graph = buildTopologyGraph(input, filters);
     const positioned = applyHierarchicalLayout(graph.nodes, graph.edges, {
       direction,
+      reserveLane,
     });
-    return { layoutNodes: positioned, layoutEdges: graph.edges };
-  }, [input, filters, direction]);
+    return {
+      layoutNodes: positioned,
+      layoutEdges:
+        direction === "TB"
+          ? withStackEdges(positioned, graph.edges)
+          : graph.edges,
+    };
+  }, [input, filters, direction, reserveLane]);
 
   // Resolve "<clusterId>:<nodeName>" -> host flow-node id for migration edges.
   const hostIdByName = useMemo(() => {
@@ -166,6 +255,7 @@ export function TopologyCanvas({
             ...node.data,
             cpuPercent: prevData.cpuPercent,
             memPercent: prevData.memPercent,
+            guestCpu: prevData.guestCpu,
           },
         };
       });
@@ -179,20 +269,27 @@ export function TopologyCanvas({
     setNodes((current) => withPower(current, overlay, direction));
   }, [overlay, direction, setNodes]);
 
-  // Inject live CPU/memory into host node data without disturbing positions
-  // (users may have dragged nodes around).
+  // Inject live CPU/memory, and each running guest's CPU for its cell, into
+  // host node data without disturbing positions (users may have dragged nodes
+  // around).
   useEffect(() => {
     setNodes((current) =>
       current.map((node) => {
         if (node.type !== "hostNode") return node;
         const data = node.data as HostNodeData;
-        const metric = liveMetrics
-          .get(data.clusterId)
-          ?.nodeMetrics.get(data.nodeId);
+        const cluster = liveMetrics.get(data.clusterId);
+        const metric = cluster?.nodeMetrics.get(data.nodeId);
         if (!metric) return node;
+        const guestCpu: Record<string, number> = {};
+        for (const g of data.guests) {
+          const cpu = cluster?.vmMetrics.get(g.vmId)?.cpuPercent;
+          // Whole percents: what a cell shows, and steady between ticks.
+          if (cpu !== undefined) guestCpu[g.vmId] = Math.round(cpu);
+        }
         if (
           data.cpuPercent === metric.cpuPercent &&
-          data.memPercent === metric.memPercent
+          data.memPercent === metric.memPercent &&
+          sameReadings(data.guestCpu, guestCpu)
         ) {
           return node;
         }
@@ -202,11 +299,23 @@ export function TopologyCanvas({
             ...data,
             cpuPercent: metric.cpuPercent,
             memPercent: metric.memPercent,
+            guestCpu,
           },
         };
       }),
     );
   }, [liveMetrics, setNodes]);
+
+  // What the graph is made of, as opposed to what it currently reads.
+  const shape = useMemo(
+    () =>
+      [
+        direction,
+        String(overlay?.ups.length ?? -1),
+        ...layoutNodes.map((n) => n.id),
+      ].join("|"),
+    [direction, overlay, layoutNodes],
+  );
 
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
@@ -235,7 +344,8 @@ export function TopologyCanvas({
   );
 
   return (
-    <div className="h-full w-full overflow-hidden rounded-xl border bg-background/60">
+    // No box: the graph sits on the page's own canvas, as its panels do.
+    <div className="h-full w-full">
       <ReactFlow
         nodes={nodes}
         edges={flowEdges}
@@ -243,21 +353,39 @@ export function TopologyCanvas({
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={handleNodeClick}
+        nodesConnectable={false}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={FIT_OPTIONS}
         minZoom={0.1}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
-        <Controls showInteractive={false} />
-        <MiniMap
-          pannable
-          zoomable
-          nodeColor={minimapColor}
-          className="border! bg-card!"
+        <FitOnChange
+          shape={shape}
+          layout={layoutNodes}
+          count={layoutNodes.length + (overlay?.ups.length ?? 0)}
         />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
+        <Controls
+          showInteractive={false}
+          fitViewOptions={FIT_OPTIONS}
+          position="top-right"
+          className="m-3! shadow-none! ring-1 ring-border"
+        />
+        <MiniMapWhenOutOfView />
       </ReactFlow>
     </div>
+  );
+}
+
+/** Whether two guest CPU maps hold the same readings. */
+function sameReadings(
+  a: Record<string, number> | undefined,
+  b: Record<string, number>,
+): boolean {
+  if (a === undefined) return false;
+  const keys = Object.keys(b);
+  return (
+    keys.length === Object.keys(a).length && keys.every((k) => a[k] === b[k])
   );
 }

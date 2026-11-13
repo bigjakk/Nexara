@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildTopologyGraph,
-  getStatusColor,
-  getGuestStatusColor,
-} from "./topology-transform";
+import { buildTopologyGraph, EDGE_NEUTRAL } from "./topology-transform";
 import type { TopologyInput, TopologyFilters } from "./topology-transform";
 import { makeStorage as baseStorage } from "@/test/storage.fixtures";
 import { makeCluster, makeNode, makeVM } from "@/test/cluster.fixtures";
@@ -182,45 +178,56 @@ describe("buildTopologyGraph", () => {
     expect(graph.edges).toHaveLength(0);
   });
 
-  it("animates edges for online/running resources", () => {
-    const graph = buildTopologyGraph(makeInput(), defaultFilters);
+  // Colour is state: a healthy tree is all neutral, still edges.
+  it.each([
+    { name: "an online host", node: {}, storage: {}, edge: 0, dashed: false },
+    {
+      name: "an offline host",
+      node: { status: "offline" },
+      storage: {},
+      edge: 0,
+      dashed: true,
+    },
+    {
+      name: "an inactive store",
+      node: {},
+      storage: { active: false },
+      edge: 2,
+      dashed: true,
+    },
+  ])(
+    "draws the edge to $name plain or flagged",
+    ({ node, storage, edge, dashed }) => {
+      const graph = buildTopologyGraph(
+        makeInput({
+          nodesByCluster: new Map([["c1", [makeNode(node)]]]),
+          storageByCluster: new Map([["c1", [makeStorage(storage)]]]),
+        }),
+        defaultFilters,
+      );
+      const style = graph.edges[edge]?.style;
+      expect(graph.edges[edge]?.animated).toBeUndefined();
+      expect(style?.stroke === EDGE_NEUTRAL).toBe(!dashed);
+      expect(style?.strokeDasharray !== undefined).toBe(dashed);
+    },
+  );
 
-    // cluster→host edge: animated (node is online)
-    expect(graph.edges[0]?.animated).toBe(true);
-    // host→guest edge: animated (vm is running)
-    expect(graph.edges[1]?.animated).toBe(true);
-  });
-});
-
-describe("getStatusColor", () => {
-  it("returns green for online", () => {
-    expect(getStatusColor("online")).toBe("#10b981");
-  });
-
-  it("returns red for offline", () => {
-    expect(getStatusColor("offline")).toBe("#ef4444");
-  });
-
-  it("returns yellow for warning", () => {
-    expect(getStatusColor("warning")).toBe("#f59e0b");
-  });
-
-  it("returns gray for unknown status", () => {
-    expect(getStatusColor("something")).toBe("#6b7280");
-  });
-});
-
-describe("getGuestStatusColor", () => {
-  it("returns green for running", () => {
-    expect(getGuestStatusColor("running")).toBe("#10b981");
-  });
-
-  it("returns neutral gray for stopped", () => {
-    expect(getGuestStatusColor("stopped")).toBe("#6b7280");
-  });
-
-  it("returns yellow for paused", () => {
-    expect(getGuestStatusColor("paused")).toBe("#f59e0b");
+  it("leaves templates out of the guest count, the host's cells and the guest chips", () => {
+    const graph = buildTopologyGraph(
+      makeInput({
+        vmsByCluster: new Map([
+          ["c1", [makeVM(), makeVM({ id: "v2", vmid: 101, template: true })]],
+        ]),
+      }),
+      defaultFilters,
+    );
+    expect(graph.nodes[0]?.data).toMatchObject({ vmCount: 1 });
+    expect(graph.nodes[1]?.data).toMatchObject({
+      guests: [expect.objectContaining({ vmId: "v1" })],
+    });
+    expect(
+      graph.nodes.filter((n) => n.type === "guestNode").map((n) => n.id),
+    ).toEqual(["guest-v1"]);
   });
 });
 

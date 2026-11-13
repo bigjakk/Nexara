@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Network } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
+import { PageHeader } from "@/components/page/PageHeader";
 import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { useDashboardMetrics } from "@/hooks/useMetrics";
 import { useRecentActivity } from "@/features/audit/api/audit-queries";
@@ -14,6 +15,7 @@ import { TopologyCanvas } from "../components/TopologyCanvas";
 import type { MigrationFlight } from "../components/TopologyCanvas";
 import { TopologyControls } from "../components/TopologyControls";
 import { TopologyLegend } from "../components/TopologyLegend";
+import { topologyCounts } from "../lib/topology-summary";
 import type { TopologyFilters } from "../lib/topology-transform";
 
 const NO_UPS: UpsDevice[] = [];
@@ -79,27 +81,31 @@ export function TopologyPage() {
     return out;
   }, [activityQuery.data]);
 
+  const counts = useMemo(
+    () => topologyCounts(input, filters.selectedClusterId),
+    [input, filters.selectedClusterId],
+  );
+
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-muted-foreground">{t("loadingTopology")}</div>
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        {t("loadingTopology")}
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-destructive">
-          {t("failedLoadTopology", { error: error.message })}
-        </div>
+      <div className="flex h-full items-center justify-center text-sm text-destructive">
+        {t("failedLoadTopology", { error: error.message })}
       </div>
     );
   }
 
   if (input.clusters.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center p-6">
+      <div className="space-y-5">
+        <PageHeader title={t("topology")} summary={t("topologyPurpose")} />
         <EmptyState
           icon={Network}
           title={td("noClustersRegistered")}
@@ -111,23 +117,35 @@ export function TopologyPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-5rem)] flex-col gap-3 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">{t("topology")}</h1>
-        <TopologyLegend power={power !== null} />
-      </div>
-
-      <TopologyControls
-        clusters={input.clusters}
-        filters={filters}
-        onFiltersChange={setFilters}
-        direction={direction}
-        onDirectionChange={setDirection}
-        showPower={showPower}
-        onShowPowerChange={canViewUps ? setShowPower : undefined}
+    // The page fills the shell's content box instead of flowing: main is a
+    // sized flex item, so h-full resolves against it and the map stays inside
+    // the window whatever the Activity panel's height. It adds no padding of
+    // its own (the shell pads); the canvas takes that padding back on three
+    // sides so the map runs to the edges.
+    <div className="flex h-full min-h-[24rem] flex-col gap-4">
+      <PageHeader
+        title={t("topology")}
+        summary={
+          <>
+            {[
+              td("summaryClusterCount", { count: counts.clusters }),
+              td("fleetNodeCount", { count: counts.nodes }),
+              td("fleetGuestCount", { count: counts.guests }),
+              t("summaryStorageCount", { count: counts.storage }),
+              ...(migrations.length > 0
+                ? [t("summaryMigrations", { count: migrations.length })]
+                : []),
+            ].join(", ")}
+            {counts.nodesOffline > 0 && (
+              <span className="ml-3 font-semibold text-red-700 dark:text-red-400">
+                {td("summaryNodesOffline", { count: counts.nodesOffline })}
+              </span>
+            )}
+          </>
+        }
       />
 
-      <div className="min-h-0 flex-1">
+      <div className="relative -mx-4 -mb-4 min-h-0 flex-1 border-t md:-mx-6 md:-mb-6">
         <TopologyCanvas
           input={input}
           filters={filters}
@@ -135,6 +153,24 @@ export function TopologyPage() {
           liveMetrics={liveMetrics}
           migrations={migrations}
           power={power}
+        />
+        {/* Floating over the canvas: what it draws at the top, how to read
+            it at the bottom. Each leaves the far corner to the zoom buttons
+            and the minimap. */}
+        <TopologyControls
+          className="absolute left-3 top-3 max-w-[calc(100%-4.5rem)]"
+          clusters={input.clusters}
+          filters={filters}
+          onFiltersChange={setFilters}
+          direction={direction}
+          onDirectionChange={setDirection}
+          showPower={showPower}
+          onShowPowerChange={canViewUps ? setShowPower : undefined}
+        />
+        <TopologyLegend
+          className="absolute bottom-3 left-3 max-w-[calc(100%-1.5rem)] md:max-w-[calc(100%-15.5rem)]"
+          power={power !== null}
+          migrating={migrations.length > 0}
         />
       </div>
     </div>

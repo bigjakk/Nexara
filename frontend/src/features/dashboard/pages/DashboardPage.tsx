@@ -1,8 +1,12 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/lib/i18n";
-import { LayoutGrid, Lock, ServerCrash } from "lucide-react";
+import { LayoutGrid, Lock, Plus, ServerCrash } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
+import { cn } from "@/lib/utils";
 import { useDashboardData } from "../api/dashboard-queries";
 import type { ClusterSummary } from "../api/dashboard-queries";
 import {
@@ -42,24 +46,50 @@ import {
   useUpsertSetting,
 } from "@/features/settings/api/settings-queries";
 import type { TimeRange } from "@/types/api";
-import type { AggregatedMetrics, MetricSeriesPoint } from "@/types/ws";
+import type {
+  AggregatedMetrics,
+  MetricSeriesPoint,
+  WsConnectionState,
+} from "@/types/ws";
+import { estateCounts } from "../lib/estate-summary";
 import { LIVE_WINDOW_MS, spliceLive } from "@/lib/metric-series";
 import { DATA_COLOR } from "@/lib/chart-colors";
 
-function ConnectionDot({
-  status,
-  t,
-}: {
-  status: string;
-  t: (key: string) => string;
-}) {
-  const isConnected = status === "connected";
+/**
+ * Whether the numbers on the page are live: a dot and a word, quiet while
+ * the stream is up and coloured only once it is not.
+ */
+function ConnectionState({ status }: { status: WsConnectionState }) {
+  const { t } = useTranslation("dashboard");
+  const connected = status === "connected";
+  const down = status === "disconnected";
   return (
     <span
-      className={`inline-block h-2 w-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-red-500"}`}
-      title={isConnected ? t("liveConnected") : t("disconnected")}
-      data-testid="connection-dot"
-    />
+      className="flex items-center gap-[7px]"
+      title={connected ? t("liveConnected") : t(status)}
+      data-testid="connection-state"
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "h-[7px] w-[7px] shrink-0 rounded-full",
+          connected ? "bg-emerald-500" : down ? "bg-red-500" : "bg-amber-500",
+        )}
+        data-testid="connection-dot"
+      />
+      <span
+        className={cn(
+          "font-[550]",
+          connected
+            ? "text-foreground"
+            : down
+              ? "text-red-700 dark:text-red-400"
+              : "text-amber-700 dark:text-amber-400",
+        )}
+      >
+        {connected ? t("live") : t(status)}
+      </span>
+    </span>
   );
 }
 
@@ -297,6 +327,7 @@ export function DashboardPage() {
               totalStorageBytes={data.totalStorageBytes}
               totalStorageUsedBytes={data.totalStorageUsedBytes}
               isLoading={isLoading}
+              vmsByCluster={data.vmsByCluster}
               metrics={liveMetrics}
               seeds={seedMetrics}
             />
@@ -304,12 +335,13 @@ export function DashboardPage() {
 
         case "cluster-cards":
           return (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid h-full content-start gap-4 overflow-y-auto [grid-template-columns:repeat(auto-fit,minmax(min(17rem,100%),1fr))]">
               {data.clusters.map((s) => (
                 <ClusterCard
                   key={s.cluster.id}
                   summary={s}
                   metrics={liveMetrics.get(s.cluster.id)}
+                  guests={data.vmsByCluster.get(s.cluster.id)}
                 />
               ))}
             </div>
@@ -364,6 +396,7 @@ export function DashboardPage() {
             <LiveMetricCards
               metrics={clusterLiveMetrics}
               clusterId={clusterId ?? undefined}
+              title={summary?.cluster.name}
             />
           );
 
@@ -386,70 +419,106 @@ export function DashboardPage() {
           return canViewUps ? (
             <UpsStatusWidget />
           ) : (
-            <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
+            <Card className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
               {t("upsWidgetNeedsPermission")}
-            </div>
+            </Card>
           );
 
         default:
           return (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
+            <Card className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
               {t("unknownWidget", { widgetId })}
-            </div>
+            </Card>
           );
       }
     },
     [data, clusterMap, isLoading, liveMetrics, seedMetrics, timeRange, t, canViewUps],
   );
 
+  const hasClusters = data != null && data.clusters.length > 0;
+  const counts = hasClusters
+    ? estateCounts(data.clusters, data.vmsByCluster)
+    : null;
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">
-            {t("dashboard")}
-          </h1>
-          <ConnectionDot status={status} t={t} />
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <DashboardPresetSelector
-            activePreset={effectivePreset}
-            savedPresets={savedPresets}
-            onSelect={handlePresetSelect}
-            onSave={handlePresetSave}
-            onDelete={handlePresetDelete}
-            onReset={handleReset}
-          />
-          {!isMobile && (
-            <Button
-              size="sm"
-              variant={editMode ? "default" : "outline"}
-              className="gap-1"
-              onClick={toggleEditMode}
-            >
-              {editMode ? (
-                <>
-                  <Lock className="h-4 w-4" />
-                  {t("lock")}
-                </>
-              ) : (
-                <>
-                  <LayoutGrid className="h-4 w-4" />
-                  {t("customize")}
-                </>
-              )}
-            </Button>
-          )}
-          <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
-          <RefreshRateSelector />
-          <AddClusterDialog />
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title={t("dashboard")}
+        summary={
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-0.5">
+            <ConnectionState status={status} />
+            <span>
+              {counts === null
+                ? t("dashboardPurpose")
+                : [
+                    t("summaryClusterCount", { count: counts.clusters }),
+                    t("fleetNodeCount", { count: counts.nodes }),
+                    t("fleetGuestCount", { count: counts.guests }),
+                    t("fleetRunningCount", { count: counts.guestsRunning }),
+                  ].join(", ")}
+            </span>
+            {counts !== null && counts.nodesOffline > 0 && (
+              <span className="font-semibold text-red-700 dark:text-red-400">
+                {t("summaryNodesOffline", { count: counts.nodesOffline })}
+              </span>
+            )}
+          </span>
+        }
+        actions={
+          <>
+            <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
+            <RefreshRateSelector />
+            <DashboardPresetSelector
+              activePreset={effectivePreset}
+              savedPresets={savedPresets}
+              onSelect={handlePresetSelect}
+              onSave={handlePresetSave}
+              onDelete={handlePresetDelete}
+              onReset={handleReset}
+            />
+            {!isMobile && (
+              <Button
+                size="sm"
+                // The page's one primary button, and only while customising:
+                // it is then the way out.
+                variant={editMode ? "default" : "outline"}
+                className="gap-1.5"
+                onClick={toggleEditMode}
+              >
+                {editMode ? (
+                  <>
+                    <Lock className="h-4 w-4" />
+                    {t("lock")}
+                  </>
+                ) : (
+                  <>
+                    <LayoutGrid className="h-4 w-4" />
+                    {t("customize")}
+                  </>
+                )}
+              </Button>
+            )}
+            {/* With no cluster yet the empty state below carries the one
+                primary "Add cluster"; with one, adding another is a quiet
+                option here. */}
+            {!(data != null && data.clusters.length === 0) && (
+              <AddClusterDialog
+                trigger={
+                  <Button size="sm" variant="outline" className="gap-1.5">
+                    <Plus className="h-4 w-4" />
+                    {t("addCluster")}
+                  </Button>
+                }
+              />
+            )}
+          </>
+        }
+      />
 
       {error != null ? (
-        <div className="rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
-          {t("failedLoadDashboard")}
-        </div>
+        <Panel>
+          <p className="text-sm text-destructive">{t("failedLoadDashboard")}</p>
+        </Panel>
       ) : (
         <>
           {!isLoading && data?.clusters.length === 0 && (
@@ -479,7 +548,9 @@ export function DashboardPage() {
 
           {/* Shaped like nothing in particular: which widgets come next is
               the viewer's own layout, not yet known. */}
-          {isLoading && !data && <Skeleton className="h-72 w-full rounded-xl" />}
+          {isLoading && !data && (
+            <Skeleton className="h-72 w-full rounded-[10px]" />
+          )}
         </>
       )}
     </div>

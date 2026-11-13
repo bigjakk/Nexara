@@ -129,18 +129,18 @@ describe("getWidgetLabel", () => {
   ]);
 
   it("returns template label for global widget", () => {
-    expect(getWidgetLabel("stats-overview", names)).toBe("Stats Overview");
+    expect(getWidgetLabel("stats-overview", names)).toBe("All clusters");
   });
 
   it("returns cluster-prefixed label for per-cluster widget", () => {
     expect(getWidgetLabel("cpu-chart:c1", names)).toBe(
-      "Prod — CPU Usage Chart",
+      "Prod — CPU usage chart",
     );
   });
 
   it("falls back to 'Cluster' if cluster name not found", () => {
     expect(getWidgetLabel("cpu-chart:unknown", names)).toBe(
-      "Cluster — CPU Usage Chart",
+      "Cluster — CPU usage chart",
     );
   });
 });

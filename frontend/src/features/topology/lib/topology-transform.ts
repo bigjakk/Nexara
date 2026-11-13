@@ -21,7 +21,7 @@ export interface ClusterNodeData {
   [key: string]: unknown;
 }
 
-/** Compact per-guest entry rendered as a status square inside its host card. */
+/** Compact per-guest entry rendered as a cell inside its host card. */
 export interface HostGuest {
   vmId: string;
   vmid: number;
@@ -43,6 +43,8 @@ export interface HostNodeData {
   /** Injected live metrics (0-100); undefined until the first WS message. */
   cpuPercent?: number;
   memPercent?: number;
+  /** Injected with them: each running guest's CPU (0-100) by its id. */
+  guestCpu?: Record<string, number>;
   /** Injected by the power overlay: the UPSes that power it with no upsmon on it. */
   noUpsmon?: string[];
   [key: string]: unknown;
@@ -137,6 +139,9 @@ export function buildTopologyGraph(
     const clusterVMs = input.vmsByCluster.get(cluster.id) ?? [];
     const clusterStorage = input.storageByCluster.get(cluster.id) ?? [];
 
+    // A template is not a guest anyone runs: not counted, and no cell.
+    const clusterGuests = clusterVMs.filter((vm) => !vm.template);
+
     const clusterNodeId = `cluster-${cluster.id}`;
 
     // Cluster node
@@ -150,7 +155,7 @@ export function buildTopologyGraph(
         isActive: cluster.is_active,
         status: cluster.status,
         nodeCount: clusterNodes.length,
-        vmCount: clusterVMs.length,
+        vmCount: clusterGuests.length,
         pveVersion: cluster.pve_version,
         clusterId: cluster.id,
       } satisfies ClusterNodeData,
@@ -160,7 +165,7 @@ export function buildTopologyGraph(
     for (const node of clusterNodes) {
       const hostNodeId = `host-${node.id}`;
 
-      const hostGuests: HostGuest[] = clusterVMs
+      const hostGuests: HostGuest[] = clusterGuests
         .filter((vm) => vm.node_id === node.id)
         .sort((a, b) => a.vmid - b.vmid)
         .map((vm) => ({
@@ -193,14 +198,13 @@ export function buildTopologyGraph(
         source: clusterNodeId,
         target: hostNodeId,
         type: "smoothstep",
-        animated: node.status === "online",
-        style: { stroke: getStatusColor(node.status) },
+        style: treeEdgeStyle(node.status === "offline" ? "err" : "ok"),
       });
     }
 
     // VMs / CTs
     if (filters.showVMs) {
-      for (const vm of clusterVMs) {
+      for (const vm of clusterGuests) {
         const guestNodeId = `guest-${vm.id}`;
         const parentHostId = `host-${vm.node_id}`;
 
@@ -229,8 +233,7 @@ export function buildTopologyGraph(
           source: parentHostId,
           target: guestNodeId,
           type: "smoothstep",
-          animated: vm.status === "running",
-          style: { stroke: getGuestStatusColor(vm.status) },
+          style: treeEdgeStyle("ok"),
         });
       }
     }
@@ -274,10 +277,7 @@ export function buildTopologyGraph(
             source: clusterNodeId,
             target: storageNodeId,
             type: "smoothstep",
-            style: {
-              stroke: sp.active ? "#10b981" : "#6b7280",
-              strokeDasharray: "5,5",
-            },
+            style: treeEdgeStyle(sp.active ? "ok" : "warn"),
           });
         } else {
           // Connect local storage to its host node
@@ -287,10 +287,7 @@ export function buildTopologyGraph(
             source: parentHostId,
             target: storageNodeId,
             type: "smoothstep",
-            style: {
-              stroke: sp.active ? "#10b981" : "#6b7280",
-              strokeDasharray: "5,5",
-            },
+            style: treeEdgeStyle(sp.active ? "ok" : "warn"),
           });
         }
       }
@@ -300,38 +297,24 @@ export function buildTopologyGraph(
   return { nodes, edges };
 }
 
-export function getStatusColor(status: string): string {
-  switch (status.toLowerCase()) {
-    case "online":
-    case "running":
-      return "#10b981"; // emerald-500
-    case "paused":
-    case "suspended":
-    case "warning":
-      return "#f59e0b"; // amber-500
-    case "offline":
-    case "stopped":
-    case "error":
-    case "critical":
-      return "#ef4444"; // red-500
-    default:
-      return "#6b7280"; // gray-500
-  }
-}
+/** The stroke every edge that has nothing to report is drawn in. */
+export const EDGE_NEUTRAL = "hsl(var(--foreground) / 0.3)";
 
-export function getGuestStatusColor(status: string): string {
-  switch (status.toLowerCase()) {
-    case "running":
-      return "#10b981";
-    case "paused":
-    case "suspended":
-      return "#f59e0b";
-    case "stopped":
-      // Neutral — a powered-off guest is not an error (matches the tree/badges).
-      return "#6b7280";
-    default:
-      return "#6b7280";
-  }
+/**
+ * A tree edge is neutral and still. Only an edge to something in trouble (an
+ * offline host, an inactive store) takes that state's colour, dashed.
+ */
+export function treeEdgeStyle(tone: "ok" | "warn" | "err"): {
+  stroke: string;
+  strokeWidth: number;
+  strokeDasharray?: string;
+} {
+  if (tone === "ok") return { stroke: EDGE_NEUTRAL, strokeWidth: 1.25 };
+  return {
+    stroke: tone === "err" ? "#ef4444" : "#f59e0b",
+    strokeWidth: 1.25,
+    strokeDasharray: "5 5",
+  };
 }
 
 // Re-exported from the canonical lib for the topology nodes that import

@@ -1,5 +1,10 @@
 {
   "dashboard": "Dashboard",
+  "dashboardPurpose": "Every cluster's nodes, guests and live load in one place.",
+  "summaryClusterCount_one": "{{count}} cluster",
+  "summaryClusterCount_other": "{{count}} clusters",
+  "summaryNodesOffline_one": "{{count}} node offline",
+  "summaryNodesOffline_other": "{{count}} nodes offline",
   "needsAttention": "Needs attention",
   "needsAttentionOpen": "{{count}} open",
   "issueOpen": "Open",
@@ -53,6 +58,8 @@
   "memory": "Memory",
   "liveConnected": "Live connected",
   "disconnected": "Disconnected",
+  "connecting": "Connecting",
+  "reconnecting": "Reconnecting",
   "failedLoadDashboard": "Failed to load dashboard data. Please try again.",
   "unknownWidget": "Unknown widget: {{widgetId}}",
   "upsWidgetNeedsPermission": "UPS status needs the view:ups permission.",
@@ -81,7 +88,7 @@
   "30s": "30s",
   "60s": "60s",
   "waitingForData": "Waiting for data...",
-  "addCluster": "Add Cluster",
+  "addCluster": "Add cluster",
   "addProxmoxCluster": "Add Proxmox Cluster",
   "connectProxmoxCluster": "Connect a Proxmox VE cluster by providing its API URL and an API token.",
   "verifyTLSCertificate": "Verify the TLS certificate fingerprint before connecting.",
@@ -118,5 +125,10 @@
   "statOnline": "{{online}}/{{total}} online",
   "statRunningStopped": "{{running}} running · {{stopped}} stopped",
   "statRunning": "{{running}} running",
-  "statUsedPercent": "{{percent}}% used"
+  "statUsedPercent": "{{percent}}% used",
+  "statReadWrite": "{{read}} read, {{write}} write",
+  "statInOut": "{{in}} in, {{out}} out",
+  "allClusters": "All clusters",
+  "liveLoad": "Live load",
+  "diskIo": "Disk I/O"
 }

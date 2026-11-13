@@ -1,14 +1,15 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Server, Monitor, Cpu, MemoryStick, HardDrive } from "lucide-react";
+import { Panel } from "@/components/page/Panel";
+import { Stat, StatStrip, type StatTone } from "@/components/page/StatStrip";
 import { formatBytes } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { usageLevel } from "@/lib/usage-level";
 import { AnimatedNumber } from "@/components/AnimatedNumber";
-import { Sparkline } from "@/components/Sparkline";
+import type { VMResponse } from "@/types/api";
 import type { AggregatedMetrics, MetricSeriesPoint } from "@/types/ws";
 import { sparklineSeries } from "@/lib/metric-series";
+import { guestCounts } from "../lib/estate-summary";
 
 interface StatsOverviewProps {
   totalNodes: number;
@@ -20,39 +21,22 @@ interface StatsOverviewProps {
   totalStorageBytes: number;
   totalStorageUsedBytes: number;
   isLoading: boolean;
+  /**
+   * Every cluster's guest list. With it the guest numbers are counted from
+   * the lists, templates left out, as the header and the Fleet widget count
+   * them; the four totals above are only the fallback without it.
+   */
+  vmsByCluster?: ReadonlyMap<string, VMResponse[]> | undefined;
   /** Live per-cluster metrics; drives the datacenter CPU card and sparkline. */
   metrics?: Map<string, AggregatedMetrics> | undefined;
   /** Stored 1h history per cluster, so sparklines are full on page load. */
   seeds?: Map<string, MetricSeriesPoint[]> | undefined;
 }
 
-/** Same card chrome as LiveMetricCards, so dashboard and cluster cards match. */
-function StatCard({
-  icon,
-  label,
-  isLoading,
-  children,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  isLoading: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Card className="flex flex-col">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{label}</CardTitle>
-        <span className="text-muted-foreground">{icon}</span>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col">
-        {isLoading ? (
-          <Skeleton className="h-7 w-24" data-testid="stat-skeleton" />
-        ) : (
-          children
-        )}
-      </CardContent>
-    </Card>
-  );
+/** A reading that is filling up is a problem from 75%; below that it is plain. */
+function usageTone(percent: number | null): StatTone {
+  const level = usageLevel(percent);
+  return level === "err" ? "bad" : level === "warn" ? "warn" : "default";
 }
 
 export function StatsOverview({
@@ -65,13 +49,32 @@ export function StatsOverview({
   totalStorageBytes,
   totalStorageUsedBytes,
   isLoading,
+  vmsByCluster,
   metrics,
   seeds,
 }: StatsOverviewProps) {
   const { t } = useTranslation("dashboard");
 
-  const guestsTotal = totalVMs + totalContainers;
-  const guestsRunning = totalVMsRunning + totalContainersRunning;
+  const guests = useMemo(
+    () =>
+      vmsByCluster !== undefined
+        ? guestCounts(vmsByCluster.values())
+        : {
+            vms: totalVMs,
+            vmsRunning: totalVMsRunning,
+            containers: totalContainers,
+            containersRunning: totalContainersRunning,
+          },
+    [
+      vmsByCluster,
+      totalVMs,
+      totalVMsRunning,
+      totalContainers,
+      totalContainersRunning,
+    ],
+  );
+  const guestsTotal = guests.vms + guests.containers;
+  const guestsRunning = guests.vmsRunning + guests.containersRunning;
   const storagePercent =
     totalStorageBytes > 0
       ? Math.round((totalStorageUsedBytes / totalStorageBytes) * 100)
@@ -138,122 +141,129 @@ export function StatsOverview({
     return [cpu, mem];
   }, [metrics, seeds]);
 
+  const loading = (value: React.ReactNode) =>
+    isLoading ? (
+      <Skeleton className="h-7 w-20" data-testid="stat-skeleton" />
+    ) : (
+      value
+    );
+  const nodesDown = totalNodes - totalNodesOnline;
+
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-      <StatCard
-        icon={<Server className="h-4 w-4" />}
-        label={t("nodes")}
-        isLoading={isLoading}
-      >
-        <div className="text-lg font-semibold tabular-nums">{totalNodes}</div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              totalNodes > 0 && totalNodesOnline === totalNodes
-                ? "bg-emerald-500"
-                : totalNodesOnline > 0
-                  ? "bg-amber-500"
-                  : "bg-muted-foreground/40",
-            )}
-          />
-          {t("statOnline", { online: totalNodesOnline, total: totalNodes })}
-        </div>
-      </StatCard>
-
-      <StatCard
-        icon={<Monitor className="h-4 w-4" />}
-        label={t("guests")}
-        isLoading={isLoading}
-      >
-        <div className="text-lg font-semibold tabular-nums">
-          <AnimatedNumber
-            value={guestsRunning}
-            format={(v) => String(Math.round(v))}
-          />
-          <span className="text-sm font-medium text-muted-foreground">
-            /{guestsTotal}
-          </span>
-        </div>
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          {t("statGuestMix", { vms: totalVMs, cts: totalContainers })}
-        </div>
-      </StatCard>
-
-      <StatCard
-        icon={<Cpu className="h-4 w-4" />}
-        label={t("datacenterCpu")}
-        isLoading={isLoading}
-      >
-        <div className="text-lg font-semibold tabular-nums">
-          {cpuNow === null ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <AnimatedNumber value={cpuNow} format={(v) => `${v.toFixed(1)}%`} />
+    <Panel
+      flush
+      title={t("allClusters")}
+      className="flex h-full flex-col overflow-hidden"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto"
+    >
+      <StatStrip>
+        <Stat
+          label={t("nodes")}
+          value={loading(totalNodes)}
+          tone={
+            isLoading || nodesDown === 0
+              ? totalNodes === 0
+                ? "quiet"
+                : "default"
+              : totalNodesOnline === 0
+                ? "bad"
+                : "warn"
+          }
+          sub={
+            isLoading
+              ? undefined
+              : t("statOnline", { online: totalNodesOnline, total: totalNodes })
+          }
+        />
+        <Stat
+          label={t("guests")}
+          value={loading(
+            <>
+              <AnimatedNumber
+                value={guestsRunning}
+                format={(v) => String(Math.round(v))}
+              />
+              <span className="text-base font-medium text-muted-foreground">
+                /{guestsTotal}
+              </span>
+            </>,
           )}
-        </div>
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          {cpuNow === null
-            ? t("waitingForData")
-            : t("statAcrossClusters", { count: clusterMetrics.length })}
-        </div>
-        <div className="mt-auto pt-2">
-          <Sparkline points={cpuSeries} className="h-7 w-full text-data" />
-        </div>
-      </StatCard>
-
-      <StatCard
-        icon={<MemoryStick className="h-4 w-4" />}
-        label={t("datacenterMemory")}
-        isLoading={isLoading}
-      >
-        <div className="text-lg font-semibold tabular-nums">
-          {memNow === null ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <AnimatedNumber value={memNow} format={(v) => `${v.toFixed(1)}%`} />
+          sub={
+            isLoading
+              ? undefined
+              : t("statGuestMix", { vms: guests.vms, cts: guests.containers })
+          }
+        />
+        <Stat
+          label={t("cpu")}
+          value={loading(
+            cpuNow === null ? (
+              "—"
+            ) : (
+              <AnimatedNumber
+                value={cpuNow}
+                format={(v) => `${v.toFixed(1)}%`}
+              />
+            ),
           )}
-        </div>
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          {memNow === null
-            ? t("waitingForData")
-            : t("statBytesUsedOf", {
-                used: formatBytes(memUsed),
-                total: formatBytes(memTotal),
-              })}
-        </div>
-        <div className="mt-auto pt-2">
-          <Sparkline points={memSeries} className="h-7 w-full text-data" />
-        </div>
-      </StatCard>
-
-      <StatCard
-        icon={<HardDrive className="h-4 w-4" />}
-        label={t("totalStorage")}
-        isLoading={isLoading}
-      >
-        <div className="text-lg font-semibold tabular-nums">
-          {formatBytes(totalStorageBytes)}
-        </div>
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          {t("statUsedPercent", { percent: storagePercent })}
-        </div>
-        <div className="mt-auto pt-2">
-          <div className="h-1 overflow-hidden rounded-full bg-foreground/10">
-            <div
-              className={cn(
-                "h-full rounded-full transition-[width] duration-700",
-                storagePercent >= 90
-                  ? "bg-red-500"
-                  : storagePercent >= 75
-                    ? "bg-amber-500"
-                    : "bg-data",
-              )}
-              style={{ width: `${String(storagePercent)}%` }}
-            />
-          </div>
-        </div>
-      </StatCard>
-    </div>
+          tone={cpuNow === null ? "quiet" : usageTone(cpuNow)}
+          sub={
+            isLoading
+              ? undefined
+              : cpuNow === null
+                ? t("waitingForData")
+                : t("statAcrossClusters", { count: clusterMetrics.length })
+          }
+          trend={isLoading ? undefined : cpuSeries}
+        />
+        <Stat
+          label={t("memory")}
+          value={loading(
+            memNow === null ? (
+              "—"
+            ) : (
+              <AnimatedNumber
+                value={memNow}
+                format={(v) => `${v.toFixed(1)}%`}
+              />
+            ),
+          )}
+          tone={memNow === null ? "quiet" : usageTone(memNow)}
+          sub={
+            isLoading
+              ? undefined
+              : memNow === null
+                ? t("waitingForData")
+                : t("statBytesUsedOf", {
+                    used: formatBytes(memUsed),
+                    total: formatBytes(memTotal),
+                  })
+          }
+          trend={isLoading ? undefined : memSeries}
+        />
+        <Stat
+          label={t("storage")}
+          value={loading(
+            totalStorageBytes > 0 ? `${String(storagePercent)}%` : "—",
+          )}
+          tone={totalStorageBytes > 0 ? usageTone(storagePercent) : "quiet"}
+          sub={
+            isLoading
+              ? undefined
+              : t("statBytesUsedOf", {
+                  used: formatBytes(totalStorageUsedBytes),
+                  total: formatBytes(totalStorageBytes),
+                })
+          }
+          percent={
+            isLoading
+              ? undefined
+              : totalStorageBytes > 0
+                ? storagePercent
+                : null
+          }
+        />
+      </StatStrip>
+    </Panel>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { TopConsumers } from "./TopConsumers";
@@ -35,13 +35,15 @@ const vmNames = new Map<string, string>([
   ["cccc-3333", "cache-01"],
 ]);
 
+const rows = () =>
+  within(screen.getByTestId("consumer-list")).getAllByRole("listitem");
+
 describe("TopConsumers", () => {
   it("renders consumers sorted by CPU by default", () => {
     renderWithProviders(
       <TopConsumers consumers={consumers} vmNames={vmNames} />,
     );
-    const list = screen.getByTestId("consumer-list");
-    const items = list.querySelectorAll(".space-y-1");
+    const items = rows();
     // First item should be web-01 (80% CPU), then cache-01 (60%), then db-01 (40%)
     expect(items[0]?.textContent).toContain("web-01");
     expect(items[1]?.textContent).toContain("cache-01");
@@ -54,10 +56,9 @@ describe("TopConsumers", () => {
       <TopConsumers consumers={consumers} vmNames={vmNames} />,
     );
 
-    await user.click(screen.getByTestId("sort-memory"));
+    await user.click(screen.getByRole("button", { name: "Memory" }));
 
-    const list = screen.getByTestId("consumer-list");
-    const items = list.querySelectorAll(".space-y-1");
+    const items = rows();
     // Sorted by memory: db-01 (90%), web-01 (50%), cache-01 (30%)
     expect(items[0]?.textContent).toContain("db-01");
     expect(items[1]?.textContent).toContain("web-01");
@@ -67,7 +68,7 @@ describe("TopConsumers", () => {
   it("shows empty state when no consumers", () => {
     renderWithProviders(<TopConsumers consumers={[]} vmNames={new Map()} />);
     expect(screen.getByTestId("empty-consumers")).toHaveTextContent(
-      "No VMs running",
+      "No guests are running.",
     );
   });
 
@@ -75,8 +76,6 @@ describe("TopConsumers", () => {
     renderWithProviders(
       <TopConsumers consumers={consumers} vmNames={vmNames} />,
     );
-    const list = screen.getByTestId("consumer-list");
-    const items = list.querySelectorAll(".space-y-1");
-    expect(items).toHaveLength(3);
+    expect(rows()).toHaveLength(3);
   });
 });

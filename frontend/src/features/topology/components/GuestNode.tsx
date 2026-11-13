@@ -1,39 +1,35 @@
 import { memo } from "react";
-import { Handle, Position } from "@xyflow/react";
+import { Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
-import { MonitorSmartphone, Container } from "lucide-react";
-import { getGuestStatusColor, formatBytes } from "../lib/topology-transform";
+import { StatusIcon } from "@/components/StatusIcon";
+import { formatBytes } from "../lib/topology-transform";
 import type { GuestNodeData } from "../lib/topology-transform";
+import { TopologyHandle } from "./TopologyHandle";
 
-export const GuestNode = memo(function GuestNode({ data }: NodeProps) {
+/** A guest as a chip the same size as a store's, so the two stack together. */
+export const GuestNode = memo(function GuestNode({
+  data,
+  targetPosition,
+}: NodeProps) {
   const d = data as GuestNodeData;
-  const statusColor = getGuestStatusColor(d.status);
-  const Icon = d.type === "qemu" ? MonitorSmartphone : Container;
 
   return (
-    <div className="rounded border bg-card px-2.5 py-2 shadow-xs min-w-[140px] cursor-pointer">
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="bg-muted-foreground! w-1.5! h-1.5!"
-      />
+    <div className="flex h-[54px] w-[172px] cursor-pointer flex-col justify-center rounded-lg bg-card px-2.5 text-card-foreground">
+      <TopologyHandle type="target" position={targetPosition ?? Position.Top} />
       <div className="flex items-center gap-1.5">
-        <div
-          className="h-2 w-2 rounded-full shrink-0"
-          style={{ backgroundColor: statusColor }}
-        />
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs font-medium truncate">{d.label}</span>
-      </div>
-      <div className="mt-1 flex gap-2 text-[10px] text-muted-foreground">
-        <span>
-          {d.type === "qemu" ? "VM" : "CT"} {String(d.vmid)}
+        <StatusIcon status={d.status} />
+        <span
+          className="min-w-0 truncate text-[12.5px] font-medium"
+          title={d.label}
+        >
+          {d.label}
         </span>
-        <span>{formatBytes(d.memTotal)}</span>
       </div>
-      {d.haState !== "" && (
-        <div className="mt-0.5 text-[10px] text-blue-500">HA: {d.haState}</div>
-      )}
+      <div className="mt-1 truncate text-[10.5px] leading-none text-muted-foreground">
+        {d.type === "qemu" ? "VM" : "CT"} {String(d.vmid)}, {d.status},{" "}
+        {formatBytes(d.memTotal)}
+        {d.haState !== "" && `, HA ${d.haState}`}
+      </div>
     </div>
   );
 });

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -30,7 +31,8 @@ export function RefreshRateSelector() {
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 px-2 text-xs"
+          className="gap-1.5 px-2 text-muted-foreground"
+          aria-label={`Refresh every ${currentLabel}`}
           data-testid="refresh-rate-selector"
         >
           <Timer className="h-3.5 w-3.5" />
@@ -38,6 +40,7 @@ export function RefreshRateSelector() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        <DropdownMenuLabel>Refresh every</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           value={String(refreshInterval)}
           onValueChange={(v) => {

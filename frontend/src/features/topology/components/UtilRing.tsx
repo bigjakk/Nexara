@@ -1,35 +1,33 @@
+import { usageLevel } from "@/lib/usage-level";
+import { cn } from "@/lib/utils";
+
 interface UtilRingProps {
   /** 0-100, or null while no live metric has arrived. */
   percent: number | null;
-  baseColor: string;
   label: string;
 }
 
-const SIZE = 36;
-const R = 14;
+const SIZE = 38;
+const R = 15;
 const CIRC = 2 * Math.PI * R;
 
-/** Small utilization arc with the value centered and a label underneath. */
-export function UtilRing({ percent, baseColor, label }: UtilRingProps) {
+/**
+ * A small utilisation arc in the data colour, amber and red at the shared
+ * thresholds, with the reading in its centre and a label underneath.
+ */
+export function UtilRing({ percent, label }: UtilRingProps) {
   const clamped = percent === null ? null : Math.min(100, Math.max(0, percent));
-  const color =
-    clamped === null
-      ? "transparent"
-      : clamped >= 90
-        ? "#ef4444"
-        : clamped >= 75
-          ? "#f59e0b"
-          : baseColor;
+  const level = usageLevel(clamped);
 
   return (
-    <div className="flex flex-col items-center gap-0.5">
+    <div className="flex flex-col items-center gap-1">
       <svg width={SIZE} height={SIZE} aria-hidden="true">
         <circle
           cx={SIZE / 2}
           cy={SIZE / 2}
           r={R}
           fill="none"
-          stroke="hsl(var(--foreground) / 0.09)"
+          className="stroke-foreground/10"
           strokeWidth={3.5}
         />
         {clamped !== null && (
@@ -38,7 +36,13 @@ export function UtilRing({ percent, baseColor, label }: UtilRingProps) {
             cy={SIZE / 2}
             r={R}
             fill="none"
-            stroke={color}
+            className={cn(
+              level === "err"
+                ? "stroke-red-500"
+                : level === "warn"
+                  ? "stroke-amber-500"
+                  : "stroke-data",
+            )}
             strokeWidth={3.5}
             strokeLinecap="round"
             strokeDasharray={`${String((clamped / 100) * CIRC)} ${String(CIRC)}`}
@@ -50,16 +54,16 @@ export function UtilRing({ percent, baseColor, label }: UtilRingProps) {
         )}
         <text
           x={SIZE / 2}
-          y={SIZE / 2 + 3}
+          y={SIZE / 2 + 3.5}
           textAnchor="middle"
           className="fill-foreground"
-          fontSize={9}
+          fontSize={10}
           fontWeight={600}
         >
           {clamped === null ? "—" : String(Math.round(clamped))}
         </text>
       </svg>
-      <span className="text-[10px] leading-none text-muted-foreground">
+      <span className="text-[10.5px] leading-none text-muted-foreground">
         {label}
       </span>
     </div>

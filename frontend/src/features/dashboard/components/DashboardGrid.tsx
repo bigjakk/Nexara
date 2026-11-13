@@ -17,7 +17,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   getAllAvailableWidgets,
@@ -158,7 +157,11 @@ export function DashboardGrid({
   return (
     <div ref={containerRef}>
       {editMode && (
-        <div className="mb-4 flex items-center gap-2">
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="mr-auto text-[12.5px] text-muted-foreground">
+            Drag a widget by its bar to move it, and by its corner to resize it.
+            Lock to save the layout.
+          </p>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -168,14 +171,14 @@ export function DashboardGrid({
                 disabled={availableWidgets.length === 0}
               >
                 <Plus className="h-4 w-4" />
-                Add Widget
+                Add widget
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              align="start"
-              className="w-64 max-h-80 overflow-y-auto"
+              align="end"
+              className="max-h-80 w-72 overflow-y-auto"
             >
-              <DropdownMenuLabel>Available Widgets</DropdownMenuLabel>
+              <DropdownMenuLabel>Available widgets</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {availableWidgets.map((w) => (
                 <DropdownMenuItem
@@ -197,12 +200,12 @@ export function DashboardGrid({
 
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             className="gap-1"
             onClick={handleReset}
           >
             <RotateCcw className="h-4 w-4" />
-            Reset to Default
+            Reset to default
           </Button>
         </div>
       )}
@@ -227,7 +230,11 @@ export function DashboardGrid({
           {activeWidgetIds.map((widgetId) => (
             <div
               key={widgetId}
-              className={cn(editMode && "rounded-lg ring-1 ring-border")}
+              className={cn(
+                // While customising, each cell shows its bounds: that is
+                // what gets dragged and resized.
+                editMode && "rounded-[10px] ring-1 ring-input",
+              )}
             >
               {editMode && (
                 <WidgetOverlay
@@ -238,7 +245,7 @@ export function DashboardGrid({
                   }}
                 />
               )}
-              <div className="h-full w-full overflow-hidden">
+              <div className="h-full w-full overflow-hidden rounded-[10px]">
                 {children(widgetId)}
               </div>
             </div>
@@ -259,21 +266,25 @@ function WidgetOverlay({
   onRemove: () => void;
 }) {
   const label = getWidgetLabel(widgetId, clusterNames);
+  // An opaque bar over the widget's own title row: the same name, plus the
+  // grip that moves it and the button that removes it.
   return (
-    <Card className="absolute inset-x-0 top-0 z-10 flex h-8 items-center justify-between rounded-b-none border-b bg-muted/80 px-2 backdrop-blur-xs">
-      <CardHeader className="flex flex-row items-center gap-1 p-0">
-        <GripVertical className="widget-drag-handle h-4 w-4 cursor-grab text-muted-foreground" />
-        <CardTitle className="text-xs font-medium">{label}</CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        <button
-          aria-label={`Remove ${label}`}
-          onClick={onRemove}
-          className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </CardContent>
-    </Card>
+    <div className="absolute inset-x-0 top-0 z-10 flex h-9 items-center gap-1 rounded-t-[10px] border-b bg-secondary pl-1.5 pr-1 text-secondary-foreground">
+      <div className="widget-drag-handle flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 active:cursor-grabbing">
+        <GripVertical
+          aria-hidden="true"
+          className="h-4 w-4 shrink-0 text-muted-foreground"
+        />
+        <span className="truncate text-[13px] font-medium">{label}</span>
+      </div>
+      <button
+        type="button"
+        aria-label={`Remove ${label}`}
+        onClick={onRemove}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-hidden hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
   );
 }
