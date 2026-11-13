@@ -1,25 +1,11 @@
 import { useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Sun,
-  Moon,
-  Monitor,
-  Check,
-  Palette,
-  Globe,
-  TerminalSquare,
-} from "lucide-react";
+import { Sun, Moon, Monitor, Check } from "lucide-react";
 import { supportedLanguages } from "@/lib/i18n";
 
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page/PageHeader";
+import { SettingRow, SettingsSection } from "@/components/page/Settings";
+import { Segmented } from "@/components/ui/segmented";
 import {
   Select,
   SelectContent,
@@ -175,124 +161,124 @@ export function AppearancePage() {
   );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{t("appearance")}</h1>
-        <p className="text-muted-foreground">{t("customizeLookAndFeel")}</p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader title={t("appearance")} summary={t("customizeLookAndFeel")} />
 
-      {/* Language */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Globe className="h-5 w-5" />
-            {t("language")}
-          </CardTitle>
-          <CardDescription>{t("selectLanguage")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select
-            value={preferences.language}
-            onValueChange={(v) => {
-              savePreferences({ language: v });
-            }}
+      <div className="max-w-3xl space-y-4">
+        <SettingsSection title={t("look")}>
+          <SettingRow label={t("theme")} description={t("chooseLightDarkMode")}>
+            <Segmented
+              aria-label={t("theme")}
+              size="md"
+              value={themeMode}
+              onValueChange={setThemeMode}
+              options={themeModes.map(({ value, labelKey, icon: Icon }) => ({
+                value,
+                label: (
+                  <>
+                    <Icon />
+                    {t(labelKey)}
+                  </>
+                ),
+              }))}
+            />
+          </SettingRow>
+          <SettingRow
+            label={t("accentColor")}
+            description={t("chooseAccentColor")}
           >
-            <SelectTrigger className="w-64">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {supportedLanguages.map((lang) => (
-                <SelectItem key={lang.code} value={lang.code}>
-                  <span>{lang.nativeName}</span>
-                  {lang.nativeName !== (lang.name as string) && (
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      ({lang.name})
-                    </span>
-                  )}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
+            <div
+              role="group"
+              aria-label={t("accentColor")}
+              className="flex flex-wrap gap-2 sm:justify-end"
+            >
+              {accentColors.map((color) => {
+                const selected = preferences.accentColor === color.name;
+                // "Default" is the theme's own neutral, so its swatch follows
+                // the theme rather than showing the light theme's near-black.
+                const neutral = color.name === "default";
+                return (
+                  <button
+                    key={color.name}
+                    type="button"
+                    aria-pressed={selected}
+                    aria-label={t(color.labelKey)}
+                    onClick={() => {
+                      handleAccentChange(color.name);
+                    }}
+                    className={cn(
+                      "grid h-7 w-7 place-items-center rounded-full outline-hidden ring-offset-2 ring-offset-card transition-shadow hover:ring-2 hover:ring-foreground/30 focus-visible:ring-2 focus-visible:ring-ring",
+                      neutral && "bg-foreground",
+                      selected &&
+                        "ring-2 ring-foreground hover:ring-foreground",
+                    )}
+                    style={
+                      neutral
+                        ? undefined
+                        : { backgroundColor: `hsl(${color.hsl})` }
+                    }
+                    title={t(color.labelKey)}
+                  >
+                    {selected && (
+                      <Check
+                        className={cn(
+                          "h-3.5 w-3.5",
+                          neutral ? "text-background" : "text-white",
+                        )}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </SettingRow>
+        </SettingsSection>
 
-      {/* Theme Mode */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("theme")}</CardTitle>
-          <CardDescription>{t("chooseLightDarkMode")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-3">
-            {themeModes.map(({ value, labelKey, icon: Icon }) => (
-              <Button
-                key={value}
-                variant={themeMode === value ? "default" : "outline"}
-                className="flex-1 gap-2"
-                onClick={() => {
-                  setThemeMode(value);
-                }}
-              >
-                <Icon className="h-4 w-4" />
-                {t(labelKey)}
-              </Button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+        <SettingsSection
+          title={t("displayPreferences")}
+          description={t("configureDataDisplay")}
+        >
+          <SettingRow
+            label={t("language")}
+            description={t("selectLanguage")}
+            htmlFor="pref-language"
+          >
+            <Select
+              value={preferences.language}
+              onValueChange={(v) => {
+                savePreferences({ language: v });
+              }}
+            >
+              <SelectTrigger id="pref-language" className="w-full sm:w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {supportedLanguages.map((lang) => (
+                  <SelectItem key={lang.code} value={lang.code}>
+                    <span>{lang.nativeName}</span>
+                    {lang.nativeName !== (lang.name as string) && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        ({lang.name})
+                      </span>
+                    )}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingRow>
 
-      {/* Accent Color */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Palette className="h-5 w-5" />
-            {t("accentColor")}
-          </CardTitle>
-          <CardDescription>{t("chooseAccentColor")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-5 gap-3 sm:grid-cols-10">
-            {accentColors.map((color) => (
-              <button
-                key={color.name}
-                onClick={() => {
-                  handleAccentChange(color.name);
-                }}
-                className={cn(
-                  "group relative flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all hover:scale-110",
-                  preferences.accentColor === color.name
-                    ? "border-foreground"
-                    : "border-transparent",
-                )}
-                style={{ backgroundColor: `hsl(${color.hsl})` }}
-                title={t(color.labelKey)}
-              >
-                {preferences.accentColor === color.name && (
-                  <Check className="h-4 w-4 text-white" />
-                )}
-              </button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Display Preferences */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("displayPreferences")}</CardTitle>
-          <CardDescription>{t("configureDataDisplay")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Byte Units */}
-          <div className="space-y-2">
-            <Label>{t("storageUnits")}</Label>
+          <SettingRow
+            label={t("storageUnits")}
+            description={t("storageUnitsHelp")}
+            htmlFor="pref-byte-unit"
+          >
             <Select
               value={preferences.byteUnit}
               onValueChange={(v) => {
                 savePreferences({ byteUnit: v as ByteUnit });
               }}
             >
-              <SelectTrigger className="w-64">
+              <SelectTrigger id="pref-byte-unit" className="w-full sm:w-64">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -306,18 +292,20 @@ export function AppearancePage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </SettingRow>
 
-          {/* Date Format */}
-          <div className="space-y-2">
-            <Label>{t("dateFormat")}</Label>
+          <SettingRow
+            label={t("dateFormat")}
+            description={t("dateFormatHelp")}
+            htmlFor="pref-date-format"
+          >
             <Select
               value={preferences.dateFormat}
               onValueChange={(v) => {
                 savePreferences({ dateFormat: v as DateFormat });
               }}
             >
-              <SelectTrigger className="w-64">
+              <SelectTrigger id="pref-date-format" className="w-full sm:w-64">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -331,18 +319,20 @@ export function AppearancePage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </SettingRow>
 
-          {/* Refresh Interval */}
-          <div className="space-y-2">
-            <Label>{t("defaultRefreshInterval")}</Label>
+          <SettingRow
+            label={t("defaultRefreshInterval")}
+            description={t("refreshIntervalHelp")}
+            htmlFor="pref-refresh"
+          >
             <Select
               value={String(preferences.refreshInterval)}
               onValueChange={(v) => {
                 savePreferences({ refreshInterval: Number(v) });
               }}
             >
-              <SelectTrigger className="w-64">
+              <SelectTrigger id="pref-refresh" className="w-full sm:w-64">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -353,29 +343,22 @@ export function AppearancePage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-        </CardContent>
-      </Card>
+          </SettingRow>
+        </SettingsSection>
 
-      {/* Console */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TerminalSquare className="h-5 w-5" />
-            {t("console")}
-          </CardTitle>
-          <CardDescription>{t("consoleOpenDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label>{t("openConsolesIn")}</Label>
+        <SettingsSection title={t("console")}>
+          <SettingRow
+            label={t("openConsolesIn")}
+            description={t("consoleOpenDescription")}
+            htmlFor="pref-console-open"
+          >
             <Select
               value={preferences.consoleOpenMode}
               onValueChange={(v) => {
                 savePreferences({ consoleOpenMode: v as ConsoleOpenMode });
               }}
             >
-              <SelectTrigger className="w-full max-w-80">
+              <SelectTrigger id="pref-console-open" className="w-full sm:w-72">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -386,9 +369,9 @@ export function AppearancePage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-        </CardContent>
-      </Card>
+          </SettingRow>
+        </SettingsSection>
+      </div>
     </div>
   );
 }

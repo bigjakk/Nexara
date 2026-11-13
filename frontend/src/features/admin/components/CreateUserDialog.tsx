@@ -63,7 +63,7 @@ export function CreateUserDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create User</DialogTitle>
+          <DialogTitle>Create user</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -80,7 +80,7 @@ export function CreateUserDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="display-name">Display Name</Label>
+            <Label htmlFor="display-name">Display name</Label>
             <Input
               id="display-name"
               value={displayName}
@@ -115,7 +115,7 @@ export function CreateUserDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={createUser.isPending}>
-              {createUser.isPending ? "Creating..." : "Create User"}
+              {createUser.isPending ? "Creating..." : "Create user"}
             </Button>
           </DialogFooter>
         </form>

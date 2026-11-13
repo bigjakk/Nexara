@@ -1,27 +1,13 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Key,
-  Plus,
-  Copy,
-  Check,
-  Trash2,
-  ExternalLink,
-  AlertTriangle,
-  Loader2,
-} from "lucide-react";
+import { Plus, Copy, Check, AlertTriangle, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
 import {
   Dialog,
   DialogContent,
@@ -81,15 +67,15 @@ function getKeyStatus(key: {
   expires_at: string | null;
 }): {
   label: string;
-  variant: "default" | "secondary" | "destructive";
+  variant: "healthy" | "secondary" | "warning";
 } {
   if (key.is_revoked) {
     return { label: "Revoked", variant: "secondary" };
   }
   if (key.expires_at && new Date(key.expires_at) < new Date()) {
-    return { label: "Expired", variant: "destructive" };
+    return { label: "Expired", variant: "warning" };
   }
-  return { label: "Active", variant: "default" };
+  return { label: "Active", variant: "healthy" };
 }
 
 function formatDate(dateStr: string | null): string {
@@ -106,7 +92,7 @@ export function APIKeysPage() {
   // Where focus goes when a dialog's opener has gone by the time it closes:
   // a revoked key's Revoke button, or "Create your first API key", which
   // the first key takes away with the empty list.
-  const keysCard = useRef<HTMLDivElement>(null);
+  const keysCard = useRef<HTMLElement>(null);
   const focusKeys = () => keysCard.current;
 
   // Create dialog state
@@ -195,140 +181,133 @@ export function APIKeysPage() {
     );
   }
 
-  return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">API Keys</h1>
-          <p className="text-sm text-muted-foreground">
-            Create and manage personal API keys for programmatic access to the
-            Nexara API
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={() => {
-              void navigate("/settings/api-docs");
-            }}
-          >
-            <ExternalLink className="mr-2 h-4 w-4" />
-            View API Documentation
-          </Button>
-          <Button
-            onClick={() => {
-              resetCreateDialog();
-              setCreateDialogOpen(true);
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Create API Key
-          </Button>
-        </div>
-      </div>
+  const total = keys?.length ?? 0;
+  const active = (keys ?? []).filter(
+    (k) => getKeyStatus(k).label === "Active",
+  ).length;
 
-      <Card
+  return (
+    <div className="max-w-5xl space-y-5">
+      <PageHeader
+        title="API keys"
+        summary={
+          total === 0
+            ? "No keys yet. A key lets a script call the Nexara API with your permissions."
+            : `${String(total)} key${total !== 1 ? "s" : ""}, ${String(active)} active. Each one calls the Nexara API with your permissions.`
+        }
+        actions={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => {
+                void navigate("/settings/api-docs");
+              }}
+            >
+              API reference
+            </Button>
+            <Button
+              onClick={() => {
+                resetCreateDialog();
+                setCreateDialogOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              Create API key
+            </Button>
+          </>
+        }
+      />
+
+      <Panel
         ref={keysCard}
-        role="region"
-        aria-label="Your API keys"
         tabIndex={-1}
+        flush
+        title="Your API keys"
         className="outline-none"
       >
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Key className="h-5 w-5" />
-            Your API Keys
-          </CardTitle>
-          <CardDescription>
-            API keys allow programmatic access to the Nexara API on your behalf.
-            Keep your keys secure and revoke any that are no longer needed.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {!keys || keys.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
-              <Key className="mb-3 h-10 w-10 text-muted-foreground" />
-              <p className="text-sm font-medium">No API keys yet</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Create an API key to get started with programmatic access.
-              </p>
-              <Button
-                className="mt-4"
-                size="sm"
-                onClick={() => {
-                  resetCreateDialog();
-                  setCreateDialogOpen(true);
-                }}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Create your first API key
-              </Button>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Key Prefix</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Last Used</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {keys.map((apiKey) => {
-                  const status = getKeyStatus(apiKey);
-                  return (
-                    <TableRow key={apiKey.id}>
-                      <TableCell className="font-medium">
-                        {apiKey.name}
-                      </TableCell>
-                      <TableCell>
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
-                          {apiKey.key_prefix}...
-                        </code>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDate(apiKey.created_at)}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDate(apiKey.last_used_at)}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDate(apiKey.expires_at)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={status.variant}>{status.label}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {!apiKey.is_revoked && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => {
-                              setRevokeTargetId(apiKey.id);
-                              setRevokeTargetName(apiKey.name);
-                              setRevokeDialogOpen(true);
-                            }}
-                          >
-                            <Trash2 className="mr-1 h-4 w-4" />
-                            Revoke
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+        {!keys || keys.length === 0 ? (
+          <div className="flex flex-col items-center px-[18px] py-10 text-center">
+            <p className="text-sm font-medium">No API keys yet</p>
+            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+              Create an API key to get started with programmatic access.
+            </p>
+            <Button
+              variant="outline"
+              className="mt-4"
+              size="sm"
+              onClick={() => {
+                resetCreateDialog();
+                setCreateDialogOpen(true);
+              }}
+            >
+              Create your first API key
+            </Button>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead className="whitespace-nowrap">Key prefix</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="whitespace-nowrap">Last used</TableHead>
+                <TableHead>Expires</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-24">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {keys.map((apiKey) => {
+                const status = getKeyStatus(apiKey);
+                return (
+                  <TableRow key={apiKey.id}>
+                    <TableCell className="min-w-[8rem] font-medium">
+                      {apiKey.name}
+                    </TableCell>
+                    <TableCell>
+                      <code className="whitespace-nowrap rounded-[5px] bg-foreground/[0.07] px-1.5 py-0.5 font-mono text-xs">
+                        {apiKey.key_prefix}...
+                      </code>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {formatDate(apiKey.created_at)}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {formatDate(apiKey.last_used_at)}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {formatDate(apiKey.expires_at)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={status.variant}>{status.label}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {!apiKey.is_revoked && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => {
+                            setRevokeTargetId(apiKey.id);
+                            setRevokeTargetName(apiKey.name);
+                            setRevokeDialogOpen(true);
+                          }}
+                        >
+                          Revoke
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </Panel>
 
-      {/* Create API Key Dialog */}
+      {/* Create API key dialog */}
       <Dialog
         open={createDialogOpen}
         onOpenChange={(open) => {
@@ -338,7 +317,7 @@ export function APIKeysPage() {
       >
         <DialogContent fallbackFocus={focusKeys}>
           <DialogHeader>
-            <DialogTitle>Create API Key</DialogTitle>
+            <DialogTitle>Create API key</DialogTitle>
             <DialogDescription>
               Create a new API key for programmatic access. Give it a
               descriptive name so you can identify it later.
@@ -403,14 +382,14 @@ export function APIKeysPage() {
                   Creating...
                 </>
               ) : (
-                "Create Key"
+                "Create key"
               )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Key Reveal Dialog */}
+      {/* Key reveal dialog */}
       <Dialog
         open={revealDialogOpen}
         onOpenChange={(open) => {
@@ -423,21 +402,20 @@ export function APIKeysPage() {
       >
         <DialogContent fallbackFocus={focusKeys}>
           <DialogHeader>
-            <DialogTitle>API Key Created</DialogTitle>
+            <DialogTitle>API key created</DialogTitle>
             <DialogDescription>
               Your new API key has been created successfully.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/20">
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
               <p className="text-sm text-amber-800 dark:text-amber-200">
-                Make sure to copy your API key now. You won&apos;t be able to
-                see it again!
+                Copy your API key now. It is not shown again.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <code className="flex-1 rounded-md bg-muted px-3 py-2 font-mono text-sm break-all select-all">
+              <code className="flex-1 select-all break-all rounded-md bg-foreground/[0.06] px-3 py-2 font-mono text-sm">
                 {createdKey}
               </code>
               <Button
@@ -473,7 +451,7 @@ export function APIKeysPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Revoke Confirmation Dialog */}
+      {/* Revoke confirmation dialog */}
       <AlertDialog
         open={revokeDialogOpen}
         onOpenChange={(open: boolean) => {
@@ -486,7 +464,7 @@ export function APIKeysPage() {
       >
         <AlertDialogContent fallbackFocus={focusKeys}>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke API Key</AlertDialogTitle>
+            <AlertDialogTitle>Revoke API key</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to revoke the API key &ldquo;
               {revokeTargetName}&rdquo;? Any applications using this key will
@@ -509,7 +487,7 @@ export function APIKeysPage() {
                   Revoking...
                 </>
               ) : (
-                "Revoke Key"
+                "Revoke key"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>

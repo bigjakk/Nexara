@@ -86,16 +86,16 @@ async function changesThePassword() {
     </QueryClientProvider>,
   );
   const [opensTheDialog] = await screen.findAllByRole("button", {
-    name: "Change Password",
+    name: "Change password",
   });
   await user.click(opensTheDialog as HTMLElement);
-  await user.type(screen.getByLabelText("Current Password"), "old-secret-01");
-  await user.type(screen.getByLabelText("New Password"), "new-secret-01");
+  await user.type(screen.getByLabelText("Current password"), "old-secret-01");
+  await user.type(screen.getByLabelText("New password"), "new-secret-01");
   await user.type(
-    screen.getByLabelText("Confirm New Password"),
+    screen.getByLabelText("Confirm new password"),
     "new-secret-01",
   );
-  await user.click(screen.getByRole("button", { name: "Change Password" }));
+  await user.click(screen.getByRole("button", { name: "Change password" }));
   await screen.findByText(/Signing you out/);
   expect(timer.count()).toBe(1);
   return { timer, view };

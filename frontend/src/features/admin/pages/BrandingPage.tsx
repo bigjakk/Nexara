@@ -1,16 +1,15 @@
 import { useState, useRef, useEffect } from "react";
-import { Upload, Image, Type, Globe, Loader2 } from "lucide-react";
+import { Upload, Loader2, Server, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  SettingRow,
+  SettingsFooter,
+  SettingsSection,
+} from "@/components/page/Settings";
 import {
   useBranding,
   useUpsertSetting,
@@ -95,78 +94,78 @@ export function BrandingPage() {
     );
   };
 
+  // What the preview shows: the title as typed, saved or not.
+  const previewTitle = appTitle.trim() || "Nexara";
+  const images =
+    branding.logoUrl && branding.faviconUrl
+      ? "a custom logo and favicon"
+      : branding.logoUrl
+        ? "a custom logo"
+        : branding.faviconUrl
+          ? "a custom favicon"
+          : "the default logo and favicon";
+
   return (
     <div>
       <AdminNav />
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Branding</h1>
-          <p className="text-muted-foreground">
-            Customize the appearance and branding of your Nexara instance.
-          </p>
-        </div>
+      <div className="max-w-5xl space-y-5">
+        <PageHeader
+          title="Branding"
+          summary={`This install is called "${branding.appTitle}" and uses ${images}.`}
+        />
 
-        {/* App Title */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Type className="h-5 w-5" />
-              Application Title
-            </CardTitle>
-            <CardDescription>
-              Set the title shown in the top bar and browser tab.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center gap-3">
-              <Input
-                value={appTitle}
-                onChange={(e) => {
-                  setAppTitle(e.target.value);
-                }}
-                placeholder="Nexara"
-                className="max-w-xs"
-                maxLength={50}
-              />
-              <Button
-                onClick={handleTitleSave}
-                disabled={!appTitle.trim() || upsertSetting.isPending}
+        {/* Settings on the left, what they produce on the right. */}
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="flex min-w-0 flex-[999_1_460px] flex-col gap-4">
+            <SettingsSection title="Name">
+              <SettingRow
+                label="Application title"
+                description="Shown in the top bar and the browser tab."
+                htmlFor="branding-app-title"
               >
-                {upsertSetting.isPending ? (
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                ) : null}
-                Save
-              </Button>
-              <Button variant="outline" onClick={handleResetTitle}>
-                Reset
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+                <Input
+                  id="branding-app-title"
+                  value={appTitle}
+                  onChange={(e) => {
+                    setAppTitle(e.target.value);
+                  }}
+                  placeholder="Nexara"
+                  maxLength={50}
+                />
+              </SettingRow>
+              <SettingsFooter>
+                <Button variant="outline" onClick={handleResetTitle}>
+                  Reset
+                </Button>
+                <Button
+                  onClick={handleTitleSave}
+                  disabled={!appTitle.trim() || upsertSetting.isPending}
+                >
+                  {upsertSetting.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  Save
+                </Button>
+              </SettingsFooter>
+            </SettingsSection>
 
-        {/* Logo Upload */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Image className="h-5 w-5" />
-              Logo
-            </CardTitle>
-            <CardDescription>
-              Upload a custom logo (PNG, JPG, SVG, or WebP, max 2 MiB).
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center gap-4">
-              {branding.logoUrl && (
-                <div className="flex h-16 w-16 items-center justify-center rounded-lg border bg-card">
-                  <img
-                    src={branding.logoUrl}
-                    alt="Logo"
-                    className="h-12 w-12 object-contain"
-                  />
-                </div>
-              )}
-              <div>
+            <SettingsSection
+              title="Images"
+              description="An upload replaces the current image as soon as it finishes."
+            >
+              <SettingRow
+                label="Logo"
+                description="PNG, JPG, SVG or WebP, up to 2 MiB."
+              >
+                {branding.logoUrl && (
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-foreground/[0.06]">
+                    <img
+                      src={branding.logoUrl}
+                      alt="Logo"
+                      className="h-8 w-8 object-contain"
+                    />
+                  </div>
+                )}
                 <input
                   ref={logoInputRef}
                   type="file"
@@ -176,7 +175,6 @@ export function BrandingPage() {
                 />
                 <Button
                   variant="outline"
-                  className="gap-1"
                   onClick={() => {
                     logoInputRef.current?.click();
                   }}
@@ -187,36 +185,22 @@ export function BrandingPage() {
                   ) : (
                     <Upload className="h-4 w-4" />
                   )}
-                  Upload Logo
+                  Upload logo
                 </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Favicon Upload */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Globe className="h-5 w-5" />
-              Favicon
-            </CardTitle>
-            <CardDescription>
-              Upload a custom favicon (.ico, .png, or .svg, max 512 KiB).
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center gap-4">
-              {branding.faviconUrl && (
-                <div className="flex h-10 w-10 items-center justify-center rounded border bg-card">
-                  <img
-                    src={branding.faviconUrl}
-                    alt="Favicon"
-                    className="h-6 w-6 object-contain"
-                  />
-                </div>
-              )}
-              <div>
+              </SettingRow>
+              <SettingRow
+                label="Favicon"
+                description="The icon in the browser tab: .ico, .png or .svg, up to 512 KiB. 32x32 or 64x64 pixels works best."
+              >
+                {branding.faviconUrl && (
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-foreground/[0.06]">
+                    <img
+                      src={branding.faviconUrl}
+                      alt="Favicon"
+                      className="h-6 w-6 object-contain"
+                    />
+                  </div>
+                )}
                 <input
                   ref={faviconInputRef}
                   type="file"
@@ -226,7 +210,6 @@ export function BrandingPage() {
                 />
                 <Button
                   variant="outline"
-                  className="gap-1"
                   onClick={() => {
                     faviconInputRef.current?.click();
                   }}
@@ -237,16 +220,55 @@ export function BrandingPage() {
                   ) : (
                     <Upload className="h-4 w-4" />
                   )}
-                  Upload Favicon
+                  Upload favicon
                 </Button>
+              </SettingRow>
+            </SettingsSection>
+          </div>
+
+          <div className="flex min-w-0 flex-[1_1_280px] flex-col gap-4">
+            <Panel title="Preview" aside="follows the title as you type">
+              <div className="space-y-4">
+                <div>
+                  <div className="mb-1.5 text-[12.5px] text-muted-foreground">
+                    Top bar
+                  </div>
+                  <div className="flex items-center gap-2.5 rounded-lg bg-background px-2.5 py-2">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-foreground/[0.08]">
+                      {branding.logoUrl ? (
+                        <img
+                          src={branding.logoUrl}
+                          alt=""
+                          className="h-5 w-5 object-contain"
+                        />
+                      ) : (
+                        <Server className="h-5 w-5" />
+                      )}
+                    </span>
+                    <span className="truncate text-base font-semibold tracking-tight [font-stretch:112%]">
+                      {previewTitle}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-1.5 text-[12.5px] text-muted-foreground">
+                    Browser tab
+                  </div>
+                  <div className="flex max-w-[15rem] items-center gap-2 rounded-t-lg bg-background px-3 py-2 text-[13px]">
+                    {/* index.html's own icon until one is uploaded. */}
+                    <img
+                      src={branding.faviconUrl ?? "/favicon.png"}
+                      alt=""
+                      className="h-4 w-4 shrink-0 object-contain"
+                    />
+                    <span className="truncate">{previewTitle}</span>
+                    <X className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
+                  </div>
+                </div>
               </div>
-            </div>
-            <Label className="text-xs text-muted-foreground">
-              The favicon appears in the browser tab. Recommended size: 32x32 or
-              64x64 pixels.
-            </Label>
-          </CardContent>
-        </Card>
+            </Panel>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -65,29 +65,29 @@ export function RoleAssignDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Manage Role Assignments</DialogTitle>
+          <DialogTitle>Manage role assignments</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Current roles */}
           <div className="space-y-2">
-            <h3 className="text-sm font-medium">Assigned Roles</h3>
+            <h3 className="text-sm font-medium">Assigned roles</h3>
             {rolesLoading ? (
               <p className="text-sm text-muted-foreground">Loading...</p>
             ) : userRoles?.length === 0 ? (
               <p className="text-sm text-muted-foreground">No roles assigned</p>
             ) : (
-              <div className="space-y-2">
+              <div className="divide-y border-y">
                 {userRoles?.map((ur) => (
                   <div
                     key={ur.id}
-                    className="flex items-center justify-between rounded-md border px-3 py-2"
+                    className="flex items-center justify-between gap-3 py-1.5"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
                       <span className="font-medium">{ur.role_name}</span>
-                      <Badge variant="outline" className="text-xs">
+                      <span className="text-muted-foreground">
                         {ur.scope_type}
-                      </Badge>
+                      </span>
                       {ur.is_builtin && (
                         <Badge variant="secondary" className="text-xs">
                           built-in
@@ -98,7 +98,7 @@ export function RoleAssignDialog({
                       aria-label={`Revoke ${ur.role_name} at ${ur.scope_type} scope`}
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 text-destructive hover:text-destructive"
+                      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
                       onClick={() => {
                         setPendingRevoke(ur);
                       }}
@@ -113,7 +113,7 @@ export function RoleAssignDialog({
 
           {/* Assign new role */}
           <div className="space-y-2">
-            <h3 className="text-sm font-medium">Assign New Role</h3>
+            <h3 className="text-sm font-medium">Assign new role</h3>
             <div className="flex items-center gap-2">
               <Select value={selectedRoleId} onValueChange={setSelectedRoleId}>
                 <SelectTrigger className="flex-1">

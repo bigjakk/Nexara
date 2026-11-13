@@ -1,24 +1,11 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Search,
-  ChevronDown,
-  ChevronRight,
-  Key,
-  ArrowLeft,
-  Loader2,
-} from "lucide-react";
+import { Search, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel, PropertyList, PropertyRow } from "@/components/page/Panel";
 import { useExpandedRows } from "@/hooks/useExpandedRows";
 import type { APIEndpoint } from "@/types/api";
 import { useAPIDocs } from "../api/api-docs-queries";
@@ -88,130 +75,139 @@ export function APIDocsPage() {
     );
   }
 
+  const total = endpoints?.length ?? 0;
+  const groupCount = new Set((endpoints ?? []).map((ep) => ep.group || "Other"))
+    .size;
+  const filtering = search.trim() !== "";
+
   return (
-    // max-w-6xl rather than the old max-w-4xl: an expanded row carries a
+    // max-w-6xl rather than a narrower column: an expanded row carries a
     // five-column parameter table, and at 4xl the description column was
     // narrower than the sentences it holds.
-    <div className="mx-auto max-w-6xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">API Reference</h1>
-        <p className="text-muted-foreground">
-          Complete reference of all available Nexara REST API endpoints.
-          Endpoints with a chevron publish their parameters — expand one to see
-          them. A row without one publishes no parameter list, which is not a
-          promise that it takes no input: a few endpoints predate the parameter
-          schema, and file uploads read form fields it does not describe.
-        </p>
-      </div>
-
-      {/* Auth info card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Key className="h-5 w-5" />
-            Authentication
-          </CardTitle>
-          <CardDescription>
-            How to authenticate with the Nexara API
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-baseline gap-2">
-              <span className="text-sm font-medium">Base URL:</span>
-              <code className="rounded bg-muted px-2 py-1 font-mono text-sm">
-                {window.location.origin}/api/v1
-              </code>
-            </div>
-            <div>
-              <span className="text-sm font-medium">Authentication:</span>
-              <p className="text-sm text-muted-foreground">
-                Include your API key or JWT token in the Authorization header
-              </p>
-            </div>
-            <div>
-              <span className="text-sm font-medium">Example:</span>
-              <code className="mt-1 block rounded bg-muted px-3 py-2 font-mono text-sm">
-                Authorization: Bearer nxra_your_api_key_here
-              </code>
-            </div>
-          </div>
+    <div className="max-w-6xl space-y-5">
+      <PageHeader
+        title="API reference"
+        // The count and the path are separate pieces on purpose: a template
+        // literal that interpolates beside an API path is what the apiPath
+        // guard looks for, and this one only describes the prefix.
+        summary={
+          <>
+            {`${String(total)} endpoint${total !== 1 ? "s" : ""} in ${String(groupCount)} group${groupCount !== 1 ? "s" : ""}`}
+            , every one under <code className="font-mono">/api/v1</code>.
+          </>
+        }
+        actions={
           <Button
             variant="outline"
-            size="sm"
             onClick={() => {
               void navigate("/settings/api-keys");
             }}
           >
-            <ArrowLeft className="mr-2 h-4 w-4" />
             Create an API key
           </Button>
-        </CardContent>
-      </Card>
+        }
+      />
 
-      {/* Search/filter */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Filter endpoints by path, description, group, or parameter..."
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-          }}
-          className="pl-10"
-        />
-      </div>
+      <Panel title="Authentication">
+        <PropertyList>
+          <PropertyRow label="Base URL">
+            <code className="font-mono text-[13px]">
+              {window.location.origin}/api/v1
+            </code>
+          </PropertyRow>
+          <PropertyRow label="Header">
+            <code className="font-mono text-[13px]">
+              Authorization: Bearer nxra_your_api_key_here
+            </code>
+          </PropertyRow>
+        </PropertyList>
+        <p className="mt-3 text-[12.5px] text-muted-foreground">
+          Include your API key or JWT token in the Authorization header of every
+          request.
+        </p>
+      </Panel>
 
-      {/* Endpoint catalog */}
-      {grouped.size === 0 ? (
-        <div className="py-12 text-center text-muted-foreground">
-          No endpoints match your search.
-        </div>
-      ) : (
+      <Panel
+        title="Endpoints"
+        aside={
+          filtering
+            ? `${String(filtered.length)} of ${String(total)} match`
+            : undefined
+        }
+        actions={
+          <div className="relative w-[min(26rem,calc(100vw-4.5rem))]">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Filter endpoints by path, description, group or parameter"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+              }}
+              className="pl-9"
+            />
+          </div>
+        }
+      >
+        <p className="max-w-[80ch] text-[12.5px] text-muted-foreground">
+          An endpoint with a chevron publishes its parameters: open it to see
+          them. A row without one publishes no parameter list, which is not a
+          promise that it takes no input. A few endpoints predate the parameter
+          schema, and file uploads read form fields it does not describe.
+        </p>
+        {grouped.size === 0 && (
+          <p className="pb-4 pt-8 text-center text-sm text-muted-foreground">
+            No endpoints match your search.
+          </p>
+        )}
+      </Panel>
+
+      {/* Endpoint catalog: one panel per group */}
+      {grouped.size > 0 && (
         <div className="space-y-3">
           {Array.from(grouped.entries()).map(([group, eps]) => {
             const isCollapsed = collapsedGroups.has(group);
             return (
-              <Card key={group}>
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between px-6 py-4 text-left"
-                  onClick={() => {
-                    toggleGroup(group);
-                  }}
-                >
-                  <div className="flex items-center gap-2">
+              <Panel
+                key={group}
+                flush
+                bodyClassName={isCollapsed ? "pb-0" : "pb-1"}
+                title={
+                  <button
+                    type="button"
+                    aria-expanded={!isCollapsed}
+                    className="-ml-1 flex items-center gap-1.5 rounded-md pr-1 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => {
+                      toggleGroup(group);
+                    }}
+                  >
                     {isCollapsed ? (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                     ) : (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                     )}
-                    <span className="font-semibold">{group}</span>
-                    <Badge variant="secondary" className="ml-1">
-                      {eps.length}
-                    </Badge>
-                  </div>
-                </button>
+                    {group}
+                  </button>
+                }
+                aside={String(eps.length)}
+              >
                 {!isCollapsed && (
-                  <CardContent className="pt-0">
-                    <div className="divide-y">
-                      {eps.map((ep) => {
-                        const key = endpointKey(ep);
-                        return (
-                          <APIEndpointRow
-                            key={key}
-                            endpoint={ep}
-                            expanded={expanded.has(key)}
-                            onToggle={() => {
-                              toggle(key);
-                            }}
-                          />
-                        );
-                      })}
-                    </div>
-                  </CardContent>
+                  <div className="divide-y border-t">
+                    {eps.map((ep) => {
+                      const key = endpointKey(ep);
+                      return (
+                        <APIEndpointRow
+                          key={key}
+                          endpoint={ep}
+                          expanded={expanded.has(key)}
+                          onToggle={() => {
+                            toggle(key);
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
                 )}
-              </Card>
+              </Panel>
             );
           })}
         </div>

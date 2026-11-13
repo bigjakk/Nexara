@@ -1,7 +1,6 @@
 import { useId } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -11,14 +10,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { APIEndpoint, APIItems, APIParameter } from "@/types/api";
+import { cn } from "@/lib/utils";
+
+/**
+ * The quiet tag a method or a parameter source is written in: a neutral chip
+ * whose text carries the colour. The colours tell categories apart; they are
+ * not states.
+ */
+const TAG_CLASS =
+  "shrink-0 rounded-[5px] bg-foreground/[0.06] py-0.5 text-center font-mono text-[11px] font-semibold leading-4";
 
 const METHOD_COLORS: Record<string, string> = {
-  GET: "text-emerald-600 border-emerald-300 dark:text-emerald-400 dark:border-emerald-700",
-  POST: "text-blue-600 border-blue-300 dark:text-blue-400 dark:border-blue-700",
-  PUT: "text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-700",
-  DELETE: "text-red-600 border-red-300 dark:text-red-400 dark:border-red-700",
-  PATCH:
-    "text-purple-600 border-purple-300 dark:text-purple-400 dark:border-purple-700",
+  GET: "text-emerald-700 dark:text-emerald-400",
+  POST: "text-blue-700 dark:text-blue-400",
+  PUT: "text-amber-700 dark:text-amber-400",
+  DELETE: "text-red-700 dark:text-red-400",
+  PATCH: "text-purple-700 dark:text-purple-400",
 };
 
 function getMethodColor(method: string): string {
@@ -32,10 +39,9 @@ function getMethodColor(method: string): string {
  * from a body one in every version of this page before this.
  */
 const SOURCE_COLORS: Record<string, string> = {
-  path: "text-violet-600 border-violet-300 dark:text-violet-400 dark:border-violet-700",
-  query:
-    "text-cyan-600 border-cyan-300 dark:text-cyan-400 dark:border-cyan-700",
-  body: "text-orange-600 border-orange-300 dark:text-orange-400 dark:border-orange-700",
+  path: "text-violet-700 dark:text-violet-400",
+  query: "text-cyan-700 dark:text-cyan-400",
+  body: "text-orange-700 dark:text-orange-400",
 };
 
 /**
@@ -152,7 +158,7 @@ function EnumChips({ values }: { values: string[] }) {
       {values.map((value, i) => (
         <code
           key={`${value}-${String(i)}`}
-          className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]"
+          className="rounded-[4px] bg-foreground/[0.07] px-1 py-0.5 font-mono text-[11px]"
         >
           {value === "" ? '""' : value}
         </code>
@@ -333,12 +339,15 @@ function ParameterName({ param }: { param: APIParameter }) {
 
 function SourceBadge({ source }: { source: APIParameter["source"] }) {
   return (
-    <Badge
-      variant="outline"
-      className={`font-mono text-[11px] ${SOURCE_COLORS[source] ?? "text-muted-foreground"}`}
+    <span
+      className={cn(
+        TAG_CLASS,
+        "inline-block px-1.5",
+        SOURCE_COLORS[source] ?? "text-muted-foreground",
+      )}
     >
       {source}
-    </Badge>
+    </span>
   );
 }
 
@@ -452,48 +461,63 @@ export function APIEndpointRow({
 
   const summary = (
     <>
-      <Badge
-        variant="outline"
-        className={`w-16 shrink-0 justify-center font-mono text-xs ${getMethodColor(endpoint.method)}`}
+      <span
+        className={cn(
+          TAG_CLASS,
+          "mt-px w-[3.25rem]",
+          getMethodColor(endpoint.method),
+        )}
       >
         {endpoint.method}
-      </Badge>
-      <span className="break-all font-mono text-sm">{endpoint.path}</span>
-      <span className="text-sm text-muted-foreground">
-        {endpoint.description}
+      </span>
+      {/* The path, then what it does: side by side while both fit, the
+          description under the path when they do not. */}
+      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5">
+        <span className="break-all font-mono text-[13px] leading-5">
+          {endpoint.path}
+        </span>
+        <span className="text-sm leading-5 text-muted-foreground">
+          {endpoint.description}
+        </span>
       </span>
       {endpoint.permission && (
-        <Badge
-          variant="outline"
-          className="ml-auto shrink-0 text-xs text-muted-foreground"
-        >
+        <span className="col-start-3 font-mono text-[11.5px] leading-5 text-muted-foreground sm:col-start-4">
           {endpoint.permission}
-        </Badge>
+        </span>
       )}
     </>
   );
 
+  // The row runs to the panel's edges and owns its own 18px gutters. Chevron,
+  // method, endpoint, and from `sm` up the permission in a column of its own;
+  // below that the permission drops under the endpoint.
+  const rowClass =
+    "grid w-full grid-cols-[1rem_3.25rem_minmax(0,1fr)] items-start gap-x-2.5 gap-y-0.5 px-[18px] py-2 text-left sm:grid-cols-[1rem_3.25rem_minmax(0,1fr)_auto]";
+
   return (
-    <div className="py-1">
+    <div>
       {expandable ? (
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
           aria-controls={expanded ? panelId : undefined}
-          className="flex w-full flex-wrap items-center gap-2 rounded py-1.5 text-left hover:bg-muted/50"
+          className={cn(
+            rowClass,
+            "outline-hidden transition-colors hover:bg-foreground/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          )}
         >
           {expanded ? (
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <ChevronDown className="mt-0.5 h-4 w-4 text-muted-foreground" />
           ) : (
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <ChevronRight className="mt-0.5 h-4 w-4 text-muted-foreground" />
           )}
           {summary}
         </button>
       ) : (
-        <div className="flex flex-wrap items-center gap-2 py-1.5">
-          {/* Keeps the method badges of expandable and plain rows aligned. */}
-          <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <div className={rowClass}>
+          {/* Keeps the method tags of expandable and plain rows aligned. */}
+          <span aria-hidden="true" />
           {summary}
         </div>
       )}
@@ -501,12 +525,12 @@ export function APIEndpointRow({
       {expandable && expanded && (
         <div
           id={panelId}
-          className="ml-6 mt-1 rounded-md border bg-muted/30 p-3"
+          className="panel mx-[18px] mb-3 mt-1 rounded-[8px] py-1 md:ml-[calc(18px+1.625rem)]"
         >
           <div className="hidden md:block">
             <ParameterTable parameters={parameters} />
           </div>
-          <div className="md:hidden">
+          <div className="px-3 py-2 md:hidden">
             <ParameterList parameters={parameters} />
           </div>
         </div>

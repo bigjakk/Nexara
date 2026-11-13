@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { Loader2, LogOut, Monitor, Smartphone, Laptop } from "lucide-react";
+import { Loader2, Monitor, Smartphone, Laptop } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Panel } from "@/components/page/Panel";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +28,7 @@ import type { UserSession } from "@/types/api";
 import { useSessions, useRevokeSession } from "../api/session-queries";
 
 function DeviceIcon({ type }: { type: string }) {
-  const className = "h-4 w-4 text-muted-foreground";
+  const className = "h-4 w-4 shrink-0 text-muted-foreground";
   if (type === "mobile") return <Smartphone className={className} />;
   if (type === "desktop") return <Laptop className={className} />;
   return <Monitor className={className} />;
@@ -50,81 +52,95 @@ export function ActiveSessionsCard() {
   const error = revokeMutation.error;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <LogOut className="h-5 w-5" />
-          Active Sessions
-        </CardTitle>
-        <CardDescription>
-          Devices currently signed in to your account. Revoke any you do not
-          recognise.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {error && (
-          <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-            {error instanceof Error
-              ? error.message
-              : "Failed to revoke session."}
-          </div>
-        )}
+    <Panel
+      flush
+      title="Active sessions"
+      aside={
+        sessions && sessions.length > 0 ? String(sessions.length) : undefined
+      }
+    >
+      <p className="-mt-2 max-w-[65ch] px-[18px] pb-3 text-sm text-muted-foreground">
+        Devices currently signed in to your account. Revoke any you do not
+        recognise.
+      </p>
+      {error && (
+        <div className="mx-[18px] mb-3 rounded-md bg-destructive/10 p-3 text-sm text-red-700 dark:text-red-400">
+          {error instanceof Error ? error.message : "Failed to revoke session."}
+        </div>
+      )}
 
-        {isLoading ? (
-          <div className="flex justify-center py-6">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : !sessions || sessions.length === 0 ? (
-          // Reachable in practice: an API-key caller has no session row, and a
-          // browser whose cookie expired mid-visit sees the same.
-          <p className="py-4 text-center text-sm text-muted-foreground">
-            No active sessions.
-          </p>
-        ) : (
-          sessions.map((session) => (
-            <div
-              key={session.id}
-              className="flex items-center justify-between gap-4 rounded-lg border p-3"
-            >
-              <div className="min-w-0 space-y-1">
-                <div className="flex items-center gap-2">
-                  <DeviceIcon type={session.device_type} />
-                  <span className="truncate font-medium">
-                    {sessionLabel(session)}
-                  </span>
-                  {session.is_current && (
-                    <Badge variant="secondary" className="text-[10px]">
-                      This device
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {session.ip_address || "Unknown address"} · last active{" "}
+      {isLoading ? (
+        <div className="flex justify-center py-6">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : !sessions || sessions.length === 0 ? (
+        // Reachable in practice: an API-key caller has no session row, and a
+        // browser whose cookie expired mid-visit sees the same.
+        <p className="border-t px-[18px] pb-1 pt-4 text-sm text-muted-foreground">
+          No active sessions.
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Device</TableHead>
+              <TableHead className="whitespace-nowrap">Last active</TableHead>
+              <TableHead className="w-24">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sessions.map((session) => (
+              <TableRow key={session.id}>
+                <TableCell>
+                  <div className="flex items-center gap-2.5">
+                    <DeviceIcon type={session.device_type} />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="break-words font-medium">
+                          {sessionLabel(session)}
+                        </span>
+                        {session.is_current && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            This device
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="text-[12.5px] text-muted-foreground">
+                        {session.ip_address || "Unknown address"}
+                      </div>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">
                   {formatRelativeTime(session.last_used_at)}
-                </p>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={revokingId === session.id}
-                onClick={() => {
-                  if (session.is_current) {
-                    setConfirmCurrent(session);
-                    return;
-                  }
-                  revokeMutation.mutate(session);
-                }}
-              >
-                {revokingId === session.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Revoke"
-                )}
-              </Button>
-            </div>
-          ))
-        )}
-      </CardContent>
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={revokingId === session.id}
+                    onClick={() => {
+                      if (session.is_current) {
+                        setConfirmCurrent(session);
+                        return;
+                      }
+                      revokeMutation.mutate(session);
+                    }}
+                  >
+                    {revokingId === session.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Revoke"
+                    )}
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
 
       {/* Revoking the session you are holding signs you out immediately, so it
           confirms first — the same bar every other disruptive action clears. */}
@@ -156,6 +172,6 @@ export function ActiveSessionsCard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </Panel>
   );
 }

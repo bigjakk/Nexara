@@ -11,7 +11,7 @@ const tabs = [
 
 export function AdminNav() {
   return (
-    <nav className="mb-6 flex gap-5 overflow-x-auto shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
+    <nav className="mb-5 flex gap-5 overflow-x-auto shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
       {tabs.map((tab) => (
         <NavLink
           key={tab.to}

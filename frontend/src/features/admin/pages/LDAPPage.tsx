@@ -1,9 +1,21 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Segmented } from "@/components/ui/segmented";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { EmptyState } from "@/components/EmptyState";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
+import { SettingRow, SettingsSection } from "@/components/page/Settings";
 import {
   Select,
   SelectContent,
@@ -12,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  BookUser,
   Plus,
   Trash2,
   RefreshCw,
@@ -43,6 +56,12 @@ import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 const INSECURE_LDAP_TRANSPORT = "insecure_ldap_transport_confirm_required";
 
 type DirectoryType = "openldap" | "ad";
+
+/**
+ * A setting whose control runs the full width under its label: a DN or a
+ * search filter does not fit the narrow control column.
+ */
+const WIDE = "sm:grid-cols-1";
 
 const presets: Record<
   DirectoryType,
@@ -367,342 +386,415 @@ export function LDAPPage() {
     );
   }
 
+  const total = configs?.length ?? 0;
+  const enabledCount = configs?.filter((c) => c.enabled).length ?? 0;
+  const saving = createConfig.isPending || updateConfig.isPending;
+  const applyPreset = (key: DirectoryType) => {
+    setDirectoryType(key);
+    setForm((prev) => ({ ...prev, ...presets[key].defaults }));
+  };
+
   return (
     <div>
       <AdminNav />
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              LDAP / Active Directory
-            </h1>
-            <p className="text-muted-foreground">
-              Configure LDAP/AD authentication and group-to-role mapping
-            </p>
-          </div>
-          {!showForm && (
-            <Button onClick={startNew}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Config
-            </Button>
-          )}
-        </div>
+      <div className="space-y-5">
+        <PageHeader
+          title="LDAP / Active Directory"
+          summary={
+            total === 0
+              ? "No directory is configured, so nobody signs in through LDAP."
+              : `${String(total)} director${total !== 1 ? "ies" : "y"} configured, ${String(enabledCount)} enabled. Group membership decides each person's role.`
+          }
+          actions={
+            !showForm ? (
+              <Button onClick={startNew}>
+                <Plus className="h-4 w-4" />
+                Add configuration
+              </Button>
+            ) : undefined
+          }
+        />
 
         {/* Config list */}
         {!showForm && configs && configs.length > 0 && (
-          <div className="space-y-3">
-            {configs.map((cfg) => (
-              <div
-                key={cfg.id}
-                className="flex items-center justify-between rounded-lg border p-4"
-              >
-                <div className="flex items-center gap-3">
-                  <Badge variant={cfg.enabled ? "default" : "secondary"}>
-                    {cfg.enabled ? "Enabled" : "Disabled"}
-                  </Badge>
-                  <div>
-                    <p className="font-medium">{cfg.name}</p>
-                    <p className="text-sm text-muted-foreground">
+          <Panel flush>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Server</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="whitespace-nowrap">Last sync</TableHead>
+                  <TableHead className="w-32">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {configs.map((cfg) => (
+                  <TableRow key={cfg.id}>
+                    <TableCell className="whitespace-nowrap font-medium">
+                      {cfg.name}
+                    </TableCell>
+                    <TableCell className="min-w-[14rem] break-all font-mono text-[13px] text-muted-foreground">
                       {cfg.server_url}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {cfg.last_sync_at && (
-                    <span className="text-xs text-muted-foreground">
-                      Last sync: {new Date(cfg.last_sync_at).toLocaleString()}
-                    </span>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      startEdit(cfg);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    aria-label={`Delete ${cfg.name}`}
-                    variant="ghost"
-                    size="icon"
-                    className="text-destructive"
-                    onClick={() => {
-                      if (
-                        confirm(
-                          "Delete this LDAP configuration? LDAP users will no longer be able to log in.",
-                        )
-                      ) {
-                        deleteConfig.mutate(cfg.id);
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
+                    </TableCell>
+                    <TableCell>
+                      {cfg.enabled ? (
+                        <Badge variant="healthy">Enabled</Badge>
+                      ) : (
+                        <span className="text-muted-foreground">Disabled</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {cfg.last_sync_at
+                        ? new Date(cfg.last_sync_at).toLocaleString()
+                        : "Never"}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            startEdit(cfg);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          aria-label={`Delete ${cfg.name}`}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            if (
+                              confirm(
+                                "Delete this LDAP configuration? LDAP users will no longer be able to log in.",
+                              )
+                            ) {
+                              deleteConfig.mutate(cfg.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Panel>
         )}
 
         {!showForm && (!configs || configs.length === 0) && (
-          <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-            No LDAP configurations. Click "Add Config" to set up LDAP/AD
-            authentication.
-          </div>
+          <EmptyState
+            icon={BookUser}
+            title="No LDAP configuration"
+            description="Add a configuration to let people sign in with their OpenLDAP or Active Directory account."
+          />
         )}
 
         {/* Edit/Create form */}
         {showForm && (
-          <div className="space-y-6 rounded-lg border p-6">
-            <h2 className="text-lg font-semibold">
-              {isNew ? "New LDAP Configuration" : "Edit LDAP Configuration"}
-            </h2>
-
-            {/* Directory type preset */}
-            <div>
-              <Label className="mb-2 block">Directory Type</Label>
-              <div className="flex gap-2">
-                {(
-                  Object.entries(presets) as Array<
-                    [DirectoryType, (typeof presets)[DirectoryType]]
-                  >
-                ).map(([key, preset]) => (
-                  <Button
-                    key={key}
-                    variant={directoryType === key ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => {
-                      setDirectoryType(key);
-                      setForm((prev) => ({ ...prev, ...preset.defaults }));
-                    }}
-                  >
-                    {preset.label}
-                  </Button>
-                ))}
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {directoryType === "ad"
-                  ? "Pre-filled for Active Directory (sAMAccountName, userPrincipalName, displayName)"
-                  : "Pre-filled for OpenLDAP (uid, mail, cn)"}
-              </p>
+          <div className="max-w-3xl space-y-4">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 className="text-lg font-semibold">
+                {isNew ? "New LDAP configuration" : "Edit LDAP configuration"}
+              </h2>
+              {!isNew && activeConfig != null && (
+                <span className="text-sm text-muted-foreground">
+                  {activeConfig.name}
+                </span>
+              )}
             </div>
 
-            {/* Basic settings */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Name</Label>
+            <SettingsSection title="Directory">
+              <SettingRow
+                label="Directory type"
+                description={
+                  directoryType === "ad"
+                    ? "Pre-filled for Active Directory (sAMAccountName, userPrincipalName, displayName)"
+                    : "Pre-filled for OpenLDAP (uid, mail, cn)"
+                }
+              >
+                <Segmented
+                  aria-label="Directory type"
+                  size="md"
+                  value={directoryType}
+                  onValueChange={applyPreset}
+                  // Pressing the current type again re-applies its defaults.
+                  onReselect={applyPreset}
+                  options={(
+                    Object.entries(presets) as Array<
+                      [DirectoryType, (typeof presets)[DirectoryType]]
+                    >
+                  ).map(([key, preset]) => ({
+                    value: key,
+                    label: preset.label,
+                  }))}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Name"
+                description="What this configuration is called in the list."
+                htmlFor="ldap-name"
+              >
                 <Input
+                  id="ldap-name"
                   value={form.name}
                   onChange={(e) => {
                     setForm({ ...form, name: e.target.value });
                   }}
                   placeholder="Default"
                 />
-              </div>
-              <div className="flex items-center gap-3 pt-6">
+              </SettingRow>
+              <SettingRow
+                label="Enabled"
+                description="People can sign in through this directory only while it is on."
+                htmlFor="ldap-enabled"
+              >
                 <Switch
+                  id="ldap-enabled"
                   checked={form.enabled}
                   onCheckedChange={(enabled) => {
                     setForm({ ...form, enabled });
                   }}
                 />
-                <Label>Enabled</Label>
-              </div>
-            </div>
+              </SettingRow>
+            </SettingsSection>
 
-            {/* Connection settings */}
-            <div>
-              <h3 className="mb-3 font-medium">Connection</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Server URL</Label>
-                  <Input
-                    value={form.server_url}
-                    onChange={(e) => {
-                      setForm({ ...form, server_url: e.target.value });
-                    }}
-                    placeholder="ldap://ldap.example.com:389"
-                  />
-                  {addressChanged && (
-                    <p className="text-xs text-muted-foreground">
-                      This directory is moving to a new address, so it needs the
-                      bind password again — the stored one is only ever sent to
-                      the address it was saved for.
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-6 pt-6">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={form.start_tls}
-                      onCheckedChange={(start_tls) => {
-                        setForm({ ...form, start_tls });
-                      }}
-                    />
-                    <Label>StartTLS</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={form.skip_tls_verify}
-                      onCheckedChange={(skip_tls_verify) => {
-                        setForm({ ...form, skip_tls_verify });
-                      }}
-                    />
-                    <Label>Skip TLS Verify</Label>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <SettingsSection title="Connection">
+              <SettingRow
+                className={WIDE}
+                label="Server URL"
+                description={
+                  addressChanged
+                    ? "This directory is moving to a new address, so it needs the bind password again. The stored one is only ever sent to the address it was saved for."
+                    : "Starts with ldap:// or ldaps:// and names the port."
+                }
+                htmlFor="ldap-server-url"
+              >
+                <Input
+                  id="ldap-server-url"
+                  className="font-mono"
+                  value={form.server_url}
+                  onChange={(e) => {
+                    setForm({ ...form, server_url: e.target.value });
+                  }}
+                  placeholder="ldap://ldap.example.com:389"
+                />
+              </SettingRow>
+              <SettingRow
+                label="StartTLS"
+                description="Upgrade an ldap:// connection to TLS before any password is sent."
+                htmlFor="ldap-start-tls"
+              >
+                <Switch
+                  id="ldap-start-tls"
+                  checked={form.start_tls}
+                  onCheckedChange={(start_tls) => {
+                    setForm({ ...form, start_tls });
+                  }}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Skip TLS verify"
+                description="Accept the server's certificate without checking it."
+                htmlFor="ldap-skip-tls-verify"
+              >
+                <Switch
+                  id="ldap-skip-tls-verify"
+                  checked={form.skip_tls_verify}
+                  onCheckedChange={(skip_tls_verify) => {
+                    setForm({ ...form, skip_tls_verify });
+                  }}
+                />
+              </SettingRow>
+              <SettingRow
+                className={WIDE}
+                label="Bind DN"
+                description="The account Nexara searches the directory as."
+                htmlFor="ldap-bind-dn"
+              >
+                <Input
+                  id="ldap-bind-dn"
+                  className="font-mono"
+                  value={form.bind_dn}
+                  onChange={(e) => {
+                    setForm({ ...form, bind_dn: e.target.value });
+                  }}
+                  placeholder="cn=admin,dc=example,dc=com"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Bind password"
+                description={
+                  !isNew && activeConfig?.bind_password_set
+                    ? addressChanged
+                      ? "Required: the address changed."
+                      : "Leave blank to keep the current one."
+                    : undefined
+                }
+                htmlFor="ldap-bind-password"
+              >
+                <Input
+                  id="ldap-bind-password"
+                  type="password"
+                  value={form.bind_password}
+                  onChange={(e) => {
+                    setForm({ ...form, bind_password: e.target.value });
+                  }}
+                  placeholder={
+                    addressChanged
+                      ? "Re-enter the bind password for the new address"
+                      : !isNew && activeConfig?.bind_password_set
+                        ? "********"
+                        : "Password"
+                  }
+                  required={addressChanged}
+                />
+              </SettingRow>
+            </SettingsSection>
 
-            {/* Bind settings */}
-            <div>
-              <h3 className="mb-3 font-medium">Bind Credentials</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Bind DN</Label>
-                  <Input
-                    value={form.bind_dn}
-                    onChange={(e) => {
-                      setForm({ ...form, bind_dn: e.target.value });
-                    }}
-                    placeholder="cn=admin,dc=example,dc=com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>
-                    Bind Password
-                    {!isNew && activeConfig?.bind_password_set && (
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        {addressChanged
-                          ? "(required — the address changed)"
-                          : "(leave blank to keep current)"}
-                      </span>
-                    )}
-                  </Label>
-                  <Input
-                    type="password"
-                    value={form.bind_password}
-                    onChange={(e) => {
-                      setForm({ ...form, bind_password: e.target.value });
-                    }}
-                    placeholder={
-                      addressChanged
-                        ? "Re-enter the bind password for the new address"
-                        : !isNew && activeConfig?.bind_password_set
-                          ? "********"
-                          : "Password"
-                    }
-                    required={addressChanged}
-                  />
-                </div>
-              </div>
-            </div>
+            <SettingsSection
+              title="User search"
+              description="How a person who signs in is found, and which attributes become their account."
+            >
+              <SettingRow
+                className={WIDE}
+                label="Search base DN"
+                htmlFor="ldap-search-base-dn"
+              >
+                <Input
+                  id="ldap-search-base-dn"
+                  className="font-mono"
+                  value={form.search_base_dn}
+                  onChange={(e) => {
+                    setForm({ ...form, search_base_dn: e.target.value });
+                  }}
+                  placeholder="dc=example,dc=com"
+                />
+              </SettingRow>
+              <SettingRow
+                className={WIDE}
+                label="User filter"
+                description="{{username}} stands for what was typed at sign-in."
+                htmlFor="ldap-user-filter"
+              >
+                <Input
+                  id="ldap-user-filter"
+                  className="font-mono"
+                  value={form.user_filter}
+                  onChange={(e) => {
+                    setForm({ ...form, user_filter: e.target.value });
+                  }}
+                  placeholder="(|(uid={{username}})(mail={{username}}))"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Username attribute"
+                htmlFor="ldap-username-attribute"
+              >
+                <Input
+                  id="ldap-username-attribute"
+                  className="font-mono"
+                  value={form.username_attribute}
+                  onChange={(e) => {
+                    setForm({ ...form, username_attribute: e.target.value });
+                  }}
+                  placeholder="uid"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Email attribute"
+                htmlFor="ldap-email-attribute"
+              >
+                <Input
+                  id="ldap-email-attribute"
+                  className="font-mono"
+                  value={form.email_attribute}
+                  onChange={(e) => {
+                    setForm({ ...form, email_attribute: e.target.value });
+                  }}
+                  placeholder="mail"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Display name attribute"
+                htmlFor="ldap-display-name-attribute"
+              >
+                <Input
+                  id="ldap-display-name-attribute"
+                  className="font-mono"
+                  value={form.display_name_attribute}
+                  onChange={(e) => {
+                    setForm({
+                      ...form,
+                      display_name_attribute: e.target.value,
+                    });
+                  }}
+                  placeholder="cn"
+                />
+              </SettingRow>
+            </SettingsSection>
 
-            {/* Search settings */}
-            <div>
-              <h3 className="mb-3 font-medium">User Search</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Search Base DN</Label>
-                  <Input
-                    value={form.search_base_dn}
-                    onChange={(e) => {
-                      setForm({ ...form, search_base_dn: e.target.value });
-                    }}
-                    placeholder="dc=example,dc=com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>User Filter</Label>
-                  <Input
-                    value={form.user_filter}
-                    onChange={(e) => {
-                      setForm({ ...form, user_filter: e.target.value });
-                    }}
-                    placeholder="(|(uid={{username}})(mail={{username}}))"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Username Attribute</Label>
-                  <Input
-                    value={form.username_attribute}
-                    onChange={(e) => {
-                      setForm({ ...form, username_attribute: e.target.value });
-                    }}
-                    placeholder="uid"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email Attribute</Label>
-                  <Input
-                    value={form.email_attribute}
-                    onChange={(e) => {
-                      setForm({ ...form, email_attribute: e.target.value });
-                    }}
-                    placeholder="mail"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Display Name Attribute</Label>
-                  <Input
-                    value={form.display_name_attribute}
-                    onChange={(e) => {
-                      setForm({
-                        ...form,
-                        display_name_attribute: e.target.value,
-                      });
-                    }}
-                    placeholder="cn"
-                  />
-                </div>
-              </div>
-            </div>
+            <SettingsSection title="Group search">
+              <SettingRow
+                className={WIDE}
+                label="Group search base DN"
+                htmlFor="ldap-group-search-base-dn"
+              >
+                <Input
+                  id="ldap-group-search-base-dn"
+                  className="font-mono"
+                  value={form.group_search_base_dn}
+                  onChange={(e) => {
+                    setForm({
+                      ...form,
+                      group_search_base_dn: e.target.value,
+                    });
+                  }}
+                  placeholder="ou=groups,dc=example,dc=com"
+                />
+              </SettingRow>
+              <SettingRow
+                className={WIDE}
+                label="Group filter"
+                description="{{userDN}} stands for the DN of the person signing in."
+                htmlFor="ldap-group-filter"
+              >
+                <Input
+                  id="ldap-group-filter"
+                  className="font-mono"
+                  value={form.group_filter}
+                  onChange={(e) => {
+                    setForm({ ...form, group_filter: e.target.value });
+                  }}
+                  placeholder="(member={{userDN}})"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Group attribute"
+                htmlFor="ldap-group-attribute"
+              >
+                <Input
+                  id="ldap-group-attribute"
+                  className="font-mono"
+                  value={form.group_attribute}
+                  onChange={(e) => {
+                    setForm({ ...form, group_attribute: e.target.value });
+                  }}
+                  placeholder="cn"
+                />
+              </SettingRow>
+            </SettingsSection>
 
-            {/* Group settings */}
-            <div>
-              <h3 className="mb-3 font-medium">Group Search</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Group Search Base DN</Label>
-                  <Input
-                    value={form.group_search_base_dn}
-                    onChange={(e) => {
-                      setForm({
-                        ...form,
-                        group_search_base_dn: e.target.value,
-                      });
-                    }}
-                    placeholder="ou=groups,dc=example,dc=com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Group Filter</Label>
-                  <Input
-                    value={form.group_filter}
-                    onChange={(e) => {
-                      setForm({ ...form, group_filter: e.target.value });
-                    }}
-                    placeholder="(member={{userDN}})"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Group Attribute</Label>
-                  <Input
-                    value={form.group_attribute}
-                    onChange={(e) => {
-                      setForm({ ...form, group_attribute: e.target.value });
-                    }}
-                    placeholder="cn"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Group-to-Role Mapping */}
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-medium">Group-to-Role Mapping</h3>
+            <SettingsSection
+              title="Group-to-role mapping"
+              description="Each mapped group gives its members a role."
+              actions={
                 <Button
                   variant="outline"
                   size="sm"
@@ -713,68 +805,78 @@ export function LDAPPage() {
                     ]);
                   }}
                 >
-                  <Plus className="mr-1 h-3 w-3" />
-                  Add Mapping
+                  <Plus className="h-3.5 w-3.5" />
+                  Add mapping
                 </Button>
-              </div>
-              {mappingRows.length === 0 && (
-                <p className="text-sm text-muted-foreground">
+              }
+            >
+              {mappingRows.length === 0 ? (
+                <p className="pb-3.5 pt-1 text-sm text-muted-foreground">
                   No mappings configured. LDAP users will be assigned the
                   default role.
                 </p>
+              ) : (
+                <div className="space-y-2 pb-3.5 pt-1">
+                  {mappingRows.map((row, idx) => (
+                    <div
+                      key={idx}
+                      className="flex flex-wrap items-center gap-2"
+                    >
+                      <Input
+                        aria-label={`Group DN of mapping ${String(idx + 1)}`}
+                        className="min-w-0 flex-[2_1_14rem] font-mono"
+                        value={row.groupDN}
+                        onChange={(e) => {
+                          const updated = [...mappingRows];
+                          updated[idx] = { ...row, groupDN: e.target.value };
+                          setMappingRows(updated);
+                        }}
+                        placeholder="CN=Admins,OU=Groups,DC=example,DC=com"
+                      />
+                      <Select
+                        value={row.roleId}
+                        onValueChange={(val) => {
+                          const updated = [...mappingRows];
+                          updated[idx] = { ...row, roleId: val };
+                          setMappingRows(updated);
+                        }}
+                      >
+                        <SelectTrigger
+                          aria-label={`Role of mapping ${String(idx + 1)}`}
+                          className="min-w-0 flex-[1_1_10rem]"
+                        >
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {roles?.map((role) => (
+                            <SelectItem key={role.id} value={role.id}>
+                              {role.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        aria-label={`Remove group mapping ${row.groupDN || String(idx + 1)}`}
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          setMappingRows(
+                            mappingRows.filter((_, i) => i !== idx),
+                          );
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
               )}
-              <div className="space-y-2">
-                {mappingRows.map((row, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Input
-                      className="flex-1"
-                      value={row.groupDN}
-                      onChange={(e) => {
-                        const updated = [...mappingRows];
-                        updated[idx] = { ...row, groupDN: e.target.value };
-                        setMappingRows(updated);
-                      }}
-                      placeholder="CN=Admins,OU=Groups,DC=example,DC=com"
-                    />
-                    <Select
-                      value={row.roleId}
-                      onValueChange={(val) => {
-                        const updated = [...mappingRows];
-                        updated[idx] = { ...row, roleId: val };
-                        setMappingRows(updated);
-                      }}
-                    >
-                      <SelectTrigger className="w-48">
-                        <SelectValue placeholder="Select role" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {roles?.map((role) => (
-                          <SelectItem key={role.id} value={role.id}>
-                            {role.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      aria-label={`Remove group mapping ${row.groupDN || String(idx + 1)}`}
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => {
-                        setMappingRows(mappingRows.filter((_, i) => i !== idx));
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Default role and sync interval */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Default Role (no group match)</Label>
+              <SettingRow
+                label="Default role"
+                description="Given to someone who is in no mapped group."
+                htmlFor="ldap-default-role"
+              >
                 <Select
                   value={form.default_role_id ?? "none"}
                   onValueChange={(val) => {
@@ -784,7 +886,10 @@ export function LDAPPage() {
                     });
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger
+                    id="ldap-default-role"
+                    className="w-full sm:w-64"
+                  >
                     <SelectValue placeholder="No default role" />
                   </SelectTrigger>
                   <SelectContent>
@@ -796,10 +901,18 @@ export function LDAPPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Sync Interval (minutes)</Label>
+              </SettingRow>
+            </SettingsSection>
+
+            <SettingsSection title="Sync">
+              <SettingRow
+                label="Sync interval"
+                description="Minutes between background syncs of this directory."
+                htmlFor="ldap-sync-interval"
+              >
                 <Input
+                  id="ldap-sync-interval"
+                  className="w-24"
                   type="number"
                   min={1}
                   value={form.sync_interval_minutes}
@@ -810,16 +923,46 @@ export function LDAPPage() {
                     });
                   }}
                 />
-              </div>
-            </div>
+                <span className="text-sm text-muted-foreground">minutes</span>
+              </SettingRow>
+              {!isNew && editingId && (
+                <SettingRow
+                  label="Sync now"
+                  description={
+                    syncResult ??
+                    "Runs a sync of the saved configuration without waiting for the interval."
+                  }
+                >
+                  <Button
+                    variant="outline"
+                    onClick={handleSync}
+                    disabled={syncLDAP.isPending}
+                  >
+                    {syncLDAP.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    Sync now
+                  </Button>
+                </SettingRow>
+              )}
+            </SettingsSection>
 
-            {/* Test connection */}
+            {/* Test connection: the saved configuration, not the edits above */}
             {!isNew && editingId && (
-              <div className="rounded-lg border bg-muted/50 p-4">
-                <h3 className="mb-3 font-medium">Test Connection</h3>
-                <div className="flex items-center gap-2">
+              <SettingsSection
+                title="Test connection"
+                description="Tries the configuration as it is saved. Edits above are not tested until they are saved."
+              >
+                <SettingRow
+                  label="Test username"
+                  description="Optional."
+                  htmlFor="ldap-test-username"
+                >
                   <Input
-                    className="max-w-xs"
+                    id="ldap-test-username"
+                    className="min-w-0 flex-1"
                     value={testUsername}
                     onChange={(e) => {
                       setTestUsername(e.target.value);
@@ -832,43 +975,30 @@ export function LDAPPage() {
                     disabled={testConnection.isPending}
                   >
                     {testConnection.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <Plug className="mr-2 h-4 w-4" />
+                      <Plug className="h-4 w-4" />
                     )}
                     Test
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleSync}
-                    disabled={syncLDAP.isPending}
-                  >
-                    {syncLDAP.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Sync Now
-                  </Button>
-                </div>
+                </SettingRow>
                 {testResult && (
-                  <div
-                    className={`mt-2 flex items-center gap-2 text-sm ${testResult.success ? "text-emerald-600" : "text-destructive"}`}
-                  >
+                  <div className="flex items-start gap-2 pt-3.5 text-sm">
                     {testResult.success ? (
-                      <CheckCircle2 className="h-4 w-4" />
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-500" />
                     ) : (
-                      <XCircle className="h-4 w-4" />
+                      <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                     )}
-                    {testResult.message}
+                    <span
+                      className={
+                        testResult.success ? undefined : "text-destructive"
+                      }
+                    >
+                      {testResult.message}
+                    </span>
                   </div>
                 )}
-                {syncResult && (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {syncResult}
-                  </p>
-                )}
-              </div>
+              </SettingsSection>
             )}
 
             {transportWarning != null &&
@@ -893,7 +1023,7 @@ export function LDAPPage() {
                   onCancel={() => {
                     setTransportWarning(null);
                   }}
-                  pending={createConfig.isPending || updateConfig.isPending}
+                  pending={saving}
                 />
               )}
 
@@ -902,18 +1032,13 @@ export function LDAPPage() {
             )}
 
             {/* Actions */}
-            <div className="flex gap-2">
-              <Button
-                onClick={handleSave}
-                disabled={createConfig.isPending || updateConfig.isPending}
-              >
-                {(createConfig.isPending || updateConfig.isPending) && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                {isNew ? "Create" : "Save"}
-              </Button>
+            <div className="flex flex-wrap justify-end gap-2">
               <Button variant="outline" onClick={cancel}>
                 Cancel
+              </Button>
+              <Button onClick={handleSave} disabled={saving}>
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isNew ? "Create" : "Save"}
               </Button>
             </div>
           </div>

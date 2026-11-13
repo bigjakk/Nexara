@@ -1,24 +1,14 @@
 import { useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import {
-  Copy,
-  Download,
-  Loader2,
-  ShieldCheck,
-  ShieldOff,
-  RefreshCw,
-} from "lucide-react";
+import { Copy, Download, Loader2, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
+import { SettingRow, SettingsSection } from "@/components/page/Settings";
 import {
   Dialog,
   DialogContent,
@@ -69,9 +59,9 @@ export function SecurityPage() {
   const setupAttempt = useRef(0);
 
   const [disableDialogOpen, setDisableDialogOpen] = useState(false);
-  // Where focus goes when Disable 2FA closes: the card, whose Disable 2FA
+  // Where focus goes when Disable 2FA closes: the section, whose Disable 2FA
   // button goes once 2FA is off.
-  const twoFactorCard = useRef<HTMLDivElement>(null);
+  const twoFactorCard = useRef<HTMLElement>(null);
   const [disableCode, setDisableCode] = useState("");
 
   const [regenDialogOpen, setRegenDialogOpen] = useState(false);
@@ -188,58 +178,59 @@ export function SecurityPage() {
     );
   }
 
+  const enabled = status?.enabled === true;
+  const codesLeft = status?.recovery_codes_remaining ?? 0;
+
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Security Settings</h1>
-        <p className="text-muted-foreground">
-          Manage two-factor authentication and active sessions for your account
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Security"
+        summary={
+          enabled
+            ? `Two-factor authentication is on, with ${String(codesLeft)} recovery code${codesLeft !== 1 ? "s" : ""} left.`
+            : "Two-factor authentication is off. Sign-in asks for nothing after your password or single sign-on."
+        }
+      />
 
-      {error && (
-        <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
+      <div className="max-w-3xl space-y-4">
+        {error && (
+          <div className="rounded-md bg-destructive/10 p-3 text-sm text-red-700 dark:text-red-400">
+            {error}
+          </div>
+        )}
 
-      <Card
-        ref={twoFactorCard}
-        role="region"
-        aria-label="Two-factor authentication"
-        tabIndex={-1}
-        className="outline-none"
-      >
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5" />
-            Two-Factor Authentication (2FA)
-          </CardTitle>
-          <CardDescription>
-            Add an extra layer of security with a TOTP authenticator app
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {status?.enabled ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between rounded-lg border p-4">
-                <div>
-                  <p className="font-medium text-emerald-600">2FA is enabled</p>
-                  <p className="text-sm text-muted-foreground">
-                    {status.recovery_codes_remaining} recovery code
-                    {status.recovery_codes_remaining !== 1 ? "s" : ""} remaining
-                  </p>
-                </div>
-                <ShieldCheck className="h-8 w-8 text-emerald-600" />
-              </div>
-
-              {status.recovery_codes_remaining < 3 && (
-                <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800 dark:bg-amber-950/20 dark:border-amber-800 dark:text-amber-200">
-                  You have few recovery codes left. Consider regenerating them.
-                </div>
-              )}
-
-              <div className="flex gap-2">
+        <SettingsSection
+          ref={twoFactorCard}
+          tabIndex={-1}
+          className="outline-none"
+          title="Two-factor authentication"
+          description="A second step at sign-in: a 6-digit code from a TOTP authenticator app."
+          actions={
+            enabled ? (
+              <Badge variant="healthy">On</Badge>
+            ) : (
+              <span className="text-sm text-muted-foreground">Off</span>
+            )
+          }
+        >
+          {enabled ? (
+            <>
+              <SettingRow
+                label="Recovery codes"
+                description={
+                  <>
+                    {codesLeft} recovery code
+                    {codesLeft !== 1 ? "s" : ""} remaining. Each one signs you
+                    in once if you lose your authenticator.
+                    {codesLeft < 3 && (
+                      <span className="mt-1 block text-amber-700 dark:text-amber-400">
+                        You have few recovery codes left. Consider regenerating
+                        them.
+                      </span>
+                    )}
+                  </>
+                }
+              >
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -247,32 +238,31 @@ export function SecurityPage() {
                     setError("");
                   }}
                 >
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Regenerate Recovery Codes
+                  <RefreshCw className="h-4 w-4" />
+                  Regenerate recovery codes
                 </Button>
+              </SettingRow>
+              <SettingRow
+                label="Turn off"
+                description="Removes the second step from your sign-in. You are asked for a current code first."
+              >
                 <Button
-                  variant="destructive"
+                  variant="outline"
+                  className="text-destructive hover:text-destructive"
                   onClick={() => {
                     setDisableDialogOpen(true);
                     setError("");
                   }}
                 >
-                  <ShieldOff className="mr-2 h-4 w-4" />
                   Disable 2FA
                 </Button>
-              </div>
-            </div>
+              </SettingRow>
+            </>
           ) : setupStep === "idle" ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between rounded-lg border border-dashed p-4">
-                <div>
-                  <p className="font-medium">2FA is not enabled</p>
-                  <p className="text-sm text-muted-foreground">
-                    Protect your account with a TOTP authenticator
-                  </p>
-                </div>
-                <ShieldOff className="h-8 w-8 text-muted-foreground" />
-              </div>
+            <SettingRow
+              label="Authenticator app"
+              description="Not set up. Enabling it shows a QR code to scan, then asks for a first code to confirm."
+            >
               <Button
                 onClick={() => {
                   setError("");
@@ -281,40 +271,40 @@ export function SecurityPage() {
               >
                 Enable 2FA
               </Button>
-            </div>
+            </SettingRow>
           ) : setupStep === "qr" ? (
-            <div className="space-y-6">
-              <div>
-                <h3 className="mb-2 font-medium">
+            <div className="flex flex-wrap items-start gap-x-6 gap-y-4 pt-1">
+              <div className="rounded-lg bg-white p-3 ring-1 ring-border">
+                <QRCodeSVG value={otpauthUrl} size={176} />
+              </div>
+              <div className="min-w-0 flex-[1_1_16rem] space-y-4">
+                <h3 className="text-sm font-medium">
                   Step 1: Scan the QR code with your authenticator app
                 </h3>
-                <div className="flex justify-center rounded-lg border bg-white p-6">
-                  <QRCodeSVG value={otpauthUrl} size={200} />
+                <div>
+                  <p className="mb-1 text-[13px] text-muted-foreground">
+                    Or enter this secret manually:
+                  </p>
+                  <code className="block select-all break-all rounded-md bg-foreground/[0.06] px-3 py-2 font-mono text-sm">
+                    {manualSecret}
+                  </code>
                 </div>
+                <Button
+                  onClick={() => {
+                    setSetupStep("verify");
+                  }}
+                >
+                  Next
+                </Button>
               </div>
-              <div>
-                <p className="mb-1 text-sm text-muted-foreground">
-                  Or enter this secret manually:
-                </p>
-                <code className="block rounded bg-muted px-3 py-2 text-sm font-mono break-all select-all">
-                  {manualSecret}
-                </code>
-              </div>
-              <Button
-                onClick={() => {
-                  setSetupStep("verify");
-                }}
-              >
-                Next
-              </Button>
             </div>
           ) : setupStep === "verify" ? (
-            <div className="space-y-4">
-              <h3 className="font-medium">
+            <div className="space-y-4 pt-1">
+              <h3 className="text-sm font-medium">
                 Step 2: Enter the 6-digit code from your authenticator
               </h3>
               <div className="max-w-xs space-y-2">
-                <Label htmlFor="setup-verify-code">Verification Code</Label>
+                <Label htmlFor="setup-verify-code">Verification code</Label>
                 <Input
                   id="setup-verify-code"
                   type="text"
@@ -340,7 +330,7 @@ export function SecurityPage() {
                   {confirmMutation.isPending && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   )}
-                  Verify & Enable
+                  Verify and enable
                 </Button>
                 <Button
                   variant="ghost"
@@ -353,56 +343,57 @@ export function SecurityPage() {
               </div>
             </div>
           ) : null}
-        </CardContent>
-      </Card>
+        </SettingsSection>
 
-      {/* Recovery Codes Display */}
-      {setupStep === "recovery" && recoveryCodes.length > 0 && (
-        <Card className="border-emerald-200 dark:border-emerald-800">
-          <CardHeader>
-            <CardTitle>Recovery Codes</CardTitle>
-            <CardDescription>
+        {/* Recovery codes, shown once after enabling or regenerating */}
+        {setupStep === "recovery" && recoveryCodes.length > 0 && (
+          <Panel
+            title="Recovery codes"
+            actions={
+              <>
+                <Button variant="outline" size="sm" onClick={copyRecoveryCodes}>
+                  <Copy className="h-4 w-4" />
+                  Copy
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={downloadRecoveryCodes}
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </Button>
+              </>
+            }
+          >
+            <p className="-mt-2 mb-3 max-w-[65ch] text-sm text-muted-foreground">
               Save these codes in a safe place. Each code can only be used once
               to sign in if you lose access to your authenticator app.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted p-4 font-mono text-sm">
+            </p>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 rounded-md bg-foreground/[0.06] px-4 py-3 font-mono text-sm">
               {recoveryCodes.map((code) => (
                 <div key={code} className="py-1">
                   {code}
                 </div>
               ))}
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={copyRecoveryCodes}>
-                <Copy className="mr-2 h-4 w-4" />
-                Copy
-              </Button>
+            <div className="flex justify-end pt-3.5">
               <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadRecoveryCodes}
+                onClick={() => {
+                  setSetupStep("idle");
+                  setRecoveryCodes([]);
+                }}
               >
-                <Download className="mr-2 h-4 w-4" />
-                Download
+                Done
               </Button>
             </div>
-            <Button
-              onClick={() => {
-                setSetupStep("idle");
-                setRecoveryCodes([]);
-              }}
-            >
-              Done
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+          </Panel>
+        )}
 
-      <ActiveSessionsCard />
+        <ActiveSessionsCard />
+      </div>
 
-      {/* Enable 2FA Dialog: the owner proves it is them before the secret is shown */}
+      {/* Enable 2FA dialog: the owner proves it is them before the secret is shown */}
       <Dialog
         open={setupDialogOpen}
         onOpenChange={(open) => {
@@ -411,7 +402,7 @@ export function SecurityPage() {
       >
         <DialogContent fallbackFocus={() => twoFactorCard.current}>
           <DialogHeader>
-            <DialogTitle>Enable Two-Factor Authentication</DialogTitle>
+            <DialogTitle>Enable two-factor authentication</DialogTitle>
             <DialogDescription>
               {hasPassword === undefined
                 ? profileFailed
@@ -424,7 +415,7 @@ export function SecurityPage() {
           </DialogHeader>
           {hasPassword && (
             <div className="space-y-2">
-              <Label htmlFor="setup-current-password">Current Password</Label>
+              <Label htmlFor="setup-current-password">Current password</Label>
               <Input
                 id="setup-current-password"
                 type="password"
@@ -461,18 +452,18 @@ export function SecurityPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Disable 2FA Dialog */}
+      {/* Disable 2FA dialog */}
       <Dialog open={disableDialogOpen} onOpenChange={setDisableDialogOpen}>
         <DialogContent fallbackFocus={() => twoFactorCard.current}>
           <DialogHeader>
-            <DialogTitle>Disable Two-Factor Authentication</DialogTitle>
+            <DialogTitle>Disable two-factor authentication</DialogTitle>
             <DialogDescription>
               Enter your current TOTP code to disable 2FA. This will remove the
               extra security layer from your account.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="disable-code">Authentication Code</Label>
+            <Label htmlFor="disable-code">Authentication code</Label>
             <Input
               id="disable-code"
               type="text"
@@ -511,18 +502,18 @@ export function SecurityPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Regenerate Recovery Codes Dialog */}
+      {/* Regenerate recovery codes dialog */}
       <Dialog open={regenDialogOpen} onOpenChange={setRegenDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Regenerate Recovery Codes</DialogTitle>
+            <DialogTitle>Regenerate recovery codes</DialogTitle>
             <DialogDescription>
               This will invalidate all existing recovery codes and generate new
               ones. Enter your current TOTP code to continue.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="regen-code">Authentication Code</Label>
+            <Label htmlFor="regen-code">Authentication code</Label>
             <Input
               id="regen-code"
               type="text"

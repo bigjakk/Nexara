@@ -28,7 +28,7 @@ export function InsecureConnectionBanner() {
   return (
     <div
       role="alert"
-      className="mx-auto mb-4 flex w-full max-w-md items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
+      className="mb-4 flex w-full items-start gap-3 rounded-[10px] border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
       <div className="flex-1 leading-snug">

@@ -61,7 +61,7 @@ describe("SecurityPage: beginning a 2FA setup", () => {
     renderWithProviders(<SecurityPage />);
 
     await user.click(await screen.findByRole("button", { name: "Enable 2FA" }));
-    const password = await screen.findByLabelText("Current Password");
+    const password = await screen.findByLabelText("Current password");
     await user.type(password, "wrong-guess");
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(
@@ -80,7 +80,7 @@ describe("SecurityPage: beginning a 2FA setup", () => {
     expect(mockedPost).toHaveBeenLastCalledWith(SETUP, {
       current_password: "right-password",
     });
-    expect(screen.queryByLabelText("Current Password")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
   });
 
   it("asks for nothing until the account is known", async () => {
@@ -98,7 +98,7 @@ describe("SecurityPage: beginning a 2FA setup", () => {
     expect(
       await screen.findByText("Loading your account…"),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Current Password")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
   });
 
@@ -116,7 +116,7 @@ describe("SecurityPage: beginning a 2FA setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Enable 2FA" }));
     await user.type(
-      await screen.findByLabelText("Current Password"),
+      await screen.findByLabelText("Current password"),
       "right-password",
     );
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -141,7 +141,7 @@ describe("SecurityPage: beginning a 2FA setup", () => {
     expect(
       await screen.findByText(/sign-in from the last 10 minutes/),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Current Password")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(
       await screen.findByText(/Step 1: Scan the QR code/),

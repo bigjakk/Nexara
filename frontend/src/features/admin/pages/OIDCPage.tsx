@@ -1,9 +1,21 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Segmented } from "@/components/ui/segmented";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { EmptyState } from "@/components/EmptyState";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
+import { SettingRow, SettingsSection } from "@/components/page/Settings";
 import {
   Select,
   SelectContent,
@@ -12,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  KeyRound,
   Plus,
   Trash2,
   Plug,
@@ -29,6 +42,12 @@ import {
 
 /** The backend's code for a cleartext OIDC callback (oidc.go). */
 const INSECURE_OIDC_REDIRECT = "insecure_oidc_redirect_confirm_required";
+
+/**
+ * A setting whose control runs the full width under its label: an issuer or
+ * a callback URL does not fit the narrow control column.
+ */
+const WIDE = "sm:grid-cols-1";
 import {
   useOIDCConfigs,
   useCreateOIDCConfig,
@@ -383,305 +402,356 @@ export function OIDCPage() {
     );
   }
 
+  const total = configs?.length ?? 0;
+  const enabledCount = configs?.filter((c) => c.enabled).length ?? 0;
+  const saving = createConfig.isPending || updateConfig.isPending;
+  const applyPreset = (key: ProviderPreset) => {
+    setProviderPreset(key);
+    if (key !== "custom") {
+      const { defaults } = presets[key];
+      setForm((prev) => ({ ...prev, ...defaults }));
+      if (defaults.scopes) {
+        setScopesText(defaults.scopes.join(", "));
+      }
+    }
+  };
+
   return (
     <div>
       <AdminNav />
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">OIDC / SSO</h1>
-            <p className="text-muted-foreground">
-              Configure OpenID Connect single sign-on with your identity
-              provider
-            </p>
-          </div>
-          {!showForm && (
-            <Button onClick={startNew}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Config
-            </Button>
-          )}
-        </div>
+      <div className="space-y-5">
+        <PageHeader
+          title="OIDC / SSO"
+          summary={
+            total === 0
+              ? "No identity provider is configured, so there is no single sign-on."
+              : `${String(total)} identity provider${total !== 1 ? "s" : ""} configured, ${String(enabledCount)} enabled.`
+          }
+          actions={
+            !showForm ? (
+              <Button onClick={startNew}>
+                <Plus className="h-4 w-4" />
+                Add configuration
+              </Button>
+            ) : undefined
+          }
+        />
 
         {/* Config list */}
         {!showForm && configs && configs.length > 0 && (
-          <div className="space-y-3">
-            {configs.map((cfg) => (
-              <div
-                key={cfg.id}
-                className="flex items-center justify-between rounded-lg border p-4"
-              >
-                <div className="flex items-center gap-3">
-                  <Badge variant={cfg.enabled ? "default" : "secondary"}>
-                    {cfg.enabled ? "Enabled" : "Disabled"}
-                  </Badge>
-                  <div>
-                    <p className="font-medium">{cfg.name}</p>
-                    <p className="text-sm text-muted-foreground">
+          <Panel flush>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Issuer</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="w-32">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {configs.map((cfg) => (
+                  <TableRow key={cfg.id}>
+                    <TableCell className="whitespace-nowrap font-medium">
+                      {cfg.name}
+                    </TableCell>
+                    <TableCell className="min-w-[14rem] break-all font-mono text-[13px] text-muted-foreground">
                       {cfg.issuer_url}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      startEdit(cfg);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    aria-label={`Delete ${cfg.name}`}
-                    variant="ghost"
-                    size="icon"
-                    className="text-destructive"
-                    onClick={() => {
-                      if (
-                        confirm(
-                          "Delete this OIDC configuration? SSO users will no longer be able to log in.",
-                        )
-                      ) {
-                        deleteConfig.mutate(cfg.id);
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
+                    </TableCell>
+                    <TableCell>
+                      {cfg.enabled ? (
+                        <Badge variant="healthy">Enabled</Badge>
+                      ) : (
+                        <span className="text-muted-foreground">Disabled</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            startEdit(cfg);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          aria-label={`Delete ${cfg.name}`}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            if (
+                              confirm(
+                                "Delete this OIDC configuration? SSO users will no longer be able to log in.",
+                              )
+                            ) {
+                              deleteConfig.mutate(cfg.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Panel>
         )}
 
         {!showForm && (!configs || configs.length === 0) && (
-          <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-            No OIDC configurations. Click "Add Config" to set up SSO.
-          </div>
+          <EmptyState
+            icon={KeyRound}
+            title="No OIDC configuration"
+            description="Add a configuration to let people sign in through your identity provider."
+          />
         )}
 
         {/* Edit/Create form */}
         {showForm && (
-          <div className="space-y-6 rounded-lg border p-6">
-            <h2 className="text-lg font-semibold">
-              {isNew ? "New OIDC Configuration" : "Edit OIDC Configuration"}
-            </h2>
-
-            {/* Provider preset */}
-            <div>
-              <Label className="mb-2 block">Provider Preset</Label>
-              <div className="flex flex-wrap gap-2">
-                {(
-                  Object.entries(presets) as Array<
-                    [ProviderPreset, (typeof presets)[ProviderPreset]]
-                  >
-                ).map(([key, preset]) => (
-                  <Button
-                    key={key}
-                    variant={providerPreset === key ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => {
-                      setProviderPreset(key);
-                      if (key !== "custom") {
-                        setForm((prev) => ({ ...prev, ...preset.defaults }));
-                        if (preset.defaults.scopes) {
-                          setScopesText(preset.defaults.scopes.join(", "));
-                        }
-                      }
-                    }}
-                  >
-                    {preset.label}
-                  </Button>
-                ))}
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {presets[providerPreset].hint}
-              </p>
+          <div className="max-w-3xl space-y-4">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 className="text-lg font-semibold">
+                {isNew ? "New OIDC configuration" : "Edit OIDC configuration"}
+              </h2>
+              {!isNew && activeConfig != null && (
+                <span className="text-sm text-muted-foreground">
+                  {activeConfig.name}
+                </span>
+              )}
             </div>
 
-            {/* Basic settings */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Name</Label>
+            <SettingsSection title="Provider">
+              <SettingRow
+                className={WIDE}
+                label="Provider preset"
+                description={presets[providerPreset].hint}
+              >
+                {/* Full width, so the presets start at the label's edge. */}
+                <div className="w-full">
+                  <Segmented
+                    aria-label="Provider preset"
+                    size="md"
+                    value={providerPreset}
+                    onValueChange={applyPreset}
+                    // Pressing the current preset again re-applies its defaults.
+                    onReselect={applyPreset}
+                    options={(
+                      Object.entries(presets) as Array<
+                        [ProviderPreset, (typeof presets)[ProviderPreset]]
+                      >
+                    ).map(([key, preset]) => ({
+                      value: key,
+                      label: preset.label,
+                    }))}
+                  />
+                </div>
+              </SettingRow>
+              <SettingRow
+                label="Name"
+                description="What this configuration is called in the list."
+                htmlFor="oidc-name"
+              >
                 <Input
+                  id="oidc-name"
                   value={form.name}
                   onChange={(e) => {
                     setForm({ ...form, name: e.target.value });
                   }}
                   placeholder="Default"
                 />
-              </div>
-              <div className="flex items-center gap-3 pt-6">
+              </SettingRow>
+              <SettingRow
+                label="Enabled"
+                description="People can sign in through this provider only while it is on."
+                htmlFor="oidc-enabled"
+              >
                 <Switch
+                  id="oidc-enabled"
                   checked={form.enabled}
                   onCheckedChange={(enabled) => {
                     setForm({ ...form, enabled });
                   }}
                 />
-                <Label>Enabled</Label>
-              </div>
-            </div>
+              </SettingRow>
+            </SettingsSection>
 
-            {/* Provider settings */}
-            <div>
-              <h3 className="mb-3 font-medium">Provider</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Issuer URL</Label>
-                  <Input
-                    value={form.issuer_url}
-                    onChange={(e) => {
-                      setForm({ ...form, issuer_url: e.target.value });
-                    }}
-                    placeholder="https://auth.example.com/realms/main"
-                  />
-                  {addressChanged && (
-                    <p className="text-xs text-muted-foreground">
-                      This provider is moving to a new issuer, so it needs the
-                      client secret again — the stored one is only ever sent to
-                      the address it was saved for.
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label>Client ID</Label>
-                  <Input
-                    value={form.client_id}
-                    onChange={(e) => {
-                      setForm({ ...form, client_id: e.target.value });
-                    }}
-                    placeholder="nexara"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>
-                    Client Secret
-                    {!isNew && activeConfig?.client_secret_set && (
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        {addressChanged
-                          ? "(required — the issuer changed)"
-                          : "(leave blank to keep current)"}
-                      </span>
-                    )}
-                  </Label>
-                  <Input
-                    type="password"
-                    value={form.client_secret}
-                    onChange={(e) => {
-                      setForm({ ...form, client_secret: e.target.value });
-                    }}
-                    placeholder={
-                      addressChanged
-                        ? "Re-enter the client secret for the new issuer"
-                        : !isNew && activeConfig?.client_secret_set
-                          ? "********"
-                          : "Client secret"
-                    }
-                    required={addressChanged}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Redirect URI</Label>
-                  <Input
-                    value={form.redirect_uri}
-                    onChange={(e) => {
-                      setForm({ ...form, redirect_uri: e.target.value });
-                    }}
-                    placeholder={
-                      window.location.origin + "/api/v1/auth/oidc/callback"
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Register this URL in your IdP as the redirect/callback URI
-                  </p>
-                </div>
-              </div>
-            </div>
+            <SettingsSection title="Client">
+              <SettingRow
+                className={WIDE}
+                label="Issuer URL"
+                description={
+                  addressChanged
+                    ? "This provider is moving to a new issuer, so it needs the client secret again. The stored one is only ever sent to the address it was saved for."
+                    : undefined
+                }
+                htmlFor="oidc-issuer-url"
+              >
+                <Input
+                  id="oidc-issuer-url"
+                  className="font-mono"
+                  value={form.issuer_url}
+                  onChange={(e) => {
+                    setForm({ ...form, issuer_url: e.target.value });
+                  }}
+                  placeholder="https://auth.example.com/realms/main"
+                />
+              </SettingRow>
+              <SettingRow label="Client ID" htmlFor="oidc-client-id">
+                <Input
+                  id="oidc-client-id"
+                  className="font-mono"
+                  value={form.client_id}
+                  onChange={(e) => {
+                    setForm({ ...form, client_id: e.target.value });
+                  }}
+                  placeholder="nexara"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Client secret"
+                description={
+                  !isNew && activeConfig?.client_secret_set
+                    ? addressChanged
+                      ? "Required: the issuer changed."
+                      : "Leave blank to keep the current one."
+                    : undefined
+                }
+                htmlFor="oidc-client-secret"
+              >
+                <Input
+                  id="oidc-client-secret"
+                  type="password"
+                  value={form.client_secret}
+                  onChange={(e) => {
+                    setForm({ ...form, client_secret: e.target.value });
+                  }}
+                  placeholder={
+                    addressChanged
+                      ? "Re-enter the client secret for the new issuer"
+                      : !isNew && activeConfig?.client_secret_set
+                        ? "********"
+                        : "Client secret"
+                  }
+                  required={addressChanged}
+                />
+              </SettingRow>
+              <SettingRow
+                className={WIDE}
+                label="Redirect URI"
+                description="Register this URL in your IdP as the redirect/callback URI"
+                htmlFor="oidc-redirect-uri"
+              >
+                <Input
+                  id="oidc-redirect-uri"
+                  className="font-mono"
+                  value={form.redirect_uri}
+                  onChange={(e) => {
+                    setForm({ ...form, redirect_uri: e.target.value });
+                  }}
+                  placeholder={
+                    window.location.origin + "/api/v1/auth/oidc/callback"
+                  }
+                />
+              </SettingRow>
+            </SettingsSection>
 
-            {/* Claims mapping */}
-            <div>
-              <h3 className="mb-3 font-medium">Claims Mapping</h3>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>Email Claim</Label>
-                  <Input
-                    value={form.email_claim}
-                    onChange={(e) => {
-                      setForm({ ...form, email_claim: e.target.value });
-                    }}
-                    placeholder="email"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Display Name Claim</Label>
-                  <Input
-                    value={form.display_name_claim}
-                    onChange={(e) => {
-                      setForm({ ...form, display_name_claim: e.target.value });
-                    }}
-                    placeholder="name"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Groups Claim</Label>
-                  <Input
-                    value={form.groups_claim}
-                    onChange={(e) => {
-                      setForm({ ...form, groups_claim: e.target.value });
-                    }}
-                    placeholder="groups"
-                  />
-                </div>
-              </div>
-            </div>
+            <SettingsSection
+              title="Claims"
+              description="Which claims in the ID token become the account's email, name and groups."
+            >
+              <SettingRow label="Email claim" htmlFor="oidc-email-claim">
+                <Input
+                  id="oidc-email-claim"
+                  className="font-mono"
+                  value={form.email_claim}
+                  onChange={(e) => {
+                    setForm({ ...form, email_claim: e.target.value });
+                  }}
+                  placeholder="email"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Display name claim"
+                htmlFor="oidc-display-name-claim"
+              >
+                <Input
+                  id="oidc-display-name-claim"
+                  className="font-mono"
+                  value={form.display_name_claim}
+                  onChange={(e) => {
+                    setForm({ ...form, display_name_claim: e.target.value });
+                  }}
+                  placeholder="name"
+                />
+              </SettingRow>
+              <SettingRow label="Groups claim" htmlFor="oidc-groups-claim">
+                <Input
+                  id="oidc-groups-claim"
+                  className="font-mono"
+                  value={form.groups_claim}
+                  onChange={(e) => {
+                    setForm({ ...form, groups_claim: e.target.value });
+                  }}
+                  placeholder="groups"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Scopes"
+                description="Comma-separated."
+                htmlFor="oidc-scopes"
+              >
+                <Input
+                  id="oidc-scopes"
+                  className="font-mono"
+                  value={scopesText}
+                  onChange={(e) => {
+                    setScopesText(e.target.value);
+                  }}
+                  placeholder="openid, email, profile"
+                />
+              </SettingRow>
+            </SettingsSection>
 
-            {/* Scopes */}
-            <div className="space-y-2">
-              <Label>Scopes (comma-separated)</Label>
-              <Input
-                value={scopesText}
-                onChange={(e) => {
-                  setScopesText(e.target.value);
-                }}
-                placeholder="openid, email, profile"
-              />
-            </div>
-
-            {/* Auto-provision and allowed domains */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex items-center gap-3">
+            <SettingsSection title="Accounts">
+              <SettingRow
+                label="Auto-provision users"
+                description="Automatically create accounts on first SSO login"
+                htmlFor="oidc-auto-provision"
+              >
                 <Switch
+                  id="oidc-auto-provision"
                   checked={form.auto_provision}
                   onCheckedChange={(auto_provision) => {
                     setForm({ ...form, auto_provision });
                   }}
                 />
-                <div>
-                  <Label>Auto-Provision Users</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Automatically create accounts on first SSO login
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>
-                  Allowed Email Domains (comma-separated, empty = all)
-                </Label>
+              </SettingRow>
+              <SettingRow
+                label="Allowed email domains"
+                description="Comma-separated. Empty allows every domain."
+                htmlFor="oidc-allowed-domains"
+              >
                 <Input
+                  id="oidc-allowed-domains"
                   value={domainsText}
                   onChange={(e) => {
                     setDomainsText(e.target.value);
                   }}
                   placeholder="example.com, corp.example.com"
                 />
-              </div>
-            </div>
+              </SettingRow>
+            </SettingsSection>
 
-            {/* Group-to-Role Mapping */}
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-medium">Group-to-Role Mapping</h3>
+            <SettingsSection
+              title="Group-to-role mapping"
+              description="Each mapped group gives its members a role."
+              actions={
                 <Button
                   variant="outline"
                   size="sm"
@@ -689,119 +759,145 @@ export function OIDCPage() {
                     setMappingRows([...mappingRows, { group: "", roleId: "" }]);
                   }}
                 >
-                  <Plus className="mr-1 h-3 w-3" />
-                  Add Mapping
+                  <Plus className="h-3.5 w-3.5" />
+                  Add mapping
                 </Button>
-              </div>
-              {mappingRows.length === 0 && (
-                <p className="text-sm text-muted-foreground">
+              }
+            >
+              {mappingRows.length === 0 ? (
+                <p className="pb-3.5 pt-1 text-sm text-muted-foreground">
                   No mappings configured. SSO users will be assigned the default
                   role.
                 </p>
-              )}
-              <div className="space-y-2">
-                {mappingRows.map((row, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Input
-                      className="flex-1"
-                      value={row.group}
-                      onChange={(e) => {
-                        const updated = [...mappingRows];
-                        updated[idx] = { ...row, group: e.target.value };
-                        setMappingRows(updated);
-                      }}
-                      placeholder="IdP group name"
-                    />
-                    <Select
-                      value={row.roleId}
-                      onValueChange={(val) => {
-                        const updated = [...mappingRows];
-                        updated[idx] = { ...row, roleId: val };
-                        setMappingRows(updated);
-                      }}
+              ) : (
+                <div className="space-y-2 pb-3.5 pt-1">
+                  {mappingRows.map((row, idx) => (
+                    <div
+                      key={idx}
+                      className="flex flex-wrap items-center gap-2"
                     >
-                      <SelectTrigger className="w-48">
-                        <SelectValue placeholder="Select role" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {roles?.map((role) => (
-                          <SelectItem key={role.id} value={role.id}>
-                            {role.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      aria-label={`Remove group mapping ${row.group || String(idx + 1)}`}
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => {
-                        setMappingRows(mappingRows.filter((_, i) => i !== idx));
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Default role */}
-            <div className="max-w-sm space-y-2">
-              <Label>Default Role (no group match)</Label>
-              <Select
-                value={form.default_role_id ?? "none"}
-                onValueChange={(val) => {
-                  setForm({
-                    ...form,
-                    default_role_id: val === "none" ? null : val,
-                  });
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="No default role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No default role</SelectItem>
-                  {roles?.map((role) => (
-                    <SelectItem key={role.id} value={role.id}>
-                      {role.name}
-                    </SelectItem>
+                      <Input
+                        aria-label={`Group of mapping ${String(idx + 1)}`}
+                        className="min-w-0 flex-[2_1_14rem]"
+                        value={row.group}
+                        onChange={(e) => {
+                          const updated = [...mappingRows];
+                          updated[idx] = { ...row, group: e.target.value };
+                          setMappingRows(updated);
+                        }}
+                        placeholder="IdP group name"
+                      />
+                      <Select
+                        value={row.roleId}
+                        onValueChange={(val) => {
+                          const updated = [...mappingRows];
+                          updated[idx] = { ...row, roleId: val };
+                          setMappingRows(updated);
+                        }}
+                      >
+                        <SelectTrigger
+                          aria-label={`Role of mapping ${String(idx + 1)}`}
+                          className="min-w-0 flex-[1_1_10rem]"
+                        >
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {roles?.map((role) => (
+                            <SelectItem key={role.id} value={role.id}>
+                              {role.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        aria-label={`Remove group mapping ${row.group || String(idx + 1)}`}
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          setMappingRows(
+                            mappingRows.filter((_, i) => i !== idx),
+                          );
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Test connection */}
-            {!isNew && editingId && (
-              <div className="rounded-lg border bg-muted/50 p-4">
-                <h3 className="mb-3 font-medium">Test Connection</h3>
-                <Button
-                  variant="outline"
-                  onClick={handleTest}
-                  disabled={testConnection.isPending}
+                </div>
+              )}
+              <SettingRow
+                label="Default role"
+                description="Given to someone who is in no mapped group."
+                htmlFor="oidc-default-role"
+              >
+                <Select
+                  value={form.default_role_id ?? "none"}
+                  onValueChange={(val) => {
+                    setForm({
+                      ...form,
+                      default_role_id: val === "none" ? null : val,
+                    });
+                  }}
                 >
-                  {testConnection.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plug className="mr-2 h-4 w-4" />
-                  )}
-                  Test Discovery Endpoint
-                </Button>
-                {testResult && (
-                  <div
-                    className={`mt-2 flex items-center gap-2 text-sm ${testResult.success ? "text-emerald-600" : "text-destructive"}`}
+                  <SelectTrigger
+                    id="oidc-default-role"
+                    className="w-full sm:w-64"
                   >
-                    {testResult.success ? (
-                      <CheckCircle2 className="h-4 w-4" />
+                    <SelectValue placeholder="No default role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No default role</SelectItem>
+                    {roles?.map((role) => (
+                      <SelectItem key={role.id} value={role.id}>
+                        {role.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+            </SettingsSection>
+
+            {/* Test connection: the saved configuration, not the edits above */}
+            {!isNew && editingId && (
+              <SettingsSection
+                title="Test connection"
+                description="Tries the configuration as it is saved. Edits above are not tested until they are saved."
+              >
+                <SettingRow
+                  label="Discovery endpoint"
+                  description="Asks the issuer for its OpenID configuration."
+                >
+                  <Button
+                    variant="outline"
+                    onClick={handleTest}
+                    disabled={testConnection.isPending}
+                  >
+                    {testConnection.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <XCircle className="h-4 w-4" />
+                      <Plug className="h-4 w-4" />
                     )}
-                    {testResult.message}
+                    Test discovery endpoint
+                  </Button>
+                </SettingRow>
+                {testResult && (
+                  <div className="flex items-start gap-2 pt-3.5 text-sm">
+                    {testResult.success ? (
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-500" />
+                    ) : (
+                      <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                    )}
+                    <span
+                      className={
+                        testResult.success ? undefined : "text-destructive"
+                      }
+                    >
+                      {testResult.message}
+                    </span>
                   </div>
                 )}
-              </div>
+              </SettingsSection>
             )}
 
             {redirectWarning != null &&
@@ -816,7 +912,7 @@ export function OIDCPage() {
                   onCancel={() => {
                     setRedirectWarning(null);
                   }}
-                  pending={createConfig.isPending || updateConfig.isPending}
+                  pending={saving}
                 />
               )}
 
@@ -825,18 +921,13 @@ export function OIDCPage() {
             )}
 
             {/* Actions */}
-            <div className="flex gap-2">
-              <Button
-                onClick={handleSave}
-                disabled={createConfig.isPending || updateConfig.isPending}
-              >
-                {(createConfig.isPending || updateConfig.isPending) && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                {isNew ? "Create" : "Save"}
-              </Button>
+            <div className="flex flex-wrap justify-end gap-2">
               <Button variant="outline" onClick={cancel}>
                 Cancel
+              </Button>
+              <Button onClick={handleSave} disabled={saving}>
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isNew ? "Create" : "Save"}
               </Button>
             </div>
           </div>

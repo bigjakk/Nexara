@@ -4,19 +4,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Loader2, Server, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
@@ -26,6 +18,7 @@ import type {
   SSOStatus,
   OIDCAuthorizeResponse,
 } from "@/types/api";
+import { AuthShell } from "../components/AuthShell";
 import { InsecureConnectionBanner } from "../components/InsecureConnectionBanner";
 
 function useLoginSchema() {
@@ -188,197 +181,173 @@ export function LoginPage() {
   // TOTP verification step
   if (totpPending) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-action">
-              <ShieldCheck className="h-6 w-6 text-action-foreground" />
+      <AuthShell
+        title={t("twoFactorAuthentication")}
+        description={
+          useRecoveryCode ? t("enterRecoveryCodes") : t("enterSixDigitCode")
+        }
+      >
+        <form onSubmit={(e) => void handleTotpSubmit(e)} className="space-y-4">
+          {error && (
+            <div className="rounded-md bg-destructive/10 p-3 text-sm text-red-700 dark:text-red-400">
+              {error}
             </div>
-            <CardTitle className="text-2xl">
-              {t("twoFactorAuthentication")}
-            </CardTitle>
-            <CardDescription>
-              {useRecoveryCode
-                ? t("enterRecoveryCodes")
-                : t("enterSixDigitCode")}
-            </CardDescription>
-          </CardHeader>
-          <form onSubmit={(e) => void handleTotpSubmit(e)}>
-            <CardContent className="space-y-4">
-              {error && (
-                <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                  {error}
-                </div>
-              )}
-              {useRecoveryCode ? (
-                <div className="space-y-2">
-                  <Label htmlFor="recovery-code">{t("recoveryCode")}</Label>
-                  <Input
-                    id="recovery-code"
-                    type="text"
-                    placeholder="XXXX-XXXX"
-                    autoComplete="off"
-                    autoFocus
-                    value={recoveryCode}
-                    onChange={(e) => {
-                      setRecoveryCode(e.target.value);
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="totp-code">{t("authenticationCode")}</Label>
-                  <Input
-                    id="totp-code"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    placeholder="000000"
-                    autoComplete="one-time-code"
-                    autoFocus
-                    value={totpCode}
-                    onChange={(e) => {
-                      setTotpCode(e.target.value.replace(/\D/g, ""));
-                    }}
-                  />
-                </div>
-              )}
-            </CardContent>
-            <CardFooter className="flex flex-col gap-3">
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={
-                  isLoading ||
-                  (useRecoveryCode ? !recoveryCode : totpCode.length !== 6)
-                }
-              >
-                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {t("verify")}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full text-sm"
-                onClick={() => {
-                  setUseRecoveryCode(!useRecoveryCode);
-                  setError("");
+          )}
+          {useRecoveryCode ? (
+            <div className="space-y-2">
+              <Label htmlFor="recovery-code">{t("recoveryCode")}</Label>
+              <Input
+                id="recovery-code"
+                type="text"
+                placeholder="XXXX-XXXX"
+                autoComplete="off"
+                autoFocus
+                value={recoveryCode}
+                onChange={(e) => {
+                  setRecoveryCode(e.target.value);
                 }}
-              >
-                {useRecoveryCode
-                  ? t("useAuthenticatorApp")
-                  : t("useRecoveryCode")}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground"
-                onClick={handleBackToLogin}
-              >
-                <ArrowLeft className="mr-1 h-3 w-3" />
-                {t("backToLogin")}
-              </Button>
-            </CardFooter>
-          </form>
-        </Card>
-      </div>
+              />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="totp-code">{t("authenticationCode")}</Label>
+              <Input
+                id="totp-code"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                placeholder="000000"
+                autoComplete="one-time-code"
+                autoFocus
+                value={totpCode}
+                onChange={(e) => {
+                  setTotpCode(e.target.value.replace(/\D/g, ""));
+                }}
+              />
+            </div>
+          )}
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={
+              isLoading ||
+              (useRecoveryCode ? !recoveryCode : totpCode.length !== 6)
+            }
+          >
+            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {t("verify")}
+          </Button>
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-ml-3 text-muted-foreground"
+              onClick={handleBackToLogin}
+            >
+              <ArrowLeft className="h-3 w-3" />
+              {t("backToLogin")}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-mr-3"
+              onClick={() => {
+                setUseRecoveryCode(!useRecoveryCode);
+                setError("");
+              }}
+            >
+              {useRecoveryCode
+                ? t("useAuthenticatorApp")
+                : t("useRecoveryCode")}
+            </Button>
+          </div>
+        </form>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4">
-      <InsecureConnectionBanner />
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-action">
-            <Server className="h-6 w-6 text-action-foreground" />
+    <AuthShell
+      banner={<InsecureConnectionBanner />}
+      title={t("welcomeToNexara")}
+      description={t("signInToManage")}
+    >
+      <form
+        onSubmit={(e) => void handleSubmit(onSubmit)(e)}
+        className="space-y-4"
+      >
+        {error && (
+          <div className="rounded-md bg-destructive/10 p-3 text-sm text-red-700 dark:text-red-400">
+            {error}
           </div>
-          <CardTitle className="text-2xl">{t("welcomeToNexara")}</CardTitle>
-          <CardDescription>{t("signInToManage")}</CardDescription>
-        </CardHeader>
-        <form onSubmit={(e) => void handleSubmit(onSubmit)(e)}>
-          <CardContent className="space-y-4">
-            {error && (
-              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="email">{t("email")}</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="admin@example.com"
-                autoComplete="email"
-                {...register("email")}
-              />
-              {errors.email && (
-                <p className="text-sm text-destructive">
-                  {errors.email.message}
-                </p>
-              )}
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="email">{t("email")}</Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="admin@example.com"
+            autoComplete="email"
+            {...register("email")}
+          />
+          {errors.email && (
+            <p className="text-sm text-destructive">{errors.email.message}</p>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">{t("password")}</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            {...register("password")}
+          />
+          {errors.password && (
+            <p className="text-sm text-destructive">
+              {errors.password.message}
+            </p>
+          )}
+        </div>
+        <Button type="submit" className="w-full" disabled={isLoading}>
+          {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {t("signIn")}
+        </Button>
+        {ssoStatus?.oidc_enabled && (
+          <>
+            <div className="flex w-full items-center gap-3">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs text-muted-foreground">{t("or")}</span>
+              <div className="h-px flex-1 bg-border" />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">{t("password")}</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                {...register("password")}
-              />
-              {errors.password && (
-                <p className="text-sm text-destructive">
-                  {errors.password.message}
-                </p>
-              )}
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-4">
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t("signIn")}
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={ssoLoading}
+              onClick={() => void handleSSOLogin()}
+            >
+              {ssoLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t("signInWith", {
+                provider: ssoStatus.oidc_provider_name || "SSO",
+              })}
             </Button>
-            {ssoStatus?.oidc_enabled && (
-              <>
-                <div className="flex w-full items-center gap-3">
-                  <div className="h-px flex-1 bg-border" />
-                  <span className="text-xs text-muted-foreground">
-                    {t("or")}
-                  </span>
-                  <div className="h-px flex-1 bg-border" />
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  disabled={ssoLoading}
-                  onClick={() => void handleSSOLogin()}
-                >
-                  {ssoLoading && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
-                  {t("signInWith", {
-                    provider: ssoStatus.oidc_provider_name || "SSO",
-                  })}
-                </Button>
-              </>
-            )}
-            {needsSetup && (
-              <p className="text-center text-sm text-muted-foreground">
-                {t("firstTime")}{" "}
-                <Link
-                  to="/register"
-                  className="font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  {t("createAdminAccount")}
-                </Link>
-              </p>
-            )}
-          </CardFooter>
-        </form>
-      </Card>
-    </div>
+          </>
+        )}
+        {needsSetup && (
+          <p className="text-sm text-muted-foreground">
+            {t("firstTime")}{" "}
+            <Link
+              to="/register"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              {t("createAdminAccount")}
+            </Link>
+          </p>
+        )}
+      </form>
+    </AuthShell>
   );
 }

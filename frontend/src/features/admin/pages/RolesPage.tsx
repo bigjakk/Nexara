@@ -7,8 +7,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
 import {
   Dialog,
   DialogContent,
@@ -18,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import {
   useRoles,
   useRole,
@@ -110,78 +111,88 @@ export function RolesPage() {
   }
 
   const dialogOpen = isCreateOpen || !!editRole;
+  const total = roles?.length ?? 0;
+  const builtin = roles?.filter((r) => r.is_builtin).length ?? 0;
 
   return (
     <div>
       <AdminNav />
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Roles</h1>
-            <p className="text-muted-foreground">
-              Manage roles and their permissions
-            </p>
-          </div>
-          <Button onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create Role
-          </Button>
-        </div>
+      <div className="space-y-5">
+        <PageHeader
+          title="Roles"
+          summary={`${String(total)} role${total !== 1 ? "s" : ""}: ${String(builtin)} built in, ${String(total - builtin)} custom. A built-in role cannot be changed.`}
+          actions={
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4" />
+              Create role
+            </Button>
+          }
+        />
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead className="w-24">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {roles?.map((role) => (
-              <TableRow key={role.id}>
-                <TableCell className="font-medium">{role.name}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {role.description}
-                </TableCell>
-                <TableCell>
-                  <Badge variant={role.is_builtin ? "default" : "outline"}>
-                    {role.is_builtin ? "Built-in" : "Custom"}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  {!role.is_builtin && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        aria-label={`Edit ${role.name}`}
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          openEdit(role);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        aria-label={`Delete ${role.name}`}
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => {
-                          if (confirm(`Delete role "${role.name}"?`)) {
-                            deleteRole.mutate(role.id);
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  )}
-                </TableCell>
+        <Panel flush>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="w-32">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {roles?.map((role) => (
+                <TableRow key={role.id}>
+                  <TableCell className="whitespace-nowrap font-medium">
+                    {role.name}
+                  </TableCell>
+                  <TableCell className="min-w-[14rem] text-muted-foreground">
+                    {role.description}
+                  </TableCell>
+                  <TableCell
+                    className={
+                      role.is_builtin
+                        ? "whitespace-nowrap text-muted-foreground"
+                        : "whitespace-nowrap"
+                    }
+                  >
+                    {role.is_builtin ? "Built-in" : "Custom"}
+                  </TableCell>
+                  <TableCell>
+                    {!role.is_builtin && (
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          aria-label={`Edit ${role.name}`}
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            openEdit(role);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          aria-label={`Delete ${role.name}`}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            if (confirm(`Delete role "${role.name}"?`)) {
+                              deleteRole.mutate(role.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Panel>
 
         <Dialog
           open={dialogOpen}
@@ -192,41 +203,50 @@ export function RolesPage() {
             }
           }}
         >
-          <DialogContent className="max-w-[90vw] w-fit max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-h-[90vh] w-fit max-w-[90vw] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
-                {editRole ? `Edit Role: ${editRole.name}` : "Create Role"}
+                {editRole ? `Edit role: ${editRole.name}` : "Create role"}
               </DialogTitle>
             </DialogHeader>
 
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="role-name">Name</Label>
-                <Input
-                  id="role-name"
-                  value={formName}
-                  onChange={(e) => {
-                    setFormName(e.target.value);
-                  }}
-                  placeholder="e.g. Network Admin"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="role-desc">Description</Label>
-                <Input
-                  id="role-desc"
-                  value={formDescription}
-                  onChange={(e) => {
-                    setFormDescription(e.target.value);
-                  }}
-                  placeholder="What this role can do"
-                />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="role-name">Name</Label>
+                  <Input
+                    id="role-name"
+                    value={formName}
+                    onChange={(e) => {
+                      setFormName(e.target.value);
+                    }}
+                    placeholder="e.g. Network Admin"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="role-desc">Description</Label>
+                  <Input
+                    id="role-desc"
+                    value={formDescription}
+                    onChange={(e) => {
+                      setFormDescription(e.target.value);
+                    }}
+                    placeholder="What this role can do"
+                  />
+                </div>
               </div>
 
               {allPermissions && (
                 <div className="space-y-2">
-                  <Label>Permissions</Label>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <Label>Permissions</Label>
+                    <span className="text-[12.5px] text-muted-foreground">
+                      {selectedPermIds.length} of {allPermissions.length}{" "}
+                      granted
+                    </span>
+                  </div>
                   <PermissionMatrix
+                    className="-mx-6"
                     permissions={allPermissions}
                     selected={selectedPermIds}
                     onChange={setSelectedPermIds}
@@ -251,7 +271,7 @@ export function RolesPage() {
                   !formName || createRole.isPending || updateRole.isPending
                 }
               >
-                {editRole ? "Save Changes" : "Create Role"}
+                {editRole ? "Save changes" : "Create role"}
               </Button>
             </DialogFooter>
           </DialogContent>

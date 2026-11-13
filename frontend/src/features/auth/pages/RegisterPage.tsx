@@ -4,19 +4,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useTranslation } from "react-i18next";
-import { Loader2, Server } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { AuthShell } from "../components/AuthShell";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
@@ -110,108 +103,95 @@ export function RegisterPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-action">
-            <Server className="h-6 w-6 text-action-foreground" />
+    <AuthShell
+      title={isFirstRun ? t("setupNexara") : t("createAccount")}
+      description={
+        isFirstRun ? t("createFirstAdminAccount") : t("registerNewAccount")
+      }
+    >
+      <form
+        onSubmit={(e) => void handleSubmit(onSubmit)(e)}
+        className="space-y-4"
+      >
+        {error && (
+          <div className="rounded-md bg-destructive/10 p-3 text-sm text-red-700 dark:text-red-400">
+            {error}
           </div>
-          <CardTitle className="text-2xl">
-            {isFirstRun ? t("setupNexara") : t("createAccount")}
-          </CardTitle>
-          <CardDescription>
-            {isFirstRun
-              ? t("createFirstAdminAccount")
-              : t("registerNewAccount")}
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={(e) => void handleSubmit(onSubmit)(e)}>
-          <CardContent className="space-y-4">
-            {error && (
-              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="display_name">{t("displayName")}</Label>
-              <Input
-                id="display_name"
-                placeholder="Admin"
-                autoComplete="name"
-                {...register("display_name")}
-              />
-              {errors.display_name && (
-                <p className="text-sm text-destructive">
-                  {errors.display_name.message}
-                </p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">{t("email")}</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="admin@example.com"
-                autoComplete="email"
-                {...register("email")}
-              />
-              {errors.email && (
-                <p className="text-sm text-destructive">
-                  {errors.email.message}
-                </p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">{t("password")}</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="new-password"
-                {...register("password")}
-              />
-              {errors.password && (
-                <p className="text-sm text-destructive">
-                  {errors.password.message}
-                </p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                {t("passwordRequirements")}
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirm_password">{t("confirmPassword")}</Label>
-              <Input
-                id="confirm_password"
-                type="password"
-                autoComplete="new-password"
-                {...register("confirm_password")}
-              />
-              {errors.confirm_password && (
-                <p className="text-sm text-destructive">
-                  {errors.confirm_password.message}
-                </p>
-              )}
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-4">
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isFirstRun ? t("createAdminAccount") : t("createAccount")}
-            </Button>
-            {!isFirstRun && (
-              <p className="text-center text-sm text-muted-foreground">
-                {t("alreadyHaveAccount")}{" "}
-                <Link
-                  to="/login"
-                  className="font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  {t("signInLink")}
-                </Link>
-              </p>
-            )}
-          </CardFooter>
-        </form>
-      </Card>
-    </div>
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="display_name">{t("displayName")}</Label>
+          <Input
+            id="display_name"
+            placeholder="Admin"
+            autoComplete="name"
+            {...register("display_name")}
+          />
+          {errors.display_name && (
+            <p className="text-sm text-destructive">
+              {errors.display_name.message}
+            </p>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="email">{t("email")}</Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="admin@example.com"
+            autoComplete="email"
+            {...register("email")}
+          />
+          {errors.email && (
+            <p className="text-sm text-destructive">{errors.email.message}</p>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">{t("password")}</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="new-password"
+            {...register("password")}
+          />
+          {errors.password && (
+            <p className="text-sm text-destructive">
+              {errors.password.message}
+            </p>
+          )}
+          <p className="text-[12.5px] text-muted-foreground">
+            {t("passwordRequirements")}
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="confirm_password">{t("confirmPassword")}</Label>
+          <Input
+            id="confirm_password"
+            type="password"
+            autoComplete="new-password"
+            {...register("confirm_password")}
+          />
+          {errors.confirm_password && (
+            <p className="text-sm text-destructive">
+              {errors.confirm_password.message}
+            </p>
+          )}
+        </div>
+        <Button type="submit" className="w-full" disabled={isLoading}>
+          {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {isFirstRun ? t("createAdminAccount") : t("createAccount")}
+        </Button>
+        {!isFirstRun && (
+          <p className="text-sm text-muted-foreground">
+            {t("alreadyHaveAccount")}{" "}
+            <Link
+              to="/login"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              {t("signInLink")}
+            </Link>
+          </p>
+        )}
+      </form>
+    </AuthShell>
   );
 }

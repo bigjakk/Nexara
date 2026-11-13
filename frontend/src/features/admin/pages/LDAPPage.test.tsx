@@ -83,8 +83,8 @@ function renderPage() {
 }
 
 /** The heading of the form that is open. */
-const EDIT_FORM = { name: "Edit LDAP Configuration" };
-const NEW_FORM = { name: "New LDAP Configuration" };
+const EDIT_FORM = { name: "Edit LDAP configuration" };
+const NEW_FORM = { name: "New LDAP configuration" };
 
 /** Opens the form of the config in the list's `position`th row. */
 async function openEdit(user: UserEvent, position = 0): Promise<void> {
@@ -111,7 +111,9 @@ async function pressSave(user: UserEvent, label: string): Promise<void> {
 
 /** Opens the form for a new config and presses Create. */
 async function createConfig(user: UserEvent): Promise<void> {
-  await user.click(await screen.findByRole("button", { name: "Add Config" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Add configuration" }),
+  );
   await screen.findByRole("heading", NEW_FORM);
   await pressSave(user, "Create");
 }
@@ -364,7 +366,9 @@ describe("an LDAP configuration save that settles", () => {
 
     await createConfig(user);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await user.click(await screen.findByRole("button", { name: "Add Config" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Add configuration" }),
+    );
     await screen.findByRole("heading", NEW_FORM);
     held.resolve(ldapConfig("ldap-03", "created"));
     await waitForSuccess(qc);

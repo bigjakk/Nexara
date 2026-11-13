@@ -71,9 +71,9 @@ async function createKey(user: User, from: string) {
   await user.click(await screen.findByRole("button", { name: from }));
   const form = await screen.findByRole("dialog");
   await user.type(within(form).getByLabelText("Name"), "deploy02");
-  await user.click(within(form).getByRole("button", { name: "Create Key" }));
+  await user.click(within(form).getByRole("button", { name: "Create key" }));
   const created = await screen.findByRole("dialog", {
-    name: "API Key Created",
+    name: "API key created",
   });
   await user.click(within(created).getByRole("button", { name: "Done" }));
 }
@@ -87,7 +87,7 @@ describe("APIKeysPage — focus after its dialogs", () => {
     const confirm = await screen.findByRole("alertdialog");
 
     await user.click(
-      within(confirm).getByRole("button", { name: "Revoke Key" }),
+      within(confirm).getByRole("button", { name: "Revoke key" }),
     );
 
     await waitFor(() => {
@@ -104,16 +104,16 @@ describe("APIKeysPage — focus after its dialogs", () => {
 
   // The key is shown in a dialog of its own, opened as the form closes: its
   // Done goes back to what opened the form.
-  it("returns focus to Create API Key from the key the form created", async () => {
+  it("returns focus to Create API key from the key the form created", async () => {
     stubKeys([apiKey("key1", "deploy01")]);
     const user = userEvent.setup();
     renderWithProviders(<APIKeysPage />);
 
-    await createKey(user, "Create API Key");
+    await createKey(user, "Create API key");
 
     await waitFor(() => {
       expect(document.activeElement).toBe(
-        screen.getByRole("button", { name: "Create API Key" }),
+        screen.getByRole("button", { name: "Create API key" }),
       );
     });
   });

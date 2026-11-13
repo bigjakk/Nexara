@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ShieldOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/page/Panel";
 import { usePermissions } from "@/hooks/usePermissions";
 
 interface RequirePermissionProps {
@@ -37,23 +37,23 @@ function ForbiddenPage({
   resource: string;
 }) {
   return (
-    <div className="flex h-full flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-      <ShieldOff className="h-12 w-12 text-muted-foreground" />
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold">Access denied</h1>
-        <p className="max-w-md text-sm text-muted-foreground">
-          You don&apos;t have permission to view this page. Required permission:{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+    <div className="flex h-full flex-1 items-center justify-center py-10">
+      <Panel className="w-full max-w-md" bodyClassName="px-6 pb-6 pt-6">
+        <h1 className="text-xl font-semibold leading-snug">Access denied</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          You don&apos;t have permission to view this page. Ask an administrator
+          to grant this permission to your role.
+        </p>
+        <div className="mt-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t pt-3 text-sm">
+          <span className="text-muted-foreground">Required permission</span>
+          <code className="font-mono text-[13px]">
             {action}:{resource}
           </code>
-        </p>
-        <p className="max-w-md text-sm text-muted-foreground">
-          Ask an administrator to grant this permission to your role.
-        </p>
-      </div>
-      <Button asChild>
-        <Link to="/">Back to dashboard</Link>
-      </Button>
+        </div>
+        <Button asChild className="mt-5">
+          <Link to="/">Back to dashboard</Link>
+        </Button>
+      </Panel>
     </div>
   );
 }
