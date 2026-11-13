@@ -103,7 +103,7 @@
   "branding": "Branding",
   "customizeBranding": "Customize the appearance and branding of your Nexara instance.",
   "applicationTitle": "Application Title",
-  "setTitleSidebar": "Set the title shown in the sidebar and browser tab.",
+  "setTitleSidebar": "Set the title shown in the top bar and browser tab.",
   "logo": "Logo",
   "uploadCustomLogo": "Upload a custom logo (PNG, JPG, SVG, or WebP, max 2 MiB).",
   "uploadLogo": "Upload Logo",

@@ -219,7 +219,7 @@ export function BackupPanel({
                     </TableCell>
                     <TableCell>
                       {snap.verified ? (
-                        <Badge variant="default" className="bg-emerald-600">
+                        <Badge variant="solid" className="bg-emerald-600">
                           Yes
                         </Badge>
                       ) : (
@@ -228,7 +228,7 @@ export function BackupPanel({
                     </TableCell>
                     <TableCell>
                       {snap.protected ? (
-                        <Badge variant="default" className="bg-blue-600">
+                        <Badge variant="solid" className="bg-blue-600">
                           Yes
                         </Badge>
                       ) : (

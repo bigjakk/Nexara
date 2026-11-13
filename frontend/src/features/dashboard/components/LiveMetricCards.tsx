@@ -52,7 +52,6 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
       value: metrics ? formatPercent(metrics.cpuPercent) : null,
       sub: null,
       spark: measured(history, (p) => p.cpuPercent),
-      sparkClass: "text-sky-400",
     },
     {
       key: "memory",
@@ -67,7 +66,6 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
             })
           : null,
       spark: measured(history, (p) => p.memPercent),
-      sparkClass: "text-violet-400",
     },
     {
       key: "disk",
@@ -78,7 +76,6 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
         : null,
       sub: null,
       spark: measured(history, (p) => sum(p.diskReadBps, p.diskWriteBps)),
-      sparkClass: "text-amber-500",
     },
     {
       key: "network",
@@ -89,7 +86,6 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
         : null,
       sub: null,
       spark: measured(history, (p) => sum(p.netInBps, p.netOutBps)),
-      sparkClass: "text-emerald-500",
     },
   ] as const;
 
@@ -119,7 +115,7 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
                   <div className="mt-auto pt-2">
                     <Sparkline
                       points={card.spark}
-                      className={`h-7 w-full ${card.sparkClass}`}
+                      className="h-7 w-full text-primary"
                     />
                   </div>
                 </>

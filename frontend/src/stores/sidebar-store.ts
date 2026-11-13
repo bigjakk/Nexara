@@ -3,7 +3,7 @@ import { create } from "zustand";
 export type TreePerspective = "hosts" | "storage" | "vms";
 
 interface SidebarState {
-  collapsed: boolean;
+  /** Whether the inventory tree is shown beside the navigation rail. */
   treeVisible: boolean;
   expandedNodes: Set<string>;
   width: number;
@@ -21,7 +21,6 @@ interface SidebarState {
 }
 
 interface SidebarActions {
-  toggleCollapsed: () => void;
   setTreeVisible: (visible: boolean) => void;
   toggleNode: (key: string) => void;
   expandNode: (key: string) => void;
@@ -32,6 +31,11 @@ interface SidebarActions {
 
 const STORAGE_KEY = "nexara-sidebar";
 
+/** The tree panel's width, held to what stays usable on either side of it. */
+export function clampTreeWidth(width: number): number {
+  return Math.min(480, Math.max(180, width));
+}
+
 function loadPersistedState(): SidebarState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -41,10 +45,14 @@ function loadPersistedState(): SidebarState {
         const obj = parsed as Record<string, unknown>;
         const persp = obj["perspective"];
         return {
-          collapsed:
-            typeof obj["collapsed"] === "boolean" ? obj["collapsed"] : false,
+          // `collapsed` is the old sidebar's flag. It asked for the least
+          // chrome, which is now a hidden tree; it is never written again.
           treeVisible:
-            typeof obj["treeVisible"] === "boolean" ? obj["treeVisible"] : true,
+            obj["collapsed"] === true
+              ? false
+              : typeof obj["treeVisible"] === "boolean"
+                ? obj["treeVisible"]
+                : true,
           expandedNodes: Array.isArray(obj["expandedNodes"])
             ? new Set(obj["expandedNodes"] as string[])
             : new Set<string>(),
@@ -59,7 +67,6 @@ function loadPersistedState(): SidebarState {
     // ignore
   }
   return {
-    collapsed: false,
     treeVisible: true,
     expandedNodes: new Set<string>(),
     width: 240,
@@ -73,7 +80,6 @@ function persist(state: SidebarState) {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        collapsed: state.collapsed,
         treeVisible: state.treeVisible,
         expandedNodes: [...state.expandedNodes],
         width: state.width,
@@ -89,12 +95,6 @@ function persist(state: SidebarState) {
 export const useSidebarStore = create<SidebarState & SidebarActions>()(
   (set, get) => ({
     ...loadPersistedState(),
-    toggleCollapsed: () => {
-      const next = !get().collapsed;
-      const state = { ...get(), collapsed: next };
-      set({ collapsed: next });
-      persist(state);
-    },
     setTreeVisible: (visible: boolean) => {
       const state = { ...get(), treeVisible: visible };
       set({ treeVisible: visible });
@@ -121,7 +121,7 @@ export const useSidebarStore = create<SidebarState & SidebarActions>()(
       }
     },
     setWidth: (width: number) => {
-      const clamped = Math.min(480, Math.max(180, width));
+      const clamped = clampTreeWidth(width);
       const state = { ...get(), width: clamped };
       set({ width: clamped });
       persist(state);

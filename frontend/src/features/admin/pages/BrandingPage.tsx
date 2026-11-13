@@ -114,7 +114,7 @@ export function BrandingPage() {
               Application Title
             </CardTitle>
             <CardDescription>
-              Set the title shown in the sidebar and browser tab.
+              Set the title shown in the top bar and browser tab.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

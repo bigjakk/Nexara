@@ -231,7 +231,10 @@ export function ProfilePage() {
             <Label>Two-Factor Authentication</Label>
             <div>
               {profile.totp_enabled ? (
-                <Badge className="bg-emerald-600 hover:bg-emerald-700">
+                <Badge
+                  variant="solid"
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                >
                   Enabled
                 </Badge>
               ) : (

@@ -6,6 +6,7 @@ import {
   deriveActor,
   filterActivity,
   pinRunningFirst,
+  summarizeActivity,
   userLabel,
   type LiveTaskStatus,
 } from "./activity-columns";
@@ -364,5 +365,63 @@ describe("activity sort accessors", () => {
         decorateActivity(entry({ created_at: "2026-09-01T10:00:00Z" }), noLive),
       ),
     ).toBe(Date.parse("2026-09-01T10:00:00Z"));
+  });
+});
+
+describe("summarizeActivity", () => {
+  const task = (id: string, createdAt: string, taskStatus: string) =>
+    entry({
+      id,
+      created_at: createdAt,
+      task_status: taskStatus,
+      details: JSON.stringify({ upid: `UPID:${id}` }),
+    });
+  const confirmed = (id: string): Record<string, LiveTaskStatus> => ({
+    [`UPID:${id}`]: { status: "running", exitStatus: "" },
+  });
+
+  it.each([
+    {
+      name: "an empty feed has nothing to say",
+      entries: [],
+      live: noLive,
+      want: { runningCount: 0, featured: undefined, latest: undefined },
+    },
+    {
+      name: "with nothing running it falls back to the newest entry",
+      entries: [
+        task("old", "2026-09-01T10:00:00Z", "completed"),
+        task("new", "2026-09-01T12:00:00Z", "completed"),
+      ],
+      live: noLive,
+      want: { runningCount: 0, featured: undefined, latest: "new" },
+    },
+    {
+      name: "a running task Proxmox has not confirmed is still named",
+      entries: [
+        task("done", "2026-09-01T12:00:00Z", "completed"),
+        task("run", "2026-09-01T10:00:00Z", "running"),
+      ],
+      live: noLive,
+      want: { runningCount: 1, featured: "run", latest: "done" },
+    },
+    {
+      name: "a confirmed task is named over a newer unconfirmed one",
+      entries: [
+        task("stranded", "2026-09-01T12:00:00Z", "running"),
+        task("live", "2026-09-01T10:00:00Z", "running"),
+      ],
+      live: confirmed("live"),
+      want: { runningCount: 2, featured: "live", latest: "stranded" },
+    },
+  ])("$name", ({ entries, live, want }) => {
+    const summary = summarizeActivity(
+      entries.map((e) => decorateActivity(e, live)),
+    );
+    expect({
+      runningCount: summary.runningCount,
+      featured: summary.featured?.entry.id,
+      latest: summary.latest?.entry.id,
+    }).toEqual(want);
   });
 });

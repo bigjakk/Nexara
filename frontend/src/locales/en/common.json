@@ -64,6 +64,7 @@
   "toggleTheme": "Toggle theme",
   "activity": "Activity",
   "noActivity": "No activity",
+  "activityLast": "Last: {{label}}, {{when}}",
   "noMatchingActivity": "No recent activity matches this filter",
   "filterActivity": "Filter activity",
   "activityErrors": "Errors",

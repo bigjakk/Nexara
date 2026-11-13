@@ -6,15 +6,14 @@ import { StatusIcon } from "@/components/StatusIcon";
 // also reports transient QEMU states (prelaunch, postmigrate, shutdown,
 // migrate, io-error, ...) that arrive as arbitrary strings.
 const statusConfig: Record<string, { label: string; className: string }> = {
+  // Healthy states stay quiet: the dot carries the green, the chip does not.
   running: {
     label: "Running",
-    className:
-      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+    className: "border-border bg-transparent text-foreground",
   },
   online: {
     label: "Online",
-    className:
-      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+    className: "border-border bg-transparent text-foreground",
   },
   stopped: {
     label: "Stopped",

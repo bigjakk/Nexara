@@ -151,7 +151,7 @@ export function VeeamProtectionCard({
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="text-sm">Veeam protection</CardTitle>
           {data.protected ? (
-            <Badge variant="default" className="gap-1 bg-emerald-600">
+            <Badge variant="solid" className="gap-1 bg-emerald-600">
               <ShieldCheck className="h-3 w-3" />
               Protected
             </Badge>

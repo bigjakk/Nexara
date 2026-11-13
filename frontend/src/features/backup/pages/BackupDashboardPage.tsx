@@ -117,7 +117,7 @@ export function BackupDashboardPage() {
       return <Badge variant="secondary">Status unavailable</Badge>;
     }
     return (
-      <Badge variant="default" className="bg-emerald-600">
+      <Badge variant="solid" className="bg-emerald-600">
         Connected
       </Badge>
     );
@@ -374,7 +374,7 @@ export function BackupDashboardPage() {
                             }}
                             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                               activeClusterId === cluster.id
-                                ? "bg-primary text-primary-foreground"
+                                ? "bg-action text-action-foreground"
                                 : "bg-muted text-muted-foreground hover:bg-accent"
                             }`}
                           >

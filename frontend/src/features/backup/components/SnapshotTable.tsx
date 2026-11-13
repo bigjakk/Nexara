@@ -208,7 +208,7 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                     </TableCell>
                     <TableCell>
                       {snap.verified ? (
-                        <Badge variant="default" className="bg-emerald-600">
+                        <Badge variant="solid" className="bg-emerald-600">
                           Yes
                         </Badge>
                       ) : (
@@ -217,7 +217,7 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                     </TableCell>
                     <TableCell>
                       {isProtected(snap) ? (
-                        <Badge variant="default" className="bg-blue-600">
+                        <Badge variant="solid" className="bg-blue-600">
                           <ShieldCheck className="mr-1 h-3 w-3" />
                           Protected
                         </Badge>

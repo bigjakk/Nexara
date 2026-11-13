@@ -83,7 +83,7 @@ function FavoriteRow({
       {fav.resource_type === "cluster" && (
         <>
           <StatusIcon status={clusterStatus} />
-          <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
+          <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate font-medium">{fav.name}</span>
         </>
       )}
@@ -116,10 +116,7 @@ function FavoriteRow({
             <OSIcon ostype={fav.ostype} configOstype={fav.config_ostype} />
           )}
           <span
-            className={cn(
-              "truncate",
-              fav.template && "text-amber-700 dark:text-amber-400",
-            )}
+            className={cn("truncate", fav.template && "text-muted-foreground")}
           >
             {fav.vmid} {fav.name}
           </span>

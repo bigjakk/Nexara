@@ -718,7 +718,7 @@ export function CreateVMDialog({
               }}
               className={`px-2 py-1 text-xs rounded-md transition-colors ${
                 s === step
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-action text-action-foreground"
                   : i < stepIdx
                     ? "bg-muted text-foreground hover:bg-muted/80"
                     : "text-muted-foreground hover:bg-muted/50"

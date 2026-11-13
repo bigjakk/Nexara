@@ -137,7 +137,7 @@ export function StoragePage() {
               }}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 activeClusterId === cluster.id
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-action text-action-foreground"
                   : "bg-muted text-muted-foreground hover:bg-accent"
               }`}
             >

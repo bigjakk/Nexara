@@ -95,7 +95,7 @@ export function UsersPage() {
                 <TableCell>
                   {user.totp_enabled ? (
                     <Badge
-                      variant="default"
+                      variant="solid"
                       className="bg-emerald-600 hover:bg-emerald-700"
                     >
                       <ShieldCheck className="mr-1 h-3 w-3" />

@@ -206,7 +206,7 @@ export function CVENotifyCard({ clusterId }: { clusterId: string }) {
         <button
           onClick={onSave}
           disabled={!canSave}
-          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md bg-action px-3 py-1.5 text-sm font-medium text-action-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Save
         </button>

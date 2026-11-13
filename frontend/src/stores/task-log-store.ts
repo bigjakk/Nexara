@@ -44,7 +44,8 @@ function loadPersistedState(): Pick<TaskLogState, "panelOpen" | "panelHeight"> {
   } catch {
     // ignore
   }
-  return { panelOpen: true, panelHeight: 200 };
+  // Collapsed until asked for: the strip already says what is running.
+  return { panelOpen: false, panelHeight: 200 };
 }
 
 function persist(state: Pick<TaskLogState, "panelOpen" | "panelHeight">) {

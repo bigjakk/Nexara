@@ -91,10 +91,7 @@ function VMLeaf({ vm, clusterId }: VMLeafProps) {
           <OSIcon ostype={vm.ostype} configOstype={vm.config_ostype} />
         )}
         <span
-          className={cn(
-            "truncate",
-            vm.template && "text-amber-700 dark:text-amber-400",
-          )}
+          className={cn("truncate", vm.template && "text-muted-foreground")}
         >
           {vm.vmid} {vm.name}
         </span>
@@ -477,7 +474,7 @@ function VMClusterBranch({
                   cluster.status === "degraded" ? "degraded" : cluster.status
                 }
               />
-              <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate font-medium">{cluster.name}</span>
             </button>
           </div>

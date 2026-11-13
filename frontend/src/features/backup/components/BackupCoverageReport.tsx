@@ -104,14 +104,14 @@ function CoverageBadge({
   switch (status) {
     case "recent":
       return (
-        <Badge variant="default" className="gap-1 bg-emerald-600">
+        <Badge variant="solid" className="gap-1 bg-emerald-600">
           <ShieldCheck className="h-3 w-3" />
           Protected
         </Badge>
       );
     case "stale":
       return (
-        <Badge variant="default" className="gap-1 bg-amber-600">
+        <Badge variant="solid" className="gap-1 bg-amber-700">
           <ShieldAlert className="h-3 w-3" />
           Stale
         </Badge>
@@ -334,9 +334,7 @@ export function BackupCoverageReport() {
                 <TableCell className="text-sm">{entry.cluster_name}</TableCell>
                 <TableCell>
                   <Badge
-                    variant={
-                      entry.status === "running" ? "default" : "secondary"
-                    }
+                    variant={entry.status === "running" ? "solid" : "secondary"}
                     className={
                       entry.status === "running" ? "bg-emerald-600" : ""
                     }

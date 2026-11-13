@@ -1730,7 +1730,9 @@ export function ContainerResourcesPanel({
             .map(([key, nic]) => (
               <div key={key} className="relative">
                 <div className="absolute -left-1 -top-1 z-10">
-                  <Badge className="bg-emerald-600 text-[10px]">new</Badge>
+                  <Badge variant="solid" className="bg-emerald-600 text-[10px]">
+                    new
+                  </Badge>
                 </div>
                 <NICRow
                   deviceKey={key}

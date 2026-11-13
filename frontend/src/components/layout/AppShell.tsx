@@ -9,6 +9,7 @@ import {
   LogOut,
   LogOutIcon,
   Menu,
+  PanelLeftOpen,
   ShieldCheck,
   Sparkles,
   User,
@@ -25,7 +26,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -33,6 +33,7 @@ import { useLiveUpdates } from "@/hooks/useLiveUpdates";
 import { useLoadBranding } from "@/hooks/useLoadBranding";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useBrandingStore } from "@/stores/branding-store";
+import { useSidebarStore } from "@/stores/sidebar-store";
 import { useChangelogStore } from "@/stores/changelog-store";
 import {
   extractBaseVersion,
@@ -41,7 +42,9 @@ import {
 } from "@/lib/changelog";
 import { MAIN_CONTENT_ID } from "@/lib/constants";
 import { useChangelog } from "@/features/changelog/api/changelog-queries";
-import { Sidebar } from "./Sidebar";
+import { MobileNav } from "./MobileNav";
+import { NavRail } from "./NavRail";
+import { TreePanel } from "./TreePanel";
 import { TaskLogPanel } from "./TaskLogPanel";
 import { TaskProgressDialog } from "./TaskProgressDialog";
 import { HistoryDrawerHost } from "@/features/history/components/HistoryDrawer";
@@ -68,6 +71,47 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
+/**
+ * A storage page is only reachable from the Storage tree, so the tree shows
+ * that grouping whenever one is open. Cluster and inventory pages are
+ * reachable from every grouping and leave the choice alone.
+ */
+function useStorageTreeOnStorageRoutes() {
+  const { pathname } = useLocation();
+  const setPerspective = useSidebarStore((s) => s.setPerspective);
+  useEffect(() => {
+    if (pathname.startsWith("/storage/")) setPerspective("storage");
+  }, [pathname, setPerspective]);
+}
+
+// The two below read the tree's visibility with a selector of their own, so
+// the shell and the routed page do not re-render with every tree change.
+
+function DesktopTree() {
+  const treeVisible = useSidebarStore((s) => s.treeVisible);
+  return treeVisible ? <TreePanel /> : null;
+}
+
+/** Brings the tree back; the panel's own header holds the button that hides it. */
+function ShowTreeButton() {
+  const treeVisible = useSidebarStore((s) => s.treeVisible);
+  const setTreeVisible = useSidebarStore((s) => s.setTreeVisible);
+  if (treeVisible) return null;
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8 shrink-0"
+      aria-label="Show inventory tree"
+      onClick={() => {
+        setTreeVisible(true);
+      }}
+    >
+      <PanelLeftOpen />
+    </Button>
+  );
+}
+
 export function AppShell() {
   const { t } = useTranslation("navigation");
   const navigate = useNavigate();
@@ -75,7 +119,9 @@ export function AppShell() {
   const { user, logout, logoutAll } = useAuth();
   const { data: clusters } = useClusters();
   const brandingQuery = useLoadBranding();
+  const appTitle = useBrandingStore((s) => s.appTitle);
   useUpsPowerToasts();
+  useStorageTreeOnStorageRoutes();
 
   // For dev builds, append "-Dev" to the browser tab title
   const { data: versionInfo } = useQuery({
@@ -174,31 +220,48 @@ export function AppShell() {
         <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
           <SheetContent side="left" className="w-72 p-0">
             <SheetTitle className="sr-only">Navigation</SheetTitle>
-            <Sidebar drawer />
+            <MobileNav />
           </SheetContent>
         </Sheet>
       ) : (
-        <Sidebar />
+        <>
+          <NavRail />
+          <DesktopTree />
+        </>
       )}
-      <div className="app-canvas flex flex-1 flex-col overflow-hidden transition-all duration-200">
-        <header className="flex h-14 items-center gap-2 border-b bg-card/70 px-3 backdrop-blur-md md:px-4">
-          {isMobile && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="shrink-0"
-              aria-label="Open navigation"
-              onClick={() => {
-                setMobileNavOpen(true);
-              }}
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-          )}
-          <div className="flex min-w-0 flex-1 items-center justify-center">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* 56px tall: the topology and report pages size themselves against
+              it. Search is centred on the bar, not on the space left over. */}
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 md:px-4">
+          <div className="flex min-w-0 items-center gap-2 md:flex-1">
+            {isMobile ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                aria-label="Open navigation"
+                onClick={() => {
+                  setMobileNavOpen(true);
+                }}
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            ) : (
+              <ShowTreeButton />
+            )}
+            <span className="hidden truncate text-base font-semibold tracking-tight [font-stretch:112%] md:inline">
+              {appTitle}
+            </span>
+            {versionInfo?.version && (
+              <span className="hidden shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground md:inline">
+                {versionInfo.version}
+              </span>
+            )}
+          </div>
+          <div className="flex min-w-0 flex-1 justify-center md:flex-[0_1_28rem]">
             <SearchBar />
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center justify-end gap-2 md:flex-1">
             <GlobalHealthIndicator />
             <CreateResourceMenu />
             <ThemeToggle />
@@ -271,7 +334,6 @@ export function AppShell() {
             </DropdownMenu>
           </div>
         </header>
-        <Separator />
         <main
           id={MAIN_CONTENT_ID}
           tabIndex={-1}

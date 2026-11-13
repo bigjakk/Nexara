@@ -12,10 +12,11 @@ import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { TaskLogSection } from "@/components/TaskLogSection";
+import { TaskProgressCell } from "@/components/TaskProgressCell";
 import { Button } from "@/components/ui/button";
 import { useDataTable } from "@/hooks/useDataTable";
 import type { ColumnLayout } from "@/hooks/useColumnLayout";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_ACTIVITY_SORT,
@@ -25,9 +26,11 @@ import {
   filterActivity,
   isErrorActivity,
   pinRunningFirst,
+  summarizeActivity,
   type ActivityFilter,
   type ActivityRowData,
   type ActivitySortKey,
+  type ActivitySummary,
   type LiveTaskStatus,
 } from "./activity-columns";
 import {
@@ -264,6 +267,35 @@ function ActivityFilterControl({
   );
 }
 
+/**
+ * The collapsed panel's one line: the task running now with its progress, or
+ * failing that the last thing that happened. Left of the filter on purpose —
+ * a minimised console sits over the bar's right end.
+ */
+function ActivitySummaryLine({ summary }: { summary: ActivitySummary }) {
+  const { t } = useTranslation("common");
+  const { featured, latest } = summary;
+  if (featured) {
+    return (
+      <span className="hidden min-w-0 items-center gap-2 sm:flex">
+        <span className="truncate">{activityLabel(featured)}</span>
+        <span className="shrink-0">
+          <TaskProgressCell display="running" value={featured.progress} />
+        </span>
+      </span>
+    );
+  }
+  if (!latest) return null;
+  return (
+    <span className="hidden min-w-0 truncate text-muted-foreground sm:inline">
+      {t("activityLast", {
+        label: activityLabel(latest),
+        when: formatRelativeTime(latest.entry.created_at),
+      })}
+    </span>
+  );
+}
+
 export function TaskLogPanel() {
   const { t } = useTranslation("common");
   const panelOpen = useTaskLogStore((s) => s.panelOpen);
@@ -334,7 +366,10 @@ export function TaskLogPanel() {
 
   // Counted off the decorated rows, so each count says what its rows show, and
   // the error one is exactly what its filter selects.
-  const runningCount = rows.filter((r) => r.status === "running").length;
+  // Off the unfiltered rows: the strip answers "what is happening", whatever
+  // filter the open list was left on.
+  const summary = useMemo(() => summarizeActivity(rows), [rows]);
+  const runningCount = summary.runningCount;
   const errorCount = entries ? rows.filter(isErrorActivity).length : null;
 
   const filteredRows = useMemo(
@@ -436,6 +471,8 @@ export function TaskLogPanel() {
             {runningCount} {t("running").toLowerCase()}
           </span>
         )}
+        {/* Only while collapsed: the open list already shows these rows. */}
+        {!panelOpen && <ActivitySummaryLine summary={summary} />}
         {/* Always there: hidden at zero, it read as a feature gone missing. */}
         <ActivityFilterControl
           filter={filter}

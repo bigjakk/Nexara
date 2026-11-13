@@ -155,7 +155,7 @@ export function UpsCharts({
         right={(v) => formatRuntime(v)}
         series={[
           { key: "charge", label: "Charge", color: "hsl(var(--primary))" },
-          { key: "runtime", label: "Runtime", color: "#3b82f6", axis: "right" },
+          { key: "runtime", label: "Runtime", color: "#a855f7", axis: "right" },
         ]}
       />
       <UpsChart

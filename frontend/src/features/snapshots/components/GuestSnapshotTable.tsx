@@ -44,7 +44,7 @@ function AgeBadge({ days }: { days: number | null }) {
       return <Badge variant="destructive">{label}</Badge>;
     case "week":
       return (
-        <Badge variant="default" className="bg-amber-600">
+        <Badge variant="solid" className="bg-amber-700">
           {label}
         </Badge>
       );

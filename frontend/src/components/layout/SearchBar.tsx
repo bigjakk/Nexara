@@ -703,7 +703,7 @@ export function SearchBar() {
         onClick={() => {
           setOpen(true);
         }}
-        className="flex h-9 w-full max-w-64 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+        className="flex h-9 w-full max-w-64 items-center gap-2 rounded-md border border-input bg-card px-3 md:max-w-md text-sm text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
       >
         <Search className="h-4 w-4" />
         <span className="flex-1 text-left">Search or jump to…</span>

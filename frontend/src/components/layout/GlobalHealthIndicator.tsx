@@ -126,10 +126,18 @@ export function GlobalHealthIndicator() {
   return (
     <Popover>
       <PopoverTrigger asChild>
+        {/* Unlit while healthy; with something open it is the one coloured
+            thing in the bar and says how many. */}
         <Button
           variant="ghost"
-          size="icon"
-          className="relative shrink-0"
+          size={hasVisible ? "sm" : "icon"}
+          className={cn(
+            "shrink-0",
+            hasVisible &&
+              (overall === "err"
+                ? "gap-1.5 bg-red-500/15 px-2.5 font-semibold text-red-700 hover:bg-red-500/25 hover:text-red-700 dark:text-red-400 dark:hover:text-red-400"
+                : "gap-1.5 bg-amber-500/15 px-2.5 font-semibold text-amber-700 hover:bg-amber-500/25 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-400"),
+          )}
           aria-label={
             hasVisible
               ? `Infrastructure health: ${String(visible.length)} issue(s)`
@@ -138,18 +146,17 @@ export function GlobalHealthIndicator() {
         >
           <Icon
             className={cn(
-              "h-5 w-5",
-              hasVisible ? severityTextClass[overall] : "text-muted-foreground",
+              hasVisible ? "h-4 w-4" : "h-5 w-5 text-muted-foreground",
               overall === "err" && "animate-pulse",
             )}
           />
           {hasVisible && (
-            <span
-              className={cn(
-                "absolute right-1 top-1 h-2 w-2 rounded-full ring-2 ring-card",
-                severityDotClass[overall],
-              )}
-            />
+            <>
+              {visible.length}
+              <span className="hidden lg:inline">
+                {visible.length === 1 ? "needs" : "need"} attention
+              </span>
+            </>
           )}
         </Button>
       </PopoverTrigger>

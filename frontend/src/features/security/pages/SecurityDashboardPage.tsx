@@ -158,7 +158,7 @@ export function SecurityDashboardPage() {
               }}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 activeClusterId === cluster.id
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-action text-action-foreground"
                   : "bg-muted text-muted-foreground hover:bg-accent"
               }`}
             >
@@ -186,7 +186,7 @@ export function SecurityDashboardPage() {
                 triggerScan.mutate(activeClusterId);
               }}
               disabled={triggerScan.isPending}
-              className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-md bg-action px-4 py-2 text-sm font-medium text-action-foreground hover:bg-action/90 disabled:opacity-50"
             >
               {triggerScan.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

@@ -2433,7 +2433,7 @@ function SyslogTab({
             {SYSLOG_TIMESPANS.map((ts) => (
               <button
                 key={ts.hours}
-                className={`px-3 py-1 text-xs transition-colors ${timespanHours === ts.hours ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                className={`px-3 py-1 text-xs transition-colors ${timespanHours === ts.hours ? "bg-action text-action-foreground" : "hover:bg-muted"}`}
                 onClick={() => {
                   handleTimespanChange(ts.hours);
                 }}

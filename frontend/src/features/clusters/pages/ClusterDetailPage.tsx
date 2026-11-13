@@ -15,6 +15,7 @@ import {
 import { ArrowLeft, Terminal, Layers } from "lucide-react";
 import { DetailChip } from "@/components/DetailChip";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
+import { StatusBadge } from "@/features/inventory/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { openConsole } from "@/features/console/lib/open-console";
 import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
@@ -246,15 +247,13 @@ export function ClusterDetailPage() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1.5">
-                                <Badge
-                                  variant={
-                                    node.status === "online"
-                                      ? "default"
-                                      : "destructive"
-                                  }
-                                >
-                                  {node.status}
-                                </Badge>
+                                {node.status === "online" ? (
+                                  <StatusBadge status="online" />
+                                ) : (
+                                  <Badge variant="destructive">
+                                    {node.status}
+                                  </Badge>
+                                )}
                                 {node.ha_state === "maintenance" && (
                                   <Badge
                                     variant="outline"

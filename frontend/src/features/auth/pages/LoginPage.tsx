@@ -191,8 +191,8 @@ export function LoginPage() {
       <div className="flex min-h-screen items-center justify-center px-4">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary">
-              <ShieldCheck className="h-6 w-6 text-primary-foreground" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-action">
+              <ShieldCheck className="h-6 w-6 text-action-foreground" />
             </div>
             <CardTitle className="text-2xl">
               {t("twoFactorAuthentication")}
@@ -292,8 +292,8 @@ export function LoginPage() {
       <InsecureConnectionBanner />
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary">
-            <Server className="h-6 w-6 text-primary-foreground" />
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-action">
+            <Server className="h-6 w-6 text-action-foreground" />
           </div>
           <CardTitle className="text-2xl">{t("welcomeToNexara")}</CardTitle>
           <CardDescription>{t("signInToManage")}</CardDescription>

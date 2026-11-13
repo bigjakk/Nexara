@@ -42,6 +42,10 @@ import type { TimeRange } from "@/types/api";
 import type { AggregatedMetrics, MetricSeriesPoint } from "@/types/ws";
 import { LIVE_WINDOW_MS, spliceLive } from "@/lib/metric-series";
 
+// Every measured series draws in the data colour: amber and green are states,
+// so a chart wearing them would read as a warning or as "running".
+const DATA_COLOR = "hsl(var(--primary))";
+
 function ConnectionDot({
   status,
   t,
@@ -514,22 +518,22 @@ function ClusterChart({
     cpu: {
       titleKey: "cpuUsage",
       dataKey: "cpuPercent" as const,
-      color: "#38bdf8",
+      color: DATA_COLOR,
     },
     memory: {
       titleKey: "memoryUsage",
       dataKey: "memPercent" as const,
-      color: "#a78bfa",
+      color: DATA_COLOR,
     },
     disk: {
       titleKey: "diskIoRead",
       dataKey: "diskReadBps" as const,
-      color: "#f59e0b",
+      color: DATA_COLOR,
     },
     network: {
       titleKey: "networkIn",
       dataKey: "netInBps" as const,
-      color: "#10b981",
+      color: DATA_COLOR,
     },
   };
 

@@ -16,9 +16,7 @@ export function VMIcon({
   template?: boolean;
 }) {
   if (template) {
-    return (
-      <FileBox className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-    );
+    return <FileBox className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
   }
   if (type === "lxc") {
     return <Container className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;

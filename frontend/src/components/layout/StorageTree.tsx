@@ -214,7 +214,7 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
               }}
               className="flex min-w-0 flex-1 items-center gap-1.5"
             >
-              <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate font-medium">{cluster.name}</span>
             </button>
           </div>

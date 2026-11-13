@@ -263,6 +263,42 @@ export function activityLabel(row: ActivityRowData): string {
     : row.actionLabel;
 }
 
+/** What the collapsed Activity strip says in one line. */
+export interface ActivitySummary {
+  runningCount: number;
+  /**
+   * The running task to name. One Proxmox has just confirmed comes first: a
+   * task stranded on a node that went down also reads "running", and is the
+   * worse answer to "what is happening now".
+   */
+  featured: ActivityRowData | null;
+  /** The newest entry of any kind; null on an empty feed. */
+  latest: ActivityRowData | null;
+}
+
+function newest(rows: ActivityRowData[]): ActivityRowData | null {
+  let best: ActivityRowData | null = null;
+  for (const row of rows) {
+    if (
+      best === null ||
+      Date.parse(row.entry.created_at) > Date.parse(best.entry.created_at)
+    ) {
+      best = row;
+    }
+  }
+  return best;
+}
+
+export function summarizeActivity(rows: ActivityRowData[]): ActivitySummary {
+  const running = rows.filter((r) => r.status === "running");
+  return {
+    runningCount: running.length,
+    featured:
+      newest(running.filter((r) => r.confirmedRunning)) ?? newest(running),
+    latest: newest(rows),
+  };
+}
+
 export type ActivitySortKey =
   | "status"
   | "level"

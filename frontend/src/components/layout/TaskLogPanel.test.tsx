@@ -160,6 +160,18 @@ describe("TaskLogPanel", () => {
       expect(shown()).toEqual(["linux02"]);
     });
 
+    it("names the running task on the collapsed strip", async () => {
+      vi.mocked(apiClient.list).mockResolvedValue(entries);
+      useTaskLogStore.setState({ panelOpen: false });
+      renderWithProviders(<TaskLogPanel />);
+
+      // The list is closed, so the strip's one line is all that names a guest.
+      await waitFor(() => {
+        expect(shown()).toEqual(["linux01"]);
+      });
+      expect(screen.getByText(/1 running/)).toBeInTheDocument();
+    });
+
     it("counts an error with no task behind it, and filters to it", async () => {
       vi.mocked(apiClient.list).mockResolvedValue([
         completed,

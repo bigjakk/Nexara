@@ -5,6 +5,9 @@ import App from "./App";
 import { queryClient } from "./lib/query-client";
 import { useAuthStore } from "./stores/auth-store";
 import "./lib/i18n"; // Initialize i18next before render
+// The wdth entry carries both axes; the package root is weight-only under the
+// same family name, so importing both would shadow the width axis.
+import "@fontsource-variable/archivo/wdth.css";
 import "./index.css";
 
 // After a redeploy, an already-open tab may lazy-load route chunks whose

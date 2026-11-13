@@ -1,11 +1,5 @@
-import { Boxes, HardDrive, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSidebarStore, type TreePerspective } from "@/stores/sidebar-store";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { FavoritesSection } from "@/features/favorites/components/FavoritesSection";
 import { InventoryTree } from "./InventoryTree";
 import { StorageTree } from "./StorageTree";
@@ -14,56 +8,66 @@ import { VMTree } from "./VMTree";
 interface PerspectiveOption {
   value: TreePerspective;
   label: string;
-  Icon: React.ComponentType<{ className?: string }>;
+  /** What the grouping holds, for the hover hint. */
+  title: string;
 }
 
 const PERSPECTIVES: PerspectiveOption[] = [
-  { value: "hosts", label: "Hosts & VMs", Icon: Boxes },
-  { value: "vms", label: "VMs & Templates", Icon: Layers },
-  { value: "storage", label: "Storage", Icon: HardDrive },
+  { value: "hosts", label: "Hosts", title: "Hosts & VMs" },
+  { value: "vms", label: "Folders", title: "VMs & Templates" },
+  { value: "storage", label: "Storage", title: "Storage" },
 ];
 
 function PerspectiveToggle() {
-  const { perspective, setPerspective } = useSidebarStore();
+  const perspective = useSidebarStore((s) => s.perspective);
+  const setPerspective = useSidebarStore((s) => s.setPerspective);
 
   return (
-    <div className="flex items-center gap-0.5 border-b px-1 py-1">
-      {PERSPECTIVES.map(({ value, label, Icon }) => (
-        <Tooltip key={value}>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => {
-                setPerspective(value);
-              }}
-              aria-pressed={perspective === value}
-              aria-label={label}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
-                perspective === value
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{label}</TooltipContent>
-        </Tooltip>
+    <div
+      role="group"
+      aria-label="Group the tree by"
+      className="m-2 flex shrink-0 gap-0.5 rounded-lg bg-foreground/[0.06] p-0.5"
+    >
+      {PERSPECTIVES.map(({ value, label, title }) => (
+        <button
+          key={value}
+          type="button"
+          title={title}
+          aria-pressed={perspective === value}
+          onClick={() => {
+            setPerspective(value);
+          }}
+          className={cn(
+            "h-7 flex-1 rounded-md text-xs font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+            perspective === value
+              ? "bg-card text-foreground shadow-sm dark:bg-foreground/15"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {label}
+        </button>
       ))}
     </div>
   );
 }
 
-export function TreeView() {
-  const { perspective } = useSidebarStore();
+/**
+ * The inventory tree with its grouping switch pinned above it. Give it a
+ * bounded height (`flex-1`, a `max-h-*`) and the list scrolls inside.
+ */
+export function TreeView({ className }: { className?: string }) {
+  const perspective = useSidebarStore((s) => s.perspective);
 
   return (
-    <div className="flex flex-col">
+    <div className={cn("flex min-h-0 flex-col", className)}>
       <PerspectiveToggle />
-      <FavoritesSection />
-      {perspective === "hosts" && <InventoryTree />}
-      {perspective === "vms" && <VMTree />}
-      {perspective === "storage" && <StorageTree />}
+      {/* VMTree's drag-to-folder auto-scroll finds its scroller by this attribute. */}
+      <div data-tree-scroller className="min-h-0 flex-1 overflow-y-auto px-1">
+        <FavoritesSection />
+        {perspective === "hosts" && <InventoryTree />}
+        {perspective === "vms" && <VMTree />}
+        {perspective === "storage" && <StorageTree />}
+      </div>
     </div>
   );
 }

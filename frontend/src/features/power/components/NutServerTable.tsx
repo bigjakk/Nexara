@@ -28,11 +28,11 @@ interface Ctx {
   onDelete: (s: NutServer) => void;
 }
 
-function serverStatus(s: NutServer): { label: string; rank: number; variant: "default" | "secondary" | "destructive" } {
+function serverStatus(s: NutServer): { label: string; rank: number; variant: "solid" | "secondary" | "destructive" } {
   if (!s.enabled) return { label: "Disabled", rank: 1, variant: "secondary" };
   if (s.last_poll_error !== "") return { label: "Failing", rank: 0, variant: "destructive" };
   if (s.last_poll_at === null) return { label: "Waiting", rank: 2, variant: "secondary" };
-  return { label: "Connected", rank: 3, variant: "default" };
+  return { label: "Connected", rank: 3, variant: "solid" };
 }
 
 /** Its own mutation per row, so two rows tested at once each keep their result. */
