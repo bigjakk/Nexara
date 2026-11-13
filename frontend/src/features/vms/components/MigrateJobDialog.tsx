@@ -71,11 +71,11 @@ const severityIcon: Record<CheckSeverity, React.ReactNode> = {
   fail: <XCircle className="h-4 w-4 text-red-500" />,
 };
 
-/** How each job state reads: work under way in the accent, done is quiet. */
+/** How each job state reads: work under way in blue, done is quiet. */
 const statusBadge: Record<string, BadgeVariant> = {
   pending: "secondary",
-  checking: "default",
-  migrating: "default",
+  checking: "info",
+  migrating: "info",
   completed: "healthy",
   failed: "destructive",
   cancelled: "outline",
@@ -1077,7 +1077,7 @@ function MigrationProgress({
         <div className="space-y-2">
           <div className="h-2 overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-data transition-all"
+              className="h-full rounded-full bg-info transition-all"
               style={{
                 width: `${String(Math.max(job.progress * 100, 5))}%`,
               }}

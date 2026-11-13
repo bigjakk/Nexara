@@ -175,7 +175,7 @@ export function UploadDialog({
                 <span>Uploading to Proxmox...</span>
                 <span>{String(progress)}%</span>
               </div>
-              <UsageBar percent={progress} thresholds={false} />
+              <UsageBar percent={progress} progress />
             </div>
           )}
 

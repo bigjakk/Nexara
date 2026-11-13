@@ -23,11 +23,11 @@ const stepConfig: Record<
   skipped: { label: "Skipped", tone: "idle" },
 };
 
-// Work in progress is the data colour, a finished step is plain, and only a
+// Work in progress is blue (--info), a finished step is plain, and only a
 // step that wants someone or went wrong takes amber or red.
 const DOT_CLASS: Record<StepTone, string> = {
   idle: "ring-[1.5px] ring-inset ring-muted-foreground/60",
-  active: "animate-pulse bg-data",
+  active: "animate-pulse bg-info",
   attention: "bg-amber-500",
   done: "bg-muted-foreground/45",
   failed: "bg-red-500",

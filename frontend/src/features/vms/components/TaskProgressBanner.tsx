@@ -44,11 +44,11 @@ export function TaskProgressBanner({
   return (
     <div
       role="status"
-      className="flex items-center gap-2 rounded-[10px] bg-data/10 px-3.5 py-2.5 text-sm"
+      className="flex items-center gap-2 rounded-[10px] bg-info/10 px-3.5 py-2.5 text-sm"
     >
       {!isStopped && (
         <>
-          <Loader2 className="h-4 w-4 animate-spin text-data" />
+          <Loader2 className="h-4 w-4 animate-spin text-info" />
           <div className="flex flex-1 items-center gap-2">
             <span>
               Task running
@@ -60,7 +60,7 @@ export function TaskProgressBanner({
             {task?.progress != null && (
               <div className="ml-auto h-2 w-32 overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full bg-data transition-all duration-300"
+                  className="h-full rounded-full bg-info transition-all duration-300"
                   style={{
                     width: `${String(Math.round(task.progress * 100))}%`,
                   }}

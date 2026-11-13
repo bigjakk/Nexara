@@ -7,7 +7,7 @@
   "dark": "Dark",
   "system": "System",
   "accentColor": "Accent color",
-  "chooseAccentColor": "Colors the main button, the active navigation item and tab, links and toggles. Charts keep their own color.",
+  "chooseAccentColor": "Colors the main button, the active navigation item and tab, links, toggles and charts. Green, orange, red and amber leave charts blue, because those colors also mean a state.",
   "displayPreferences": "Display preferences",
   "configureDataDisplay": "Configure how data is displayed throughout the application.",
   "storageUnits": "Storage units",

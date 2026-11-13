@@ -41,20 +41,20 @@ const STATUS_LABEL: Record<string, string> = {
 
 /**
  * An import's state. Only one in flight or one that failed takes a colour:
- * running is the data colour over a moving bar (Proxmox reports no fraction
+ * running is blue over a moving bar (Proxmox reports no fraction
  * for an import), failed is red, and a finished one is plain text.
  */
 function ImportStatus({ status }: { status: string }) {
   const label = STATUS_LABEL[status] ?? status;
   if (status === "running") {
     return (
-      <span className="flex items-center gap-2 font-medium text-data">
+      <span className="flex items-center gap-2 font-medium text-info">
         {label}
         <span
           aria-hidden="true"
           className="h-1.5 w-14 overflow-hidden rounded-full bg-foreground/10"
         >
-          <span className="block h-full w-[30%] animate-task-indeterminate rounded-full bg-data" />
+          <span className="block h-full w-[30%] animate-task-indeterminate rounded-full bg-info" />
         </span>
       </span>
     );

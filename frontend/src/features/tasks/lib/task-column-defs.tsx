@@ -22,7 +22,7 @@ import type { TaskCellCtx, TaskSortKey } from "./task-columns";
  *  the space one takes, so the dates stay in a column. */
 function statusIcon(status: DisplayStatus) {
   if (status === "running")
-    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-data" />;
+    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-info" />;
   if (status === "ok")
     return <span aria-hidden="true" className="w-3.5 shrink-0" />;
   return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />;
@@ -30,7 +30,7 @@ function statusIcon(status: DisplayStatus) {
 
 /** Colour is state: a task in flight and a failed one, never a finished one. */
 const STATUS_TEXT: Record<DisplayStatus, string> = {
-  running: "font-medium text-data",
+  running: "font-medium text-info",
   ok: "text-muted-foreground",
   failed: "font-medium text-red-700 dark:text-red-400",
 };

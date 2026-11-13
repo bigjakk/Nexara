@@ -1,4 +1,4 @@
-import { DATA_COLOR } from "@/lib/chart-colors";
+import { PALETTE_BLUE } from "@/lib/chart-colors";
 import type { PBSDatastoreMetric } from "../types/backup";
 
 /**
@@ -11,12 +11,14 @@ import type { PBSDatastoreMetric } from "../types/backup";
  */
 
 /**
- * Series colours. The first is the data colour every other chart draws in, so
- * a server with one datastore looks like the rest of the app; the others only
- * have to be told apart from it. None is green, amber or red: those are
- * states, and a store drawn in one would read as running, warning or failed.
+ * Series colours for a chart of several datastores. A fixed palette: the
+ * hues only have to be told apart from one another, and an accent the user
+ * picked would land on one of them. (A server with one datastore draws it in
+ * the data colour instead: see DatastoreChart.) None is green, amber or red:
+ * those are states, and a store drawn in one would read as running, warning
+ * or failed.
  */
-const FIRST_SERIES_COLOR = DATA_COLOR;
+const FIRST_SERIES_COLOR = PALETTE_BLUE;
 
 const SERIES_COLORS: readonly string[] = [
   FIRST_SERIES_COLOR,

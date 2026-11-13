@@ -74,7 +74,7 @@ export function LiveBlockJobRows({
                     {pct.toFixed(1)}%)
                   </span>
                 </div>
-                <UsageBar percent={pct} thresholds={false} />
+                <UsageBar percent={pct} progress />
                 <div className="flex flex-wrap gap-x-4 text-[12.5px] text-muted-foreground">
                   <span>
                     Speed limit:{" "}

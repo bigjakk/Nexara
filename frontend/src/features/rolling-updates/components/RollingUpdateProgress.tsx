@@ -59,7 +59,7 @@ const STEP_ORDER = [
   "completed",
 ] as const;
 
-/** The pipeline as a row of ticks: done plain, the current one in the data colour. */
+/** The pipeline as a row of ticks: done plain, the current one blue. */
 function StepIndicator({ node }: { node: RollingUpdateNode }) {
   const currentIdx = STEP_ORDER.indexOf(
     node.step as (typeof STEP_ORDER)[number],
@@ -77,7 +77,7 @@ function StepIndicator({ node }: { node: RollingUpdateNode }) {
         } else if (i < currentIdx || finished) {
           color = "bg-foreground/35";
         } else if (i === currentIdx) {
-          color = "bg-data";
+          color = "bg-info";
         }
 
         return (

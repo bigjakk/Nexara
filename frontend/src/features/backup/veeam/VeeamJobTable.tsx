@@ -145,7 +145,7 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
               measured yet", which is the truth. */}
           {measured && (
             <div data-testid="job-progress" className="w-16 shrink-0">
-              <UsageBar percent={job.progress_percent} thresholds={false} />
+              <UsageBar percent={job.progress_percent} progress />
             </div>
           )}
         </div>

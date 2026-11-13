@@ -35,10 +35,10 @@ function MigrationProgress({ job }: { job: MigrationJob }) {
       {/* A sliver even at 0%, so a job that just started is not an empty track. */}
       <UsageBar
         percent={Math.max(percent, 5)}
-        thresholds={false}
+        progress
         className="w-20 shrink-0"
       />
-      <span className="text-[12.5px] font-medium tabular-nums text-data">
+      <span className="text-[12.5px] font-medium tabular-nums text-info">
         {String(percent)}%
       </span>
     </div>

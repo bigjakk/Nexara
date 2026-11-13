@@ -1046,7 +1046,7 @@ function BulkJobProgress({
       {/* A sliver even at 0%, so a job that just started is not an empty
           track. */}
       {(status === "pending" || status === "migrating") && (
-        <UsageBar percent={Math.max(progress * 100, 5)} thresholds={false} />
+        <UsageBar percent={Math.max(progress * 100, 5)} progress />
       )}
       {status === "failed" && job?.error_message && (
         <p className="text-xs text-destructive">{job.error_message}</p>

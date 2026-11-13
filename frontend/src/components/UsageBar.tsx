@@ -9,12 +9,18 @@ import { usageLevel, type UsageLevel } from "@/lib/usage-level";
 export function UsageBar({
   percent,
   thresholds = true,
+  progress = false,
   level: givenLevel,
   className,
 }: {
   percent: number | null;
-  /** False for a bar that measures progress or share, not something filling up. */
+  /** False for a bar that measures a share or a charge, not something filling up. */
   thresholds?: boolean;
+  /**
+   * A job's progress, not a measurement: drawn in the "under way" colour,
+   * which no accent recolours, and never at a threshold.
+   */
+  progress?: boolean;
   /**
    * The state to draw, where the caller knows it and the thresholds do not:
    * a battery that is draining is amber however full it is.
@@ -23,7 +29,8 @@ export function UsageBar({
   className?: string;
 }) {
   const clamped = percent === null ? null : Math.min(100, Math.max(0, percent));
-  const level = givenLevel ?? (thresholds ? usageLevel(clamped) : "ok");
+  const level =
+    givenLevel ?? (thresholds && !progress ? usageLevel(clamped) : "ok");
   return (
     <div
       aria-hidden="true"
@@ -40,7 +47,9 @@ export function UsageBar({
               ? "bg-red-500"
               : level === "warn"
                 ? "bg-amber-500"
-                : "bg-data",
+                : progress
+                  ? "bg-info"
+                  : "bg-data",
           )}
           style={{ width: `${String(Math.round(clamped))}%` }}
         />

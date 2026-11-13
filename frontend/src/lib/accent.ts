@@ -1,12 +1,12 @@
 /**
  * The accent a user picks in Settings › Appearance. "default" picks none and
- * leaves the theme alone: ink buttons and marks, blue links.
+ * leaves the theme alone: ink buttons and marks, blue links and charts.
  *
  * A picked accent colours the one primary button, the "you are here" marks
  * (the rail's active item, the active tab, the selected figure of a stat
- * strip) and links, toggles and focus rings. It never colours --data: that is
- * also the in-progress state, and a running task wearing a green or red accent
- * would read as done or failed.
+ * strip), links, toggles and focus rings, and measured data: charts, bars,
+ * sparklines. It never colours --info, the "under way" state: a running task
+ * wearing a green or red accent would read as done or failed.
  */
 export const ACCENT_COLORS = [
   { name: "blue", labelKey: "colorBlue", hsl: "221 83% 53%" },
@@ -20,16 +20,33 @@ export const ACCENT_COLORS = [
   { name: "amber", labelKey: "colorAmber", hsl: "38 92% 50%" },
 ] as const;
 
+/**
+ * Accents that are also state colours. Under one of these, measured data
+ * keeps the stock blue: a usage bar turns amber and red at its thresholds,
+ * and beside a green "OK" series a green chart line would mean nothing.
+ */
+const STATE_HUES: ReadonlySet<string> = new Set([
+  "green",
+  "orange",
+  "red",
+  "amber",
+]);
+
 const ACCENT_TOKENS = [
   "--primary",
   "--ring",
   "--marker",
+  "--data",
   "--action",
   "--action-foreground",
   "--rail-marker",
 ] as const;
 
-export type AccentTokens = Record<(typeof ACCENT_TOKENS)[number], string>;
+type AccentToken = (typeof ACCENT_TOKENS)[number];
+/** Every token but --data, which a state-coloured accent leaves alone. */
+export type AccentTokens = Record<Exclude<AccentToken, "--data">, string> & {
+  "--data"?: string;
+};
 
 /**
  * Surfaces from index.css. Accent text has to stay readable on each theme's
@@ -108,6 +125,7 @@ export function accentTokens(
     "--primary": text,
     "--ring": text,
     "--marker": text,
+    ...(STATE_HUES.has(accent.name) ? {} : { "--data": text }),
     "--action": accent.hsl,
     "--action-foreground":
       contrast(accent.hsl, WHITE) >= contrast(accent.hsl, INK) ? WHITE : INK,
@@ -125,7 +143,8 @@ export function applyAccentColor(name: string): void {
   const root = document.documentElement;
   const tokens = accentTokens(name, root.classList.contains("dark"));
   for (const token of ACCENT_TOKENS) {
-    if (tokens) root.style.setProperty(token, tokens[token]);
-    else root.style.removeProperty(token);
+    const value = tokens?.[token];
+    if (value === undefined) root.style.removeProperty(token);
+    else root.style.setProperty(token, value);
   }
 }

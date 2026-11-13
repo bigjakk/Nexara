@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { StatusIcon } from "@/components/StatusIcon";
 import { GuestCellSwatch } from "@/features/dashboard/components/GuestCell";
-import { DATA_COLOR } from "@/lib/chart-colors";
+import { INFO_COLOR } from "@/lib/chart-colors";
 import { cn } from "@/lib/utils";
 import { TONE_COLOR } from "../lib/topology-power";
 
@@ -83,7 +83,7 @@ export const TopologyLegend = memo(function TopologyLegend({
         </span>
         container
       </span>
-      {migrating && <Line label="Migrating" color={DATA_COLOR} dash="4 4" />}
+      {migrating && <Line label="Migrating" color={INFO_COLOR} dash="4 4" />}
       {power && (
         <>
           <Line label="On mains" color={TONE_COLOR.ok} />

@@ -96,7 +96,7 @@ function NodePackageRow({
           </UpdateState>
         ) : (
           <span className="flex flex-wrap items-center gap-x-3">
-            <UpdateState dot={securityCount > 0 ? "bg-amber-500" : "bg-data"}>
+            <UpdateState dot={securityCount > 0 ? "bg-amber-500" : "bg-info"}>
               {String(count)} update{count !== 1 ? "s" : ""}
             </UpdateState>
             {securityCount > 0 && (

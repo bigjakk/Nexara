@@ -37,8 +37,11 @@ describe("accentTokens", () => {
       const tokens = accentTokens(name, isDark);
       if (!tokens) throw new Error("no tokens");
       for (const surface of surfaces) {
-        for (const token of ["--primary", "--marker"] as const) {
-          expect(contrast(tokens[token], surface)).toBeGreaterThanOrEqual(4.5);
+        for (const token of ["--primary", "--marker", "--data"] as const) {
+          const shade = tokens[token];
+          // --data is absent under a state-coloured accent: see below.
+          if (shade === undefined) continue;
+          expect(contrast(shade, surface)).toBeGreaterThanOrEqual(4.5);
         }
       }
       expect(
@@ -49,6 +52,19 @@ describe("accentTokens", () => {
       ).toBeGreaterThanOrEqual(4.5);
     },
   );
+
+  it.each([
+    ["purple", true],
+    ["teal", true],
+    ["green", false],
+    ["orange", false],
+    ["red", false],
+    ["amber", false],
+  ])("under %s, charts follow the accent: %s", (name, follows) => {
+    const tokens = accentTokens(name, true);
+    if (!tokens) throw new Error("no tokens");
+    expect(tokens["--data"] !== undefined).toBe(follows);
+  });
 
   it("overrides nothing for the default accent", () => {
     expect(accentTokens("default", false)).toBeNull();
@@ -64,7 +80,12 @@ describe("applyAccentColor", () => {
   it("sets the accent's tokens on the document and clears them for default", () => {
     applyAccentColor("purple");
     expect(style.getPropertyValue("--action")).toBe("262 83% 58%");
-    expect(style.getPropertyValue("--rail-marker")).not.toBe("");
+    expect(style.getPropertyValue("--data")).not.toBe("");
+
+    // A state-coloured accent hands the data colour back to the theme.
+    applyAccentColor("red");
+    expect(style.getPropertyValue("--action")).toBe("0 72% 51%");
+    expect(style.getPropertyValue("--data")).toBe("");
 
     applyAccentColor("default");
     expect(style.getPropertyValue("--action")).toBe("");

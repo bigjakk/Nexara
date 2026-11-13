@@ -13,7 +13,7 @@ import {
 import type { PBSTask } from "../types/backup";
 
 const OUTCOME_ICON: Record<PBSTaskOutcome, React.ReactNode> = {
-  running: <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />,
+  running: <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />,
   ok: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />,
   warning: <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />,
   failed: <XCircle className="h-3.5 w-3.5 text-red-500" />,

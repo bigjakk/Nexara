@@ -29,7 +29,7 @@ function ScanStatus({ status }: { status: string }) {
   if (status === "running") {
     return (
       <span className="inline-flex items-center gap-1.5">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />
         Running
       </span>
     );

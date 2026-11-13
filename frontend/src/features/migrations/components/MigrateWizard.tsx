@@ -631,10 +631,7 @@ export function MigrateWizard() {
               <div className="space-y-2">
                 {/* A sliver even at 0%, so a job that just started is not
                     an empty track. */}
-                <UsageBar
-                  percent={Math.max(job.progress * 100, 5)}
-                  thresholds={false}
-                />
+                <UsageBar percent={Math.max(job.progress * 100, 5)} progress />
                 <p className="text-center text-xs text-muted-foreground">
                   {job.status === "pending"
                     ? "Starting migration..."

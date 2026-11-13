@@ -53,11 +53,17 @@
      a stat strip. Ink, or the picked accent in a shade that reads on a page. */
   --color-marker: hsl(var(--marker));
 
-  /* Measured data and in-progress state: usage bars, sparklines, chart lines,
-     a running task. Never the accent: a usage bar in an amber or red accent
-     would read as a warning or a failure, and a running task in a green one
-     as done. */
+  /* Measured data: usage bars, sparklines, chart lines, the fleet's cells.
+     The stock blue, or the picked accent, except an accent that is itself a
+     state colour (lib/accent.ts): a usage bar in amber or red would read as
+     a warning or a failure. */
   --color-data: hsl(var(--data));
+
+  /* The fourth state colour, beside green, amber and red: something is under
+     way or waiting (a running task, a spinner, a progress bar, an update to
+     install). Never the accent: a running task in a green accent would read
+     as done. */
+  --color-info: hsl(var(--info));
 
   /* The navigation rail keeps one dark surface in both themes. */
   --color-rail: hsl(var(--rail));
@@ -128,7 +134,11 @@
     --popover-foreground: 216 20% 10%;
     --primary: 218 78% 44%;
     --primary-foreground: 0 0% 100%;
-    --data: 218 78% 44%;
+    /* The theme's one blue. Data starts as it and may take an accent; the
+       "under way" state and a fixed chart palette always use it. */
+    --theme-blue: 218 78% 44%;
+    --data: var(--theme-blue);
+    --info: var(--theme-blue);
     --action: 216 20% 10%;
     --action-foreground: 0 0% 100%;
     --marker: var(--foreground);
@@ -182,7 +192,12 @@
     --popover-foreground: 220 19% 94%;
     --primary: 216 100% 69%;
     --primary-foreground: 220 40% 10%;
-    --data: 216 100% 69%;
+    --theme-blue: 216 100% 69%;
+    /* Restated so a dark island inside the light theme (the console stage)
+       resolves them against its own values, not the page's. */
+    --data: var(--theme-blue);
+    --info: var(--theme-blue);
+    --marker: var(--foreground);
     --action: 220 21% 95%;
     --action-foreground: 214 15% 9%;
     --secondary: 217 14% 18%;

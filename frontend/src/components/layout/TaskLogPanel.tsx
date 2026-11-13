@@ -139,9 +139,9 @@ function ActivityRow({
       <tr
         className={cn(
           "cursor-pointer border-b border-border/70 transition-colors hover:bg-foreground/[0.04]",
-          // The row's own words take its state: a running task in the data
-          // colour, a failed one red, everything finished plain.
-          status === "running" && "text-data",
+          // The row's own words take its state: a running task blue, a
+          // failed one red, everything finished plain.
+          status === "running" && "text-info",
           isFailed && "text-red-600 dark:text-red-400",
           expanded && "border-transparent bg-foreground/[0.04]",
         )}
@@ -480,7 +480,7 @@ export function TaskLogPanel() {
       >
         <h2 className="text-[13px] font-semibold">{t("activity")}</h2>
         {runningCount > 0 && (
-          <span className="text-[12.5px] font-medium tabular-nums text-data">
+          <span className="text-[12.5px] font-medium tabular-nums text-info">
             {runningCount} {t("running").toLowerCase()}
           </span>
         )}

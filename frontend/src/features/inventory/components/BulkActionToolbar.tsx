@@ -135,7 +135,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
         </span>
         {progress ? (
           <span className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />
             {String(progress.done)}/{String(progress.total)} done
           </span>
         ) : (

@@ -50,11 +50,11 @@ export function VeeamServerStatusBadge({
       // on its own, so it should read as work in progress rather than as a
       // condition competing with Error for attention. The spinner is the part
       // that actually says "something is happening" — the whole point of the
-      // state — and it turns in the data colour, as running work does.
+      // state — and it turns in blue, as running work does.
       return (
         <Badge variant="outline" title="Waiting for the first inventory sync">
           <Loader2
-            className="mr-1 h-3 w-3 animate-spin text-data"
+            className="mr-1 h-3 w-3 animate-spin text-info"
             aria-hidden="true"
           />
           Syncing

@@ -4,12 +4,12 @@ import {
 } from "@/components/layout/task-status";
 
 const FILL: Record<DisplayStatus, string> = {
-  running: "bg-data",
+  running: "bg-info",
   ok: "bg-foreground/30",
   failed: "bg-red-500",
 };
 const TEXT: Record<DisplayStatus, string> = {
-  running: "text-data",
+  running: "text-info",
   ok: "text-muted-foreground",
   failed: "text-red-500",
 };
@@ -67,7 +67,7 @@ export function TaskProgressCell({
         title="Proxmox reports no progress for this task type"
       >
         <div className="h-1 w-16 overflow-hidden rounded-full bg-foreground/10">
-          <div className="h-full w-[30%] animate-task-indeterminate rounded-full bg-data" />
+          <div className="h-full w-[30%] animate-task-indeterminate rounded-full bg-info" />
         </div>
         <span className="text-[11.5px] tabular-nums text-muted-foreground">
           —

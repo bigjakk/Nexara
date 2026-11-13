@@ -162,7 +162,9 @@ function UsageAreaChart({
               type="monotone"
               dataKey={datastoreSeriesKey(store)}
               name={store}
-              stroke={datastoreSeriesColor(i)}
+              stroke={
+                datastores.length > 1 ? datastoreSeriesColor(i) : DATA_COLOR
+              }
               strokeWidth={2}
               strokeDasharray={datastoreSeriesDash(i)}
               fill={

@@ -27,7 +27,7 @@ import type { HistoryCellCtx, HistoryColumnKey } from "./history";
  *  data and fast refresh treats it as such. */
 function statusIcon(status: DisplayStatus | null) {
   if (status === "running")
-    return <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />;
+    return <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />;
   if (status === "ok")
     return <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />;
   if (status === "failed")
@@ -36,7 +36,7 @@ function statusIcon(status: DisplayStatus | null) {
 }
 
 const STATUS_BADGE: Record<DisplayStatus, string> = {
-  running: "bg-data/15 text-data",
+  running: "bg-info/15 text-info",
   ok: "bg-muted text-muted-foreground",
   failed: "bg-red-500/15 text-red-600 dark:text-red-400",
 };

@@ -33,7 +33,7 @@ function JobStatus({ status }: { status: RollingUpdateJob["status"] }) {
       )}
     >
       {status === "running" ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />
       ) : (
         <span
           aria-hidden="true"

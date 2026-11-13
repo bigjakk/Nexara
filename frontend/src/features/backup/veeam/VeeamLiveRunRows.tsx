@@ -15,7 +15,7 @@ import { latestRuns, runIsActive } from "./veeam-live-runs";
 
 function runIcon(session: VeeamSession) {
   if (runIsActive(session)) {
-    return <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />;
+    return <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />;
   }
   switch (session.result) {
     case "Success":

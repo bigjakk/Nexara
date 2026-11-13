@@ -26,12 +26,12 @@ import {
 import { STATUS_LABEL, type DerivedTaskStatus } from "./task-status";
 
 /**
- * A row's state as a dot: a running task in the data colour, a failed one
- * red, a finished one quiet. An entry with no task behind it has no state to
+ * A row's state as a dot: a running task blue, a failed one red, a finished
+ * one quiet. An entry with no task behind it has no state to
  * show, so it gets a hollow ring: the column still lines up, and says so.
  */
 const STATUS_DOT: Record<DerivedTaskStatus, string> = {
-  running: "animate-pulse bg-data",
+  running: "animate-pulse bg-info",
   ok: "bg-muted-foreground/45",
   failed: "bg-red-500",
   none: "ring-[1.5px] ring-inset ring-muted-foreground/40",

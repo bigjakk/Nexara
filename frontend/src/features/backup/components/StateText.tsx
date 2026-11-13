@@ -25,7 +25,7 @@ const TEXT_CLASS: Record<StateTone, string> = {
 /**
  * A state in a table cell or on a line of facts: a dot and the word for it.
  * Healthy is a green dot beside plain text, only a problem colours the text,
- * and work in progress spins in the data colour.
+ * and work in progress spins in blue.
  */
 export function StateText({
   tone,
@@ -50,7 +50,7 @@ export function StateText({
       {tone === "running" ? (
         <Loader2
           aria-hidden="true"
-          className="h-3.5 w-3.5 shrink-0 animate-spin text-data"
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-info"
         />
       ) : (
         <span

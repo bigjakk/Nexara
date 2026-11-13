@@ -24,6 +24,8 @@ const badgeVariants = cva(
           "gap-1.5 border-border text-foreground before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-emerald-500 before:content-['']",
         warning:
           "border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400",
+        // Under way: a running job. The blue no accent recolours.
+        info: "border-transparent bg-info/15 text-info",
       },
     },
     defaultVariants: {
