@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -68,43 +68,57 @@ export function ClusterReplicationTab({
     return new Date(ts * 1000).toLocaleString();
   };
 
+  const jobs = jobsQuery.data ?? [];
+  const failing = jobs.filter((job) => Boolean(job.error)).length;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>
-          Replication Jobs
-          <ClusterHistoryButton
-            history={clusterHistories.replication(clusterId)}
-            title="replication jobs"
-          />
-        </CardTitle>
-        {canManage("replication") && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Create Job
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Create Replication Job</DialogTitle>
-              </DialogHeader>
-              <CreateJobForm
-                clusterId={clusterId}
-                onSuccess={() => {
-                  setCreateOpen(false);
-                }}
-              />
-            </DialogContent>
-          </Dialog>
-        )}
-      </CardHeader>
-      <CardContent>
+    <>
+      <Panel
+        flush
+        title="Replication jobs"
+        aside={
+          jobs.length === 0
+            ? undefined
+            : failing > 0
+              ? `${String(jobs.length)}, ${String(failing)} failing`
+              : String(jobs.length)
+        }
+        actions={
+          <>
+            <ClusterHistoryButton
+              history={clusterHistories.replication(clusterId)}
+              title="replication jobs"
+            />
+            {canManage("replication") && (
+              <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create Job
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Create Replication Job</DialogTitle>
+                  </DialogHeader>
+                  <CreateJobForm
+                    clusterId={clusterId}
+                    onSuccess={() => {
+                      setCreateOpen(false);
+                    }}
+                  />
+                </DialogContent>
+              </Dialog>
+            )}
+          </>
+        }
+      >
         {jobsQuery.isLoading ? (
-          <Skeleton className="h-20 w-full" />
-        ) : !jobsQuery.data || jobsQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <div className="px-[18px]">
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : jobs.length === 0 ? (
+          <p className="px-[18px] text-sm text-muted-foreground">
             No replication jobs configured.
           </p>
         ) : (
@@ -116,15 +130,17 @@ export function ClusterReplicationTab({
                 <TableHead>Target</TableHead>
                 <TableHead>Schedule</TableHead>
                 <TableHead>Comment</TableHead>
-                <TableHead>Last Sync</TableHead>
+                <TableHead>Last sync</TableHead>
                 <TableHead>Status</TableHead>
                 {canManage("replication") && (
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-right">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 )}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {jobsQuery.data.map((job) => (
+              {jobs.map((job) => (
                 <TableRow key={job.id}>
                   <TableCell className="font-medium">
                     {job.id}
@@ -158,14 +174,15 @@ export function ClusterReplicationTab({
                     ) : job.disable ? (
                       <Badge variant="secondary">Disabled</Badge>
                     ) : (
-                      <Badge variant="default">OK</Badge>
+                      <Badge variant="healthy">OK</Badge>
                     )}
                   </TableCell>
                   {canManage("replication") && (
-                    <TableCell className="text-right space-x-1">
+                    <TableCell className="whitespace-nowrap text-right">
                       <Button
                         variant="ghost"
                         size="sm"
+                        className="text-muted-foreground hover:text-foreground"
                         aria-label={`Edit replication job ${job.id}`}
                         title="Edit job"
                         onClick={() => {
@@ -178,6 +195,7 @@ export function ClusterReplicationTab({
                         <Button
                           variant="ghost"
                           size="sm"
+                          className="text-muted-foreground hover:text-foreground"
                           onClick={() => {
                             triggerJob.mutate({
                               id: job.id,
@@ -194,11 +212,12 @@ export function ClusterReplicationTab({
                         aria-label={`Delete replication job ${job.id}`}
                         variant="ghost"
                         size="sm"
+                        className="text-muted-foreground hover:text-destructive"
                         onClick={() => {
                           setPendingDelete(job);
                         }}
                       >
-                        <Trash2 className="h-4 w-4 text-destructive" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   )}
@@ -207,7 +226,7 @@ export function ClusterReplicationTab({
             </TableBody>
           </Table>
         )}
-      </CardContent>
+      </Panel>
 
       {/*
         What the delete does, from pve-manager PVE/API2/ReplicationConfig.pm
@@ -244,7 +263,7 @@ export function ClusterReplicationTab({
           }}
         />
       )}
-    </Card>
+    </>
   );
 }
 
@@ -305,7 +324,7 @@ function CreateJobForm({
           <SelectContent>
             {(vmsQuery.data ?? []).map((vm) => (
               <SelectItem key={vm.vmid} value={String(vm.vmid)}>
-                {vm.vmid} — {vm.name} ({vm.type})
+                {vm.vmid}: {vm.name} ({vm.type})
               </SelectItem>
             ))}
           </SelectContent>
@@ -372,7 +391,7 @@ function CreateJobForm({
       )}
 
       {createJob.isSuccess && (
-        <p className="text-sm text-emerald-600">
+        <p className="text-sm text-muted-foreground">
           Replication job created successfully.
         </p>
       )}

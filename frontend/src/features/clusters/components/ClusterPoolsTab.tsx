@@ -1,5 +1,5 @@
 import { Fragment, useRef, useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -127,61 +127,72 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
     });
   };
 
+  const pools = poolsQuery.data ?? [];
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>
-          Resource Pools
-          <ClusterHistoryButton
-            history={clusterHistories.pools(clusterId)}
-            title="resource pools"
-          />
-        </CardTitle>
-        {canManage("pool") && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Create Pool
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-sm">
-              <DialogHeader>
-                <DialogTitle>Create Resource Pool</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleCreate} className="space-y-4">
-                <div>
-                  <Label>Pool ID</Label>
-                  <Input
-                    value={poolId}
-                    onChange={(e) => {
-                      setPoolId(e.target.value);
-                    }}
-                    required
-                  />
-                </div>
-                <div>
-                  <Label>Comment</Label>
-                  <Input
-                    value={comment}
-                    onChange={(e) => {
-                      setComment(e.target.value);
-                    }}
-                  />
-                </div>
-                <Button type="submit" disabled={createPool.isPending}>
-                  {createPool.isPending ? "Creating..." : "Create"}
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-        )}
-      </CardHeader>
-      <CardContent>
+    <>
+      <Panel
+        flush
+        title="Resource pools"
+        aside={
+          pools.length > 0
+            ? `${String(pools.length)}, each opens to its members`
+            : undefined
+        }
+        actions={
+          <>
+            <ClusterHistoryButton
+              history={clusterHistories.pools(clusterId)}
+              title="resource pools"
+            />
+            {canManage("pool") && (
+              <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create Pool
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>Create Resource Pool</DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={handleCreate} className="space-y-4">
+                    <div>
+                      <Label>Pool ID</Label>
+                      <Input
+                        value={poolId}
+                        onChange={(e) => {
+                          setPoolId(e.target.value);
+                        }}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <Label>Comment</Label>
+                      <Input
+                        value={comment}
+                        onChange={(e) => {
+                          setComment(e.target.value);
+                        }}
+                      />
+                    </div>
+                    <Button type="submit" disabled={createPool.isPending}>
+                      {createPool.isPending ? "Creating..." : "Create"}
+                    </Button>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            )}
+          </>
+        }
+      >
         {poolsQuery.isLoading ? (
-          <Skeleton className="h-20 w-full" />
-        ) : !poolsQuery.data || poolsQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <div className="px-[18px]">
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : pools.length === 0 ? (
+          <p className="px-[18px] text-sm text-muted-foreground">
             No resource pools configured.
           </p>
         ) : (
@@ -192,12 +203,14 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                 <TableHead>Pool ID</TableHead>
                 <TableHead>Comment</TableHead>
                 {canManage("pool") && (
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-right">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 )}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {poolsQuery.data.map((pool) => (
+              {pools.map((pool) => (
                 <Fragment key={pool.poolid}>
                   <TableRow
                     className="cursor-pointer"
@@ -207,7 +220,7 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                       );
                     }}
                   >
-                    <TableCell>
+                    <TableCell className="text-muted-foreground">
                       {expanded === pool.poolid ? (
                         <ChevronDown className="h-4 w-4" />
                       ) : (
@@ -249,6 +262,7 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                               aria-label={`Edit ${pool.poolid}`}
                               variant="ghost"
                               size="sm"
+                              className="text-muted-foreground hover:text-foreground"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setEditPoolId(pool.poolid);
@@ -260,12 +274,13 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                               aria-label={`Delete ${pool.poolid}`}
                               variant="ghost"
                               size="sm"
+                              className="text-muted-foreground hover:text-destructive"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setDeleteTarget(pool.poolid);
                               }}
                             >
-                              <Trash2 className="h-4 w-4 text-destructive" />
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </>
                         )}
@@ -273,8 +288,12 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                     )}
                   </TableRow>
                   {expanded === pool.poolid && (
-                    <TableRow>
-                      <TableCell colSpan={canManage("pool") ? 4 : 3}>
+                    // The members sit in a recessed band under their pool.
+                    <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.03]">
+                      <TableCell
+                        colSpan={canManage("pool") ? 4 : 3}
+                        className="py-3"
+                      >
                         <PoolMembers
                           clusterId={clusterId}
                           poolId={pool.poolid}
@@ -288,7 +307,7 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
             </TableBody>
           </Table>
         )}
-      </CardContent>
+      </Panel>
 
       <AlertDialog
         open={deleteTarget !== null}
@@ -341,7 +360,7 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
           }}
         />
       )}
-    </Card>
+    </>
   );
 }
 
@@ -833,7 +852,9 @@ function AddressablePoolMembers({
       {/* Members table */}
       {members.length > 0 ? (
         <>
-          <p className="text-xs font-medium">Members ({members.length})</p>
+          <p className="text-[12.5px] font-medium">
+            Members ({members.length})
+          </p>
           <Table>
             <TableHeader>
               <TableRow>
@@ -857,7 +878,7 @@ function AddressablePoolMembers({
                   <TableCell>{m.node}</TableCell>
                   <TableCell>
                     <Badge
-                      variant={m.status === "running" ? "default" : "secondary"}
+                      variant={m.status === "running" ? "healthy" : "secondary"}
                     >
                       {m.status ?? "—"}
                     </Badge>
@@ -873,6 +894,7 @@ function AddressablePoolMembers({
                         aria-label={`Remove ${m.name ?? m.storage ?? m.id}`}
                         variant="ghost"
                         size="sm"
+                        className="text-muted-foreground hover:text-destructive"
                         // One removal at a time: while one is in flight no
                         // Remove button opens the confirmation, so neither a
                         // second click nor a second confirm can send another
@@ -889,7 +911,7 @@ function AddressablePoolMembers({
                           setPendingRemove(m);
                         }}
                       >
-                        <X className="h-3 w-3 text-destructive" />
+                        <X className="h-3.5 w-3.5" />
                       </Button>
                     </TableCell>
                   )}

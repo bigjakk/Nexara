@@ -1,8 +1,12 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
+import {
+  SettingRow,
+  SettingsFooter,
+  SettingsSection,
+} from "@/components/page/Settings";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -12,11 +16,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { useDRSConfig, useUpdateDRSConfig } from "../api/drs-queries";
 import type { DRSMode, DRSConfigRequest } from "../types/drs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Settings, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { WarningCallout } from "@/components/WarningCallout";
 
 interface DRSConfigCardProps {
@@ -63,7 +67,11 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   }, [config]);
 
   if (isLoading) {
-    return <Skeleton className="h-64 w-full" />;
+    return (
+      <Panel title="DRS configuration">
+        <Skeleton className="h-64 w-full" />
+      </Panel>
+    );
   }
 
   const handleSave = () => {
@@ -90,24 +98,22 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   };
 
   const weightSum = cpuWeight + memWeight;
+  const weightsOff = Math.abs(weightSum - 1.0) > 0.01;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Settings className="h-5 w-5" />
-          DRS Configuration
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {nativeRebalance && (
+    <SettingsSection
+      title="DRS configuration"
+      description="How Nexara spreads guests across this cluster's nodes."
+    >
+      {nativeRebalance && (
+        <div className="pb-3.5">
           <WarningCallout title="Proxmox native Dynamic Load Balancer is active">
             <p>
               This cluster&apos;s Proxmox CRS is auto-rebalancing HA-managed
               guests. Nexara DRS <strong>Automatic</strong> mode is disabled to
-              avoid conflicting migrations &mdash; <strong>Advisory</strong>{" "}
-              still works as a read-only second opinion. Manage the native
-              balancer under{" "}
+              avoid conflicting migrations; <strong>Advisory</strong> still
+              works as a read-only second opinion. Manage the native balancer
+              under{" "}
               <Link
                 to={`/clusters/${clusterId}?tab=options`}
                 className="underline"
@@ -117,211 +123,212 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
               .
             </p>
           </WarningCallout>
-        )}
-        <div className="space-y-2">
-          <Label>Mode</Label>
-          <Select
-            value={mode}
-            onValueChange={(v) => {
-              setMode(v as DRSMode);
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="disabled">
-                Disabled &mdash; do nothing
-              </SelectItem>
-              <SelectItem value="advisory">
-                Advisory &mdash; recommend only
-              </SelectItem>
-              <SelectItem value="automatic" disabled={nativeRebalance}>
-                Automatic &mdash; migrate VMs
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
+        </div>
+      )}
+      <SettingRow
+        label="Mode"
+        description={
+          <>
             Disabled turns DRS off. Advisory logs recommendations without
             acting. Automatic will live-migrate VMs.
             {nativeRebalance &&
               " Automatic is unavailable while Proxmox native CRS rebalancing is on."}
+          </>
+        }
+        htmlFor="drs-mode"
+      >
+        <Select
+          value={mode}
+          onValueChange={(v) => {
+            setMode(v as DRSMode);
+          }}
+        >
+          <SelectTrigger id="drs-mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="disabled">Disabled: do nothing</SelectItem>
+            <SelectItem value="advisory">Advisory: recommend only</SelectItem>
+            <SelectItem value="automatic" disabled={nativeRebalance}>
+              Automatic: migrate VMs
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingRow>
+
+      <SettingRow
+        label="CPU weight"
+        description="How much each resource type influences balance scoring. The two weights must sum to 1.0."
+      >
+        <Slider
+          aria-label="CPU weight"
+          className="min-w-0 flex-1"
+          value={[cpuWeight]}
+          onValueChange={([v]) => {
+            if (v !== undefined) setCpuWeight(v);
+          }}
+          min={0}
+          max={1}
+          step={0.05}
+        />
+        <span className="w-10 text-right font-mono text-sm text-muted-foreground">
+          {(cpuWeight * 100).toFixed(0)}%
+        </span>
+      </SettingRow>
+      <SettingRow
+        label="Memory weight"
+        description="A higher memory weight means DRS prioritizes evening out memory usage."
+      >
+        <Slider
+          aria-label="Memory weight"
+          className="min-w-0 flex-1"
+          value={[memWeight]}
+          onValueChange={([v]) => {
+            if (v !== undefined) setMemWeight(v);
+          }}
+          min={0}
+          max={1}
+          step={0.05}
+        />
+        <span className="w-10 text-right font-mono text-sm text-muted-foreground">
+          {(memWeight * 100).toFixed(0)}%
+        </span>
+        {weightsOff && (
+          <p className="w-full text-sm text-destructive sm:text-right">
+            Weights must sum to 1.0 (current: {(weightSum * 100).toFixed(0)}
+            %)
           </p>
-        </div>
+        )}
+      </SettingRow>
 
-        <div className="space-y-4">
-          <div>
-            <Label>Resource Weights</Label>
-            <p className="text-xs text-muted-foreground">
-              How much each resource type influences balance scoring. Higher
-              memory weight means DRS prioritizes evening out memory usage. Must
-              sum to 1.0.
-            </p>
-          </div>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <div className="flex justify-between text-sm">
-                <span>CPU</span>
-                <span className="font-mono text-muted-foreground">
-                  {(cpuWeight * 100).toFixed(0)}%
-                </span>
-              </div>
-              <Slider
-                value={[cpuWeight]}
-                onValueChange={([v]) => {
-                  if (v !== undefined) setCpuWeight(v);
-                }}
-                min={0}
-                max={1}
-                step={0.05}
-              />
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-sm">
-                <span>Memory</span>
-                <span className="font-mono text-muted-foreground">
-                  {(memWeight * 100).toFixed(0)}%
-                </span>
-              </div>
-              <Slider
-                value={[memWeight]}
-                onValueChange={([v]) => {
-                  if (v !== undefined) setMemWeight(v);
-                }}
-                min={0}
-                max={1}
-                step={0.05}
-              />
-            </div>
-            {Math.abs(weightSum - 1.0) > 0.01 && (
-              <p className="text-sm text-destructive">
-                Weights must sum to 1.0 (current: {(weightSum * 100).toFixed(0)}
-                %)
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <Label>Imbalance Threshold</Label>
-            <span className="font-mono text-muted-foreground">
-              {(threshold * 100).toFixed(0)}%
-            </span>
-          </div>
-          <Slider
-            value={[threshold]}
-            onValueChange={([v]) => {
-              if (v !== undefined) setThreshold(v);
-            }}
-            min={0.05}
-            max={1}
-            step={0.05}
-          />
-          <p className="text-xs text-muted-foreground">
+      <SettingRow
+        label="Imbalance threshold"
+        description={
+          <>
             {threshold <= 0.15
-              ? "Aggressive — triggers on small load differences between nodes."
+              ? "Aggressive: triggers on small load differences between nodes."
               : threshold <= 0.3
-                ? "Balanced — triggers when node loads diverge moderately."
-                : "Conservative — only triggers on large load imbalances."}{" "}
+                ? "Balanced: triggers when node loads diverge moderately."
+                : "Conservative: only triggers on large load imbalances."}{" "}
             Lower values cause more frequent migrations.
-          </p>
-        </div>
+          </>
+        }
+      >
+        <Slider
+          aria-label="Imbalance threshold"
+          className="min-w-0 flex-1"
+          value={[threshold]}
+          onValueChange={([v]) => {
+            if (v !== undefined) setThreshold(v);
+          }}
+          min={0.05}
+          max={1}
+          step={0.05}
+        />
+        <span className="w-10 text-right font-mono text-sm text-muted-foreground">
+          {(threshold * 100).toFixed(0)}%
+        </span>
+      </SettingRow>
 
-        <div className="space-y-2">
-          <Label htmlFor="eval-interval">Evaluation Interval</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="eval-interval"
-              type="number"
-              min={60}
-              value={evalInterval}
-              onChange={(e) => {
-                setEvalInterval(Number(e.target.value));
-              }}
-            />
-            <span className="text-sm text-muted-foreground whitespace-nowrap">
-              seconds
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground">
+      <SettingRow
+        label="Evaluation interval"
+        description={
+          <>
             How often DRS checks cluster balance.
             {evalInterval >= 300
               ? ` Every ${String(Math.round(evalInterval / 60))} minutes.`
               : ` Every ${String(evalInterval)} seconds.`}
-          </p>
-        </div>
+          </>
+        }
+        htmlFor="eval-interval"
+      >
+        <Input
+          id="eval-interval"
+          type="number"
+          min={60}
+          className="w-32"
+          value={evalInterval}
+          onChange={(e) => {
+            setEvalInterval(Number(e.target.value));
+          }}
+        />
+        <span className="whitespace-nowrap text-sm text-muted-foreground">
+          seconds
+        </span>
+      </SettingRow>
 
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="include-containers"
-              checked={includeContainers}
-              onCheckedChange={(v) => {
-                setIncludeContainers(v === true);
-              }}
-            />
-            <Label htmlFor="include-containers">
-              Include containers in balancing
-            </Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="exclude-veeam-workers"
-              checked={excludeVeeamWorkers}
-              onCheckedChange={(v) => {
-                setExcludeVeeamWorkers(v === true);
-              }}
-            />
-            <Label htmlFor="exclude-veeam-workers">
-              Never migrate Veeam&apos;s own guests
-            </Label>
-          </div>
-          {!excludeVeeamWorkers && (
-            <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                DRS may then migrate a Veeam worker appliance mid-backup, which
-                fails the job running on it and leaves nothing behind but a
-                failed session. Veeam&apos;s guests are still counted toward
-                node load either way.
-              </p>
-            </div>
-          )}
-          {includeContainers && (
-            <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                Container migration requires downtime. Unlike VMs which support
-                live migration, containers must be stopped, moved, and
-                restarted. Only enable this if container downtime during
-                rebalancing is acceptable.
-              </p>
-            </div>
-          )}
-        </div>
+      <SettingRow
+        label="Include containers in balancing"
+        description={
+          includeContainers ? (
+            <Caution>
+              Container migration requires downtime. Unlike VMs which support
+              live migration, containers must be stopped, moved, and restarted.
+              Only enable this if container downtime during rebalancing is
+              acceptable.
+            </Caution>
+          ) : undefined
+        }
+        htmlFor="include-containers"
+      >
+        <Switch
+          id="include-containers"
+          checked={includeContainers}
+          onCheckedChange={setIncludeContainers}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Never migrate Veeam's own guests"
+        description={
+          excludeVeeamWorkers ? undefined : (
+            <Caution>
+              DRS may then migrate a Veeam worker appliance mid-backup, which
+              fails the job running on it and leaves nothing behind but a failed
+              session. Veeam&apos;s guests are still counted toward node load
+              either way.
+            </Caution>
+          )
+        }
+        htmlFor="exclude-veeam-workers"
+      >
+        <Switch
+          id="exclude-veeam-workers"
+          checked={excludeVeeamWorkers}
+          onCheckedChange={setExcludeVeeamWorkers}
+        />
+      </SettingRow>
 
-        <div className="flex items-center gap-3">
-          <Button
-            onClick={handleSave}
-            disabled={
-              updateConfig.isPending || Math.abs(weightSum - 1.0) > 0.01
-            }
-          >
-            {updateConfig.isPending ? "Saving..." : "Save Configuration"}
-          </Button>
-          {saveStatus === "saved" && (
-            <span className="text-sm text-emerald-600">Saved successfully</span>
-          )}
-          {saveStatus === "error" && (
-            <span className="text-sm text-destructive">
-              {updateConfig.error instanceof Error
-                ? updateConfig.error.message
-                : "Failed to save"}
-            </span>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+      <SettingsFooter>
+        {saveStatus === "saved" && (
+          <span className="text-sm text-muted-foreground">
+            Saved successfully
+          </span>
+        )}
+        {saveStatus === "error" && (
+          <span className="text-sm text-destructive">
+            {updateConfig.error instanceof Error
+              ? updateConfig.error.message
+              : "Failed to save"}
+          </span>
+        )}
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={updateConfig.isPending || weightsOff}
+        >
+          {updateConfig.isPending ? "Saving..." : "Save Configuration"}
+        </Button>
+      </SettingsFooter>
+    </SettingsSection>
+  );
+}
+
+/** What turning a setting this way costs, said under it in amber. */
+function Caution({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>{children}</span>
+    </span>
   );
 }

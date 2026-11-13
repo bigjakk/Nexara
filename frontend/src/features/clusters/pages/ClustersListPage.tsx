@@ -9,6 +9,11 @@ import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { NodeResponse, VMResponse, ClusterResponse } from "@/types/api";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
+import { EmptyState } from "@/components/EmptyState";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
+import { StatusIcon } from "@/components/StatusIcon";
+import { UsageBar } from "@/components/UsageBar";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -19,12 +24,67 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Pencil, Trash2 } from "lucide-react";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { Layers, Pencil, Trash2 } from "lucide-react";
+import { useDashboardMetrics } from "@/hooks/useMetrics";
+import { formatBytes } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { usageLevel, USAGE_TEXT_CLASS } from "@/lib/usage-level";
+import { clustersSummary } from "../lib/cluster-summary";
+
+/** What a cluster's state dot says to a screen reader. */
+const STATUS_LABEL: Record<ClusterResponse["status"], string> = {
+  online: "Online",
+  degraded: "Degraded",
+  offline: "Offline",
+  inactive: "Inactive",
+  unknown: "Unknown",
+};
+
+/** A cluster's guests that someone runs: templates are not counted. */
+function guestCounts(vms: readonly VMResponse[] | undefined) {
+  if (vms === undefined) return undefined;
+  const guests = vms.filter((v) => !v.template);
+  return {
+    total: guests.length,
+    running: guests.filter((v) => v.status === "running").length,
+  };
+}
+
+/** A live load figure: the bar and its reading, a dash until one arrives. */
+function LoadCell({
+  percent,
+  detail,
+}: {
+  percent: number | undefined;
+  detail?: string | undefined;
+}) {
+  const clamped =
+    percent === undefined ? null : Math.min(100, Math.max(0, percent));
+  const level = usageLevel(clamped);
+  return (
+    <div className="min-w-[7rem]">
+      <div className="flex items-center gap-2">
+        <UsageBar percent={clamped} className="w-16 shrink-0 lg:w-20" />
+        <span
+          className={cn(
+            "text-xs tabular-nums",
+            level === "ok" ? "text-muted-foreground" : USAGE_TEXT_CLASS[level],
+          )}
+        >
+          {clamped === null ? "—" : `${String(Math.round(clamped))}%`}
+        </span>
+      </div>
+      {detail !== undefined && (
+        <div className="mt-1 whitespace-nowrap text-xs text-muted-foreground/75">
+          {detail}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ClustersListPage() {
   const { data: clusters, isLoading, error } = useClusters();
-  const isMobile = useIsMobile();
   const [editCluster, setEditCluster] = useState<ClusterResponse | null>(null);
   const [deleteCluster, setDeleteCluster] = useState<ClusterResponse | null>(
     null,
@@ -50,186 +110,184 @@ export function ClustersListPage() {
     })),
   });
 
+  // Live load for the CPU and memory bars: one metrics subscription per
+  // cluster, held while this page is open.
+  const metrics = useDashboardMetrics((clusters ?? []).map((c) => c.id));
+
+  const summary = clustersSummary(
+    (clusters ?? []).map((cluster, i) => ({
+      status: cluster.status,
+      nodes: nodeQueries[i]?.data?.length,
+      guests: guestCounts(vmQueries[i]?.data)?.total,
+    })),
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">Clusters</h1>
-        <AddClusterDialog />
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Clusters"
+        summary={summary ?? "The Proxmox VE clusters Nexara manages."}
+        actions={<AddClusterDialog />}
+      />
 
       {error != null && (
-        <div className="rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
-          Failed to load clusters.
-        </div>
+        <Panel>
+          <p className="text-sm text-destructive">Failed to load clusters.</p>
+        </Panel>
       )}
 
       {isLoading && (
-        <div className="space-y-2">
-          {Array.from({ length: 3 }, (_, i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
+        <Panel>
+          <div className="space-y-2">
+            {Array.from({ length: 3 }, (_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        </Panel>
       )}
 
       {!isLoading && !error && clusters?.length === 0 && (
-        <div
-          className="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
-          data-testid="empty-state"
-        >
-          No clusters configured. Add one to get started.
+        <div data-testid="empty-state">
+          <EmptyState
+            icon={Layers}
+            title="No clusters"
+            description="No clusters configured. Add one to get started."
+          />
         </div>
       )}
 
-      {!isLoading &&
-        clusters !== undefined &&
-        clusters.length > 0 &&
-        isMobile && (
-          <div className="space-y-3">
-            {clusters.map((cluster, i) => {
-              const nodes = nodeQueries[i]?.data;
-              const vms = vmQueries[i]?.data;
-              const vmCount = vms?.filter((v) => v.type === "qemu").length;
+      {!isLoading && clusters !== undefined && clusters.length > 0 && (
+        <Panel flush>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Cluster</TableHead>
+                <TableHead className="hidden md:table-cell">Version</TableHead>
+                <TableHead className="hidden sm:table-cell">Nodes</TableHead>
+                <TableHead className="hidden sm:table-cell">Guests</TableHead>
+                <TableHead className="hidden md:table-cell">CPU</TableHead>
+                <TableHead className="hidden md:table-cell">Memory</TableHead>
+                <TableHead className="w-20">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {clusters.map((cluster, i) => {
+                const nodes = nodeQueries[i]?.data;
+                const guests = guestCounts(vmQueries[i]?.data);
+                const live = metrics.get(cluster.id);
+                const nodesOnline =
+                  nodes === undefined
+                    ? undefined
+                    : `${String(nodes.filter((n) => n.status === "online").length)} of ${String(nodes.length)}`;
 
-              return (
-                <div key={cluster.id} className="rounded-lg border bg-card p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <Link
-                        to={`/clusters/${cluster.id}`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {cluster.name}
-                      </Link>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {cluster.api_url}
-                      </p>
-                    </div>
-                    <ClusterStatusBadge status={cluster.status} />
-                  </div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <div className="flex gap-4 text-sm text-muted-foreground">
-                      <span>
-                        <span className="font-medium text-foreground">
-                          {nodes !== undefined ? nodes.length : "—"}
-                        </span>{" "}
-                        nodes
-                      </span>
-                      <span>
-                        <span className="font-medium text-foreground">
-                          {vmCount !== undefined ? vmCount : "—"}
-                        </span>{" "}
-                        VMs
-                      </span>
-                    </div>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        aria-label={`Edit ${cluster.name}`}
-                        onClick={() => {
-                          setEditCluster(cluster);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        aria-label={`Delete ${cluster.name}`}
-                        onClick={() => {
-                          setDeleteCluster(cluster);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-      {!isLoading &&
-        clusters !== undefined &&
-        clusters.length > 0 &&
-        !isMobile && (
-          <div className="rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Nodes</TableHead>
-                  <TableHead className="text-right">VMs</TableHead>
-                  <TableHead>API URL</TableHead>
-                  <TableHead className="w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {clusters.map((cluster, i) => {
-                  const nodes = nodeQueries[i]?.data;
-                  const vms = vmQueries[i]?.data;
-                  const vmCount = vms?.filter((v) => v.type === "qemu").length;
-
-                  return (
-                    <TableRow key={cluster.id}>
-                      <TableCell>
+                return (
+                  <TableRow key={cluster.id}>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <StatusIcon
+                          status={cluster.status}
+                          label={STATUS_LABEL[cluster.status]}
+                        />
                         <Link
                           to={`/clusters/${cluster.id}`}
-                          className="font-medium text-primary hover:underline"
+                          className="font-medium hover:underline"
                           data-testid={`cluster-link-${cluster.id}`}
                         >
                           {cluster.name}
                         </Link>
-                      </TableCell>
-                      <TableCell>
-                        <ClusterStatusBadge status={cluster.status} />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {nodes !== undefined ? nodes.length : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {vmCount !== undefined ? vmCount : "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
+                        {/* Online is the dot alone; any other state says so. */}
+                        {cluster.status !== "online" && (
+                          <ClusterStatusBadge status={cluster.status} />
+                        )}
+                      </div>
+                      <p className="mt-0.5 font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
                         {cluster.api_url}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            aria-label={`Edit ${cluster.name}`}
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => {
-                              setEditCluster(cluster);
-                            }}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            aria-label={`Delete ${cluster.name}`}
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => {
-                              setDeleteCluster(cluster);
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                      </p>
+                      {/* A phone has no room for the columns: the counts
+                          sit under the name there. */}
+                      <p className="mt-1 text-xs text-muted-foreground sm:hidden">
+                        {[
+                          nodesOnline === undefined
+                            ? undefined
+                            : `${nodesOnline} nodes online`,
+                          guests === undefined
+                            ? undefined
+                            : `${String(guests.running)} of ${String(guests.total)} guests running`,
+                        ]
+                          .filter((part) => part !== undefined)
+                          .join(", ")}
+                      </p>
+                    </TableCell>
+                    <TableCell className="hidden whitespace-nowrap md:table-cell">
+                      {cluster.pve_version !== ""
+                        ? `PVE ${cluster.pve_version}`
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="hidden whitespace-nowrap sm:table-cell">
+                      {nodesOnline === undefined
+                        ? "—"
+                        : `${nodesOnline} online`}
+                    </TableCell>
+                    <TableCell className="hidden sm:table-cell">
+                      {guests === undefined ? (
+                        "—"
+                      ) : (
+                        <>
+                          <div>{guests.total}</div>
+                          <div className="whitespace-nowrap text-xs text-muted-foreground/75">
+                            {guests.running} running
+                          </div>
+                        </>
+                      )}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      <LoadCell percent={live?.cpuPercent} />
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      <LoadCell
+                        percent={live?.memPercent}
+                        detail={
+                          live !== undefined && live.memTotal > 0
+                            ? `${formatBytes(live.memUsed)} of ${formatBytes(live.memTotal)}`
+                            : undefined
+                        }
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-0.5">
+                        <Button
+                          aria-label={`Edit ${cluster.name}`}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => {
+                            setEditCluster(cluster);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          aria-label={`Delete ${cluster.name}`}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            setDeleteCluster(cluster);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Panel>
+      )}
 
       {/* Keyed on the cluster, so that the dialog of another is a new one. This
           one seeds its form from its props once and reads the error of its save

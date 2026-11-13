@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -73,25 +73,10 @@ export function HAMaintenanceCard({
   };
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          HA Maintenance
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-xs text-muted-foreground">
-          Disarm the HA stack cluster-wide before planned maintenance so
-          controlled reboots aren&apos;t treated as failures (no fencing).
-          Re-arm when done.
-        </p>
-        {error && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 p-2 text-xs text-destructive">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
+    <Panel
+      title="Maintenance"
+      actions={
+        <>
           <Dialog
             open={disarmOpen}
             onOpenChange={(v) => {
@@ -128,10 +113,10 @@ export function HAMaintenanceCard({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="freeze">
-                        Freeze — lock services in place
+                        Freeze: lock services in place
                       </SelectItem>
                       <SelectItem value="ignore">
-                        Ignore — suspend HA tracking (manage manually)
+                        Ignore: suspend HA tracking (manage manually)
                       </SelectItem>
                     </SelectContent>
                   </Select>
@@ -184,8 +169,20 @@ export function HAMaintenanceCard({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        </div>
-      </CardContent>
-    </Card>
+        </>
+      }
+    >
+      <p className="max-w-[75ch] text-sm text-muted-foreground">
+        Disarm the HA stack cluster-wide before planned maintenance so
+        controlled reboots aren&apos;t treated as failures (no fencing). Re-arm
+        when done.
+      </p>
+      {error && (
+        <p className="mt-2 flex items-start gap-2 text-sm text-destructive">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </p>
+      )}
+    </Panel>
   );
 }

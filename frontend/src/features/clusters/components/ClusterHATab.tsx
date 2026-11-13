@@ -1,8 +1,10 @@
 import { useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Panel } from "@/components/page/Panel";
+import { Stat, StatStrip } from "@/components/page/StatStrip";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { Segmented } from "@/components/ui/segmented";
 import {
   Table,
   TableBody,
@@ -30,16 +32,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  CircleDot,
-  Pencil,
-  Plus,
-  ShieldCheck,
-  Trash2,
-  XCircle,
-} from "lucide-react";
+import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
@@ -68,10 +61,8 @@ import { HAMaintenanceCard } from "@/features/ha/components/HAMaintenanceCard";
 import { useClusterVMs, useClusterNodes } from "../api/cluster-queries";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
-import {
-  HistoryTabContent,
-  HistoryTabTrigger,
-} from "@/features/history/components/HistoryTab";
+import { HistoryTabContent } from "@/features/history/components/HistoryTab";
+import { useCanViewHistory } from "@/features/history/hooks/useCanViewHistory";
 import type { VMResponse } from "@/types/api";
 import {
   isPVEAtLeast,
@@ -91,14 +82,14 @@ function ErrorBanner({ error }: { error: Error }) {
     message.toLowerCase().includes("permission") ||
     message.toLowerCase().includes("forbidden");
   return (
-    <div className="flex items-center gap-2 rounded-md border border-orange-300 bg-orange-50 p-3 text-sm text-orange-800 dark:border-orange-700 dark:bg-orange-950 dark:text-orange-200">
-      <AlertTriangle className="h-4 w-4 shrink-0" />
+    <p className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-400">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
       <span>
         {isForbidden
           ? "Permission denied. You may need to log out and back in for new RBAC permissions to take effect."
           : message}
       </span>
-    </div>
+    </p>
   );
 }
 
@@ -156,6 +147,17 @@ function categorizeStatus(entries: HAStatusEntry[]) {
 
 const HA_STATES = ["started", "stopped", "disabled", "ignored"] as const;
 
+/** The views of the tab, in the order the switch shows them. */
+const HA_VIEWS = [
+  { value: "status", label: "Status" },
+  { value: "resources", label: "Resources" },
+  { value: "groups", label: "Groups / Rules" },
+] as const;
+
+/** A row's icon buttons: quiet until pointed at, the delete red only then. */
+const ROW_ACTION = "text-muted-foreground hover:text-foreground";
+const ROW_DELETE = "text-muted-foreground hover:text-destructive";
+
 function vmToSID(vm: VMResponse): string {
   return `${vm.type === "lxc" ? "ct" : "vm"}:${String(vm.vmid)}`;
 }
@@ -192,6 +194,16 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   const deleteRule = useDeleteHARule(clusterId);
 
   const [mutationError, setMutationError] = useState<string | null>(null);
+
+  // The panels are Radix tab panels, so only the view on show is mounted;
+  // the switch above them is what picks it.
+  const [view, setView] = useState("status");
+  const history = clusterHistories.ha(clusterId);
+  const canHistory = useCanViewHistory(
+    history.permission,
+    history.target.clusterId === null,
+  );
+  const shown = view === "history" && !canHistory ? "status" : view;
 
   // --- Resource dialog state ---
   const [resCreateOpen, setResCreateOpen] = useState(false);
@@ -341,163 +353,185 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   const hasGroups = (groupsQuery.data ?? []).length > 0;
 
   return (
-    <Tabs defaultValue="status">
+    <Tabs value={shown} onValueChange={setView}>
       {mutationError && (
-        <div className="mb-4 flex items-center gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="mb-4 flex items-center gap-2 rounded-[10px] bg-destructive/10 px-[18px] py-3 text-sm text-destructive">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{mutationError}</span>
         </div>
       )}
-      <TabsList>
-        <TabsTrigger value="status">Status</TabsTrigger>
-        <TabsTrigger value="resources">Resources</TabsTrigger>
-        <TabsTrigger value="groups">Groups / Rules</TabsTrigger>
-        <HistoryTabTrigger history={clusterHistories.ha(clusterId)} />
-      </TabsList>
+      <Segmented
+        aria-label="HA view"
+        size="md"
+        value={shown}
+        onValueChange={setView}
+        options={[
+          ...HA_VIEWS,
+          ...(canHistory ? [{ value: "history", label: "History" }] : []),
+        ]}
+      />
 
-      <TabsContent value="status" className="mt-4 space-y-4">
+      {/* Each panel is named by its view: a dialog whose opener is gone
+          when it closes (a deleted row) sends focus to the panel. */}
+      <TabsContent
+        value="status"
+        aria-label="Status"
+        aria-labelledby={undefined}
+        className="mt-4 space-y-4"
+      >
         {statusQuery.isLoading && (
           <div className="space-y-4">
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-32 w-full" />
           </div>
         )}
-        {statusQuery.isError && <ErrorBanner error={statusQuery.error} />}
+        {statusQuery.isError && (
+          <Panel>
+            <ErrorBanner error={statusQuery.error} />
+          </Panel>
+        )}
         {!statusQuery.isLoading && !statusQuery.isError && (
           <>
-            <div className="grid gap-4 md:grid-cols-3">
-              <ManagerCard entry={manager} />
-              <QuorumCard entry={quorum} />
-              <ServiceSummaryCard services={serviceEntries} />
-            </div>
+            <Panel
+              flush
+              title="Manager and quorum"
+              aside={
+                statusEntries.length === 0
+                  ? "No HA status available. HA may not be configured for this cluster."
+                  : undefined
+              }
+            >
+              <HAStatusStrip
+                manager={manager}
+                quorum={quorum}
+                nodes={nodeEntries}
+                services={serviceEntries}
+              />
+            </Panel>
 
             <HAMaintenanceCard clusterId={clusterId} pveVersion={pveVersion} />
 
             {nodeEntries.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Node Status</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Node</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>CRM State</TableHead>
-                        <TableHead>Timestamp</TableHead>
+              <Panel
+                flush
+                title="Node status"
+                aside={String(nodeEntries.length)}
+              >
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Node</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>CRM state</TableHead>
+                      <TableHead>Timestamp</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {nodeEntries.map((n) => (
+                      <TableRow key={n.id}>
+                        <TableCell className="font-medium">
+                          {n.node ?? n.id.replace("lrm:", "")}
+                        </TableCell>
+                        <TableCell>
+                          {n.status.includes("maintenance") ? (
+                            <Badge variant="warning">Maintenance</Badge>
+                          ) : (
+                            statusBadge(
+                              n.status.includes("active") ? "active" : n.status,
+                            )
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {n.crm_state ??
+                            (n.status.includes("active")
+                              ? "active"
+                              : (n.state ?? "—"))}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {n.timestamp
+                            ? new Date(n.timestamp * 1000).toLocaleString()
+                            : "—"}
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {nodeEntries.map((n) => (
-                        <TableRow key={n.id}>
-                          <TableCell className="font-medium">
-                            {n.node ?? n.id.replace("lrm:", "")}
-                          </TableCell>
-                          <TableCell>
-                            {n.status.includes("maintenance") ? (
-                              <Badge
-                                variant="outline"
-                                className="border-amber-500/50 text-amber-600 dark:text-amber-400"
-                              >
-                                Maintenance
-                              </Badge>
-                            ) : (
-                              statusBadge(
-                                n.status.includes("active")
-                                  ? "active"
-                                  : n.status,
-                              )
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {n.crm_state ??
-                              (n.status.includes("active")
-                                ? "active"
-                                : (n.state ?? "—"))}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {n.timestamp
-                              ? new Date(n.timestamp * 1000).toLocaleString()
-                              : "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Panel>
             )}
 
             {serviceEntries.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Active Services</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Service</TableHead>
-                        <TableHead>Node</TableHead>
-                        <TableHead>State</TableHead>
-                        <TableHead>Request State</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {serviceEntries.map((s) => (
-                        <TableRow key={s.sid ?? s.id}>
-                          <TableCell>
-                            <span className="font-mono text-sm">
-                              {s.sid ?? s.id}
+              <Panel
+                flush
+                title="Active services"
+                aside={String(serviceEntries.length)}
+              >
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Service</TableHead>
+                      <TableHead>Node</TableHead>
+                      <TableHead>State</TableHead>
+                      <TableHead>Request state</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {serviceEntries.map((s) => (
+                      <TableRow key={s.sid ?? s.id}>
+                        <TableCell>
+                          <span className="font-mono text-sm">
+                            {s.sid ?? s.id}
+                          </span>
+                          {s.sid && vmNameBySID.get(s.sid) && (
+                            <span className="ml-2 text-muted-foreground">
+                              {vmNameBySID.get(s.sid)}
                             </span>
-                            {s.sid && vmNameBySID.get(s.sid) && (
-                              <span className="ml-2 text-muted-foreground">
-                                {vmNameBySID.get(s.sid)}
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell>{s.node ?? "—"}</TableCell>
-                          <TableCell>
-                            {statusBadge(s.state ?? s.status)}
-                          </TableCell>
-                          <TableCell>{s.request_state ?? "—"}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+                          )}
+                        </TableCell>
+                        <TableCell>{s.node ?? "—"}</TableCell>
+                        <TableCell>
+                          {statusBadge(s.state ?? s.status)}
+                        </TableCell>
+                        <TableCell>{s.request_state ?? "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Panel>
             )}
 
             {managerStatusQuery.data && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Manager Details</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <pre className="max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs font-mono">
+              <Panel title="Manager details">
+                {/* Raw, for diagnosis: folded away until it is wanted. */}
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    The manager&apos;s status as Proxmox reports it
+                  </summary>
+                  <pre className="mt-3 max-h-80 overflow-auto rounded-md bg-foreground/[0.05] p-3 font-mono text-xs">
                     {JSON.stringify(managerStatusQuery.data, null, 2)}
                   </pre>
-                </CardContent>
-              </Card>
-            )}
-
-            {statusEntries.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                No HA status available. HA may not be configured for this
-                cluster.
-              </p>
+                </details>
+              </Panel>
             )}
           </>
         )}
       </TabsContent>
 
-      <TabsContent value="resources" className="mt-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>HA Resources</CardTitle>
-            {canManage("ha") && (
+      <TabsContent
+        value="resources"
+        aria-label="Resources"
+        aria-labelledby={undefined}
+        className="mt-4"
+      >
+        <Panel
+          flush
+          title="HA resources"
+          aside={
+            resourcesQuery.data && resourcesQuery.data.length > 0
+              ? String(resourcesQuery.data.length)
+              : undefined
+          }
+          actions={
+            canManage("ha") ? (
               <Dialog open={resCreateOpen} onOpenChange={setResCreateOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm">
@@ -520,140 +554,149 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                   />
                 </DialogContent>
               </Dialog>
-            )}
-          </CardHeader>
-          <CardContent>
-            {resourcesQuery.isLoading && <Skeleton className="h-20 w-full" />}
-            {resourcesQuery.isError && (
+            ) : undefined
+          }
+        >
+          {resourcesQuery.isLoading && (
+            <div className="px-[18px]">
+              <Skeleton className="h-20 w-full" />
+            </div>
+          )}
+          {resourcesQuery.isError && (
+            <div className="px-[18px]">
               <ErrorBanner error={resourcesQuery.error} />
-            )}
-            {!resourcesQuery.isLoading &&
-              !resourcesQuery.isError &&
-              (resourcesQuery.data && resourcesQuery.data.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Resource</TableHead>
-                      <TableHead>State</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Group</TableHead>
-                      <TableHead>Restart / Relocate</TableHead>
-                      {resourceFailback && <TableHead>Failback</TableHead>}
-                      <TableHead>Comment</TableHead>
+            </div>
+          )}
+          {!resourcesQuery.isLoading &&
+            !resourcesQuery.isError &&
+            (resourcesQuery.data && resourcesQuery.data.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Resource</TableHead>
+                    <TableHead>State</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Group</TableHead>
+                    <TableHead>Restart / Relocate</TableHead>
+                    {resourceFailback && <TableHead>Failback</TableHead>}
+                    <TableHead>Comment</TableHead>
+                    {canManage("ha") && (
+                      <TableHead className="w-24">
+                        <span className="sr-only">Actions</span>
+                      </TableHead>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {resourcesQuery.data.map((res) => (
+                    <TableRow key={res.sid}>
+                      <TableCell>
+                        <span className="font-mono text-sm">{res.sid}</span>
+                        {vmNameBySID.get(res.sid) && (
+                          <span className="ml-2 text-muted-foreground">
+                            {vmNameBySID.get(res.sid)}
+                          </span>
+                        )}
+                        <ClusterHistoryButton
+                          history={clusterHistories.haResource(
+                            clusterId,
+                            res.sid,
+                          )}
+                          title={res.sid}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {canManage("ha") ? (
+                          <Select
+                            value={res.state || HA_RESOURCE_DEFAULTS.state}
+                            onValueChange={(v) => {
+                              handleQuickStateChange(res.sid, v);
+                            }}
+                          >
+                            <SelectTrigger className="h-7 w-28">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {HA_STATES.map((s) => (
+                                <SelectItem key={s} value={s}>
+                                  {s}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          statusBadge(res.state || HA_RESOURCE_DEFAULTS.state)
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {res.status ? statusBadge(res.status) : "—"}
+                      </TableCell>
+                      <TableCell>{res.group || "—"}</TableCell>
+                      <TableCell className="text-xs">
+                        <ResourceSetting
+                          value={res.max_restart}
+                          fallback={HA_RESOURCE_DEFAULTS.max_restart}
+                        />
+                        {" / "}
+                        <ResourceSetting
+                          value={res.max_relocate}
+                          fallback={HA_RESOURCE_DEFAULTS.max_relocate}
+                        />
+                      </TableCell>
+                      {resourceFailback && (
+                        <TableCell>
+                          {(res.failback ?? HA_RESOURCE_DEFAULTS.failback) ===
+                          0 ? (
+                            <span className="text-muted-foreground">Off</span>
+                          ) : (
+                            "On"
+                          )}
+                          {res.failback === undefined && <DefaultMark />}
+                        </TableCell>
+                      )}
+                      <TableCell
+                        className="max-w-[12rem] truncate text-xs text-muted-foreground"
+                        title={res.comment ?? ""}
+                      >
+                        {res.comment || "—"}
+                      </TableCell>
                       {canManage("ha") && (
-                        <TableHead className="text-right">Actions</TableHead>
+                        <TableCell className="whitespace-nowrap text-right">
+                          <Button
+                            aria-label={`Edit resource ${res.sid}`}
+                            variant="ghost"
+                            size="sm"
+                            className={ROW_ACTION}
+                            onClick={() => {
+                              setResEditing(res);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            aria-label={`Delete resource ${res.sid}`}
+                            variant="ghost"
+                            size="sm"
+                            className={ROW_DELETE}
+                            disabled={deleteResource.isPending}
+                            onClick={() => {
+                              setPendingResource(res);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
                       )}
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {resourcesQuery.data.map((res) => (
-                      <TableRow key={res.sid}>
-                        <TableCell>
-                          <span className="font-mono text-sm">{res.sid}</span>
-                          {vmNameBySID.get(res.sid) && (
-                            <span className="ml-2 text-muted-foreground">
-                              {vmNameBySID.get(res.sid)}
-                            </span>
-                          )}
-                          <ClusterHistoryButton
-                            history={clusterHistories.haResource(
-                              clusterId,
-                              res.sid,
-                            )}
-                            title={res.sid}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {canManage("ha") ? (
-                            <Select
-                              value={res.state || HA_RESOURCE_DEFAULTS.state}
-                              onValueChange={(v) => {
-                                handleQuickStateChange(res.sid, v);
-                              }}
-                            >
-                              <SelectTrigger className="h-7 w-28">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {HA_STATES.map((s) => (
-                                  <SelectItem key={s} value={s}>
-                                    {s}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            statusBadge(res.state || HA_RESOURCE_DEFAULTS.state)
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {res.status ? statusBadge(res.status) : "—"}
-                        </TableCell>
-                        <TableCell>{res.group || "—"}</TableCell>
-                        <TableCell className="text-xs">
-                          <ResourceSetting
-                            value={res.max_restart}
-                            fallback={HA_RESOURCE_DEFAULTS.max_restart}
-                          />
-                          {" / "}
-                          <ResourceSetting
-                            value={res.max_relocate}
-                            fallback={HA_RESOURCE_DEFAULTS.max_relocate}
-                          />
-                        </TableCell>
-                        {resourceFailback && (
-                          <TableCell>
-                            {(res.failback ?? HA_RESOURCE_DEFAULTS.failback) ===
-                            0 ? (
-                              <Badge variant="outline">Off</Badge>
-                            ) : (
-                              <Badge variant="default">On</Badge>
-                            )}
-                            {res.failback === undefined && <DefaultMark />}
-                          </TableCell>
-                        )}
-                        <TableCell
-                          className="max-w-[12rem] truncate text-xs text-muted-foreground"
-                          title={res.comment ?? ""}
-                        >
-                          {res.comment || "—"}
-                        </TableCell>
-                        {canManage("ha") && (
-                          <TableCell className="text-right space-x-1">
-                            <Button
-                              aria-label={`Edit resource ${res.sid}`}
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setResEditing(res);
-                              }}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              aria-label={`Delete resource ${res.sid}`}
-                              variant="ghost"
-                              size="sm"
-                              disabled={deleteResource.isPending}
-                              onClick={() => {
-                                setPendingResource(res);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  No HA resources configured.
-                </p>
-              ))}
-          </CardContent>
-        </Card>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="px-[18px] text-sm text-muted-foreground">
+                No HA resources configured.
+              </p>
+            ))}
+        </Panel>
 
         {/* Edit-resource dialog */}
         <Dialog
@@ -681,12 +724,19 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         </Dialog>
       </TabsContent>
 
-      <TabsContent value="groups" className="mt-4 space-y-4">
+      <TabsContent
+        value="groups"
+        aria-label="Groups / Rules"
+        aria-labelledby={undefined}
+        className="mt-4 space-y-4"
+      >
         {/* HA Rules section (PVE 9.0+) */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>HA Rules</CardTitle>
-            {canManage("ha") && rulesSupported && (
+        <Panel
+          flush
+          title="HA rules"
+          aside={hasRules ? String((rulesQuery.data ?? []).length) : undefined}
+          actions={
+            canManage("ha") && rulesSupported ? (
               <Dialog open={ruleCreateOpen} onOpenChange={setRuleCreateOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm">
@@ -710,121 +760,133 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                   />
                 </DialogContent>
               </Dialog>
-            )}
-          </CardHeader>
-          <CardContent>
-            {rulesQuery.isLoading && <Skeleton className="h-20 w-full" />}
-            {rulesQuery.isError && <ErrorBanner error={rulesQuery.error} />}
-            {!rulesQuery.isLoading &&
-              !rulesQuery.isError &&
-              (hasRules ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Rule</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Resources</TableHead>
-                      <TableHead>Nodes / Affinity</TableHead>
-                      <TableHead>Strict</TableHead>
-                      <TableHead>Comment</TableHead>
-                      <TableHead>Enabled</TableHead>
+            ) : undefined
+          }
+        >
+          {rulesQuery.isLoading && (
+            <div className="px-[18px]">
+              <Skeleton className="h-20 w-full" />
+            </div>
+          )}
+          {rulesQuery.isError && (
+            <div className="px-[18px]">
+              <ErrorBanner error={rulesQuery.error} />
+            </div>
+          )}
+          {!rulesQuery.isLoading &&
+            !rulesQuery.isError &&
+            (hasRules ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Rule</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Resources</TableHead>
+                    <TableHead>Nodes / Affinity</TableHead>
+                    <TableHead>Strict</TableHead>
+                    <TableHead>Comment</TableHead>
+                    <TableHead>Enabled</TableHead>
+                    {canManage("ha") && (
+                      <TableHead className="w-24">
+                        <span className="sr-only">Actions</span>
+                      </TableHead>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(rulesQuery.data ?? []).map((r) => (
+                    <TableRow key={r.rule}>
+                      <TableCell className="font-medium">
+                        {r.rule}
+                        <ClusterHistoryButton
+                          history={clusterHistories.haRule(clusterId, r.rule)}
+                          title={r.rule}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{r.type}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs font-mono">
+                        {r.resources}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono">
+                        {r.type === "resource-affinity"
+                          ? (r.affinity ?? "—")
+                          : (r.nodes ?? "—")}
+                      </TableCell>
+                      <TableCell>
+                        {r.type === "node-affinity" ? (
+                          r.strict ? (
+                            "Yes"
+                          ) : (
+                            <span className="text-muted-foreground">No</span>
+                          )
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell
+                        className="max-w-[10rem] truncate text-xs text-muted-foreground"
+                        title={r.comment ?? ""}
+                      >
+                        {r.comment || "—"}
+                      </TableCell>
+                      <TableCell>
+                        {canManage("ha") ? (
+                          <Switch
+                            aria-label={`Rule ${r.rule} enabled`}
+                            checked={r.disable !== 1}
+                            onCheckedChange={(checked) => {
+                              handleQuickRuleDisable(r, !checked);
+                            }}
+                          />
+                        ) : r.disable === 1 ? (
+                          <Badge variant="secondary">Disabled</Badge>
+                        ) : (
+                          <Badge variant="healthy">Enabled</Badge>
+                        )}
+                      </TableCell>
                       {canManage("ha") && (
-                        <TableHead className="text-right">Actions</TableHead>
+                        <TableCell className="whitespace-nowrap text-right">
+                          <Button
+                            aria-label={`Edit rule ${r.rule}`}
+                            variant="ghost"
+                            size="sm"
+                            className={ROW_ACTION}
+                            onClick={() => {
+                              setRuleEditing(r);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            aria-label={`Delete rule ${r.rule}`}
+                            variant="ghost"
+                            size="sm"
+                            className={ROW_DELETE}
+                            disabled={deleteRule.isPending}
+                            onClick={() => {
+                              setPendingRule(r);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
                       )}
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(rulesQuery.data ?? []).map((r) => (
-                      <TableRow key={r.rule}>
-                        <TableCell className="font-medium">
-                          {r.rule}
-                          <ClusterHistoryButton
-                            history={clusterHistories.haRule(clusterId, r.rule)}
-                            title={r.rule}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{r.type}</Badge>
-                        </TableCell>
-                        <TableCell className="text-xs font-mono">
-                          {r.resources}
-                        </TableCell>
-                        <TableCell className="text-xs font-mono">
-                          {r.type === "resource-affinity"
-                            ? (r.affinity ?? "—")
-                            : (r.nodes ?? "—")}
-                        </TableCell>
-                        <TableCell>
-                          {r.type === "node-affinity" ? (
-                            r.strict ? (
-                              <Badge variant="default">Yes</Badge>
-                            ) : (
-                              <Badge variant="outline">No</Badge>
-                            )
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell
-                          className="max-w-[10rem] truncate text-xs text-muted-foreground"
-                          title={r.comment ?? ""}
-                        >
-                          {r.comment || "—"}
-                        </TableCell>
-                        <TableCell>
-                          {canManage("ha") ? (
-                            <Switch
-                              checked={r.disable !== 1}
-                              onCheckedChange={(checked) => {
-                                handleQuickRuleDisable(r, !checked);
-                              }}
-                            />
-                          ) : r.disable === 1 ? (
-                            <Badge variant="secondary">Disabled</Badge>
-                          ) : (
-                            <Badge variant="healthy">Enabled</Badge>
-                          )}
-                        </TableCell>
-                        {canManage("ha") && (
-                          <TableCell className="text-right space-x-1">
-                            <Button
-                              aria-label={`Edit rule ${r.rule}`}
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setRuleEditing(r);
-                              }}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              aria-label={`Delete rule ${r.rule}`}
-                              variant="ghost"
-                              size="sm"
-                              disabled={deleteRule.isPending}
-                              onClick={() => {
-                                setPendingRule(r);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {rulesSupported
-                    ? "No HA rules configured."
-                    : versionKnown
-                      ? "HA rules require Proxmox VE 9.0 or newer."
-                      : "Checking the cluster's Proxmox VE version…"}
-                </p>
-              ))}
-          </CardContent>
-        </Card>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="px-[18px] text-sm text-muted-foreground">
+                {rulesSupported
+                  ? "No HA rules configured."
+                  : versionKnown
+                    ? "HA rules require Proxmox VE 9.0 or newer."
+                    : "Checking the cluster's Proxmox VE version…"}
+              </p>
+            ))}
+        </Panel>
 
         {/* Edit-rule dialog */}
         <Dialog
@@ -858,17 +920,16 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
             for any cluster where groups still exist — but not, with nothing
             to list, while the version is still unknown. */}
         {(hasGroups || (versionKnown && !rulesSupported)) && (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>
-                HA Groups
-                {rulesSupported && (
-                  <span className="ml-2 text-xs text-muted-foreground font-normal">
-                    (Legacy — superseded by Rules in PVE 9)
-                  </span>
-                )}
-              </CardTitle>
-              {canManage("ha") && groupWritesAllowed && (
+          <Panel
+            flush
+            title="HA groups"
+            aside={
+              rulesSupported
+                ? "Legacy, superseded by rules in PVE 9"
+                : undefined
+            }
+            actions={
+              canManage("ha") && groupWritesAllowed ? (
                 <Dialog open={grpCreateOpen} onOpenChange={setGrpCreateOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm">
@@ -923,112 +984,115 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                     </form>
                   </DialogContent>
                 </Dialog>
-              )}
-            </CardHeader>
-            <CardContent>
-              {groupsDeprecated && (
-                <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>
-                    Proxmox VE 9 migrated HA Groups to <strong>HA Rules</strong>{" "}
-                    (node affinity). Creating or editing groups is disabled
-                    &mdash; use the <strong>Rules</strong> section above. Any
-                    existing groups are shown read-only.
-                  </span>
-                </div>
-              )}
-              {groupsQuery.isLoading && <Skeleton className="h-20 w-full" />}
-              {groupsQuery.isError && <ErrorBanner error={groupsQuery.error} />}
-              {!groupsQuery.isLoading &&
-                !groupsQuery.isError &&
-                (hasGroups ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Group</TableHead>
-                        <TableHead>Nodes</TableHead>
-                        <TableHead>Restricted</TableHead>
-                        <TableHead>No Failback</TableHead>
-                        <TableHead>Comment</TableHead>
+              ) : undefined
+            }
+          >
+            {groupsDeprecated && (
+              <p className="flex items-start gap-2 px-[18px] pb-3 text-[12.5px] text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  Proxmox VE 9 migrated HA Groups to <strong>HA Rules</strong>{" "}
+                  (node affinity). Creating or editing groups is disabled; use
+                  the <strong>Rules</strong> section above. Any existing groups
+                  are shown read-only.
+                </span>
+              </p>
+            )}
+            {groupsQuery.isLoading && (
+              <div className="px-[18px]">
+                <Skeleton className="h-20 w-full" />
+              </div>
+            )}
+            {groupsQuery.isError && (
+              <div className="px-[18px]">
+                <ErrorBanner error={groupsQuery.error} />
+              </div>
+            )}
+            {!groupsQuery.isLoading &&
+              !groupsQuery.isError &&
+              (hasGroups ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Group</TableHead>
+                      <TableHead>Nodes</TableHead>
+                      <TableHead>Restricted</TableHead>
+                      <TableHead>No failback</TableHead>
+                      <TableHead>Comment</TableHead>
+                      {canManage("ha") && (
+                        <TableHead className="w-24">
+                          <span className="sr-only">Actions</span>
+                        </TableHead>
+                      )}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(groupsQuery.data ?? []).map((g) => (
+                      <TableRow key={g.group}>
+                        <TableCell className="font-medium">
+                          {g.group}
+                          <ClusterHistoryButton
+                            history={clusterHistories.haGroup(
+                              clusterId,
+                              g.group,
+                            )}
+                            title={g.group}
+                          />
+                        </TableCell>
+                        <TableCell className="text-xs font-mono">
+                          {g.nodes}
+                        </TableCell>
+                        <TableCell>
+                          <YesNo value={Boolean(g.restricted)} />
+                        </TableCell>
+                        <TableCell>
+                          <YesNo value={Boolean(g.nofailback)} />
+                        </TableCell>
+                        <TableCell
+                          className="max-w-[10rem] truncate text-xs text-muted-foreground"
+                          title={g.comment ?? ""}
+                        >
+                          {g.comment ?? "—"}
+                        </TableCell>
                         {canManage("ha") && (
-                          <TableHead className="text-right">Actions</TableHead>
-                        )}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(groupsQuery.data ?? []).map((g) => (
-                        <TableRow key={g.group}>
-                          <TableCell className="font-medium">
-                            {g.group}
-                            <ClusterHistoryButton
-                              history={clusterHistories.haGroup(
-                                clusterId,
-                                g.group,
-                              )}
-                              title={g.group}
-                            />
-                          </TableCell>
-                          <TableCell className="text-xs font-mono">
-                            {g.nodes}
-                          </TableCell>
-                          <TableCell>
-                            {g.restricted ? (
-                              <Badge variant="default">Yes</Badge>
-                            ) : (
-                              <Badge variant="outline">No</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {g.nofailback ? (
-                              <Badge variant="default">Yes</Badge>
-                            ) : (
-                              <Badge variant="outline">No</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell
-                            className="max-w-[10rem] truncate text-xs text-muted-foreground"
-                            title={g.comment ?? ""}
-                          >
-                            {g.comment ?? "—"}
-                          </TableCell>
-                          {canManage("ha") && (
-                            <TableCell className="text-right space-x-1">
-                              {groupWritesAllowed && (
-                                <Button
-                                  aria-label={`Edit group ${g.group}`}
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    startEditGroup(g);
-                                  }}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                              )}
+                          <TableCell className="whitespace-nowrap text-right">
+                            {groupWritesAllowed && (
                               <Button
-                                aria-label={`Delete group ${g.group}`}
+                                aria-label={`Edit group ${g.group}`}
                                 variant="ghost"
                                 size="sm"
-                                disabled={deleteGroup.isPending}
+                                className={ROW_ACTION}
                                 onClick={() => {
-                                  setPendingGroup(g);
+                                  startEditGroup(g);
                                 }}
                               >
-                                <Trash2 className="h-4 w-4 text-destructive" />
+                                <Pencil className="h-4 w-4" />
                               </Button>
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No HA groups configured.
-                  </p>
-                ))}
-            </CardContent>
-          </Card>
+                            )}
+                            <Button
+                              aria-label={`Delete group ${g.group}`}
+                              variant="ghost"
+                              size="sm"
+                              className={ROW_DELETE}
+                              disabled={deleteGroup.isPending}
+                              onClick={() => {
+                                setPendingGroup(g);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="px-[18px] text-sm text-muted-foreground">
+                  No HA groups configured.
+                </p>
+              ))}
+          </Panel>
         )}
 
         {/* Edit-group dialog */}
@@ -1077,7 +1141,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         </Dialog>
       </TabsContent>
 
-      <HistoryTabContent history={clusterHistories.ha(clusterId)} />
+      <HistoryTabContent history={history} label="History" />
 
       {/*
         Resource delete (pve-ha-manager API2/HA/Resources.pm "delete", then
@@ -1218,106 +1282,79 @@ function ResourceSetting({
   );
 }
 
-// --- Status Summary Cards ---
+// --- Status strip ---
 
-function ManagerCard({ entry }: { entry: HAStatusEntry | undefined }) {
-  if (!entry) {
-    return (
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            HA Manager
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2">
-            <XCircle className="h-5 w-5 text-muted-foreground" />
-            <span className="text-sm">Not available</span>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const isActive = entry.status.includes("active") || entry.state === "active";
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          HA Manager
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center gap-2">
-          {isActive ? (
-            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-          ) : (
-            <XCircle className="h-5 w-5 text-destructive" />
-          )}
-          <span className="text-lg font-semibold">
-            {isActive ? "Active" : entry.status}
-          </span>
-        </div>
-        {entry.node && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Master node: {entry.node}
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
+/** A yes or no in a table: said in words, the no kept quiet. */
+function YesNo({ value }: { value: boolean }) {
+  return value ? <>Yes</> : <span className="text-muted-foreground">No</span>;
 }
 
-function QuorumCard({ entry }: { entry: HAStatusEntry | undefined }) {
+/**
+ * The HA stack at a glance: who the manager is, whether the cluster has
+ * quorum, and how many nodes and services HA is tracking.
+ */
+function HAStatusStrip({
+  manager,
+  quorum,
+  nodes,
+  services,
+}: {
+  manager: HAStatusEntry | undefined;
+  quorum: HAStatusEntry | undefined;
+  nodes: HAStatusEntry[];
+  services: HAStatusEntry[];
+}) {
+  const managerActive =
+    manager != null &&
+    (manager.status.includes("active") || manager.state === "active");
   const hasQuorum =
-    entry != null && (entry.quorum === 1 || entry.status === "OK");
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          Quorum
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center gap-2">
-          {hasQuorum ? (
-            <ShieldCheck className="h-5 w-5 text-emerald-500" />
-          ) : (
-            <AlertTriangle className="h-5 w-5 text-amber-500" />
-          )}
-          <span className="text-lg font-semibold">
-            {hasQuorum ? "OK" : "No Quorum"}
-          </span>
-        </div>
-        {!entry && (
-          <p className="mt-1 text-xs text-muted-foreground">No quorum data</p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ServiceSummaryCard({ services }: { services: HAStatusEntry[] }) {
-  const active = services.filter(
+    quorum != null && (quorum.quorum === 1 || quorum.status === "OK");
+  const nodesActive = nodes.filter((n) => n.status.includes("active")).length;
+  const servicesActive = services.filter(
     (s) => s.state === "started" || s.status === "active",
   ).length;
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          HA Services
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center gap-2">
-          <CircleDot className="h-5 w-5 text-primary" />
-          <span className="text-lg font-semibold">{services.length}</span>
-          <span className="text-sm text-muted-foreground">total</span>
-        </div>
-        {services.length > 0 && (
-          <p className="mt-1 text-xs text-muted-foreground">{active} active</p>
-        )}
-      </CardContent>
-    </Card>
+    <StatStrip>
+      <Stat
+        label="HA manager"
+        value={
+          manager == null
+            ? "Not available"
+            : managerActive
+              ? "Active"
+              : "Not active"
+        }
+        tone={manager == null ? "quiet" : managerActive ? "default" : "bad"}
+        sub={
+          manager == null
+            ? undefined
+            : managerActive
+              ? manager.node
+                ? `Master node: ${manager.node}`
+                : undefined
+              : manager.status
+        }
+      />
+      <Stat
+        label="Quorum"
+        value={quorum == null ? "Unknown" : hasQuorum ? "OK" : "No quorum"}
+        tone={quorum == null ? "quiet" : hasQuorum ? "default" : "bad"}
+        sub={quorum == null ? "No quorum data" : undefined}
+      />
+      <Stat
+        label="Nodes"
+        value={String(nodes.length)}
+        tone={nodes.length === 0 ? "quiet" : "default"}
+        sub={nodes.length > 0 ? `${String(nodesActive)} active` : undefined}
+      />
+      <Stat
+        label="HA services"
+        value={String(services.length)}
+        tone={services.length === 0 ? "quiet" : "default"}
+        sub={
+          services.length > 0 ? `${String(servicesActive)} active` : undefined
+        }
+      />
+    </StatStrip>
   );
 }

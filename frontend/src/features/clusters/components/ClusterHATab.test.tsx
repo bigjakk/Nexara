@@ -113,7 +113,7 @@ async function openResources(
     <ClusterHATab clusterId={CLUSTER} pveVersion={pveVersion} />,
     { client: createTestQueryClient({ keepCache: true }), router: false },
   );
-  await user.click(screen.getByRole("tab", { name: "Resources" }));
+  await user.click(screen.getByRole("button", { name: "Resources" }));
   await screen.findByText("vm:101");
   return user;
 }
@@ -276,7 +276,7 @@ describe("ClusterHATab — HA resource settings", () => {
 
   it("offers no HA rules on PVE 8, which has no rules API, and offers groups", async () => {
     const user = await openResources(PVE8, PVE8_RESOURCES);
-    await user.click(screen.getByRole("tab", { name: "Groups / Rules" }));
+    await user.click(screen.getByRole("button", { name: "Groups / Rules" }));
 
     expect(
       await screen.findByText("HA rules require Proxmox VE 9.0 or newer."),
@@ -284,7 +284,7 @@ describe("ClusterHATab — HA resource settings", () => {
     expect(
       screen.queryByRole("button", { name: "Add Rule" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/^HA Groups/)).toBeInTheDocument();
+    expect(screen.getByText(/^HA groups/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Add Group" }),
     ).toBeInTheDocument();
@@ -292,13 +292,13 @@ describe("ClusterHATab — HA resource settings", () => {
 
   it("offers HA rules on PVE 9, and no groups once they are migrated", async () => {
     const user = await openResources(PVE9, RESOURCES);
-    await user.click(screen.getByRole("tab", { name: "Groups / Rules" }));
+    await user.click(screen.getByRole("button", { name: "Groups / Rules" }));
 
     expect(
       await screen.findByRole("button", { name: "Add Rule" }),
     ).toBeInTheDocument();
     expect(screen.getByText("No HA rules configured.")).toBeInTheDocument();
-    expect(screen.queryByText(/^HA Groups/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^HA groups/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Add Group" }),
     ).not.toBeInTheDocument();
@@ -309,7 +309,7 @@ describe("ClusterHATab — HA resource settings", () => {
   // for rules and offered group writes a migrated PVE 9 cluster refuses.
   it("says it is checking while the version is unknown, and offers no rule or group writes", async () => {
     const user = await openResources("", RESOURCES);
-    await user.click(screen.getByRole("tab", { name: "Groups / Rules" }));
+    await user.click(screen.getByRole("button", { name: "Groups / Rules" }));
 
     expect(
       await screen.findByText("Checking the cluster's Proxmox VE version…"),
@@ -321,7 +321,7 @@ describe("ClusterHATab — HA resource settings", () => {
       screen.queryByRole("button", { name: "Add Rule" }),
     ).not.toBeInTheDocument();
     // Nothing to list, so no groups card either — and so no Add Group.
-    expect(screen.queryByText(/^HA Groups/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^HA groups/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Add Group" }),
     ).not.toBeInTheDocument();
@@ -336,7 +336,7 @@ describe("ClusterHATab — HA resource settings", () => {
         nofailback: 0,
       },
     ]);
-    await user.click(screen.getByRole("tab", { name: "Groups / Rules" }));
+    await user.click(screen.getByRole("button", { name: "Groups / Rules" }));
 
     expect(await screen.findByText("ha-group01")).toBeInTheDocument();
     expect(

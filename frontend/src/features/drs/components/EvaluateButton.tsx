@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
+import { UsageBar } from "@/components/UsageBar";
+import { cn } from "@/lib/utils";
+import { usageLevel, USAGE_TEXT_CLASS } from "@/lib/usage-level";
 import { useTriggerEvaluation } from "../api/drs-queries";
 import type { DRSRecommendation, NodeScore } from "../types/drs";
-import { Play, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Play, Loader2, AlertTriangle } from "lucide-react";
 
 interface EvaluateButtonProps {
   clusterId: string;
@@ -14,29 +16,23 @@ function pct(v: number): string {
   return `${(v * 100).toFixed(1)}%`;
 }
 
-/** Color class based on load percentage. */
-function loadColor(v: number): string {
-  if (v >= 0.8) return "text-red-500";
-  if (v >= 0.6) return "text-amber-500";
-  return "text-emerald-600 dark:text-emerald-400";
-}
+/** A verdict that asks for a look: the balanced one stays plain. */
+const VERDICT_WARN = "font-medium text-amber-700 dark:text-amber-400";
 
-/** Simple horizontal bar showing load visually. */
+/** One of a node's loads: the shared capacity bar and its reading. */
 function LoadBar({ value, label }: { value: number; label: string }) {
-  const widthPct = Math.min(value * 100, 100);
-  let barColor = "bg-emerald-500/70";
-  if (value >= 0.8) barColor = "bg-red-500/70";
-  else if (value >= 0.6) barColor = "bg-amber-500/70";
+  const percent = Math.min(value * 100, 100);
+  const level = usageLevel(percent);
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="w-10 text-muted-foreground">{label}</span>
-      <div className="h-2 flex-1 rounded-full bg-muted">
-        <div
-          className={`h-2 rounded-full ${barColor}`}
-          style={{ width: `${String(widthPct)}%` }}
-        />
-      </div>
-      <span className={`w-12 text-right font-mono ${loadColor(value)}`}>
+      <UsageBar percent={percent} className="flex-1" />
+      <span
+        className={cn(
+          "w-12 text-right font-mono",
+          level === "ok" ? "text-muted-foreground" : USAGE_TEXT_CLASS[level],
+        )}
+      >
         {pct(value)}
       </span>
     </div>
@@ -114,99 +110,104 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
     : [];
 
   return (
-    <div className="space-y-4">
-      <Button
-        onClick={handleEvaluate}
-        disabled={evaluation.isPending || clusterId.length === 0}
-        variant="outline"
-      >
-        {evaluation.isPending ? (
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        ) : (
-          <Play className="mr-2 h-4 w-4" />
+    <Panel
+      title="Evaluation"
+      aside={
+        isBalanced ? (
+          "Cluster balanced"
+        ) : isImbalancedNoMoves ? (
+          <span className={VERDICT_WARN}>
+            Imbalanced, no beneficial migrations
+          </span>
+        ) : isImbalancedWithMoves ? (
+          <span className={VERDICT_WARN}>
+            {results.length}{" "}
+            {results.length === 1 ? "recommendation" : "recommendations"}
+          </span>
+        ) : undefined
+      }
+      actions={
+        <Button
+          onClick={handleEvaluate}
+          disabled={evaluation.isPending || clusterId.length === 0}
+          variant="outline"
+          size="sm"
+        >
+          {evaluation.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Play className="mr-2 h-4 w-4" />
+          )}
+          Run Evaluation
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        {!evaluated && !evaluation.isError && (
+          <p className="text-sm text-muted-foreground">
+            Score the nodes now and see what DRS would move. Nothing is migrated
+            unless the mode is Automatic.
+          </p>
         )}
-        Run Evaluation
-      </Button>
 
-      {/*
-        Gate on isError, not on the message: a proxy 502 with an HTML body
-        falls back to res.statusText, which is "" over HTTP/2, and a failure
-        now clears the results — so keying off the message alone would render
-        the whole panel blank.
-      */}
-      {evaluation.isError && (
-        <p className="text-sm text-destructive">
-          {errorMessage || "Evaluation failed."}
-        </p>
-      )}
+        {/*
+          Gate on isError, not on the message: a proxy 502 with an HTML body
+          falls back to res.statusText, which is "" over HTTP/2, and a failure
+          now clears the results — so keying off the message alone would render
+          the whole panel blank.
+        */}
+        {evaluation.isError && (
+          <p className="text-sm text-destructive">
+            {errorMessage || "Evaluation failed."}
+          </p>
+        )}
 
-      {isBlocked && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-              Evaluation skipped — Proxmox native CRS active
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              {blockReason ||
-                "Proxmox native CRS auto-rebalance is enabled on this cluster, so Nexara automatic migrations are paused. Switch DRS to Advisory mode to generate recommendations without migrating."}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+        {isBlocked && (
+          <div className="flex items-start gap-2 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div>
+              <p className="font-medium">
+                Evaluation skipped: Proxmox native CRS active
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                {blockReason ||
+                  "Proxmox native CRS auto-rebalance is enabled on this cluster, so Nexara automatic migrations are paused. Switch DRS to Advisory mode to generate recommendations without migrating."}
+              </p>
+            </div>
+          </div>
+        )}
 
-      {hasResults && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              {isBalanced && (
-                <>
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  Cluster Balanced
-                </>
-              )}
-              {isImbalancedNoMoves && (
-                <>
-                  <AlertTriangle className="h-4 w-4 text-amber-500" />
-                  Imbalanced — No Beneficial Migrations
-                </>
-              )}
-              {isImbalancedWithMoves && (
-                <>
-                  <AlertTriangle className="h-4 w-4 text-amber-500" />
-                  {results.length} Recommendation
-                  {results.length !== 1 ? "s" : ""}
-                </>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        {hasResults && (
+          <>
             {/* Node Score Breakdown */}
             {sortedScores.length > 0 && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    Node Load Scores
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <span className="text-[12.5px] font-medium text-muted-foreground">
+                    Node load scores
                   </span>
-                  <Badge
-                    variant={
-                      imbalance > threshold ? "destructive" : "secondary"
-                    }
-                    className="font-mono text-xs"
+                  <span
+                    className={cn(
+                      "font-mono text-xs",
+                      imbalance > threshold
+                        ? "font-semibold text-amber-700 dark:text-amber-400"
+                        : "text-muted-foreground",
+                    )}
                   >
                     Variance: {pct(imbalance)} / Threshold: {pct(threshold)}
-                  </Badge>
+                  </span>
                 </div>
-                <div className="space-y-3">
+                <div className="divide-y">
                   {sortedScores.map((ns) => (
-                    <div key={ns.node} className="space-y-1">
+                    <div
+                      key={ns.node}
+                      className="space-y-1 py-2.5 first:pt-0 last:pb-0"
+                    >
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">{ns.node}</span>
-                        <Badge variant="outline" className="font-mono text-xs">
+                        <span className="font-mono text-xs text-muted-foreground">
                           {pct(ns.score)}
-                        </Badge>
+                        </span>
                       </div>
                       <LoadBar value={ns.cpu_load} label="CPU" />
                       <LoadBar value={ns.mem_load} label="Mem" />
@@ -230,7 +231,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
                 Load variance ({pct(imbalance)}) exceeds the threshold (
                 {pct(threshold)}), but no single VM migration would improve the
                 balance. This typically happens when nodes have very few VMs or
-                when workloads are too large relative to the load difference —
+                when workloads are too large relative to the load difference:
                 moving any one VM would overshoot and make things worse.
               </p>
             )}
@@ -238,8 +239,8 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
             {/* Recommendations */}
             {isImbalancedWithMoves && (
               <div className="space-y-2">
-                <span className="text-xs font-medium text-muted-foreground">
-                  Recommended Migrations
+                <span className="text-[12.5px] font-medium text-muted-foreground">
+                  Recommended migrations
                 </span>
                 {queued && (
                   <p className="text-xs text-muted-foreground">
@@ -250,30 +251,32 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
                     Results appear in DRS history.
                   </p>
                 )}
-                {results.map((rec, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between rounded-md border p-3 text-sm"
-                  >
-                    <div>
-                      <span className="font-medium">
-                        {rec.vm_type.toUpperCase()} {rec.vmid}
+                <ul className="divide-y text-sm">
+                  {results.map((rec, i) => (
+                    <li
+                      key={i}
+                      className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0"
+                    >
+                      <div className="min-w-0">
+                        <span className="font-medium">
+                          {rec.vm_type.toUpperCase()} {rec.vmid}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          {rec.from} &rarr; {rec.to}
+                        </span>
+                      </div>
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                        +{(rec.improvement * 100).toFixed(1)}%
                       </span>
-                      <span className="text-muted-foreground">
-                        {" "}
-                        {rec.from} &rarr; {rec.to}
-                      </span>
-                    </div>
-                    <Badge variant="secondary">
-                      +{(rec.improvement * 100).toFixed(1)}%
-                    </Badge>
-                  </div>
-                ))}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
-          </CardContent>
-        </Card>
-      )}
-    </div>
+          </>
+        )}
+      </div>
+    </Panel>
   );
 }

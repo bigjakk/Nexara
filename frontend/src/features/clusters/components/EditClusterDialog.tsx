@@ -323,11 +323,11 @@ export function EditClusterDialog({
           </div>
 
           {sshResetForeseen && sshResetConfirm == null && (
-            <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
+            <div className="rounded-lg bg-amber-500/10 p-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-500 shrink-0" />
                 <div className="space-y-1">
-                  <p className="text-sm font-medium text-amber-600 dark:text-amber-500">
+                  <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
                     SSH credential will be cleared
                   </p>
                   <p className="text-sm text-muted-foreground">
@@ -410,8 +410,8 @@ export function EditClusterDialog({
             {fingerprint != null && (
               <>
                 {fingerprint.self_signed ? (
-                  <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 space-y-3">
-                    <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
+                  <div className="rounded-lg bg-amber-500/10 p-4 space-y-3">
+                    <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
                       <ShieldAlert className="h-5 w-5 shrink-0" />
                       <span className="font-medium">
                         Self-Signed Certificate
@@ -432,8 +432,8 @@ export function EditClusterDialog({
                     </div>
                     {cluster.tls_fingerprint &&
                       fingerprint.fingerprint !== cluster.tls_fingerprint && (
-                        <div className="rounded-md border border-orange-500/50 bg-orange-500/10 p-2">
-                          <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">
+                        <div className="rounded-md bg-amber-500/15 p-2">
+                          <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
                             This fingerprint differs from the currently stored
                             fingerprint. The server certificate has changed.
                           </p>
@@ -454,9 +454,10 @@ export function EditClusterDialog({
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 p-4">
-                    <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-500">
-                      <ShieldCheck className="h-5 w-5 shrink-0" />
+                  // Nothing to decide here, so it is said quietly.
+                  <div className="panel rounded-lg p-4">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-500" />
                       <span className="font-medium">Trusted Certificate</span>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">
@@ -514,11 +515,11 @@ export function EditClusterDialog({
             )}
 
           {showConnectivityWarning && (
-            <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
+            <div className="rounded-lg bg-amber-500/10 p-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-500 shrink-0" />
                 <div>
-                  <p className="text-sm font-medium text-amber-600 dark:text-amber-500">
+                  <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
                     Connectivity Issue
                   </p>
                   <p className="text-sm text-muted-foreground">

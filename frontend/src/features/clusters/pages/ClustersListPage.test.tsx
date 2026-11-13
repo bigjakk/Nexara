@@ -75,9 +75,11 @@ describe("ClustersListPage", () => {
     expect(screen.getByText("Clusters")).toBeInTheDocument();
     expect(screen.getByText("Prod Cluster")).toBeInTheDocument();
     expect(screen.getByText("Dev Cluster")).toBeInTheDocument();
+    // The summary counts what has been read: the clusters and their states.
+    expect(screen.getByText("2 clusters, 1 inactive")).toBeInTheDocument();
   });
 
-  it("shows online/inactive badges", () => {
+  it("names a cluster's state only when it is not online", () => {
     mockUseClusters.mockReturnValue({
       data: mockClusters,
       isLoading: false,
@@ -85,7 +87,9 @@ describe("ClustersListPage", () => {
     });
 
     renderWithProviders(<ClustersListPage />);
-    expect(screen.getByText("Online")).toBeInTheDocument();
+    // Online is the state dot alone, named for a screen reader.
+    expect(screen.getByRole("img", { name: "Online" })).toBeInTheDocument();
+    expect(screen.queryByText("Online")).not.toBeInTheDocument();
     expect(screen.getByText("Inactive")).toBeInTheDocument();
   });
 

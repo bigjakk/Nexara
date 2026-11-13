@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
+import { deferred } from "@/test/fake-server";
 import { DeleteClusterDialog } from "./DeleteClusterDialog";
 import type { ClusterResponse } from "@/types/api";
 
@@ -147,11 +148,17 @@ describe("DeleteClusterDialog", () => {
     [true, "/api/v1/clusters/c1?confirm=Prod+Cluster&revoke_pve_credentials=1"],
   ])("sends the typed name as confirm (revoking: %s)", async (revoke, want) => {
     const user = userEvent.setup();
+    const onDeleted = vi.fn();
+    const onOpenChange = vi.fn();
+    // Held, so the dialog can be tried while the delete is out.
+    const answer = deferred<undefined>();
+    deleteMock.mockReturnValue(answer.promise);
     renderWithProviders(
       <DeleteClusterDialog
         cluster={cluster({ credential_source: "bootstrap" })}
         open
-        onOpenChange={() => {}}
+        onOpenChange={onOpenChange}
+        onDeleted={onDeleted}
       />,
     );
     const button = screen.getByRole("button", { name: /delete cluster/i });
@@ -167,5 +174,14 @@ describe("DeleteClusterDialog", () => {
       expect(deleteMock).toHaveBeenCalled();
     });
     expect(deleteMock.mock.calls).toEqual([[want]]);
+    // Escape does not close it while the delete is out: a caller that
+    // unmounts it on close would never hear the cluster is gone.
+    await user.keyboard("{Escape}");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    answer.resolve(undefined);
+    // A page that was showing the cluster is told it is gone, once.
+    await waitFor(() => {
+      expect(onDeleted).toHaveBeenCalledTimes(1);
+    });
   });
 });

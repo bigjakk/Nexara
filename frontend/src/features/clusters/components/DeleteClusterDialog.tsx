@@ -20,12 +20,15 @@ interface DeleteClusterDialogProps {
   cluster: ClusterResponse;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Called once the cluster is gone, for a page that was showing it. */
+  onDeleted?: () => void;
 }
 
 export function DeleteClusterDialog({
   cluster,
   open,
   onOpenChange,
+  onDeleted,
 }: DeleteClusterDialogProps) {
   const [confirmName, setConfirmName] = useState("");
   const [revokeCredentials, setRevokeCredentials] = useState(false);
@@ -59,6 +62,7 @@ export function DeleteClusterDialog({
       {
         onSuccess: () => {
           onOpenChange(false);
+          onDeleted?.();
         },
       },
     );
@@ -68,6 +72,10 @@ export function DeleteClusterDialog({
     <Dialog
       open={open}
       onOpenChange={(v) => {
+        // Not while the delete is out: every caller mounts this only while it
+        // is open, so closing it would drop what follows the delete (the
+        // page's move away from a cluster that is gone).
+        if (!v && deleteMutation.isPending) return;
         onOpenChange(v);
         if (!v) {
           setConfirmName("");
@@ -93,7 +101,7 @@ export function DeleteClusterDialog({
             }}
           />
           {canRevoke && (
-            <div className="rounded-lg border border-border p-3 space-y-2">
+            <div className="panel space-y-2 rounded-lg p-3">
               <div className="flex items-start gap-2">
                 <Checkbox
                   id="revoke-pve-credentials"
@@ -132,6 +140,7 @@ export function DeleteClusterDialog({
         <DialogFooter>
           <Button
             variant="outline"
+            disabled={deleteMutation.isPending}
             onClick={() => {
               onOpenChange(false);
             }}

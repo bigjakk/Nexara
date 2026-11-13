@@ -117,6 +117,8 @@ function pageReads(
     [path(CLUSTER_B, "/nodes")]: listOf([]),
     [path(CLUSTER_A, "/vms")]: listOf([]),
     [path(CLUSTER_B, "/vms")]: listOf([]),
+    [path(CLUSTER_A, "/storage")]: listOf([]),
+    [path(CLUSTER_B, "/storage")]: listOf([]),
   };
 }
 
@@ -350,7 +352,7 @@ describe("the cluster page when it moves to another cluster: Metrics", () => {
 });
 
 describe("the cluster page when it moves to another cluster: VMs", () => {
-  const FILTER = /^Search by name/;
+  const FILTER = /^Search, or filter/;
 
   it("does not carry a filter typed into the table over to the next cluster", async () => {
     const user = userEvent.setup();
@@ -466,7 +468,7 @@ describe("the cluster page when it moves to another cluster: what it keeps", () 
 
     await user.click(screen.getByRole("tab", { name: "Metrics" }));
     expect(
-      await screen.findByText("Metric Servers", { selector: "div" }),
+      await screen.findByRole("heading", { name: "Metric servers" }),
     ).toBeInTheDocument();
     expect(where()).toBe(`/clusters/${CLUSTER_A}?tab=metric-servers`);
 

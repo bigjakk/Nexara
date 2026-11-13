@@ -159,7 +159,7 @@ const SITES: Site[] = [
 
 async function openDialog(site: Site) {
   const user = renderTab(site.pveVersion);
-  await user.click(screen.getByRole("tab", { name: site.tab }));
+  await user.click(screen.getByRole("button", { name: site.tab }));
   await user.click(await screen.findByRole("button", { name: site.button }));
   const dialog = await screen.findByRole("alertdialog");
   return { user, dialog };
@@ -209,7 +209,7 @@ describe("ClusterHATab — deletes confirm first", () => {
   // stops HA applying it; the enabled rule02 above is the positive twin.
   it("says a disabled rule is not being applied now", async () => {
     const user = renderTab(PVE9);
-    await user.click(screen.getByRole("tab", { name: "Groups / Rules" }));
+    await user.click(screen.getByRole("button", { name: "Groups / Rules" }));
     await user.click(
       await screen.findByRole("button", { name: "Delete rule rule03" }),
     );

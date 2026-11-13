@@ -204,10 +204,10 @@ async function saveFirstDomainHeldThenCancel(user: UserEvent) {
   });
 }
 
-/** Picks the Node Certificates tab of the ACME tab, and waits for the node's domains. */
+/** Picks the Node certificates view of the ACME tab, and waits for the node's domains. */
 async function openNodeCertificates(user: UserEvent, firstDomain: string) {
   await user.click(
-    await screen.findByRole("tab", { name: "Node Certificates" }),
+    await screen.findByRole("button", { name: "Node certificates" }),
   );
   expect(await screen.findByText(firstDomain)).toBeInTheDocument();
 }

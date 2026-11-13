@@ -67,22 +67,24 @@ export function ClusterCertificateBanner({
 
   return (
     <>
-      <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-4">
-        <div className="flex items-start gap-3">
+      {/* A flat tinted surface, not an outlined box: the one thing on the
+          page that is wrong, with the one primary button that settles it. */}
+      <div className="rounded-[10px] bg-destructive/10 px-[18px] py-4">
+        <div className="flex flex-wrap items-start gap-x-3 gap-y-3">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-[1_1_320px]">
             <p className="font-medium text-destructive">{issue.summary}</p>
             {/* break-all: the detail ends in a fingerprint, which has no
                 spaces to wrap on and would otherwise widen the page. */}
             <p className="mt-1 text-sm break-all text-destructive/90">
               {issue.detail}
             </p>
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="mt-2 text-[12.5px] text-muted-foreground">
               Inventory and metrics keep updating through the cluster&apos;s
               other members, so this will not show up as a sync failure.
             </p>
           </div>
-          <div className="flex shrink-0 flex-col gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             <Button
               size="sm"
               onClick={handleVerify}

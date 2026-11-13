@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Panel } from "@/components/page/Panel";
 import {
   Table,
   TableBody,
@@ -32,9 +33,11 @@ import { Trash2 } from "lucide-react";
 
 interface DRSRulesTableProps {
   clusterId: string;
+  /** Controls for the panel's title row: the Add Rule dialog. */
+  actions?: ReactNode;
 }
 
-export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
+export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
   const manualQuery = useDRSRules(clusterId);
   const haQuery = useHARules(clusterId);
   const manualRules = manualQuery.data;
@@ -99,28 +102,39 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
 
   return (
     <>
-      <QueryFailureNote
-        query={manualQuery}
-        subject="this cluster's DRS rules"
-        identity={clusterId}
-        className="mb-2"
-      />
-      <QueryFailureNote
-        query={haQuery}
-        subject="this cluster's HA rules"
-        identity={clusterId}
-        className="mb-2"
-      />
-      <div className="rounded-md border">
+      <Panel
+        flush
+        title="Placement rules"
+        aside={
+          allRules.length > 0
+            ? `${String(allRules.length)}, DRS and Proxmox HA rules together`
+            : undefined
+        }
+        actions={actions}
+      >
+        <QueryFailureNote
+          query={manualQuery}
+          subject="this cluster's DRS rules"
+          identity={clusterId}
+          className="mb-2 px-[18px]"
+        />
+        <QueryFailureNote
+          query={haQuery}
+          subject="this cluster's HA rules"
+          identity={clusterId}
+          className="mb-2 px-[18px]"
+        />
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Type</TableHead>
               <TableHead>VM IDs</TableHead>
-              <TableHead>Node Names</TableHead>
+              <TableHead>Node names</TableHead>
               <TableHead>Source</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="w-24" />
+              <TableHead className="w-24">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -128,7 +142,7 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
               <TableRow>
                 <TableCell
                   colSpan={6}
-                  className="text-center text-muted-foreground"
+                  className="py-6 text-center text-muted-foreground"
                 >
                   {stillLoading
                     ? "Loading rules..."
@@ -142,20 +156,16 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
             ) : (
               allRules.map((rule, idx) => (
                 <TableRow
-                  key={rule.id || `ha-${rule.ha_rule_name ?? String(idx)}`}
+                  // An HA rule is keyed on its name: every one of them
+                  // arrives with the same all-zero id.
+                  key={
+                    rule.ha_rule_name !== undefined
+                      ? `ha-${rule.ha_rule_name}`
+                      : rule.id || String(idx)
+                  }
                 >
                   <TableCell>
-                    <Badge
-                      variant={
-                        rule.rule_type === "affinity"
-                          ? "default"
-                          : rule.rule_type === "anti-affinity"
-                            ? "destructive"
-                            : "secondary"
-                      }
-                    >
-                      {rule.rule_type}
-                    </Badge>
+                    <Badge variant="outline">{rule.rule_type}</Badge>
                   </TableCell>
                   <TableCell className="font-mono text-sm">
                     {(rule.vm_ids ?? []).join(", ")}
@@ -166,18 +176,16 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                       : "-"}
                   </TableCell>
                   <TableCell>
-                    <Badge
-                      variant={rule.source === "ha" ? "outline" : "default"}
-                    >
+                    <span className="text-muted-foreground">
                       {rule.source === "ha" ? "HA" : "Manual"}
-                    </Badge>
+                    </span>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={rule.enabled ? "default" : "secondary"}>
+                    <Badge variant={rule.enabled ? "healthy" : "secondary"}>
                       {rule.enabled ? "Enabled" : "Disabled"}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap text-right">
                     {/* A Proxmox HA rule's History is the HA tab's, and needs
                         its view permission. */}
                     {rule.ha_rule_name !== undefined ? (
@@ -198,6 +206,7 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                       aria-label={`Delete ${rule.rule_type} rule for ${rule.ha_rule_name ?? (rule.vm_ids ?? []).join(", ")}`}
                       variant="ghost"
                       size="icon"
+                      className="text-muted-foreground hover:text-destructive"
                       onClick={() => {
                         setDeleteTarget(rule);
                       }}
@@ -210,7 +219,7 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
             )}
           </TableBody>
         </Table>
-      </div>
+      </Panel>
 
       <Dialog
         open={deleteTarget !== null}

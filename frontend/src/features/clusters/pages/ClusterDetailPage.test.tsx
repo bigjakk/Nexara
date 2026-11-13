@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { makeCluster, makeNode } from "@/test/cluster.fixtures";
+import { useAuthStore } from "@/stores/auth-store";
 import { ClusterDetailPage } from "./ClusterDetailPage";
 
 vi.mock("react-router-dom", async () => {
@@ -22,6 +23,9 @@ vi.mock("../api/cluster-queries", () => ({
   useCluster: (...args: unknown[]) => mockUseCluster(...args) as unknown,
   useClusterNodes: (...args: unknown[]) =>
     mockUseClusterNodes(...args) as unknown,
+  // The Performance strip's storage figure. Not read here: the strip shows a
+  // dash until it answers.
+  useClusterStorage: () => ({ data: undefined }),
   // Consumed by ClusterCertificateBanner, which the page renders above the
   // tabs. Inert here — the banner returns null unless the cluster carries the
   // certificate issue, which these fixtures do not.
@@ -59,22 +63,13 @@ const inventory = (over: object = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mockUseInventoryData.mockReturnValue(inventory());
+  useAuthStore.setState({ user: null, permissions: [] });
 });
 
 describe("ClusterDetailPage", () => {
   it("renders cluster name, nodes, and tab triggers", () => {
     mockUseCluster.mockReturnValue({
-      data: {
-        id: "test-cluster-id",
-        name: "Test Cluster",
-        api_url: "https://pve.example.com:8006",
-        token_id: "root@pam!token",
-        tls_fingerprint: "",
-        sync_interval_seconds: 60,
-        is_active: true,
-        created_at: "2024-01-01T00:00:00Z",
-        updated_at: "2024-01-01T00:00:00Z",
-      },
+      data: makeCluster({ id: "test-cluster-id", name: "Test Cluster" }),
       isLoading: false,
       error: null,
     });
@@ -100,12 +95,19 @@ describe("ClusterDetailPage", () => {
     });
 
     renderWithProviders(<ClusterDetailPage />);
-    expect(screen.getByText("Test Cluster")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Test Cluster" }),
+    ).toBeInTheDocument();
+    // The facts line says the state in words, with the nodes behind it.
+    expect(screen.getByText("Online")).toBeInTheDocument();
+    expect(screen.getByText("1 of 1 nodes")).toBeInTheDocument();
     expect(screen.getByText("pve-node-1")).toBeInTheDocument();
-    expect(screen.getByText("16")).toBeInTheDocument();
+    expect(screen.getByText("16 cores")).toBeInTheDocument();
     expect(screen.getByText("64.0 GiB")).toBeInTheDocument();
     expect(screen.getByText("8.1.3")).toBeInTheDocument();
     expect(screen.getByText("10d 0h")).toBeInTheDocument();
+    // The Nodes panel's note is computed from the nodes listed.
+    expect(screen.getByText("1 node on 8.1.3")).toBeInTheDocument();
 
     // Tab triggers should be present
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
@@ -117,17 +119,7 @@ describe("ClusterDetailPage", () => {
 
   it("maps legacy ?tab=nodes deep links to the Overview tab", () => {
     mockUseCluster.mockReturnValue({
-      data: {
-        id: "test-cluster-id",
-        name: "Test Cluster",
-        api_url: "https://pve.example.com:8006",
-        token_id: "root@pam!token",
-        tls_fingerprint: "",
-        sync_interval_seconds: 60,
-        is_active: true,
-        created_at: "2024-01-01T00:00:00Z",
-        updated_at: "2024-01-01T00:00:00Z",
-      },
+      data: makeCluster({ id: "test-cluster-id", name: "Test Cluster" }),
       isLoading: false,
       error: null,
     });
@@ -144,6 +136,31 @@ describe("ClusterDetailPage", () => {
     expect(
       screen.getByRole("tab", { name: "Overview", selected: true }),
     ).toBeInTheDocument();
+  });
+
+  // The server asks manage:cluster to edit a cluster and delete:cluster to
+  // delete one: the header offers neither to a caller it would refuse.
+  it("offers the header's Edit and Delete only with the permission each takes", () => {
+    useAuthStore.setState({ user: null, permissions: ["manage:cluster"] });
+    mockUseCluster.mockReturnValue({
+      data: makeCluster({ id: "test-cluster-id" }),
+      isLoading: false,
+      error: null,
+    });
+    mockUseClusterNodes.mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithProviders(<ClusterDetailPage />);
+    expect(
+      screen.getByRole("button", { name: "Edit cluster" }),
+    ).toBeInTheDocument();
+    // Without delete:cluster or the History grants, More has nothing in it.
+    expect(
+      screen.queryByRole("button", { name: "More actions" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows error state", () => {
