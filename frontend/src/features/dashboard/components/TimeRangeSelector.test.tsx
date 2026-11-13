@@ -23,12 +23,16 @@ describe("TimeRangeSelector", () => {
     expect(screen.getByTestId("range-7d")).not.toBeDisabled();
   });
 
-  it("highlights the active range with different styling", () => {
+  it("marks the active range as the pressed one", () => {
     renderWithProviders(<TimeRangeSelector value="6h" onChange={() => {}} />);
-    const btn6h = screen.getByTestId("range-6h");
-    const btnLive = screen.getByTestId("range-live");
-    // Active (default variant) and inactive (ghost variant) should have different classes
-    expect(btn6h.className).not.toEqual(btnLive.className);
+    expect(screen.getByTestId("range-6h")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByTestId("range-live")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("calls onChange when a range is clicked", async () => {

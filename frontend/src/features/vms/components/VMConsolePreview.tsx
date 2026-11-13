@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import RFB from "@novnc/novnc";
 import { Maximize2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   buildVncWsUrl,
   mintConsoleToken,
@@ -13,6 +14,8 @@ interface VMConsolePreviewProps {
   vmid: number;
   /** Gets the click, whose Ctrl/⌘ asks for the console in a new tab. */
   onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  /** Overrides the default thumbnail size. */
+  className?: string | undefined;
 }
 
 type PreviewStatus = "connecting" | "connected" | "paused" | "error";
@@ -22,6 +25,7 @@ export function VMConsolePreview({
   node,
   vmid,
   onOpen,
+  className,
 }: VMConsolePreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
@@ -157,7 +161,10 @@ export function VMConsolePreview({
     <button
       type="button"
       onClick={onOpen}
-      className="group relative block h-[140px] w-[240px] shrink-0 overflow-hidden rounded-lg border bg-black ring-offset-background transition hover:ring-2 hover:ring-ring focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className={cn(
+        "group relative block h-[140px] w-[240px] shrink-0 overflow-hidden rounded-lg border bg-black ring-offset-background transition hover:ring-2 hover:ring-ring focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        className,
+      )}
       title="Open VNC console"
       aria-label="Open VNC console"
     >

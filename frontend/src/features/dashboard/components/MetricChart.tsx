@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatPercent, formatBytesPerSecond } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { MetricSeriesPoint } from "@/types/ws";
 import type { TimeRange } from "@/types/api";
 import { latestValue } from "@/lib/metric-series";
@@ -32,6 +33,22 @@ interface MetricChartProps {
   timeRange?: TimeRange;
   /** Extra context shown next to the current value (e.g. "65.2 GiB of 125.7 GiB"). */
   headerDetail?: string | undefined;
+  /** Inside a panel: no surface or padding of its own. */
+  bare?: boolean | undefined;
+}
+
+function Frame({
+  bare,
+  children,
+}: {
+  bare: boolean | undefined;
+  children: ReactNode;
+}) {
+  return bare ? (
+    <div className="flex h-full flex-col">{children}</div>
+  ) : (
+    <Card className="flex h-full flex-col">{children}</Card>
+  );
 }
 
 function ChartHeader({
@@ -39,14 +56,21 @@ function ChartHeader({
   color,
   currentValue,
   detail,
+  bare,
 }: {
   title: string;
   color: string;
   currentValue?: string | undefined;
   detail?: string | undefined;
+  bare?: boolean | undefined;
 }) {
   return (
-    <CardHeader className="flex-row items-center gap-2 space-y-0 p-4 pb-2">
+    <CardHeader
+      className={cn(
+        "flex-row items-center gap-2 space-y-0",
+        bare ? "p-0 pb-2" : "p-4 pb-2",
+      )}
+    >
       <span
         className="h-2 w-2 shrink-0 rounded-full"
         style={{ backgroundColor: color }}
@@ -80,6 +104,7 @@ export function MetricChart({
   formatValue,
   timeRange,
   headerDetail,
+  bare,
 }: MetricChartProps) {
   const formatter =
     formatValue ??
@@ -104,14 +129,14 @@ export function MetricChart({
 
   if (data.length === 0) {
     return (
-      <Card className="flex h-full flex-col">
-        <ChartHeader title={title} color={color} />
+      <Frame bare={bare}>
+        <ChartHeader title={title} color={color} bare={bare} />
         <CardContent className="flex flex-1 items-center justify-center">
           <div className="text-sm text-muted-foreground">
             Waiting for data...
           </div>
         </CardContent>
-      </Card>
+      </Frame>
     );
   }
 
@@ -120,14 +145,15 @@ export function MetricChart({
     lastValue !== undefined ? formatter(lastValue) : undefined;
 
   return (
-    <Card className="flex h-full flex-col">
+    <Frame bare={bare}>
       <ChartHeader
         title={title}
         color={color}
         currentValue={currentValue}
         detail={headerDetail}
+        bare={bare}
       />
-      <CardContent className="min-h-0 flex-1 p-2 pt-0">
+      <CardContent className={cn("min-h-0 flex-1", bare ? "p-0" : "p-2 pt-0")}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={data}
@@ -185,6 +211,6 @@ export function MetricChart({
           </AreaChart>
         </ResponsiveContainer>
       </CardContent>
-    </Card>
+    </Frame>
   );
 }

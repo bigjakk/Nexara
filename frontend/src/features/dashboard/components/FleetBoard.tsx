@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { StatusIcon } from "@/components/StatusIcon";
+import { UsageBar } from "@/components/UsageBar";
+import { usageLevel, USAGE_TEXT_CLASS } from "@/lib/usage-level";
 import { cn } from "@/lib/utils";
 import { formatBytes } from "@/lib/format";
 import { visibleClusterIssues } from "@/lib/health-issues";
@@ -17,9 +19,8 @@ import { GuestCells, GuestCellSwatch } from "./GuestCell";
 const COLUMNS = "md:grid-cols-[9rem_11rem_17rem_minmax(0,1fr)]";
 
 /**
- * A utilisation bar in the data colour, amber from 75% and red from 90% (the
- * thresholds the cluster cards use). No reading yet draws an empty track and a
- * dash, never 0%.
+ * A labelled utilisation bar and its reading. No reading yet draws an empty
+ * track and a dash, never 0%.
  */
 function Meter({
   label,
@@ -31,40 +32,18 @@ function Meter({
   detail?: string | undefined;
 }) {
   const clamped = percent === null ? null : Math.min(100, Math.max(0, percent));
-  const level =
-    clamped === null || clamped < 75 ? "ok" : clamped < 90 ? "warn" : "err";
+  const level = usageLevel(clamped);
   return (
     <div className="flex items-center gap-2.5">
       {/* Named beside the bar on a phone, where there is no column header. */}
       <span className="w-12 shrink-0 text-xs text-muted-foreground md:sr-only">
         {label}
       </span>
-      <div
-        aria-hidden="true"
-        className="h-1.5 min-w-8 flex-1 overflow-hidden rounded-full bg-foreground/10"
-      >
-        {clamped !== null && (
-          <div
-            className={cn(
-              "h-full rounded-full transition-[width] duration-700",
-              level === "err"
-                ? "bg-red-500"
-                : level === "warn"
-                  ? "bg-amber-500"
-                  : "bg-data",
-            )}
-            style={{ width: `${String(Math.round(clamped))}%` }}
-          />
-        )}
-      </div>
+      <UsageBar percent={clamped} className="flex-1" />
       <span
         className={cn(
           "w-9 shrink-0 text-right text-xs",
-          level === "err"
-            ? "font-semibold text-red-700 dark:text-red-400"
-            : level === "warn"
-              ? "font-semibold text-amber-700 dark:text-amber-400"
-              : "text-muted-foreground",
+          level === "ok" ? "text-muted-foreground" : USAGE_TEXT_CLASS[level],
         )}
       >
         {clamped === null ? "—" : `${String(Math.round(clamped))}%`}
@@ -232,24 +211,10 @@ export function FleetBoard({ data, metrics }: FleetBoardProps) {
                 {cluster.storagePercent !== null && (
                   <div className="ml-auto flex items-center gap-2.5 text-muted-foreground">
                     <span>{t("storage")}</span>
-                    <div
-                      aria-hidden="true"
-                      className="h-1.5 w-24 overflow-hidden rounded-full bg-foreground/10"
-                    >
-                      <div
-                        className={cn(
-                          "h-full rounded-full",
-                          cluster.storagePercent >= 90
-                            ? "bg-red-500"
-                            : cluster.storagePercent >= 75
-                              ? "bg-amber-500"
-                              : "bg-data",
-                        )}
-                        style={{
-                          width: `${String(Math.round(cluster.storagePercent))}%`,
-                        }}
-                      />
-                    </div>
+                    <UsageBar
+                      percent={cluster.storagePercent}
+                      className="w-24"
+                    />
                     <span>
                       {t("fleetStorageOf", {
                         percent: Math.round(cluster.storagePercent),

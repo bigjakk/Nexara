@@ -31,6 +31,25 @@ export function latestValue(
 }
 
 /**
+ * The newest `count` measured readings of a series, oldest first: the points
+ * of a sparkline. A missed sample is skipped, not drawn as zero.
+ */
+export function seriesTail(
+  points: readonly MetricSeriesPoint[],
+  pick: (point: MetricSeriesPoint) => number | null,
+  count = 60,
+): number[] {
+  const out: number[] = [];
+  for (let i = points.length - 1; i >= 0 && out.length < count; i--) {
+    const point = points[i];
+    if (point === undefined) continue;
+    const v = pick(point);
+    if (v !== null) out.push(v);
+  }
+  return out.reverse();
+}
+
+/**
  * Stored history extended by the live ticks newer than its newest point. The
  * history is what to show — rated with the rules that keep a stall from
  * reading as a ramp or a reset as a zero dip — and it is refetched while a

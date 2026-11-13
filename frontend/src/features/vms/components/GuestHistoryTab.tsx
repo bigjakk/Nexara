@@ -1,8 +1,7 @@
 import { useMemo } from "react";
-import { apiPath } from "@/lib/api-path";
 import { HistoryTimeline } from "@/features/history/components/HistoryTimeline";
-import type { HistoryTarget } from "@/features/history/types/history";
 import { guestHistoryKind } from "../lib/guest-history-kind";
+import { guestHistoryTarget } from "../lib/guest-history-target";
 import { LiveBlockJobRows } from "./LiveBlockJobRows";
 
 /**
@@ -32,12 +31,8 @@ export function GuestHistoryTab({
   /** A running QEMU VM: the only guest with block jobs to read. */
   showBlockJobs: boolean;
 }) {
-  const target = useMemo<HistoryTarget>(
-    () => ({
-      clusterId,
-      path: (query) =>
-        apiPath`/api/v1/clusters/${clusterId}/guests/${String(vmid)}/history?${query}`,
-    }),
+  const target = useMemo(
+    () => guestHistoryTarget(clusterId, vmid),
     [clusterId, vmid],
   );
   return (

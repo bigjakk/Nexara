@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
 import { useAuthStore } from "@/stores/auth-store";
@@ -175,6 +176,9 @@ vi.mock("../api/vm-queries", () => ({
 }));
 
 vi.mock("@/features/clusters/api/cluster-queries", () => ({
+  useCluster: () => ({
+    data: { name: "cluster01" },
+  }),
   useClusterNodes: () => ({
     data: [],
   }),
@@ -223,10 +227,26 @@ describe("VMDetailPage", () => {
     mockCurrentVM = mockVM;
   });
 
-  it("renders VM name and status", () => {
+  it("names the guest, its state and where it sits", () => {
     renderPage();
-    expect(screen.getByText("test-vm-1")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "test-vm-1" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "cluster01" })).toHaveAttribute(
+      "href",
+      "/clusters/cluster-1",
+    );
+  });
+
+  // The strip is the chart's selector: one measure is drawn large at a time.
+  it("draws the measure picked in the performance strip", async () => {
+    renderPage();
+    expect(screen.getByText("CPU Usage")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Network/ }));
+    expect(screen.queryByText("CPU Usage")).toBeNull();
+    expect(screen.getByText("Network In")).toBeInTheDocument();
+    expect(screen.getByText("Network Out")).toBeInTheDocument();
   });
 
   it("renders overview tab with resource info", () => {

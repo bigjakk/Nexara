@@ -3,35 +3,45 @@ import { VMGuestToolsCard } from "@/features/guest-tools/components/VMGuestTools
 import { VMGuestToolsSummary } from "@/features/guest-tools/components/VMGuestToolsSummary";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import {
-  ArrowLeft,
   Monitor,
   Terminal,
   Pencil,
   Check,
   X,
   Container,
-  Server,
+  ExternalLink,
 } from "lucide-react";
 import { OSIcon } from "@/components/OSIcon";
-import { DetailChip } from "@/components/DetailChip";
+import { DetailField } from "@/components/DetailField";
+import { DetailHeader, Fact, StatusFact } from "@/components/page/DetailHeader";
+import {
+  DefGrid,
+  Panel,
+  PropertyList,
+  PropertyRow,
+} from "@/components/page/Panel";
+import { Stat, StatStrip } from "@/components/page/StatStrip";
 import { classifyOS } from "@/lib/os-classify";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusBadge } from "@/features/inventory/components/StatusBadge";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
+import { TimeRangeSelector } from "@/features/dashboard/components/TimeRangeSelector";
 import {
   useVMHistoricalMetrics,
   useVMPressure,
 } from "@/features/dashboard/api/historical-queries";
 import { PressureChart } from "@/features/dashboard/components/PressureChart";
 import { useLiveSeries } from "@/features/dashboard/hooks/useLiveSeries";
-import { latestValue } from "@/lib/metric-series";
+import { latestValue, seriesTail } from "@/lib/metric-series";
 import { useConsoleStore } from "@/stores/console-store";
 import { openConsole } from "@/features/console/lib/open-console";
 import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
-import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
+import {
+  useCluster,
+  useClusterNodes,
+} from "@/features/clusters/api/cluster-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -59,11 +69,17 @@ import { SchedulePanel } from "../components/SchedulePanel";
 import { BackupPanel } from "../components/BackupPanel";
 import { VeeamProtectionCard } from "../components/VeeamProtectionCard";
 import { GuestHistoryTab } from "../components/GuestHistoryTab";
+import { GuestRecentPanel } from "../components/GuestRecentPanel";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
 import type { VmLiveMetric } from "@/types/ws";
-import { formatBytes, formatUptime } from "@/lib/format";
+import {
+  formatBytes,
+  formatBytesPerSecond,
+  formatPercent,
+  formatUptime,
+} from "@/lib/format";
 import { DATA_COLOR } from "@/lib/chart-colors";
 
 export function VMDetailPage() {
@@ -111,6 +127,14 @@ export function VMDetailPage() {
   const liveMetric = clusterMetrics?.vmMetrics.get(vmId);
 
   const { data: nodes } = useClusterNodes(clusterId);
+  const { data: cluster } = useCluster(clusterId);
+  const [tab, setTab] = useState(initialTab);
+  // The running task's banner gets the full width under the header; the
+  // buttons that start the task sit in the header's corner.
+  const [bannerSlot, setBannerSlot] = useState<HTMLDivElement | null>(null);
+  // The rail's History link removes itself by switching tab; focus follows
+  // to the tab it opened rather than falling back to the document.
+  const historyTabRef = useRef<HTMLButtonElement>(null);
   const updateTabNode = useConsoleStore((s) => s.updateTabNode);
 
   // Resolve node name from node_id
@@ -189,195 +213,196 @@ export function VMDetailPage() {
     );
   }
 
+  const previewAllowed =
+    !isMobile &&
+    kind === "vm" &&
+    consoleAllowed &&
+    normalizedStatus === "running" &&
+    nodeName !== "";
+  const hasKnownOS =
+    classifyOS(vm.ostype) !== "unknown" ||
+    classifyOS(vm.config_ostype) !== "unknown";
+  const statusLabel =
+    normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1);
+
   return (
-    <div className="relative space-y-6">
-      {/* Floating live console preview — absolute so it doesn't stretch the
-          header row. Desktop-only: at phone widths it would sit on top of
-          the header; the VNC Console button stays as the mobile entry. */}
-      {!isMobile &&
-        kind === "vm" &&
-        consoleAllowed &&
-        normalizedStatus === "running" &&
-        nodeName !== "" && (
-          <div className="absolute right-0 top-0 z-10">
-            <VMConsolePreview
-              clusterId={clusterId}
-              node={nodeName}
-              vmid={vm.vmid}
-              onOpen={(e) => {
-                openGuestConsole("vnc", e);
+    <div className="space-y-5">
+      <DetailHeader
+        crumbs={[
+          { label: "Inventory", to: "/inventory" },
+          {
+            label: cluster?.name ?? "Cluster",
+            to: `/clusters/${clusterId}`,
+          },
+          ...(nodeName !== ""
+            ? [
+                {
+                  label: nodeName,
+                  to: `/clusters/${clusterId}/nodes/${vm.node_id}`,
+                },
+              ]
+            : []),
+          { label: vm.name },
+        ]}
+        icon={
+          hasKnownOS ? (
+            <OSIcon ostype={vm.ostype} configOstype={vm.config_ostype} />
+          ) : kind === "ct" ? (
+            <Container />
+          ) : (
+            <Monitor />
+          )
+        }
+        title={
+          renaming ? (
+            <InlineRename
+              inputRef={renameInputRef}
+              value={newName}
+              onChange={setNewName}
+              isPending={setConfig.isPending}
+              onConfirm={() => {
+                const trimmed = newName.trim();
+                if (trimmed.length === 0 || trimmed === vm.name) {
+                  setRenaming(false);
+                  return;
+                }
+                const field = kind === "ct" ? "hostname" : "name";
+                setConfig.mutate(
+                  {
+                    clusterId,
+                    resourceId: vmId,
+                    kind,
+                    fields: { [field]: trimmed },
+                  },
+                  {
+                    onSuccess: () => {
+                      setRenaming(false);
+                    },
+                  },
+                );
+              }}
+              onCancel={() => {
+                setRenaming(false);
               }}
             />
-          </div>
-        )}
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <Button
-            aria-label="Back to inventory"
-            variant="ghost"
-            size="sm"
-            asChild
-            className="-ml-2 mt-1.5"
-          >
-            <Link to="/inventory">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
-          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-            {classifyOS(vm.ostype) !== "unknown" ||
-            classifyOS(vm.config_ostype) !== "unknown" ? (
-              <OSIcon
-                ostype={vm.ostype}
-                configOstype={vm.config_ostype}
-                className="h-6 w-6"
-              />
-            ) : kind === "ct" ? (
-              <Container className="h-6 w-6 text-muted-foreground" />
-            ) : (
-              <Monitor className="h-6 w-6 text-muted-foreground" />
+          ) : (
+            vm.name
+          )
+        }
+        titleAside={
+          <>
+            {!renaming && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-muted-foreground"
+                onClick={() => {
+                  setNewName(vm.name);
+                  setRenaming(true);
+                }}
+                title="Rename"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
             )}
-          </div>
-          <div className="min-w-0 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              {renaming ? (
-                <InlineRename
-                  inputRef={renameInputRef}
-                  value={newName}
-                  onChange={setNewName}
-                  isPending={setConfig.isPending}
-                  onConfirm={() => {
-                    const trimmed = newName.trim();
-                    if (trimmed.length === 0 || trimmed === vm.name) {
-                      setRenaming(false);
-                      return;
-                    }
-                    const field = kind === "ct" ? "hostname" : "name";
-                    setConfig.mutate(
-                      {
-                        clusterId,
-                        resourceId: vmId,
-                        kind,
-                        fields: { [field]: trimmed },
-                      },
-                      {
-                        onSuccess: () => {
-                          setRenaming(false);
-                        },
-                      },
-                    );
-                  }}
-                  onCancel={() => {
-                    setRenaming(false);
-                  }}
-                />
-              ) : (
-                <>
-                  <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">
-                    {vm.name}
-                  </h1>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => {
-                      setNewName(vm.name);
-                      setRenaming(true);
-                    }}
-                    title="Rename"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                </>
-              )}
-              <StatusBadge status={normalizedStatus} />
-              {vm.template && <Badge variant="secondary">Template</Badge>}
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <DetailChip>
-                {kind === "ct" ? "CT · LXC" : "VM · QEMU"}
-              </DetailChip>
-              <DetailChip>VMID {String(vm.vmid)}</DetailChip>
-              {nodeName !== "" && (
-                <Link to={`/clusters/${clusterId}/nodes/${vm.node_id}`}>
-                  <DetailChip className="transition-colors hover:border-muted-foreground/40 hover:text-foreground">
-                    <Server className="h-3 w-3" />
-                    {nodeName}
-                  </DetailChip>
+            {vm.template && <Badge variant="secondary">Template</Badge>}
+          </>
+        }
+        facts={
+          <>
+            <StatusFact
+              status={normalizedStatus}
+              label={statusLabel}
+              detail={
+                normalizedStatus === "running" && vm.uptime > 0
+                  ? `for ${formatUptime(vm.uptime)}`
+                  : undefined
+              }
+            />
+            <Fact label={kind === "ct" ? "CT" : "VM"}>{String(vm.vmid)}</Fact>
+            {nodeName !== "" && (
+              <Fact label="Node">
+                <Link
+                  to={`/clusters/${clusterId}/nodes/${vm.node_id}`}
+                  className="hover:text-foreground hover:underline"
+                >
+                  {nodeName}
                 </Link>
-              )}
-              {vm.ha_state !== "" && (
-                <DetailChip>HA · {vm.ha_state}</DetailChip>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Console + Actions. Consoles open regardless of power state
-          (iLO-style): a stopped guest parks as "powered off" with a Start
-          button and connects automatically on power-on. Only templates can't
-          be consoled. Hidden without the console:* permission — the mint
-          would 403. */}
-      <VMActions
-        clusterId={clusterId}
-        resourceId={vmId}
-        kind={kind}
-        status={vm.status}
-        name={vm.name}
-        template={vm.template}
-        onSnapshot={() => {
-          setSnapshotOpen(true);
-        }}
-        onClone={() => {
-          setCloneOpen(true);
-        }}
-        onCloneToTemplate={() => {
-          setCloneToTemplateOpen(true);
-        }}
-        onDeploy={() => {
-          setDeployOpen(true);
-        }}
-        onMigrate={() => {
-          setMigrateOpen(true);
-        }}
-        onDestroy={() => {
-          setDestroyOpen(true);
-        }}
-        onConvertToTemplate={() => {
-          setConvertTemplateOpen(true);
-        }}
-      >
-        {kind === "vm" && consoleAllowed && (
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={(e) => {
-              openGuestConsole("vnc", e);
+              </Fact>
+            )}
+            {vm.ha_state !== "" && <Fact label="HA">{vm.ha_state}</Fact>}
+            <PoolFact clusterId={clusterId} vmId={vmId} currentPool={vm.pool} />
+            {vm.tags.trim() !== "" && <Fact label="Tags">{vm.tags}</Fact>}
+          </>
+        }
+        actions={
+          /* Consoles open regardless of power state (iLO-style): a stopped
+             guest parks as "powered off" with a Start button and connects
+             automatically on power-on. Only templates can't be consoled.
+             Hidden without the console:* permission — the mint would 403. */
+          <VMActions
+            clusterId={clusterId}
+            resourceId={vmId}
+            kind={kind}
+            status={vm.status}
+            name={vm.name}
+            template={vm.template}
+            bannerContainer={bannerSlot}
+            onSnapshot={() => {
+              setSnapshotOpen(true);
             }}
-            disabled={vm.template}
-          >
-            <Monitor className="h-4 w-4" />
-            VNC Console
-          </Button>
-        )}
-        {kind === "ct" && consoleAllowed && (
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={(e) => {
-              openGuestConsole("terminal", e);
+            onClone={() => {
+              setCloneOpen(true);
             }}
-            disabled={vm.template}
+            onCloneToTemplate={() => {
+              setCloneToTemplateOpen(true);
+            }}
+            onDeploy={() => {
+              setDeployOpen(true);
+            }}
+            onMigrate={() => {
+              setMigrateOpen(true);
+            }}
+            onDestroy={() => {
+              setDestroyOpen(true);
+            }}
+            onConvertToTemplate={() => {
+              setConvertTemplateOpen(true);
+            }}
           >
-            <Terminal className="h-4 w-4" />
-            Attach
-          </Button>
-        )}
-      </VMActions>
+            {kind === "vm" && consoleAllowed && (
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={(e) => {
+                  openGuestConsole("vnc", e);
+                }}
+                disabled={vm.template}
+              >
+                <Monitor className="h-4 w-4" />
+                VNC Console
+              </Button>
+            )}
+            {kind === "ct" && consoleAllowed && (
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={(e) => {
+                  openGuestConsole("terminal", e);
+                }}
+                disabled={vm.template}
+              >
+                <Terminal className="h-4 w-4" />
+                Attach
+              </Button>
+            )}
+          </VMActions>
+        }
+      />
+      <div ref={setBannerSlot} className="empty:hidden" />
 
       {/* Tabs */}
-      <Tabs defaultValue={initialTab}>
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           {kind === "vm" && (
@@ -395,51 +420,94 @@ export function VMDetailPage() {
           )}
           <TabsTrigger value="backups">Backups</TabsTrigger>
           <TabsTrigger value="schedules">Schedules</TabsTrigger>
-          {canHistory && <TabsTrigger value="history">History</TabsTrigger>}
+          {canHistory && (
+            <TabsTrigger ref={historyTabRef} value="history">
+              History
+            </TabsTrigger>
+          )}
         </TabsList>
 
-        <TabsContent value="overview" className="mt-4 space-y-6">
-          {/* Summary */}
-          <div className="rounded-lg border p-4">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-              <InfoItem label="VMID" value={String(vm.vmid)} />
-              <InfoItem label="Node" value={nodeName || "--"} />
-              <InfoItem
-                label="Type"
-                value={vm.type === "lxc" ? "LXC" : "QEMU"}
-              />
-              <InfoItem label="CPUs" value={String(vm.cpu_count)} />
-              <InfoItem label="Memory" value={formatBytes(vm.mem_total)} />
-              <InfoItem label="Disk" value={formatBytes(vm.disk_total)} />
-              <InfoItem label="Uptime" value={formatUptime(vm.uptime)} />
-              <InfoItem label="HA State" value={vm.ha_state || "--"} />
-              <PoolSelector
+        <TabsContent value="overview" className="mt-5">
+          {/* Two columns that fold into one: what the guest is doing on the
+              left, what it is and what happened to it on the right. */}
+          <div className="flex flex-wrap items-start gap-4">
+            <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-4">
+              <VMMetricsPanel
                 clusterId={clusterId}
                 vmId={vmId}
-                currentPool={vm.pool}
+                liveMetric={liveMetric}
+                memTotalBytes={vm.mem_total}
+                cpuCount={vm.cpu_count}
               />
-              {vm.tags && <InfoItem label="Tags" value={vm.tags} />}
+              {/* Guest Agent — QEMU VMs only, when running */}
+              {kind === "vm" && normalizedStatus === "running" && (
+                <GuestAgentSection
+                  clusterId={clusterId}
+                  vmId={vmId}
+                  vmid={vm.vmid}
+                  configOstype={vm.config_ostype}
+                  ostype={vm.ostype}
+                />
+              )}
+            </div>
+            <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-4">
+              {/* Desktop-only: a phone has the Console button, and a live
+                  framebuffer is too much to stream into a thumbnail there. */}
+              {!isMobile && consoleAllowed && !vm.template && (
+                <ConsolePanel
+                  idleText={
+                    kind === "ct"
+                      ? "Attach to open a terminal"
+                      : normalizedStatus === "running"
+                        ? "Console unavailable"
+                        : "Powered off"
+                  }
+                  onOpenInTab={() => {
+                    openGuestConsole(kind === "ct" ? "terminal" : "vnc", {
+                      ctrlKey: true,
+                      metaKey: false,
+                    });
+                  }}
+                >
+                  {previewAllowed && (
+                    <VMConsolePreview
+                      clusterId={clusterId}
+                      node={nodeName}
+                      vmid={vm.vmid}
+                      className="aspect-[16/10] h-auto w-full rounded-[7px] border-0"
+                      onOpen={(e) => {
+                        openGuestConsole("vnc", e);
+                      }}
+                    />
+                  )}
+                </ConsolePanel>
+              )}
+              <Panel title="Configuration">
+                <PropertyList>
+                  <PropertyRow label="Type">
+                    {vm.type === "lxc" ? "LXC" : "QEMU"}
+                  </PropertyRow>
+                  <PropertyRow label="CPUs">{String(vm.cpu_count)}</PropertyRow>
+                  <PropertyRow label="Memory">
+                    {formatBytes(vm.mem_total)}
+                  </PropertyRow>
+                  <PropertyRow label="Disk">
+                    {formatBytes(vm.disk_total)}
+                  </PropertyRow>
+                </PropertyList>
+              </Panel>
+              {canHistory && (
+                <GuestRecentPanel
+                  clusterId={clusterId}
+                  vmid={vm.vmid}
+                  onOpenHistory={() => {
+                    setTab("history");
+                    historyTabRef.current?.focus();
+                  }}
+                />
+              )}
             </div>
           </div>
-
-          {/* Guest Agent — QEMU VMs only, when running */}
-          {kind === "vm" && normalizedStatus === "running" && (
-            <GuestAgentSection
-              clusterId={clusterId}
-              vmId={vmId}
-              vmid={vm.vmid}
-              configOstype={vm.config_ostype}
-              ostype={vm.ostype}
-            />
-          )}
-
-          {/* Metrics */}
-          <VMMetricsPanel
-            clusterId={clusterId}
-            vmId={vmId}
-            liveMetric={liveMetric}
-            memTotalBytes={vm.mem_total}
-          />
         </TabsContent>
 
         {kind === "vm" && (
@@ -589,6 +657,45 @@ export function VMDetailPage() {
   );
 }
 
+/** The rail's console block: the live display when there is one, and a way in. */
+function ConsolePanel({
+  children,
+  idleText,
+  onOpenInTab,
+}: {
+  /** The live preview. Absent (or false) shows the idle tile instead. */
+  children?: React.ReactNode;
+  idleText: string;
+  onOpenInTab: () => void;
+}) {
+  return (
+    <Panel flush bodyClassName="p-2.5 pb-2">
+      {children !== undefined && children !== false ? (
+        children
+      ) : (
+        <div className="grid aspect-[16/10] place-items-center rounded-[7px] bg-black text-xs text-neutral-400">
+          {idleText}
+        </div>
+      )}
+      <div className="flex items-center gap-2 pl-2 pt-2">
+        <h2 className="flex-1 text-[13.5px] font-semibold">Console</h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-primary hover:text-primary"
+          onClick={onOpenInTab}
+        >
+          Open in a tab
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </Panel>
+  );
+}
+
+/** How many interfaces the Overview lists before it says how many more. */
+const AGENT_INTERFACE_LIMIT = 3;
+
 function GuestAgentSection({
   clusterId,
   vmId,
@@ -603,40 +710,58 @@ function GuestAgentSection({
   ostype: string;
 }) {
   const { data, isLoading } = useGuestAgentInfo(clusterId, vmId, true);
+  const interfaces = (data?.network_interfaces ?? []).filter(
+    (iface) => iface.name !== "lo",
+  );
+  const shown = interfaces.slice(0, AGENT_INTERFACE_LIMIT);
 
   return (
-    <div className="rounded-lg border p-4">
-      <h3 className="mb-3 text-sm font-semibold">QEMU Guest Agent</h3>
-      {isLoading ? (
-        <p className="text-sm text-muted-foreground">Checking...</p>
-      ) : !data?.running ? (
-        <p className="text-sm text-muted-foreground">Not running</p>
+    <Panel
+      title="Guest agent"
+      actions={
+        <span className="flex items-center gap-[7px] text-sm text-muted-foreground">
+          {isLoading ? (
+            "Checking..."
+          ) : data?.running ? (
+            <>
+              <span
+                aria-hidden="true"
+                className="h-[7px] w-[7px] rounded-full bg-emerald-500"
+              />
+              Connected
+            </>
+          ) : (
+            "Not running"
+          )}
+        </span>
+      }
+    >
+      {isLoading || !data?.running ? (
+        <p className="text-sm text-muted-foreground">
+          {isLoading
+            ? "Asking the guest agent..."
+            : "The QEMU guest agent is not answering, so there is nothing to read from inside the guest."}
+        </p>
       ) : (
-        <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="space-y-5">
+          <DefGrid>
             {data.os_info?.["pretty-name"] && (
-              <div>
-                <p className="text-xs text-muted-foreground">OS</p>
-                <p className="text-sm">{data.os_info["pretty-name"]}</p>
-              </div>
+              <DetailField label="Operating system">
+                {data.os_info["pretty-name"]}
+              </DetailField>
             )}
             {data.os_info?.["kernel-release"] && (
-              <div>
-                <p className="text-xs text-muted-foreground">Kernel</p>
-                <p className="text-sm">{data.os_info["kernel-release"]}</p>
-              </div>
+              <DetailField label="Kernel">
+                {data.os_info["kernel-release"]}
+              </DetailField>
             )}
             {data.os_info?.machine && (
-              <div>
-                <p className="text-xs text-muted-foreground">Architecture</p>
-                <p className="text-sm">{data.os_info.machine}</p>
-              </div>
+              <DetailField label="Architecture">
+                {data.os_info.machine}
+              </DetailField>
             )}
             {data.os_info?.name && (
-              <div>
-                <p className="text-xs text-muted-foreground">Hostname</p>
-                <p className="text-sm">{data.os_info.name}</p>
-              </div>
+              <DetailField label="Hostname">{data.os_info.name}</DetailField>
             )}
             {/* Read-only status so "is an update waiting?" is answerable from
                 Overview. The controls live on the Guest Tools tab. */}
@@ -646,73 +771,83 @@ function GuestAgentSection({
               configOstype={configOstype}
               ostype={ostype}
             />
-          </div>
-          {data.network_interfaces && data.network_interfaces.length > 0 && (
-            <div>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">
-                Network Interfaces
-              </p>
-              <div className="space-y-2">
-                {data.network_interfaces
-                  .filter((iface) => iface.name !== "lo")
-                  .slice(0, 1)
-                  .map((iface) => (
-                    <div
-                      key={iface.name}
-                      className="rounded border p-2 text-sm"
-                    >
-                      <span className="font-medium">{iface.name}</span>
-                      {iface["hardware-address"] && (
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          ({iface["hardware-address"]})
-                        </span>
-                      )}
-                      {iface["ip-addresses"] != null &&
-                        iface["ip-addresses"].length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-2">
-                            {iface["ip-addresses"].map((ip) => (
-                              <Badge
-                                key={`${ip["ip-address"]}/${String(ip.prefix)}`}
-                                variant="secondary"
-                                className="font-mono text-xs"
-                              >
-                                {ip["ip-address"]}/{String(ip.prefix)}
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                    </div>
+          </DefGrid>
+          {shown.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[26rem] text-left text-sm">
+                <caption className="pb-1.5 text-left font-semibold">
+                  Network interfaces
+                </caption>
+                <thead>
+                  <tr className="border-b">
+                    <th scope="col" className="py-1.5 pr-4 font-normal">
+                      Interface
+                    </th>
+                    <th scope="col" className="py-1.5 pr-4 font-normal">
+                      MAC address
+                    </th>
+                    <th scope="col" className="py-1.5 font-normal">
+                      Addresses
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((iface) => (
+                    <tr key={iface.name} className="border-b last:border-0">
+                      <td className="py-2 pr-4 align-top">{iface.name}</td>
+                      <td className="py-2 pr-4 align-top font-mono text-[12.5px] text-muted-foreground">
+                        {iface["hardware-address"] !== ""
+                          ? iface["hardware-address"]
+                          : "—"}
+                      </td>
+                      <td className="py-2 align-top">
+                        <div className="flex flex-wrap gap-1.5 font-mono text-[12.5px]">
+                          {(iface["ip-addresses"] ?? []).map((ip) => (
+                            <span
+                              key={`${ip["ip-address"]}/${String(ip.prefix)}`}
+                              className="rounded-[5px] bg-foreground/[0.07] px-1.5 py-0.5"
+                            >
+                              {ip["ip-address"]}/{String(ip.prefix)}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
                   ))}
-              </div>
+                </tbody>
+              </table>
+              {interfaces.length > shown.length && (
+                <p className="pt-2 text-[12.5px] text-muted-foreground">
+                  and {String(interfaces.length - shown.length)} more
+                </p>
+              )}
             </div>
           )}
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
-const TIME_RANGES: { label: string; value: TimeRange }[] = [
-  { label: "Live", value: "live" },
-  { label: "1h", value: "1h" },
-  { label: "6h", value: "6h" },
-  { label: "24h", value: "24h" },
-  { label: "7d", value: "7d" },
-];
+/** Which measure the large chart under the strip is drawing. */
+type MetricFocus = "cpu" | "memory" | "disk" | "network";
 
 function VMMetricsPanel({
   clusterId,
   vmId,
   liveMetric,
   memTotalBytes,
+  cpuCount,
 }: {
   clusterId: string;
   vmId: string;
   liveMetric: VmLiveMetric | undefined;
   /** VM configured memory size; turns the memory percent into exact used/total bytes. */
   memTotalBytes?: number | undefined;
+  cpuCount: number;
 }) {
   const [timeRange, setTimeRange] = useState<TimeRange>("live");
+  const [focus, setFocus] = useState<MetricFocus>("cpu");
   const isLive = timeRange === "live";
   // Live charts are seeded with the last hour of stored data so they're full
   // on page load; WS ticks are appended on top.
@@ -726,119 +861,142 @@ function VMMetricsPanel({
   const chartData = useLiveSeries(historicalData, liveMetric, isLive);
   const pressure = useVMPressure(clusterId, vmId, timeRange);
 
-  const lastMemPercent = latestValue(chartData, "memPercent");
+  const cpu = latestValue(chartData, "cpuPercent");
+  const mem = latestValue(chartData, "memPercent");
+  const diskRead = latestValue(chartData, "diskReadBps");
+  const diskWrite = latestValue(chartData, "diskWriteBps");
+  const netIn = latestValue(chartData, "netInBps");
+  const netOut = latestValue(chartData, "netOutBps");
   const memDetail =
-    lastMemPercent !== undefined &&
-    memTotalBytes !== undefined &&
-    memTotalBytes > 0
-      ? `${formatBytes((lastMemPercent / 100) * memTotalBytes)} of ${formatBytes(memTotalBytes)}`
+    mem !== undefined && memTotalBytes !== undefined && memTotalBytes > 0
+      ? `${formatBytes((mem / 100) * memTotalBytes)} of ${formatBytes(memTotalBytes)}`
       : undefined;
+  const rate = (a: number | undefined, b: number | undefined) =>
+    a === undefined && b === undefined
+      ? "—"
+      : formatBytesPerSecond((a ?? 0) + (b ?? 0));
+  const pair = (
+    a: number | undefined,
+    b: number | undefined,
+    aLabel: string,
+    bLabel: string,
+  ) =>
+    a === undefined && b === undefined
+      ? undefined
+      : `${formatBytesPerSecond(a ?? 0)} ${aLabel}, ${formatBytesPerSecond(b ?? 0)} ${bLabel}`;
+
+  const chart = (
+    title: string,
+    dataKey: React.ComponentProps<typeof MetricChart>["dataKey"],
+    headerDetail?: string,
+  ) => (
+    <div className="h-64 min-w-0">
+      <MetricChart
+        bare
+        title={title}
+        data={chartData}
+        dataKey={dataKey}
+        color={DATA_COLOR}
+        timeRange={timeRange}
+        headerDetail={headerDetail}
+      />
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
-      {/* Time range selector */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground">
-          Range:
-        </span>
-        <div className="flex gap-1">
-          {TIME_RANGES.map((tr) => (
-            <Button
-              key={tr.value}
-              size="sm"
-              variant={timeRange === tr.value ? "default" : "outline"}
-              className="h-7 px-2.5 text-xs"
-              onClick={() => {
-                setTimeRange(tr.value);
-              }}
-            >
-              {tr.label}
-            </Button>
-          ))}
-        </div>
-        {isLoading && (
-          <span className="text-xs text-muted-foreground">Loading...</span>
-        )}
-      </div>
-
-      {/* Charts (live = seeded 1h + WS ticks) */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="h-64">
-          <MetricChart
-            title="CPU Usage"
-            data={chartData}
-            dataKey="cpuPercent"
-            color={DATA_COLOR}
-            timeRange={timeRange}
+    <>
+      <Panel
+        flush
+        title="Performance"
+        aside={isLoading ? "Loading..." : undefined}
+        actions={
+          <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
+        }
+      >
+        {/* The strip is the summary and the chart's selector in one: each
+            measure's latest reading over its recent shape, and the one that
+            is pressed drawn large below. */}
+        <StatStrip>
+          <Stat
+            label="CPU"
+            value={cpu === undefined ? "—" : formatPercent(cpu)}
+            sub={`of ${String(cpuCount)} vCPU`}
+            trend={seriesTail(chartData, (p) => p.cpuPercent)}
+            trendMax={100}
+            selected={focus === "cpu"}
+            onSelect={() => {
+              setFocus("cpu");
+            }}
           />
-        </div>
-        <div className="h-64">
-          <MetricChart
-            title="Memory Usage"
-            data={chartData}
-            dataKey="memPercent"
-            color={DATA_COLOR}
-            timeRange={timeRange}
-            headerDetail={memDetail}
+          <Stat
+            label="Memory"
+            value={mem === undefined ? "—" : formatPercent(mem)}
+            sub={memDetail}
+            trend={seriesTail(chartData, (p) => p.memPercent)}
+            trendMax={100}
+            selected={focus === "memory"}
+            onSelect={() => {
+              setFocus("memory");
+            }}
           />
-        </div>
-        <div className="h-64">
-          <MetricChart
-            title="Disk Read"
-            data={chartData}
-            dataKey="diskReadBps"
-            color={DATA_COLOR}
-            timeRange={timeRange}
+          <Stat
+            label="Disk I/O"
+            value={rate(diskRead, diskWrite)}
+            sub={pair(diskRead, diskWrite, "read", "write")}
+            trend={seriesTail(chartData, (p) =>
+              p.diskReadBps === null && p.diskWriteBps === null
+                ? null
+                : (p.diskReadBps ?? 0) + (p.diskWriteBps ?? 0),
+            )}
+            selected={focus === "disk"}
+            onSelect={() => {
+              setFocus("disk");
+            }}
           />
-        </div>
-        <div className="h-64">
-          <MetricChart
-            title="Disk Write"
-            data={chartData}
-            dataKey="diskWriteBps"
-            color={DATA_COLOR}
-            timeRange={timeRange}
+          <Stat
+            label="Network"
+            value={rate(netIn, netOut)}
+            sub={pair(netIn, netOut, "in", "out")}
+            trend={seriesTail(chartData, (p) =>
+              p.netInBps === null && p.netOutBps === null
+                ? null
+                : (p.netInBps ?? 0) + (p.netOutBps ?? 0),
+            )}
+            selected={focus === "network"}
+            onSelect={() => {
+              setFocus("network");
+            }}
           />
+        </StatStrip>
+        <div className="-mt-px border-t px-[18px] pt-4">
+          {focus === "cpu" && chart("CPU Usage", "cpuPercent")}
+          {focus === "memory" && chart("Memory Usage", "memPercent", memDetail)}
+          {focus === "disk" && (
+            <div className="grid gap-6 sm:grid-cols-2">
+              {chart("Disk Read", "diskReadBps")}
+              {chart("Disk Write", "diskWriteBps")}
+            </div>
+          )}
+          {focus === "network" && (
+            <div className="grid gap-6 sm:grid-cols-2">
+              {chart("Network In", "netInBps")}
+              {chart("Network Out", "netOutBps")}
+            </div>
+          )}
         </div>
-        <div className="h-64">
-          <MetricChart
-            title="Network In"
-            data={chartData}
-            dataKey="netInBps"
-            color={DATA_COLOR}
-            timeRange={timeRange}
-          />
-        </div>
-        <div className="h-64">
-          <MetricChart
-            title="Network Out"
-            data={chartData}
-            dataKey="netOutBps"
-            color={DATA_COLOR}
-            timeRange={timeRange}
-          />
-        </div>
-      </div>
+      </Panel>
       <PressureChart
         data={pressure.data}
         timeRange={timeRange}
         isLoading={pressure.isLoading}
         isError={pressure.isError}
       />
-    </div>
+    </>
   );
 }
 
-function InfoItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="py-1">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-sm font-medium">{value}</p>
-    </div>
-  );
-}
-
-function PoolSelector({
+/** The guest's pool on the facts line, changed in place. */
+function PoolFact({
   clusterId,
   vmId,
   currentPool,
@@ -857,23 +1015,16 @@ function PoolSelector({
     setSelected(currentPool);
   }, [currentPool]);
 
-  // Both branches live in a fixed 1fr grid track whose right-hand neighbour is
-  // the Tags cell. Without min-w-0 the value keeps its intrinsic width — a
-  // <select> sized to its widest option, or a pool name with no break
-  // opportunity — and pushes the trailing buttons outside the track, where the
-  // later-painting Tags cell covers them and swallows the clicks. Let the value
-  // shrink and pin the buttons instead.
   if (!editing) {
     return (
-      <div className="min-w-0 py-1">
-        <p className="text-xs text-muted-foreground">Pool</p>
-        <div className="flex min-w-0 items-center gap-1">
-          <p
-            className="min-w-0 truncate text-sm font-medium"
+      <Fact label="Pool" className="items-center">
+        <span className="flex min-w-0 items-center gap-1">
+          <span
+            className="min-w-0 max-w-[16rem] truncate"
             title={currentPool || undefined}
           >
-            {currentPool || "--"}
-          </p>
+            {currentPool || "none"}
+          </span>
           <Button
             variant="ghost"
             size="sm"
@@ -885,17 +1036,16 @@ function PoolSelector({
           >
             <Pencil className="h-3 w-3" />
           </Button>
-        </div>
-      </div>
+        </span>
+      </Fact>
     );
   }
 
   return (
-    <div className="min-w-0 py-1">
-      <p className="text-xs text-muted-foreground">Pool</p>
-      <div className="flex min-w-0 items-center gap-1">
+    <Fact label="Pool" className="items-center">
+      <span className="flex min-w-0 items-center gap-1">
         <select
-          className="h-7 min-w-0 flex-1 rounded-md border bg-transparent px-1.5 text-sm outline-hidden focus:ring-2 focus:ring-ring"
+          className="h-7 min-w-0 max-w-[16rem] rounded-md border bg-transparent px-1.5 text-sm text-foreground outline-hidden focus:ring-2 focus:ring-ring"
           value={selected}
           onChange={(e) => {
             setSelected(e.target.value);
@@ -939,8 +1089,8 @@ function PoolSelector({
         >
           <X className="h-3 w-3" />
         </Button>
-      </div>
-    </div>
+      </span>
+    </Fact>
   );
 }
 
@@ -968,7 +1118,8 @@ function InlineRename({
     <div className="flex items-center gap-1">
       <input
         ref={inputRef}
-        className="h-9 rounded-md border bg-transparent px-2 text-xl font-bold outline-hidden focus:ring-2 focus:ring-ring"
+        aria-label="Name"
+        className="h-9 min-w-0 rounded-md border bg-transparent px-2 text-xl font-[650] outline-hidden [font-stretch:112%] focus:ring-2 focus:ring-ring"
         value={value}
         onChange={(e) => {
           onChange(e.target.value);

@@ -6,13 +6,15 @@ interface StatusIconProps {
 }
 
 /**
- * Small status dot. Running/online is emerald, stopped is neutral (a powered-
- * off guest is not an error), offline is red (an unreachable node/cluster is),
- * and paused/transient states are amber.
+ * Small status dot. Running/online is emerald, stopped is a hollow neutral
+ * ring (a powered-off guest is not an error, and the shape says "off" without
+ * relying on colour), offline is red (an unreachable node/cluster is), and
+ * paused/transient states are amber.
  */
 export function StatusIcon({ status, className }: StatusIconProps) {
   const normalized = status.toLowerCase();
 
+  const hollow = "ring-[1.5px] ring-inset ring-muted-foreground/70";
   let colorClass = "bg-muted-foreground/40";
   let label = "Unknown";
 
@@ -24,7 +26,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
     colorClass = "bg-emerald-500";
     label = "Running";
   } else if (normalized === "stopped") {
-    colorClass = "bg-muted-foreground/40";
+    colorClass = hollow;
     label = "Stopped";
   } else if (normalized === "offline") {
     colorClass = "bg-red-500";

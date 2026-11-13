@@ -3,6 +3,7 @@ import {
   breakAtGaps,
   bucketSeries,
   latestValue,
+  seriesTail,
   spliceLive,
 } from "./metric-series";
 import type { MetricSeriesPoint } from "@/types/ws";
@@ -92,5 +93,14 @@ describe("metric-series", () => {
       7,
     );
     expect(latestValue([pt(0, null)], "cpuPercent")).toBeUndefined();
+  });
+
+  // A sparkline's points: a missed sample is left out rather than drawn as a
+  // dip to zero, and the newest readings win when there are too many.
+  it("takes the newest measured readings, oldest first, skipping gaps", () => {
+    const points = [pt(0, 1), pt(10, null), pt(20, 3), pt(30, 4)];
+    expect(seriesTail(points, (p) => p.cpuPercent)).toEqual([1, 3, 4]);
+    expect(seriesTail(points, (p) => p.cpuPercent, 2)).toEqual([3, 4]);
+    expect(seriesTail([], (p) => p.cpuPercent)).toEqual([]);
   });
 });

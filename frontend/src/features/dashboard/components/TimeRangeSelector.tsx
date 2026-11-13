@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/segmented";
 import type { TimeRange } from "@/types/api";
 
 const ranges: readonly TimeRange[] = ["live", "1h", "6h", "24h", "7d"];
@@ -18,25 +18,28 @@ interface TimeRangeSelectorProps {
 
 export function TimeRangeSelector({ value, onChange }: TimeRangeSelectorProps) {
   return (
-    <div className="flex items-center gap-1" data-testid="time-range-selector">
-      {ranges.map((range) => (
-        <div key={range} className="relative">
-          <Button
-            variant={range === value ? "default" : "ghost"}
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={() => {
-              onChange(range);
-            }}
-            data-testid={`range-${range}`}
-          >
-            {range === "live" && (
-              <span className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-            )}
-            {labels[range]}
-          </Button>
-        </div>
-      ))}
+    <div className="inline-flex max-w-full" data-testid="time-range-selector">
+      <Segmented
+        aria-label="Time range"
+        value={value}
+        onValueChange={onChange}
+        options={ranges.map((range) => ({
+          value: range,
+          testId: `range-${range}`,
+          label:
+            range === "live" ? (
+              <>
+                <span
+                  aria-hidden="true"
+                  className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                />
+                {labels[range]}
+              </>
+            ) : (
+              labels[range]
+            ),
+        }))}
+      />
     </div>
   );
 }

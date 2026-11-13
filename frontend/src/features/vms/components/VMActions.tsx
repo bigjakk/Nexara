@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Camera,
   ChevronDown,
@@ -65,6 +66,12 @@ interface VMActionsProps {
   onConvertToTemplate?: () => void;
   /** Shown first in the row: the page's primary action (its console button). */
   children?: React.ReactNode;
+  /**
+   * Where the running task's banner goes. Without it the banner sits under
+   * the buttons; a page that puts the buttons in its header gives it a
+   * full-width place of its own.
+   */
+  bannerContainer?: HTMLElement | null | undefined;
 }
 
 export function VMActions({
@@ -82,6 +89,7 @@ export function VMActions({
   onDestroy,
   onConvertToTemplate,
   children,
+  bannerContainer,
 }: VMActionsProps) {
   const queryClient = useQueryClient();
   const actionMutation = useVMAction();
@@ -152,6 +160,15 @@ export function VMActions({
   const otherPower = powerActions.filter((a) => a !== primaryPower);
   const canConvert =
     !template && normalizedStatus === "stopped" && onConvertToTemplate;
+
+  const banner = (
+    <TaskProgressBanner
+      clusterId={clusterId}
+      upid={activeUpid}
+      onComplete={handleTaskComplete}
+      description={`${lastAction ?? "action"} ${name}`}
+    />
+  );
 
   return (
     <div className="space-y-2">
@@ -288,12 +305,7 @@ export function VMActions({
         </DropdownMenu>
       </div>
 
-      <TaskProgressBanner
-        clusterId={clusterId}
-        upid={activeUpid}
-        onComplete={handleTaskComplete}
-        description={`${lastAction ?? "action"} ${name}`}
-      />
+      {bannerContainer != null ? createPortal(banner, bannerContainer) : banner}
 
       {/* Confirmation dialog */}
       <Dialog

@@ -42,7 +42,10 @@ export function TaskProgressBanner({
   if (!upid) return null;
 
   return (
-    <div className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+    <div
+      role="status"
+      className="flex items-center gap-2 rounded-[10px] bg-data/10 px-3.5 py-2.5 text-sm"
+    >
       {!isStopped && (
         <>
           <Loader2 className="h-4 w-4 animate-spin text-data" />

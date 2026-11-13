@@ -39,7 +39,7 @@ describe("PowerPage", () => {
     // What the outage will cost, in the banner, the summary and the card.
     expect(screen.getByText("Will lose power without shutting down: pve-03 (cluster01).")).toBeInTheDocument();
     expect(screen.getByText("1 of 2 nodes")).toBeInTheDocument();
-    const cards = screen.getAllByRole("link", { name: /^ups0[12]$/ }).map((a) => a.closest("div.rounded-xl") as HTMLElement);
+    const cards = screen.getAllByRole("link", { name: /^ups0[12]$/ }).map((a) => a.closest("div.panel") as HTMLElement);
     expect(within(cards[0] as HTMLElement).getByText("On battery")).toBeInTheDocument();
     expect(within(cards[0] as HTMLElement).getByText("Not protected")).toBeInTheDocument();
     expect(within(cards[1] as HTMLElement).getByText("Unreachable")).toBeInTheDocument();

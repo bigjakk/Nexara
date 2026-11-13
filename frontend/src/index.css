@@ -162,7 +162,7 @@
     --provider-pbs: 35 78% 36%;
     --provider-pbs-foreground: 0 0% 100%;
 
-    --radius: 0.5rem;
+    --radius: 0.5625rem;
   }
 
   .dark {
@@ -249,6 +249,32 @@
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+}
+
+/* The flat surface every panel and card sits on. In the components layer so
+   a utility on the element (a tinted warning card) still wins. A panel inside
+   another surface would vanish into it, so it takes a recessed tone there. */
+@layer components {
+  .panel {
+    background-color: hsl(var(--card));
+  }
+  .panel .panel,
+  [role="dialog"] .panel,
+  [role="alertdialog"] .panel {
+    background-color: hsl(var(--foreground) / 0.04);
+  }
+  /* ui/table's cell padding: the outer cells line up with a panel's 18px
+     gutter. Here rather than as utilities so a caller's own padding wins. */
+  .table-cell-pad {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+  .table-cell-pad:first-child {
+    padding-left: 18px;
+  }
+  .table-cell-pad:last-child {
+    padding-right: 18px;
   }
 }
 
