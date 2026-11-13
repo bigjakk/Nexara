@@ -34,6 +34,7 @@ var pbsHistoryRules = []HistoryRule{
 	{Category: "jobs", Field: HistoryFieldEntry, Equals: []string{"observed"}},
 	{Category: "server", Field: HistoryFieldAction, Like: []string{`pbs\_%`}},
 	{Category: "snapshots", Field: HistoryFieldAction, Like: []string{`snapshot\_%`}},
+	{Category: "snapshots", Field: HistoryFieldAction, Equals: []string{"backup_group_owner_changed"}},
 	{Category: "maintenance", Field: HistoryFieldAction, Equals: []string{"gc_triggered", "datastore_pruned"}},
 	{Category: "jobs", Field: HistoryFieldAction, Like: []string{`%\_job\_triggered`}},
 	{Category: "restore", Field: HistoryFieldAction, Equals: []string{"backup_restored"}},

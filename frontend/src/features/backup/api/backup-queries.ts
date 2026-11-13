@@ -19,6 +19,7 @@ import type {
   PBSTaskLogEntry,
   RestoreRequest,
   DeleteSnapshotRequest,
+  ChangeBackupOwnerRequest,
   ProtectSnapshotRequest,
   UpdateSnapshotNotesRequest,
   PBSPruneRequest,
@@ -346,6 +347,36 @@ export function useUpdatePBSServer() {
 }
 
 // --- Phase 1: Snapshot Management ---
+
+/**
+ * Gives a backup group to another user or API token, so a storage signing in
+ * as it can add to the group.
+ */
+export function useChangeBackupOwner() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      pbsId,
+      store,
+      body,
+    }: {
+      pbsId: string;
+      store: string;
+      body: ChangeBackupOwnerRequest;
+    }) =>
+      apiClient.put<{ status: string }>(
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores/${store}/groups/owner`,
+        body,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["pbs-servers", variables.pbsId, "snapshots"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["pbs-snapshots"] });
+    },
+  });
+}
 
 export function useProtectSnapshot() {
   const queryClient = useQueryClient();

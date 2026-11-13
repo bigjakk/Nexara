@@ -852,7 +852,10 @@ ZFS, iSCSI, iSCSI Direct, RBD (Ceph), CephFS and Proxmox Backup Server.
   cluster's API URL is the one it had when the token was entered: after moving the server
   to another cluster or changing the cluster's URL, Create refuses it until you enter the
   token secret again on the server under Backup. Proxmox keeps its own copy and backs up with every right the token
-  holds on the PBS, and a token replaced in Nexara later is not replaced in Proxmox. **Port** is needed only for a PBS that does not
+  holds on the PBS, and a token replaced in Nexara later is not replaced in Proxmox. A
+  guest with backups already on that datastore under another owner fails its next backup
+  with `backup owner check failed` until its group is given to the storage's token (see
+  [Managing Datastores](#managing-datastores)). **Port** is needed only for a PBS that does not
   listen on 8007, and Nexara reads only a datastore's root namespace, so backups
   written to a **Namespace** do not show in Backup, coverage or restore. Until you type
   an ID, it follows the datastore: coverage ties a PBS storage to its datastore by ID.
@@ -1137,6 +1140,7 @@ After adding a PBS server, Nexara syncs its datastores. For each datastore you c
 - View **usage statistics** and storage capacity
 - Browse **snapshots**
 - **Protect/unprotect** snapshots
+- **Change the owner** of a backup group, every snapshot of one guest: open a snapshot and click **Change** beside Owner (`manage:backup`). PBS adds backups to a group only for its owner, or for the owner's user when the owner is an API token, so a storage that signs in as anyone else fails with `backup owner check failed`. The dialog fills in the server's own token, unless it already owns the group. Nexara's own PBS token needs `Datastore.Modify` on the datastore for this
 - **Delete** snapshots
 - Trigger **garbage collection**
 - **Prune** old snapshots based on retention rules

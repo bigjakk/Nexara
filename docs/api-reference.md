@@ -1596,6 +1596,7 @@ Rules are addressed by position, so every rule listing returns a `digest` on eac
 | DELETE | `/pbs-servers/:id/datastores/:store/snapshots` | Delete snapshot |
 | PUT | `/pbs-servers/:id/datastores/:store/snapshots/protect` | Protect/unprotect snapshot |
 | PUT | `/pbs-servers/:id/datastores/:store/snapshots/notes` | Update snapshot notes |
+| PUT | `/pbs-servers/:id/datastores/:store/groups/owner` | Change a backup group's owner (`backup_type`, `backup_id`, `owner`) |
 | POST | `/pbs-servers/:id/datastores/:store/prune` | Prune datastore |
 | GET | `/pbs-servers/:id/datastores/:store/rrd` | Get datastore RRD data |
 | GET | `/pbs-servers/:id/datastores/:store/config` | Get datastore config |

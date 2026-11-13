@@ -473,6 +473,53 @@ func (h *BackupHandler) UpdateSnapshotNotes(c fiber.Ctx, p *apischema.Params) er
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
+// ChangeBackupGroupOwner handles PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/groups/owner.
+//
+// It gives a backup group, every snapshot of one guest, to another user or API
+// token: what a storage needs before it can add to a group someone else owns.
+func (h *BackupHandler) ChangeBackupGroupOwner(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
+	if err != nil {
+		return err
+	}
+	cluster, err := h.requirePBSPerm(c, pbsID, "manage")
+	if err != nil {
+		return err
+	}
+
+	store, backupType, backupID, owner := p.String("store"), p.String("backup_type"), p.String("backup_id"), p.String("owner")
+
+	client, err := h.createPBSClient(c, pbsID)
+	if err != nil {
+		return err
+	}
+	if err := client.ChangeBackupOwner(c.Context(), store, backupType, backupID, owner); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	// The snapshot list reads what the last sync stored; show the new owner
+	// now. A failure here is only that delay: the next sync writes it anyway.
+	if err := h.queries.SetPBSGroupOwner(c.Context(), db.SetPBSGroupOwnerParams{
+		Owner:       owner,
+		PbsServerID: pbsID,
+		Datastore:   store,
+		BackupType:  backupType,
+		BackupID:    backupID,
+	}); err != nil {
+		slog.Warn("record a backup group's new owner", "pbs_id", pbsID, "error", err)
+	}
+
+	h.auditPBS(c, cluster, pbsID, store, "backup_group_owner_changed", map[string]any{
+		"resource_name": store + "/" + backupType + "/" + backupID,
+		"backup_type":   backupType,
+		"backup_id":     backupID,
+		"owner":         owner,
+	})
+	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "backup_group_owner_changed")
+
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
 // GetTaskLog handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid/log
 func (h *BackupHandler) GetTaskLog(c fiber.Ctx, p *apischema.Params) error {
 	pbsID, err := pbsIDFromParams(p)

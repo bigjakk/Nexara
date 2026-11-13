@@ -140,16 +140,23 @@ type pbsUPIDDBTX struct {
 	jobs   map[string][]any
 	mu     sync.Mutex
 	audits []capturedQuery
+	// owners is every SetPBSGroupOwner's arguments: a group's new owner,
+	// written onto the synced snapshots.
+	owners [][]any
 }
 
 func (d *pbsUPIDDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	if !strings.Contains(sql, "INSERT INTO audit_log") {
-		return pgconn.CommandTag{}, errPBSUPIDUnexpectedQuery
-	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.audits = append(d.audits, capturedQuery{sql: sql, args: args})
-	return pgconn.NewCommandTag("INSERT 0 1"), nil
+	switch {
+	case strings.Contains(sql, "INSERT INTO audit_log"):
+		d.audits = append(d.audits, capturedQuery{sql: sql, args: args})
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	case strings.Contains(sql, "-- name: SetPBSGroupOwner :exec"):
+		d.owners = append(d.owners, args)
+		return pgconn.NewCommandTag("UPDATE 2"), nil
+	}
+	return pgconn.CommandTag{}, errPBSUPIDUnexpectedQuery
 }
 
 func (d *pbsUPIDDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {

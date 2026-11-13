@@ -150,3 +150,13 @@ ORDER BY 1 ASC, datastore ASC;
 INSERT INTO pbs_job_baselines (pbs_server_id, job_type, last_read_at)
 VALUES (sqlc.arg('pbs_server_id'), sqlc.arg('job_type'), now())
 ON CONFLICT (pbs_server_id, job_type) DO UPDATE SET last_read_at = now();
+
+-- name: SetPBSGroupOwner :exec
+-- A backup group's new owner, written onto the snapshots the last sync stored
+-- so the list shows it before the next sync does.
+UPDATE pbs_snapshots
+SET owner = sqlc.arg(owner)
+WHERE pbs_server_id = sqlc.arg(pbs_server_id)
+  AND datastore = sqlc.arg(datastore)
+  AND backup_type = sqlc.arg(backup_type)
+  AND backup_id = sqlc.arg(backup_id);

@@ -131,6 +131,14 @@ export interface DeleteSnapshotRequest {
   backup_time: number;
 }
 
+/** Body of PUT /pbs-servers/:id/datastores/:store/groups/owner. */
+export interface ChangeBackupOwnerRequest {
+  backup_type: string;
+  backup_id: string;
+  /** A PBS user (user@realm) or API token (user@realm!token). */
+  owner: string;
+}
+
 export interface ProtectSnapshotRequest {
   backup_type: string;
   backup_id: string;

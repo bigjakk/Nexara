@@ -21,7 +21,7 @@ import (
 // backupRouteCount is how many endpoints registerBackupEndpoints declares.
 // See vmRouteCount in registry_vms_test.go for why the registry total is a
 // sum of per-domain constants rather than one number.
-const backupRouteCount = 28
+const backupRouteCount = 29
 
 const testPBSStore = "datastore01"
 
@@ -36,12 +36,12 @@ func backupRoute(path string) string {
 }
 
 // backupRoutesOutsideTheClusterCheckShape is this domain's half of the registry-wide exception list in
-// registry_vms_test.go. TWENTY-TWO of the 28 are here, the highest proportion of any domain and its own
+// registry_vms_test.go. TWENTY-THREE of the 29 are here, the highest proportion of any domain and its own
 // shape: a PBS server may belong to a cluster or to none, which decides whether the grant is cluster-scoped
-// or instance-wide, a DB read on every one of the 19 routes nested under /pbs-servers/:pbs_id; two more
+// or instance-wide, a DB read on every one of the 20 routes nested under /pbs-servers/:pbs_id; two more
 // span every cluster and filter instead of gating, and the restore checks the PBS server its body names
-// after the cluster in its path. The map is built rather than written out because the 19 share one reason
-// verbatim, and nineteen copies of one sentence is a list nobody re-reads.
+// after the cluster in its path. The map is built rather than written out because the 20 share one reason
+// verbatim, and twenty copies of one sentence is a list nobody re-reads.
 var backupRoutesOutsideTheClusterCheckShape = func() map[string]string {
 	const deferred = "Deferred: requirePBSPerm loads the PBS server row and gates on its cluster, or " +
 		"instance-wide when the server is standalone"
@@ -60,6 +60,7 @@ var backupRoutesOutsideTheClusterCheckShape = func() map[string]string {
 		"DELETE /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots",
 		"PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/protect",
 		"PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/notes",
+		"PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/groups/owner",
 		"POST /api/v1/pbs-servers/:pbs_id/datastores/:store/prune",
 		"GET /api/v1/pbs-servers/:pbs_id/datastores/:store/rrd",
 		"GET /api/v1/pbs-servers/:pbs_id/datastores/:store/config",
@@ -99,6 +100,7 @@ var backupLegacyPermissions = map[string]struct {
 	"DELETE /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots":      {"delete:backup", "Deferred", 2},
 	"PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/protect": {"manage:backup", "Deferred", 2},
 	"PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/notes":   {"manage:backup", "Deferred", 2},
+	"PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/groups/owner":      {"manage:backup", "Deferred", 2},
 	"POST /api/v1/pbs-servers/:pbs_id/datastores/:store/prune":            {"manage:backup", "Deferred", 2},
 	"GET /api/v1/pbs-servers/:pbs_id/datastores/:store/rrd":               {"view:backup", "Deferred", 2},
 	"GET /api/v1/pbs-servers/:pbs_id/datastores/:store/config":            {"view:backup", "Deferred", 2},
@@ -220,8 +222,9 @@ func TestBackupRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 			t.Fatalf("%s: unknown shape %q in the tally", key, want.shape)
 		}
 	}
-	if hoisted != 6 || kept != 43 {
-		t.Errorf("the tally moves %d permission call(s) into middleware and keeps %d in handlers, want 6 / 43",
+	// 43 at the migration, and the backup group owner route added since keeps two more.
+	if hoisted != 6 || kept != 45 {
+		t.Errorf("the tally moves %d permission call(s) into middleware and keeps %d in handlers, want 6 / 45",
 			hoisted, kept)
 	}
 
@@ -248,6 +251,7 @@ func TestBackupPathSegmentsAreAnchored(t *testing.T) {
 			"DELETE " + pbsBackupScope + "/datastores/:store/snapshots",
 			"PUT " + pbsBackupScope + "/datastores/:store/snapshots/protect",
 			"PUT " + pbsBackupScope + "/datastores/:store/snapshots/notes",
+			"PUT " + pbsBackupScope + "/datastores/:store/groups/owner",
 			"POST " + pbsBackupScope + "/datastores/:store/prune",
 			"GET " + pbsBackupScope + "/datastores/:store/rrd",
 			"GET " + pbsBackupScope + "/datastores/:store/config",

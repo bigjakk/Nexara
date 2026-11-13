@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -384,5 +385,35 @@ func TestPBSClient_GetPruneJobs(t *testing.T) {
 	// A job with no run recorded yet must not invent one.
 	if jobs[1].LastRunState != "" || jobs[1].LastRunEndtime != 0 {
 		t.Errorf("never-run job carries a last run: %+v", jobs[1])
+	}
+}
+
+// A group's owner changes with a POST to the datastore's change-owner, the
+// group and the new owner as form fields, as PBS's API takes them.
+func TestPBSClient_ChangeBackupOwnerPostsTheGroupAndOwner(t *testing.T) {
+	t.Parallel()
+	var method, path string
+	var form url.Values
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		_ = r.ParseForm()
+		form = r.PostForm
+		_ = json.NewEncoder(w).Encode(response{Data: json.RawMessage(`null`)})
+	}))
+	defer srv.Close()
+	client := &PBSClient{apiClient: &apiClient{
+		httpClient: srv.Client(),
+		baseURL:    srv.URL,
+		authHeader: "PBSAPIToken=test@pam!token:secret",
+	}}
+
+	if err := client.ChangeBackupOwner(context.Background(), "datastore01", "vm", "121", "backup@pbs!test"); err != nil {
+		t.Fatalf("ChangeBackupOwner: %v", err)
+	}
+	want := url.Values{"backup-type": {"vm"}, "backup-id": {"121"}, "new-owner": {"backup@pbs!test"}}
+	if method != http.MethodPost || path != "/api2/json/admin/datastore/datastore01/change-owner" ||
+		form.Encode() != want.Encode() {
+		t.Errorf("PBS received %s %s %v, want POST /api2/json/admin/datastore/datastore01/change-owner %v",
+			method, path, form, want)
 	}
 }

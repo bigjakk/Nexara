@@ -436,6 +436,36 @@ func (q *Queries) MarkPBSJobBaseline(ctx context.Context, arg MarkPBSJobBaseline
 	return err
 }
 
+const setPBSGroupOwner = `-- name: SetPBSGroupOwner :exec
+UPDATE pbs_snapshots
+SET owner = $1
+WHERE pbs_server_id = $2
+  AND datastore = $3
+  AND backup_type = $4
+  AND backup_id = $5
+`
+
+type SetPBSGroupOwnerParams struct {
+	Owner       string    `json:"owner"`
+	PbsServerID uuid.UUID `json:"pbs_server_id"`
+	Datastore   string    `json:"datastore"`
+	BackupType  string    `json:"backup_type"`
+	BackupID    string    `json:"backup_id"`
+}
+
+// A backup group's new owner, written onto the snapshots the last sync stored
+// so the list shows it before the next sync does.
+func (q *Queries) SetPBSGroupOwner(ctx context.Context, arg SetPBSGroupOwnerParams) error {
+	_, err := q.db.Exec(ctx, setPBSGroupOwner,
+		arg.Owner,
+		arg.PbsServerID,
+		arg.Datastore,
+		arg.BackupType,
+		arg.BackupID,
+	)
+	return err
+}
+
 const upsertPBSSnapshot = `-- name: UpsertPBSSnapshot :one
 INSERT INTO pbs_snapshots (pbs_server_id, datastore, backup_type, backup_id, backup_time, size, verified, protected, comment, owner, last_seen_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())

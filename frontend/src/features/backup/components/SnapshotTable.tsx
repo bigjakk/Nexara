@@ -27,10 +27,13 @@ import { StateText } from "./StateText";
 import type { PBSSnapshot } from "../types/backup";
 import { RestoreDialog } from "./RestoreDialog";
 import { DeleteSnapshotDialog } from "./DeleteSnapshotDialog";
+import { ChangeOwnerDialog } from "./ChangeOwnerDialog";
 import {
+  usePBSServers,
   useProtectSnapshot,
   useUpdateSnapshotNotes,
 } from "../api/backup-queries";
+import { usePermissions } from "@/hooks/usePermissions";
 import { formatBytes } from "@/lib/format";
 
 function formatUnixTime(ts: number): string {
@@ -49,6 +52,15 @@ interface SnapshotTableProps {
 export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<PBSSnapshot | null>(null);
+  const [ownerTarget, setOwnerTarget] = useState<PBSSnapshot | null>(null);
+  const canManage = usePermissions().hasPermission("manage", "backup");
+  // What a storage made from this server with its token signs in as.
+  const serverToken = usePBSServers().data?.find(
+    (s) => s.id === pbsId,
+  )?.token_id;
+  const ownerSuggestions = [
+    ...new Set(snapshots.map((s) => s.owner).filter((o) => o !== "")),
+  ];
   const [editingComment, setEditingComment] = useState<string | null>(null);
   const [commentValue, setCommentValue] = useState("");
   // Optimistic overrides: snapKey -> protected value
@@ -284,7 +296,22 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                           {formatBytes(snap.size)}
                         </DetailField>
                         <DetailField label="Owner">
-                          {snap.owner || "-"}
+                          <span className="inline-flex flex-wrap items-baseline gap-x-2">
+                            {snap.owner || "-"}
+                            {canManage && (
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="h-auto p-0"
+                                aria-label={`Change owner of ${snap.backup_type}/${snap.backup_id}`}
+                                onClick={() => {
+                                  setOwnerTarget(snap);
+                                }}
+                              >
+                                Change
+                              </Button>
+                            )}
+                          </span>
                         </DetailField>
                         <DetailField label="Verified">
                           {snap.verified ? "Yes" : "No"}
@@ -365,6 +392,25 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
           </TableBody>
         </Table>
       </Panel>
+      {ownerTarget && (
+        <ChangeOwnerDialog
+          pbsId={pbsId}
+          snapshot={ownerTarget}
+          groupSize={
+            snapshots.filter(
+              (s) =>
+                s.datastore === ownerTarget.datastore &&
+                s.backup_type === ownerTarget.backup_type &&
+                s.backup_id === ownerTarget.backup_id,
+            ).length
+          }
+          serverToken={serverToken}
+          suggestions={ownerSuggestions}
+          onClose={() => {
+            setOwnerTarget(null);
+          }}
+        />
+      )}
       {deleteTarget && (
         <DeleteSnapshotDialog
           snapshot={deleteTarget}

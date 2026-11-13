@@ -176,6 +176,25 @@ func (c *PBSClient) ProtectSnapshot(ctx context.Context, store, backupType, back
 	return nil
 }
 
+// ChangeBackupOwner gives a backup group, every snapshot of one guest, to
+// another user or API token. PBS adds a snapshot to a group only for its owner,
+// or for the owner's user when the owner is a token, so a storage that signs in
+// as anyone else fails with "backup owner check failed".
+func (c *PBSClient) ChangeBackupOwner(ctx context.Context, store, backupType, backupID, newOwner string) error {
+	if store == "" {
+		return fmt.Errorf("store name is required")
+	}
+	params := url.Values{}
+	params.Set("backup-type", backupType)
+	params.Set("backup-id", backupID)
+	params.Set("new-owner", newOwner)
+	path := "/admin/datastore/" + url.PathEscape(store) + "/change-owner"
+	if err := c.doPost(ctx, path, params, nil); err != nil {
+		return fmt.Errorf("change backup owner on %s: %w", store, err)
+	}
+	return nil
+}
+
 // UpdateSnapshotNotes updates the comment/notes on a snapshot.
 func (c *PBSClient) UpdateSnapshotNotes(ctx context.Context, store, backupType, backupID string, backupTime int64, comment string) error {
 	if store == "" {

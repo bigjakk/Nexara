@@ -3092,6 +3092,9 @@ type Querier interface {
 	// hour must not read "polled 5 seconds ago" beside its error.
 	SetNutServerPollError(ctx context.Context, arg SetNutServerPollErrorParams) error
 	SetNutServerPolled(ctx context.Context, arg SetNutServerPolledParams) error
+	// A backup group's new owner, written onto the snapshots the last sync stored
+	// so the list shows it before the next sync does.
+	SetPBSGroupOwner(ctx context.Context, arg SetPBSGroupOwnerParams) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error
 	// A listing of the UPS's logins was taken on mains, so the nodes it powers can

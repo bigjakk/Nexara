@@ -16,7 +16,7 @@ import (
 // this file inherits, live in registry_pbs.go; pathPrefix is the registry's
 // own, in registry.go.
 
-// pbsBackupScope is the per-server prefix the 19 PBS backup routes hang
+// pbsBackupScope is the per-server prefix the 20 PBS backup routes hang
 // off. It is NOT the /pbs-servers/:id prefix registry_pbs.go declares: the
 // PBSHandler routes spell the server's id :id, and these have always
 // spelled it :pbs_id.
@@ -152,7 +152,7 @@ func pbsStoreParams(extra apischema.Properties) apischema.Properties {
 	return pbsParams(withParams(apischema.Properties{"store": pbsDatastoreParam}, extra))
 }
 
-// backupDeferredReason is the Deferred justification the 19 per-server
+// backupDeferredReason is the Deferred justification the 20 per-server
 // routes share.
 //
 // It is requirePBSPerm (handlers/backup.go) rather than PBSHandler's inline
@@ -172,6 +172,14 @@ const restoreDeferredReason = "two checks, the second on something only the body
 	"cluster in the path, then view:backup on the PBS server the body's pbs_server_id picks — requirePBSPerm " +
 	"loads its row and gates on its cluster, or instance-wide when it is standalone — refused as a 404, so " +
 	"a server the caller cannot view looks like one that does not exist"
+
+// groupRefParams is the (type, id) pair that names one backup group, the
+// snapshots of one guest: snapshotRefParams without the time.
+func groupRefParams() apischema.Properties {
+	props := snapshotRefParams(apischema.SourceAuto)
+	delete(props, "backup_time")
+	return props
+}
 
 // snapshotRefParams is the (type, id, time) triple that names one PBS
 // snapshot, shared by the delete, protect and notes routes.
@@ -221,19 +229,19 @@ func snapshotRefParams(source apischema.Source) apischema.Properties {
 	}
 }
 
-// registerBackupEndpoints declares the 28 routes served by BackupHandler.
+// registerBackupEndpoints declares the 29 routes served by BackupHandler.
 //
 // The split is the widest of any domain so far, and it is the domain's own
 // shape rather than an accident of migration:
 //
-//	19  Deferred  the /pbs-servers/:pbs_id routes, every one of which gates
+//	20  Deferred  the /pbs-servers/:pbs_id routes, every one of which gates
 //	              through requirePBSPerm — see backupDeferredReason
 //	 7  Check     the cluster-scoped restore and backup-job routes, whose
 //	              cluster is the first parameter of their own path
 //	 2  Advisory  the two instance-wide listings, which filter through
 //	              accessibleClusters instead of gating
 //
-// None of the 19 can hoist and none of the 2 can gate, so seven hand-placed
+// None of the 20 can hoist and none of the 2 can gate, so seven hand-placed
 // calls move into middleware and the rest stay where they are. The tally in
 // registry_backup_test.go states that out loud.
 func registerBackupEndpoints(reg *Registry, h *handlers.BackupHandler) {
@@ -322,6 +330,32 @@ func registerBackupEndpoints(reg *Registry, h *handlers.BackupHandler) {
 			"comment": optString(4096, "<string>", "Note to store on the snapshot. Empty clears it."),
 		})),
 		Handler: h.UpdateSnapshotNotes,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPut,
+		Path:   pbsBackupScope + "/datastores/:store/groups/owner",
+		Description: "Give a backup group, every snapshot of one guest, to another user or API token. " +
+			"PBS adds snapshots to a group only for its owner, or for the owner's user when the owner is " +
+			"a token, so a storage that signs in as anyone else fails with \"backup owner check failed\". " +
+			"Requires manage:backup on the server's cluster, or the instance-wide manage:backup when it " +
+			"is standalone.",
+		Group:       "Backup",
+		Permissions: Permissions{Deferred: backupDeferredReason},
+		Parameters: pbsStoreParams(withParams(groupRefParams(), apischema.Properties{
+			// A floor, not PBS's grammar: PBS checks the auth id itself and
+			// refuses one it does not know in its own words. A user name may
+			// hold an "@" of its own (an e-mail address on an LDAP realm), so
+			// only "some @ some, no white space" is asked for here.
+			"owner": {
+				Type:        apischema.String,
+				MinLength:   apischema.Ptr(3),
+				MaxLength:   apischema.Ptr(128),
+				Pattern:     `^\S+@\S+$`,
+				Typetext:    "<user@realm[!token]>",
+				Description: "The new owner: a PBS user (user@realm) or API token (user@realm!token).",
+			},
+		})),
+		Handler: h.ChangeBackupGroupOwner,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,

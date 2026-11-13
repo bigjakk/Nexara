@@ -22,6 +22,7 @@
     "snapshot_protected": "Snapshot protected",
     "snapshot_unprotected": "Snapshot unprotected",
     "snapshot_notes_updated": "Snapshot notes changed",
+    "backup_group_owner_changed": "Backup group owner changed",
     "sync_job_triggered": "Sync job run",
     "verify_job_triggered": "Verify job run",
     "backup_restored": "Restore"

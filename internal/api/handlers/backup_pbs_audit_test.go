@@ -40,6 +40,10 @@ func mountPBSAuditRoutes(t *testing.T, app *fiber.App, h *BackupHandler) {
 		apischema.Properties{"pbs_id": pbsID, "job_id": name}, []string{"pbs_id", "job_id"}, h.RunVerifyJob))
 	app.Put(base+"/datastores/:store/snapshots/protect", withRequestParams(t,
 		snapshot, []string{"pbs_id", "store"}, h.ProtectSnapshot))
+	app.Put(base+"/datastores/:store/groups/owner", withRequestParams(t, apischema.Properties{
+		"pbs_id": pbsID, "store": name, "backup_type": {Type: apischema.String},
+		"backup_id": {Type: apischema.String}, "owner": {Type: apischema.String},
+	}, []string{"pbs_id", "store"}, h.ChangeBackupGroupOwner))
 }
 
 // A datastore action is audited under its SERVER: pbs_server, the server's id,
@@ -56,6 +60,7 @@ func TestPBSDatastoreActionsAreAuditedUnderTheirServer(t *testing.T) {
 		name, method, path, body string
 		action                   string
 		details                  map[string]any
+		owner                    bool // the synced snapshots take the group's new owner
 	}{
 		{
 			name: "garbage collection", method: http.MethodPost, path: "/datastores/datastore01/gc",
@@ -84,6 +89,16 @@ func TestPBSDatastoreActionsAreAuditedUnderTheirServer(t *testing.T) {
 				"datastore": "datastore01", "resource_name": "datastore01/vm/101", "backup_type": "vm",
 				"backup_id": "101", "backup_time": float64(1700000000), "protected": true,
 			},
+		},
+		{
+			name: "backup group owner", method: http.MethodPut, path: "/datastores/datastore01/groups/owner",
+			body:   `{"backup_type":"vm","backup_id":"101","owner":"backup@pbs!test"}`,
+			action: "backup_group_owner_changed",
+			details: map[string]any{
+				"datastore": "datastore01", "resource_name": "datastore01/vm/101", "backup_type": "vm",
+				"backup_id": "101", "owner": "backup@pbs!test",
+			},
+			owner: true,
 		},
 	}
 	for _, tt := range tests {
@@ -123,6 +138,12 @@ func TestPBSDatastoreActionsAreAuditedUnderTheirServer(t *testing.T) {
 			}
 			if !reflect.DeepEqual(details, tt.details) {
 				t.Errorf("details = %s\nwant %v", got.Details, tt.details)
+			}
+			if tt.owner {
+				want := [][]any{{"backup@pbs!test", h.pbsID, "datastore01", "vm", "101"}}
+				if !reflect.DeepEqual(h.dbtx.owners, want) {
+					t.Errorf("synced snapshots given owner %v, want %v", h.dbtx.owners, want)
+				}
 			}
 		})
 	}
