@@ -33,8 +33,9 @@ export function SnapshotFilterBar({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Input
-        className="h-9 w-full sm:w-64"
+        className="h-8 w-full sm:w-56"
         placeholder={t("filters.search")}
+        aria-label={t("filters.search")}
         value={filters.search}
         onChange={(e) => {
           onChange({ ...filters, search: e.target.value });
@@ -46,7 +47,7 @@ export function SnapshotFilterBar({
           onChange({ ...filters, clusterId: v === ALL ? "" : v });
         }}
       >
-        <SelectTrigger className="h-9 w-44">
+        <SelectTrigger className="h-8 w-40" aria-label={t("table.cluster")}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -64,7 +65,7 @@ export function SnapshotFilterBar({
           onChange({ ...filters, guestType: v === ALL ? "" : v });
         }}
       >
-        <SelectTrigger className="h-9 w-36">
+        <SelectTrigger className="h-8 w-32" aria-label={t("filters.type")}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -79,7 +80,7 @@ export function SnapshotFilterBar({
           onChange({ ...filters, age: v === ALL ? "" : v });
         }}
       >
-        <SelectTrigger className="h-9 w-44">
+        <SelectTrigger className="h-8 w-44" aria-label={t("table.age")}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

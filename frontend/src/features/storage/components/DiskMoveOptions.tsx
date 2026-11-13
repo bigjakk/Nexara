@@ -110,7 +110,7 @@ export function DiskMoveOptions({
       )}
 
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-bwlimit`}>Bandwidth Limit (KiB/s)</Label>
+        <Label htmlFor={`${idPrefix}-bwlimit`}>Bandwidth limit (KiB/s)</Label>
         <Input
           id={`${idPrefix}-bwlimit`}
           type="number"

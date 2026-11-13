@@ -20,7 +20,12 @@ import {
   SquareArrowOutUpRight,
   Loader2,
 } from "lucide-react";
+import { DetailField } from "@/components/DetailField";
+import { DefGrid } from "@/components/page/Panel";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePermissions } from "@/hooks/usePermissions";
+import { USAGE_TEXT_CLASS } from "@/lib/usage-level";
+import { cn } from "@/lib/utils";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { useDeleteSnapshot } from "@/features/vms/api/vm-queries";
 import { useResyncGuestSnapshots } from "../api/snapshot-queries";
@@ -36,16 +41,20 @@ function formatUnixTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString();
 }
 
-function AgeBadge({ days }: { days: number | null }) {
+/** A row's icon actions stay quiet until the pointer is on them. */
+const ROW_ACTION_CLASS = "h-7 w-7 p-0 text-muted-foreground";
+
+/** Fresh is plain; past a week reads amber and past a month red. */
+function Age({ days }: { days: number | null }) {
   const bucket = ageBucket(days);
   const label = formatAge(days);
   switch (bucket) {
     case "month":
-      return <Badge variant="destructive">{label}</Badge>;
+      return <span className={USAGE_TEXT_CLASS.err}>{label}</span>;
     case "week":
-      return <Badge variant="warning">{label}</Badge>;
+      return <span className={USAGE_TEXT_CLASS.warn}>{label}</span>;
     case "fresh":
-      return <span className="text-sm">{label}</span>;
+      return <span>{label}</span>;
     case "unknown":
       return <span className="text-muted-foreground">—</span>;
   }
@@ -54,6 +63,10 @@ function AgeBadge({ days }: { days: number | null }) {
 export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
   const { t } = useTranslation("snapshots");
   const { canDelete } = usePermissions();
+  // A phone has room for one column and the actions: the snapshot's name
+  // over its age and guest. Where it is and when it was taken move into the
+  // expanded row.
+  const isMobile = useIsMobile();
   const deleteMutation = useDeleteSnapshot();
   const resyncMutation = useResyncGuestSnapshots();
 
@@ -156,11 +169,17 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
     />
   ));
 
+  // The table sits flush in a panel, so what is not the table brings its own
+  // gutters.
+  const bannerStack = banners.length > 0 && (
+    <div className="space-y-3 px-[18px] pb-3">{banners}</div>
+  );
+
   if (rows.length === 0) {
     return (
-      <div className="space-y-3">
-        {banners}
-        <p className="py-8 text-center text-sm text-muted-foreground">
+      <div>
+        {bannerStack}
+        <p className="px-[18px] py-8 text-center text-sm text-muted-foreground">
           {t("emptyFiltered")}
         </p>
       </div>
@@ -168,18 +187,18 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
   }
 
   return (
-    <div className="space-y-3">
-      {banners}
+    <div>
+      {bannerStack}
 
-      <div className="rounded-md border">
+      <div>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-8" />
+              <TableHead className="w-8 pr-0" />
               <TableHead>
                 <button
                   type="button"
-                  className="flex items-center gap-1 font-medium"
+                  className="flex items-center gap-1 font-medium hover:text-foreground"
                   onClick={() => {
                     setOldestFirst((prev) => !prev);
                   }}
@@ -192,11 +211,15 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                   )}
                 </button>
               </TableHead>
-              <TableHead>{t("table.name")}</TableHead>
-              <TableHead>{t("table.guest")}</TableHead>
-              <TableHead>{t("table.cluster")}</TableHead>
-              <TableHead>{t("table.node")}</TableHead>
-              <TableHead>{t("table.created")}</TableHead>
+              {!isMobile && (
+                <>
+                  <TableHead>{t("table.name")}</TableHead>
+                  <TableHead>{t("table.guest")}</TableHead>
+                  <TableHead>{t("table.cluster")}</TableHead>
+                  <TableHead>{t("table.node")}</TableHead>
+                  <TableHead>{t("table.created")}</TableHead>
+                </>
+              )}
               <TableHead className="w-28" />
             </TableRow>
           </TableHeader>
@@ -207,6 +230,31 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
               const days = ageDays(row.snap_time, nowMs);
               const guestKind = row.guest_type === "lxc" ? "ct" : "vm";
               const deletable = canDeleteRow(row) && row.vm_id !== null;
+              const name = (
+                <>
+                  {row.name}
+                  {row.vmstate && (
+                    <Badge variant="secondary" className="ml-2 font-sans">
+                      {t("ramState")}
+                    </Badge>
+                  )}
+                </>
+              );
+              const guest = (
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className={cn(
+                      "font-medium",
+                      !row.vm_name && "italic text-muted-foreground",
+                    )}
+                  >
+                    {row.vm_name ?? `#${String(row.vmid)}`}
+                  </span>
+                  <span className="text-[12.5px] text-muted-foreground">
+                    {row.guest_type === "qemu" ? "VM" : "CT"}
+                  </span>
+                </div>
+              );
 
               return (
                 <Fragment key={key}>
@@ -216,54 +264,46 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                       toggleExpand(key);
                     }}
                   >
-                    <TableCell className="px-2">
+                    <TableCell className="pr-0 text-muted-foreground">
                       {isExpanded ? (
                         <ChevronDown className="h-4 w-4" />
                       ) : (
                         <ChevronRight className="h-4 w-4" />
                       )}
                     </TableCell>
-                    <TableCell>
-                      <AgeBadge days={days} />
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {row.name}
-                      {row.vmstate && (
-                        <Badge variant="secondary" className="ml-2">
-                          {t("ramState")}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant={
-                            row.guest_type === "qemu" ? "default" : "secondary"
-                          }
-                        >
-                          {row.guest_type === "qemu" ? "VM" : "CT"}
-                        </Badge>
-                        <span
-                          className={
-                            row.vm_name ? "" : "text-muted-foreground italic"
-                          }
-                        >
-                          {row.vm_name ?? `#${String(row.vmid)}`}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {row.cluster_name}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {row.node || "—"}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatUnixTime(row.snap_time)}
-                    </TableCell>
+                    {isMobile ? (
+                      <TableCell>
+                        <div className="font-mono text-[12.5px] [overflow-wrap:anywhere]">
+                          {name}
+                        </div>
+                        <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2.5 tabular-nums">
+                          <Age days={days} />
+                          {guest}
+                        </div>
+                      </TableCell>
+                    ) : (
+                      <>
+                        <TableCell className="whitespace-nowrap tabular-nums">
+                          <Age days={days} />
+                        </TableCell>
+                        <TableCell className="font-mono text-[12.5px]">
+                          {name}
+                        </TableCell>
+                        <TableCell>{guest}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {row.cluster_name}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {row.node || "—"}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {formatUnixTime(row.snap_time)}
+                        </TableCell>
+                      </>
+                    )}
                     <TableCell>
                       <div
-                        className="flex items-center justify-end gap-1"
+                        className="flex items-center justify-end gap-0.5"
                         onClick={(e) => {
                           e.stopPropagation();
                         }}
@@ -299,6 +339,7 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                             <Button
                               variant="ghost"
                               size="sm"
+                              className={ROW_ACTION_CLASS}
                               title={
                                 row.vm_id
                                   ? t("refreshRow")
@@ -321,6 +362,7 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                               <Button
                                 variant="ghost"
                                 size="sm"
+                                className={ROW_ACTION_CLASS}
                                 title={t("openGuest")}
                                 asChild
                               >
@@ -334,6 +376,7 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                               <Button
                                 variant="ghost"
                                 size="sm"
+                                className={ROW_ACTION_CLASS}
                                 title={t("openGuestUnavailable")}
                                 disabled
                               >
@@ -343,6 +386,10 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                             <Button
                               variant="ghost"
                               size="sm"
+                              className={cn(
+                                ROW_ACTION_CLASS,
+                                "hover:text-destructive",
+                              )}
                               title={
                                 deletable
                                   ? t("delete")
@@ -355,7 +402,7 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                               }}
                               disabled={!deletable}
                             >
-                              <Trash2 className="h-4 w-4 text-destructive" />
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </>
                         )}
@@ -363,47 +410,60 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                     </TableCell>
                   </TableRow>
                   {isExpanded && (
-                    <TableRow>
-                      <TableCell colSpan={8} className="bg-muted/30 px-8 py-4">
-                        <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm md:grid-cols-4">
-                          <div>
-                            <span className="text-muted-foreground">
-                              {t("detail.description")}:
-                            </span>{" "}
-                            {row.description || "—"}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              {t("detail.parent")}:
-                            </span>{" "}
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell
+                        colSpan={isMobile ? 3 : 8}
+                        className="bg-foreground/[0.03] py-4 sm:first:pl-[58px]"
+                      >
+                        <DefGrid>
+                          {isMobile && (
+                            <>
+                              <DetailField label={t("table.cluster")}>
+                                {row.cluster_name}
+                              </DetailField>
+                              <DetailField label={t("table.node")}>
+                                {row.node || "—"}
+                              </DetailField>
+                              <DetailField label={t("table.created")}>
+                                {formatUnixTime(row.snap_time)}
+                              </DetailField>
+                            </>
+                          )}
+                          {row.description ? (
+                            <DetailField label={t("detail.description")}>
+                              {row.description}
+                            </DetailField>
+                          ) : (
+                            <DetailField
+                              label={t("detail.description")}
+                              variant="muted"
+                            >
+                              —
+                            </DetailField>
+                          )}
+                          <DetailField
+                            label={t("detail.parent")}
+                            variant={row.parent ? "mono" : "muted"}
+                          >
                             {row.parent || "—"}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              {t("detail.vmid")}:
-                            </span>{" "}
+                          </DetailField>
+                          <DetailField label={t("detail.vmid")} variant="mono">
                             {row.vmid}
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              {t("detail.lastSeen")}:
-                            </span>{" "}
+                          </DetailField>
+                          <DetailField label={t("detail.lastSeen")}>
                             {new Date(row.last_seen_at).toLocaleString()}
-                          </div>
+                          </DetailField>
                           {row.vm_status && (
-                            <div>
-                              <span className="text-muted-foreground">
-                                {t("detail.guestStatus")}:
-                              </span>{" "}
+                            <DetailField label={t("detail.guestStatus")}>
                               {row.vm_status}
-                            </div>
+                            </DetailField>
                           )}
-                          {!row.vm_id && (
-                            <div className="col-span-2 text-muted-foreground italic md:col-span-4">
-                              {t("orphanHint")}
-                            </div>
-                          )}
-                        </div>
+                        </DefGrid>
+                        {!row.vm_id && (
+                          <p className="mt-3 text-[12.5px] italic text-muted-foreground">
+                            {t("orphanHint")}
+                          </p>
+                        )}
                       </TableCell>
                     </TableRow>
                   )}

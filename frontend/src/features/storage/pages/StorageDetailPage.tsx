@@ -1,11 +1,28 @@
-import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, Database } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  ArrowRightLeft,
+  Container,
+  Database,
+  LibraryBig,
+  MoreHorizontal,
+  Trash2,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Segmented } from "@/components/ui/segmented";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { DetailHeader, Fact, StatusFact } from "@/components/page/DetailHeader";
+import { Panel } from "@/components/page/Panel";
+import { Stat, StatStrip } from "@/components/page/StatStrip";
 import {
   HistoryTabContent,
   HistoryTabTrigger,
@@ -15,8 +32,9 @@ import {
   useCluster,
   useClusterNodes,
 } from "@/features/clusters/api/cluster-queries";
+import { formatBytes, formatPercent } from "@/lib/format";
+import { usageLevel } from "@/lib/usage-level";
 import { useClusterStorage, useStorageContent } from "../api/storage-queries";
-import { StorageCapacityBar } from "../components/StorageCapacityBar";
 import { StorageContentTable } from "../components/StorageContentTable";
 import { StorageGuestTable } from "../components/StorageGuestTable";
 import { UploadDialog } from "../components/UploadDialog";
@@ -27,7 +45,22 @@ import { BulkMoveDialog } from "../components/BulkMoveDialog";
 import { EditStorageDialog } from "../components/EditStorageDialog";
 import { DeleteStorageDialog } from "../components/DeleteStorageDialog";
 import { isPVEAtLeast } from "../lib/pve-version";
+import {
+  contentBreakdown,
+  contentKindNoun,
+  contentKindPlural,
+  contentList,
+  sortContentKinds,
+  storageTypeLabel,
+  storePercent,
+  storeState,
+  STATE_ICON,
+  STATE_LABEL,
+} from "../lib/store-rows";
 import type { StorageContentItem } from "../types/storage";
+
+/** The content filter's "every kind" choice; no Proxmox content kind is named this. */
+const ALL_KINDS = "all";
 
 export function StorageDetailPage() {
   const { clusterId = "", storageId = "" } = useParams<{
@@ -35,6 +68,12 @@ export function StorageDetailPage() {
     storageId: string;
   }>();
   const navigate = useNavigate();
+  const [kind, setKind] = useState(ALL_KINDS);
+  // These four open from a More menu, so the page holds their open state.
+  const [evacuateOpen, setEvacuateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [appliancesOpen, setAppliancesOpen] = useState(false);
+  const [ociOpen, setOciOpen] = useState(false);
 
   const storageQuery = useClusterStorage(clusterId);
   const nodesQuery = useClusterNodes(clusterId);
@@ -72,7 +111,7 @@ export function StorageDetailPage() {
     clusterQuery.data?.pve_version ?? "",
     "9.1",
   );
-  const filterableTypes = contentTypes.filter(
+  const filterableTypes = sortContentKinds(contentTypes).filter(
     (t) =>
       t === "iso" ||
       t === "vztmpl" ||
@@ -142,8 +181,13 @@ export function StorageDetailPage() {
     return (
       <EmptyState
         icon={Database}
-        title="Storage pool not found"
+        title="Store not found"
         description="It may have been removed, or you may not have access."
+        action={
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/storage">Back to Storage</Link>
+          </Button>
+        }
       />
     );
   }
@@ -170,212 +214,301 @@ export function StorageDetailPage() {
       </p>
     );
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-          <button
-            onClick={() => {
-              void navigate(`/storage?cluster=${clusterId}`);
-            }}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            All Pools
-          </button>
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-            <Database className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">
-            {pool.storage}
-          </h1>
-          <Badge variant="outline">{pool.type}</Badge>
-          {pool.shared ? (
-            <Badge variant="secondary">shared</Badge>
-          ) : hostNodeName ? (
-            <Badge variant="secondary">on {hostNodeName}</Badge>
-          ) : null}
-          {!pool.active && <Badge variant="destructive">inactive</Badge>}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {hasImages && evacuateTargets.length > 0 && (
-            <BulkMoveDialog
-              clusterId={clusterId}
-              storageId={pool.id}
-              storageName={pool.storage}
-              targetOptions={evacuateTargets}
-            />
-          )}
-          <UploadDialog
-            clusterId={clusterId}
-            storageId={pool.id}
-            supportedContent={pool.content}
-          />
-          {(hasIso || hasVztmpl || hasImport) && (
-            <URLDownloadDialog
-              clusterId={clusterId}
-              storageId={pool.id}
-              supportedContent={pool.content}
-            />
-          )}
-          {hasVztmpl && pveSupportsOCI && (
-            <OCIPullDialog clusterId={clusterId} storageId={pool.id} />
-          )}
-          {hasVztmpl && (
-            <ApplianceBrowserDialog
-              clusterId={clusterId}
-              storageId={pool.id}
-              storageName={pool.storage}
-            />
-          )}
-          <EditStorageDialog
-            clusterId={clusterId}
-            storageId={pool.id}
-            storageName={pool.storage}
-            storageType={pool.type}
-          />
-          <DeleteStorageDialog
-            clusterId={clusterId}
-            storageId={pool.id}
-            storageName={pool.storage}
-            onDeleted={() => {
-              void navigate(`/storage?cluster=${clusterId}`);
-            }}
-          />
-        </div>
-      </div>
+  const state = storeState(pool);
+  const percent = storePercent(pool);
+  const kinds = contentList(pool.content);
+  const guestCount = new Set(
+    guestItems
+      .filter((item) => item.vmid != null)
+      .map((item) => `${item.content}:${String(item.vmid)}`),
+  ).size;
+  const shownKind = filterableTypes.some((t) => t === kind) ? kind : ALL_KINDS;
+  const shownItems = shownKind === ALL_KINDS ? items : filterByType(shownKind);
+  const canEvacuate = hasImages && evacuateTargets.length > 0;
+  const canPullOCI = hasVztmpl && pveSupportsOCI;
+  const contentLoaded = !contentQuery.isLoading && !contentQuery.isError;
 
-      <Tabs defaultValue="files">
+  return (
+    <div className="space-y-5">
+      <DetailHeader
+        crumbs={[
+          { label: "Storage", to: "/storage" },
+          {
+            label: clusterQuery.data?.name ?? "Cluster",
+            to: `/storage?cluster=${clusterId}`,
+          },
+          { label: pool.storage },
+        ]}
+        icon={<Database />}
+        title={pool.storage}
+        facts={
+          <>
+            <StatusFact
+              status={STATE_ICON[state]}
+              label={STATE_LABEL[state]}
+              nameDot
+            />
+            <Fact label="Type">{storageTypeLabel(pool.type)}</Fact>
+            {pool.shared ? (
+              <Fact label="Scope">Shared</Fact>
+            ) : hostNodeName ? (
+              <Fact label="Node">
+                <Link
+                  to={`/clusters/${clusterId}/nodes/${pool.node_id}`}
+                  className="hover:text-foreground hover:underline"
+                >
+                  {hostNodeName}
+                </Link>
+              </Fact>
+            ) : (
+              <Fact label="Scope">Local</Fact>
+            )}
+            <Fact label="Holds">{kinds !== "" ? kinds : "Nothing"}</Fact>
+          </>
+        }
+        actions={
+          <>
+            <EditStorageDialog
+              clusterId={clusterId}
+              storageId={pool.id}
+              storageName={pool.storage}
+              storageType={pool.type}
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="px-2"
+                  aria-label="More actions"
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {canEvacuate && (
+                  <>
+                    <DropdownMenuItem
+                      className="gap-2"
+                      onClick={() => {
+                        setEvacuateOpen(true);
+                      }}
+                    >
+                      <ArrowRightLeft className="h-4 w-4" />
+                      Evacuate
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                <DropdownMenuItem
+                  className="gap-2 text-destructive focus:text-destructive"
+                  onClick={() => {
+                    setDeleteOpen(true);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      />
+
+      <Panel flush bodyClassName="py-4">
+        <StatStrip>
+          <Stat
+            label="Used"
+            value={percent === null ? "—" : formatBytes(pool.used)}
+            sub={
+              percent === null
+                ? "No size reported"
+                : `${formatPercent(percent)} of capacity`
+            }
+            tone={
+              usageLevel(percent) === "err"
+                ? "bad"
+                : usageLevel(percent) === "warn"
+                  ? "warn"
+                  : "default"
+            }
+            percent={percent}
+          />
+          <Stat
+            label="Free"
+            value={percent === null ? "—" : formatBytes(pool.avail)}
+            sub={
+              percent === null
+                ? undefined
+                : `${formatPercent((pool.avail / pool.total) * 100)} of capacity`
+            }
+          />
+          <Stat
+            label="Total"
+            value={percent === null ? "—" : formatBytes(pool.total)}
+            sub={
+              pool.shared
+                ? "Shared across nodes"
+                : hostNodeName
+                  ? `On ${hostNodeName}`
+                  : undefined
+            }
+          />
+          <Stat
+            label="Items"
+            value={contentLoaded ? String(items.length) : "—"}
+            tone={contentLoaded && items.length === 0 ? "quiet" : "default"}
+            sub={
+              contentLoaded && items.length > 0
+                ? contentBreakdown(items.map((item) => item.content))
+                : undefined
+            }
+          />
+        </StatStrip>
+      </Panel>
+
+      <Tabs defaultValue="content">
         <TabsList>
-          <TabsTrigger value="summary">Summary</TabsTrigger>
-          <TabsTrigger value="files">Files</TabsTrigger>
-          {hasGuestVolumes && (
-            <TabsTrigger value="guests">
-              VMs/CTs ({guestItems.length})
-            </TabsTrigger>
-          )}
+          <TabsTrigger value="content">Content</TabsTrigger>
+          {hasGuestVolumes && <TabsTrigger value="guests">Guests</TabsTrigger>}
           <HistoryTabTrigger history={storageHistory} />
         </TabsList>
 
-        <TabsContent value="summary" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Capacity</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <StorageCapacityBar used={pool.used} total={pool.total} />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                  <dt className="text-muted-foreground">Type</dt>
-                  <dd className="font-mono">{pool.type}</dd>
-                  <dt className="text-muted-foreground">Shared</dt>
-                  <dd>{pool.shared ? "yes" : "no"}</dd>
-                  <dt className="text-muted-foreground">Active</dt>
-                  <dd>{pool.active ? "yes" : "no"}</dd>
-                  <dt className="text-muted-foreground">Enabled</dt>
-                  <dd>{pool.enabled ? "yes" : "no"}</dd>
-                  {hostNodeName && (
-                    <>
-                      <dt className="text-muted-foreground">Host node</dt>
-                      <dd>{hostNodeName}</dd>
-                    </>
-                  )}
-                </dl>
-              </CardContent>
-            </Card>
-          </div>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Content Types</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {contentTypes.length === 0 ? (
-                <p className="text-xs text-muted-foreground">None declared.</p>
-              ) : (
-                <div className="flex flex-wrap gap-1">
-                  {contentTypes.map((ct) => (
-                    <Badge key={ct} variant="outline" className="text-xs">
-                      {ct}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="files" className="space-y-4">
-          {contentQuery.isLoading && (
-            <div className="space-y-2">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          )}
-          {contentQuery.isError && (
-            <p className="text-sm text-destructive">
-              Failed to load storage content.
-            </p>
-          )}
-          {!contentQuery.isLoading &&
-            !contentQuery.isError &&
-            (filterableTypes.length > 1 ? (
-              <Tabs defaultValue={filterableTypes[0] ?? "all"}>
-                <TabsList>
-                  {filterableTypes.map((t) => (
-                    <TabsTrigger key={t} value={t}>
-                      {t} ({filterByType(t).length})
-                    </TabsTrigger>
-                  ))}
-                  <TabsTrigger value="all">All ({items.length})</TabsTrigger>
-                </TabsList>
-                {filterableTypes.map((t) => (
-                  <TabsContent key={t} value={t}>
-                    <StorageContentTable
-                      items={filterByType(t)}
-                      clusterId={clusterId}
-                      storageId={pool.id}
-                    />
-                  </TabsContent>
-                ))}
-                <TabsContent value="all">
-                  <StorageContentTable
-                    items={items}
+        <TabsContent value="content" className="mt-5">
+          <Panel
+            flush
+            title="Content"
+            aside={
+              contentLoaded && shownKind !== ALL_KINDS
+                ? `${String(shownItems.length)} of ${String(items.length)}`
+                : undefined
+            }
+            actions={
+              <>
+                {filterableTypes.length > 1 && (
+                  <Segmented
+                    aria-label="Content kind"
+                    value={shownKind}
+                    onValueChange={setKind}
+                    options={[
+                      { value: ALL_KINDS, label: "All" },
+                      ...filterableTypes.map((t) => ({
+                        value: t,
+                        ariaLabel: `${contentKindPlural(t)}, ${String(filterByType(t).length)}`,
+                        label: (
+                          <>
+                            {contentKindPlural(t)}
+                            <span className="font-normal opacity-70">
+                              {filterByType(t).length}
+                            </span>
+                          </>
+                        ),
+                      })),
+                    ]}
+                  />
+                )}
+                <UploadDialog
+                  clusterId={clusterId}
+                  storageId={pool.id}
+                  supportedContent={pool.content}
+                />
+                {(hasIso || hasVztmpl || hasImport) && (
+                  <URLDownloadDialog
                     clusterId={clusterId}
                     storageId={pool.id}
+                    supportedContent={pool.content}
                   />
-                </TabsContent>
-              </Tabs>
-            ) : (
-              <StorageContentTable
-                items={items}
-                clusterId={clusterId}
-                storageId={pool.id}
-              />
-            ))}
-        </TabsContent>
-
-        {hasGuestVolumes && (
-          <TabsContent value="guests">
-            {contentQuery.isLoading ? (
-              <div className="space-y-2">
+                )}
+                {hasVztmpl && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="px-2"
+                        aria-label="More ways to add content"
+                      >
+                        <MoreHorizontal />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        className="gap-2"
+                        onClick={() => {
+                          setAppliancesOpen(true);
+                        }}
+                      >
+                        <LibraryBig className="h-4 w-4" />
+                        Browse appliances
+                      </DropdownMenuItem>
+                      {canPullOCI && (
+                        <DropdownMenuItem
+                          className="gap-2"
+                          onClick={() => {
+                            setOciOpen(true);
+                          }}
+                        >
+                          <Container className="h-4 w-4" />
+                          Pull OCI image
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </>
+            }
+          >
+            {contentQuery.isLoading && (
+              <div className="space-y-2 px-[18px] pb-1">
+                <Skeleton className="h-8 w-full" />
                 <Skeleton className="h-8 w-full" />
                 <Skeleton className="h-8 w-full" />
               </div>
-            ) : (
-              <StorageGuestTable
-                items={guestItems}
+            )}
+            {contentQuery.isError && (
+              <p className="px-[18px] pb-1 text-sm text-destructive">
+                Failed to load storage content.
+              </p>
+            )}
+            {contentLoaded && (
+              <StorageContentTable
+                items={shownItems}
                 clusterId={clusterId}
-                migrateTargets={migrateTargets}
+                storageId={pool.id}
+                emptyText={
+                  shownKind === ALL_KINDS
+                    ? undefined
+                    : `No ${contentKindNoun(shownKind)} on this store.`
+                }
               />
             )}
+          </Panel>
+        </TabsContent>
+
+        {hasGuestVolumes && (
+          <TabsContent value="guests" className="mt-5">
+            <Panel
+              flush
+              title="Guests"
+              aside={
+                contentQuery.isLoading
+                  ? "Loading..."
+                  : `${String(guestCount)} with ${guestItems.length === 1 ? "a volume" : "volumes"} on this store`
+              }
+            >
+              {contentQuery.isLoading ? (
+                <div className="space-y-2 px-[18px] pb-1">
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-full" />
+                </div>
+              ) : (
+                <StorageGuestTable
+                  items={guestItems}
+                  clusterId={clusterId}
+                  migrateTargets={migrateTargets}
+                />
+              )}
+            </Panel>
           </TabsContent>
         )}
 
@@ -384,6 +517,44 @@ export function StorageDetailPage() {
           placeholder={historyPlaceholder}
         />
       </Tabs>
+
+      {canEvacuate && (
+        <BulkMoveDialog
+          clusterId={clusterId}
+          storageId={pool.id}
+          storageName={pool.storage}
+          targetOptions={evacuateTargets}
+          open={evacuateOpen}
+          onOpenChange={setEvacuateOpen}
+        />
+      )}
+      <DeleteStorageDialog
+        clusterId={clusterId}
+        storageId={pool.id}
+        storageName={pool.storage}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        onDeleted={() => {
+          void navigate(`/storage?cluster=${clusterId}`);
+        }}
+      />
+      {hasVztmpl && (
+        <ApplianceBrowserDialog
+          clusterId={clusterId}
+          storageId={pool.id}
+          storageName={pool.storage}
+          open={appliancesOpen}
+          onOpenChange={setAppliancesOpen}
+        />
+      )}
+      {canPullOCI && (
+        <OCIPullDialog
+          clusterId={clusterId}
+          storageId={pool.id}
+          open={ociOpen}
+          onOpenChange={setOciOpen}
+        />
+      )}
     </div>
   );
 }

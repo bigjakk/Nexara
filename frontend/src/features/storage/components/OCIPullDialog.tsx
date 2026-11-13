@@ -17,6 +17,12 @@ import { usePullOCIImage } from "../api/storage-queries";
 interface OCIPullDialogProps {
   clusterId: string;
   storageId: string;
+  /**
+   * With `open` the dialog is controlled and draws no trigger of its own: the
+   * caller opens it, from a menu item.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 // Pragmatic client-side validator matching the backend regex. Catches obvious
@@ -24,8 +30,19 @@ interface OCIPullDialogProps {
 const REFERENCE_PATTERN = /^[A-Za-z0-9._\-/:@]+$/;
 const FILENAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 
-export function OCIPullDialog({ clusterId, storageId }: OCIPullDialogProps) {
-  const [open, setOpen] = useState(false);
+export function OCIPullDialog({
+  clusterId,
+  storageId,
+  open: openProp,
+  onOpenChange,
+}: OCIPullDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (!controlled) setInternalOpen(v);
+    onOpenChange?.(v);
+  };
   const [reference, setReference] = useState("");
   const [filename, setFilename] = useState("");
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
@@ -88,26 +105,28 @@ export function OCIPullDialog({ clusterId, storageId }: OCIPullDialogProps) {
         setOpen(v);
       }}
     >
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <Container className="mr-2 h-4 w-4" />
-          Pull OCI
-        </Button>
-      </DialogTrigger>
+      {!controlled && (
+        <DialogTrigger asChild>
+          <Button size="sm" variant="outline">
+            <Container className="mr-2 h-4 w-4" />
+            Pull OCI image
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Pull from OCI Registry</DialogTitle>
+          <DialogTitle>Pull from an OCI registry</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+          <div className="rounded-md bg-amber-500/10 p-3 text-[12.5px]">
             <p className="font-medium text-amber-700 dark:text-amber-400">
               Tech preview (Proxmox VE 9.1+)
             </p>
             <p className="mt-1 text-muted-foreground">
-              The node must have{" "}
-              <code className="rounded bg-muted px-1">skopeo</code> installed.
-              OCI layers are squashed on container create; in-place updates are
-              not supported — re-create the container to apply image changes.
+              The node must have <code className="font-mono">skopeo</code>{" "}
+              installed. OCI layers are squashed on container create, and
+              in-place updates are not supported: re-create the container to
+              apply image changes.
             </p>
           </div>
 

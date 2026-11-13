@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRightLeft, Boxes, Server } from "lucide-react";
+import { ArrowRightLeft } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -169,8 +169,8 @@ export function StorageGuestTable({
 
   if (rows.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No VM disks or container volumes on this pool.
+      <p className="px-[18px] py-8 text-center text-sm text-muted-foreground">
+        No VM disks or container volumes on this store.
       </p>
     );
   }
@@ -178,9 +178,9 @@ export function StorageGuestTable({
   const canMigrate = migrateTargets.length > 0;
 
   return (
-    <div className="space-y-2">
+    <div>
       {selectedVmids.size > 0 && (
-        <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-y bg-primary/[0.06] px-[18px] py-2 text-sm">
           <span>
             {selectedVmids.size} {selectedVmids.size === 1 ? "guest" : "guests"}{" "}
             selected
@@ -222,13 +222,21 @@ export function StorageGuestTable({
             </TableHead>
             <TableHead>Name</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>VMID</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Node</TableHead>
-            <TableHead className="text-right">CPU</TableHead>
-            <TableHead className="text-right">Memory</TableHead>
-            <TableHead className="text-right">Uptime</TableHead>
-            <TableHead className="text-right">Disks</TableHead>
+            <TableHead className="hidden sm:table-cell">ID</TableHead>
+            <TableHead className="hidden sm:table-cell">Kind</TableHead>
+            <TableHead className="hidden md:table-cell">Node</TableHead>
+            <TableHead className="hidden text-right lg:table-cell">
+              CPU
+            </TableHead>
+            <TableHead className="hidden text-right lg:table-cell">
+              Memory
+            </TableHead>
+            <TableHead className="hidden text-right lg:table-cell">
+              Uptime
+            </TableHead>
+            <TableHead className="hidden text-right sm:table-cell">
+              Disks
+            </TableHead>
             <TableHead className="text-right">Total size</TableHead>
             <TableHead className="w-20" />
           </TableRow>
@@ -252,13 +260,8 @@ export function StorageGuestTable({
                       aria-label={`Select ${row.name}`}
                     />
                   </TableCell>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      {row.guestKind === "ct" ? (
-                        <Boxes className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <Server className="h-4 w-4 text-muted-foreground" />
-                      )}
+                  <TableCell>
+                    <div className="flex items-center gap-2 font-medium">
                       <span>{row.name}</span>
                       {row.template && (
                         <Badge variant="secondary" className="text-xs">
@@ -266,36 +269,43 @@ export function StorageGuestTable({
                         </Badge>
                       )}
                     </div>
+                    {/* A phone has no room for these as columns. */}
+                    <div className="text-[12.5px] text-muted-foreground sm:hidden">
+                      {row.guestKind === "ct" ? "CT" : "VM"} {row.vmid},{" "}
+                      {row.volumes.length === 1
+                        ? "1 disk"
+                        : `${String(row.volumes.length)} disks`}
+                    </div>
                   </TableCell>
                   <TableCell>
                     {row.status ? (
                       <StatusBadge status={row.status} />
                     ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
+                      <span className="text-muted-foreground">—</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs">{row.vmid}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-xs">
-                      {row.guestKind === "ct" ? "CT" : "VM"}
-                    </Badge>
+                  <TableCell className="hidden tabular-nums text-muted-foreground sm:table-cell">
+                    {row.vmid}
                   </TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell className="hidden text-muted-foreground sm:table-cell">
+                    {row.guestKind === "ct" ? "CT" : "VM"}
+                  </TableCell>
+                  <TableCell className="hidden text-muted-foreground md:table-cell">
                     {row.nodeName || "—"}
                   </TableCell>
-                  <TableCell className="text-right text-xs">
+                  <TableCell className="hidden text-right tabular-nums lg:table-cell">
                     {row.cpuCount > 0 ? row.cpuCount : "—"}
                   </TableCell>
-                  <TableCell className="text-right text-xs">
+                  <TableCell className="hidden whitespace-nowrap text-right tabular-nums lg:table-cell">
                     {row.memTotal > 0 ? formatBytes(row.memTotal) : "—"}
                   </TableCell>
-                  <TableCell className="text-right text-xs">
+                  <TableCell className="hidden whitespace-nowrap text-right tabular-nums text-muted-foreground lg:table-cell">
                     {formatUptime(row.uptime, "—")}
                   </TableCell>
-                  <TableCell className="text-right text-xs">
+                  <TableCell className="hidden text-right tabular-nums sm:table-cell">
                     {row.volumes.length}
                   </TableCell>
-                  <TableCell className="text-right text-xs">
+                  <TableCell className="whitespace-nowrap text-right tabular-nums">
                     {formatBytes(row.totalBytes)}
                   </TableCell>
                   <TableCell>

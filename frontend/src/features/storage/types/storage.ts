@@ -281,12 +281,12 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
   dir: [
     {
       key: "path",
-      label: "Directory Path",
+      label: "Directory path",
       required: true,
       placeholder: "/mnt/storage",
     },
-    { key: "mkdir", label: "Create Directory", type: "checkbox" },
-    { key: "is_mountpoint", label: "Is Mountpoint", type: "checkbox" },
+    { key: "mkdir", label: "Create directory", type: "checkbox" },
+    { key: "is_mountpoint", label: "Is mountpoint", type: "checkbox" },
     {
       key: "preallocation",
       label: "Preallocation",
@@ -303,11 +303,11 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
   btrfs: [
     {
       key: "path",
-      label: "Directory Path",
+      label: "Directory path",
       required: true,
       placeholder: "/mnt/btrfs",
     },
-    { key: "mkdir", label: "Create Directory", type: "checkbox" },
+    { key: "mkdir", label: "Create directory", type: "checkbox" },
   ],
   nfs: [
     {
@@ -318,11 +318,11 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
     },
     {
       key: "export",
-      label: "Export Path",
+      label: "Export path",
       required: true,
       placeholder: "/export/share",
     },
-    { key: "options", label: "NFS Options", placeholder: "vers=4.2" },
+    { key: "options", label: "NFS options", placeholder: "vers=4.2" },
     {
       key: "preallocation",
       label: "Preallocation",
@@ -345,7 +345,7 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
     },
     {
       key: "share",
-      label: "Share Name",
+      label: "Share name",
       required: true,
       placeholder: "backups",
     },
@@ -354,7 +354,7 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
     { key: "domain", label: "Domain" },
     {
       key: "smbversion",
-      label: "SMB Version",
+      label: "SMB version",
       type: "select",
       options: [
         { value: "", label: "Default" },
@@ -369,23 +369,23 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
   lvm: [
     {
       key: "vgname",
-      label: "Volume Group",
+      label: "Volume group",
       required: true,
       placeholder: "pve",
     },
-    { key: "base", label: "Base Volume" },
-    { key: "saferemove", label: "Safe Remove", type: "checkbox" },
+    { key: "base", label: "Base volume" },
+    { key: "saferemove", label: "Safe remove", type: "checkbox" },
   ],
   lvmthin: [
     {
       key: "vgname",
-      label: "Volume Group",
+      label: "Volume group",
       required: true,
       placeholder: "pve",
     },
     {
       key: "thinpool",
-      label: "Thin Pool",
+      label: "Thin pool",
       required: true,
       placeholder: "data",
     },
@@ -393,19 +393,19 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
   zfspool: [
     {
       key: "pool",
-      label: "ZFS Pool",
+      label: "ZFS pool",
       required: true,
       placeholder: "rpool/data",
     },
-    { key: "blocksize", label: "Block Size", placeholder: "8k" },
-    { key: "sparse", label: "Sparse Volumes", type: "checkbox" },
+    { key: "blocksize", label: "Block size", placeholder: "8k" },
+    { key: "sparse", label: "Sparse volumes", type: "checkbox" },
   ],
   // Both iSCSI plugins declare portal and target `fixed => 1` upstream — they
   // identify the backend, so Proxmox only accepts them at creation.
   iscsi: [
     {
       key: "portal",
-      label: "Portal (IP/Host)",
+      label: "Portal (IP or host)",
       required: true,
       placeholder: "192.168.1.100",
       fixed: true,
@@ -423,7 +423,7 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
   iscsidirect: [
     {
       key: "portal",
-      label: "Portal (IP/Host)",
+      label: "Portal (IP or host)",
       required: true,
       placeholder: "192.168.1.100",
       fixed: true,
@@ -441,35 +441,35 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
   rbd: [
     {
       key: "monhost",
-      label: "Monitor Hosts",
+      label: "Monitor hosts",
       placeholder: "10.0.0.1,10.0.0.2",
     },
-    { key: "pool", label: "Ceph Pool", placeholder: "rbd" },
-    { key: "username", label: "Ceph User", placeholder: "admin" },
-    { key: "krbd", label: "Use Kernel RBD", type: "checkbox" },
+    { key: "pool", label: "Ceph pool", placeholder: "rbd" },
+    { key: "username", label: "Ceph user", placeholder: "admin" },
+    { key: "krbd", label: "Use kernel RBD", type: "checkbox" },
     { key: "namespace", label: "Namespace" },
   ],
   cephfs: [
     {
       key: "monhost",
-      label: "Monitor Hosts",
+      label: "Monitor hosts",
       placeholder: "10.0.0.1,10.0.0.2",
     },
-    { key: "path", label: "Mount Path", placeholder: "/" },
-    { key: "username", label: "Ceph User", placeholder: "admin" },
+    { key: "path", label: "Mount path", placeholder: "/" },
+    { key: "username", label: "Ceph user", placeholder: "admin" },
     { key: "fuse", label: "Use FUSE", type: "checkbox" },
     { key: "subdir", label: "Subdirectory" },
-    { key: "fs-name", label: "FS Name" },
+    { key: "fs-name", label: "FS name" },
   ],
   glusterfs: [
     {
       key: "server",
-      label: "Primary Server",
+      label: "Primary server",
       required: true,
       placeholder: "192.168.1.100",
     },
-    { key: "server2", label: "Backup Server", placeholder: "192.168.1.101" },
-    { key: "volume", label: "Volume Name", required: true, placeholder: "gv0" },
+    { key: "server2", label: "Backup server", placeholder: "192.168.1.101" },
+    { key: "volume", label: "Volume name", required: true, placeholder: "gv0" },
     {
       key: "transport",
       label: "Transport",
@@ -503,13 +503,13 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
     },
     {
       key: "password",
-      label: "Password / API Token",
+      label: "Password or API token",
       required: true,
       type: "password",
     },
     {
       key: "fingerprint",
-      label: "TLS Fingerprint",
+      label: "TLS fingerprint",
       placeholder: "AA:BB:CC:...",
     },
     // encryption-key is not a field here: the dialogs render the PBS
@@ -530,7 +530,7 @@ export interface CephSecretFieldDef {
 
 /**
  * The credential an rbd or cephfs storage takes for an EXTERNAL Ceph cluster
- * — one reached through Monitor Hosts rather than this Proxmox cluster's own
+ * — one reached through Monitor hosts rather than this Proxmox cluster's own
  * Ceph.
  *
  * It is the credential's CONTENTS, never a path: Proxmox writes the value
@@ -559,7 +559,7 @@ export const CEPH_SECRET_FIELD: Partial<
     help: "The keyring for the Ceph user above, pasted in full — the file's contents, not a path (ceph auth get client.<user> prints it).",
   },
   cephfs: {
-    label: "Secret Key",
+    label: "Secret key",
     multiline: false,
     placeholder: "The user's key",
     help: "The Ceph user's secret key itself, not a path to it (ceph auth get-key client.<user> prints it).",

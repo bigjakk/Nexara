@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Camera, Layers, CalendarClock, CalendarX2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
+import { Stat, StatStrip } from "@/components/page/StatStrip";
 import { useGuestSnapshots } from "../api/snapshot-queries";
 import { GuestSnapshotTable } from "../components/GuestSnapshotTable";
 import {
@@ -44,31 +45,6 @@ function matchesFilters(
     if (!haystack.includes(q)) return false;
   }
   return true;
-}
-
-interface StatCardProps {
-  title: string;
-  value: number;
-  icon: React.ReactNode;
-  valueClassName?: string;
-}
-
-function StatCard({ title, value, icon, valueClassName }: StatCardProps) {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        {icon}
-      </CardHeader>
-      <CardContent>
-        <div
-          className={`text-2xl font-bold tracking-tight ${valueClassName ?? ""}`}
-        >
-          {value}
-        </div>
-      </CardContent>
-    </Card>
-  );
 }
 
 export function SnapshotsPage() {
@@ -117,74 +93,106 @@ export function SnapshotsPage() {
     [rows, filters, nowMs],
   );
 
+  const filtering =
+    filters.search !== "" ||
+    filters.clusterId !== "" ||
+    filters.guestType !== "" ||
+    filters.age !== "";
+
+  // "34 snapshots on 12 guests, 3 older than 30 days": the oldest bucket that
+  // has anything in it is the one worth saying.
+  const summary =
+    stats.total === 0
+      ? t("subtitle")
+      : [
+          `${t("summary.snapshots", { count: stats.total })} ${t("summary.guests", { count: stats.guests })}`,
+          ...(stats.over30 > 0
+            ? [t("summary.olderThan30", { count: stats.over30 })]
+            : stats.over7 > 0
+              ? [t("summary.olderThan7", { count: stats.over7 })]
+              : []),
+        ].join(", ");
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground">{t("subtitle")}</p>
-        </div>
-        {stats.lastSeen > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {t("lastSynced", {
-              time: new Date(stats.lastSeen).toLocaleString(),
-            })}
-          </p>
-        )}
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title={t("stats.total")}
-          value={stats.total}
-          icon={<Camera className="h-4 w-4 text-muted-foreground" />}
-        />
-        <StatCard
-          title={t("stats.guests")}
-          value={stats.guests}
-          icon={<Layers className="h-4 w-4 text-muted-foreground" />}
-        />
-        <StatCard
-          title={t("stats.olderThan7")}
-          value={stats.over7}
-          icon={<CalendarClock className="h-4 w-4 text-amber-500" />}
-          valueClassName={
-            stats.over7 > 0 ? "text-amber-600 dark:text-amber-400" : ""
-          }
-        />
-        <StatCard
-          title={t("stats.olderThan30")}
-          value={stats.over30}
-          icon={<CalendarX2 className="h-4 w-4 text-red-500" />}
-          valueClassName={
-            stats.over30 > 0 ? "text-red-600 dark:text-red-400" : ""
-          }
-        />
-      </div>
-
-      <SnapshotFilterBar
-        filters={filters}
-        onChange={setFilters}
-        clusterOptions={clusterOptions}
+    <div className="space-y-5">
+      <PageHeader
+        title={t("title")}
+        summary={
+          <>
+            {summary}
+            {stats.lastSeen > 0 && (
+              <span className="mt-0.5 block text-[12.5px] text-muted-foreground/75">
+                {t("lastSynced", {
+                  time: new Date(stats.lastSeen).toLocaleString(),
+                })}
+              </span>
+            )}
+          </>
+        }
       />
 
-      {isLoading ? (
-        <div className="space-y-2">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-        </div>
-      ) : error ? (
-        <p className="py-8 text-center text-sm text-destructive">
-          {t("loadError")}
-        </p>
-      ) : rows.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          {t("empty")}
-        </p>
-      ) : (
-        <GuestSnapshotTable rows={filtered} />
-      )}
+      <Panel flush bodyClassName="py-4">
+        <StatStrip>
+          <Stat
+            label={t("stats.total")}
+            value={isLoading ? "—" : stats.total}
+            tone={stats.total === 0 ? "quiet" : "default"}
+          />
+          <Stat
+            label={t("stats.guests")}
+            value={isLoading ? "—" : stats.guests}
+            tone={stats.guests === 0 ? "quiet" : "default"}
+          />
+          <Stat
+            label={t("stats.olderThan7")}
+            value={isLoading ? "—" : stats.over7}
+            tone={stats.over7 > 0 ? "warn" : "quiet"}
+          />
+          <Stat
+            label={t("stats.olderThan30")}
+            value={isLoading ? "—" : stats.over30}
+            tone={stats.over30 > 0 ? "bad" : "quiet"}
+          />
+        </StatStrip>
+      </Panel>
+
+      <Panel
+        flush
+        title={t("table.title")}
+        aside={
+          filtering && rows.length > 0
+            ? t("table.matching", {
+                shown: filtered.length,
+                total: rows.length,
+              })
+            : undefined
+        }
+        actions={
+          <SnapshotFilterBar
+            filters={filters}
+            onChange={setFilters}
+            clusterOptions={clusterOptions}
+          />
+        }
+      >
+        {isLoading ? (
+          <div className="space-y-2 px-[18px] pb-1">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ) : error ? (
+          <p className="px-[18px] py-8 text-center text-sm text-destructive">
+            {t("loadError")}
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="px-[18px] py-8 text-center text-sm text-muted-foreground">
+            {t("empty")}
+          </p>
+        ) : (
+          <GuestSnapshotTable rows={filtered} />
+        )}
+      </Panel>
     </div>
   );
 }

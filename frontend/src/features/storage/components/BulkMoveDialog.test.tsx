@@ -70,6 +70,7 @@ async function signInAs(user: User) {
   });
 }
 
+// Opened as the store page opens it: from its More menu, already open.
 async function startTheEvacuation() {
   const user = userEvent.setup();
   const view = render(
@@ -79,15 +80,15 @@ async function startTheEvacuation() {
         storageId={STORAGE}
         storageName={STORAGE}
         targetOptions={["store02"]}
+        open
       />
     </QueryClientProvider>,
   );
-  await user.click(screen.getByRole("button", { name: "Evacuate" }));
   await user.selectOptions(
-    await screen.findByLabelText("Target Storage"),
+    await screen.findByLabelText("Target storage"),
     "store02",
   );
-  await user.click(screen.getByRole("button", { name: "Start Evacuation" }));
+  await user.click(screen.getByRole("button", { name: "Start evacuation" }));
   return view;
 }
 

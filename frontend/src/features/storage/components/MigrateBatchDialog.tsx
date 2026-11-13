@@ -214,7 +214,7 @@ export function MigrateBatchDialog({
                 setDeleteOriginal(e.target.checked);
               }}
               disabled={running || finished}
-              className="h-4 w-4 rounded border-gray-300"
+              className="h-4 w-4 rounded accent-primary"
             />
             <Label htmlFor="batch-delete-original">
               Delete original after move completes
@@ -222,7 +222,7 @@ export function MigrateBatchDialog({
           </div>
 
           {states.length > 0 && (
-            <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2 text-sm">
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-md bg-foreground/[0.04] p-2 text-sm">
               {states.map((s) => (
                 <div
                   key={s.volid}
@@ -247,7 +247,7 @@ export function MigrateBatchDialog({
           {finished && (
             <p className="text-sm">
               {done} of {total} completed
-              {failed > 0 ? ` • ${String(failed)} failed` : ""}.
+              {failed > 0 ? `, ${String(failed)} failed` : ""}.
             </p>
           )}
         </div>

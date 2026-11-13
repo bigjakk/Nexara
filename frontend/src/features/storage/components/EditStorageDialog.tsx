@@ -54,11 +54,11 @@ interface EditStorageDialogProps {
 }
 
 const ALL_CONTENT_TYPES: { value: StorageContentType; label: string }[] = [
-  { value: "images", label: "Disk Images" },
-  { value: "rootdir", label: "Container" },
-  { value: "iso", label: "ISO Image" },
-  { value: "vztmpl", label: "CT Template" },
-  { value: "backup", label: "Backup" },
+  { value: "images", label: "Disk images" },
+  { value: "rootdir", label: "Container volumes" },
+  { value: "iso", label: "ISO images" },
+  { value: "vztmpl", label: "CT templates" },
+  { value: "backup", label: "Backups" },
   { value: "snippets", label: "Snippets" },
 ];
 
@@ -303,16 +303,18 @@ export function EditStorageDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Pencil className="mr-1 h-3.5 w-3.5" />
+        <Button variant="outline" size="sm" className="gap-1.5">
+          <Pencil className="h-3.5 w-3.5" />
           Edit
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            Edit Storage: {storageName}
-            <Badge variant="outline">{typeLabel}</Badge>
+          <DialogTitle className="flex flex-wrap items-baseline gap-x-2.5">
+            Edit {storageName}
+            <span className="text-sm font-normal text-muted-foreground">
+              {typeLabel}
+            </span>
           </DialogTitle>
         </DialogHeader>
 
@@ -484,7 +486,7 @@ export function EditStorageDialog({
               </div>
             ) : (
               <div className="space-y-1.5">
-                <Label>Content Types</Label>
+                <Label>Content types</Label>
                 <div className="flex flex-wrap gap-2">
                   {ALL_CONTENT_TYPES.filter((ct) =>
                     availableContent.includes(ct.value),
@@ -561,7 +563,7 @@ export function EditStorageDialog({
                   (cephSecretRequired && !cephSecret.trim())
                 }
               >
-                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                {updateMutation.isPending ? "Saving..." : "Save changes"}
               </Button>
             </div>
           </div>

@@ -58,7 +58,7 @@ describe("MoveDiskDialog", () => {
   it("excludes the storage the disk already lives on", async () => {
     await openDialog();
     const values = Array.from(
-      screen.getByLabelText<HTMLSelectElement>("Target Storage").options,
+      screen.getByLabelText<HTMLSelectElement>("Target storage").options,
     ).map((o) => o.value);
     // "local" is the current storage — Proxmox rejects moving a disk onto it.
     expect(values).toEqual(["", "nfs-store", "local-lvm"]);
@@ -73,7 +73,7 @@ describe("MoveDiskDialog", () => {
   it("enables the format choice for file-based targets", async () => {
     const user = await openDialog();
     await user.selectOptions(
-      screen.getByLabelText("Target Storage"),
+      screen.getByLabelText("Target storage"),
       "nfs-store",
     );
     expect(screen.getByLabelText("Format")).toBeEnabled();
@@ -82,32 +82,32 @@ describe("MoveDiskDialog", () => {
   it("preselects the source format so an untouched move preserves it", async () => {
     const user = await openDialog();
     await user.selectOptions(
-      screen.getByLabelText("Target Storage"),
+      screen.getByLabelText("Target storage"),
       "nfs-store",
     );
     // Sending no format would let PVE fall back to the storage default.
     expect(screen.getByLabelText<HTMLSelectElement>("Format").value).toBe(
       "raw",
     );
-    await user.click(screen.getByRole("button", { name: "Move Disk" }));
+    await user.click(screen.getByRole("button", { name: "Move disk" }));
     expect(moveState.vars).toMatchObject({ format: "raw" });
   });
 
   it("allows explicitly deferring to the storage default", async () => {
     const user = await openDialog();
     await user.selectOptions(
-      screen.getByLabelText("Target Storage"),
+      screen.getByLabelText("Target storage"),
       "nfs-store",
     );
     await user.selectOptions(screen.getByLabelText("Format"), "");
-    await user.click(screen.getByRole("button", { name: "Move Disk" }));
+    await user.click(screen.getByRole("button", { name: "Move disk" }));
     expect(moveState.vars).toMatchObject({ format: "" });
   });
 
   it("disables the format choice for block-backed targets", async () => {
     const user = await openDialog();
     await user.selectOptions(
-      screen.getByLabelText("Target Storage"),
+      screen.getByLabelText("Target storage"),
       "local-lvm",
     );
     expect(screen.getByLabelText("Format")).toBeDisabled();
@@ -117,13 +117,13 @@ describe("MoveDiskDialog", () => {
   it("submits the chosen format, delete flag and bandwidth limit", async () => {
     const user = await openDialog();
     await user.selectOptions(
-      screen.getByLabelText("Target Storage"),
+      screen.getByLabelText("Target storage"),
       "nfs-store",
     );
     await user.selectOptions(screen.getByLabelText("Format"), "qcow2");
     await user.type(screen.getByLabelText(/bandwidth limit/i), "51200");
     await user.click(screen.getByLabelText(/delete source/i));
-    await user.click(screen.getByRole("button", { name: "Move Disk" }));
+    await user.click(screen.getByRole("button", { name: "Move disk" }));
 
     expect(moveState.vars).toMatchObject({
       clusterId: "c1",
@@ -139,17 +139,17 @@ describe("MoveDiskDialog", () => {
   it("drops a stale format when the target cannot honor it", async () => {
     const user = await openDialog();
     await user.selectOptions(
-      screen.getByLabelText("Target Storage"),
+      screen.getByLabelText("Target storage"),
       "nfs-store",
     );
     await user.selectOptions(screen.getByLabelText("Format"), "qcow2");
     // Switching to a block-backed target must not send format=qcow2, which
     // Proxmox would reject.
     await user.selectOptions(
-      screen.getByLabelText("Target Storage"),
+      screen.getByLabelText("Target storage"),
       "local-lvm",
     );
-    await user.click(screen.getByRole("button", { name: "Move Disk" }));
+    await user.click(screen.getByRole("button", { name: "Move disk" }));
 
     expect(moveState.vars).toMatchObject({ storage: "local-lvm", format: "" });
   });
@@ -157,11 +157,11 @@ describe("MoveDiskDialog", () => {
   it("blocks a non-numeric bandwidth limit", async () => {
     const user = await openDialog();
     await user.selectOptions(
-      screen.getByLabelText("Target Storage"),
+      screen.getByLabelText("Target storage"),
       "nfs-store",
     );
     await user.type(screen.getByLabelText(/bandwidth limit/i), "-5");
     expect(screen.getByText(/whole number of KiB\/s/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Move Disk" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move disk" })).toBeDisabled();
   });
 });

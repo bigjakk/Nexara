@@ -9,44 +9,36 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useQueryClient } from "@tanstack/react-query";
 import type { StorageContentItem } from "../types/storage";
 import { useDeleteContent } from "../api/storage-queries";
 import { sessionScope } from "@/lib/api-client";
 import { formatBytes } from "@/lib/format";
+import { contentKindName } from "../lib/store-rows";
 
 interface StorageContentTableProps {
   items: StorageContentItem[];
   clusterId: string;
   storageId: string;
+  /** What to say when there is nothing to list. */
+  emptyText?: string | undefined;
 }
 
 function formatDate(unixTs: number): string {
-  if (unixTs === 0) return "-";
+  if (unixTs === 0) return "—";
   return new Date(unixTs * 1000).toLocaleString();
 }
 
-function contentBadgeVariant(content: string) {
-  switch (content) {
-    case "iso":
-      return "default" as const;
-    case "vztmpl":
-      return "secondary" as const;
-    case "images":
-      return "outline" as const;
-    case "backup":
-      return "destructive" as const;
-    default:
-      return "outline" as const;
-  }
-}
-
+/**
+ * A store's content, with its own gutters: it sits flush in a panel, the
+ * selection bar and the table running edge to edge.
+ */
 export function StorageContentTable({
   items,
   clusterId,
   storageId,
+  emptyText = "This store holds no content yet.",
 }: StorageContentTableProps) {
   const deleteMutation = useDeleteContent();
   const queryClient = useQueryClient();
@@ -149,8 +141,8 @@ export function StorageContentTable({
 
   if (items.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No content found in this storage pool.
+      <p className="px-[18px] py-8 text-center text-sm text-muted-foreground">
+        {emptyText}
       </p>
     );
   }
@@ -159,13 +151,13 @@ export function StorageContentTable({
   const someSelected = selected.size > 0 && selected.size < items.length;
 
   return (
-    <div className="space-y-2">
+    <div>
       {selected.size > 0 && (
-        <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-y bg-primary/[0.06] px-[18px] py-2 text-sm">
           <span>
             {selected.size} {selected.size === 1 ? "item" : "items"} selected
             {bulkProgress && bulkDeleting
-              ? ` • deleting ${String(bulkProgress.done + bulkProgress.failed + 1)}/${String(selected.size)}…`
+              ? `, deleting ${String(bulkProgress.done + bulkProgress.failed + 1)} of ${String(selected.size)}`
               : ""}
           </span>
           <div className="flex items-center gap-2">
@@ -206,12 +198,12 @@ export function StorageContentTable({
                 aria-label="Select all items"
               />
             </TableHead>
-            <TableHead>Volume ID</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Format</TableHead>
+            <TableHead>Volume</TableHead>
+            <TableHead className="hidden md:table-cell">Kind</TableHead>
+            <TableHead className="hidden md:table-cell">Format</TableHead>
             <TableHead className="text-right">Size</TableHead>
-            <TableHead>Created</TableHead>
-            <TableHead>VMID</TableHead>
+            <TableHead className="hidden md:table-cell">Created</TableHead>
+            <TableHead className="hidden md:table-cell">Guest</TableHead>
             <TableHead className="w-12" />
           </TableRow>
         </TableHeader>
@@ -230,23 +222,37 @@ export function StorageContentTable({
                   aria-label={`Select ${item.volid}`}
                 />
               </TableCell>
-              <TableCell className="max-w-[300px] truncate font-mono text-xs">
-                {item.volid}
+              <TableCell className="max-w-[28rem]">
+                <div
+                  className="font-mono text-[12.5px] [overflow-wrap:anywhere] md:truncate"
+                  title={item.volid}
+                >
+                  {item.volid}
+                </div>
+                {/* A phone has no room for these as columns. */}
+                <div className="mt-0.5 text-[12.5px] text-muted-foreground md:hidden">
+                  {[
+                    contentKindName(item.content),
+                    item.format,
+                    ...(item.ctime === 0 ? [] : [formatDate(item.ctime)]),
+                    ...(item.vmid ? [`guest ${String(item.vmid)}`] : []),
+                  ].join(", ")}
+                </div>
               </TableCell>
-              <TableCell>
-                <Badge variant={contentBadgeVariant(item.content)}>
-                  {item.content}
-                </Badge>
+              <TableCell className="hidden whitespace-nowrap md:table-cell">
+                {contentKindName(item.content)}
               </TableCell>
-              <TableCell className="text-xs">{item.format}</TableCell>
-              <TableCell className="text-right text-xs">
+              <TableCell className="hidden text-muted-foreground md:table-cell">
+                {item.format}
+              </TableCell>
+              <TableCell className="whitespace-nowrap text-right tabular-nums">
                 {formatBytes(item.size)}
               </TableCell>
-              <TableCell className="text-xs">
+              <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
                 {formatDate(item.ctime)}
               </TableCell>
-              <TableCell className="text-xs">
-                {item.vmid ? item.vmid : "-"}
+              <TableCell className="hidden tabular-nums text-muted-foreground md:table-cell">
+                {item.vmid ? item.vmid : "—"}
               </TableCell>
               <TableCell>
                 <div className="flex items-center justify-end">
@@ -254,13 +260,13 @@ export function StorageContentTable({
                     aria-label={`Delete ${item.volid}`}
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
                     onClick={() => {
                       handleDelete(item.volid);
                     }}
                     disabled={deletingVolid === item.volid || bulkDeleting}
                   >
-                    <Trash2 className="h-4 w-4 text-destructive" />
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               </TableCell>

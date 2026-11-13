@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Segmented } from "@/components/ui/segmented";
 import {
   Select,
   SelectContent,
@@ -141,9 +142,9 @@ export function URLDownloadDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <Download className="mr-2 h-4 w-4" />
-          Download URL
+        <Button size="sm" variant="outline" className="gap-1.5">
+          <Download className="h-4 w-4" />
+          Download from URL
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
@@ -153,43 +154,42 @@ export function URLDownloadDialog({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Content type</Label>
-            <div className="flex gap-2 flex-wrap">
-              {supportsIso && (
-                <Button
-                  size="sm"
-                  variant={content === "iso" ? "default" : "outline"}
-                  onClick={() => {
-                    setContent("iso");
-                  }}
-                  disabled={isBusy}
-                >
-                  ISO Image
-                </Button>
-              )}
-              {supportsVztmpl && (
-                <Button
-                  size="sm"
-                  variant={content === "vztmpl" ? "default" : "outline"}
-                  onClick={() => {
-                    setContent("vztmpl");
-                  }}
-                  disabled={isBusy}
-                >
-                  CT Template
-                </Button>
-              )}
-              {supportsImport && (
-                <Button
-                  size="sm"
-                  variant={content === "import" ? "default" : "outline"}
-                  onClick={() => {
-                    setContent("import");
-                  }}
-                  disabled={isBusy}
-                >
-                  Import
-                </Button>
-              )}
+            <div>
+              <Segmented<ContentType>
+                aria-label="Content type"
+                size="md"
+                value={content}
+                onValueChange={setContent}
+                options={[
+                  ...(supportsIso
+                    ? [
+                        {
+                          value: "iso" as const,
+                          label: "ISO image",
+                          disabled: isBusy,
+                        },
+                      ]
+                    : []),
+                  ...(supportsVztmpl
+                    ? [
+                        {
+                          value: "vztmpl" as const,
+                          label: "CT template",
+                          disabled: isBusy,
+                        },
+                      ]
+                    : []),
+                  ...(supportsImport
+                    ? [
+                        {
+                          value: "import" as const,
+                          label: "Import",
+                          disabled: isBusy,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
             </div>
           </div>
 
@@ -247,7 +247,7 @@ export function URLDownloadDialog({
           </button>
 
           {showAdvanced && (
-            <div className="space-y-3 rounded-md border border-border p-3">
+            <div className="space-y-3 border-t pt-4">
               <div className="grid grid-cols-3 gap-2">
                 <div className="col-span-2 space-y-1">
                   <Label htmlFor="checksum">Checksum</Label>

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, HardDrive } from "lucide-react";
+import { Plus } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,13 @@ import {
 
 interface AddStorageDialogProps {
   clusterId: string;
+  /** Named in the title, for a page that shows more than one cluster. */
+  clusterName?: string | undefined;
+  /**
+   * How the built-in trigger is drawn: a page's one primary button, or an
+   * outline button where several triggers share a screen.
+   */
+  triggerVariant?: "default" | "outline";
   /**
    * When provided, the dialog runs in controlled mode and the built-in
    * trigger button is hidden. The caller is responsible for opening it
@@ -54,16 +61,18 @@ interface AddStorageDialogProps {
 const ALL_STORAGE_TYPES = Object.keys(STORAGE_TYPE_LABELS) as StorageType[];
 
 const ALL_CONTENT_TYPES: { value: StorageContentType; label: string }[] = [
-  { value: "images", label: "Disk Images" },
-  { value: "rootdir", label: "Container" },
-  { value: "iso", label: "ISO Image" },
-  { value: "vztmpl", label: "CT Template" },
-  { value: "backup", label: "Backup" },
+  { value: "images", label: "Disk images" },
+  { value: "rootdir", label: "Container volumes" },
+  { value: "iso", label: "ISO images" },
+  { value: "vztmpl", label: "CT templates" },
+  { value: "backup", label: "Backups" },
   { value: "snippets", label: "Snippets" },
 ];
 
 export function AddStorageDialog({
   clusterId,
+  clusterName,
+  triggerVariant = "default",
   open: openProp,
   onOpenChange,
 }: AddStorageDialogProps) {
@@ -210,7 +219,7 @@ export function AddStorageDialog({
     }
 
     // Sent only when typed, and only while the field is showing: a keyring
-    // typed before Monitor Hosts was cleared again must not go along.
+    // typed before Monitor hosts was cleared again must not go along.
     if (showCephSecret && cephSecret.trim() !== "") {
       submitParams["keyring"] = cephSecret;
     }
@@ -264,17 +273,21 @@ export function AddStorageDialog({
     >
       {!controlled && (
         <DialogTrigger asChild>
-          <Button size="sm">
-            <Plus className="mr-1 h-4 w-4" />
-            Add Storage
+          <Button size="sm" variant={triggerVariant} className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            Add storage
           </Button>
         </DialogTrigger>
       )}
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <HardDrive className="h-5 w-5" />
-            Add Storage
+          <DialogTitle className="flex flex-wrap items-baseline gap-x-2.5">
+            Add storage
+            {clusterName !== undefined && (
+              <span className="text-sm font-normal text-muted-foreground">
+                to {clusterName}
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
 
@@ -439,7 +452,7 @@ export function AddStorageDialog({
             </div>
           ) : (
             <div className="space-y-1.5">
-              <Label>Content Types</Label>
+              <Label>Content types</Label>
               <div className="flex flex-wrap gap-2">
                 {ALL_CONTENT_TYPES.filter((ct) =>
                   availableContent.includes(ct.value),
@@ -516,7 +529,7 @@ export function AddStorageDialog({
               onClick={handleSubmit}
               disabled={!hasAllRequired || createMutation.isPending}
             >
-              {createMutation.isPending ? "Creating..." : "Create Storage"}
+              {createMutation.isPending ? "Creating..." : "Create storage"}
             </Button>
           </div>
         </div>

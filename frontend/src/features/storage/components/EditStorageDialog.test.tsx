@@ -110,7 +110,7 @@ async function openEditor(config: StorageConfigResponse, storageType = "pbs") {
     </>,
   );
   await user.click(screen.getByRole("button", { name: "Edit" }));
-  await screen.findByRole("button", { name: "Save Changes" });
+  await screen.findByRole("button", { name: "Save changes" });
   return { user, queryClient };
 }
 
@@ -191,7 +191,8 @@ describe("EditStorageDialog — PBS encryption", () => {
     await openEditor(pbsConfig({ "encryption-key": "1" }));
 
     expect(screen.getByText("Encryption enabled")).toBeInTheDocument();
-    expect(screen.queryByText(/fingerprint/)).toBeNull();
+    // The status line's, not the "TLS fingerprint" field's label.
+    expect(screen.queryByText(/enabled — fingerprint/)).toBeNull();
   });
 
   it("Keep sends nothing about the key", async () => {
@@ -200,7 +201,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     );
 
     await user.click(screen.getByLabelText("Enable"));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();
@@ -217,7 +218,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     expect(
       screen.getByText(/can only be restored with\s+the current key/),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();
@@ -226,7 +227,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     // Wait for onSuccess to have run — the form closes there — before
     // asserting it opened no save dialog.
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Save Changes" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     });
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
@@ -239,7 +240,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     await user.click(screen.getByRole("radio", { name: "Remove the key" }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    await screen.findByRole("button", { name: "Save Changes" });
+    await screen.findByRole("button", { name: "Save changes" });
 
     expect(
       screen.getByRole("radio", { name: "Keep the current key" }),
@@ -263,7 +264,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     );
 
     await user.click(screen.getByRole("radio", { name: "Replace the key" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();
     });
@@ -290,7 +291,7 @@ describe("EditStorageDialog — PBS encryption", () => {
       pbsConfig({ "encryption-key": FINGERPRINT }),
     );
     await user.click(screen.getByRole("radio", { name: "Replace the key" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();
     });
@@ -310,7 +311,7 @@ describe("EditStorageDialog — PBS encryption", () => {
       pbsConfig({ "encryption-key": FINGERPRINT }),
     );
     await user.click(screen.getByRole("radio", { name: "Replace the key" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();
     });
@@ -334,7 +335,7 @@ describe("EditStorageDialog — PBS encryption", () => {
       pbsConfig({ "encryption-key": FINGERPRINT }),
     );
     await user.click(screen.getByRole("radio", { name: "Replace the key" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();
     });
@@ -343,7 +344,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     answer(GENERATED_ANSWER);
     // The editor closes once the answer has been handled, key and all.
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Save Changes" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     });
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -357,9 +358,9 @@ describe("EditStorageDialog — PBS encryption", () => {
       pbsConfig({ "encryption-key": FINGERPRINT }),
     );
     await user.click(screen.getByRole("radio", { name: "Replace the key" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Save Changes" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     });
     expect(usePBSKeyStore.getState().pending).toEqual([]);
 
@@ -386,7 +387,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     });
 
     await user.click(screen.getByRole("radio", { name: "Replace the key" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await screen.findByRole("alertdialog");
 
     await waitFor(() => {
@@ -412,7 +413,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     );
 
     await user.click(screen.getByRole("radio", { name: "Replace the key" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await screen.findByRole("alertdialog");
     await user.click(screen.getByLabelText("I have saved this key"));
     await user.click(screen.getByRole("button", { name: "Done" }));
@@ -438,7 +439,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     expect(
       screen.getByText(/can only be restored with\s+the current key/),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     const dialog = await screen.findByRole("alertdialog");
     expect(sentBody()).toEqual({ params: { "encryption-key": "autogen" } });
@@ -465,7 +466,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     );
 
     await user.click(screen.getByRole("radio", { name: "Replace the key" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByRole("alertdialog")).toHaveTextContent(
       "for store01 on cluster cluster01.",
@@ -485,7 +486,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     await user.click(
       screen.getByRole("radio", { name: "Auto-generate a key" }),
     );
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await screen.findByRole("alertdialog");
     expect(
@@ -511,7 +512,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     );
     await user.click(screen.getByLabelText("Key"));
     await user.paste(PASTED_KEY);
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();
@@ -519,7 +520,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     expect(sentBody()).toEqual({ params: { "encryption-key": PASTED_KEY } });
     // Give a save dialog every chance to appear before asserting it did not.
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Save Changes" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     });
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(usePBSKeyStore.getState().pending).toEqual([]);
@@ -564,7 +565,7 @@ describe("EditStorageDialog — PBS encryption", () => {
     await user.paste("autogen");
 
     expect(screen.getByText(/This is not JSON/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
 });
 
@@ -595,10 +596,10 @@ describe("EditStorageDialog — Ceph keyring", () => {
     expect(keyring).toHaveValue("");
     // Proxmox already holds this external cluster's keyring, so leaving the
     // field empty is a valid edit.
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
     await user.click(keyring);
     await user.paste("[client.admin]\n\tkey = CANARY-keyring-contents\n");
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();
@@ -613,14 +614,14 @@ describe("EditStorageDialog — Ceph keyring", () => {
     delete ownCeph.monhost;
     const { user } = await openEditor(ownCeph, "rbd");
 
-    await user.type(screen.getByLabelText("Monitor Hosts"), "192.0.2.11");
+    await user.type(screen.getByLabelText("Monitor hosts"), "192.0.2.11");
     // The keyring Proxmox has is this cluster's own admin keyring, which is no
     // credential for another cluster.
     const keyring = screen.getByLabelText(/^Keyring/);
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     await user.click(keyring);
     await user.paste("[client.admin]\n\tkey = CANARY-keyring-contents\n");
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();

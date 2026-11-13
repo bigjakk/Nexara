@@ -175,7 +175,7 @@ export function PBSKeySaveDialog({
         </AlertDialogHeader>
 
         {replacedBy && (
-          <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          <div className="space-y-1 rounded-md bg-destructive/10 p-3 text-sm">
             <p>
               <strong>Not the current key.</strong> Another key was generated
               for {storageOnCluster} after this one, and only the last one
@@ -202,7 +202,7 @@ export function PBSKeySaveDialog({
           </div>
         )}
 
-        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/20">
+        <div className="flex items-start gap-2 rounded-md bg-amber-500/10 p-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <p className="text-sm text-amber-800 dark:text-amber-200">
             {replacedBy

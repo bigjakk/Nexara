@@ -71,6 +71,12 @@ interface BulkMoveDialogProps {
   storageId: string;
   storageName: string;
   targetOptions: string[];
+  /**
+   * With `open` the dialog is controlled and draws no trigger of its own: the
+   * caller opens it, from a menu item.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function BulkMoveDialog({
@@ -78,8 +84,16 @@ export function BulkMoveDialog({
   storageId,
   storageName,
   targetOptions,
+  open: openProp,
+  onOpenChange,
 }: BulkMoveDialogProps) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (!controlled) setInternalOpen(v);
+    onOpenChange?.(v);
+  };
   const [targetStorage, setTargetStorage] = useState("");
   const [deleteOriginal, setDeleteOriginal] = useState(true);
   const [jobs, setJobs] = useState<DiskMoveJob[]>([]);
@@ -211,20 +225,22 @@ export function BulkMoveDialog({
         if (!running) setOpen(v);
       }}
     >
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5">
-          <ArrowRightLeft className="h-3.5 w-3.5" />
-          Evacuate
-        </Button>
-      </DialogTrigger>
+      {!controlled && (
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm" className="gap-1.5">
+            <ArrowRightLeft className="h-3.5 w-3.5" />
+            Evacuate
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Evacuate Storage: {storageName}</DialogTitle>
+          <DialogTitle>Evacuate {storageName}</DialogTitle>
         </DialogHeader>
 
         <p className="text-sm text-muted-foreground">
           Move all VM disk images off <strong>{storageName}</strong> to another
-          storage pool.
+          store.
           {imageItems.length > 0 && (
             <>
               {" "}
@@ -244,7 +260,7 @@ export function BulkMoveDialog({
         {imageItems.length > 0 && (
           <>
             <div className="space-y-2">
-              <Label htmlFor="bulk-target-storage">Target Storage</Label>
+              <Label htmlFor="bulk-target-storage">Target storage</Label>
               <select
                 id="bulk-target-storage"
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
@@ -272,7 +288,7 @@ export function BulkMoveDialog({
                   setDeleteOriginal(e.target.checked);
                 }}
                 disabled={running}
-                className="h-4 w-4 rounded border-gray-300"
+                className="h-4 w-4 rounded accent-primary"
               />
               <Label htmlFor="bulk-delete-original">
                 Delete originals after move completes
@@ -280,25 +296,27 @@ export function BulkMoveDialog({
             </div>
 
             {jobs.length > 0 && (
-              <div className="max-h-48 space-y-1 overflow-y-auto rounded border p-2">
+              <div className="max-h-48 space-y-1 overflow-y-auto rounded-md bg-foreground/[0.04] p-2.5">
                 {jobs.map((job, idx) => (
                   <div key={idx} className="flex items-center gap-2 text-xs">
                     {job.status === "pending" && (
                       <Circle className="h-3 w-3 text-muted-foreground" />
                     )}
                     {job.status === "running" && (
-                      <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                     )}
                     {job.status === "completed" && (
                       <CheckCircle2 className="h-3 w-3 text-emerald-500" />
                     )}
                     {job.status === "failed" && (
-                      <XCircle className="h-3 w-3 text-red-500" />
+                      <XCircle className="h-3 w-3 text-destructive" />
                     )}
                     <span className="font-mono">VM {job.vmid}</span>
                     <span className="text-muted-foreground">{job.diskKey}</span>
                     {job.error && (
-                      <span className="truncate text-red-500">{job.error}</span>
+                      <span className="truncate text-destructive">
+                        {job.error}
+                      </span>
                     )}
                   </div>
                 ))}
@@ -330,9 +348,9 @@ export function BulkMoveDialog({
                   Evacuating...
                 </>
               ) : jobs.length > 0 ? (
-                "Evacuation Complete"
+                "Evacuation complete"
               ) : (
-                "Start Evacuation"
+                "Start evacuation"
               )}
             </Button>
           </>

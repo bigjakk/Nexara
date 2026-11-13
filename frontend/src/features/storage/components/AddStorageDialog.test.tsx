@@ -58,7 +58,7 @@ async function openAdd(typeLabel: string) {
       <PendingPBSKeyDialog />
     </>,
   );
-  await user.click(screen.getByRole("button", { name: "Add Storage" }));
+  await user.click(screen.getByRole("button", { name: "Add storage" }));
   await chooseType(typeLabel);
   return queryClient;
 }
@@ -153,7 +153,7 @@ describe("AddStorageDialog — PBS encryption", () => {
     fillPBS();
 
     expect(screen.getByRole("radio", { name: "Do not encrypt" })).toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Create Storage" }));
+    await user.click(screen.getByRole("button", { name: "Create storage" }));
 
     await waitFor(() => {
       expect(mockedPost).toHaveBeenCalled();
@@ -177,7 +177,7 @@ describe("AddStorageDialog — PBS encryption", () => {
     await user.click(
       screen.getByRole("radio", { name: "Auto-generate a key" }),
     );
-    await user.click(screen.getByRole("button", { name: "Create Storage" }));
+    await user.click(screen.getByRole("button", { name: "Create storage" }));
 
     const dialog = await screen.findByRole("alertdialog");
     expect(sentBody()).toEqual({
@@ -212,14 +212,14 @@ describe("AddStorageDialog — PBS encryption", () => {
       screen.getByRole("radio", { name: "Use an existing key" }),
     );
     expect(
-      screen.getByRole("button", { name: "Create Storage" }),
+      screen.getByRole("button", { name: "Create storage" }),
     ).toBeDisabled();
     fill(screen.getByLabelText("Key"), PASTED_KEY);
-    await user.click(screen.getByRole("button", { name: "Create Storage" }));
+    await user.click(screen.getByRole("button", { name: "Create storage" }));
 
     await waitFor(() => {
       expect(
-        screen.queryByRole("button", { name: "Create Storage" }),
+        screen.queryByRole("button", { name: "Create storage" }),
       ).toBeNull();
     });
     expect(sentBody()).toEqual({
@@ -257,7 +257,7 @@ describe("AddStorageDialog — PBS encryption", () => {
       await user.click(
         screen.getByRole("radio", { name: "Auto-generate a key" }),
       );
-      await user.click(screen.getByRole("button", { name: "Create Storage" }));
+      await user.click(screen.getByRole("button", { name: "Create storage" }));
       await waitFor(() => {
         expect(mockedPost).toHaveBeenCalled();
       });
@@ -313,15 +313,15 @@ describe("AddStorageDialog — Ceph keyring", () => {
     await openAdd("RBD (Ceph)");
 
     expect(screen.queryByLabelText(/^Keyring/)).toBeNull();
-    fill(screen.getByLabelText("Monitor Hosts"), "192.0.2.11,192.0.2.12");
+    fill(screen.getByLabelText("Monitor hosts"), "192.0.2.11,192.0.2.12");
     const keyring = screen.getByLabelText(/^Keyring/);
     expect(keyring.tagName).toBe("TEXTAREA");
     // Required once shown, as the Proxmox GUI has it.
     expect(
-      screen.getByRole("button", { name: "Create Storage" }),
+      screen.getByRole("button", { name: "Create storage" }),
     ).toBeDisabled();
     fill(keyring, "[client.admin]\n\tkey = CANARY-keyring-contents\n");
-    await user.click(screen.getByRole("button", { name: "Create Storage" }));
+    await user.click(screen.getByRole("button", { name: "Create storage" }));
 
     await waitFor(() => {
       expect(mockedPost).toHaveBeenCalled();
@@ -340,18 +340,18 @@ describe("AddStorageDialog — Ceph keyring", () => {
   it("asks CephFS for the bare secret key, and sends it as keyring", async () => {
     await openAdd("CephFS");
 
-    expect(screen.queryByLabelText(/^Secret Key/)).toBeNull();
-    fill(screen.getByLabelText("Monitor Hosts"), "192.0.2.11");
-    const secret = screen.getByLabelText(/^Secret Key/);
+    expect(screen.queryByLabelText(/^Secret key/)).toBeNull();
+    fill(screen.getByLabelText("Monitor hosts"), "192.0.2.11");
+    const secret = screen.getByLabelText(/^Secret key/);
     expect(secret).toHaveAttribute("type", "password");
     // "off" is ignored on a password field; this keeps the saved Nexara
     // login out of it.
     expect(secret).toHaveAttribute("autocomplete", "new-password");
     expect(
-      screen.getByRole("button", { name: "Create Storage" }),
+      screen.getByRole("button", { name: "Create storage" }),
     ).toBeDisabled();
     fill(secret, "CANARY-cephfs-secret");
-    await user.click(screen.getByRole("button", { name: "Create Storage" }));
+    await user.click(screen.getByRole("button", { name: "Create storage" }));
 
     await waitFor(() => {
       expect(mockedPost).toHaveBeenCalled();
@@ -367,16 +367,16 @@ describe("AddStorageDialog — Ceph keyring", () => {
     });
   });
 
-  it("does not send a keyring typed before Monitor Hosts was cleared", async () => {
+  it("does not send a keyring typed before Monitor hosts was cleared", async () => {
     await openAdd("RBD (Ceph)");
 
-    fill(screen.getByLabelText("Monitor Hosts"), "192.0.2.11");
+    fill(screen.getByLabelText("Monitor hosts"), "192.0.2.11");
     fill(
       screen.getByLabelText(/^Keyring/),
       "[client.admin]\n\tkey = CANARY-keyring-contents\n",
     );
-    fill(screen.getByLabelText("Monitor Hosts"), "");
-    await user.click(screen.getByRole("button", { name: "Create Storage" }));
+    fill(screen.getByLabelText("Monitor hosts"), "");
+    await user.click(screen.getByRole("button", { name: "Create storage" }));
 
     await waitFor(() => {
       expect(mockedPost).toHaveBeenCalled();

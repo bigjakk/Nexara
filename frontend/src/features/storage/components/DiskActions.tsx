@@ -58,11 +58,11 @@ export function ResizeDiskDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Resize Disk: {diskName}</DialogTitle>
+          <DialogTitle>Resize disk {diskName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="resize-size">New Size (e.g. +10G or 50G)</Label>
+            <Label htmlFor="resize-size">New size (e.g. +10G or 50G)</Label>
             <Input
               id="resize-size"
               value={size}
@@ -181,7 +181,7 @@ export function MoveDiskDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Move Disk: {diskName}</DialogTitle>
+          <DialogTitle>Move disk {diskName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           {currentStorage && (
@@ -198,7 +198,7 @@ export function MoveDiskDialog({
             </p>
           )}
           <div className="space-y-2">
-            <Label htmlFor="target-storage">Target Storage</Label>
+            <Label htmlFor="target-storage">Target storage</Label>
             <select
               id="target-storage"
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
@@ -245,7 +245,7 @@ export function MoveDiskDialog({
             }
             className="w-full"
           >
-            {moveMutation.isPending ? "Moving disk..." : "Move Disk"}
+            {moveMutation.isPending ? "Moving disk..." : "Move disk"}
           </Button>
           {moveMutation.isError && (
             <p className="text-sm text-destructive">

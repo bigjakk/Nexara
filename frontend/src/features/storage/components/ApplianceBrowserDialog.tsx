@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -28,14 +28,28 @@ interface ApplianceBrowserDialogProps {
   clusterId: string;
   storageId: string;
   storageName: string;
+  /**
+   * With `open` the dialog is controlled and draws no trigger of its own: the
+   * caller opens it, from a menu item.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function ApplianceBrowserDialog({
   clusterId,
   storageId,
   storageName,
+  open: openProp,
+  onOpenChange,
 }: ApplianceBrowserDialogProps) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (!controlled) setInternalOpen(v);
+    onOpenChange?.(v);
+  };
   const [search, setSearch] = useState("");
   const [section, setSection] = useState<string>("all");
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
@@ -110,18 +124,20 @@ export function ApplianceBrowserDialog({
         setOpen(v);
       }}
     >
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <LibraryBig className="mr-2 h-4 w-4" />
-          Browse Appliances
-        </Button>
-      </DialogTrigger>
+      {!controlled && (
+        <DialogTrigger asChild>
+          <Button size="sm" variant="outline">
+            <LibraryBig className="mr-2 h-4 w-4" />
+            Browse appliances
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden">
         <DialogHeader>
-          <DialogTitle>Proxmox Appliance Catalog</DialogTitle>
+          <DialogTitle>Proxmox appliance catalog</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3 overflow-hidden">
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[12.5px] text-muted-foreground">
             Official templates curated by Proxmox. Downloads go to{" "}
             <span className="font-mono">{storageName}</span>.
           </p>
@@ -155,21 +171,17 @@ export function ApplianceBrowserDialog({
           </div>
 
           {sections.length > 1 && (
-            <div className="flex flex-wrap gap-1">
-              {sections.map((s) => (
-                <Button
-                  key={s}
-                  size="sm"
-                  variant={section === s ? "default" : "outline"}
-                  onClick={() => {
-                    setSection(s);
-                  }}
-                  disabled={isBusy}
-                  className="h-6 px-2 text-xs"
-                >
-                  {s}
-                </Button>
-              ))}
+            <div>
+              <Segmented
+                aria-label="Section"
+                value={section}
+                onValueChange={setSection}
+                options={sections.map((s) => ({
+                  value: s,
+                  label: s === "all" ? "All" : s,
+                  disabled: isBusy,
+                }))}
+              />
             </div>
           )}
 
@@ -194,19 +206,21 @@ export function ApplianceBrowserDialog({
             />
           )}
 
+          {/* The table lines up with the dialog's own padding, not a panel's
+              gutters. */}
           <div
-            className="overflow-y-auto rounded-md border"
+            className="overflow-y-auto border-t [&_td:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th:first-child]:pl-0 [&_th:last-child]:pr-0"
             style={{ maxHeight: "55vh" }}
           >
             {appliancesQuery.isLoading ? (
-              <div className="space-y-1 p-2">
+              <div className="space-y-1 py-2">
                 <Skeleton className="h-8 w-full" />
                 <Skeleton className="h-8 w-full" />
                 <Skeleton className="h-8 w-full" />
                 <Skeleton className="h-8 w-full" />
               </div>
             ) : appliancesQuery.isError ? (
-              <p className="p-4 text-sm text-destructive">
+              <p className="py-4 text-sm text-destructive">
                 Failed to load appliance catalog.
               </p>
             ) : filtered.length === 0 ? (
@@ -221,24 +235,24 @@ export function ApplianceBrowserDialog({
                     <TableHead>Version</TableHead>
                     <TableHead>Section</TableHead>
                     <TableHead>Description</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
+                    <TableHead className="text-right">
+                      <span className="sr-only">Download</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filtered.map((a) => (
                     <TableRow key={a.template}>
                       <TableCell className="font-medium">{a.os}</TableCell>
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="font-mono text-[12.5px]">
                         {a.version}
                       </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">
-                          {a.section}
-                        </Badge>
+                      <TableCell className="text-muted-foreground">
+                        {a.section}
                       </TableCell>
                       <TableCell className="max-w-md">
                         <p
-                          className="truncate text-xs"
+                          className="truncate text-[12.5px] text-muted-foreground"
                           title={a.description || a.headline}
                         >
                           {a.headline || a.description || a.template}

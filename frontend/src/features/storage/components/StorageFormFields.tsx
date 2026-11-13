@@ -434,7 +434,7 @@ interface CephSecretFieldProps {
 /**
  * The keyring (rbd) or secret key (cephfs) for an external Ceph cluster — see
  * CEPH_SECRET_FIELD for what Proxmox does with it. The dialogs show it only
- * once Monitor Hosts names that cluster, never fill it in, and send it only
+ * once Monitor hosts names that cluster, never fill it in, and send it only
  * when something was typed.
  */
 export function CephSecretField({

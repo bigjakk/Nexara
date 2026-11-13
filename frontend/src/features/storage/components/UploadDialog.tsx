@@ -11,6 +11,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Segmented } from "@/components/ui/segmented";
+import { UsageBar } from "@/components/UsageBar";
 import { formatBytes } from "@/lib/format";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { useUploadFile } from "../api/storage-queries";
@@ -104,43 +106,45 @@ export function UploadDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <Upload className="mr-2 h-4 w-4" />
+        <Button size="sm" className="gap-1.5">
+          <Upload className="h-4 w-4" />
           Upload
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Upload to Storage</DialogTitle>
+          <DialogTitle>Upload to storage</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Content Type</Label>
-            <div className="flex gap-2">
-              {supportsIso && (
-                <Button
-                  size="sm"
-                  variant={contentType === "iso" ? "default" : "outline"}
-                  onClick={() => {
-                    setContentType("iso");
-                  }}
-                  disabled={isBusy}
-                >
-                  ISO Image
-                </Button>
-              )}
-              {supportsVztmpl && (
-                <Button
-                  size="sm"
-                  variant={contentType === "vztmpl" ? "default" : "outline"}
-                  onClick={() => {
-                    setContentType("vztmpl");
-                  }}
-                  disabled={isBusy}
-                >
-                  CT Template
-                </Button>
-              )}
+            <Label>Content type</Label>
+            <div>
+              <Segmented<ContentType>
+                aria-label="Content type"
+                size="md"
+                value={contentType}
+                onValueChange={setContentType}
+                options={[
+                  ...(supportsIso
+                    ? [
+                        {
+                          value: "iso" as const,
+                          label: "ISO image",
+                          disabled: isBusy,
+                        },
+                      ]
+                    : []),
+                  ...(supportsVztmpl
+                    ? [
+                        {
+                          value: "vztmpl" as const,
+                          label: "CT template",
+                          disabled: isBusy,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
             </div>
           </div>
           <div className="space-y-2">
@@ -166,17 +170,12 @@ export function UploadDialog({
 
           {/* Upload progress (browser → Nexara → Proxmox) */}
           {progress !== null && (
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs text-muted-foreground">
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-[12.5px] tabular-nums text-muted-foreground">
                 <span>Uploading to Proxmox...</span>
                 <span>{String(progress)}%</span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-data transition-all duration-300"
-                  style={{ width: `${String(progress)}%` }}
-                />
-              </div>
+              <UsageBar percent={progress} thresholds={false} />
             </div>
           )}
 

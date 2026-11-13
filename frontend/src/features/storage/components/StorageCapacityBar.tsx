@@ -1,29 +1,44 @@
+import { UsageBar } from "@/components/UsageBar";
 import { formatBytes } from "@/lib/format";
+import { USAGE_TEXT_CLASS, usageLevel } from "@/lib/usage-level";
+import { cn } from "@/lib/utils";
 
 interface StorageCapacityBarProps {
   used: number;
   total: number;
+  className?: string;
 }
 
-export function StorageCapacityBar({ used, total }: StorageCapacityBarProps) {
-  const pct = total > 0 ? (used / total) * 100 : 0;
-  const color =
-    pct > 90 ? "bg-destructive" : pct > 70 ? "bg-amber-500" : "bg-data";
-
+/**
+ * A store's used space in words over the shared usage bar. A store that
+ * reports no size (it is inactive) says so over an empty track, never 0%.
+ */
+export function StorageCapacityBar({
+  used,
+  total,
+  className,
+}: StorageCapacityBarProps) {
+  const percent = total > 0 ? (used / total) * 100 : null;
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-xs text-muted-foreground">
-        <span>
-          {formatBytes(used)} / {formatBytes(total)}
+    <div className={cn("min-w-0 space-y-1.5", className)}>
+      <div className="flex items-baseline justify-between gap-3 text-[12.5px] tabular-nums text-muted-foreground">
+        <span className="truncate">
+          {percent === null
+            ? "No size reported"
+            : `${formatBytes(used)} of ${formatBytes(total)}`}
         </span>
-        <span>{pct.toFixed(1)}%</span>
+        {percent !== null && (
+          <span
+            className={cn(
+              "text-foreground",
+              USAGE_TEXT_CLASS[usageLevel(percent)],
+            )}
+          >
+            {String(Math.round(percent))}%
+          </span>
+        )}
       </div>
-      <div className="h-2 w-full rounded-full bg-muted">
-        <div
-          className={`h-full rounded-full transition-all ${color}`}
-          style={{ width: `${String(Math.min(pct, 100))}%` }}
-        />
-      </div>
+      <UsageBar percent={percent} />
     </div>
   );
 }
