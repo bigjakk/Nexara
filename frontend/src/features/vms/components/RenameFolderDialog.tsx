@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Field } from "@/components/page/Field";
 import { useUpdateVMFolder } from "../api/folder-queries";
 
 interface RenameFolderDialogProps {
@@ -67,26 +69,31 @@ export function RenameFolderDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Rename folder</DialogTitle>
+          <DialogDescription>
+            A new name for <strong>{currentName}</strong>. The guests in it stay
+            where they are.
+          </DialogDescription>
         </DialogHeader>
 
-        <Input
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-          }}
-          maxLength={128}
-          autoFocus
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleSubmit();
-            }
-          }}
-        />
+        <Field label="Name" htmlFor="rename-folder-name" error={error}>
+          <Input
+            id="rename-folder-name"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+            }}
+            maxLength={128}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+          />
+        </Field>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-0">
           <Button
             variant="outline"
             onClick={() => {

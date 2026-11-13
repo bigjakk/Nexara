@@ -9,9 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { AlertTriangle } from "lucide-react";
+import { CheckField, Field, NativeSelect } from "@/components/page/Field";
 import {
   useClusterNodes,
   useClusterStorage,
@@ -121,15 +119,15 @@ export function CloneToTemplateDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Clone to Template</DialogTitle>
+          <DialogTitle>Clone to template</DialogTitle>
           <DialogDescription>
-            Clone <strong>{sourceName}</strong> and convert the clone into a
-            template.
+            Clones <strong>{sourceName}</strong> and turns the copy into a
+            read-only template. The {typeLabel} itself is not changed.
           </DialogDescription>
         </DialogHeader>
 
         {upid ? (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <TaskProgressBanner
               clusterId={clusterId}
               upid={upid}
@@ -138,107 +136,84 @@ export function CloneToTemplateDialog({
               }}
               description={`Clone ${sourceName} to template`}
             />
-            <p className="text-xs text-muted-foreground">
-              After cloning completes, the clone will be automatically converted
-              to a template.
+            <p className="text-[12.5px] text-muted-foreground">
+              When the clone is done it is converted to a template
+              automatically.
             </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="rounded-md border border-blue-500/50 bg-blue-500/10 p-3">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                <p className="text-sm text-blue-700 dark:text-blue-300">
-                  This will create a clone of your {typeLabel} and convert it to
-                  a read-only template. The original {typeLabel} will not be
-                  modified.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="ctt-new-id">New VMID</Label>
-                <Input
-                  id="ctt-new-id"
-                  type="number"
-                  min={1}
-                  value={newId}
+            <Field
+              label="New VMID"
+              htmlFor="ctt-new-id"
+              warning={
+                isDuplicate && `VMID ${String(numericId)} may already be in use`
+              }
+            >
+              <Input
+                id="ctt-new-id"
+                type="number"
+                min={1}
+                value={newId}
+                onChange={(e) => {
+                  setNewId(e.target.value);
+                }}
+                placeholder="e.g. 200"
+                required
+                className="max-w-[10rem]"
+              />
+            </Field>
+            <Field label="Template name" htmlFor="ctt-name">
+              <Input
+                id="ctt-name"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                }}
+                placeholder="Optional"
+              />
+            </Field>
+            <Field label="Target node" htmlFor="ctt-target">
+              <NativeSelect
+                id="ctt-target"
+                value={target}
+                onChange={(e) => {
+                  setTarget(e.target.value);
+                }}
+              >
+                <option value="">Same node</option>
+                {nodes?.map((n) => (
+                  <option key={n.id} value={n.name}>
+                    {n.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <CheckField
+              id="ctt-full"
+              label="Full clone"
+              hint="An independent copy. Unticked, the clone stays linked to its source."
+              checked={full}
+              onCheckedChange={setFull}
+            />
+            {full && (
+              <Field label="Storage" htmlFor="ctt-storage">
+                <NativeSelect
+                  id="ctt-storage"
+                  value={storage}
                   onChange={(e) => {
-                    setNewId(e.target.value);
+                    setStorage(e.target.value);
                   }}
-                  placeholder="e.g. 200"
-                  required
-                />
-                {isDuplicate && (
-                  <p className="text-xs text-amber-600 dark:text-amber-500">
-                    VMID {numericId} may already be in use
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ctt-name">Template Name</Label>
-                <Input
-                  id="ctt-name"
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                  }}
-                  placeholder="Optional"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ctt-target">Target Node</Label>
-                <select
-                  id="ctt-target"
-                  value={target}
-                  onChange={(e) => {
-                    setTarget(e.target.value);
-                  }}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 >
-                  <option value="">Same node</option>
-                  {nodes?.map((n) => (
-                    <option key={n.id} value={n.name}>
-                      {n.name}
+                  <option value="">Same as source</option>
+                  {storageOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
                     </option>
                   ))}
-                </select>
-              </div>
-              {full && (
-                <div className="space-y-2">
-                  <Label htmlFor="ctt-storage">Storage</Label>
-                  <select
-                    id="ctt-storage"
-                    value={storage}
-                    onChange={(e) => {
-                      setStorage(e.target.value);
-                    }}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    <option value="">Same as source</option>
-                    {storageOptions.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="ctt-full"
-                checked={full}
-                onCheckedChange={(checked) => {
-                  setFull(Boolean(checked));
-                }}
-              />
-              <Label htmlFor="ctt-full" className="text-sm">
-                Full clone (independent copy)
-              </Label>
-            </div>
+                </NativeSelect>
+              </Field>
+            )}
 
             {cloneToTemplateMutation.isError && (
               <p className="text-sm text-destructive">
@@ -246,7 +221,7 @@ export function CloneToTemplateDialog({
               </p>
             )}
 
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button type="button" variant="outline" onClick={handleClose}>
                 Cancel
               </Button>
@@ -256,7 +231,7 @@ export function CloneToTemplateDialog({
               >
                 {cloneToTemplateMutation.isPending
                   ? "Cloning..."
-                  : "Clone to Template"}
+                  : "Clone to template"}
               </Button>
             </DialogFooter>
           </form>

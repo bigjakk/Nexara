@@ -10,8 +10,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { CheckField, Field } from "@/components/page/Field";
+import { WarningCallout } from "@/components/WarningCallout";
 import { useCreateSnapshot, useSnapshotCapability } from "../api/vm-queries";
 import { useTaskStatus } from "@/features/tasks/api/tasks-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
@@ -177,9 +177,10 @@ export function CreateSnapshotDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Take Snapshot</DialogTitle>
+          <DialogTitle>Take snapshot</DialogTitle>
           <DialogDescription>
-            Create a point-in-time snapshot of <strong>{resourceName}</strong>.
+            A point-in-time snapshot of <strong>{resourceName}</strong> to roll
+            back to.
           </DialogDescription>
         </DialogHeader>
 
@@ -191,13 +192,13 @@ export function CreateSnapshotDialog({
               description={task.description}
             />
             {taskFailed && (
-              <DialogFooter>
+              <DialogFooter className="gap-2 sm:gap-0">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={handleTryAgain}
                 >
-                  Try Again
+                  Try again
                 </Button>
                 <Button type="button" onClick={handleClose}>
                   Close
@@ -208,27 +209,27 @@ export function CreateSnapshotDialog({
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             {capability && !capability.supported && (
-              <div className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-500">
-                <p className="font-medium">
-                  Proxmox reports that this guest cannot take snapshots in its
-                  current configuration.
-                </p>
+              <WarningCallout title="Proxmox reports that this guest cannot take snapshots in its current configuration.">
                 {capability.blocking_volumes.length > 0 && (
                   <p>
                     Likely cause:{" "}
-                    <span className="font-medium">
+                    <span className="font-medium text-foreground">
                       {capability.blocking_volumes.join(", ")}
-                    </span>{" "}
-                    — that storage has no snapshot support. Move the volume to
-                    snapshot-capable storage (RBD, LVM-thin, ZFS) or use qcow2
-                    format.
+                    </span>
+                    . That storage has no snapshot support. Move the volume to
+                    snapshot-capable storage (RBD, LVM-thin, ZFS) or use the
+                    qcow2 format.
                   </p>
                 )}
                 <p>You can still try, but the task will most likely fail.</p>
-              </div>
+              </WarningCallout>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="snapshot-name">Name</Label>
+            <Field
+              label="Name"
+              htmlFor="snapshot-name"
+              hint={SNAPSHOT_NAME_RULES}
+              error={nameError}
+            >
               <Input
                 id="snapshot-name"
                 value={snapName}
@@ -239,18 +240,8 @@ export function CreateSnapshotDialog({
                 maxLength={40}
                 required
               />
-              <p
-                className={
-                  nameError
-                    ? "text-xs text-destructive"
-                    : "text-xs text-muted-foreground"
-                }
-              >
-                {nameError ?? SNAPSHOT_NAME_RULES}
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="snapshot-desc">Description</Label>
+            </Field>
+            <Field label="Description" htmlFor="snapshot-desc">
               <Input
                 id="snapshot-desc"
                 value={description}
@@ -259,21 +250,16 @@ export function CreateSnapshotDialog({
                 }}
                 placeholder="Optional"
               />
-            </div>
+            </Field>
 
             {kind === "vm" && (
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="snapshot-vmstate"
-                  checked={vmstate}
-                  onCheckedChange={(checked) => {
-                    setVmstate(Boolean(checked));
-                  }}
-                />
-                <Label htmlFor="snapshot-vmstate" className="text-sm">
-                  Include RAM state
-                </Label>
-              </div>
+              <CheckField
+                id="snapshot-vmstate"
+                label="Include RAM state"
+                hint="Also saves what is in memory, so a rollback resumes the VM where it was."
+                checked={vmstate}
+                onCheckedChange={setVmstate}
+              />
             )}
 
             {createMutation.isError && (
@@ -282,7 +268,7 @@ export function CreateSnapshotDialog({
               </p>
             )}
 
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button type="button" variant="outline" onClick={handleClose}>
                 Cancel
               </Button>
@@ -290,7 +276,7 @@ export function CreateSnapshotDialog({
                 type="submit"
                 disabled={!canSubmit || createMutation.isPending}
               >
-                {createMutation.isPending ? "Creating..." : "Create Snapshot"}
+                {createMutation.isPending ? "Creating..." : "Create snapshot"}
               </Button>
             </DialogFooter>
           </form>

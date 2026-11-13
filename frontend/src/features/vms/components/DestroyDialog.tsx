@@ -9,9 +9,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { CopyableName } from "@/components/CopyableName";
+import { ConfirmNameField } from "@/components/TypeToConfirmDialog";
 import { useDestroyVM } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
@@ -64,11 +63,12 @@ export function DestroyDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Destroy {kind === "ct" ? "Container" : "VM"}
+            Destroy {kind === "ct" ? "container" : "VM"}
           </DialogTitle>
           <DialogDescription>
-            This will permanently destroy <CopyableName name={resourceName} />{" "}
-            and all its data. This action cannot be undone.
+            This permanently destroys <CopyableName name={resourceName} /> and
+            all its data: its disks, its snapshots and its configuration. It
+            cannot be undone.
           </DialogDescription>
         </DialogHeader>
 
@@ -84,20 +84,13 @@ export function DestroyDialog({
           />
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="destroy-confirm">
-                Type <CopyableName name={resourceName} /> to confirm
-              </Label>
-              <Input
-                id="destroy-confirm"
-                value={confirmText}
-                onChange={(e) => {
-                  setConfirmText(e.target.value);
-                }}
-                placeholder={resourceName}
-                autoComplete="off"
-              />
-            </div>
+            <ConfirmNameField
+              id="destroy-confirm"
+              name={resourceName}
+              assist
+              value={confirmText}
+              onChange={setConfirmText}
+            />
 
             {destroyMutation.isError && (
               <p className="text-sm text-destructive">
@@ -105,10 +98,11 @@ export function DestroyDialog({
               </p>
             )}
 
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button type="button" variant="outline" onClick={handleClose}>
                 Cancel
               </Button>
+              {/* The one filled red control in the dialog. */}
               <Button
                 type="submit"
                 variant="destructive"

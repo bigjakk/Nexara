@@ -9,8 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { CheckField, Field, NativeSelect } from "@/components/page/Field";
 import {
   useClusterNodes,
   useClusterStorage,
@@ -114,113 +113,100 @@ export function CloneDialog({
     onOpenChange(false);
   }
 
+  const kindLabel = kind === "ct" ? "container" : "virtual machine";
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Clone {kind === "ct" ? "Container" : "VM"}</DialogTitle>
+          <DialogTitle>Clone {kind === "ct" ? "container" : "VM"}</DialogTitle>
           <DialogDescription>
-            Clone <strong>{sourceName}</strong> to a new{" "}
-            {kind === "ct" ? "container" : "virtual machine"}.
+            A new {kindLabel} copied from <strong>{sourceName}</strong>.
           </DialogDescription>
         </DialogHeader>
 
         {upid ? (
-          <div className="space-y-4">
-            <TaskProgressBanner
-              clusterId={clusterId}
-              upid={upid}
-              onComplete={() => {
-                handleClose();
-              }}
-              description={`Clone ${sourceName}`}
-            />
-          </div>
+          <TaskProgressBanner
+            clusterId={clusterId}
+            upid={upid}
+            onComplete={() => {
+              handleClose();
+            }}
+            description={`Clone ${sourceName}`}
+          />
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="clone-new-id">New VMID</Label>
-                <Input
-                  id="clone-new-id"
-                  type="number"
-                  min={1}
-                  value={newId}
+            <Field
+              label="New VMID"
+              htmlFor="clone-new-id"
+              warning={
+                isDuplicate && `VMID ${String(numericId)} may already be in use`
+              }
+            >
+              <Input
+                id="clone-new-id"
+                type="number"
+                min={1}
+                value={newId}
+                onChange={(e) => {
+                  setNewId(e.target.value);
+                }}
+                placeholder="e.g. 200"
+                required
+                className="max-w-[10rem]"
+              />
+            </Field>
+            <Field label="Name" htmlFor="clone-name">
+              <Input
+                id="clone-name"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                }}
+                placeholder="Optional"
+              />
+            </Field>
+            <Field label="Target node" htmlFor="clone-target">
+              <NativeSelect
+                id="clone-target"
+                value={target}
+                onChange={(e) => {
+                  setTarget(e.target.value);
+                }}
+              >
+                <option value="">Same node</option>
+                {nodes?.map((n) => (
+                  <option key={n.id} value={n.name}>
+                    {n.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <CheckField
+              id="clone-full"
+              label="Full clone"
+              hint="An independent copy. Unticked, the clone stays linked to its source."
+              checked={full}
+              onCheckedChange={setFull}
+            />
+            {full && (
+              <Field label="Storage" htmlFor="clone-storage">
+                <NativeSelect
+                  id="clone-storage"
+                  value={storage}
                   onChange={(e) => {
-                    setNewId(e.target.value);
+                    setStorage(e.target.value);
                   }}
-                  placeholder="e.g. 200"
-                  required
-                />
-                {isDuplicate && (
-                  <p className="text-xs text-amber-600 dark:text-amber-500">
-                    VMID {numericId} may already be in use
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clone-name">Name</Label>
-                <Input
-                  id="clone-name"
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                  }}
-                  placeholder="Optional"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clone-target">Target Node</Label>
-                <select
-                  id="clone-target"
-                  value={target}
-                  onChange={(e) => {
-                    setTarget(e.target.value);
-                  }}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 >
-                  <option value="">Same node</option>
-                  {nodes?.map((n) => (
-                    <option key={n.id} value={n.name}>
-                      {n.name}
+                  <option value="">Same as source</option>
+                  {storageOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
                     </option>
                   ))}
-                </select>
-              </div>
-              {full && (
-                <div className="space-y-2">
-                  <Label htmlFor="clone-storage">Storage</Label>
-                  <select
-                    id="clone-storage"
-                    value={storage}
-                    onChange={(e) => {
-                      setStorage(e.target.value);
-                    }}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    <option value="">Same as source</option>
-                    {storageOptions.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="clone-full"
-                checked={full}
-                onCheckedChange={(checked) => {
-                  setFull(Boolean(checked));
-                }}
-              />
-              <Label htmlFor="clone-full" className="text-sm">
-                Full clone (independent copy)
-              </Label>
-            </div>
+                </NativeSelect>
+              </Field>
+            )}
 
             {cloneMutation.isError && (
               <p className="text-sm text-destructive">
@@ -228,7 +214,7 @@ export function CloneDialog({
               </p>
             )}
 
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button type="button" variant="outline" onClick={handleClose}>
                 Cancel
               </Button>

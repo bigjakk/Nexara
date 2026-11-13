@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -13,7 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Field, FormSection } from "@/components/page/Field";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -53,7 +56,7 @@ import type {
 } from "@/features/migrations/types/migration";
 import type { ResourceKind } from "../types/vm";
 import {
-  ArrowLeftRight,
+  ArrowRight,
   CheckCircle2,
   XCircle,
   AlertTriangle,
@@ -68,13 +71,14 @@ const severityIcon: Record<CheckSeverity, React.ReactNode> = {
   fail: <XCircle className="h-4 w-4 text-red-500" />,
 };
 
-const statusColors: Record<string, string> = {
-  pending: "bg-gray-100 text-gray-700",
-  checking: "bg-blue-100 text-blue-700",
-  migrating: "bg-amber-100 text-amber-700",
-  completed: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
-  cancelled: "bg-gray-100 text-gray-500",
+/** How each job state reads: work under way in the accent, done is quiet. */
+const statusBadge: Record<string, BadgeVariant> = {
+  pending: "secondary",
+  checking: "default",
+  migrating: "default",
+  completed: "healthy",
+  failed: "destructive",
+  cancelled: "outline",
 };
 
 interface MigrateJobDialogProps {
@@ -477,6 +481,9 @@ export function MigrateJobDialog({
   const sourceDiskFormat =
     currentDiskFormats.size === 1 ? [...currentDiskFormats][0] : undefined;
 
+  const storageOnly =
+    migrationType === "intra-cluster" && migrationMode === "storage";
+
   return (
     <Dialog
       open={open}
@@ -486,23 +493,21 @@ export function MigrateJobDialog({
     >
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ArrowLeftRight className="h-5 w-5" />
-            {step === "config" && "Migrate"}
-            {step === "preflight" && "Pre-Flight Checks"}
-            {step === "progress" && "Migration Progress"}
+          <DialogTitle>
+            {step === "config" &&
+              `Migrate ${kind === "ct" ? "container" : "VM"}`}
+            {step === "preflight" && "Pre-flight checks"}
+            {step === "progress" && "Migration progress"}
           </DialogTitle>
           <DialogDescription>
-            Migrate <strong>{vmName}</strong> (VMID {String(vmid)}) from{" "}
-            <strong>{currentNode}</strong>
+            <strong>{vmName}</strong> (VMID {String(vmid)}), currently on{" "}
+            <strong>{currentNode}</strong>.
           </DialogDescription>
         </DialogHeader>
 
         {step === "config" && (
           <div className="space-y-4">
-            {/* Migration Type */}
-            <div className="space-y-2">
-              <Label>Migration Type</Label>
+            <Field label="Migration type" htmlFor="migrate-type">
               <Select
                 value={migrationType}
                 onValueChange={(v) => {
@@ -518,24 +523,33 @@ export function MigrateJobDialog({
                   setDeleteSourceOverride(null);
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="migrate-type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="intra-cluster">
-                    Intra-Cluster (same cluster)
+                    Within this cluster
                   </SelectItem>
                   <SelectItem value="cross-cluster">
-                    Cross-Cluster (different clusters)
+                    To another cluster
                   </SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </Field>
 
-            {/* Migration Mode (intra-cluster only) */}
+            {/* What to move (intra-cluster only) */}
             {migrationType === "intra-cluster" && (
-              <div className="space-y-2">
-                <Label>Migration Mode</Label>
+              <Field
+                label="What to move"
+                htmlFor="migrate-mode"
+                hint={
+                  migrationMode === "live"
+                    ? "Moves the guest to a different node."
+                    : migrationMode === "storage"
+                      ? "Moves all of the guest's disks to a different storage on the same node."
+                      : "Moves the guest to another node and all of its disks to a different storage."
+                }
+              >
                 <Select
                   value={migrationMode}
                   onValueChange={(v) => {
@@ -546,36 +560,30 @@ export function MigrateJobDialog({
                     }
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger
+                    id="migrate-mode"
+                    aria-describedby="migrate-mode-note"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="live">
-                      Live (move VM to another node)
+                      The guest, to another node
                     </SelectItem>
                     <SelectItem value="storage">
-                      Storage (move disks to another storage)
+                      Its disks, to another storage
                     </SelectItem>
                     <SelectItem value="both">
-                      Both (move VM + move disks)
+                      The guest and its disks
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-[11px] text-muted-foreground">
-                  {migrationMode === "live" &&
-                    "Moves the VM to a different node (memory migration)"}
-                  {migrationMode === "storage" &&
-                    "Moves all VM disks to a different storage on the same node"}
-                  {migrationMode === "both" &&
-                    "Moves VM to another node and all disks to a different storage"}
-                </p>
-              </div>
+              </Field>
             )}
 
-            {/* Target Cluster (cross-cluster only) */}
+            {/* Target cluster (cross-cluster only) */}
             {migrationType === "cross-cluster" && (
-              <div className="space-y-2">
-                <Label>Target Cluster</Label>
+              <Field label="Target cluster" htmlFor="migrate-cluster">
                 <Select
                   value={targetClusterId}
                   onValueChange={(v) => {
@@ -585,7 +593,7 @@ export function MigrateJobDialog({
                     setNetworkMap({});
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="migrate-cluster">
                     <SelectValue placeholder="Select target cluster" />
                   </SelectTrigger>
                   <SelectContent>
@@ -598,17 +606,21 @@ export function MigrateJobDialog({
                       ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </Field>
             )}
 
-            {/* Target Node (hidden for storage-only mode) */}
-            {!(
-              migrationType === "intra-cluster" && migrationMode === "storage"
-            ) && (
-              <div className="space-y-2">
-                <Label>Target Node</Label>
+            {/* Target node (hidden for storage-only mode) */}
+            {!storageOnly && (
+              <Field
+                label="Target node"
+                htmlFor="migrate-node"
+                hint="The least loaded node is picked for you."
+              >
                 <Select value={targetNode} onValueChange={setTargetNode}>
-                  <SelectTrigger>
+                  <SelectTrigger
+                    id="migrate-node"
+                    aria-describedby="migrate-node-note"
+                  >
                     <SelectValue placeholder="Select target node" />
                   </SelectTrigger>
                   <SelectContent>
@@ -622,7 +634,7 @@ export function MigrateJobDialog({
                         : null;
                       return (
                         <SelectItem key={n.id} value={n.name}>
-                          <span className="flex items-center gap-2">
+                          <span className="flex items-baseline gap-2">
                             {n.name}
                             {n.status !== "online" && (
                               <span className="text-muted-foreground">
@@ -630,7 +642,7 @@ export function MigrateJobDialog({
                               </span>
                             )}
                             {cpuLabel && memLabel && (
-                              <span className="text-[10px] text-muted-foreground">
+                              <span className="text-xs text-muted-foreground">
                                 CPU {cpuLabel} · Mem {memLabel}
                               </span>
                             )}
@@ -640,23 +652,22 @@ export function MigrateJobDialog({
                     })}
                   </SelectContent>
                 </Select>
-                <p className="text-[11px] text-muted-foreground">
-                  Auto-selects the least loaded node
-                </p>
-              </div>
+              </Field>
             )}
 
-            {/* Target Storage (storage/both mode for intra-cluster) */}
+            {/* Target storage (storage/both mode for intra-cluster) */}
             {migrationType === "intra-cluster" &&
               (migrationMode === "storage" || migrationMode === "both") &&
               (perDiskStorage ? (
-                <div className="space-y-2">
-                  <Label>Per-Disk Target Storage</Label>
-                  <p className="text-[11px] text-muted-foreground">
-                    This guest&apos;s disks span multiple storages. Pick a
-                    target per disk, or leave one on its current storage.
-                  </p>
-                  <div className="space-y-2 rounded-md border p-3">
+                <Field
+                  label="Target storage for each disk"
+                  hint={
+                    hasPerDiskSelection
+                      ? "This guest's disks are on more than one storage. Pick a target for each, or leave a disk where it is."
+                      : "This guest's disks are on more than one storage. Choose a new storage for at least one of them."
+                  }
+                >
+                  <div className="divide-y border-y">
                     {guestDisks.map((d) => {
                       const diskOptions = compatibleStorage.filter(
                         (s) => s.storage !== d.storage,
@@ -664,11 +675,13 @@ export function MigrateJobDialog({
                       return (
                         <div
                           key={d.key}
-                          className="grid grid-cols-[1fr_180px] items-center gap-2"
+                          className="grid grid-cols-[minmax(0,1fr)_minmax(0,11rem)] items-center gap-3 py-2"
                         >
-                          <div className="min-w-0 truncate">
-                            <span className="font-mono text-xs">{d.key}</span>
-                            <span className="ml-1.5 text-[11px] text-muted-foreground">
+                          <div className="min-w-0 truncate text-sm">
+                            <span className="font-mono text-[12.5px]">
+                              {d.key}
+                            </span>
+                            <span className="ml-2 text-[12.5px] text-muted-foreground">
                               {d.storage}
                               {d.size ? ` · ${d.size}` : ""}
                             </span>
@@ -682,7 +695,10 @@ export function MigrateJobDialog({
                               }));
                             }}
                           >
-                            <SelectTrigger className="h-8 text-xs">
+                            <SelectTrigger
+                              className="h-8"
+                              aria-label={`Target storage for ${d.key}`}
+                            >
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -700,20 +716,25 @@ export function MigrateJobDialog({
                       );
                     })}
                   </div>
-                  {!hasPerDiskSelection && (
-                    <p className="text-[11px] text-muted-foreground">
-                      Choose a new storage for at least one disk to migrate.
-                    </p>
-                  )}
-                </div>
+                </Field>
               ) : (
-                <div className="space-y-2">
-                  <Label>Target Storage</Label>
+                <Field
+                  label="Target storage"
+                  htmlFor="migrate-storage"
+                  hint={
+                    currentDiskStorages.size > 0
+                      ? `All disks move to this storage. The guest's current storage (${Array.from(currentDiskStorages).join(", ")}) is left out: Proxmox cannot move a disk onto the storage it is already on.`
+                      : "All of the guest's disks are moved to this storage."
+                  }
+                >
                   <Select
                     value={targetStorage}
                     onValueChange={setTargetStorage}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger
+                      id="migrate-storage"
+                      aria-describedby="migrate-storage-note"
+                    >
                       <SelectValue placeholder="Select target storage" />
                     </SelectTrigger>
                     <SelectContent>
@@ -724,51 +745,39 @@ export function MigrateJobDialog({
                       ))}
                     </SelectContent>
                   </Select>
-                  {currentDiskStorages.size > 0 ? (
-                    <p className="text-[11px] text-muted-foreground">
-                      All disks move to this storage. The guest&apos;s current
-                      storage ({Array.from(currentDiskStorages).join(", ")}) is
-                      excluded — Proxmox can&apos;t move a disk onto the storage
-                      it already lives on.
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-muted-foreground">
-                      All VM disks will be moved to this storage
-                    </p>
-                  )}
                   {guestConfig &&
                     targetStorageList !== undefined &&
                     eligibleTargetStorage.length === 0 && (
-                      <p className="text-[11px] text-destructive">
-                        No eligible target storage — every compatible storage
+                      <p className="text-[12.5px] leading-snug text-destructive">
+                        No eligible target storage. Every compatible storage
                         either already holds one of this guest&apos;s disks or
                         is unavailable.
                       </p>
                     )}
-                </div>
+                </Field>
               ))}
 
-            {/* Storage Mapping (cross-cluster only) */}
+            {/* Storage mapping (cross-cluster only) */}
             {migrationType === "cross-cluster" &&
               targetClusterId.length > 0 &&
               uniqueSourceStorage.length > 0 && (
-                <div className="space-y-2">
-                  <Label>Storage Mapping</Label>
-                  <div className="space-y-2 rounded-md border p-3">
+                <Field
+                  label="Storage mapping"
+                  hint="A storage left unmapped keeps its name on the target cluster."
+                >
+                  <div className="divide-y border-y">
                     {uniqueSourceStorage.map((src) => (
-                      <div
-                        key={src.storage}
-                        className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
-                      >
-                        <span className="truncate text-sm">{src.storage}</span>
-                        <ArrowLeftRight className="h-3 w-3 text-muted-foreground" />
+                      <MappingRow key={src.storage} source={src.storage}>
                         <Select
                           value={storageMap[src.storage] ?? ""}
                           onValueChange={(v) => {
                             updateStorageMapping(src.storage, v);
                           }}
                         >
-                          <SelectTrigger className="h-8 text-xs">
+                          <SelectTrigger
+                            className="h-8"
+                            aria-label={`Target storage for ${src.storage}`}
+                          >
                             <SelectValue placeholder="Same name" />
                           </SelectTrigger>
                           <SelectContent>
@@ -779,35 +788,35 @@ export function MigrateJobDialog({
                             ))}
                           </SelectContent>
                         </Select>
-                      </div>
+                      </MappingRow>
                     ))}
                   </div>
-                </div>
+                </Field>
               )}
 
-            {/* Network Mapping (cross-cluster only) */}
+            {/* Network mapping (cross-cluster only) */}
             {migrationType === "cross-cluster" &&
               targetClusterId.length > 0 &&
               targetNode.length > 0 &&
               sourceBridges &&
               sourceBridges.length > 0 && (
-                <div className="space-y-2">
-                  <Label>Network Mapping</Label>
-                  <div className="space-y-2 rounded-md border p-3">
+                <Field
+                  label="Network mapping"
+                  hint="A bridge left unmapped keeps its name on the target node."
+                >
+                  <div className="divide-y border-y">
                     {sourceBridges.map((src) => (
-                      <div
-                        key={src.iface}
-                        className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
-                      >
-                        <span className="truncate text-sm">{src.iface}</span>
-                        <ArrowLeftRight className="h-3 w-3 text-muted-foreground" />
+                      <MappingRow key={src.iface} source={src.iface}>
                         <Select
                           value={networkMap[src.iface] ?? ""}
                           onValueChange={(v) => {
                             updateNetworkMapping(src.iface, v);
                           }}
                         >
-                          <SelectTrigger className="h-8 text-xs">
+                          <SelectTrigger
+                            className="h-8"
+                            aria-label={`Target bridge for ${src.iface}`}
+                          >
                             <SelectValue placeholder="Same name" />
                           </SelectTrigger>
                           <SelectContent>
@@ -818,58 +827,66 @@ export function MigrateJobDialog({
                             ))}
                           </SelectContent>
                         </Select>
-                      </div>
+                      </MappingRow>
                     ))}
                   </div>
-                </div>
+                </Field>
               )}
 
             {/* Target VMID (cross-cluster only) */}
             {migrationType === "cross-cluster" && (
-              <div className="space-y-2">
-                <Label>Target VMID (optional)</Label>
+              <Field
+                label="Target VMID"
+                htmlFor="migrate-vmid"
+                hint="Optional."
+              >
                 <Input
+                  id="migrate-vmid"
                   type="number"
                   value={targetVmid}
                   onChange={(e) => {
                     setTargetVmid(e.target.value);
                   }}
                   placeholder="Auto"
+                  className="max-w-[10rem]"
                 />
-              </div>
+              </Field>
             )}
 
-            {/* Options */}
-            <div className="space-y-3">
-              {!(
-                migrationType === "intra-cluster" && migrationMode === "storage"
-              ) && (
-                <div className="flex items-center justify-between">
-                  <Label>Live Migration</Label>
-                  <Switch checked={online} onCheckedChange={setOnline} />
-                </div>
-              )}
-              <DiskMoveOptions
-                idPrefix="migrate"
-                hideFormat={!showFormat}
-                targetStorageType={formatTargetType}
-                sourceFormat={sourceDiskFormat}
-                format={diskFormat}
-                onFormatChange={setDiskFormat}
-                bwlimit={bwlimit}
-                onBwlimitChange={setBwlimit}
-                deleteSource={deleteSource}
-                onDeleteSourceChange={setDeleteSourceOverride}
-                deleteSourceLabel="Delete Source After Migration"
-                hideDeleteSource={!showDeleteSource}
-                {...(needsDiskPlacement
-                  ? {
-                      keptHint:
-                        "Source volumes are kept as unused disks on the guest.",
-                    }
-                  : {})}
-              />
-            </div>
+            <FormSection title="Options">
+              <div className="space-y-3.5">
+                {!storageOnly && (
+                  <div className="flex items-center justify-between gap-4">
+                    <Label htmlFor="migrate-online">Live migration</Label>
+                    <Switch
+                      id="migrate-online"
+                      checked={online}
+                      onCheckedChange={setOnline}
+                    />
+                  </div>
+                )}
+                <DiskMoveOptions
+                  idPrefix="migrate"
+                  hideFormat={!showFormat}
+                  targetStorageType={formatTargetType}
+                  sourceFormat={sourceDiskFormat}
+                  format={diskFormat}
+                  onFormatChange={setDiskFormat}
+                  bwlimit={bwlimit}
+                  onBwlimitChange={setBwlimit}
+                  deleteSource={deleteSource}
+                  onDeleteSourceChange={setDeleteSourceOverride}
+                  deleteSourceLabel="Delete source after migration"
+                  hideDeleteSource={!showDeleteSource}
+                  {...(needsDiskPlacement
+                    ? {
+                        keptHint:
+                          "Source volumes are kept as unused disks on the guest.",
+                      }
+                    : {})}
+                />
+              </div>
+            </FormSection>
 
             {(createMutation.isError || checkMutation.isError) && (
               <p className="text-sm text-destructive">
@@ -877,20 +894,24 @@ export function MigrateJobDialog({
               </p>
             )}
 
-            <Button
-              onClick={handleCreate}
-              disabled={!isFormValid || createMutation.isPending}
-              className="w-full"
-            >
-              {createMutation.isPending || checkMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Running Pre-Flight Checks...
-                </>
-              ) : (
-                "Create & Run Pre-Flight Checks"
-              )}
-            </Button>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={handleClose}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreate}
+                disabled={!isFormValid || createMutation.isPending}
+              >
+                {createMutation.isPending || checkMutation.isPending ? (
+                  <>
+                    <Loader2 className="animate-spin" />
+                    Running pre-flight checks...
+                  </>
+                ) : (
+                  "Run pre-flight checks"
+                )}
+              </Button>
+            </DialogFooter>
           </div>
         )}
 
@@ -898,48 +919,56 @@ export function MigrateJobDialog({
           <div className="space-y-4">
             {job.check_results ? (
               <>
-                <div className="space-y-2">
-                  {job.check_results.checks.map((check, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-2 rounded-md border p-3"
-                    >
-                      {severityIcon[check.severity]}
-                      <div>
-                        <p className="text-sm font-medium">{check.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {check.message}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  {job.check_results.passed ? (
-                    <Button
-                      onClick={handleExecute}
-                      disabled={executeMutation.isPending}
-                      className="flex-1"
-                    >
-                      {executeMutation.isPending ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : null}
-                      Execute Migration
-                    </Button>
-                  ) : (
-                    <p className="text-sm text-red-500">
-                      Pre-flight checks failed. Fix issues and try again.
-                    </p>
+                {job.check_results.checks.length > 0 && (
+                  <ul className="divide-y border-y">
+                    {job.check_results.checks.map((check, i) => (
+                      <li key={i} className="flex items-start gap-2.5 py-2.5">
+                        <span className="mt-0.5 shrink-0">
+                          {severityIcon[check.severity]}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">{check.name}</p>
+                          <p className="text-[12.5px] leading-snug text-muted-foreground">
+                            {check.message}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p
+                  className={cn(
+                    "text-sm",
+                    job.check_results.passed
+                      ? "text-muted-foreground"
+                      : "text-destructive",
                   )}
+                >
+                  {job.check_results.passed
+                    ? "The checks passed. Nothing has been moved yet."
+                    : "Pre-flight checks failed. Fix the issues and try again."}
+                </p>
+                <DialogFooter className="gap-2 sm:gap-0">
                   <Button variant="outline" onClick={handleClose}>
                     Close
                   </Button>
-                </div>
+                  {job.check_results.passed && (
+                    <Button
+                      onClick={handleExecute}
+                      disabled={executeMutation.isPending}
+                    >
+                      {executeMutation.isPending ? (
+                        <Loader2 className="animate-spin" />
+                      ) : null}
+                      Execute migration
+                    </Button>
+                  )}
+                </DialogFooter>
               </>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <p className="text-sm">Running checks...</p>
+                Running checks...
               </div>
             )}
           </div>
@@ -954,6 +983,26 @@ export function MigrateJobDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** One line of a mapping: what it is called at the source, and where it lands. */
+function MappingRow({
+  source,
+  children,
+}: {
+  source: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2.5 py-2">
+      <span className="truncate text-sm">{source}</span>
+      <ArrowRight
+        aria-hidden="true"
+        className="h-3.5 w-3.5 text-muted-foreground"
+      />
+      {children}
+    </div>
   );
 }
 
@@ -1017,10 +1066,10 @@ function MigrationProgress({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">Status</span>
-        <Badge variant="outline" className={statusColors[job.status] ?? ""}>
-          {job.status}
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-sm text-muted-foreground">Status</span>
+        <Badge variant={statusBadge[job.status] ?? "outline"}>
+          {job.status.charAt(0).toUpperCase() + job.status.slice(1)}
         </Badge>
       </div>
 
@@ -1028,17 +1077,17 @@ function MigrationProgress({
         <div className="space-y-2">
           <div className="h-2 overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full bg-data transition-all"
+              className="h-full rounded-full bg-data transition-all"
               style={{
                 width: `${String(Math.max(job.progress * 100, 5))}%`,
               }}
             />
           </div>
-          <p className="text-center text-xs text-muted-foreground">
+          <p className="text-[12.5px] text-muted-foreground">
             {progressLabel()}
           </p>
           {speedLine && (
-            <p className="text-center text-xs font-medium text-blue-600 dark:text-blue-400 break-all">
+            <p className="break-all font-mono text-xs text-muted-foreground">
               {speedLine}
             </p>
           )}
@@ -1046,14 +1095,14 @@ function MigrationProgress({
       )}
 
       {job.status === "completed" && (
-        <p className="text-sm text-emerald-600">
+        <p className="text-sm">
           {isStorageMode
             ? "Storage migration completed successfully."
             : "Migration completed successfully."}
         </p>
       )}
       {job.status === "failed" && (
-        <p className="text-sm text-red-500">
+        <p className="text-sm text-destructive">
           Migration failed: {job.error_message}
         </p>
       )}
@@ -1061,9 +1110,11 @@ function MigrationProgress({
       {/* Task Log (only for real Proxmox UPIDs) */}
       {hasUpid && <TaskLogSection lines={logLines} isLoading={logLoading} />}
 
-      <Button variant="outline" onClick={onClose}>
-        Close
-      </Button>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          Close
+        </Button>
+      </DialogFooter>
     </div>
   );
 }

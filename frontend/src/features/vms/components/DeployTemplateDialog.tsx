@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { CheckField, Field, NativeSelect } from "@/components/page/Field";
 import {
   Dialog,
   DialogContent,
@@ -16,9 +15,6 @@ import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
-
-const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 interface DeployTemplateDialogProps {
   clusterId: string;
@@ -123,12 +119,12 @@ export function DeployTemplateDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>Deploy Template</DialogTitle>
+          <DialogTitle>Deploy from template</DialogTitle>
           <DialogDescription>
-            Clone &ldquo;{templateName}&rdquo; to create a new{" "}
-            {kind === "ct" ? "container" : "VM"}.
+            A new {kind === "ct" ? "container" : "VM"} cloned from the template{" "}
+            <strong>{templateName}</strong>.
           </DialogDescription>
         </DialogHeader>
 
@@ -146,48 +142,42 @@ export function DeployTemplateDialog({
 
         {!upid && (
           <form onSubmit={handleDeploy} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="deploy-vmid">New VMID</Label>
-                <Input
-                  id="deploy-vmid"
-                  type="number"
-                  min={100}
-                  value={newId}
-                  onChange={(e) => {
-                    setNewId(e.target.value);
-                  }}
-                  required
-                />
-                {isDuplicate && (
-                  <p className="text-xs text-amber-600 dark:text-amber-500">
-                    VMID already in use
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="deploy-name">Name</Label>
-                <Input
-                  id="deploy-name"
-                  value={newName}
-                  onChange={(e) => {
-                    setNewName(e.target.value);
-                  }}
-                  required
-                />
-              </div>
-            </div>
+            <Field
+              label="New VMID"
+              htmlFor="deploy-vmid"
+              warning={isDuplicate && "VMID already in use"}
+            >
+              <Input
+                id="deploy-vmid"
+                type="number"
+                min={100}
+                value={newId}
+                onChange={(e) => {
+                  setNewId(e.target.value);
+                }}
+                required
+                className="max-w-[10rem]"
+              />
+            </Field>
+            <Field label="Name" htmlFor="deploy-name">
+              <Input
+                id="deploy-name"
+                value={newName}
+                onChange={(e) => {
+                  setNewName(e.target.value);
+                }}
+                required
+              />
+            </Field>
 
             {nodes && nodes.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="deploy-node">Target Node</Label>
-                <select
+              <Field label="Target node" htmlFor="deploy-node">
+                <NativeSelect
                   id="deploy-node"
                   value={targetNode}
                   onChange={(e) => {
                     setTargetNode(e.target.value);
                   }}
-                  className={selectClass}
                 >
                   <option value="">Same node</option>
                   {nodes.map((n) => (
@@ -195,19 +185,17 @@ export function DeployTemplateDialog({
                       {n.name}
                     </option>
                   ))}
-                </select>
-              </div>
+                </NativeSelect>
+              </Field>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="deploy-storage">Target Storage</Label>
-              <select
+            <Field label="Target storage" htmlFor="deploy-storage">
+              <NativeSelect
                 id="deploy-storage"
                 value={storage}
                 onChange={(e) => {
                   setStorage(e.target.value);
                 }}
-                className={selectClass}
               >
                 <option value="">Default (same as template)</option>
                 {diskStorages?.map((s) => (
@@ -215,21 +203,16 @@ export function DeployTemplateDialog({
                     {s.storage} ({s.type})
                   </option>
                 ))}
-              </select>
-            </div>
+              </NativeSelect>
+            </Field>
 
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="deploy-full"
-                checked={fullClone}
-                onCheckedChange={(checked) => {
-                  setFullClone(Boolean(checked));
-                }}
-              />
-              <Label htmlFor="deploy-full" className="text-sm">
-                Full Clone (independent copy)
-              </Label>
-            </div>
+            <CheckField
+              id="deploy-full"
+              label="Full clone"
+              hint="An independent copy. Unticked, the clone stays linked to the template."
+              checked={fullClone}
+              onCheckedChange={setFullClone}
+            />
 
             {cloneMutation.isError && (
               <p className="text-sm text-destructive">
@@ -237,7 +220,7 @@ export function DeployTemplateDialog({
               </p>
             )}
 
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button
                 type="button"
                 variant="outline"

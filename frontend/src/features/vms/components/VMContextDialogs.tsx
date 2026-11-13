@@ -20,6 +20,18 @@ import {
 import { Button } from "@/components/ui/button";
 import type { VMAction } from "../types/vm";
 
+/**
+ * What each confirmed power action costs, in a sentence. An action that is not
+ * listed gets the general warning.
+ */
+const POWER_CONSEQUENCE: Partial<Record<string, string>> = {
+  shutdown:
+    "The guest is asked to shut down, and stays off until it is started again.",
+  stop: "The guest is powered off at once, without shutting down. Anything it has not saved is lost.",
+  reset:
+    "The guest is reset at once, without shutting down. Anything it has not saved is lost.",
+};
+
 export function VMContextDialogs() {
   const { target, openDialog, confirmAction, confirmActionLabel, closeDialog } =
     useVMContextMenuStore();
@@ -129,13 +141,16 @@ export function VMContextDialogs() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirm {confirmActionLabel}</DialogTitle>
+            <DialogTitle>
+              {confirmActionLabel} {target.name}?
+            </DialogTitle>
             <DialogDescription>
-              Are you sure you want to {confirmActionLabel?.toLowerCase()}{" "}
-              <strong>{target.name}</strong>? This action may cause data loss.
+              {(confirmAction !== null
+                ? POWER_CONSEQUENCE[confirmAction]
+                : undefined) ?? "This may cause data loss in the guest."}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={closeDialog}>
               Cancel
             </Button>

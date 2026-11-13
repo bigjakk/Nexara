@@ -1,4 +1,5 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, type ReactNode } from "react";
+import { Check, Folder, FolderX } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,6 +10,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Field } from "@/components/page/Field";
+import { cn } from "@/lib/utils";
 import { useVMFolders, useAssignVMToFolder } from "../api/folder-queries";
 import { buildFolderTree, flattenFolderTree } from "../lib/folder-tree";
 
@@ -69,61 +72,59 @@ export function MoveToFolderDialog({
         <DialogHeader>
           <DialogTitle>Move to folder</DialogTitle>
           <DialogDescription>
-            Choose a folder for <strong>{vmName}</strong>. Folders are only used
-            for organising the tree view; the VM is not migrated between hosts.
+            Where <strong>{vmName}</strong> sits in the tree. Folders only
+            organise the view: the guest is not migrated between hosts.
           </DialogDescription>
         </DialogHeader>
 
-        {foldersQuery.isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-          </div>
-        ) : (
-          <div className="max-h-[300px] space-y-0.5 overflow-y-auto rounded-md border p-1">
-            <button
-              type="button"
-              onClick={() => {
-                setSelected(null);
-              }}
-              className={`flex w-full items-center rounded px-2 py-1 text-left text-sm transition-colors ${
-                selected === null
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent/50"
-              }`}
+        <Field
+          label="Folder"
+          hint={
+            !foldersQuery.isLoading &&
+            flat.length === 0 &&
+            "No folders yet. Create one from the tree's right-click menu."
+          }
+          error={error}
+        >
+          {foldersQuery.isLoading ? (
+            <div className="space-y-1.5">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          ) : (
+            <div
+              role="group"
+              aria-label="Folder"
+              className="max-h-[300px] space-y-px overflow-y-auto rounded-[10px] bg-foreground/[0.04] p-1"
             >
-              <span className="text-muted-foreground">
-                (Unassigned — Discovered)
-              </span>
-            </button>
-            {flat.length === 0 && (
-              <p className="px-2 py-2 text-xs text-muted-foreground">
-                No folders yet — create one from the tree right-click menu.
-              </p>
-            )}
-            {flat.map(({ folder, depth }) => (
-              <button
-                key={folder.id}
-                type="button"
-                onClick={() => {
-                  setSelected(folder.id);
+              <FolderOption
+                selected={selected === null}
+                onSelect={() => {
+                  setSelected(null);
                 }}
-                className={`flex w-full items-center rounded px-2 py-1 text-left text-sm transition-colors ${
-                  selected === folder.id
-                    ? "bg-accent text-accent-foreground"
-                    : "hover:bg-accent/50"
-                }`}
-                style={{ paddingLeft: `${String(depth * 16 + 8)}px` }}
+                icon={<FolderX />}
+                muted
               >
-                {folder.name}
-              </button>
-            ))}
-          </div>
-        )}
+                No folder (listed under Discovered)
+              </FolderOption>
+              {flat.map(({ folder, depth }) => (
+                <FolderOption
+                  key={folder.id}
+                  selected={selected === folder.id}
+                  onSelect={() => {
+                    setSelected(folder.id);
+                  }}
+                  icon={<Folder />}
+                  depth={depth}
+                >
+                  {folder.name}
+                </FolderOption>
+              ))}
+            </div>
+          )}
+        </Field>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-0">
           <Button
             variant="outline"
             onClick={() => {
@@ -139,5 +140,49 @@ export function MoveToFolderDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** One row of the folder list: the chosen one carries the tick. */
+function FolderOption({
+  selected,
+  onSelect,
+  icon,
+  depth = 0,
+  muted = false,
+  children,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  icon: ReactNode;
+  /** How deep the folder sits; each level indents the row. */
+  depth?: number;
+  /** Not a folder: the "no folder" choice reads quieter than a name. */
+  muted?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-4 [&_svg]:shrink-0",
+        selected
+          ? "bg-primary/10 font-medium text-foreground"
+          : "hover:bg-foreground/[0.06]",
+        muted && !selected && "text-muted-foreground",
+      )}
+      style={{ paddingLeft: `${String(depth * 16 + 8)}px` }}
+    >
+      <span
+        aria-hidden="true"
+        className={selected ? "text-primary" : "text-muted-foreground"}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {selected && <Check aria-hidden="true" className="text-primary" />}
+    </button>
   );
 }

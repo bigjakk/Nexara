@@ -108,9 +108,7 @@ async function createsTheVM() {
 
   const user = userEvent.setup();
   await screen.findByRole("option", { name: /pve-01/ });
-  await user.selectOptions(screen.getAllByRole("combobox")[0] as HTMLElement, [
-    "pve-01",
-  ]);
+  await user.selectOptions(screen.getByLabelText("Node"), ["pve-01"]);
   // The dialog offers the next free VMID and refills the field when it is
   // emptied, so this one is set in a single change: it is a guest of its own.
   fireEvent.change(screen.getByRole("spinbutton"), {

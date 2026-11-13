@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Field } from "@/components/page/Field";
 import { useCreateVMFolder } from "../api/folder-queries";
 
 interface CreateFolderDialogProps {
@@ -67,14 +68,12 @@ export function CreateFolderDialog({
         <DialogHeader>
           <DialogTitle>New folder</DialogTitle>
           <DialogDescription>
-            Creating a folder inside <strong>{parentLabel}</strong>.
+            A folder inside <strong>{parentLabel}</strong>, for grouping guests
+            in the tree.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="folder-name">
-            Name
-          </label>
+        <Field label="Name" htmlFor="folder-name" error={error}>
           <Input
             id="folder-name"
             value={name}
@@ -91,11 +90,9 @@ export function CreateFolderDialog({
               }
             }}
           />
-        </div>
+        </Field>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-0">
           <Button
             variant="outline"
             onClick={() => {
@@ -106,7 +103,7 @@ export function CreateFolderDialog({
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={create.isPending}>
-            {create.isPending ? "Creating…" : "Create"}
+            {create.isPending ? "Creating…" : "Create folder"}
           </Button>
         </DialogFooter>
       </DialogContent>

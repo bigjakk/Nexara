@@ -8,10 +8,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { CopyableName } from "@/components/CopyableName";
-import { AlertTriangle } from "lucide-react";
+import { ConfirmNameField } from "@/components/TypeToConfirmDialog";
 import { useConvertToTemplate } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
@@ -63,54 +61,33 @@ export function ConvertToTemplateDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Convert to Template</DialogTitle>
+          <DialogTitle>Convert to template</DialogTitle>
           <DialogDescription>
-            Convert <CopyableName name={resourceName} /> to a template.
+            This turns <CopyableName name={resourceName} /> into a read-only
+            template. It can no longer be started or changed, only cloned into
+            new {typeLabel}s, and it cannot be turned back: to get a runnable{" "}
+            {typeLabel} again you clone the template.
           </DialogDescription>
         </DialogHeader>
 
         {upid ? (
-          <div className="space-y-4">
-            <TaskProgressBanner
-              clusterId={clusterId}
-              upid={upid}
-              onComplete={() => {
-                handleClose();
-              }}
-              description={`Convert ${resourceName} to template`}
-            />
-          </div>
+          <TaskProgressBanner
+            clusterId={clusterId}
+            upid={upid}
+            onComplete={() => {
+              handleClose();
+            }}
+            description={`Convert ${resourceName} to template`}
+          />
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <div className="text-sm text-amber-700 dark:text-amber-300">
-                  <p className="font-medium">This action is irreversible</p>
-                  <p className="mt-1">
-                    Converting this {typeLabel} to a template will make it
-                    read-only. It can no longer be started or modified — only
-                    cloned to create new {typeLabel}s. To get a runnable{" "}
-                    {typeLabel} back, you must clone the template.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="confirm-name">
-                Type <CopyableName name={resourceName} /> to confirm
-              </Label>
-              <Input
-                id="confirm-name"
-                value={confirmText}
-                onChange={(e) => {
-                  setConfirmText(e.target.value);
-                }}
-                placeholder={resourceName}
-                autoComplete="off"
-              />
-            </div>
+            <ConfirmNameField
+              id="confirm-name"
+              name={resourceName}
+              assist
+              value={confirmText}
+              onChange={setConfirmText}
+            />
 
             {convertMutation.isError && (
               <p className="text-sm text-destructive">
@@ -118,10 +95,11 @@ export function ConvertToTemplateDialog({
               </p>
             )}
 
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button type="button" variant="outline" onClick={handleClose}>
                 Cancel
               </Button>
+              {/* The one filled red control in the dialog. */}
               <Button
                 type="submit"
                 variant="destructive"
@@ -129,7 +107,7 @@ export function ConvertToTemplateDialog({
               >
                 {convertMutation.isPending
                   ? "Converting..."
-                  : "Convert to Template"}
+                  : "Convert to template"}
               </Button>
             </DialogFooter>
           </form>

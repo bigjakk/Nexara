@@ -1,18 +1,27 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import {
+  CheckField,
+  Field,
+  FieldGrid,
+  FormSection,
+  NativeSelect,
+  TextArea,
+} from "@/components/page/Field";
+import { PropertyList, PropertyRow } from "@/components/page/Panel";
+import { Wizard, type WizardStep } from "@/components/page/Wizard";
+import { cn } from "@/lib/utils";
 import {
   useClusterNodes,
   useClusterStorage,
@@ -61,9 +70,6 @@ interface DiskEntry {
   iothread: boolean;
 }
 
-const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
-
 type Step =
   | "general"
   | "os"
@@ -75,29 +81,41 @@ type Step =
   | "cloudinit"
   | "confirm";
 
-const steps: Step[] = [
-  "general",
-  "os",
-  "system",
-  "disks",
-  "cpu",
-  "memory",
-  "network",
-  "cloudinit",
-  "confirm",
+const steps: readonly WizardStep<Step>[] = [
+  {
+    id: "general",
+    label: "General",
+    hint: "What the VM is called and where it runs.",
+  },
+  {
+    id: "os",
+    label: "OS",
+    hint: "The guest operating system and the media it installs from.",
+  },
+  {
+    id: "system",
+    label: "System",
+    hint: "Firmware, machine type and the controller the disks attach to.",
+  },
+  { id: "disks", label: "Disks", hint: "The drives the VM starts with." },
+  { id: "cpu", label: "CPU", hint: "The virtual processors the guest sees." },
+  {
+    id: "memory",
+    label: "Memory",
+    hint: "How much RAM the guest gets, and whether it can hand some back.",
+  },
+  { id: "network", label: "Network", hint: "The VM's first network card." },
+  {
+    id: "cloudinit",
+    label: "Cloud-init",
+    hint: "Optional. First-boot settings for images that support cloud-init.",
+  },
+  {
+    id: "confirm",
+    label: "Review",
+    hint: "Check the settings, then create the VM.",
+  },
 ];
-
-const stepLabels: Record<Step, string> = {
-  general: "General",
-  os: "OS",
-  system: "System",
-  disks: "Disks",
-  cpu: "CPU",
-  memory: "Memory",
-  network: "Network",
-  cloudinit: "Cloud-Init",
-  confirm: "Confirm",
-};
 
 export function CreateVMDialog({
   open,
@@ -429,7 +447,7 @@ export function CreateVMDialog({
   }, []);
 
   const isDuplicate = usedVMIDs ? usedVMIDs.has(Number(vmid)) : false;
-  const stepIdx = steps.indexOf(step);
+  const stepIdx = steps.findIndex((s) => s.id === step);
   const isWindows = isWindowsOS(ostype);
 
   // Disk management helpers
@@ -697,99 +715,166 @@ export function CreateVMDialog({
           ? Number(memory) > 0
           : true;
 
+  const diskDevices = assignDiskDeviceNames();
+  const osLabel = osTypes.find((o) => o.value === ostype)?.label ?? ostype;
+  const machineLabel =
+    machineOptions.find((mt) => mt.value === machine)?.label ?? machine;
+  /** The Review step's way back to the step a group of settings came from. */
+  const editStep = (target: Step) => (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-6 px-2 text-primary hover:text-primary"
+      aria-label={`Edit ${steps.find((s) => s.id === target)?.label ?? target}`}
+      onClick={() => {
+        setStep(target);
+      }}
+    >
+      Edit
+    </Button>
+  );
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Create Virtual Machine</DialogTitle>
+      <DialogContent
+        className={cn(
+          "flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0",
+          upid ? "max-w-lg" : "h-[640px] max-w-3xl",
+        )}
+      >
+        <DialogHeader className="border-b px-5 py-4 pr-12 sm:px-6">
+          <DialogTitle>Create virtual machine</DialogTitle>
+          {/* What is being built so far, so the header reads as its identity. */}
           <DialogDescription>
-            Step {stepIdx + 1} of {steps.length}: {stepLabels[step]}
+            VM {vmid || "—"}
+            {name ? `, ${name}` : ""}
+            {node ? `, on ${node}` : ""}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Step navigation tabs */}
-        <div className="flex flex-wrap gap-1 border-b pb-2">
-          {steps.map((s, i) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => {
-                setStep(s);
-              }}
-              className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                s === step
-                  ? "bg-action text-action-foreground"
-                  : i < stepIdx
-                    ? "bg-muted text-foreground hover:bg-muted/80"
-                    : "text-muted-foreground hover:bg-muted/50"
-              }`}
-            >
-              {stepLabels[s]}
-            </button>
-          ))}
-        </div>
-
         {upid ? (
-          <TaskProgressBanner
-            clusterId={clusterId}
-            upid={upid}
-            onComplete={() => {
-              // After task completes, poll for the new VM record and navigate to it
-              const createdVmid = Number(vmid);
-              // The session that created it. A look at the list that is already
-              // out when it ends is answered all the same, and what it finds is
-              // that session's VM: navigating then goes through whoever is signed
-              // in next, and a protected route carries the page as returnTo.
-              const ended = sessionScope();
-              const pollForVM = () => {
-                void queryClient
-                  .invalidateQueries({
-                    queryKey: ["clusters", clusterId, "vms"],
-                  })
-                  .then(() =>
-                    apiClient.list<VMResponse>(
-                      apiPath`/api/v1/clusters/${clusterId}/vms`,
-                    ),
-                  )
-                  .then((vms) => {
-                    if (ended()) return;
-                    const found = vms.find((v) => v.vmid === createdVmid);
-                    if (found) {
-                      if (pollTimerRef.current)
-                        clearInterval(pollTimerRef.current);
-                      pollTimerRef.current = null;
-                      // Reset dialog state without closing
-                      createMutation.reset();
-                      onOpenChange(false);
-                      void navigate(`/inventory/vm/${clusterId}/${found.id}`);
-                    }
-                  })
-                  .catch(() => {
-                    // ignore, will retry
-                  });
-              };
-              // First attempt immediately, then poll every 3s
-              pollForVM();
-              pollTimerRef.current = setInterval(pollForVM, 3000);
-              // Safety: stop polling after 30s and just close
-              setTimeout(() => {
-                if (pollTimerRef.current) {
-                  clearInterval(pollTimerRef.current);
-                  pollTimerRef.current = null;
-                  handleClose();
-                }
-              }, 30000);
-            }}
-            description={`Create VM ${name || vmid}`}
-          />
+          <div className="px-5 py-5 sm:px-6">
+            <TaskProgressBanner
+              clusterId={clusterId}
+              upid={upid}
+              onComplete={() => {
+                // After task completes, poll for the new VM record and navigate to it
+                const createdVmid = Number(vmid);
+                // The session that created it. A look at the list that is already
+                // out when it ends is answered all the same, and what it finds is
+                // that session's VM: navigating then goes through whoever is signed
+                // in next, and a protected route carries the page as returnTo.
+                const ended = sessionScope();
+                const pollForVM = () => {
+                  void queryClient
+                    .invalidateQueries({
+                      queryKey: ["clusters", clusterId, "vms"],
+                    })
+                    .then(() =>
+                      apiClient.list<VMResponse>(
+                        apiPath`/api/v1/clusters/${clusterId}/vms`,
+                      ),
+                    )
+                    .then((vms) => {
+                      if (ended()) return;
+                      const found = vms.find((v) => v.vmid === createdVmid);
+                      if (found) {
+                        if (pollTimerRef.current)
+                          clearInterval(pollTimerRef.current);
+                        pollTimerRef.current = null;
+                        // Reset dialog state without closing
+                        createMutation.reset();
+                        onOpenChange(false);
+                        void navigate(`/inventory/vm/${clusterId}/${found.id}`);
+                      }
+                    })
+                    .catch(() => {
+                      // ignore, will retry
+                    });
+                };
+                // First attempt immediately, then poll every 3s
+                pollForVM();
+                pollTimerRef.current = setInterval(pollForVM, 3000);
+                // Safety: stop polling after 30s and just close
+                setTimeout(() => {
+                  if (pollTimerRef.current) {
+                    clearInterval(pollTimerRef.current);
+                    pollTimerRef.current = null;
+                    handleClose();
+                  }
+                }, 30000);
+              }}
+              description={`Create VM ${name || vmid}`}
+            />
+          </div>
         ) : (
-          <div className="space-y-4">
+          <Wizard
+            steps={steps}
+            current={step}
+            onStepChange={setStep}
+            notice={
+              createMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {createMutation.error.message}
+                </p>
+              )
+            }
+            footer={
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="mr-auto"
+                  onClick={handleClose}
+                >
+                  Cancel
+                </Button>
+                {stepIdx > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      const prev = steps[stepIdx - 1];
+                      if (prev) setStep(prev.id);
+                    }}
+                  >
+                    Back
+                  </Button>
+                )}
+                {step !== "confirm" ? (
+                  <Button
+                    type="button"
+                    disabled={!canProceed}
+                    onClick={() => {
+                      const next = steps[stepIdx + 1];
+                      if (next) setStep(next.id);
+                    }}
+                  >
+                    Next
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    disabled={createMutation.isPending}
+                    onClick={handleSubmit}
+                  >
+                    {createMutation.isPending ? "Creating..." : "Create VM"}
+                  </Button>
+                )}
+              </>
+            }
+          >
             {/* === GENERAL === */}
             {step === "general" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>VMID</Label>
+              <FieldGrid>
+                <Field
+                  label="VMID"
+                  htmlFor="vm-vmid"
+                  warning={isDuplicate && "VMID may already be in use"}
+                >
                   <Input
+                    id="vm-vmid"
                     type="number"
                     min={1}
                     value={vmid}
@@ -797,31 +882,25 @@ export function CreateVMDialog({
                       setVmid(e.target.value);
                     }}
                   />
-                  {isDuplicate && (
-                    <p className="text-xs text-amber-600 dark:text-amber-500">
-                      VMID may already be in use
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label>Name</Label>
+                </Field>
+                <Field label="Name" htmlFor="vm-name">
                   <Input
+                    id="vm-name"
                     value={name}
                     onChange={(e) => {
                       setName(e.target.value);
                     }}
                     placeholder="my-vm"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>Target Node</Label>
-                  <select
+                </Field>
+                <Field label="Node" htmlFor="vm-node">
+                  <NativeSelect
+                    id="vm-node"
                     value={node}
                     onChange={(e) => {
                       setNode(e.target.value);
                       setBridge("vmbr0"); // reset bridge when node changes
                     }}
-                    className={selectClass}
                   >
                     <option value="">Select node</option>
                     {nodes?.map((n) => (
@@ -831,16 +910,15 @@ export function CreateVMDialog({
                         {n.status !== "online" ? " [offline]" : ""}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Resource Pool</Label>
-                  <select
+                  </NativeSelect>
+                </Field>
+                <Field label="Resource pool" htmlFor="vm-pool">
+                  <NativeSelect
+                    id="vm-pool"
                     value={pool}
                     onChange={(e) => {
                       setPool(e.target.value);
                     }}
-                    className={selectClass}
                   >
                     <option value="">None</option>
                     {resourcePools?.map((p) => (
@@ -849,64 +927,75 @@ export function CreateVMDialog({
                         {p.comment ? ` — ${p.comment}` : ""}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Tags</Label>
+                  </NativeSelect>
+                </Field>
+                <Field
+                  label="Tags"
+                  htmlFor="vm-tags"
+                  hint="Separated by semicolons."
+                  className="sm:col-span-2"
+                >
                   <Input
+                    id="vm-tags"
                     value={tags}
                     onChange={(e) => {
                       setTags(e.target.value);
                     }}
                     placeholder="tag1;tag2;tag3"
                   />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Description</Label>
-                  <textarea
+                </Field>
+                <Field
+                  label="Description"
+                  htmlFor="vm-description"
+                  className="sm:col-span-2"
+                >
+                  <TextArea
+                    id="vm-description"
                     value={description}
                     onChange={(e) => {
                       setDescription(e.target.value);
                     }}
-                    className="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                     placeholder="Optional description"
                     rows={2}
                   />
-                </div>
-              </div>
+                </Field>
+              </FieldGrid>
             )}
 
             {/* === OS === */}
             {step === "os" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>OS Type</Label>
-                  <select
+              <FieldGrid>
+                <Field
+                  label="OS type"
+                  htmlFor="vm-ostype"
+                  hint="Sets the defaults for the disk bus, network card and firmware on the steps that follow."
+                  className="sm:col-span-2"
+                >
+                  <NativeSelect
+                    id="vm-ostype"
                     value={ostype}
                     onChange={(e) => {
                       const newOstype = e.target.value;
                       setOstype(newOstype);
                       applyOSDefaults(newOstype);
                     }}
-                    className={selectClass}
                   >
                     {osTypes.map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>ISO Storage</Label>
-                  <select
+                  </NativeSelect>
+                </Field>
+                <Field label="ISO storage" htmlFor="vm-iso-storage">
+                  <NativeSelect
+                    id="vm-iso-storage"
                     value={isoStorageId}
                     onChange={(e) => {
                       const selectedId = e.target.value;
                       setIsoStorageId(selectedId);
                       setIsoImage("");
                     }}
-                    className={selectClass}
                   >
                     <option value="">Do not use any media</option>
                     {isoStoragePools.map((p) => (
@@ -914,16 +1003,15 @@ export function CreateVMDialog({
                         {p.storage}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>ISO Image</Label>
-                  <select
+                  </NativeSelect>
+                </Field>
+                <Field label="ISO image" htmlFor="vm-iso-image">
+                  <NativeSelect
+                    id="vm-iso-image"
                     value={isoImage}
                     onChange={(e) => {
                       setIsoImage(e.target.value);
                     }}
-                    className={selectClass}
                     disabled={!isoStorageId}
                   >
                     <option value="">
@@ -938,67 +1026,62 @@ export function CreateVMDialog({
                         {iso.volid.split("/").pop()}
                       </option>
                     ))}
-                  </select>
-                </div>
+                  </NativeSelect>
+                </Field>
                 {/* VirtIO Drivers ISO — shown for Windows OS types */}
                 {isWindows && (
-                  <>
-                    <div className="sm:col-span-2 flex items-center gap-2 pt-2">
-                      <Checkbox
-                        id="virtio-drivers"
-                        checked={virtioDrivers}
-                        onCheckedChange={(c) => {
-                          const checked = Boolean(c);
-                          setVirtioDrivers(checked);
-                          if (checked) {
-                            // VirtIO drivers: recommend scsi bus + virtio NIC
+                  <FormSection title="VirtIO drivers" className="sm:col-span-2">
+                    <CheckField
+                      id="virtio-drivers"
+                      label="Add a second drive with the VirtIO drivers ISO"
+                      hint="Also sets the disk bus to SCSI and the network card to VirtIO, which perform best on Windows."
+                      checked={virtioDrivers}
+                      onCheckedChange={(checked) => {
+                        setVirtioDrivers(checked);
+                        if (checked) {
+                          // VirtIO drivers: recommend scsi bus + virtio NIC
+                          setDisks((prev) => {
+                            const first = prev[0];
+                            if (!first) return prev;
+                            return [
+                              { ...first, bus: "scsi" as const },
+                              ...prev.slice(1),
+                            ];
+                          });
+                          setNetModel("virtio");
+                        } else {
+                          // Restore OS defaults for bus and NIC
+                          const defaults =
+                            osDefaults[ostype] ?? osDefaults["other"];
+                          if (defaults) {
                             setDisks((prev) => {
                               const first = prev[0];
                               if (!first) return prev;
                               return [
-                                { ...first, bus: "scsi" as const },
+                                { ...first, bus: defaults.diskBus },
                                 ...prev.slice(1),
                               ];
                             });
-                            setNetModel("virtio");
-                          } else {
-                            // Restore OS defaults for bus and NIC
-                            const defaults =
-                              osDefaults[ostype] ?? osDefaults["other"];
-                            if (defaults) {
-                              setDisks((prev) => {
-                                const first = prev[0];
-                                if (!first) return prev;
-                                return [
-                                  { ...first, bus: defaults.diskBus },
-                                  ...prev.slice(1),
-                                ];
-                              });
-                              setNetModel(defaults.netModel);
-                            }
-                            setVirtioIsoStorageId("");
-                            setVirtioIsoImage("");
+                            setNetModel(defaults.netModel);
                           }
-                        }}
-                      />
-                      <Label
-                        htmlFor="virtio-drivers"
-                        className="text-sm font-normal"
-                      >
-                        Add additional drive for VirtIO drivers
-                      </Label>
-                    </div>
+                          setVirtioIsoStorageId("");
+                          setVirtioIsoImage("");
+                        }
+                      }}
+                    />
                     {virtioDrivers && (
-                      <>
-                        <div className="space-y-2">
-                          <Label>VirtIO ISO Storage</Label>
-                          <select
+                      <FieldGrid>
+                        <Field
+                          label="VirtIO ISO storage"
+                          htmlFor="vm-virtio-storage"
+                        >
+                          <NativeSelect
+                            id="vm-virtio-storage"
                             value={virtioIsoStorageId}
                             onChange={(e) => {
                               setVirtioIsoStorageId(e.target.value);
                               setVirtioIsoImage("");
                             }}
-                            className={selectClass}
                           >
                             <option value="">Select storage</option>
                             {isoStoragePools.map((p) => (
@@ -1006,16 +1089,18 @@ export function CreateVMDialog({
                                 {p.storage}
                               </option>
                             ))}
-                          </select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>VirtIO Drivers ISO</Label>
-                          <select
+                          </NativeSelect>
+                        </Field>
+                        <Field
+                          label="VirtIO drivers ISO"
+                          htmlFor="vm-virtio-image"
+                        >
+                          <NativeSelect
+                            id="vm-virtio-image"
                             value={virtioIsoImage}
                             onChange={(e) => {
                               setVirtioIsoImage(e.target.value);
                             }}
-                            className={selectClass}
                             disabled={!virtioIsoStorageId}
                           >
                             <option value="">
@@ -1030,165 +1115,142 @@ export function CreateVMDialog({
                                 {iso.volid.split("/").pop()}
                               </option>
                             ))}
-                          </select>
-                        </div>
-                        <p className="text-xs text-muted-foreground sm:col-span-2">
-                          Enabling VirtIO drivers sets disk bus to SCSI and
-                          network to VirtIO for best Windows performance.
-                        </p>
-                      </>
+                          </NativeSelect>
+                        </Field>
+                      </FieldGrid>
                     )}
-                  </>
+                  </FormSection>
                 )}
-              </div>
+              </FieldGrid>
             )}
 
             {/* === SYSTEM === */}
             {step === "system" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>BIOS</Label>
-                  <select
-                    value={bios}
-                    onChange={(e) => {
-                      setBios(e.target.value);
-                      if (e.target.value === "ovmf") {
-                        setEfiDisk(true);
-                        // Pick the best q35+pve variant, fall back to generic q35
-                        const q35pve = machineOptions.find(
-                          (mt) =>
-                            mt.value.includes("q35") &&
-                            mt.value.includes("+pve"),
-                        );
-                        setMachine(q35pve?.value ?? "q35");
-                      } else {
-                        setEfiDisk(false);
-                      }
-                    }}
-                    className={selectClass}
-                  >
-                    <option value="seabios">SeaBIOS (Default)</option>
-                    <option value="ovmf">OVMF (UEFI)</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Machine Type</Label>
-                  <select
-                    value={machine}
-                    onChange={(e) => {
-                      setMachine(e.target.value);
-                    }}
-                    className={selectClass}
-                  >
-                    {machineOptions.map((mt) => (
-                      <option key={mt.value} value={mt.value}>
-                        {mt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>SCSI Controller</Label>
-                  <select
-                    value={scsihw}
-                    onChange={(e) => {
-                      setScsihw(e.target.value);
-                    }}
-                    className={selectClass}
-                  >
-                    {scsiControllers.map((sc) => (
-                      <option key={sc.value} value={sc.value}>
-                        {sc.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>QEMU Guest Agent</Label>
-                  <div className="flex flex-col gap-2 pt-1">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="agent-enabled"
-                        checked={agentEnabled}
-                        onCheckedChange={(c) => {
-                          setAgentEnabled(Boolean(c));
+              <div className="space-y-4">
+                <FieldGrid>
+                  <Field label="BIOS" htmlFor="vm-bios">
+                    <NativeSelect
+                      id="vm-bios"
+                      value={bios}
+                      onChange={(e) => {
+                        setBios(e.target.value);
+                        if (e.target.value === "ovmf") {
+                          setEfiDisk(true);
+                          // Pick the best q35+pve variant, fall back to generic q35
+                          const q35pve = machineOptions.find(
+                            (mt) =>
+                              mt.value.includes("q35") &&
+                              mt.value.includes("+pve"),
+                          );
+                          setMachine(q35pve?.value ?? "q35");
+                        } else {
+                          setEfiDisk(false);
+                        }
+                      }}
+                    >
+                      <option value="seabios">SeaBIOS (Default)</option>
+                      <option value="ovmf">OVMF (UEFI)</option>
+                    </NativeSelect>
+                  </Field>
+                  <Field label="Machine type" htmlFor="vm-machine">
+                    <NativeSelect
+                      id="vm-machine"
+                      value={machine}
+                      onChange={(e) => {
+                        setMachine(e.target.value);
+                      }}
+                    >
+                      {machineOptions.map((mt) => (
+                        <option key={mt.value} value={mt.value}>
+                          {mt.label}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <Field label="SCSI controller" htmlFor="vm-scsihw">
+                    <NativeSelect
+                      id="vm-scsihw"
+                      value={scsihw}
+                      onChange={(e) => {
+                        setScsihw(e.target.value);
+                      }}
+                    >
+                      {scsiControllers.map((sc) => (
+                        <option key={sc.value} value={sc.value}>
+                          {sc.label}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  {efiDisk && (
+                    <Field
+                      label="EFI disk storage"
+                      htmlFor="vm-efi-storage"
+                      hint="UEFI keeps its settings on a small disk of its own."
+                    >
+                      <NativeSelect
+                        id="vm-efi-storage"
+                        value={efiStorage}
+                        onChange={(e) => {
+                          setEfiStorage(e.target.value);
                         }}
-                      />
-                      <Label
-                        htmlFor="agent-enabled"
-                        className="text-sm font-normal"
                       >
-                        Enable
-                      </Label>
-                    </div>
+                        <option value="">Select storage</option>
+                        {imageStorageOptions.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                  )}
+                </FieldGrid>
+                <FormSection title="QEMU guest agent">
+                  <div className="space-y-3">
+                    <CheckField
+                      id="agent-enabled"
+                      label="Enable the guest agent"
+                      hint="The agent has to be installed inside the guest as well."
+                      checked={agentEnabled}
+                      onCheckedChange={setAgentEnabled}
+                    />
                     {agentEnabled && (
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id="agent-fstrim"
-                          checked={agentFstrim}
-                          onCheckedChange={(c) => {
-                            setAgentFstrim(Boolean(c));
-                          }}
-                        />
-                        <Label
-                          htmlFor="agent-fstrim"
-                          className="text-sm font-normal"
-                        >
-                          TRIM on clone
-                        </Label>
-                      </div>
+                      <CheckField
+                        id="agent-fstrim"
+                        label="TRIM on clone"
+                        hint="Runs fstrim in the guest after a disk is moved or the VM is migrated."
+                        checked={agentFstrim}
+                        onCheckedChange={setAgentFstrim}
+                      />
                     )}
                   </div>
-                </div>
-                {efiDisk && (
-                  <div className="space-y-2 sm:col-span-2">
-                    <Label>EFI Disk Storage</Label>
-                    <select
-                      value={efiStorage}
-                      onChange={(e) => {
-                        setEfiStorage(e.target.value);
-                      }}
-                      className={selectClass}
-                    >
-                      <option value="">Select storage</option>
-                      {imageStorageOptions.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                <div className="space-y-2 sm:col-span-2">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="tpm-enabled"
-                      checked={tpmEnabled}
-                      onCheckedChange={(c) => {
-                        setTpmEnabled(Boolean(c));
-                      }}
-                    />
-                    <Label htmlFor="tpm-enabled" className="text-sm">
-                      Add TPM v2.0
-                    </Label>
-                  </div>
+                </FormSection>
+                <FormSection title="TPM">
+                  <CheckField
+                    id="tpm-enabled"
+                    label="Add TPM v2.0"
+                    checked={tpmEnabled}
+                    onCheckedChange={setTpmEnabled}
+                  />
                   {tpmEnabled && (
-                    <select
-                      value={tpmStorage}
-                      onChange={(e) => {
-                        setTpmStorage(e.target.value);
-                      }}
-                      className={selectClass + " mt-2"}
-                    >
-                      <option value="">Select storage for TPM</option>
-                      {imageStorageOptions.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
+                    <Field label="TPM storage" htmlFor="vm-tpm-storage">
+                      <NativeSelect
+                        id="vm-tpm-storage"
+                        value={tpmStorage}
+                        onChange={(e) => {
+                          setTpmStorage(e.target.value);
+                        }}
+                      >
+                        <option value="">Select storage for TPM</option>
+                        {imageStorageOptions.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
                   )}
-                </div>
+                </FormSection>
               </div>
             )}
 
@@ -1196,55 +1258,42 @@ export function CreateVMDialog({
             {step === "disks" && (
               <div className="space-y-4">
                 {disks.map((disk, idx) => (
-                  <div
+                  <FormSection
                     key={disk.id}
-                    className="rounded-lg border p-3 space-y-3"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">
-                        Disk {idx + 1}
+                    title={`Disk ${String(idx + 1)}`}
+                    aside={
+                      <span className="font-mono">
+                        {diskDevices[idx]?.name}
                       </span>
-                      {disks.length > 1 && (
+                    }
+                    action={
+                      disks.length > 1 && (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="h-7 text-xs text-destructive hover:text-destructive"
+                          className="h-6 px-2 text-muted-foreground"
+                          aria-label={`Remove disk ${String(idx + 1)}`}
                           onClick={() => {
                             removeDisk(disk.id);
                           }}
                         >
                           Remove
                         </Button>
-                      )}
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Bus Type</Label>
-                        <select
-                          value={disk.bus}
-                          onChange={(e) => {
-                            updateDisk(disk.id, {
-                              bus: e.target.value as DiskEntry["bus"],
-                            });
-                          }}
-                          className={selectClass}
-                        >
-                          {diskBusTypes.map((bt) => (
-                            <option key={bt.value} value={bt.value}>
-                              {bt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Storage</Label>
-                        <select
+                      )
+                    }
+                  >
+                    <FieldGrid>
+                      <Field
+                        label="Storage"
+                        htmlFor={`vm-disk-storage-${String(disk.id)}`}
+                      >
+                        <NativeSelect
+                          id={`vm-disk-storage-${String(disk.id)}`}
                           value={disk.storage}
                           onChange={(e) => {
                             updateDisk(disk.id, { storage: e.target.value });
                           }}
-                          className={selectClass}
                         >
                           <option value="">Default</option>
                           {imageStorageOptions.map((s) => (
@@ -1252,11 +1301,14 @@ export function CreateVMDialog({
                               {s}
                             </option>
                           ))}
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Size (GiB)</Label>
+                        </NativeSelect>
+                      </Field>
+                      <Field
+                        label="Size (GiB)"
+                        htmlFor={`vm-disk-size-${String(disk.id)}`}
+                      >
                         <Input
+                          id={`vm-disk-size-${String(disk.id)}`}
                           type="number"
                           min={1}
                           value={disk.size}
@@ -1264,106 +1316,115 @@ export function CreateVMDialog({
                             updateDisk(disk.id, { size: e.target.value });
                           }}
                         />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Format</Label>
-                        <select
+                      </Field>
+                      <Field
+                        label="Bus type"
+                        htmlFor={`vm-disk-bus-${String(disk.id)}`}
+                      >
+                        <NativeSelect
+                          id={`vm-disk-bus-${String(disk.id)}`}
+                          value={disk.bus}
+                          onChange={(e) => {
+                            updateDisk(disk.id, {
+                              bus: e.target.value as DiskEntry["bus"],
+                            });
+                          }}
+                        >
+                          {diskBusTypes.map((bt) => (
+                            <option key={bt.value} value={bt.value}>
+                              {bt.label}
+                            </option>
+                          ))}
+                        </NativeSelect>
+                      </Field>
+                      <Field
+                        label="Format"
+                        htmlFor={`vm-disk-format-${String(disk.id)}`}
+                      >
+                        <NativeSelect
+                          id={`vm-disk-format-${String(disk.id)}`}
                           value={disk.format}
                           onChange={(e) => {
                             updateDisk(disk.id, { format: e.target.value });
                           }}
-                          className={selectClass}
                         >
                           {diskFormats.map((f) => (
                             <option key={f.value} value={f.value}>
                               {f.label}
                             </option>
                           ))}
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Cache</Label>
-                        <select
+                        </NativeSelect>
+                      </Field>
+                      <Field
+                        label="Cache"
+                        htmlFor={`vm-disk-cache-${String(disk.id)}`}
+                      >
+                        <NativeSelect
+                          id={`vm-disk-cache-${String(disk.id)}`}
                           value={disk.cache}
                           onChange={(e) => {
                             updateDisk(disk.id, { cache: e.target.value });
                           }}
-                          className={selectClass}
                         >
                           {cacheModes.map((cm) => (
                             <option key={cm.value} value={cm.value}>
                               {cm.label}
                             </option>
                           ))}
-                        </select>
-                      </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 items-center pt-4">
-                        <div className="flex items-center gap-1.5">
-                          <Checkbox
+                        </NativeSelect>
+                      </Field>
+                      <Field label="Options">
+                        <div className="flex min-h-9 flex-wrap items-center gap-x-5 gap-y-2">
+                          <CheckField
                             id={`discard-${String(disk.id)}`}
+                            label="TRIM"
                             checked={disk.discard}
-                            onCheckedChange={(c) => {
-                              updateDisk(disk.id, { discard: Boolean(c) });
+                            onCheckedChange={(checked) => {
+                              updateDisk(disk.id, { discard: checked });
                             }}
                           />
-                          <Label
-                            htmlFor={`discard-${String(disk.id)}`}
-                            className="text-xs font-normal"
-                          >
-                            TRIM
-                          </Label>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Checkbox
+                          <CheckField
                             id={`ssd-${String(disk.id)}`}
+                            label="SSD"
                             checked={disk.ssd}
-                            onCheckedChange={(c) => {
-                              updateDisk(disk.id, { ssd: Boolean(c) });
+                            onCheckedChange={(checked) => {
+                              updateDisk(disk.id, { ssd: checked });
                             }}
                           />
-                          <Label
-                            htmlFor={`ssd-${String(disk.id)}`}
-                            className="text-xs font-normal"
-                          >
-                            SSD
-                          </Label>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Checkbox
+                          <CheckField
                             id={`io-${String(disk.id)}`}
+                            label="IO thread"
                             checked={disk.iothread}
-                            onCheckedChange={(c) => {
-                              updateDisk(disk.id, { iothread: Boolean(c) });
+                            onCheckedChange={(checked) => {
+                              updateDisk(disk.id, { iothread: checked });
                             }}
                           />
-                          <Label
-                            htmlFor={`io-${String(disk.id)}`}
-                            className="text-xs font-normal"
-                          >
-                            IO Thread
-                          </Label>
                         </div>
-                      </div>
-                    </div>
-                  </div>
+                      </Field>
+                    </FieldGrid>
+                  </FormSection>
                 ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addDisk}
-                >
-                  + Add Disk
-                </Button>
+                <div className="border-t pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={addDisk}
+                  >
+                    <Plus />
+                    Add disk
+                  </Button>
+                </div>
               </div>
             )}
 
             {/* === CPU === */}
             {step === "cpu" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Sockets</Label>
+              <FieldGrid>
+                <Field label="Sockets" htmlFor="vm-sockets">
                   <Input
+                    id="vm-sockets"
                     type="number"
                     min={1}
                     value={sockets}
@@ -1371,10 +1432,14 @@ export function CreateVMDialog({
                       setSockets(e.target.value);
                     }}
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>Cores</Label>
+                </Field>
+                <Field
+                  label="Cores"
+                  htmlFor="vm-cores"
+                  hint={`${String(Number(cores) * Number(sockets))} vCPUs in total.`}
+                >
                   <Input
+                    id="vm-cores"
                     type="number"
                     min={1}
                     value={cores}
@@ -1382,47 +1447,46 @@ export function CreateVMDialog({
                       setCores(e.target.value);
                     }}
                   />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>CPU Type</Label>
-                  <select
+                </Field>
+                <Field
+                  label="CPU type"
+                  htmlFor="vm-cputype"
+                  className="sm:col-span-2"
+                >
+                  <NativeSelect
+                    id="vm-cputype"
                     value={cpuType}
                     onChange={(e) => {
                       setCpuType(e.target.value);
                     }}
-                    className={selectClass}
                   >
                     {cpuTypeOptions.map((ct) => (
                       <option key={ct} value={ct}>
                         {ct}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2 sm:col-span-2">
-                  <Checkbox
-                    id="numa"
-                    checked={numa}
-                    onCheckedChange={(c) => {
-                      setNuma(Boolean(c));
-                    }}
-                  />
-                  <Label htmlFor="numa" className="text-sm font-normal">
-                    Enable NUMA
-                  </Label>
-                </div>
-                <p className="text-xs text-muted-foreground sm:col-span-2">
-                  Total vCPUs: {Number(cores) * Number(sockets)}
-                </p>
-              </div>
+                  </NativeSelect>
+                </Field>
+                <CheckField
+                  id="numa"
+                  label="Enable NUMA"
+                  checked={numa}
+                  onCheckedChange={setNuma}
+                  className="sm:col-span-2"
+                />
+              </FieldGrid>
             )}
 
             {/* === MEMORY === */}
             {step === "memory" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Memory (MiB)</Label>
+              <FieldGrid>
+                <Field
+                  label="Memory (MiB)"
+                  htmlFor="vm-memory"
+                  hint={`${(Number(memory) / 1024).toFixed(1)} GiB`}
+                >
                   <Input
+                    id="vm-memory"
                     type="number"
                     min={64}
                     step={128}
@@ -1431,70 +1495,61 @@ export function CreateVMDialog({
                       setMemory(e.target.value);
                     }}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    {(Number(memory) / 1024).toFixed(1)} GiB
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="balloon-enabled"
-                      checked={balloonEnabled}
-                      onCheckedChange={(c) => {
-                        setBalloonEnabled(Boolean(c));
+                </Field>
+                {balloonEnabled && (
+                  <Field
+                    label="Minimum memory (MiB)"
+                    htmlFor="vm-balloon-min"
+                    hint="What ballooning may shrink the guest down to."
+                  >
+                    <Input
+                      id="vm-balloon-min"
+                      type="number"
+                      min={0}
+                      value={balloonMin}
+                      onChange={(e) => {
+                        setBalloonMin(e.target.value);
                       }}
+                      placeholder="Same as max"
                     />
-                    <Label htmlFor="balloon-enabled" className="text-sm">
-                      Ballooning
-                    </Label>
-                  </div>
-                  {balloonEnabled && (
-                    <div className="space-y-1 pt-1">
-                      <Label className="text-xs text-muted-foreground">
-                        Minimum Memory (MiB)
-                      </Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        value={balloonMin}
-                        onChange={(e) => {
-                          setBalloonMin(e.target.value);
-                        }}
-                        placeholder="Same as max"
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
+                  </Field>
+                )}
+                <CheckField
+                  id="balloon-enabled"
+                  label="Ballooning"
+                  hint="Lets the host take back memory the guest is not using."
+                  checked={balloonEnabled}
+                  onCheckedChange={setBalloonEnabled}
+                  className="sm:col-span-2"
+                />
+              </FieldGrid>
             )}
 
             {/* === NETWORK === */}
             {step === "network" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Model</Label>
-                  <select
+              <FieldGrid>
+                <Field label="Model" htmlFor="vm-net-model">
+                  <NativeSelect
+                    id="vm-net-model"
                     value={netModel}
                     onChange={(e) => {
                       setNetModel(e.target.value);
                     }}
-                    className={selectClass}
                   >
                     {netModels.map((nm) => (
                       <option key={nm.value} value={nm.value}>
                         {nm.label}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Bridge</Label>
-                  <select
+                  </NativeSelect>
+                </Field>
+                <Field label="Bridge" htmlFor="vm-bridge">
+                  <NativeSelect
+                    id="vm-bridge"
                     value={bridge}
                     onChange={(e) => {
                       setBridge(e.target.value);
                     }}
-                    className={selectClass}
                   >
                     {bridges && bridges.length > 0 ? (
                       bridges.map((b) => (
@@ -1507,11 +1562,11 @@ export function CreateVMDialog({
                     ) : (
                       <option value="vmbr0">vmbr0</option>
                     )}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>VLAN Tag</Label>
+                  </NativeSelect>
+                </Field>
+                <Field label="VLAN tag" htmlFor="vm-vlan">
                   <Input
+                    id="vm-vlan"
                     type="number"
                     min={1}
                     max={4094}
@@ -1521,10 +1576,10 @@ export function CreateVMDialog({
                     }}
                     placeholder="None"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>Rate Limit (MB/s)</Label>
+                </Field>
+                <Field label="Rate limit (MB/s)" htmlFor="vm-rate">
                   <Input
+                    id="vm-rate"
                     type="number"
                     min={0}
                     value={rateLimit}
@@ -1533,20 +1588,20 @@ export function CreateVMDialog({
                     }}
                     placeholder="Unlimited"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>MAC Address</Label>
+                </Field>
+                <Field label="MAC address" htmlFor="vm-mac">
                   <Input
+                    id="vm-mac"
                     value={macAddress}
                     onChange={(e) => {
                       setMacAddress(e.target.value);
                     }}
                     placeholder="Auto-generated"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>MTU</Label>
+                </Field>
+                <Field label="MTU" htmlFor="vm-mtu">
                   <Input
+                    id="vm-mtu"
                     type="number"
                     min={68}
                     max={65520}
@@ -1556,10 +1611,10 @@ export function CreateVMDialog({
                     }}
                     placeholder="Default"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>Multiqueue</Label>
+                </Field>
+                <Field label="Multiqueue" htmlFor="vm-multiqueue">
                   <Input
+                    id="vm-multiqueue"
                     type="number"
                     min={0}
                     max={64}
@@ -1569,38 +1624,34 @@ export function CreateVMDialog({
                     }}
                     placeholder="Disabled"
                   />
-                </div>
-                <div className="flex items-center gap-2 pt-5">
-                  <Checkbox
-                    id="firewall"
-                    checked={firewall}
-                    onCheckedChange={(c) => {
-                      setFirewall(Boolean(c));
-                    }}
-                  />
-                  <Label htmlFor="firewall" className="text-sm font-normal">
-                    Firewall
-                  </Label>
-                </div>
-              </div>
+                </Field>
+                <CheckField
+                  id="firewall"
+                  label="Firewall"
+                  hint="Applies the guest's firewall rules to this card."
+                  checked={firewall}
+                  onCheckedChange={setFirewall}
+                  className="sm:col-span-2"
+                />
+              </FieldGrid>
             )}
 
             {/* === CLOUD-INIT === */}
             {step === "cloudinit" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>User</Label>
+              <FieldGrid>
+                <Field label="User" htmlFor="vm-ciuser">
                   <Input
+                    id="vm-ciuser"
                     value={ciuser}
                     onChange={(e) => {
                       setCiuser(e.target.value);
                     }}
                     placeholder="root"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>Password</Label>
+                </Field>
+                <Field label="Password" htmlFor="vm-cipassword">
                   <Input
+                    id="vm-cipassword"
                     type="password"
                     value={cipassword}
                     onChange={(e) => {
@@ -1608,253 +1659,191 @@ export function CreateVMDialog({
                     }}
                     placeholder="Optional"
                   />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>SSH Public Keys</Label>
-                  <textarea
+                </Field>
+                <Field
+                  label="SSH public keys"
+                  htmlFor="vm-sshkeys"
+                  hint="One key per line."
+                  className="sm:col-span-2"
+                >
+                  <TextArea
+                    id="vm-sshkeys"
                     value={sshkeys}
                     onChange={(e) => {
                       setSshkeys(e.target.value);
                     }}
-                    className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs font-mono focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                    className="min-h-[80px] font-mono"
                     placeholder="ssh-rsa AAAA..."
                     rows={3}
                   />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>IP Config (ipconfig0)</Label>
+                </Field>
+                <Field
+                  label="IP config (ipconfig0)"
+                  htmlFor="vm-ipconfig0"
+                  className="sm:col-span-2"
+                >
                   <Input
+                    id="vm-ipconfig0"
                     value={ipconfig0}
                     onChange={(e) => {
                       setIpconfig0(e.target.value);
                     }}
-                    placeholder="ip=dhcp or ip=10.0.0.2/24,gw=10.0.0.1"
+                    placeholder="ip=dhcp or ip=192.0.2.10/24,gw=192.0.2.1"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>DNS Server</Label>
+                </Field>
+                <Field label="DNS server" htmlFor="vm-nameserver">
                   <Input
+                    id="vm-nameserver"
                     value={nameserver}
                     onChange={(e) => {
                       setNameserver(e.target.value);
                     }}
-                    placeholder="8.8.8.8"
+                    placeholder="192.0.2.53"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>Search Domain</Label>
+                </Field>
+                <Field label="Search domain" htmlFor="vm-searchdomain">
                   <Input
+                    id="vm-searchdomain"
                     value={searchdomain}
                     onChange={(e) => {
                       setSearchdomain(e.target.value);
                     }}
                     placeholder="example.com"
                   />
-                </div>
-              </div>
+                </Field>
+              </FieldGrid>
             )}
 
-            {/* === CONFIRM === */}
+            {/* === REVIEW === */}
             {step === "confirm" && (
               <div className="space-y-4">
-                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg border p-3 text-sm">
-                  <span className="text-muted-foreground">VMID</span>
-                  <span>{vmid}</span>
-                  <span className="text-muted-foreground">Name</span>
-                  <span>{name || "--"}</span>
-                  <span className="text-muted-foreground">Node</span>
-                  <span>{node}</span>
-                  {pool && (
-                    <>
-                      <span className="text-muted-foreground">Pool</span>
-                      <span>{pool}</span>
-                    </>
-                  )}
-                  {tags && (
-                    <>
-                      <span className="text-muted-foreground">Tags</span>
-                      <span>{tags}</span>
-                    </>
-                  )}
-                  <span className="text-muted-foreground">OS Type</span>
-                  <span>
-                    {osTypes.find((o) => o.value === ostype)?.label ?? ostype}
-                  </span>
-                  {isoImage && (
-                    <>
-                      <span className="text-muted-foreground">ISO</span>
-                      <span className="truncate">
+                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                  <CheckField
+                    id="start-after"
+                    label="Start after creation"
+                    checked={startAfter}
+                    onCheckedChange={setStartAfter}
+                  />
+                  <CheckField
+                    id="onboot"
+                    label="Start on boot"
+                    checked={onboot}
+                    onCheckedChange={setOnboot}
+                  />
+                </div>
+                <FormSection title="General" action={editStep("general")}>
+                  <PropertyList>
+                    <PropertyRow label="VMID">{vmid}</PropertyRow>
+                    <PropertyRow label="Name">{name || "—"}</PropertyRow>
+                    <PropertyRow label="Node">{node}</PropertyRow>
+                    {pool && <PropertyRow label="Pool">{pool}</PropertyRow>}
+                    {tags && <PropertyRow label="Tags">{tags}</PropertyRow>}
+                  </PropertyList>
+                </FormSection>
+                <FormSection title="Operating system" action={editStep("os")}>
+                  <PropertyList>
+                    <PropertyRow label="OS type">{osLabel}</PropertyRow>
+                    {isoImage && (
+                      <PropertyRow label="ISO">
                         {isoImage.split("/").pop()}
-                      </span>
-                    </>
-                  )}
-                  <span className="text-muted-foreground">BIOS</span>
-                  <span>
-                    {bios === "ovmf" ? "OVMF (UEFI)" : "SeaBIOS"}
-                    {" / "}
-                    {machineOptions.find((mt) => mt.value === machine)?.label ??
-                      machine}
-                  </span>
-                  <span className="text-muted-foreground">SCSI HW</span>
-                  <span>
-                    {scsiControllers.find((sc) => sc.value === scsihw)?.label ??
-                      scsihw}
-                  </span>
-                  <span className="text-muted-foreground">CPU</span>
-                  <span>
-                    {cores} cores x {sockets} socket(s) ({cpuType})
-                    {numa ? " +NUMA" : ""}
-                  </span>
-                  <span className="text-muted-foreground">Memory</span>
-                  <span>
-                    {memory} MiB
-                    {balloonEnabled
-                      ? balloonMin
-                        ? ` (balloon min ${balloonMin} MiB)`
-                        : " (balloon on)"
-                      : " (balloon off)"}
-                  </span>
-                  {disks.map((disk, idx) => {
-                    const devNames = assignDiskDeviceNames();
-                    const devName = devNames[idx]?.name ?? `disk${String(idx)}`;
-                    return (
-                      <React.Fragment key={disk.id}>
-                        <span className="text-muted-foreground">
-                          {devName.toUpperCase()}
-                        </span>
-                        <span>
-                          {disk.size} GiB
-                          {disk.storage ? ` on ${disk.storage}` : ""} (
-                          {disk.format}){disk.discard ? " +discard" : ""}
-                          {disk.ssd ? " +ssd" : ""}
-                          {disk.iothread ? " +iothread" : ""}
-                        </span>
-                      </React.Fragment>
-                    );
-                  })}
-                  {virtioDrivers && virtioIsoImage && (
-                    <>
-                      <span className="text-muted-foreground">VirtIO ISO</span>
-                      <span className="truncate">
+                      </PropertyRow>
+                    )}
+                    {virtioDrivers && virtioIsoImage && (
+                      <PropertyRow label="VirtIO ISO">
                         {virtioIsoImage.split("/").pop()}
-                      </span>
-                    </>
-                  )}
-                  <span className="text-muted-foreground">Network</span>
-                  <span>
-                    {netModels.find((nm) => nm.value === netModel)?.label ??
-                      netModel}
-                    , bridge={bridge}
-                    {vlan ? `, vlan=${vlan}` : ""}
-                    {firewall ? ", fw" : ""}
-                    {rateLimit ? `, rate=${rateLimit}` : ""}
-                  </span>
-                  {agentEnabled && (
-                    <>
-                      <span className="text-muted-foreground">Agent</span>
-                      <span>Enabled{agentFstrim ? " +fstrim" : ""}</span>
-                    </>
-                  )}
-                  {efiDisk && efiStorage && (
-                    <>
-                      <span className="text-muted-foreground">EFI Disk</span>
-                      <span>{efiStorage}</span>
-                    </>
-                  )}
-                  {tpmEnabled && tpmStorage && (
-                    <>
-                      <span className="text-muted-foreground">TPM</span>
-                      <span>v2.0 on {tpmStorage}</span>
-                    </>
-                  )}
-                  {(ciuser || sshkeys || ipconfig0) && (
-                    <>
-                      <span className="text-muted-foreground">Cloud-Init</span>
-                      <span>
-                        {ciuser ? `user=${ciuser}` : ""}
-                        {sshkeys ? " +ssh-keys" : ""}
-                        {ipconfig0 ? ` ip=${ipconfig0}` : ""}
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="start-after"
-                      checked={startAfter}
-                      onCheckedChange={(c) => {
-                        setStartAfter(Boolean(c));
-                      }}
-                    />
-                    <Label
-                      htmlFor="start-after"
-                      className="text-sm font-normal"
-                    >
-                      Start after creation
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="onboot"
-                      checked={onboot}
-                      onCheckedChange={(c) => {
-                        setOnboot(Boolean(c));
-                      }}
-                    />
-                    <Label htmlFor="onboot" className="text-sm font-normal">
-                      Start on boot
-                    </Label>
-                  </div>
-                </div>
+                      </PropertyRow>
+                    )}
+                  </PropertyList>
+                </FormSection>
+                <FormSection title="System" action={editStep("system")}>
+                  <PropertyList>
+                    <PropertyRow label="BIOS">
+                      {bios === "ovmf" ? "OVMF (UEFI)" : "SeaBIOS"}
+                    </PropertyRow>
+                    <PropertyRow label="Machine type">
+                      {machineLabel}
+                    </PropertyRow>
+                    <PropertyRow label="SCSI controller">
+                      {scsiControllers.find((sc) => sc.value === scsihw)
+                        ?.label ?? scsihw}
+                    </PropertyRow>
+                    {agentEnabled && (
+                      <PropertyRow label="Guest agent">
+                        Enabled{agentFstrim ? ", TRIM on clone" : ""}
+                      </PropertyRow>
+                    )}
+                    {efiDisk && efiStorage && (
+                      <PropertyRow label="EFI disk">{efiStorage}</PropertyRow>
+                    )}
+                    {tpmEnabled && tpmStorage && (
+                      <PropertyRow label="TPM">
+                        v2.0 on {tpmStorage}
+                      </PropertyRow>
+                    )}
+                  </PropertyList>
+                </FormSection>
+                <FormSection title="Disks" action={editStep("disks")}>
+                  <PropertyList>
+                    {disks.map((disk, idx) => (
+                      <PropertyRow
+                        key={disk.id}
+                        label={
+                          <span className="font-mono text-[12.5px]">
+                            {diskDevices[idx]?.name ?? `disk${String(idx)}`}
+                          </span>
+                        }
+                      >
+                        {disk.size} GiB
+                        {disk.storage ? ` on ${disk.storage}` : ""} (
+                        {disk.format}){disk.discard ? ", TRIM" : ""}
+                        {disk.ssd ? ", SSD" : ""}
+                        {disk.iothread ? ", IO thread" : ""}
+                      </PropertyRow>
+                    ))}
+                  </PropertyList>
+                </FormSection>
+                <FormSection title="CPU and memory" action={editStep("cpu")}>
+                  <PropertyList>
+                    <PropertyRow label="CPU">
+                      {cores} cores × {sockets} sockets, {cpuType}
+                      {numa ? ", NUMA" : ""}
+                    </PropertyRow>
+                    <PropertyRow label="Memory">
+                      {memory} MiB
+                      {balloonEnabled
+                        ? balloonMin
+                          ? `, ballooning down to ${balloonMin} MiB`
+                          : ", ballooning on"
+                        : ", ballooning off"}
+                    </PropertyRow>
+                  </PropertyList>
+                </FormSection>
+                <FormSection title="Network" action={editStep("network")}>
+                  <PropertyList>
+                    <PropertyRow label="Card">
+                      {netModels.find((nm) => nm.value === netModel)?.label ??
+                        netModel}{" "}
+                      on {bridge}
+                      {vlan ? `, VLAN ${vlan}` : ""}
+                      {firewall ? ", firewall" : ""}
+                      {rateLimit ? `, ${rateLimit} MB/s` : ""}
+                    </PropertyRow>
+                    {(ciuser || sshkeys || ipconfig0) && (
+                      <PropertyRow label="Cloud-init">
+                        {[
+                          ciuser ? `user ${ciuser}` : "",
+                          sshkeys ? "SSH keys" : "",
+                          ipconfig0,
+                        ]
+                          .filter((part) => part !== "")
+                          .join(", ")}
+                      </PropertyRow>
+                    )}
+                  </PropertyList>
+                </FormSection>
               </div>
             )}
-
-            {createMutation.isError && (
-              <p className="text-sm text-destructive">
-                {createMutation.error.message}
-              </p>
-            )}
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={handleClose}>
-                Cancel
-              </Button>
-              {stepIdx > 0 && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    const prev = steps[stepIdx - 1];
-                    if (prev) setStep(prev);
-                  }}
-                >
-                  Back
-                </Button>
-              )}
-              {step !== "confirm" ? (
-                <Button
-                  type="button"
-                  disabled={!canProceed}
-                  onClick={() => {
-                    const next = steps[stepIdx + 1];
-                    if (next) setStep(next);
-                  }}
-                >
-                  Next
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  disabled={createMutation.isPending}
-                  onClick={handleSubmit}
-                >
-                  {createMutation.isPending ? "Creating..." : "Create VM"}
-                </Button>
-              )}
-            </DialogFooter>
-          </div>
+          </Wizard>
         )}
       </DialogContent>
     </Dialog>

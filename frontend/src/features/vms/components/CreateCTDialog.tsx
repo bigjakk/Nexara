@@ -3,15 +3,24 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  CheckField,
+  Field,
+  FieldGrid,
+  FormSection,
+  NativeSelect,
+  TextArea,
+} from "@/components/page/Field";
+import { PropertyList, PropertyRow } from "@/components/page/Panel";
+import { Wizard, type WizardStep } from "@/components/page/Wizard";
+import { WarningCallout } from "@/components/WarningCallout";
 import { formatBytes } from "@/lib/format";
-import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 import {
   useClusterNodes,
   useClusterStorage,
@@ -33,9 +42,6 @@ interface CreateCTDialogProps {
   clusterId: string;
 }
 
-const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
-
 type Step =
   | "general"
   | "template"
@@ -45,25 +51,43 @@ type Step =
   | "dns_options"
   | "confirm";
 
-const steps: Step[] = [
-  "general",
-  "template",
-  "rootdisk",
-  "cpu_memory",
-  "network",
-  "dns_options",
-  "confirm",
+const steps: readonly WizardStep<Step>[] = [
+  {
+    id: "general",
+    label: "General",
+    hint: "What the container is called and where it runs.",
+  },
+  {
+    id: "template",
+    label: "Template",
+    hint: "The image the container is built from.",
+  },
+  {
+    id: "rootdisk",
+    label: "Root disk",
+    hint: "Where the root filesystem lives and how large it is.",
+  },
+  {
+    id: "cpu_memory",
+    label: "CPU and memory",
+    hint: "The processor and memory the container may use.",
+  },
+  {
+    id: "network",
+    label: "Network",
+    hint: "The container's first network interface and its addresses.",
+  },
+  {
+    id: "dns_options",
+    label: "DNS and options",
+    hint: "Name resolution, startup behaviour and the root login.",
+  },
+  {
+    id: "confirm",
+    label: "Review",
+    hint: "Check the settings, then create the container.",
+  },
 ];
-
-const stepLabels: Record<Step, string> = {
-  general: "General",
-  template: "Template",
-  rootdisk: "Root Disk",
-  cpu_memory: "CPU & Memory",
-  network: "Network",
-  dns_options: "DNS & Options",
-  confirm: "Confirm",
-};
 
 type IPv4Mode = "dhcp" | "static" | "none";
 type IPv6Mode = "dhcp" | "slaac" | "static" | "none";
@@ -220,7 +244,7 @@ export function CreateCTDialog({
   }, [open, usedVMIDs, nextAvailableId, vmid, bestNode, node]);
 
   const isDuplicate = usedVMIDs ? usedVMIDs.has(Number(vmid)) : false;
-  const stepIdx = steps.indexOf(step);
+  const stepIdx = steps.findIndex((s) => s.id === step);
 
   function extractFilename(volid: string): string {
     // volid like "local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
@@ -365,8 +389,8 @@ export function CreateCTDialog({
   const passwordMismatch =
     password !== "" && passwordConfirm !== "" && password !== passwordConfirm;
 
-  const canProceed = (() => {
-    switch (step) {
+  function stepValid(s: Step): boolean {
+    switch (s) {
       case "general":
         return Number(vmid) > 0 && node !== "";
       case "template":
@@ -382,35 +406,141 @@ export function CreateCTDialog({
       default:
         return true;
     }
-  })();
+  }
+
+  const canProceed = stepValid(step);
+
+  // The step list goes back freely, and ahead only as far as Next would: every
+  // step between here and there has to pass the check Next holds it to.
+  function canGoTo(target: Step): boolean {
+    const targetIdx = steps.findIndex((s) => s.id === target);
+    return steps.slice(stepIdx, targetIdx).every((s) => stepValid(s.id));
+  }
+
+  /** The Review step's way back to the step a group of settings came from. */
+  const editStep = (target: Step) => (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-6 px-2 text-primary hover:text-primary"
+      aria-label={`Edit ${steps.find((s) => s.id === target)?.label ?? target}`}
+      onClick={() => {
+        setStep(target);
+      }}
+    >
+      Edit
+    </Button>
+  );
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Create Container</DialogTitle>
+      <DialogContent
+        className={cn(
+          "flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0",
+          upid ? "max-w-lg" : "h-[640px] max-w-3xl",
+        )}
+      >
+        <DialogHeader className="border-b px-5 py-4 pr-12 sm:px-6">
+          <DialogTitle>Create container</DialogTitle>
+          {/* What is being built so far, so the header reads as its identity. */}
           <DialogDescription>
-            Step {stepIdx + 1} of {steps.length}: {stepLabels[step]}
+            CT {vmid || "—"}
+            {hostname ? `, ${hostname}` : ""}
+            {node ? `, on ${node}` : ""}
           </DialogDescription>
         </DialogHeader>
 
         {upid ? (
-          <TaskProgressBanner
-            clusterId={clusterId}
-            upid={upid}
-            onComplete={() => {
-              handleClose();
-            }}
-            description={`Create CT ${hostname || vmid}`}
-          />
+          <div className="px-5 py-5 sm:px-6">
+            <TaskProgressBanner
+              clusterId={clusterId}
+              upid={upid}
+              onComplete={() => {
+                handleClose();
+              }}
+              description={`Create CT ${hostname || vmid}`}
+            />
+          </div>
         ) : (
-          <div className="space-y-4">
+          <Wizard
+            steps={steps}
+            current={step}
+            onStepChange={setStep}
+            canGoTo={canGoTo}
+            notice={
+              createMutation.isError ? (
+                <p className="text-sm text-destructive">
+                  {createMutation.error.message}
+                </p>
+              ) : (
+                // Why Next is held, said where it shows: the field that says
+                // it sits below the fold of this step.
+                step === "dns_options" &&
+                passwordMismatch && (
+                  <p className="text-sm text-destructive">
+                    Passwords do not match
+                  </p>
+                )
+              )
+            }
+            footer={
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="mr-auto"
+                  onClick={handleClose}
+                >
+                  Cancel
+                </Button>
+                {stepIdx > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      const prev = steps[stepIdx - 1];
+                      if (prev) setStep(prev.id);
+                    }}
+                  >
+                    Back
+                  </Button>
+                )}
+                {step !== "confirm" ? (
+                  <Button
+                    type="button"
+                    disabled={!canProceed}
+                    onClick={() => {
+                      const next = steps[stepIdx + 1];
+                      if (next) setStep(next.id);
+                    }}
+                  >
+                    Next
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    disabled={createMutation.isPending}
+                    onClick={handleSubmit}
+                  >
+                    {createMutation.isPending
+                      ? "Creating..."
+                      : "Create container"}
+                  </Button>
+                )}
+              </>
+            }
+          >
             {/* Step 1: General */}
             {step === "general" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>VMID</Label>
+              <FieldGrid>
+                <Field
+                  label="VMID"
+                  htmlFor="ct-vmid"
+                  warning={isDuplicate && "VMID may already be in use"}
+                >
                   <Input
+                    id="ct-vmid"
                     type="number"
                     min={1}
                     value={vmid}
@@ -418,30 +548,24 @@ export function CreateCTDialog({
                       setVmid(e.target.value);
                     }}
                   />
-                  {isDuplicate && (
-                    <p className="text-xs text-amber-600 dark:text-amber-500">
-                      VMID may already be in use
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label>Hostname</Label>
+                </Field>
+                <Field label="Hostname" htmlFor="ct-hostname">
                   <Input
+                    id="ct-hostname"
                     value={hostname}
                     onChange={(e) => {
                       setHostname(e.target.value);
                     }}
                     placeholder="my-container"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>Target Node</Label>
-                  <select
+                </Field>
+                <Field label="Node" htmlFor="ct-node">
+                  <NativeSelect
+                    id="ct-node"
                     value={node}
                     onChange={(e) => {
                       setNode(e.target.value);
                     }}
-                    className={selectClass}
                   >
                     <option value="">Select node</option>
                     {nodes?.map((n) => (
@@ -449,16 +573,15 @@ export function CreateCTDialog({
                         {n.name}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Resource Pool</Label>
-                  <select
+                  </NativeSelect>
+                </Field>
+                <Field label="Resource pool" htmlFor="ct-pool">
+                  <NativeSelect
+                    id="ct-pool"
                     value={pool}
                     onChange={(e) => {
                       setPool(e.target.value);
                     }}
-                    className={selectClass}
                   >
                     <option value="">None</option>
                     {pools?.map((p) => (
@@ -467,47 +590,36 @@ export function CreateCTDialog({
                         {p.comment ? ` — ${p.comment}` : ""}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="ct-unprivileged"
-                    checked={unprivileged}
-                    onCheckedChange={(checked) => {
-                      setUnprivileged(Boolean(checked));
-                    }}
-                  />
-                  <Label htmlFor="ct-unprivileged" className="text-sm">
-                    Unprivileged container
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="ct-nesting"
-                    checked={nesting}
-                    onCheckedChange={(checked) => {
-                      setNesting(Boolean(checked));
-                    }}
-                  />
-                  <Label htmlFor="ct-nesting" className="text-sm">
-                    Nesting (Docker-in-LXC)
-                  </Label>
-                </div>
-              </div>
+                  </NativeSelect>
+                </Field>
+                <CheckField
+                  id="ct-unprivileged"
+                  label="Unprivileged container"
+                  hint="Root inside the container is an ordinary user on the node."
+                  checked={unprivileged}
+                  onCheckedChange={setUnprivileged}
+                />
+                <CheckField
+                  id="ct-nesting"
+                  label="Nesting"
+                  hint="Lets the container run containers of its own, such as Docker."
+                  checked={nesting}
+                  onCheckedChange={setNesting}
+                />
+              </FieldGrid>
             )}
 
             {/* Step 2: Template */}
             {step === "template" && (
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Template Storage</Label>
-                  <select
+                <Field label="Template storage" htmlFor="ct-template-storage">
+                  <NativeSelect
+                    id="ct-template-storage"
                     value={templateStorageId}
                     onChange={(e) => {
                       setTemplateStorageId(e.target.value);
                       setSelectedTemplate("");
                     }}
-                    className={selectClass}
                   >
                     <option value="">Select storage</option>
                     {templateStoragePools.map((p) => (
@@ -515,17 +627,23 @@ export function CreateCTDialog({
                         {p.storage}
                       </option>
                     ))}
-                  </select>
-                </div>
+                  </NativeSelect>
+                </Field>
                 {templateStorageId && (
-                  <div className="space-y-2">
-                    <Label>Template</Label>
-                    <select
+                  <Field
+                    label="Template"
+                    htmlFor="ct-template"
+                    hint={
+                      templates.length === 0 &&
+                      "No templates found on this storage. Upload a container template first."
+                    }
+                  >
+                    <NativeSelect
+                      id="ct-template"
                       value={selectedTemplate}
                       onChange={(e) => {
                         setSelectedTemplate(e.target.value);
                       }}
-                      className={selectClass}
                     >
                       <option value="">Select template</option>
                       {templates.map((t) => (
@@ -534,49 +652,43 @@ export function CreateCTDialog({
                           {looksLikeOCI(t.volid) ? "  — OCI (preview)" : ""}
                         </option>
                       ))}
-                    </select>
-                    {templates.length === 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        No templates found on this storage. Upload a container
-                        template first.
-                      </p>
-                    )}
-                    {selectedTemplate && looksLikeOCI(selectedTemplate) && (
-                      <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
-                        <p className="font-medium text-amber-700 dark:text-amber-400">
-                          OCI image (tech preview)
-                        </p>
-                        <p className="mt-1 text-muted-foreground">
-                          Layers will be squashed on create. In-place updates
-                          aren&apos;t supported — re-create the container to
-                          apply image changes.
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                    </NativeSelect>
+                  </Field>
                 )}
-                <div className="space-y-2">
-                  <Label>Or enter template path manually</Label>
+                {templateStorageId &&
+                  selectedTemplate &&
+                  looksLikeOCI(selectedTemplate) && (
+                    <WarningCallout title="OCI image (tech preview)">
+                      <p>
+                        Layers are squashed on create. In-place updates are not
+                        supported: re-create the container to apply image
+                        changes.
+                      </p>
+                    </WarningCallout>
+                  )}
+                <Field
+                  label="Template path"
+                  htmlFor="ct-template-path"
+                  hint="Optional. A full volume ID typed here replaces the selection above."
+                >
                   <Input
+                    id="ct-template-path"
                     value={selectedTemplate}
                     onChange={(e) => {
                       setSelectedTemplate(e.target.value);
                     }}
                     placeholder="local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Full volume ID of the template (overrides selection above)
-                  </p>
-                </div>
+                </Field>
               </div>
             )}
 
             {/* Step 3: Root Disk */}
             {step === "rootdisk" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Storage Pool</Label>
-                  <select
+              <FieldGrid>
+                <Field label="Storage" htmlFor="ct-root-storage">
+                  <NativeSelect
+                    id="ct-root-storage"
                     value={rootStorageId}
                     onChange={(e) => {
                       const id = e.target.value;
@@ -586,7 +698,6 @@ export function CreateCTDialog({
                       );
                       setRootStorageName(found ? found.storage : "");
                     }}
-                    className={selectClass}
                   >
                     <option value="">Default</option>
                     {rootdirStoragePools.map((p) => (
@@ -594,11 +705,11 @@ export function CreateCTDialog({
                         {p.storage}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Disk Size (GiB)</Label>
+                  </NativeSelect>
+                </Field>
+                <Field label="Disk size (GiB)" htmlFor="ct-disk-size">
                   <Input
+                    id="ct-disk-size"
                     type="number"
                     min={1}
                     value={diskSize}
@@ -606,653 +717,564 @@ export function CreateCTDialog({
                       setDiskSize(e.target.value);
                     }}
                   />
-                </div>
-              </div>
+                </Field>
+              </FieldGrid>
             )}
 
             {/* Step 4: CPU & Memory */}
             {step === "cpu_memory" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>CPU Cores</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={cores}
-                    onChange={(e) => {
-                      setCores(e.target.value);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>CPU Limit (optional)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    value={cpuLimit}
-                    onChange={(e) => {
-                      setCpuLimit(e.target.value);
-                    }}
-                    placeholder="e.g. 2.5"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Fractional CPU limit (empty = unlimited)
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>CPU Units</Label>
-                  <Input
-                    type="number"
-                    min={8}
-                    max={500000}
-                    value={cpuUnits}
-                    onChange={(e) => {
-                      setCpuUnits(e.target.value);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Architecture</Label>
-                  <select
-                    value={arch}
-                    onChange={(e) => {
-                      setArch(e.target.value);
-                    }}
-                    className={selectClass}
-                  >
-                    <option value="amd64">amd64</option>
-                    <option value="i386">i386</option>
-                    <option value="arm64">arm64</option>
-                    <option value="armhf">armhf</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Memory (MiB)</Label>
-                  <Input
-                    type="number"
-                    min={64}
-                    step={64}
-                    value={memory}
-                    onChange={(e) => {
-                      setMemory(e.target.value);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Swap (MiB)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={64}
-                    value={swap}
-                    onChange={(e) => {
-                      setSwap(e.target.value);
-                    }}
-                  />
-                </div>
+              <div className="space-y-4">
+                <FormSection title="Processor">
+                  <FieldGrid>
+                    <Field label="Cores" htmlFor="ct-cores">
+                      <Input
+                        id="ct-cores"
+                        type="number"
+                        min={1}
+                        value={cores}
+                        onChange={(e) => {
+                          setCores(e.target.value);
+                        }}
+                      />
+                    </Field>
+                    <Field
+                      label="CPU limit"
+                      htmlFor="ct-cpu-limit"
+                      hint="Optional. A fraction of cores, such as 2.5. Blank means no limit."
+                    >
+                      <Input
+                        id="ct-cpu-limit"
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        value={cpuLimit}
+                        onChange={(e) => {
+                          setCpuLimit(e.target.value);
+                        }}
+                        placeholder="Unlimited"
+                      />
+                    </Field>
+                    <Field label="CPU units" htmlFor="ct-cpu-units">
+                      <Input
+                        id="ct-cpu-units"
+                        type="number"
+                        min={8}
+                        max={500000}
+                        value={cpuUnits}
+                        onChange={(e) => {
+                          setCpuUnits(e.target.value);
+                        }}
+                      />
+                    </Field>
+                    <Field label="Architecture" htmlFor="ct-arch">
+                      <NativeSelect
+                        id="ct-arch"
+                        value={arch}
+                        onChange={(e) => {
+                          setArch(e.target.value);
+                        }}
+                      >
+                        <option value="amd64">amd64</option>
+                        <option value="i386">i386</option>
+                        <option value="arm64">arm64</option>
+                        <option value="armhf">armhf</option>
+                      </NativeSelect>
+                    </Field>
+                  </FieldGrid>
+                </FormSection>
+                <FormSection title="Memory">
+                  <FieldGrid>
+                    <Field label="Memory (MiB)" htmlFor="ct-memory">
+                      <Input
+                        id="ct-memory"
+                        type="number"
+                        min={64}
+                        step={64}
+                        value={memory}
+                        onChange={(e) => {
+                          setMemory(e.target.value);
+                        }}
+                      />
+                    </Field>
+                    <Field label="Swap (MiB)" htmlFor="ct-swap">
+                      <Input
+                        id="ct-swap"
+                        type="number"
+                        min={0}
+                        step={64}
+                        value={swap}
+                        onChange={(e) => {
+                          setSwap(e.target.value);
+                        }}
+                      />
+                    </Field>
+                  </FieldGrid>
+                </FormSection>
               </div>
             )}
 
             {/* Step 5: Network */}
             {step === "network" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>NIC Name</Label>
-                  <Input
-                    value={nicName}
-                    onChange={(e) => {
-                      setNicName(e.target.value);
-                    }}
-                    placeholder="eth0"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Bridge</Label>
-                  <Input
-                    value={bridge}
-                    onChange={(e) => {
-                      setBridge(e.target.value);
-                    }}
-                    placeholder="vmbr0"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>MAC Address (optional)</Label>
-                  <Input
-                    value={macAddress}
-                    onChange={(e) => {
-                      setMacAddress(e.target.value);
-                    }}
-                    placeholder="auto"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>VLAN Tag (optional)</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={4094}
-                    value={vlanTag}
-                    onChange={(e) => {
-                      setVlanTag(e.target.value);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Rate Limit MB/s (optional)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={rateLimit}
-                    onChange={(e) => {
-                      setRateLimit(e.target.value);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>MTU (optional)</Label>
-                  <Input
-                    type="number"
-                    min={576}
-                    max={65535}
-                    value={mtu}
-                    onChange={(e) => {
-                      setMtu(e.target.value);
-                    }}
-                  />
-                </div>
-                <div className="flex items-center gap-2 sm:col-span-2">
-                  <Checkbox
-                    id="ct-firewall"
-                    checked={firewall}
-                    onCheckedChange={(checked) => {
-                      setFirewall(Boolean(checked));
-                    }}
-                  />
-                  <Label htmlFor="ct-firewall" className="text-sm">
-                    Firewall
-                  </Label>
-                </div>
+              <div className="space-y-4">
+                <FormSection title="Interface">
+                  <FieldGrid>
+                    <Field label="Name" htmlFor="ct-nic-name">
+                      <Input
+                        id="ct-nic-name"
+                        value={nicName}
+                        onChange={(e) => {
+                          setNicName(e.target.value);
+                        }}
+                        placeholder="eth0"
+                      />
+                    </Field>
+                    <Field label="Bridge" htmlFor="ct-bridge">
+                      <Input
+                        id="ct-bridge"
+                        value={bridge}
+                        onChange={(e) => {
+                          setBridge(e.target.value);
+                        }}
+                        placeholder="vmbr0"
+                      />
+                    </Field>
+                    <Field label="MAC address" htmlFor="ct-mac">
+                      <Input
+                        id="ct-mac"
+                        value={macAddress}
+                        onChange={(e) => {
+                          setMacAddress(e.target.value);
+                        }}
+                        placeholder="Auto-generated"
+                      />
+                    </Field>
+                    <Field label="VLAN tag" htmlFor="ct-vlan">
+                      <Input
+                        id="ct-vlan"
+                        type="number"
+                        min={1}
+                        max={4094}
+                        value={vlanTag}
+                        onChange={(e) => {
+                          setVlanTag(e.target.value);
+                        }}
+                        placeholder="None"
+                      />
+                    </Field>
+                    <Field label="Rate limit (MB/s)" htmlFor="ct-rate">
+                      <Input
+                        id="ct-rate"
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={rateLimit}
+                        onChange={(e) => {
+                          setRateLimit(e.target.value);
+                        }}
+                        placeholder="Unlimited"
+                      />
+                    </Field>
+                    <Field label="MTU" htmlFor="ct-mtu">
+                      <Input
+                        id="ct-mtu"
+                        type="number"
+                        min={576}
+                        max={65535}
+                        value={mtu}
+                        onChange={(e) => {
+                          setMtu(e.target.value);
+                        }}
+                        placeholder="Default"
+                      />
+                    </Field>
+                    <CheckField
+                      id="ct-firewall"
+                      label="Firewall"
+                      hint="Applies the container's firewall rules to this interface."
+                      checked={firewall}
+                      onCheckedChange={setFirewall}
+                      className="sm:col-span-2"
+                    />
+                  </FieldGrid>
+                </FormSection>
 
-                {/* IPv4 */}
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>IPv4 Mode</Label>
-                  <select
-                    value={ipv4Mode}
-                    onChange={(e) => {
-                      setIpv4Mode(e.target.value as IPv4Mode);
-                    }}
-                    className={selectClass}
-                  >
-                    <option value="dhcp">DHCP</option>
-                    <option value="static">Static</option>
-                    <option value="none">None</option>
-                  </select>
-                </div>
-                {ipv4Mode === "static" && (
-                  <>
-                    <div className="space-y-2">
-                      <Label>IPv4 Address (CIDR)</Label>
-                      <Input
-                        value={ipv4Addr}
+                <FormSection title="IPv4">
+                  <FieldGrid>
+                    <Field
+                      label="Mode"
+                      htmlFor="ct-ipv4-mode"
+                      className="sm:col-span-2"
+                    >
+                      <NativeSelect
+                        id="ct-ipv4-mode"
+                        value={ipv4Mode}
                         onChange={(e) => {
-                          setIpv4Addr(e.target.value);
+                          setIpv4Mode(e.target.value as IPv4Mode);
                         }}
-                        placeholder="192.168.1.100/24"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Gateway</Label>
-                      <Input
-                        value={ipv4Gw}
-                        onChange={(e) => {
-                          setIpv4Gw(e.target.value);
-                        }}
-                        placeholder="192.168.1.1"
-                      />
-                    </div>
-                  </>
-                )}
+                      >
+                        <option value="dhcp">DHCP</option>
+                        <option value="static">Static</option>
+                        <option value="none">None</option>
+                      </NativeSelect>
+                    </Field>
+                    {ipv4Mode === "static" && (
+                      <>
+                        <Field label="Address (CIDR)" htmlFor="ct-ipv4-addr">
+                          <Input
+                            id="ct-ipv4-addr"
+                            value={ipv4Addr}
+                            onChange={(e) => {
+                              setIpv4Addr(e.target.value);
+                            }}
+                            placeholder="192.0.2.10/24"
+                          />
+                        </Field>
+                        <Field label="Gateway" htmlFor="ct-ipv4-gw">
+                          <Input
+                            id="ct-ipv4-gw"
+                            value={ipv4Gw}
+                            onChange={(e) => {
+                              setIpv4Gw(e.target.value);
+                            }}
+                            placeholder="192.0.2.1"
+                          />
+                        </Field>
+                      </>
+                    )}
+                  </FieldGrid>
+                </FormSection>
 
-                {/* IPv6 */}
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>IPv6 Mode</Label>
-                  <select
-                    value={ipv6Mode}
-                    onChange={(e) => {
-                      setIpv6Mode(e.target.value as IPv6Mode);
-                    }}
-                    className={selectClass}
-                  >
-                    <option value="none">None</option>
-                    <option value="dhcp">DHCP</option>
-                    <option value="slaac">SLAAC</option>
-                    <option value="static">Static</option>
-                  </select>
-                </div>
-                {ipv6Mode === "static" && (
-                  <>
-                    <div className="space-y-2">
-                      <Label>IPv6 Address (CIDR)</Label>
-                      <Input
-                        value={ipv6Addr}
+                <FormSection title="IPv6">
+                  <FieldGrid>
+                    <Field
+                      label="Mode"
+                      htmlFor="ct-ipv6-mode"
+                      className="sm:col-span-2"
+                    >
+                      <NativeSelect
+                        id="ct-ipv6-mode"
+                        value={ipv6Mode}
                         onChange={(e) => {
-                          setIpv6Addr(e.target.value);
+                          setIpv6Mode(e.target.value as IPv6Mode);
                         }}
-                        placeholder="fd00::1/64"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>IPv6 Gateway</Label>
-                      <Input
-                        value={ipv6Gw}
-                        onChange={(e) => {
-                          setIpv6Gw(e.target.value);
-                        }}
-                        placeholder="fd00::1"
-                      />
-                    </div>
-                  </>
-                )}
+                      >
+                        <option value="none">None</option>
+                        <option value="dhcp">DHCP</option>
+                        <option value="slaac">SLAAC</option>
+                        <option value="static">Static</option>
+                      </NativeSelect>
+                    </Field>
+                    {ipv6Mode === "static" && (
+                      <>
+                        <Field label="Address (CIDR)" htmlFor="ct-ipv6-addr">
+                          <Input
+                            id="ct-ipv6-addr"
+                            value={ipv6Addr}
+                            onChange={(e) => {
+                              setIpv6Addr(e.target.value);
+                            }}
+                            placeholder="2001:db8::10/64"
+                          />
+                        </Field>
+                        <Field label="Gateway" htmlFor="ct-ipv6-gw">
+                          <Input
+                            id="ct-ipv6-gw"
+                            value={ipv6Gw}
+                            onChange={(e) => {
+                              setIpv6Gw(e.target.value);
+                            }}
+                            placeholder="2001:db8::1"
+                          />
+                        </Field>
+                      </>
+                    )}
+                  </FieldGrid>
+                </FormSection>
               </div>
             )}
 
             {/* Step 6: DNS & Options */}
             {step === "dns_options" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>DNS Domain (searchdomain)</Label>
-                  <Input
-                    value={searchdomain}
-                    onChange={(e) => {
-                      setSearchdomain(e.target.value);
-                    }}
-                    placeholder="example.com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>DNS Server (nameserver)</Label>
-                  <Input
-                    value={nameserver}
-                    onChange={(e) => {
-                      setNameserver(e.target.value);
-                    }}
-                    placeholder="8.8.8.8"
-                  />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Description</Label>
-                  <textarea
-                    value={description}
-                    onChange={(e) => {
-                      setDescription(e.target.value);
-                    }}
-                    rows={2}
-                    className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                    placeholder="Container description"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Tags</Label>
-                  <Input
-                    value={tags}
-                    onChange={(e) => {
-                      setTags(e.target.value);
-                    }}
-                    placeholder="web,prod"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Comma-separated
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Startup Order</Label>
-                  <Input
-                    value={startup}
-                    onChange={(e) => {
-                      setStartup(e.target.value);
-                    }}
-                    placeholder="order=1,up=5,down=5"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Console Mode</Label>
-                  <select
-                    value={cmode}
-                    onChange={(e) => {
-                      setCmode(e.target.value);
-                    }}
-                    className={selectClass}
-                  >
-                    <option value="tty">tty</option>
-                    <option value="console">console</option>
-                    <option value="shell">shell</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
+              <div className="space-y-4">
+                <FormSection title="DNS">
+                  <FieldGrid>
+                    <Field label="Search domain" htmlFor="ct-searchdomain">
+                      <Input
+                        id="ct-searchdomain"
+                        value={searchdomain}
+                        onChange={(e) => {
+                          setSearchdomain(e.target.value);
+                        }}
+                        placeholder="example.com"
+                      />
+                    </Field>
+                    <Field label="DNS server" htmlFor="ct-nameserver">
+                      <Input
+                        id="ct-nameserver"
+                        value={nameserver}
+                        onChange={(e) => {
+                          setNameserver(e.target.value);
+                        }}
+                        placeholder="192.0.2.53"
+                      />
+                    </Field>
+                  </FieldGrid>
+                </FormSection>
+
+                <FormSection title="Notes">
+                  <FieldGrid>
+                    <Field
+                      label="Description"
+                      htmlFor="ct-description"
+                      className="sm:col-span-2"
+                    >
+                      <TextArea
+                        id="ct-description"
+                        value={description}
+                        onChange={(e) => {
+                          setDescription(e.target.value);
+                        }}
+                        rows={2}
+                        placeholder="Container description"
+                      />
+                    </Field>
+                    <Field
+                      label="Tags"
+                      htmlFor="ct-tags"
+                      hint="Separated by commas."
+                      className="sm:col-span-2"
+                    >
+                      <Input
+                        id="ct-tags"
+                        value={tags}
+                        onChange={(e) => {
+                          setTags(e.target.value);
+                        }}
+                        placeholder="web,prod"
+                      />
+                    </Field>
+                  </FieldGrid>
+                </FormSection>
+
+                <FormSection title="Startup">
+                  <FieldGrid>
+                    <Field label="Startup order" htmlFor="ct-startup">
+                      <Input
+                        id="ct-startup"
+                        value={startup}
+                        onChange={(e) => {
+                          setStartup(e.target.value);
+                        }}
+                        placeholder="order=1,up=5,down=5"
+                      />
+                    </Field>
+                    <Field label="Console mode" htmlFor="ct-cmode">
+                      <NativeSelect
+                        id="ct-cmode"
+                        value={cmode}
+                        onChange={(e) => {
+                          setCmode(e.target.value);
+                        }}
+                      >
+                        <option value="tty">tty</option>
+                        <option value="console">console</option>
+                        <option value="shell">shell</option>
+                      </NativeSelect>
+                    </Field>
+                  </FieldGrid>
+                  <div className="flex flex-wrap gap-x-6 gap-y-2">
+                    <CheckField
                       id="ct-onboot"
+                      label="Start on boot"
                       checked={onboot}
-                      onCheckedChange={(checked) => {
-                        setOnboot(Boolean(checked));
-                      }}
+                      onCheckedChange={setOnboot}
                     />
-                    <Label htmlFor="ct-onboot" className="text-sm">
-                      Start on Boot
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="ct-protection"
-                      checked={protection}
-                      onCheckedChange={(checked) => {
-                        setProtection(Boolean(checked));
-                      }}
-                    />
-                    <Label htmlFor="ct-protection" className="text-sm">
-                      Protection
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
+                    <CheckField
                       id="ct-start-after"
+                      label="Start after creation"
                       checked={startAfter}
-                      onCheckedChange={(checked) => {
-                        setStartAfter(Boolean(checked));
-                      }}
+                      onCheckedChange={setStartAfter}
                     />
-                    <Label htmlFor="ct-start-after" className="text-sm">
-                      Start after creation
-                    </Label>
+                    <CheckField
+                      id="ct-protection"
+                      label="Protection"
+                      checked={protection}
+                      onCheckedChange={setProtection}
+                    />
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Password</Label>
-                  <Input
-                    type="password"
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                    }}
-                    placeholder="Root password"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Confirm Password</Label>
-                  <Input
-                    type="password"
-                    value={passwordConfirm}
-                    onChange={(e) => {
-                      setPasswordConfirm(e.target.value);
-                    }}
-                    placeholder="Confirm password"
-                  />
-                  {passwordMismatch && (
-                    <p className="text-xs text-destructive">
-                      Passwords do not match
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>SSH Public Keys</Label>
-                  <textarea
-                    value={sshKeys}
-                    onChange={(e) => {
-                      setSshKeys(e.target.value);
-                    }}
-                    rows={3}
-                    className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring font-mono"
-                    placeholder="ssh-ed25519 AAAA... user@host"
-                  />
-                </div>
+                </FormSection>
+
+                <FormSection title="Root login">
+                  <FieldGrid>
+                    <Field label="Password" htmlFor="ct-password">
+                      <Input
+                        id="ct-password"
+                        type="password"
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                        }}
+                        placeholder="Root password"
+                      />
+                    </Field>
+                    <Field
+                      label="Confirm password"
+                      htmlFor="ct-password-confirm"
+                      error={passwordMismatch && "Passwords do not match"}
+                    >
+                      <Input
+                        id="ct-password-confirm"
+                        type="password"
+                        value={passwordConfirm}
+                        onChange={(e) => {
+                          setPasswordConfirm(e.target.value);
+                        }}
+                        placeholder="Confirm password"
+                      />
+                    </Field>
+                    <Field
+                      label="SSH public keys"
+                      htmlFor="ct-sshkeys"
+                      hint="One key per line."
+                      className="sm:col-span-2"
+                    >
+                      <TextArea
+                        id="ct-sshkeys"
+                        value={sshKeys}
+                        onChange={(e) => {
+                          setSshKeys(e.target.value);
+                        }}
+                        rows={3}
+                        className="min-h-[80px] font-mono"
+                        placeholder="ssh-ed25519 AAAA... user@host"
+                      />
+                    </Field>
+                  </FieldGrid>
+                </FormSection>
               </div>
             )}
 
-            {/* Step 7: Confirm */}
+            {/* Step 7: Review */}
             {step === "confirm" && (
-              <div className="space-y-3 text-sm">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3">
-                  <span className="font-medium text-muted-foreground col-span-2 mb-1">
-                    General
-                  </span>
-                  <span className="text-muted-foreground">VMID</span>
-                  <span>{vmid}</span>
-                  <span className="text-muted-foreground">Hostname</span>
-                  <span>{hostname || "--"}</span>
-                  <span className="text-muted-foreground">Node</span>
-                  <span>{node}</span>
-                  {pool && (
-                    <>
-                      <span className="text-muted-foreground">Pool</span>
-                      <span>{pool}</span>
-                    </>
-                  )}
-                  <span className="text-muted-foreground">Unprivileged</span>
-                  <span>{unprivileged ? "Yes" : "No"}</span>
-                  {nesting && (
-                    <>
-                      <span className="text-muted-foreground">Nesting</span>
-                      <span>Enabled</span>
-                    </>
-                  )}
-                </div>
+              <div className="space-y-4">
+                <FormSection title="General" action={editStep("general")}>
+                  <PropertyList>
+                    <PropertyRow label="VMID">{vmid}</PropertyRow>
+                    <PropertyRow label="Hostname">
+                      {hostname || "—"}
+                    </PropertyRow>
+                    <PropertyRow label="Node">{node}</PropertyRow>
+                    {pool && <PropertyRow label="Pool">{pool}</PropertyRow>}
+                    <PropertyRow label="Unprivileged">
+                      {unprivileged ? "Yes" : "No"}
+                    </PropertyRow>
+                    {nesting && (
+                      <PropertyRow label="Nesting">Enabled</PropertyRow>
+                    )}
+                  </PropertyList>
+                </FormSection>
 
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3">
-                  <span className="font-medium text-muted-foreground col-span-2 mb-1">
-                    Template & Disk
-                  </span>
-                  <span className="text-muted-foreground">Template</span>
-                  <span className="truncate">{selectedTemplate}</span>
-                  <span className="text-muted-foreground">Root Disk</span>
-                  <span>
-                    {diskSize} GiB
-                    {rootStorageName ? ` on ${rootStorageName}` : ""}
-                  </span>
-                </div>
+                <FormSection
+                  title="Template and disk"
+                  action={editStep("template")}
+                >
+                  <PropertyList>
+                    <PropertyRow label="Template">
+                      {selectedTemplate}
+                    </PropertyRow>
+                    <PropertyRow label="Root disk">
+                      {diskSize} GiB
+                      {rootStorageName ? ` on ${rootStorageName}` : ""}
+                    </PropertyRow>
+                  </PropertyList>
+                </FormSection>
 
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3">
-                  <span className="font-medium text-muted-foreground col-span-2 mb-1">
-                    CPU & Memory
-                  </span>
-                  <span className="text-muted-foreground">Cores</span>
-                  <span>{cores}</span>
-                  {cpuLimit && (
-                    <>
-                      <span className="text-muted-foreground">CPU Limit</span>
-                      <span>{cpuLimit}</span>
-                    </>
-                  )}
-                  {arch !== "amd64" && (
-                    <>
-                      <span className="text-muted-foreground">Arch</span>
-                      <span>{arch}</span>
-                    </>
-                  )}
-                  <span className="text-muted-foreground">Memory</span>
-                  <span>{memory} MiB</span>
-                  <span className="text-muted-foreground">Swap</span>
-                  <span>{swap} MiB</span>
-                </div>
+                <FormSection
+                  title="CPU and memory"
+                  action={editStep("cpu_memory")}
+                >
+                  <PropertyList>
+                    <PropertyRow label="Cores">{cores}</PropertyRow>
+                    {cpuLimit && (
+                      <PropertyRow label="CPU limit">{cpuLimit}</PropertyRow>
+                    )}
+                    {arch !== "amd64" && (
+                      <PropertyRow label="Architecture">{arch}</PropertyRow>
+                    )}
+                    <PropertyRow label="Memory">{memory} MiB</PropertyRow>
+                    <PropertyRow label="Swap">{swap} MiB</PropertyRow>
+                  </PropertyList>
+                </FormSection>
 
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3">
-                  <span className="font-medium text-muted-foreground col-span-2 mb-1">
-                    Network
-                  </span>
-                  <span className="text-muted-foreground">NIC</span>
-                  <span>
-                    {nicName} on {bridge}
-                  </span>
-                  <span className="text-muted-foreground">IPv4</span>
-                  <span>
-                    {ipv4Mode === "dhcp"
-                      ? "DHCP"
-                      : ipv4Mode === "static"
-                        ? ipv4Addr
-                        : "None"}
-                  </span>
-                  {ipv6Mode !== "none" && (
-                    <>
-                      <span className="text-muted-foreground">IPv6</span>
-                      <span>
+                <FormSection title="Network" action={editStep("network")}>
+                  <PropertyList>
+                    <PropertyRow label="Interface">
+                      {nicName} on {bridge}
+                    </PropertyRow>
+                    <PropertyRow label="IPv4">
+                      {ipv4Mode === "dhcp"
+                        ? "DHCP"
+                        : ipv4Mode === "static"
+                          ? ipv4Addr
+                          : "None"}
+                    </PropertyRow>
+                    {ipv6Mode !== "none" && (
+                      <PropertyRow label="IPv6">
                         {ipv6Mode === "dhcp"
                           ? "DHCP"
                           : ipv6Mode === "slaac"
                             ? "SLAAC"
                             : ipv6Addr}
-                      </span>
-                    </>
-                  )}
-                  {vlanTag && (
-                    <>
-                      <span className="text-muted-foreground">VLAN</span>
-                      <span>{vlanTag}</span>
-                    </>
-                  )}
-                  {firewall && (
-                    <>
-                      <span className="text-muted-foreground">Firewall</span>
-                      <span>Enabled</span>
-                    </>
-                  )}
-                </div>
+                      </PropertyRow>
+                    )}
+                    {vlanTag && (
+                      <PropertyRow label="VLAN">{vlanTag}</PropertyRow>
+                    )}
+                    {firewall && (
+                      <PropertyRow label="Firewall">Enabled</PropertyRow>
+                    )}
+                  </PropertyList>
+                </FormSection>
 
-                {(nameserver ||
-                  searchdomain ||
-                  description ||
-                  tags ||
-                  onboot ||
-                  protection ||
-                  startup ||
-                  password) && (
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3">
-                    <span className="font-medium text-muted-foreground col-span-2 mb-1">
-                      Options
-                    </span>
+                <FormSection title="Options" action={editStep("dns_options")}>
+                  <PropertyList>
                     {nameserver && (
-                      <>
-                        <span className="text-muted-foreground">
-                          DNS Server
-                        </span>
-                        <span>{nameserver}</span>
-                      </>
+                      <PropertyRow label="DNS server">{nameserver}</PropertyRow>
                     )}
                     {searchdomain && (
-                      <>
-                        <span className="text-muted-foreground">
-                          DNS Domain
-                        </span>
-                        <span>{searchdomain}</span>
-                      </>
+                      <PropertyRow label="Search domain">
+                        {searchdomain}
+                      </PropertyRow>
                     )}
                     {description && (
-                      <>
-                        <span className="text-muted-foreground">
-                          Description
-                        </span>
-                        <span className="truncate">{description}</span>
-                      </>
+                      <PropertyRow label="Description">
+                        {description}
+                      </PropertyRow>
                     )}
-                    {tags && (
-                      <>
-                        <span className="text-muted-foreground">Tags</span>
-                        <span>{tags}</span>
-                      </>
-                    )}
+                    {tags && <PropertyRow label="Tags">{tags}</PropertyRow>}
                     {onboot && (
-                      <>
-                        <span className="text-muted-foreground">
-                          Start on Boot
-                        </span>
-                        <span>Yes</span>
-                      </>
+                      <PropertyRow label="Start on boot">Yes</PropertyRow>
                     )}
                     {protection && (
-                      <>
-                        <span className="text-muted-foreground">
-                          Protection
-                        </span>
-                        <span>Yes</span>
-                      </>
+                      <PropertyRow label="Protection">Yes</PropertyRow>
                     )}
                     {startup && (
-                      <>
-                        <span className="text-muted-foreground">
-                          Startup Order
-                        </span>
-                        <span>{startup}</span>
-                      </>
+                      <PropertyRow label="Startup order">{startup}</PropertyRow>
                     )}
                     {password && (
-                      <>
-                        <span className="text-muted-foreground">Password</span>
-                        <span>Set</span>
-                      </>
+                      <PropertyRow label="Password">Set</PropertyRow>
                     )}
                     {sshKeys && (
-                      <>
-                        <span className="text-muted-foreground">SSH Keys</span>
-                        <span>Provided</span>
-                      </>
+                      <PropertyRow label="SSH keys">Provided</PropertyRow>
                     )}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3">
-                  <span className="text-muted-foreground">Start after</span>
-                  <span>{startAfter ? "Yes" : "No"}</span>
-                </div>
+                    <PropertyRow label="Start after creation">
+                      {startAfter ? "Yes" : "No"}
+                    </PropertyRow>
+                  </PropertyList>
+                </FormSection>
               </div>
             )}
-
-            {createMutation.isError && (
-              <p className="text-sm text-destructive">
-                {createMutation.error.message}
-              </p>
-            )}
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={handleClose}>
-                Cancel
-              </Button>
-              {stepIdx > 0 && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    const prev = steps[stepIdx - 1];
-                    if (prev) setStep(prev);
-                  }}
-                >
-                  Back
-                </Button>
-              )}
-              {step !== "confirm" ? (
-                <Button
-                  type="button"
-                  disabled={!canProceed}
-                  onClick={() => {
-                    const next = steps[stepIdx + 1];
-                    if (next) setStep(next);
-                  }}
-                >
-                  Next
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  disabled={createMutation.isPending}
-                  onClick={handleSubmit}
-                >
-                  {createMutation.isPending
-                    ? "Creating..."
-                    : "Create Container"}
-                </Button>
-              )}
-            </DialogFooter>
-          </div>
+          </Wizard>
         )}
       </DialogContent>
     </Dialog>

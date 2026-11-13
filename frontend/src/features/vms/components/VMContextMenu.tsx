@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -24,6 +24,17 @@ import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
 import { usePermissions } from "@/hooks/usePermissions";
 import { FavoriteContextItem } from "@/features/favorites/components/FavoriteMenuItem";
 import type { VMAction } from "../types/vm";
+
+// Where each management action sits in the menu. One that is in none of these
+// lists is appended to the rarer group rather than dropped.
+const EVERYDAY: ManagementAction[] = ["snapshot", "deploy", "migrate"];
+const RARER: ManagementAction[] = [
+  "clone",
+  "clone-to-template",
+  "convert-to-template",
+];
+const LAST: ManagementAction[] = ["destroy"];
+const PLACED = [...EVERYDAY, ...RARER, ...LAST];
 
 interface VMContextMenuProps {
   target: VMContextTarget;
@@ -124,80 +135,107 @@ export function VMContextMenu({
     );
   }
 
+  const managementItem = (action: ManagementAction) => {
+    const config = visibleManagement.find((a) => a.action === action);
+    if (!config) return null;
+    return (
+      <ContextMenuItem
+        key={config.action}
+        onClick={() => {
+          handleManagementAction(config.action);
+        }}
+        className={
+          config.variant === "destructive"
+            ? "text-destructive focus:text-destructive"
+            : ""
+        }
+      >
+        <span className="mr-2">{config.icon}</span>
+        {config.label}
+      </ContextMenuItem>
+    );
+  };
+
+  // The same order as the guest page's actions: the console, then power, then
+  // what is done to a guest most days, then the rarer ones, and Destroy last
+  // behind a rule of its own. An empty group takes its separator with it.
+  const groups = [
+    normalizedStatus === "running" && consoleAllowed
+      ? [
+          <ContextMenuItem key="console" onClick={handleOpenConsole}>
+            <span className="mr-2">
+              <Monitor className="h-4 w-4" />
+            </span>
+            Console
+          </ContextMenuItem>,
+        ]
+      : [],
+    visibleLifecycle.map((config) => (
+      <ContextMenuItem
+        key={config.action}
+        onClick={() => {
+          handleLifecycleAction(
+            config.action,
+            config.needsConfirm,
+            config.label,
+          );
+        }}
+      >
+        <span className="mr-2">{config.icon}</span>
+        {config.label}
+      </ContextMenuItem>
+    )),
+    EVERYDAY.map(managementItem),
+    [
+      ...RARER.map(managementItem),
+      <ContextMenuItem
+        key="move-to-folder"
+        onClick={() => {
+          onAction?.();
+          openMoveToFolder(target);
+        }}
+      >
+        <span className="mr-2">
+          <FolderInput className="h-4 w-4" />
+        </span>
+        Move to folder…
+      </ContextMenuItem>,
+      <FavoriteContextItem
+        key="favorite"
+        target={{
+          resource_type: "vm",
+          cluster_id: target.clusterId,
+          ref: String(target.vmid),
+        }}
+        onAction={onAction}
+      />,
+      // An action nobody has given a place yet still shows, here.
+      ...visibleManagement
+        .filter((a) => !PLACED.includes(a.action))
+        .map((a) => managementItem(a.action)),
+    ],
+    LAST.map(managementItem),
+  ]
+    .map((items) => items.filter((item) => item !== null))
+    .filter((items) => items.length > 0);
+
   return (
     <ContextMenu modal={false}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-44">
-        <ContextMenuLabel className="text-xs text-muted-foreground">
-          {String(target.vmid)} {target.name}
-        </ContextMenuLabel>
-
-        {visibleLifecycle.map((config) => (
-          <ContextMenuItem
-            key={config.action}
-            onClick={() => {
-              handleLifecycleAction(
-                config.action,
-                config.needsConfirm,
-                config.label,
-              );
-            }}
-          >
-            <span className="mr-2">{config.icon}</span>
-            {config.label}
-          </ContextMenuItem>
-        ))}
-
-        {normalizedStatus === "running" && consoleAllowed && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem onClick={handleOpenConsole}>
-              <span className="mr-2">
-                <Monitor className="h-4 w-4" />
-              </span>
-              Console
-            </ContextMenuItem>
-          </>
-        )}
-
-        <ContextMenuSeparator />
-        <FavoriteContextItem
-          target={{
-            resource_type: "vm",
-            cluster_id: target.clusterId,
-            ref: String(target.vmid),
-          }}
-          onAction={onAction}
-        />
-        <ContextMenuItem
-          onClick={() => {
-            onAction?.();
-            openMoveToFolder(target);
-          }}
-        >
-          <span className="mr-2">
-            <FolderInput className="h-4 w-4" />
+      <ContextMenuContent className="w-52">
+        <ContextMenuLabel className="flex items-baseline gap-2 font-normal">
+          <span className="min-w-0 truncate text-[13px] font-semibold">
+            {target.name}
           </span>
-          Move to folder…
-        </ContextMenuItem>
-
-        {visibleManagement.length > 0 && <ContextMenuSeparator />}
-
-        {visibleManagement.map((config) => (
-          <ContextMenuItem
-            key={config.action}
-            onClick={() => {
-              handleManagementAction(config.action);
-            }}
-            className={
-              config.variant === "destructive"
-                ? "text-destructive focus:text-destructive"
-                : ""
-            }
-          >
-            <span className="mr-2">{config.icon}</span>
-            {config.label}
-          </ContextMenuItem>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {target.kind === "ct" ? "CT" : "VM"} {String(target.vmid)}
+          </span>
+        </ContextMenuLabel>
+        {groups.map((items, i) => (
+          <Fragment key={i}>
+            <ContextMenuSeparator />
+            {items}
+          </Fragment>
         ))}
       </ContextMenuContent>
     </ContextMenu>
