@@ -1,4 +1,4 @@
-import { Activity } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePermissions } from "@/hooks/usePermissions";
 import { AuditLogPanel } from "../components/AuditLogPanel";
@@ -15,24 +15,28 @@ export function EventsPage() {
   const canTasks = canView("task");
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Activity className="h-6 w-6 text-muted-foreground" />
-        <h1 className="text-2xl font-bold tracking-tight">Events</h1>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Events"
+        summary={
+          canTasks
+            ? "Every action recorded in Nexara or seen in Proxmox, and how each Proxmox task ended."
+            : "Every action recorded in Nexara or seen in Proxmox, newest first."
+        }
+      />
 
       <Tabs defaultValue="audit">
         <TabsList>
-          <TabsTrigger value="audit">Audit Log</TabsTrigger>
+          <TabsTrigger value="audit">Audit log</TabsTrigger>
           {canTasks && <TabsTrigger value="tasks">Tasks</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value="audit" className="mt-4">
+        <TabsContent value="audit" className="mt-5">
           <AuditLogPanel />
         </TabsContent>
 
         {canTasks && (
-          <TabsContent value="tasks" className="mt-4">
+          <TabsContent value="tasks" className="mt-5">
             <TasksPanel />
           </TabsContent>
         )}

@@ -9,7 +9,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Panel } from "@/components/page/Panel";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,7 +27,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Eye, Download, FileCode, Mail, Trash2 } from "lucide-react";
+import {
+  Download,
+  Eye,
+  FileCode,
+  Loader2,
+  Mail,
+  MoreHorizontal,
+  Trash2,
+} from "lucide-react";
 import {
   useReportRuns,
   useDeleteReportRun,
@@ -32,12 +47,32 @@ import type { ReportRun } from "@/types/api";
 import { reportTypeLabel, periodLabel, runFileName } from "../report-types";
 import { ReportEmailDialog } from "./ReportEmailDialog";
 
-const STATUS_VARIANTS: Record<string, BadgeVariant> = {
-  completed: "default",
-  running: "outline",
-  pending: "secondary",
-  failed: "destructive",
-};
+/** A run's state in words. A finished run is the ordinary case and stays plain. */
+function RunStatus({ run }: { run: ReportRun }) {
+  if (run.status === "completed") {
+    return <span className="text-muted-foreground">Completed</span>;
+  }
+  if (run.status === "running") {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />
+        Running
+      </span>
+    );
+  }
+  if (run.status === "failed") {
+    return (
+      <span className="inline-flex items-center gap-[7px] text-red-700 dark:text-red-400">
+        <span
+          aria-hidden="true"
+          className="h-[7px] w-[7px] shrink-0 rounded-full bg-red-500"
+        />
+        Failed
+      </span>
+    );
+  }
+  return <span className="text-muted-foreground">Pending</span>;
+}
 
 export function ReportRunsTable() {
   const { data: runs, isLoading, error } = useReportRuns();
@@ -53,156 +88,172 @@ export function ReportRunsTable() {
   const clusterName = (id: string) =>
     clusters?.find((c) => c.id === id)?.name ?? "—";
 
-  if (isLoading)
-    return (
-      <div className="py-8 text-center text-muted-foreground">Loading...</div>
+  const download = (run: ReportRun, format: "html" | "csv") => {
+    void downloadReportRun(
+      run,
+      format,
+      runFileName(run, clusterName(run.cluster_id), format),
     );
-  if (error)
-    return (
-      <div className="py-8 text-center text-destructive">
-        Failed to load report history:{" "}
-        {error instanceof Error ? error.message : "Unknown error"}
-      </div>
-    );
-  if (!runs?.length)
-    return (
-      <div className="py-8 text-center text-muted-foreground">
-        No report runs yet. Generate one from the catalogue above.
-      </div>
-    );
+  };
 
   return (
-    <>
+    <Panel
+      flush
+      title="Report history"
+      aside={
+        runs && runs.length > 0
+          ? `${String(runs.length)} ${runs.length === 1 ? "run" : "runs"}`
+          : undefined
+      }
+    >
       {deleteError && (
-        <p className="mb-2 text-sm text-destructive">{deleteError}</p>
+        <p className="px-[18px] pb-3 text-sm text-destructive">{deleteError}</p>
       )}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Report</TableHead>
-            <TableHead>Cluster</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Period</TableHead>
-            <TableHead>Created</TableHead>
-            <TableHead>Source</TableHead>
-            <TableHead className="w-[200px]">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {runs.map((run) => (
-            <TableRow key={run.id}>
-              <TableCell className="font-medium">
-                {run.status === "completed" ? (
-                  <Link
-                    to={`/reports/runs/${run.id}`}
-                    className="hover:underline"
-                  >
-                    {reportTypeLabel(run.report_type)}
-                  </Link>
-                ) : (
-                  reportTypeLabel(run.report_type)
-                )}
-              </TableCell>
-              <TableCell>{clusterName(run.cluster_id)}</TableCell>
-              <TableCell>
-                <Badge variant={STATUS_VARIANTS[run.status] ?? "secondary"}>
-                  {run.status}
-                </Badge>
-                {run.error_message ? (
-                  <span
-                    className="ml-2 text-xs text-destructive"
-                    title={run.error_message}
-                  >
-                    {run.error_message.length > 60
-                      ? run.error_message.slice(0, 60) + "…"
-                      : run.error_message}
-                  </span>
-                ) : null}
-              </TableCell>
-              <TableCell>{periodLabel(run.time_range_hours)}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {new Date(run.created_at).toLocaleString()}
-              </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {run.schedule_id ? "Schedule" : "On demand"}
-              </TableCell>
-              <TableCell>
-                <div className="flex gap-1">
-                  {run.status === "completed" && (
-                    <>
-                      <Button variant="ghost" size="icon" asChild title="Open">
-                        <Link to={`/reports/runs/${run.id}`}>
-                          <Eye className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Download HTML"
-                        onClick={() => {
-                          void downloadReportRun(
-                            run,
-                            "html",
-                            runFileName(
-                              run,
-                              clusterName(run.cluster_id),
-                              "html",
-                            ),
-                          );
-                        }}
-                      >
-                        <FileCode className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Download CSV"
-                        onClick={() => {
-                          void downloadReportRun(
-                            run,
-                            "csv",
-                            runFileName(
-                              run,
-                              clusterName(run.cluster_id),
-                              "csv",
-                            ),
-                          );
-                        }}
-                      >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                      {canGenerate && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Email this report"
-                          onClick={() => {
-                            setEmailRun(run);
-                          }}
-                        >
-                          <Mail className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </>
-                  )}
-                  {canManage && run.status !== "running" && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title="Delete run"
-                      onClick={() => {
-                        setDeleteTarget(run);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  )}
-                </div>
-              </TableCell>
+      {isLoading ? (
+        <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+          Loading...
+        </p>
+      ) : error ? (
+        <p className="px-[18px] pb-1 text-sm text-destructive">
+          Failed to load report history:{" "}
+          {error instanceof Error ? error.message : "Unknown error"}
+        </p>
+      ) : !runs?.length ? (
+        <p className="px-[18px] pb-1 text-sm text-muted-foreground">
+          No report runs yet. Generate one from the report types.
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Report</TableHead>
+              <TableHead className="hidden sm:table-cell">Period</TableHead>
+              <TableHead>Generated</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="w-12">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {runs.map((run) => {
+              const label = reportTypeLabel(run.report_type);
+              const completed = run.status === "completed";
+              const canDelete = canManage && run.status !== "running";
+              return (
+                <TableRow key={run.id}>
+                  <TableCell className="whitespace-nowrap py-2">
+                    <div className="font-medium">
+                      {completed ? (
+                        <Link
+                          to={`/reports/runs/${run.id}`}
+                          className="hover:underline"
+                        >
+                          {label}
+                        </Link>
+                      ) : (
+                        label
+                      )}
+                    </div>
+                    <div className="text-[12.5px] text-muted-foreground">
+                      {clusterName(run.cluster_id)}
+                    </div>
+                  </TableCell>
+                  <TableCell className="hidden py-2 whitespace-nowrap sm:table-cell">
+                    {periodLabel(run.time_range_hours)}
+                  </TableCell>
+                  <TableCell className="py-2">
+                    <div className="whitespace-nowrap">
+                      {new Date(run.created_at).toLocaleString()}
+                    </div>
+                    <div className="text-[12.5px] text-muted-foreground">
+                      {run.schedule_id ? "By a schedule" : "On demand"}
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-2">
+                    <RunStatus run={run} />
+                    {run.error_message ? (
+                      <div
+                        className="max-w-[22rem] truncate text-[12.5px] text-red-700 dark:text-red-400"
+                        title={run.error_message}
+                      >
+                        {run.error_message}
+                      </div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="py-1.5 text-right">
+                    {(completed || canDelete) && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground"
+                            aria-label={`Actions for ${label}, ${new Date(run.created_at).toLocaleString()}`}
+                            title="Actions"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {completed && (
+                            <>
+                              <DropdownMenuItem asChild>
+                                <Link to={`/reports/runs/${run.id}`}>
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  Open
+                                </Link>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  download(run, "html");
+                                }}
+                              >
+                                <FileCode className="mr-2 h-4 w-4" />
+                                Download HTML
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  download(run, "csv");
+                                }}
+                              >
+                                <Download className="mr-2 h-4 w-4" />
+                                Download CSV
+                              </DropdownMenuItem>
+                              {canGenerate && (
+                                <DropdownMenuItem
+                                  onSelect={() => {
+                                    setEmailRun(run);
+                                  }}
+                                >
+                                  <Mail className="mr-2 h-4 w-4" />
+                                  Email this report
+                                </DropdownMenuItem>
+                              )}
+                            </>
+                          )}
+                          {completed && canDelete && <DropdownMenuSeparator />}
+                          {canDelete && (
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onSelect={() => {
+                                setDeleteTarget(run);
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete run
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
 
       <ReportEmailDialog
         run={emailRun}
@@ -253,6 +304,6 @@ export function ReportRunsTable() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </Panel>
   );
 }

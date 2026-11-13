@@ -1,9 +1,9 @@
 {
   "security": "Security",
-  "vulnerabilityScanning": "Vulnerability Scanning",
-  "rollingUpdates": "Rolling Updates",
+  "vulnerabilityScanning": "Vulnerability scanning",
+  "rollingUpdates": "Rolling updates",
   "noClustersConfigured": "No clusters configured. Add a cluster first.",
-  "scanNow": "Scan Now",
+  "scanNow": "Scan now",
   "securityPosture": "Security Posture",
   "scoreOf100": "/100",
   "nodesScanned": "{{scanned}}/{{total}} nodes scanned",
@@ -23,5 +23,15 @@
   "package": "Package",
   "current": "Current",
   "available": "Available",
-  "priority": "Priority"
+  "priority": "Priority",
+  "cluster": "Cluster",
+  "summaryPurpose": "Known vulnerabilities on each node, and rolling package updates.",
+  "summaryNoScans": "No vulnerability scan has run for this cluster yet",
+  "summaryNodes_one": "{{scanned}} of {{count}} node scanned",
+  "summaryNodes_other": "{{scanned}} of {{count}} nodes scanned",
+  "summaryClean": "no known vulnerabilities",
+  "summaryVulns_one": "{{count}} known vulnerability",
+  "summaryVulns_other": "{{count}} known vulnerabilities",
+  "summaryCritical": "{{count}} critical",
+  "summaryExploited": "{{count}} actively exploited"
 }

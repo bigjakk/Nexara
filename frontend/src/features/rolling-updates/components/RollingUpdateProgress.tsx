@@ -1,6 +1,23 @@
+import { useState } from "react";
+import {
+  Loader2,
+  Pause,
+  Play,
+  CheckCircle,
+  SkipForward,
+  ChevronDown,
+  RefreshCw,
+} from "lucide-react";
+import { DetailField } from "@/components/DetailField";
+import {
+  Breadcrumbs,
+  DetailHeader,
+  Fact,
+  StatusFact,
+} from "@/components/page/DetailHeader";
+import { DefGrid, Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { NodeStepBadge } from "./NodeStepBadge";
 import { PackagePreviewTable } from "./PackagePreviewTable";
 import {
@@ -13,32 +30,23 @@ import {
   useCancelRollingUpdateJob,
 } from "../api/rolling-update-queries";
 import type {
+  RollingUpdateJob,
   RollingUpdateNode,
   AptPackage,
   GuestSnapshot,
   HAConflict,
 } from "@/types/api";
-import {
-  Loader2,
-  ArrowLeft,
-  Pause,
-  Play,
-  XCircle,
-  CheckCircle,
-  SkipForward,
-  ChevronDown,
-  ChevronRight,
-  AlertTriangle,
-  RotateCcw,
-} from "lucide-react";
-import { useState } from "react";
 
 interface RollingUpdateProgressProps {
   clusterId: string;
+  /** The cluster's name, for the facts line. */
+  clusterName?: string | undefined;
   jobId: string;
   canManage: boolean;
-  onBack: () => void;
 }
+
+/** Where the job list lives: the trail back from a job. */
+const JOBS_PATH = "/security?tab=rolling-updates";
 
 const STEP_ORDER = [
   "pending",
@@ -51,21 +59,23 @@ const STEP_ORDER = [
   "completed",
 ] as const;
 
+/** The pipeline as a row of ticks: done plain, the current one in the data colour. */
 function StepIndicator({ node }: { node: RollingUpdateNode }) {
   const currentIdx = STEP_ORDER.indexOf(
     node.step as (typeof STEP_ORDER)[number],
   );
+  const finished = node.step === "completed";
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1" aria-hidden="true">
       {STEP_ORDER.map((step, i) => {
-        let color = "bg-muted";
+        let color = "bg-foreground/10";
         if (node.step === "failed") {
-          color = i <= currentIdx ? "bg-destructive" : "bg-muted";
+          color = i <= currentIdx ? "bg-red-500" : "bg-foreground/10";
         } else if (node.step === "skipped") {
-          color = "bg-muted";
-        } else if (i < currentIdx) {
-          color = "bg-emerald-500";
+          color = "bg-foreground/10";
+        } else if (i < currentIdx || finished) {
+          color = "bg-foreground/35";
         } else if (i === currentIdx) {
           color = "bg-data";
         }
@@ -73,7 +83,7 @@ function StepIndicator({ node }: { node: RollingUpdateNode }) {
         return (
           <div
             key={step}
-            className={`h-2 w-6 rounded-full ${color}`}
+            className={`h-1.5 w-5 rounded-full ${color}`}
             title={step.replace(/_/g, " ")}
           />
         );
@@ -92,6 +102,27 @@ function parseJsonField<T>(raw: unknown): T[] {
     }
   }
   return [];
+}
+
+/** The times a node passed each stage, in the order it passes them. */
+function nodeTimes(node: RollingUpdateNode): Array<[string, string]> {
+  const times: Array<[string, string | undefined]> = [
+    ["Drain started", node.drain_started_at],
+    ["Drain done", node.drain_completed_at],
+    ["Upgrade started", node.upgrade_started_at],
+    ["Upgrade done", node.upgrade_completed_at],
+    [
+      "Upgrade confirmed",
+      node.upgrade_started_at ? undefined : node.upgrade_confirmed_at,
+    ],
+    ["Reboot started", node.reboot_started_at],
+    ["Reboot done", node.reboot_completed_at],
+    ["Health check", node.health_check_at],
+    ["Restore done", node.restore_completed_at],
+  ];
+  return times.flatMap(([label, at]) =>
+    at ? [[label, new Date(at).toLocaleTimeString()] as [string, string]] : [],
+  );
 }
 
 function NodeRow({
@@ -113,35 +144,38 @@ function NodeRow({
 
   const packages = parseJsonField<AptPackage>(node.packages_json);
   const guests = parseJsonField<GuestSnapshot>(node.guests_json);
+  const times = nodeTimes(node);
 
   return (
-    <div className="rounded-md border">
+    <li>
       <div
-        className="flex cursor-pointer items-center gap-3 p-3"
+        className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 px-[18px] py-2.5 transition-colors hover:bg-foreground/[0.035]"
         onClick={() => {
           setExpanded(!expanded);
         }}
       >
-        {expanded ? (
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-        )}
-
-        <span className="min-w-[120px] font-medium">{node.node_name}</span>
+        {/* The click is the row's; the button is there for the keyboard. */}
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="flex min-w-[8.5rem] items-center gap-2 rounded-sm text-left font-medium outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ChevronDown
+            className={cn(
+              "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+              !expanded && "-rotate-90",
+            )}
+          />
+          {node.node_name}
+        </button>
         {/* An in-place upgrade never reboots a node that still has guests on
             it, so a kernel update finishes with the reboot still owed. The
             badge says that instead of "Completed", or the row reads as done. */}
         <NodeStepBadge
           step={node.step}
           rebootRequired={node.reboot_required === true}
+          className="min-w-[9.5rem]"
         />
-        {node.reboot_required === true && (
-          <RotateCcw
-            aria-label="Reboot required"
-            className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500"
-          />
-        )}
         <StepIndicator node={node} />
 
         <div className="ml-auto flex items-center gap-2">
@@ -161,13 +195,14 @@ function NodeRow({
               ) : (
                 <CheckCircle className="mr-1 h-3 w-3" />
               )}
-              Confirm Upgrade
+              Confirm upgrade
             </Button>
           )}
           {canManage && node.step === "pending" && (
             <Button
               variant="ghost"
               size="sm"
+              className="text-muted-foreground"
               onClick={(e) => {
                 e.stopPropagation();
                 skipNode.mutate({ clusterId, jobId, nodeId: node.id });
@@ -182,38 +217,42 @@ function NodeRow({
       </div>
 
       {expanded && (
-        <div className="space-y-3 border-t px-3 pb-3 pt-2">
+        <div className="space-y-4 bg-foreground/[0.03] px-[18px] py-3.5 text-sm">
           {node.failure_reason && (
-            <p className="text-sm text-destructive">{node.failure_reason}</p>
+            <p className="text-red-700 [overflow-wrap:anywhere] dark:text-red-400">
+              {node.failure_reason}
+            </p>
           )}
           {node.skip_reason && (
-            <p className="text-sm text-muted-foreground">
-              Skipped: {node.skip_reason}
-            </p>
+            <p className="text-muted-foreground">Skipped: {node.skip_reason}</p>
           )}
 
           {guests.length > 0 && (
             <div>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">
+              <p className="mb-1.5 text-[12.5px] font-medium text-muted-foreground">
                 Guests ({guests.length})
                 {guests.some((g) => g.passthrough) && (
-                  <span className="ml-2 text-amber-500">
+                  <span className="ml-2 text-amber-700 dark:text-amber-400">
                     {guests.filter((g) => g.passthrough).length} with
                     passthrough
                   </span>
                 )}
               </p>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1.5">
                 {guests.map((g) => (
-                  <Badge
+                  <span
                     key={g.vmid}
-                    variant={g.passthrough ? "secondary" : "outline"}
-                    className={`text-xs ${g.passthrough ? "border-amber-500/50" : ""}`}
+                    className={cn(
+                      "rounded-[5px] px-1.5 py-0.5 text-[12.5px]",
+                      g.passthrough
+                        ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                        : "bg-foreground/[0.07]",
+                    )}
                   >
                     {g.type === "qemu" ? "VM" : "CT"} {g.vmid}
                     {g.name ? ` (${g.name})` : ""}
                     {g.passthrough ? " [passthrough]" : ""}
-                  </Badge>
+                  </span>
                 ))}
               </div>
             </div>
@@ -221,87 +260,53 @@ function NodeRow({
 
           {packages.length > 0 && (
             <div>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">
+              <p className="mb-1 text-[12.5px] font-medium text-muted-foreground">
                 Packages ({packages.length})
               </p>
-              <PackagePreviewTable packages={packages} />
+              <div className="-mx-[18px]">
+                <PackagePreviewTable packages={packages} />
+              </div>
             </div>
           )}
 
           {node.upgrade_output && (
             <div>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">
-                Upgrade Output
+              <p className="mb-1 text-[12.5px] font-medium text-muted-foreground">
+                Upgrade output
               </p>
-              <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs">
+              <pre className="max-h-48 overflow-auto rounded-md bg-foreground/[0.06] p-2.5 font-mono text-xs">
                 {node.upgrade_output}
               </pre>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground sm:grid-cols-4">
-            {node.drain_started_at && (
-              <div>
-                <span className="font-medium">Drain started: </span>
-                {new Date(node.drain_started_at).toLocaleTimeString()}
-              </div>
+          {times.length > 0 && (
+            <DefGrid className="gap-y-2.5">
+              {times.map(([label, at]) => (
+                <DetailField key={label} label={label}>
+                  {at}
+                </DetailField>
+              ))}
+            </DefGrid>
+          )}
+
+          {!node.failure_reason &&
+            !node.skip_reason &&
+            guests.length === 0 &&
+            packages.length === 0 &&
+            !node.upgrade_output &&
+            times.length === 0 && (
+              <p className="text-muted-foreground">
+                Nothing has been recorded for this node yet.
+              </p>
             )}
-            {node.drain_completed_at && (
-              <div>
-                <span className="font-medium">Drain done: </span>
-                {new Date(node.drain_completed_at).toLocaleTimeString()}
-              </div>
-            )}
-            {node.upgrade_started_at && (
-              <div>
-                <span className="font-medium">Upgrade started: </span>
-                {new Date(node.upgrade_started_at).toLocaleTimeString()}
-              </div>
-            )}
-            {node.upgrade_completed_at && (
-              <div>
-                <span className="font-medium">Upgrade done: </span>
-                {new Date(node.upgrade_completed_at).toLocaleTimeString()}
-              </div>
-            )}
-            {node.upgrade_confirmed_at && !node.upgrade_started_at && (
-              <div>
-                <span className="font-medium">Upgrade confirmed: </span>
-                {new Date(node.upgrade_confirmed_at).toLocaleTimeString()}
-              </div>
-            )}
-            {node.reboot_started_at && (
-              <div>
-                <span className="font-medium">Reboot started: </span>
-                {new Date(node.reboot_started_at).toLocaleTimeString()}
-              </div>
-            )}
-            {node.reboot_completed_at && (
-              <div>
-                <span className="font-medium">Reboot done: </span>
-                {new Date(node.reboot_completed_at).toLocaleTimeString()}
-              </div>
-            )}
-            {node.health_check_at && (
-              <div>
-                <span className="font-medium">Health check: </span>
-                {new Date(node.health_check_at).toLocaleTimeString()}
-              </div>
-            )}
-            {node.restore_completed_at && (
-              <div>
-                <span className="font-medium">Restore done: </span>
-                {new Date(node.restore_completed_at).toLocaleTimeString()}
-              </div>
-            )}
-          </div>
         </div>
       )}
-    </div>
+    </li>
   );
 }
 
-function HAWarningsCard({
+function HAWarningsPanel({
   warnings,
   policy,
 }: {
@@ -311,82 +316,96 @@ function HAWarningsCard({
   const [expanded, setExpanded] = useState(false);
   const errorCount = warnings.filter((w) => w.severity === "error").length;
   const warnCount = warnings.length - errorCount;
+  const counts = [
+    ...(errorCount > 0
+      ? [`${String(errorCount)} error${errorCount > 1 ? "s" : ""}`]
+      : []),
+    ...(warnCount > 0
+      ? [`${String(warnCount)} warning${warnCount > 1 ? "s" : ""}`]
+      : []),
+  ].join(", ");
 
   return (
-    <Card>
-      <div
-        className="flex cursor-pointer items-center gap-2 px-4 py-3"
-        onClick={() => {
-          setExpanded(!expanded);
-        }}
-      >
-        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-        <span className="text-sm font-medium">
-          HA Warnings ({warnings.length})
+    <Panel
+      flush={expanded}
+      title={`HA warnings (${String(warnings.length)})`}
+      aside={
+        <span
+          className={
+            errorCount > 0
+              ? "text-red-700 dark:text-red-400"
+              : "text-amber-700 dark:text-amber-400"
+          }
+        >
+          {counts}
+          <span className="text-muted-foreground">, policy: {policy}</span>
         </span>
-        <Badge variant="outline" className="text-xs">
-          Policy: {policy}
-        </Badge>
-        {errorCount > 0 && (
-          <Badge variant="destructive" className="text-xs">
-            {errorCount} error{errorCount > 1 ? "s" : ""}
-          </Badge>
-        )}
-        {warnCount > 0 && (
-          <Badge
-            variant="outline"
-            className="border-amber-500/50 text-xs text-amber-500"
-          >
-            {warnCount} warning{warnCount > 1 ? "s" : ""}
-          </Badge>
-        )}
-        <div className="ml-auto">
-          {expanded ? (
-            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-          )}
-        </div>
-      </div>
+      }
+      actions={
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-expanded={expanded}
+          className="text-muted-foreground"
+          onClick={() => {
+            setExpanded(!expanded);
+          }}
+        >
+          {expanded ? "Hide" : "Show"}
+        </Button>
+      }
+      bodyClassName={expanded ? "" : "pb-1"}
+    >
       {expanded && (
-        <CardContent className="space-y-2 border-t pt-3">
+        <ul className="divide-y border-t">
           {warnings.map((w, i) => {
             const isError = w.severity === "error";
             return (
-              <div
+              <li
                 key={`${String(w.vmid)}-${w.node}-${String(i)}`}
-                className={`flex items-start gap-2 rounded-md border p-3 text-sm ${
-                  isError
-                    ? "border-destructive/50 bg-destructive/10"
-                    : "border-amber-500/50 bg-amber-500/10"
-                }`}
+                className="flex items-baseline gap-2.5 px-[18px] py-2.5 text-sm"
               >
-                {isError ? (
-                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-                ) : (
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                )}
-                <div>
-                  <p>{w.message}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "h-2 w-2 shrink-0 -translate-y-px rounded-full",
+                    isError ? "bg-red-500" : "bg-amber-500",
+                  )}
+                />
+                <div className="min-w-0">
+                  <p className="[overflow-wrap:anywhere]">{w.message}</p>
+                  <p className="mt-0.5 text-[12.5px] text-muted-foreground">
                     {w.node ? `Node: ${w.node} | ` : ""}Source: {w.source}
                     {w.rule_name ? ` (${w.rule_name})` : ""}
                   </p>
                 </div>
-              </div>
+              </li>
             );
           })}
-        </CardContent>
+        </ul>
       )}
-    </Card>
+    </Panel>
   );
 }
 
+/** The dot StatusFact draws for a job's state, and the word beside it. */
+const JOB_STATE: Record<
+  RollingUpdateJob["status"],
+  { dot: string; label: string }
+> = {
+  pending: { dot: "unknown", label: "Pending" },
+  running: { dot: "running", label: "Running" },
+  paused: { dot: "paused", label: "Paused" },
+  completed: { dot: "unknown", label: "Completed" },
+  failed: { dot: "offline", label: "Failed" },
+  cancelled: { dot: "unknown", label: "Cancelled" },
+};
+
 export function RollingUpdateProgress({
   clusterId,
+  clusterName,
   jobId,
   canManage,
-  onBack,
 }: RollingUpdateProgressProps) {
   const { data: job, isLoading: jobLoading } = useRollingUpdateJob(
     clusterId,
@@ -400,121 +419,137 @@ export function RollingUpdateProgress({
   const resumeJob = useResumeRollingUpdateJob();
   const cancelJob = useCancelRollingUpdateJob();
 
+  const crumbs = [
+    { label: "Security", to: "/security" },
+    { label: "Rolling updates", to: JOBS_PATH },
+    { label: "Job" },
+  ];
+
   if (jobLoading || nodesLoading) {
     return (
-      <div className="flex h-32 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="space-y-5">
+        <Breadcrumbs crumbs={crumbs} />
+        <div className="flex h-32 items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
       </div>
     );
   }
 
   if (!job || !nodes) {
-    return <p className="text-muted-foreground">Job not found</p>;
+    return (
+      <div className="space-y-3">
+        <Breadcrumbs crumbs={crumbs} />
+        <p className="text-muted-foreground">Job not found</p>
+      </div>
+    );
   }
 
   const completedCount = nodes.filter((n) => n.step === "completed").length;
   const failedCount = nodes.filter((n) => n.step === "failed").length;
   const skippedCount = nodes.filter((n) => n.step === "skipped").length;
+  const progress = `${String(completedCount)}/${String(nodes.length)} completed${
+    failedCount > 0 ? `, ${String(failedCount)} failed` : ""
+  }${skippedCount > 0 ? `, ${String(skippedCount)} skipped` : ""}`;
+  const state = JOB_STATE[job.status];
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="mr-1 h-4 w-4" />
-          Back
-        </Button>
-
-        <Badge
-          variant={
-            job.status === "failed"
-              ? "destructive"
-              : job.status === "running"
-                ? "default"
-                : "outline"
-          }
-        >
-          {job.status}
-        </Badge>
-
-        <span className="text-sm text-muted-foreground">
-          {completedCount}/{nodes.length} completed
-          {failedCount > 0 && `, ${String(failedCount)} failed`}
-          {skippedCount > 0 && `, ${String(skippedCount)} skipped`}
-        </span>
-
-        <div className="ml-auto flex items-center gap-2">
-          {canManage && job.status === "running" && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                pauseJob.mutate({ clusterId, jobId });
-              }}
-              disabled={pauseJob.isPending}
-            >
-              <Pause className="mr-1 h-3 w-3" />
-              Pause
-            </Button>
-          )}
-          {canManage && job.status === "paused" && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                resumeJob.mutate({ clusterId, jobId });
-              }}
-              disabled={resumeJob.isPending}
-            >
-              <Play className="mr-1 h-3 w-3" />
-              Resume
-            </Button>
-          )}
-          {canManage &&
-            (job.status === "running" || job.status === "paused") && (
+    <div className="space-y-5">
+      <DetailHeader
+        crumbs={crumbs}
+        icon={<RefreshCw />}
+        title="Rolling update"
+        facts={
+          <>
+            <StatusFact status={state.dot} label={state.label} nameDot />
+            <Fact label="Nodes">{progress}</Fact>
+            {clusterName !== undefined && (
+              <Fact label="Cluster">{clusterName}</Fact>
+            )}
+            <Fact label="Guests">
+              {job.drain_guests ? "drained first" : "stay running"}
+            </Fact>
+            <Fact label="At a time">{String(job.parallelism)}</Fact>
+            <Fact label="Reboot">{job.reboot_after_update ? "yes" : "no"}</Fact>
+            <Fact label="Created">
+              {new Date(job.created_at).toLocaleString()}
+            </Fact>
+          </>
+        }
+        actions={
+          <>
+            {canManage && job.status === "running" && (
               <Button
-                variant="destructive"
+                variant="outline"
                 size="sm"
                 onClick={() => {
-                  cancelJob.mutate({ clusterId, jobId });
+                  pauseJob.mutate({ clusterId, jobId });
                 }}
-                disabled={cancelJob.isPending}
+                disabled={pauseJob.isPending}
               >
-                <XCircle className="mr-1 h-3 w-3" />
-                Cancel
+                <Pause className="mr-1 h-3 w-3" />
+                Pause
               </Button>
             )}
-        </div>
+            {canManage && job.status === "paused" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  resumeJob.mutate({ clusterId, jobId });
+                }}
+                disabled={resumeJob.isPending}
+              >
+                <Play className="mr-1 h-3 w-3" />
+                Resume
+              </Button>
+            )}
+            {canManage &&
+              (job.status === "running" || job.status === "paused") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => {
+                    cancelJob.mutate({ clusterId, jobId });
+                  }}
+                  disabled={cancelJob.isPending}
+                >
+                  Cancel
+                </Button>
+              )}
+          </>
+        }
+      />
+
+      <div className="space-y-4">
+        {job.failure_reason && (
+          <Panel title="Why it failed">
+            <p className="text-sm text-red-700 [overflow-wrap:anywhere] dark:text-red-400">
+              {job.failure_reason}
+            </p>
+          </Panel>
+        )}
+
+        {job.ha_warnings && job.ha_warnings.length > 0 && (
+          <HAWarningsPanel warnings={job.ha_warnings} policy={job.ha_policy} />
+        )}
+
+        <Panel flush title="Nodes" aside="in the order they are updated">
+          <ul className="divide-y border-t">
+            {nodes.map((node) => (
+              <NodeRow
+                key={node.id}
+                node={node}
+                clusterId={clusterId}
+                jobId={jobId}
+                jobRunning={job.status === "running"}
+                canManage={canManage}
+              />
+            ))}
+          </ul>
+        </Panel>
       </div>
-
-      {job.failure_reason && (
-        <Card>
-          <CardContent className="py-3">
-            <p className="text-sm text-destructive">{job.failure_reason}</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {job.ha_warnings && job.ha_warnings.length > 0 && (
-        <HAWarningsCard warnings={job.ha_warnings} policy={job.ha_policy} />
-      )}
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Node Pipeline</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {nodes.map((node) => (
-            <NodeRow
-              key={node.id}
-              node={node}
-              clusterId={clusterId}
-              jobId={jobId}
-              jobRunning={job.status === "running"}
-              canManage={canManage}
-            />
-          ))}
-        </CardContent>
-      </Card>
     </div>
   );
 }

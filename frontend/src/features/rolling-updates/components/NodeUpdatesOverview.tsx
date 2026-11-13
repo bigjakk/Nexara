@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Panel } from "@/components/page/Panel";
+import { cn } from "@/lib/utils";
 import { PackagePreviewTable } from "./PackagePreviewTable";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useNodePackagePreview } from "../api/rolling-update-queries";
@@ -8,15 +8,29 @@ import { useSettledQueryError } from "@/hooks/useSettledQueryError";
 import { securityPackageCount } from "../lib/packages";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { describeError } from "@/lib/api-error";
-import {
-  Loader2,
-  Package,
-  ChevronDown,
-  ChevronRight,
-  CheckCircle,
-  AlertTriangle,
-  HelpCircle,
-} from "lucide-react";
+import { Loader2, ChevronDown } from "lucide-react";
+
+/** A dot and a few words: what the last update check said about a node. */
+function UpdateState({
+  dot,
+  className,
+  children,
+}: {
+  /** The dot's colour classes. */
+  dot: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span className={cn("inline-flex items-center gap-[7px]", className)}>
+      <span
+        aria-hidden="true"
+        className={cn("h-2 w-2 shrink-0 rounded-full", dot)}
+      />
+      {children}
+    </span>
+  );
+}
 
 function NodePackageRow({
   clusterId,
@@ -41,61 +55,63 @@ function NodePackageRow({
   const securityCount = securityPackageCount(packages);
 
   return (
-    <div className="rounded-md border">
+    <li>
       <button
         type="button"
-        className="flex w-full items-center gap-3 p-3 text-left hover:bg-accent/50"
+        aria-expanded={expanded}
+        className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-[18px] py-2.5 text-left text-sm outline-hidden transition-colors hover:bg-foreground/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         onClick={() => {
           setExpanded(!expanded);
         }}
       >
-        {expanded ? (
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-        )}
-
-        <span className="min-w-[120px] font-medium">{nodeName}</span>
+        <span className="flex min-w-[8.5rem] items-center gap-2 font-medium">
+          <ChevronDown
+            className={cn(
+              "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+              !expanded && "-rotate-90",
+            )}
+          />
+          {nodeName}
+        </span>
 
         {isLoading && settledError === null ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         ) : settledError !== null ? (
-          <Badge
-            variant="outline"
-            className="gap-1 border-destructive/40 text-destructive"
+          <UpdateState
+            dot="bg-red-500"
+            className="text-red-700 dark:text-red-400"
           >
-            <AlertTriangle className="h-3 w-3" />
             Update check failed
-          </Badge>
+          </UpdateState>
         ) : unread ? (
-          <Badge variant="outline" className="gap-1 text-muted-foreground">
-            <HelpCircle className="h-3 w-3" />
+          <UpdateState
+            dot="ring-[1.5px] ring-inset ring-muted-foreground/60"
+            className="text-muted-foreground"
+          >
             Not checked
-          </Badge>
+          </UpdateState>
         ) : count === 0 ? (
-          <Badge variant="outline" className="gap-1">
-            <CheckCircle className="h-3 w-3 text-emerald-500" />
+          <UpdateState dot="bg-emerald-500" className="text-muted-foreground">
             Up to date
-          </Badge>
+          </UpdateState>
         ) : (
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="gap-1">
-              <Package className="h-3 w-3" />
+          <span className="flex flex-wrap items-center gap-x-3">
+            <UpdateState dot={securityCount > 0 ? "bg-amber-500" : "bg-data"}>
               {String(count)} update{count !== 1 ? "s" : ""}
-            </Badge>
+            </UpdateState>
             {securityCount > 0 && (
-              <Badge variant="destructive">
+              <span className="text-amber-700 dark:text-amber-400">
                 {String(securityCount)} security
-              </Badge>
+              </span>
             )}
-          </div>
+          </span>
         )}
       </button>
 
       {expanded && (
-        <div className="border-t px-3 pb-3 pt-2">
+        <div className="bg-foreground/[0.03] py-3">
           {settledError !== null && (
-            <div className="text-sm text-muted-foreground">
+            <div className="px-[18px] text-sm text-muted-foreground">
               <p>
                 {/* A previous check can have succeeded before this one failed,
                     and TanStack keeps its rows. Saying the patch level is
@@ -121,7 +137,7 @@ function NodePackageRow({
           {/* Expanding a row must never open an empty box: the states with
               nothing to list still owe the operator a sentence. */}
           {settledError === null && (packages === undefined || count === 0) && (
-            <p className="text-sm text-muted-foreground">
+            <p className="px-[18px] text-sm text-muted-foreground">
               {isLoading
                 ? "Checking for updates..."
                 : unread
@@ -131,7 +147,7 @@ function NodePackageRow({
           )}
         </div>
       )}
-    </div>
+    </li>
   );
 }
 
@@ -152,28 +168,31 @@ export function NodeUpdatesOverview({ clusterId }: NodeUpdatesOverviewProps) {
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Available Updates</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {nodes !== undefined && nodes.length > 0 ? (
-          nodes.map((node) => (
+    <Panel
+      flush
+      title="Available updates"
+      aside="pending apt packages on each node"
+    >
+      {nodes !== undefined && nodes.length > 0 ? (
+        <ul className="divide-y border-t">
+          {nodes.map((node) => (
             <NodePackageRow
               key={node.id}
               clusterId={clusterId}
               nodeName={node.name}
             />
-          ))
-        ) : (
+          ))}
+        </ul>
+      ) : (
+        <div className="px-[18px] pb-1">
           <QueryStateNotice
             query={nodesQuery}
             subject="this cluster's nodes"
             empty="No nodes found."
             skeletonClassName="h-20 w-full"
           />
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </Panel>
   );
 }

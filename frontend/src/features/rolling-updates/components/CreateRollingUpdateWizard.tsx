@@ -223,7 +223,7 @@ export function CreateRollingUpdateWizard({
       }}
     >
       <DialogTrigger asChild>
-        <Button>New Rolling Update</Button>
+        <Button>New rolling update</Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader>

@@ -314,10 +314,7 @@ describe("HistoryTimeline", () => {
     expect(
       await screen.findByText(/^Nothing was recorded in this time/),
     ).toBeInTheDocument();
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Time" }),
-      "",
-    );
+    await user.click(screen.getByRole("button", { name: "All time" }));
     await waitFor(() => {
       expect(mockedPage.mock.calls.length).toBeGreaterThan(1);
     });

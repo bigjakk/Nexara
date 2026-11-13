@@ -1,4 +1,3 @@
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -8,17 +7,50 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import type { RollingUpdateJob } from "@/types/api";
-import { Play, XCircle, Eye } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
-const statusVariant: Record<RollingUpdateJob["status"], BadgeVariant> = {
-  pending: "outline",
-  running: "default",
-  paused: "secondary",
-  completed: "outline",
-  failed: "destructive",
-  cancelled: "outline",
+const STATUS_LABEL: Record<RollingUpdateJob["status"], string> = {
+  pending: "Pending",
+  running: "Running",
+  paused: "Paused",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
 };
+
+/** A job's state: a dot and a word. Finished is plain, and only trouble is coloured. */
+function JobStatus({ status }: { status: RollingUpdateJob["status"] }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-[7px] whitespace-nowrap",
+        (status === "pending" || status === "cancelled") &&
+          "text-muted-foreground",
+        status === "paused" && "text-amber-700 dark:text-amber-400",
+        status === "failed" && "text-red-700 dark:text-red-400",
+      )}
+    >
+      {status === "running" ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-data" />
+      ) : (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "h-2 w-2 shrink-0 rounded-full",
+            status === "paused" && "bg-amber-500",
+            status === "failed" && "bg-red-500",
+            status === "completed" && "bg-muted-foreground/45",
+            (status === "pending" || status === "cancelled") &&
+              "ring-[1.5px] ring-inset ring-muted-foreground/60",
+          )}
+        />
+      )}
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}
 
 interface RollingUpdateJobsTableProps {
   jobs: RollingUpdateJob[];
@@ -37,7 +69,7 @@ export function RollingUpdateJobsTable({
 }: RollingUpdateJobsTableProps) {
   if (jobs.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
+      <p className="px-[18px] pb-1 text-sm text-muted-foreground">
         No rolling update jobs yet
       </p>
     );
@@ -46,57 +78,68 @@ export function RollingUpdateJobsTable({
   return (
     <Table>
       <TableHeader>
-        <TableRow>
+        <TableRow className="hover:bg-transparent">
           <TableHead>Status</TableHead>
-          <TableHead>Parallelism</TableHead>
+          <TableHead className="whitespace-nowrap">Nodes at a time</TableHead>
           <TableHead>Reboot</TableHead>
           <TableHead>Created</TableHead>
           <TableHead>Completed</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
+          <TableHead className="text-right">
+            <span className="sr-only">Actions</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {jobs.map((job) => (
           <TableRow key={job.id}>
-            <TableCell>
-              <Badge variant={statusVariant[job.status]}>{job.status}</Badge>
+            {/* A floor on the width: on a phone the table scrolls sideways
+                rather than squeeze a failure's reason into a ribbon. */}
+            <TableCell
+              className={job.failure_reason ? "min-w-[16rem] py-2" : "py-2"}
+            >
+              <JobStatus status={job.status} />
               {job.failure_reason && (
-                <span className="ml-2 text-xs text-destructive">
+                <div className="mt-0.5 max-w-[30rem] text-[12.5px] text-red-700 [overflow-wrap:anywhere] dark:text-red-400">
                   {job.failure_reason}
-                </span>
+                </div>
               )}
             </TableCell>
-            <TableCell>{job.parallelism}</TableCell>
-            <TableCell>{job.reboot_after_update ? "Yes" : "No"}</TableCell>
-            <TableCell className="text-xs text-muted-foreground">
+            <TableCell className="py-2 tabular-nums">
+              {job.parallelism}
+            </TableCell>
+            <TableCell className="py-2">
+              {job.reboot_after_update ? "Yes" : "No"}
+            </TableCell>
+            <TableCell className="whitespace-nowrap py-2 text-muted-foreground">
               {new Date(job.created_at).toLocaleString()}
             </TableCell>
-            <TableCell className="text-xs text-muted-foreground">
+            <TableCell className="whitespace-nowrap py-2 text-muted-foreground">
               {job.completed_at
                 ? new Date(job.completed_at).toLocaleString()
-                : "-"}
+                : "—"}
             </TableCell>
-            <TableCell className="text-right">
+            <TableCell className="py-1.5 text-right">
               <div className="flex items-center justify-end gap-1">
+                {/* View first: Start begins a rolling update without asking,
+                    so it does not sit where a habitual click lands. */}
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="text-primary hover:text-primary"
                   onClick={() => {
                     onSelect(job);
                   }}
                 >
-                  <Eye className="mr-1 h-3 w-3" />
                   View
                 </Button>
                 {canManage && job.status === "pending" && (
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     onClick={() => {
                       onStart(job.id);
                     }}
                   >
-                    <Play className="mr-1 h-3 w-3" />
                     Start
                   </Button>
                 )}
@@ -107,11 +150,11 @@ export function RollingUpdateJobsTable({
                     <Button
                       variant="ghost"
                       size="sm"
+                      className="text-muted-foreground"
                       onClick={() => {
                         onCancel(job.id);
                       }}
                     >
-                      <XCircle className="mr-1 h-3 w-3" />
                       Cancel
                     </Button>
                   )}

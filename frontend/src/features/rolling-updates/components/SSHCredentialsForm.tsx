@@ -1,16 +1,10 @@
 import { useMemo, useState } from "react";
+import { SettingRow, SettingsFooter } from "@/components/page/Settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Loader2,
-  CheckCircle,
-  XCircle,
-  Trash2,
-  Key,
-  ShieldAlert,
-  ShieldCheck,
-} from "lucide-react";
+import { Segmented } from "@/components/ui/segmented";
+import { Loader2, Trash2 } from "lucide-react";
 import {
   useSSHCredentials,
   useUpsertSSHCredentials,
@@ -205,90 +199,95 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
   if (isLoading) {
     return (
       <div className="flex justify-center py-4">
-        <Loader2 className="h-5 w-5 animate-spin" />
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (!editing && !creds) {
     return (
-      <div className="rounded-md border border-dashed p-4 text-center">
-        <Key className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
-        <p className="mb-2 text-sm text-muted-foreground">
-          No SSH credentials configured. Add credentials to enable automated{" "}
-          <code className="text-xs">apt dist-upgrade</code> during rolling
-          updates.
-        </p>
-        <Button size="sm" onClick={startEditing}>
+      <SettingRow
+        label="No SSH credentials configured"
+        description={
+          <>
+            Add credentials to enable automated{" "}
+            <code className="text-xs">apt dist-upgrade</code> during rolling
+            updates.
+          </>
+        }
+      >
+        <Button variant="outline" size="sm" onClick={startEditing}>
           Configure SSH
         </Button>
-      </div>
+      </SettingRow>
     );
   }
 
   if (!editing && creds) {
+    const allPinned = pinSummary.pinned === pinSummary.total;
     return (
-      <div className="space-y-3">
-        <div className="flex items-center justify-between rounded-md border p-3">
-          <div className="space-y-1 text-sm">
-            <p>
-              <span className="text-muted-foreground">User:</span>{" "}
-              <span className="font-medium">{creds.username}</span>
-            </p>
-            <p>
-              <span className="text-muted-foreground">Port:</span>{" "}
-              <span className="font-medium">{creds.port}</span>
-            </p>
-            <p>
-              <span className="text-muted-foreground">Auth:</span>{" "}
-              <span className="font-medium">
-                {creds.auth_type === "key" ? "SSH Key" : "Password"}
-              </span>
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={startEditing}>
-              Edit
-            </Button>
-            <Button
-              aria-label="Delete SSH credentials"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setPendingCredsDelete(creds);
-              }}
-              disabled={deleteCreds.isPending}
-            >
-              <Trash2 className="h-4 w-4 text-destructive" />
-            </Button>
-          </div>
-        </div>
+      <>
+        <SettingRow
+          label="Credentials"
+          description={
+            <>
+              Signs in as{" "}
+              <span className="font-medium text-foreground">
+                {creds.username}
+              </span>{" "}
+              on port{" "}
+              <span className="font-medium text-foreground">{creds.port}</span>{" "}
+              with {creds.auth_type === "key" ? "an SSH key" : "a password"}.
+            </>
+          }
+        >
+          <Button variant="outline" size="sm" onClick={startEditing}>
+            Edit
+          </Button>
+          <Button
+            aria-label="Delete SSH credentials"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+            onClick={() => {
+              setPendingCredsDelete(creds);
+            }}
+            disabled={deleteCreds.isPending}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </SettingRow>
 
         {pinSummary.total > 0 && (
-          <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-xs">
-            <div className="flex items-center gap-2">
-              {pinSummary.pinned === pinSummary.total ? (
-                <ShieldCheck className="h-4 w-4 text-emerald-500" />
-              ) : (
-                <ShieldAlert className="h-4 w-4 text-amber-500" />
-              )}
-              <span>
-                Host keys:{" "}
-                <span className="font-medium">
-                  {pinSummary.pinned}/{pinSummary.total}
-                </span>{" "}
-                pinned
-                {pinSummary.pinned < pinSummary.total && (
-                  <span className="ml-1 text-muted-foreground">
-                    — rolling updates require all nodes pinned
-                  </span>
-                )}
-              </span>
-            </div>
+          <SettingRow
+            label="Host keys"
+            description={
+              allPinned
+                ? "Every node's host key is pinned."
+                : "Rolling updates require every node's host key to be pinned."
+            }
+          >
+            <span
+              className={
+                allPinned
+                  ? "flex items-center gap-[7px] text-sm text-muted-foreground"
+                  : "flex items-center gap-[7px] text-sm text-amber-700 dark:text-amber-400"
+              }
+            >
+              <span
+                aria-hidden="true"
+                className={
+                  allPinned
+                    ? "h-2 w-2 shrink-0 rounded-full bg-emerald-500"
+                    : "h-2 w-2 shrink-0 rounded-full bg-amber-500"
+                }
+              />
+              {pinSummary.pinned}/{pinSummary.total} pinned
+            </span>
             {unpinnedNodes.length > 0 && (
               <Button
                 size="sm"
-                variant="default"
+                variant="outline"
                 onClick={() => {
                   setBulkOpen(true);
                 }}
@@ -296,12 +295,17 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
                 Pin all node host keys
               </Button>
             )}
-          </div>
+          </SettingRow>
         )}
 
-        <div className="flex items-center gap-2">
+        <SettingRow
+          label="Test the connection"
+          htmlFor="ssh-test-node"
+          description="Signs in to one node with the stored credentials and checks its host key."
+        >
           <select
-            className="h-9 rounded-md border bg-background px-3 text-sm"
+            id="ssh-test-node"
+            className="h-8 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-[13px] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring sm:max-w-[13rem]"
             value={testNode}
             onChange={(e) => {
               setTestNode(e.target.value);
@@ -326,9 +330,32 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
             {testConn.isPending ? (
               <Loader2 className="mr-1 h-3 w-3 animate-spin" />
             ) : null}
-            Test Connection
+            Test connection
           </Button>
-        </div>
+
+          {testState.kind === "success" && (
+            <p className="flex basis-full items-center gap-[7px] text-[12.5px] text-muted-foreground sm:justify-end">
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 shrink-0 rounded-full bg-emerald-500"
+              />
+              <span className="min-w-0 [overflow-wrap:anywhere]">
+                SSH connection successful.
+                {testState.fingerprint && (
+                  <span className="ml-1 font-mono text-[11px]">
+                    ({testState.fingerprint})
+                  </span>
+                )}
+              </span>
+            </p>
+          )}
+
+          {testState.kind === "error" && (
+            <p className="basis-full text-[12.5px] text-red-700 [overflow-wrap:anywhere] sm:text-right dark:text-red-400">
+              {testState.message}
+            </p>
+          )}
+        </SettingRow>
 
         <BulkPinDialog
           open={bulkOpen}
@@ -340,44 +367,28 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           }))}
         />
 
-        {testState.kind === "success" && (
-          <div className="flex items-center gap-2 rounded-md border border-emerald-500/50 bg-emerald-500/10 p-2 text-xs text-emerald-600 dark:text-emerald-400">
-            <CheckCircle className="h-4 w-4 shrink-0" />
-            <div>
-              SSH connection successful.
-              {testState.fingerprint && (
-                <span className="ml-1 font-mono text-[10px] opacity-80">
-                  ({testState.fingerprint})
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {testState.kind === "error" && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
-            <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="break-words">{testState.message}</div>
-          </div>
-        )}
-
         {testState.kind === "pending" && (
-          <div className="space-y-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs">
-            <div className="flex items-start gap-2 text-amber-700 dark:text-amber-400">
-              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="space-y-2.5 py-3.5 text-[13px]">
+            <div className="flex items-baseline gap-2.5">
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 shrink-0 -translate-y-px rounded-full bg-amber-500"
+              />
               <div>
-                <p className="font-medium">Host key not yet trusted.</p>
-                <p className="mt-1 opacity-90">
+                <p className="font-medium text-amber-700 dark:text-amber-400">
+                  Host key not yet trusted.
+                </p>
+                <p className="mt-0.5 text-muted-foreground">
                   Compare this fingerprint to the value reported by the node
                   itself (run{" "}
-                  <code className="text-[11px]">
+                  <code className="text-xs">
                     ssh-keyscan {testState.info.host}
                   </code>{" "}
                   on a trusted machine, or check the node console).
                 </p>
               </div>
             </div>
-            <div className="ml-6 space-y-1 font-mono text-[11px]">
+            <div className="ml-[18px] space-y-1 font-mono text-xs">
               <div>
                 <span className="text-muted-foreground">host: </span>
                 {testState.info.host}:{testState.info.port}
@@ -387,10 +398,10 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
                 {testState.info.fingerprint}
               </div>
             </div>
-            <div className="ml-6 flex gap-2">
+            <div className="ml-[18px] flex gap-2">
               <Button
                 size="sm"
-                variant="default"
+                variant="outline"
                 disabled={pinKey.isPending}
                 onClick={() => {
                   handlePin(testState.nodeName, testState.info.fingerprint);
@@ -415,20 +426,23 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
         )}
 
         {testState.kind === "mismatch" && (
-          <div className="space-y-2 rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs">
-            <div className="flex items-start gap-2 text-destructive">
-              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="space-y-2.5 py-3.5 text-[13px]">
+            <div className="flex items-baseline gap-2.5">
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 shrink-0 -translate-y-px rounded-full bg-red-500"
+              />
               <div>
-                <p className="font-medium">
+                <p className="font-medium text-red-700 dark:text-red-400">
                   Host key has changed since it was pinned.
                 </p>
-                <p className="mt-1 opacity-90">
+                <p className="mt-0.5 text-muted-foreground">
                   This may be a legitimate reinstall or it may indicate a
                   man-in-the-middle. Investigate before re-pinning.
                 </p>
               </div>
             </div>
-            <div className="ml-6 space-y-1 font-mono text-[11px]">
+            <div className="ml-[18px] space-y-1 font-mono text-xs">
               <div>
                 <span className="text-muted-foreground">host: </span>
                 {testState.info.host}:{testState.info.port}
@@ -442,7 +456,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
                 {testState.info.presented_fingerprint}
               </div>
             </div>
-            <div className="ml-6 flex gap-2">
+            <div className="ml-[18px] flex gap-2">
               <Button
                 size="sm"
                 variant="destructive"
@@ -473,35 +487,33 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
         )}
 
         {knownHosts && knownHosts.length > 0 && (
-          <div className="rounded-md border p-3">
-            <div className="mb-2 flex items-center gap-2 text-xs font-medium">
-              <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-              Pinned host keys
-            </div>
-            <div className="space-y-1.5">
+          <div className="py-3.5 last:pb-0">
+            <h3 className="text-sm font-medium">Pinned host keys</h3>
+            <div className="mt-1 divide-y">
               {knownHosts.map((kh) => (
                 <div
                   key={kh.id}
-                  className="flex items-center justify-between gap-2 rounded border bg-muted/30 px-2 py-1.5 text-xs"
+                  className="flex items-center justify-between gap-2 py-1.5 last:pb-0"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono">
+                    <div className="truncate font-mono text-[12.5px]">
                       {kh.host}:{kh.port}
                     </div>
-                    <div className="truncate font-mono text-[10px] text-muted-foreground">
+                    <div className="truncate font-mono text-[11px] text-muted-foreground">
                       {kh.fingerprint}
                     </div>
                   </div>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
                     disabled={deleteKnownHost.isPending}
                     onClick={() => {
                       setPendingUnpin(kh);
                     }}
                     title="Unpin host key"
                   >
-                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ))}
@@ -557,14 +569,14 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           }
           confirmLabel="Unpin"
         />
-      </div>
+      </>
     );
   }
 
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
+    <div className="max-w-xl space-y-4 pt-1">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(11rem,100%),1fr))] gap-3">
+        <div className="space-y-1.5">
           <Label htmlFor="ssh-user">Username</Label>
           <Input
             id="ssh-user"
@@ -575,7 +587,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
             placeholder="root"
           />
         </div>
-        <div>
+        <div className="space-y-1.5">
           <Label htmlFor="ssh-port">Port</Label>
           <Input
             id="ssh-port"
@@ -588,32 +600,24 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
         </div>
       </div>
 
-      <div>
-        <Label>Auth Type</Label>
-        <div className="flex gap-2 mt-1">
-          <Button
-            variant={authType === "password" ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              setAuthType("password");
-            }}
-          >
-            Password
-          </Button>
-          <Button
-            variant={authType === "key" ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              setAuthType("key");
-            }}
-          >
-            SSH Key
-          </Button>
+      <div className="space-y-1.5">
+        <Label>Sign in with</Label>
+        <div>
+          <Segmented
+            aria-label="Sign in with"
+            size="md"
+            value={authType}
+            onValueChange={setAuthType}
+            options={[
+              { value: "password", label: "Password" },
+              { value: "key", label: "SSH key" },
+            ]}
+          />
         </div>
       </div>
 
       {authType === "password" ? (
-        <div>
+        <div className="space-y-1.5">
           <Label htmlFor="ssh-password">Password</Label>
           <Input
             id="ssh-password"
@@ -626,11 +630,11 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           />
         </div>
       ) : (
-        <div>
-          <Label htmlFor="ssh-key">Private Key (PEM format)</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="ssh-key">Private key (PEM format)</Label>
           <textarea
             id="ssh-key"
-            className="w-full rounded-md border bg-background px-3 py-2 text-xs font-mono"
+            className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
             rows={6}
             value={privateKey}
             onChange={(e) => {
@@ -645,17 +649,9 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
         </div>
       )}
 
-      <div className="flex justify-end gap-2">
+      <SettingsFooter className="justify-start pt-0">
         <Button
           variant="outline"
-          size="sm"
-          onClick={() => {
-            setEditing(false);
-          }}
-        >
-          Cancel
-        </Button>
-        <Button
           size="sm"
           onClick={handleSave}
           disabled={
@@ -669,7 +665,16 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           )}
           Save
         </Button>
-      </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setEditing(false);
+          }}
+        >
+          Cancel
+        </Button>
+      </SettingsFooter>
     </div>
   );
 }

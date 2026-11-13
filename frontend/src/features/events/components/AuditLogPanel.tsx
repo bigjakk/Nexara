@@ -1,17 +1,28 @@
 import { useState, useCallback, useMemo } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  Download,
-  Monitor,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Download } from "lucide-react";
+import { DetailField } from "@/components/DetailField";
+import { DefGrid, Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api-client";
 import type { ApiPath } from "@/lib/api-path";
 import {
-  SEVERITY_STYLES,
   deriveActor,
   deriveSeverity,
   formatAction,
@@ -37,11 +48,9 @@ import { auditClusterLabel } from "@/features/audit/lib/audit-cluster";
 
 const PAGE_SIZE = 25;
 
-const selectClass =
-  "flex h-9 w-[180px] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
-
-const inputClass =
-  "flex h-9 w-[180px] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
+/** A filter in the row above the table: compact, and named by its aria-label. */
+const filterClass =
+  "h-8 min-w-0 max-w-[11.5rem] rounded-md border border-input bg-transparent px-2 text-[13px] transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 /** The severity dropdown's value: a severity, or no filter at all. */
 type SeverityFilter = Severity | "all";
@@ -51,12 +60,33 @@ function entrySeverity(entry: AuditLogEntry): Severity {
   return deriveSeverity(entry.action, parseDetails(entry.details));
 }
 
-function severityBadge(severity: Severity) {
+const SEVERITY_WORDS: Record<Severity, string> = {
+  info: "Info",
+  warning: "Warning",
+  error: "Error",
+};
+
+/** A dot and a word. Info is nearly every row, so it stays quiet. */
+function SeverityMark({ severity }: { severity: Severity }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_STYLES[severity]}`}
+      className={cn(
+        "inline-flex items-center gap-[7px] whitespace-nowrap",
+        severity === "info" && "text-muted-foreground",
+        severity === "warning" && "text-amber-700 dark:text-amber-400",
+        severity === "error" && "text-red-700 dark:text-red-400",
+      )}
     >
-      {severity}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "h-[7px] w-[7px] shrink-0 rounded-full",
+          severity === "info" && "bg-muted-foreground/40",
+          severity === "warning" && "bg-amber-500",
+          severity === "error" && "bg-red-500",
+        )}
+      />
+      {SEVERITY_WORDS[severity]}
     </span>
   );
 }
@@ -87,7 +117,8 @@ function formatDetailsSummary(entry: AuditLogEntry): string | null {
   }
 }
 
-function sourceBadge(entry: AuditLogEntry) {
+/** Who did it: the Nexara account, or the Proxmox account for an ingested task. */
+function SourceCell({ entry }: { entry: AuditLogEntry }) {
   if (entry.source === "proxmox") {
     const details = parseDetails(entry.details);
     const proxmoxUser =
@@ -95,12 +126,11 @@ function sourceBadge(entry: AuditLogEntry) {
         ? details["proxmox_user"]
         : "";
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-600 dark:text-orange-400">
-        <Monitor className="h-3 w-3" />
-        PVE
-        {proxmoxUser && (
-          <span className="text-muted-foreground">({proxmoxUser})</span>
-        )}
+      <span>
+        {proxmoxUser !== "" && <>{proxmoxUser} </>}
+        <span className="text-[12.5px] text-muted-foreground">
+          {proxmoxUser !== "" ? "in Proxmox" : "Proxmox"}
+        </span>
       </span>
     );
   }
@@ -109,7 +139,7 @@ function sourceBadge(entry: AuditLogEntry) {
   // Activity drawer's User column does — a row cannot read "DRS Scheduler" in
   // one table and "System" in the other when the drawer sits over this page.
   return (
-    <span className="text-sm">
+    <span>
       {userLabel(entry.user_id, entry.user_display_name, entry.user_email) ||
         "—"}
     </span>
@@ -126,7 +156,7 @@ function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
       typeof d["resource_id"] === "string" ? d["resource_id"] : null;
     if (resName) {
       return (
-        <span className="ml-2 text-xs">
+        <span>
           {resName}
           {resId && <span className="text-muted-foreground"> ({resId})</span>}
         </span>
@@ -137,26 +167,27 @@ function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
     const vmType = typeof d["vm_type"] === "string" ? d["vm_type"] : null;
     if (vmid != null) {
       return (
-        <span className="ml-2 text-xs">
+        <span>
           {vmType ?? "VM"} {String(vmid)}
         </span>
       );
     }
     // Proxmox task with VMID but no name resolved
     if (resId) {
-      return (
-        <span className="ml-2 text-xs text-muted-foreground">VMID {resId}</span>
-      );
+      return <span className="text-muted-foreground">VMID {resId}</span>;
     }
   } catch {
     // ignore
   }
   return (
-    <span className="ml-2 text-xs text-muted-foreground">
+    <span className="font-mono text-[12.5px] text-muted-foreground">
       {entry.resource_id.slice(0, 8)}
     </span>
   );
 }
+
+/** How many columns the table has, for a row that spans them all. */
+const COLUMN_COUNT = 7;
 
 function EventRow({
   entry,
@@ -176,26 +207,36 @@ function EventRow({
 
   return (
     <>
-      <tr
-        className="cursor-pointer border-b hover:bg-muted/20"
-        onClick={onToggle}
-      >
-        <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">
+      <TableRow className="cursor-pointer" onClick={onToggle}>
+        <TableCell className="whitespace-nowrap text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <ChevronDown
-              className={`h-3 w-3 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`}
+              className={cn(
+                "h-3.5 w-3.5 shrink-0 transition-transform",
+                !expanded && "-rotate-90",
+              )}
             />
             {new Date(entry.created_at).toLocaleString()}
           </div>
-        </td>
-        <td className="px-4 py-2">{severityBadge(severity)}</td>
-        <td className="px-4 py-2">{auditClusterLabel(entry, "System")}</td>
-        <td className="px-4 py-2">
-          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+        </TableCell>
+        <TableCell>
+          <SeverityMark severity={severity} />
+        </TableCell>
+        <TableCell className="whitespace-nowrap font-medium">
+          <span className="inline-flex items-center gap-2">
+            <LinkedTaskBadge
+              role={linkedTaskRole(parseDetails(entry.details))}
+              requester={requester}
+            />
+            {formatAction(entry.action)}
+          </span>
+        </TableCell>
+        <TableCell>
+          <span className="mr-2 text-[12.5px] text-muted-foreground">
             {resourceTypeLabel(entry.resource_type)}
           </span>
           {entry.resource_name ? (
-            <span className="ml-2 text-xs">
+            <span>
               {entry.resource_name}
               {entry.resource_vmid > 0 && (
                 <span className="text-muted-foreground">
@@ -207,65 +248,54 @@ function EventRow({
           ) : (
             <ResourceFallback entry={entry} />
           )}
-        </td>
-        <td className="px-4 py-2 font-medium">
-          <span className="inline-flex items-center gap-2">
-            <LinkedTaskBadge
-              role={linkedTaskRole(parseDetails(entry.details))}
-              requester={requester}
-            />
-            {formatAction(entry.action)}
-          </span>
-        </td>
-        <td className="px-4 py-2 text-xs text-muted-foreground">
+        </TableCell>
+        <TableCell className="hidden text-muted-foreground md:table-cell">
+          {auditClusterLabel(entry, "System")}
+        </TableCell>
+        <TableCell className="hidden text-[12.5px] text-muted-foreground lg:table-cell">
           {summary ?? ""}
-        </td>
-        <td className="px-4 py-2">{sourceBadge(entry)}</td>
-      </tr>
+        </TableCell>
+        <TableCell>
+          <SourceCell entry={entry} />
+        </TableCell>
+      </TableRow>
       {expanded && (
-        <tr className="border-b bg-muted/10">
-          <td colSpan={7} className="px-4 py-3">
-            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-              <span className="text-muted-foreground">Timestamp</span>
-              <span>{new Date(entry.created_at).toLocaleString()}</span>
-
-              <span className="text-muted-foreground">Severity</span>
-              <span>{severityBadge(severity)}</span>
-
-              <span className="text-muted-foreground">Cluster</span>
-              <span>{auditClusterLabel(entry, "System")}</span>
-
-              <span className="text-muted-foreground">Resource Type</span>
-              <span>{resourceTypeLabel(entry.resource_type)}</span>
-
+        <TableRow className="hover:bg-transparent">
+          <TableCell
+            colSpan={COLUMN_COUNT}
+            className="bg-foreground/[0.03] py-4"
+          >
+            <DefGrid className="grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))]">
+              <DetailField label="Timestamp">
+                {new Date(entry.created_at).toLocaleString()}
+              </DetailField>
+              <DetailField label="Severity">
+                <SeverityMark severity={severity} />
+              </DetailField>
+              <DetailField label="Action">
+                {formatAction(entry.action)}
+              </DetailField>
+              <DetailField label="Cluster">
+                {auditClusterLabel(entry, "System")}
+              </DetailField>
+              <DetailField label="Resource type">
+                {resourceTypeLabel(entry.resource_type)}
+              </DetailField>
               {entry.resource_name && (
-                <>
-                  <span className="text-muted-foreground">Resource Name</span>
-                  <span>
-                    {entry.resource_name}
-                    {entry.resource_vmid > 0 &&
-                      ` (VMID ${String(entry.resource_vmid)})`}
-                  </span>
-                </>
+                <DetailField label="Resource name">
+                  {entry.resource_name}
+                  {entry.resource_vmid > 0 &&
+                    ` (VMID ${String(entry.resource_vmid)})`}
+                </DetailField>
               )}
-
-              <span className="text-muted-foreground">Resource ID</span>
-              <span className="break-all font-mono text-[10px]">
-                {entry.resource_id}
-              </span>
-
-              <span className="text-muted-foreground">Action</span>
-              <span className="font-medium">{formatAction(entry.action)}</span>
-
-              <span className="text-muted-foreground">Source</span>
-              <span>{sourceBadge(entry)}</span>
-
-              <span className="text-muted-foreground">User</span>
-              <span>
-                {/* The Nexara account that wrote the entry — the Source row
-                    above already carries the PVE account for an ingested
-                    task, so naming that one here would put "root@pam" beside
-                    its own system@ email. */}
+              <DetailField label="Source">
+                <SourceCell entry={entry} />
+              </DetailField>
+              <DetailField label="User">
+                {/* The Nexara account that wrote the entry — the Source field
+                    already carries the PVE account for an ingested task, so
+                    naming that one here would put "root@pam" beside its own
+                    system@ email. */}
                 {userLabel(
                   entry.user_id,
                   entry.user_display_name,
@@ -276,29 +306,29 @@ function EventRow({
                     ({entry.user_email})
                   </span>
                 )}
-              </span>
-
-              <span className="text-muted-foreground">User ID</span>
-              <span className="break-all font-mono text-[10px]">
-                {entry.user_id}
-              </span>
-            </div>
+              </DetailField>
+              <DetailField label="Resource ID" variant="mono">
+                <span className="break-all text-xs">{entry.resource_id}</span>
+              </DetailField>
+              <DetailField label="User ID" variant="mono">
+                <span className="break-all text-xs">{entry.user_id}</span>
+              </DetailField>
+            </DefGrid>
 
             {details && details.length > 0 && (
-              <div className="mt-2 border-t pt-2">
-                <span className="text-xs font-medium text-muted-foreground">
+              <div className="mt-4 border-t pt-3">
+                <h3 className="text-[12.5px] font-medium text-muted-foreground">
                   Details
-                </span>
-                <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                </h3>
+                <div className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-5 gap-y-1 text-[12.5px]">
                   {details.map(([label, value]) => (
                     <div key={label} className="contents">
                       <span className="text-muted-foreground">{label}</span>
                       <span
-                        className={
-                          label === "Error"
-                            ? "text-red-500 break-all"
-                            : "break-all"
-                        }
+                        className={cn(
+                          "break-all",
+                          label === "Error" && "text-red-700 dark:text-red-400",
+                        )}
                       >
                         {value}
                       </span>
@@ -307,8 +337,8 @@ function EventRow({
                 </div>
               </div>
             )}
-          </td>
-        </tr>
+          </TableCell>
+        </TableRow>
       )}
     </>
   );
@@ -430,83 +460,102 @@ export function AuditLogPanel() {
     setPage(0);
   }, []);
 
-  const hasFilters =
+  // The filters the server applies, which narrow the total it reports. The
+  // severity filter is applied here, to the page already fetched, and leaves
+  // that total alone.
+  const hasServerFilters =
     clusterFilter !== "" ||
     resourceFilter !== "" ||
     userFilter !== "" ||
     actionFilter !== "" ||
     sourceFilter !== "" ||
-    severityFilter !== "all" ||
     startDate !== "" ||
     endDate !== "";
+  const hasFilters = hasServerFilters || severityFilter !== "all";
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
-        {/* Export buttons */}
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              handleExport("csv");
-            }}
-          >
-            <Download className="mr-1 h-3 w-3" />
-            CSV
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              handleExport("json");
-            }}
-          >
-            <Download className="mr-1 h-3 w-3" />
-            JSON
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              handleExport("syslog");
-            }}
-          >
-            <Download className="mr-1 h-3 w-3" />
-            Syslog
-          </Button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            Cluster
-          </label>
+      <Panel
+        flush
+        title="Audit log"
+        aside={
+          data
+            ? `${data.total.toLocaleString()} ${data.total === 1 ? "event" : "events"}${hasServerFilters ? " match" : ""}`
+            : undefined
+        }
+        actions={
+          <>
+            <Segmented
+              aria-label="Severity"
+              value={severityFilter}
+              onValueChange={(value) => {
+                setSeverityFilter(value);
+                setPage(0);
+              }}
+              options={[
+                { value: "all", label: "All" },
+                { value: "info", label: "Info" },
+                { value: "warning", label: "Warning" },
+                { value: "error", label: "Error" },
+              ]}
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <Download className="h-3.5 w-3.5" />
+                  Export
+                  <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onSelect={() => {
+                    handleExport("csv");
+                  }}
+                >
+                  CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    handleExport("json");
+                  }}
+                >
+                  JSON
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    handleExport("syslog");
+                  }}
+                >
+                  Syslog (RFC 5424)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      >
+        {/* Filters: each control is named by its own first option. */}
+        <div className="flex flex-wrap items-center gap-2 px-[18px] pb-3">
           <select
-            className={selectClass}
+            aria-label="Cluster"
+            className={filterClass}
             value={clusterFilter}
             onChange={(e) => {
               setClusterFilter(e.target.value);
               setPage(0);
             }}
           >
-            <option value="">All Clusters</option>
+            <option value="">All clusters</option>
             {clusters?.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
             ))}
           </select>
-        </div>
 
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            Resource Type
-          </label>
           <select
-            className={selectClass}
+            aria-label="Resource type"
+            className={filterClass}
             value={resourceFilter}
             onChange={(e) => {
               setResourceFilter(e.target.value);
@@ -515,163 +564,125 @@ export function AuditLogPanel() {
           >
             {resourceTypes.map((rt) => (
               <option key={rt.value || "all"} value={rt.value}>
-                {rt.label}
+                {rt.value === "" ? "All types" : rt.label}
               </option>
             ))}
           </select>
-        </div>
 
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            User
-          </label>
           <select
-            className={selectClass}
+            aria-label="User"
+            className={filterClass}
             value={userFilter}
             onChange={(e) => {
               setUserFilter(e.target.value);
               setPage(0);
             }}
           >
-            <option value="">All Users</option>
+            <option value="">All users</option>
             {userOptions.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.label}
               </option>
             ))}
           </select>
-        </div>
 
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            Action
-          </label>
           <select
-            className={selectClass}
+            aria-label="Action"
+            className={filterClass}
             value={actionFilter}
             onChange={(e) => {
               setActionFilter(e.target.value);
               setPage(0);
             }}
           >
-            <option value="">All Actions</option>
+            <option value="">All actions</option>
             {actions?.map((a) => (
               <option key={a} value={a}>
                 {formatAction(a)}
               </option>
             ))}
           </select>
-        </div>
 
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            Source
-          </label>
           <select
-            className={selectClass}
+            aria-label="Source"
+            className={filterClass}
             value={sourceFilter}
             onChange={(e) => {
               setSourceFilter(e.target.value);
               setPage(0);
             }}
           >
-            <option value="">All Sources</option>
+            <option value="">All sources</option>
             <option value="nexara">Nexara</option>
             <option value="proxmox">Proxmox</option>
           </select>
-        </div>
 
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            Severity
-          </label>
-          <select
-            className={selectClass}
-            value={severityFilter}
-            onChange={(e) => {
-              setSeverityFilter(e.target.value as SeverityFilter);
-              setPage(0);
-            }}
-          >
-            <option value="all">All Levels</option>
-            <option value="info">Info</option>
-            <option value="warning">Warning</option>
-            <option value="error">Error</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
+          <label className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
             From
+            <input
+              type="date"
+              className={cn(filterClass, "text-foreground")}
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setPage(0);
+              }}
+            />
           </label>
-          <input
-            type="date"
-            className={inputClass}
-            value={startDate}
-            onChange={(e) => {
-              setStartDate(e.target.value);
-              setPage(0);
-            }}
-          />
+          <label className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+            to
+            <input
+              type="date"
+              className={cn(filterClass, "text-foreground")}
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPage(0);
+              }}
+            />
+          </label>
+
+          {hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={resetFilters}
+              className="text-muted-foreground"
+            >
+              Clear filters
+            </Button>
+          )}
         </div>
 
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">To</label>
-          <input
-            type="date"
-            className={inputClass}
-            value={endDate}
-            onChange={(e) => {
-              setEndDate(e.target.value);
-              setPage(0);
-            }}
-          />
-        </div>
-
-        {hasFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={resetFilters}
-            className="text-muted-foreground"
-          >
-            Clear filters
-          </Button>
-        )}
-      </div>
-
-      {/* Syslog forwarding config. Its routes all require a global manage:audit
-          (registry_audit.go), and this tab is open to anyone with view:audit —
-          every Viewer — who would get only a notice whose Retry can 403 again. */}
-      {canManage("audit") && <SyslogConfigCard />}
-
-      {/* Table */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
-          ))}
-        </div>
-      ) : error ? (
-        <p className="text-destructive">
-          {error instanceof Error ? error.message : "Failed to load events"}
-        </p>
-      ) : (
-        <>
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-2 text-left font-medium">Timestamp</th>
-                  <th className="px-4 py-2 text-left font-medium">Severity</th>
-                  <th className="px-4 py-2 text-left font-medium">Cluster</th>
-                  <th className="px-4 py-2 text-left font-medium">Resource</th>
-                  <th className="px-4 py-2 text-left font-medium">Action</th>
-                  <th className="px-4 py-2 text-left font-medium">Details</th>
-                  <th className="px-4 py-2 text-left font-medium">User</th>
-                </tr>
-              </thead>
-              <tbody>
+        {isLoading ? (
+          <div className="space-y-2 px-[18px] pb-1">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
+        ) : error ? (
+          <p className="px-[18px] pb-1 text-sm text-destructive">
+            {error instanceof Error ? error.message : "Failed to load events"}
+          </p>
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Time</TableHead>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Resource</TableHead>
+                  <TableHead className="hidden md:table-cell">
+                    Cluster
+                  </TableHead>
+                  <TableHead className="hidden lg:table-cell">
+                    Details
+                  </TableHead>
+                  <TableHead>User</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filteredItems?.map((entry) => (
                   <EventRow
                     key={entry.id}
@@ -687,29 +698,27 @@ export function AuditLogPanel() {
                   />
                 ))}
                 {(!filteredItems || filteredItems.length === 0) && (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-8 text-center text-muted-foreground"
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell
+                      colSpan={COLUMN_COUNT}
+                      className="py-10 text-center text-muted-foreground"
                     >
                       No events found.
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 )}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
 
-          {/* Pagination */}
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {data ? `${String(data.total)} total events` : ""}
-            </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-end gap-1 border-t px-[18px] pt-3">
+              <span className="mr-1 text-[12.5px] text-muted-foreground">
+                Page {page + 1} of {Math.max(1, totalPages)}
+              </span>
               <Button
                 aria-label="Previous page"
-                variant="outline"
-                size="sm"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
                 disabled={page === 0}
                 onClick={() => {
                   setPage((p) => Math.max(0, p - 1));
@@ -717,13 +726,11 @@ export function AuditLogPanel() {
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <span className="text-sm">
-                Page {page + 1} of {Math.max(1, totalPages)}
-              </span>
               <Button
                 aria-label="Next page"
-                variant="outline"
-                size="sm"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
                 disabled={page + 1 >= totalPages}
                 onClick={() => {
                   setPage((p) => p + 1);
@@ -732,9 +739,14 @@ export function AuditLogPanel() {
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </Panel>
+
+      {/* Syslog forwarding config. Its routes all require a global manage:audit
+          (registry_audit.go), and this tab is open to anyone with view:audit —
+          every Viewer — who would get only a notice whose Retry can 403 again. */}
+      {canManage("audit") && <SyslogConfigCard />}
     </div>
   );
 }

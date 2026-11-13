@@ -3,7 +3,13 @@ import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert, Loader2, RefreshCw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/segmented";
+import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { PageHeader } from "@/components/page/PageHeader";
+import { Panel } from "@/components/page/Panel";
+import { SettingsSection } from "@/components/page/Settings";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,11 +18,12 @@ import {
   useSecurityPosture,
   useTriggerScan,
 } from "../api/cve-queries";
-import { SecurityPostureCard } from "../components/SecurityPostureCard";
+import { postureSummary } from "../lib/posture";
+import { PosturePanel } from "../components/PosturePanel";
 import { SSVCHistogram } from "../components/SSVCHistogram";
-import { CVENotifyCard } from "../components/CVENotifyCard";
+import { CVENotifySettings } from "../components/CVENotifySettings";
 import { KEVDetailDialog } from "../components/KEVDetailDialog";
-import { ScanScheduleCard } from "../components/ScanScheduleCard";
+import { ScanScheduleSettings } from "../components/ScanScheduleSettings";
 import { ScanHistoryTable } from "../components/ScanHistoryTable";
 import { VulnerabilityTable } from "../components/VulnerabilityTable";
 import {
@@ -113,60 +120,67 @@ export function SecurityDashboardPage() {
     );
   }
 
-  // Rolling update progress detail view
+  // Rolling update progress detail view: a page about one job, with its own
+  // header and a trail back to the list.
   if (selectedJobId) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <ShieldAlert className="h-6 w-6" />
-          <h1 className="text-2xl font-bold tracking-tight">{t("security")}</h1>
-        </div>
-        <RollingUpdateProgress
-          clusterId={activeClusterId}
-          jobId={selectedJobId}
-          canManage={canManageRolling}
-          onBack={() => {
-            setSearchParams((prev) => {
-              const next = new URLSearchParams(prev);
-              next.delete("job");
-              return next;
-            });
-          }}
-        />
-      </div>
+      <RollingUpdateProgress
+        clusterId={activeClusterId}
+        clusterName={clusters.find((c) => c.id === activeClusterId)?.name}
+        jobId={selectedJobId}
+        canManage={canManageRolling}
+      />
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <ShieldAlert className="h-6 w-6" />
-        <h1 className="text-2xl font-bold tracking-tight">{t("security")}</h1>
-      </div>
-
-      {/* Cluster selector */}
-      {clusters.length > 1 && (
-        <div className="flex gap-2">
-          {clusters.map((cluster) => (
-            <button
-              key={cluster.id}
-              onClick={() => {
-                setSelectedClusterId(cluster.id);
-                setSelectedScanId(null);
-                setSelectedJob(null);
-              }}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeClusterId === cluster.id
-                  ? "bg-action text-action-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              {cluster.name}
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="space-y-5">
+      <PageHeader
+        title={t("security")}
+        summary={postureSummary(postureLoading ? undefined : posture, t)}
+        actions={
+          <>
+            {clusters.length > 1 && (
+              <Segmented
+                aria-label={t("cluster")}
+                size="md"
+                value={activeClusterId}
+                onValueChange={(clusterId) => {
+                  setSelectedClusterId(clusterId);
+                  setSelectedScanId(null);
+                  setSelectedJob(null);
+                }}
+                options={clusters.map((cluster) => ({
+                  value: cluster.id,
+                  label: cluster.name,
+                }))}
+              />
+            )}
+            {/* The one primary button is the open tab's own action. */}
+            {activeTab === "rolling-updates" ? (
+              canManageRolling &&
+              activeClusterId && (
+                <CreateRollingUpdateWizard clusterId={activeClusterId} />
+              )
+            ) : (
+              <Button
+                onClick={() => {
+                  triggerScan.mutate(activeClusterId);
+                }}
+                disabled={triggerScan.isPending}
+                className="gap-2"
+              >
+                {triggerScan.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                {t("scanNow")}
+              </Button>
+            )}
+          </>
+        }
+      />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
@@ -178,30 +192,14 @@ export function SecurityDashboardPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Vulnerability Scanning Tab */}
-        <TabsContent value="vulnerabilities" className="mt-4 space-y-6">
-          <div className="flex items-center justify-end">
-            <button
-              onClick={() => {
-                triggerScan.mutate(activeClusterId);
-              }}
-              disabled={triggerScan.isPending}
-              className="flex items-center gap-2 rounded-md bg-action px-4 py-2 text-sm font-medium text-action-foreground hover:bg-action/90 disabled:opacity-50"
-            >
-              {triggerScan.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-              {t("scanNow")}
-            </button>
-          </div>
-
+        {/* Vulnerability Scanning Tab: what the last scan found, the scans
+            themselves, then how scanning is set up. */}
+        <TabsContent value="vulnerabilities" className="mt-5 space-y-4">
           {postureLoading ? (
-            <div className="h-32 animate-pulse rounded-lg border bg-card" />
+            <Skeleton className="h-32 w-full rounded-[10px]" />
           ) : posture ? (
             <>
-              <SecurityPostureCard
+              <PosturePanel
                 posture={posture}
                 onShowKEV={(scanId) => {
                   setKEVDialogScanId(scanId);
@@ -216,9 +214,6 @@ export function SecurityDashboardPage() {
             </>
           ) : null}
 
-          <ScanScheduleCard clusterId={activeClusterId} />
-          <CVENotifyCard clusterId={activeClusterId} />
-
           {selectedScanId ? (
             <VulnerabilityTable
               clusterId={activeClusterId}
@@ -228,10 +223,21 @@ export function SecurityDashboardPage() {
               }}
             />
           ) : (
-            <div className="space-y-3">
-              <h2 className="text-lg font-semibold">Scan History</h2>
+            <Panel
+              flush
+              title="Scan history"
+              aside={
+                scans && scans.length > 0
+                  ? `${String(scans.length)} ${scans.length === 1 ? "scan" : "scans"}`
+                  : undefined
+              }
+            >
               {scansLoading ? (
-                <div className="h-48 animate-pulse rounded-lg border bg-card" />
+                <div className="space-y-2 px-[18px] pb-1">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
               ) : (
                 <ScanHistoryTable
                   scans={scans ?? []}
@@ -239,18 +245,20 @@ export function SecurityDashboardPage() {
                   onSelectScan={setSelectedScanId}
                 />
               )}
-            </div>
+            </Panel>
           )}
+
+          <SettingsSection
+            title="Scanning"
+            description="When this cluster is scanned, and who is told what a scan finds."
+          >
+            <ScanScheduleSettings clusterId={activeClusterId} />
+            <CVENotifySettings clusterId={activeClusterId} />
+          </SettingsSection>
         </TabsContent>
 
         {/* Rolling Updates Tab */}
-        <TabsContent value="rolling-updates" className="mt-4 space-y-6">
-          <div className="flex items-center justify-end">
-            {canManageRolling && activeClusterId && (
-              <CreateRollingUpdateWizard clusterId={activeClusterId} />
-            )}
-          </div>
-
+        <TabsContent value="rolling-updates" className="mt-5 space-y-4">
           {/* Gated like every sibling on this tab: with no clusters
               activeClusterId is "", which disables the query behind the card
               and leaves it reporting a read that was never going to happen. */}
@@ -258,35 +266,49 @@ export function SecurityDashboardPage() {
             <NodeUpdatesOverview clusterId={activeClusterId} />
           )}
 
-          {canManageSSH && activeClusterId && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold">SSH Credentials</h3>
-              <p className="text-xs text-muted-foreground">
-                Configure SSH access for automated <code>apt dist-upgrade</code>{" "}
-                on nodes. Nexara also uses it, once a day, to read each node's
-                memory layout with <code>dmidecode</code> (set{" "}
-                <code>NODE_MEMORY_READ_INTERVAL=0</code> to turn that off).
-              </p>
-              <SSHCredentialsForm clusterId={activeClusterId} />
-            </div>
-          )}
+          <Panel
+            flush
+            title="Rolling update jobs"
+            aside={
+              jobs && jobs.length > 0
+                ? `${String(jobs.length)} ${jobs.length === 1 ? "job" : "jobs"}`
+                : undefined
+            }
+          >
+            {jobsLoading ? (
+              <div className="flex h-24 items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <RollingUpdateJobsTable
+                jobs={jobs ?? []}
+                canManage={canManageRolling}
+                onSelect={setSelectedJob}
+                onStart={(jobId) => {
+                  startJob.mutate({ clusterId: activeClusterId, jobId });
+                }}
+                onCancel={(jobId) => {
+                  cancelJob.mutate({ clusterId: activeClusterId, jobId });
+                }}
+              />
+            )}
+          </Panel>
 
-          {jobsLoading ? (
-            <div className="flex h-32 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <RollingUpdateJobsTable
-              jobs={jobs ?? []}
-              canManage={canManageRolling}
-              onSelect={setSelectedJob}
-              onStart={(jobId) => {
-                startJob.mutate({ clusterId: activeClusterId, jobId });
-              }}
-              onCancel={(jobId) => {
-                cancelJob.mutate({ clusterId: activeClusterId, jobId });
-              }}
-            />
+          {canManageSSH && activeClusterId && (
+            <SettingsSection
+              title="SSH access"
+              description={
+                <>
+                  Nexara runs <code>apt dist-upgrade</code> on each node over
+                  SSH during an automated rolling update. It also uses this
+                  access, once a day, to read each node&apos;s memory layout
+                  with <code>dmidecode</code> (set{" "}
+                  <code>NODE_MEMORY_READ_INTERVAL=0</code> to turn that off).
+                </>
+              }
+            >
+              <SSHCredentialsForm clusterId={activeClusterId} />
+            </SettingsSection>
           )}
         </TabsContent>
       </Tabs>

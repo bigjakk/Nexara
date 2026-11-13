@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/page/PageHeader";
 import { ReportSchedulesTable } from "../components/ReportSchedulesTable";
 import { ReportRunsTable } from "../components/ReportRunsTable";
 import { ReportScheduleForm } from "../components/ReportScheduleForm";
 import { ReportGenerateDialog } from "../components/ReportGenerateDialog";
 import { ReportCatalogue } from "../components/ReportCatalogue";
-import { useReportRuns } from "../api/report-queries";
+import { useReportRuns, useReportSchedules } from "../api/report-queries";
+import { reportsSummary } from "../lib/reports-summary";
 import { useAuth } from "@/hooks/useAuth";
 import type { ReportSchedule } from "@/types/api";
 
@@ -14,6 +15,7 @@ export function ReportsPage() {
   const canManage = hasPermission("manage", "report");
   const canGenerate = hasPermission("generate", "report");
   const { data: runs } = useReportRuns();
+  const { data: schedules } = useReportSchedules();
 
   const [editSchedule, setEditSchedule] = useState<
     ReportSchedule | undefined
@@ -30,49 +32,42 @@ export function ReportsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Reports</h1>
-          <p className="text-sm text-muted-foreground">
-            Generate a report now, or schedule one and have it emailed.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {canGenerate && <ReportGenerateDialog />}
-          {canManage && <ReportScheduleForm />}
-        </div>
-      </div>
-
-      <ReportCatalogue
-        runs={runs}
-        canGenerate={canGenerate}
-        canManage={canManage}
-        onGenerate={(type) => {
-          setGenerateType(type);
-          setGenerateOpen(true);
-        }}
-        onSchedule={(type) => {
-          setEditSchedule(undefined);
-          setScheduleType(type);
-          setScheduleOpen(true);
-        }}
+    <div className="space-y-5">
+      <PageHeader
+        title="Reports"
+        summary={reportsSummary(schedules, runs)}
+        actions={
+          <>
+            {canManage && <ReportScheduleForm />}
+            {canGenerate && <ReportGenerateDialog />}
+          </>
+        }
       />
 
-      <Tabs defaultValue="history">
-        <TabsList>
-          <TabsTrigger value="history">Report history</TabsTrigger>
-          <TabsTrigger value="schedules">Schedules</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="history" className="mt-4">
-          <ReportRunsTable />
-        </TabsContent>
-
-        <TabsContent value="schedules" className="mt-4">
+      {/* What will be produced and what has been, on the left; what can be
+          asked for, on the right. Folds into one column on a narrow screen. */}
+      <div className="flex flex-wrap items-start gap-4">
+        <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-4">
           <ReportSchedulesTable onEdit={handleEdit} />
-        </TabsContent>
-      </Tabs>
+          <ReportRunsTable />
+        </div>
+        <div className="flex min-w-0 flex-[1_1_320px] flex-col gap-4">
+          <ReportCatalogue
+            runs={runs}
+            canGenerate={canGenerate}
+            canManage={canManage}
+            onGenerate={(type) => {
+              setGenerateType(type);
+              setGenerateOpen(true);
+            }}
+            onSchedule={(type) => {
+              setEditSchedule(undefined);
+              setScheduleType(type);
+              setScheduleOpen(true);
+            }}
+          />
+        </div>
+      </div>
 
       {canGenerate && (
         <ReportGenerateDialog

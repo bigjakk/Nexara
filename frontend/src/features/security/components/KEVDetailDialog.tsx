@@ -1,4 +1,4 @@
-import { ExternalLink, Flame, Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -10,8 +10,8 @@ import { SeverityBadge } from "./SeverityBadge";
 
 /**
  * Dialog that lists every KEV-flagged (actively-exploited) vulnerability for
- * a given scan. Surfaced when the user clicks the red "X actively exploited"
- * callout on the SecurityPostureCard.
+ * a given scan. Opened by the Review button on the PosturePanel's "X actively
+ * exploited" line.
  *
  * Each CVE-ID is a deep link to NIST NVD for the canonical detail page; the
  * KEV flame badge links to CISA's KEV catalog filtered to that CVE so users
@@ -49,10 +49,7 @@ export function KEVDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-5xl overflow-hidden sm:rounded-lg">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
-            <Flame className="h-5 w-5" />
-            Actively Exploited Vulnerabilities
-          </DialogTitle>
+          <DialogTitle>Actively exploited vulnerabilities</DialogTitle>
           <p className="text-sm text-muted-foreground">
             Listed in CISA&apos;s{" "}
             <a
@@ -63,9 +60,9 @@ export function KEVDetailDialog({
             >
               Known Exploited Vulnerabilities catalog
             </a>
-            . Patch immediately. Click any CVE-ID for the full record on NIST
-            NVD; click the <Flame className="inline h-3 w-3" /> badge for
-            CISA&apos;s KEV entry with required-action and due-date guidance.
+            . Patch these first. A CVE-ID opens its full record on NIST NVD; the
+            KEV chip beside it opens CISA&apos;s entry, with the required action
+            and due date.
           </p>
         </DialogHeader>
 
@@ -81,12 +78,12 @@ export function KEVDetailDialog({
           ) : (
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-background">
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-2 py-2">CVE</th>
-                  <th className="px-2 py-2">Risk</th>
-                  <th className="px-2 py-2">Score</th>
-                  <th className="px-2 py-2">Package</th>
-                  <th className="px-2 py-2">Installed → Fixed</th>
+                <tr className="border-b text-left text-xs font-medium text-muted-foreground">
+                  <th className="px-2 py-2 font-medium">CVE</th>
+                  <th className="px-2 py-2 font-medium">Risk</th>
+                  <th className="px-2 py-2 font-medium">Score</th>
+                  <th className="px-2 py-2 font-medium">Package</th>
+                  <th className="px-2 py-2 font-medium">Installed → fixed</th>
                 </tr>
               </thead>
               <tbody>
@@ -108,9 +105,8 @@ export function KEVDetailDialog({
                           target="_blank"
                           rel="noopener noreferrer"
                           title="View CISA KEV entry"
-                          className="inline-flex items-center gap-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold text-white hover:opacity-90"
+                          className="inline-flex items-center rounded-md bg-red-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 hover:bg-red-500/25 dark:text-red-400"
                         >
-                          <Flame className="h-2.5 w-2.5" />
                           KEV
                         </a>
                       </div>
@@ -118,7 +114,7 @@ export function KEVDetailDialog({
                     <td className="px-2 py-2">
                       <SeverityBadge severity={v.risk_severity} />
                     </td>
-                    <td className="px-2 py-2 font-mono">
+                    <td className="px-2 py-2 tabular-nums">
                       {v.risk_score > 0 ? v.risk_score.toFixed(1) : "-"}
                     </td>
                     <td className="px-2 py-2 font-medium">{v.package_name}</td>

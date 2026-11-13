@@ -102,7 +102,7 @@ describe("AuditLogPanel", () => {
     renderFor(["view:audit"]);
 
     // The panel itself did render, so the card's absence is the gate's doing.
-    expect(screen.getByRole("button", { name: "CSV" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export" })).toBeInTheDocument();
     expect(screen.queryByText("syslog card")).not.toBeInTheDocument();
   });
 });

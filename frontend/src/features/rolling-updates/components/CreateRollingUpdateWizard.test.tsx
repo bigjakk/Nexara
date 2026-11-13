@@ -38,7 +38,7 @@ beforeEach(() => {
 });
 
 async function openWithBothNodes(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "New Rolling Update" }));
+  await user.click(screen.getByRole("button", { name: "New rolling update" }));
   await user.click(await screen.findByRole("button", { name: "Select all" }));
 }
 

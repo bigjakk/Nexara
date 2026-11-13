@@ -30,6 +30,7 @@ export function HistoryTabContent({
   history,
   value = "history",
   placeholder,
+  label,
 }: {
   history: ClusterHistory;
   value?: string;
@@ -37,13 +38,23 @@ export function HistoryTabContent({
    *  because the object's page does not know where to read it: nothing is
    *  read meanwhile. */
   placeholder?: ReactNode;
+  /** Names the panel where no HistoryTabTrigger does: a caller that switches
+   *  views with something other than a tab strip. Radix would otherwise point
+   *  aria-labelledby at a trigger that is not there. */
+  label?: string;
 }) {
   const can = useCanViewHistory(
     history.permission,
     history.target.clusterId === null,
   );
   return can ? (
-    <TabsContent value={value} className="mt-4">
+    <TabsContent
+      value={value}
+      className="mt-4"
+      {...(label === undefined
+        ? {}
+        : { "aria-label": label, "aria-labelledby": undefined })}
+    >
       {placeholder ?? (
         <HistoryTimeline kind={history.kind} target={history.target} />
       )}

@@ -1,16 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft,
+  ChevronDown,
   Download,
   FileCode,
+  FileText,
   Mail,
   Printer,
   RefreshCw,
   Trash2,
 } from "lucide-react";
+import {
+  Breadcrumbs,
+  DetailHeader,
+  Fact,
+  StatusFact,
+} from "@/components/page/DetailHeader";
+import { Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
@@ -34,9 +48,17 @@ import {
 import { reportTypeLabel, periodLabel, runFileName } from "../report-types";
 import { ReportEmailDialog } from "../components/ReportEmailDialog";
 
+/** How the facts line names a run's state, and the dot it draws for it. */
+const RUN_STATE: Record<string, { dot: string; label: string }> = {
+  completed: { dot: "running", label: "Completed" },
+  failed: { dot: "offline", label: "Failed" },
+  running: { dot: "unknown", label: "Generating" },
+  pending: { dot: "unknown", label: "Queued" },
+};
+
 /**
- * A finished run on its own page: the stored report in a sandboxed frame with
- * a toolbar for the things a reader does with it. The frame shows the same
+ * A finished run on its own page: the stored report in a sandboxed frame under
+ * a header with the things a reader does with it. The frame shows the same
  * HTML the schedule emails and the print button hands to the browser, so
  * there is exactly one rendering to get right.
  */
@@ -98,165 +120,175 @@ export function ReportViewerPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-10 w-2/3" />
+      <div className="space-y-5">
+        <Skeleton className="h-16 w-2/3" />
         <Skeleton className="h-[70vh] w-full" />
       </div>
     );
   }
   if (error || !run) {
     return (
-      <div className="space-y-4">
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/reports">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Reports
-          </Link>
-        </Button>
+      <div className="space-y-3">
+        <Breadcrumbs
+          crumbs={[{ label: "Reports", to: "/reports" }, { label: "Run" }]}
+        />
         <p className="text-destructive">
           {error instanceof Error ? error.message : "Report run not found."}
         </p>
+        <Button variant="link" asChild className="px-0">
+          <Link to="/reports">Back to reports</Link>
+        </Button>
       </div>
     );
   }
 
   const title = reportTypeLabel(run.report_type);
   const period = periodLabel(run.time_range_hours);
+  const state = RUN_STATE[run.status] ?? { dot: "unknown", label: run.status };
+  const canDelete = canManage && run.status !== "running";
 
   return (
-    <div className="flex h-full flex-col">
-      {/*
-        Sticky, because the app shell lets the page scroll behind the report
-        frame: without this a reader who scrolls the report loses the toolbar
-        and has to scroll back up to print, download or run again.
-      */}
-      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b bg-background px-4 py-3">
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/reports">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Reports
-          </Link>
-        </Button>
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h1 className="truncate text-base font-semibold">
-            {title}
-            {clusterName ? ` · ${clusterName}` : ""}
-          </h1>
-          <Badge variant="outline">{period}</Badge>
-          <Badge
-            variant={run.status === "failed" ? "destructive" : "secondary"}
-          >
-            {run.status}
-          </Badge>
-          <span className="text-xs text-muted-foreground">
-            {run.completed_at
-              ? new Date(run.completed_at).toLocaleString()
-              : new Date(run.created_at).toLocaleString()}
-          </span>
-        </div>
-        <div className="ml-auto flex flex-wrap gap-1">
-          {completed && (
-            <>
+    <div className="space-y-5">
+      <DetailHeader
+        crumbs={[{ label: "Reports", to: "/reports" }, { label: title }]}
+        icon={<FileText />}
+        title={title}
+        facts={
+          <>
+            <StatusFact status={state.dot} label={state.label} nameDot />
+            {clusterName !== undefined && (
+              <Fact label="Cluster">
+                <Link
+                  to={`/clusters/${run.cluster_id}`}
+                  className="hover:text-foreground hover:underline"
+                >
+                  {clusterName}
+                </Link>
+              </Fact>
+            )}
+            <Fact label="Period">{period}</Fact>
+            <Fact label="Generated">
+              {run.completed_at
+                ? new Date(run.completed_at).toLocaleString()
+                : new Date(run.created_at).toLocaleString()}
+            </Fact>
+            <Fact label="Source">
+              {run.schedule_id ? "A schedule" : "On demand"}
+            </Fact>
+          </>
+        }
+        actions={
+          <>
+            {canGenerate && run.status !== "running" && (
               <Button
-                variant="outline"
+                // The one thing to do with a run that has no report to read.
+                variant={completed ? "outline" : "default"}
                 size="sm"
-                disabled={!frameReady}
-                onClick={handlePrint}
+                onClick={handleRunAgain}
+                disabled={generate.isPending}
               >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                {generate.isPending ? "Running…" : "Run again"}
+              </Button>
+            )}
+            {completed && (
+              <Button size="sm" disabled={!frameReady} onClick={handlePrint}>
                 <Printer className="mr-2 h-4 w-4" />
                 Print / PDF
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void downloadReportRun(
-                    run,
-                    "html",
-                    runFileName(run, clusterName ?? "cluster", "html"),
-                  );
-                }}
-              >
-                <FileCode className="mr-2 h-4 w-4" />
-                HTML
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void downloadReportRun(
-                    run,
-                    "csv",
-                    runFileName(run, clusterName ?? "cluster", "csv"),
-                  );
-                }}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                CSV
-              </Button>
-              {canGenerate && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setEmailOpen(true);
-                  }}
-                >
-                  <Mail className="mr-2 h-4 w-4" />
-                  Email
-                </Button>
-              )}
-            </>
-          )}
-          {canGenerate && run.status !== "running" && (
-            <Button
-              size="sm"
-              onClick={handleRunAgain}
-              disabled={generate.isPending}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              {generate.isPending ? "Running…" : "Run again"}
-            </Button>
-          )}
-          {canManage && run.status !== "running" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              title="Delete run"
-              onClick={() => {
-                setConfirmDelete(true);
-              }}
-            >
-              <Trash2 className="h-4 w-4 text-destructive" />
-            </Button>
-          )}
-        </div>
-      </div>
+            )}
+            {(completed || canDelete) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-1.5">
+                    More
+                    <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {completed && (
+                    <>
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          void downloadReportRun(
+                            run,
+                            "html",
+                            runFileName(run, clusterName ?? "cluster", "html"),
+                          );
+                        }}
+                      >
+                        <FileCode className="mr-2 h-4 w-4" />
+                        Download HTML
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          void downloadReportRun(
+                            run,
+                            "csv",
+                            runFileName(run, clusterName ?? "cluster", "csv"),
+                          );
+                        }}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        Download CSV
+                      </DropdownMenuItem>
+                      {canGenerate && (
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            setEmailOpen(true);
+                          }}
+                        >
+                          <Mail className="mr-2 h-4 w-4" />
+                          Email
+                        </DropdownMenuItem>
+                      )}
+                    </>
+                  )}
+                  {completed && canDelete && <DropdownMenuSeparator />}
+                  {canDelete && (
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onSelect={() => {
+                        setConfirmDelete(true);
+                      }}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete run
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </>
+        }
+      />
 
-      <div className="flex-1 bg-muted/30">
-        {run.status === "failed" ? (
-          <div className="p-6">
-            <p className="text-sm font-medium text-destructive">
-              This run failed.
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {run.error_message ?? "No error message was recorded."}
-            </p>
-          </div>
-        ) : !completed ? (
-          <div className="p-6 text-sm text-muted-foreground">
+      {run.status === "failed" ? (
+        <Panel title="This run failed">
+          <p className="text-sm text-muted-foreground">
+            {run.error_message ?? "No error message was recorded."}
+          </p>
+        </Panel>
+      ) : !completed ? (
+        <Panel>
+          <p className="text-sm text-muted-foreground">
             Generating… this page refreshes when the report is ready.
-          </div>
-        ) : htmlLoading ? (
-          <div className="p-6 text-sm text-muted-foreground">
-            Loading report…
-          </div>
-        ) : html ? (
+          </p>
+        </Panel>
+      ) : htmlLoading ? (
+        <Panel>
+          <p className="text-sm text-muted-foreground">Loading report…</p>
+        </Panel>
+      ) : html ? (
+        // The frame fills what the header leaves of the window and scrolls
+        // inside itself, so the header and its actions stay in reach while
+        // the report is read.
+        <Panel flush bodyClassName="p-0" className="overflow-hidden">
           <iframe
             ref={frameRef}
             srcDoc={html}
             title={`${title} report`}
-            className="h-[calc(100vh-7.5rem)] w-full border-0"
+            className="block h-[calc(100vh-17.5rem)] min-h-[30rem] w-full border-0"
             // allow-scripts is deliberately absent: the report is static
             // markup, so nothing inside it needs to run, and allow-modals
             // grants the parent's print() call without granting the document
@@ -266,12 +298,14 @@ export function ReportViewerPage() {
               setFrameReady(true);
             }}
           />
-        ) : (
-          <div className="p-6 text-sm text-muted-foreground">
+        </Panel>
+      ) : (
+        <Panel>
+          <p className="text-sm text-muted-foreground">
             No report content is stored for this run.
-          </div>
-        )}
-      </div>
+          </p>
+        </Panel>
+      )}
 
       <ReportEmailDialog
         run={emailOpen ? run : null}

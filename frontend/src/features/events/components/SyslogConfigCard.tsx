@@ -1,12 +1,9 @@
 import { useEffect, useState } from "react";
-import {
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  Settings2,
-  AlertTriangle,
-} from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { Panel } from "@/components/page/Panel";
+import { SettingRow, SettingsFooter } from "@/components/page/Settings";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { ApiClientError } from "@/lib/api-client";
 import {
@@ -17,10 +14,11 @@ import {
 } from "../api/events-queries";
 
 const inputClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
+  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
-const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
+const selectClass = inputClass;
+
+const PANEL_TITLE = "Syslog forwarding";
 
 interface FacilityOption {
   value: number;
@@ -217,71 +215,82 @@ export function SyslogConfigCard() {
     // (off, udp, 514): to a reader that says forwarding is off, and Save would
     // write those defaults over a live config the card never read.
     return (
-      <div className="rounded-md border">
-        <div className="flex items-center gap-2 px-4 py-3">
-          <Settings2 className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Syslog Forwarding</span>
-        </div>
-        <div className="border-t px-4 py-4">
-          <QueryStateNotice
-            query={syslogQuery}
-            subject="the syslog forwarding settings"
-            empty="Nexara returned no syslog forwarding settings."
-          />
-        </div>
-      </div>
+      <Panel title={PANEL_TITLE}>
+        <QueryStateNotice
+          query={syslogQuery}
+          subject="the syslog forwarding settings"
+          empty="Nexara returned no syslog forwarding settings."
+        />
+      </Panel>
     );
   }
 
+  // The header says what is stored, not what the form holds: a ticked box
+  // that has not been saved forwards nothing.
+  const stored = formConfig(savedConfig);
+  const storedTarget =
+    stored.host === ""
+      ? ""
+      : `${stored.host}:${String(stored.port === 0 ? defaultSyslogPort(stored.protocol) : stored.port)}`;
+
   return (
-    <div className="rounded-md border">
-      <button
-        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted/20"
-        onClick={() => {
-          // Collapsing unmounts the port field and any text in it. The field
-          // reopens from the form's port, which unreadable text left at 0 —
-          // blank — so an error about that text must not outlive it.
-          if (expanded) setPortInvalid(false);
-          setExpanded(!expanded);
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <Settings2 className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Syslog Forwarding</span>
-          {config.enabled && (
-            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-              Active
-            </span>
-          )}
-        </div>
-        <span className="text-xs text-muted-foreground">
-          {expanded ? "Hide" : "Configure"}
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="border-t px-4 py-4 space-y-4">
-          {/* Enable toggle */}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={config.enabled}
-              onChange={(e) => {
-                update({ enabled: e.target.checked });
-              }}
-              className="h-4 w-4 rounded border-input"
+    <Panel
+      title={PANEL_TITLE}
+      aside={
+        stored.enabled ? (
+          <span className="flex items-center gap-[7px]">
+            <span
+              aria-hidden="true"
+              className="h-[7px] w-[7px] shrink-0 rounded-full bg-emerald-500"
             />
-            <span className="text-sm">Enable syslog forwarding</span>
-          </label>
+            <span className="min-w-0 [overflow-wrap:anywhere]">
+              {storedTarget !== ""
+                ? `Forwarding to ${storedTarget} over ${stored.protocol.toUpperCase()}`
+                : "Forwarding"}
+            </span>
+          </span>
+        ) : (
+          "Off"
+        )
+      }
+      actions={
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-expanded={expanded}
+          className="text-muted-foreground"
+          onClick={() => {
+            // Collapsing unmounts the port field and any text in it. The field
+            // reopens from the form's port, which unreadable text left at 0 —
+            // blank — so an error about that text must not outlive it.
+            if (expanded) setPortInvalid(false);
+            setExpanded(!expanded);
+          }}
+        >
+          {expanded ? "Hide" : "Configure"}
+        </Button>
+      }
+      bodyClassName={expanded ? "" : "pb-1"}
+    >
+      {expanded && (
+        <>
+          <div className="divide-y border-t">
+            <SettingRow
+              label="Enable syslog forwarding"
+              htmlFor="syslog-enabled"
+              description="Every audit event is sent to the server below as it is recorded, in RFC 5424 format. Severity is derived from the action type."
+              className="first:pt-3.5"
+            >
+              <Switch
+                id="syslog-enabled"
+                checked={config.enabled}
+                onCheckedChange={(enabled) => {
+                  update({ enabled });
+                }}
+              />
+            </SettingRow>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <label
-                htmlFor="syslog-host"
-                className="mb-1 block text-xs text-muted-foreground"
-              >
-                Host
-              </label>
+            <SettingRow label="Host" htmlFor="syslog-host">
               <input
                 id="syslog-host"
                 type="text"
@@ -292,15 +301,13 @@ export function SyslogConfigCard() {
                   update({ host: e.target.value });
                 }}
               />
-            </div>
+            </SettingRow>
 
-            <div>
-              <label
-                htmlFor="syslog-port"
-                className="mb-1 block text-xs text-muted-foreground"
-              >
-                Port
-              </label>
+            <SettingRow
+              label="Port"
+              htmlFor="syslog-port"
+              description="Leave blank for the protocol's default."
+            >
               <input
                 id="syslog-port"
                 type="number"
@@ -334,20 +341,14 @@ export function SyslogConfigCard() {
                 <p
                   id={portErrorId}
                   role="alert"
-                  className="mt-1 text-xs text-red-500"
+                  className="basis-full text-[12.5px] text-red-700 dark:text-red-400"
                 >
                   {portError}
                 </p>
               )}
-            </div>
+            </SettingRow>
 
-            <div>
-              <label
-                htmlFor="syslog-protocol"
-                className="mb-1 block text-xs text-muted-foreground"
-              >
-                Protocol
-              </label>
+            <SettingRow label="Protocol" htmlFor="syslog-protocol">
               <select
                 id="syslog-protocol"
                 className={selectClass}
@@ -364,24 +365,17 @@ export function SyslogConfigCard() {
                 <option value="udp">UDP</option>
                 <option value="tcp">TCP</option>
                 <option value="tls">TLS</option>
-                {unlistedProtocols(
-                  config.protocol,
-                  formConfig(savedConfig).protocol,
-                ).map((p) => (
-                  <option key={p} value={p}>
-                    {`other (${p})`}
-                  </option>
-                ))}
+                {unlistedProtocols(config.protocol, stored.protocol).map(
+                  (p) => (
+                    <option key={p} value={p}>
+                      {`other (${p})`}
+                    </option>
+                  ),
+                )}
               </select>
-            </div>
+            </SettingRow>
 
-            <div>
-              <label
-                htmlFor="syslog-facility"
-                className="mb-1 block text-xs text-muted-foreground"
-              >
-                Facility
-              </label>
+            <SettingRow label="Facility" htmlFor="syslog-facility">
               <select
                 id="syslog-facility"
                 className={selectClass}
@@ -390,44 +384,75 @@ export function SyslogConfigCard() {
                   update({ facility: parseInt(e.target.value, 10) });
                 }}
               >
-                {facilityOptions(
-                  config.facility,
-                  formConfig(savedConfig).facility,
-                ).map((f) => (
+                {facilityOptions(config.facility, stored.facility).map((f) => (
                   <option key={f.value} value={f.value}>
                     {f.label}
                   </option>
                 ))}
               </select>
-            </div>
+            </SettingRow>
+
+            {config.protocol === "tls" && (
+              <SettingRow
+                label="Skip TLS certificate verification"
+                htmlFor="syslog-tls-skip-verify"
+                description="Accept whatever certificate the server presents."
+              >
+                <Switch
+                  id="syslog-tls-skip-verify"
+                  checked={config.tls_skip_verify}
+                  onCheckedChange={(tls_skip_verify) => {
+                    update({ tls_skip_verify });
+                  }}
+                />
+              </SettingRow>
+            )}
           </div>
 
-          {config.protocol === "tls" && (
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={config.tls_skip_verify}
-                onChange={(e) => {
-                  update({ tls_skip_verify: e.target.checked });
-                }}
-                className="h-4 w-4 rounded border-input"
-              />
-              <span className="text-sm">Skip TLS certificate verification</span>
-            </label>
-          )}
-
-          {/* Actions */}
-          <div className="flex items-center gap-3">
-            <Button
-              size="sm"
-              onClick={handleSave}
-              disabled={saveMutation.isPending || portError !== null}
+          <SettingsFooter className="border-t">
+            {/* Status feedback */}
+            <div
+              role="status"
+              className="mr-auto flex min-w-0 flex-wrap items-center gap-3 text-[12.5px]"
             >
-              {saveMutation.isPending && (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              {saveMutation.isSuccess && warning === null && (
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                  Saved
+                </span>
               )}
-              Save
-            </Button>
+              {/* Stored, but the forwarder could not connect. It tries again
+                  for each later record and drops any it cannot deliver,
+                  which a plain "Saved" would hide. */}
+              {saveMutation.isSuccess && warning !== null && (
+                <span className="flex items-center gap-1 text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  {warning}
+                </span>
+              )}
+              {saveMutation.isError && (
+                <span className="flex items-center gap-1 text-red-700 dark:text-red-400">
+                  <XCircle className="h-3.5 w-3.5 shrink-0" />
+                  {saveMutation.error instanceof Error
+                    ? saveMutation.error.message
+                    : "Failed to save"}
+                </span>
+              )}
+              {testMutation.isSuccess && (
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                  Test message sent
+                </span>
+              )}
+              {testMutation.isError && (
+                <span className="flex items-center gap-1 text-red-700 dark:text-red-400">
+                  <XCircle className="h-3.5 w-3.5 shrink-0" />
+                  {testMutation.error instanceof Error
+                    ? testFailure(testMutation.error)
+                    : "Test failed"}
+                </span>
+              )}
+            </div>
 
             <Button
               variant="outline"
@@ -440,58 +465,22 @@ export function SyslogConfigCard() {
               {testMutation.isPending && (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
               )}
-              Test Connection
+              Test connection
             </Button>
 
-            {/* Status feedback */}
-            <div role="status" className="flex items-center gap-3">
-              {saveMutation.isSuccess && warning === null && (
-                <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2 className="h-3 w-3" />
-                  Saved
-                </span>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saveMutation.isPending || portError !== null}
+            >
+              {saveMutation.isPending && (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
               )}
-              {/* Stored, but the forwarder could not connect. It tries again
-                  for each later record and drops any it cannot deliver,
-                  which a plain "Saved" would hide. */}
-              {saveMutation.isSuccess && warning !== null && (
-                <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-                  <AlertTriangle className="h-3 w-3" />
-                  {warning}
-                </span>
-              )}
-              {saveMutation.isError && (
-                <span className="flex items-center gap-1 text-xs text-red-500">
-                  <XCircle className="h-3 w-3" />
-                  {saveMutation.error instanceof Error
-                    ? saveMutation.error.message
-                    : "Failed to save"}
-                </span>
-              )}
-              {testMutation.isSuccess && (
-                <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2 className="h-3 w-3" />
-                  Test message sent
-                </span>
-              )}
-              {testMutation.isError && (
-                <span className="flex items-center gap-1 text-xs text-red-500">
-                  <XCircle className="h-3 w-3" />
-                  {testMutation.error instanceof Error
-                    ? testFailure(testMutation.error)
-                    : "Test failed"}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <p className="text-xs text-muted-foreground">
-            When enabled, all audit events are forwarded in real-time to the
-            configured syslog server using RFC 5424 format. Severity is derived
-            from the action type.
-          </p>
-        </div>
+              Save
+            </Button>
+          </SettingsFooter>
+        </>
       )}
-    </div>
+    </Panel>
   );
 }

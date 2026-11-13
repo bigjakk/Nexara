@@ -1,5 +1,5 @@
-import { Zap, Clock, Eye, FileText } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Panel } from "@/components/page/Panel";
+import { Stat, StatStrip, type StatTone } from "@/components/page/StatStrip";
 import type { SSVCLabel } from "@/types/api";
 
 /**
@@ -20,45 +20,23 @@ interface SSVCHistogramProps {
 
 interface ActionConfig {
   label: string;
-  icon: typeof Zap;
   description: string;
-  cardClass: string;
-  iconClass: string;
-  countClass: string;
+  /** The tone once there is at least one; zero is always quiet. */
+  tone: StatTone;
 }
 
 const actionConfig: Record<SSVCLabel, ActionConfig> = {
-  act: {
-    label: "Act",
-    icon: Zap,
-    description: "Patch immediately",
-    cardClass: "border-red-500/40 bg-red-500/10",
-    iconClass: "text-red-500",
-    countClass: "text-red-700 dark:text-red-400",
-  },
-  attend: {
-    label: "Attend",
-    icon: Clock,
-    description: "Plan this week",
-    cardClass: "border-orange-500/40 bg-orange-500/10",
-    iconClass: "text-orange-500",
-    countClass: "text-orange-700 dark:text-orange-400",
-  },
+  act: { label: "Act", description: "Patch immediately", tone: "bad" },
+  attend: { label: "Attend", description: "Plan this week", tone: "warn" },
   track_star: {
     label: "Track*",
-    icon: Eye,
     description: "Next routine cycle",
-    cardClass: "border-amber-500/40 bg-amber-500/10",
-    iconClass: "text-amber-500",
-    countClass: "text-amber-700 dark:text-amber-500",
+    tone: "default",
   },
   track: {
     label: "Track",
-    icon: FileText,
     description: "Routine maintenance",
-    cardClass: "border-muted bg-muted/30",
-    iconClass: "text-muted-foreground",
-    countClass: "text-foreground",
+    tone: "default",
   },
 };
 
@@ -79,52 +57,29 @@ export function SSVCHistogram({
   ];
 
   return (
-    <div className="rounded-lg border bg-card p-6">
-      <div className="mb-3 flex items-baseline justify-between">
-        <h3 className="text-sm font-medium text-muted-foreground">
-          Action Required (SSVC)
-        </h3>
-        <span
-          className="text-xs text-muted-foreground"
-          title="CISA Stakeholder-Specific Vulnerability Categorization"
-        >
-          per CISA decision tree
+    <Panel
+      flush
+      title="What to do"
+      aside={
+        <span title="CISA Stakeholder-Specific Vulnerability Categorization">
+          each finding sorted by CISA&apos;s SSVC decision tree
         </span>
-      </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      }
+    >
+      <StatStrip>
         {items.map(({ label, count }) => {
           const cfg = actionConfig[label];
-          const Icon = cfg.icon;
           return (
-            <div
+            <Stat
               key={label}
-              className={cn(
-                "flex flex-col items-start gap-1 rounded-md border p-3",
-                cfg.cardClass,
-              )}
-              title={cfg.description}
-            >
-              <div className="flex items-center gap-1.5">
-                <Icon className={cn("h-4 w-4", cfg.iconClass)} />
-                <span className="text-xs font-semibold uppercase tracking-wide">
-                  {cfg.label}
-                </span>
-              </div>
-              <span
-                className={cn(
-                  "text-2xl font-bold tracking-tight",
-                  cfg.countClass,
-                )}
-              >
-                {count}
-              </span>
-              <span className="text-[11px] text-muted-foreground">
-                {cfg.description}
-              </span>
-            </div>
+              label={cfg.label}
+              value={String(count)}
+              sub={cfg.description}
+              tone={count > 0 ? cfg.tone : "quiet"}
+            />
           );
         })}
-      </div>
-    </div>
+      </StatStrip>
+    </Panel>
   );
 }

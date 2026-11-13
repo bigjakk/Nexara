@@ -136,7 +136,7 @@ export function ReportScheduleForm({
     <DialogContent className="max-w-lg">
       <DialogHeader>
         <DialogTitle>
-          {isEditing ? "Edit Report Schedule" : "New Report Schedule"}
+          {isEditing ? "Edit report schedule" : "New report schedule"}
         </DialogTitle>
       </DialogHeader>
       <div className="space-y-4 pt-4">
@@ -147,13 +147,13 @@ export function ReportScheduleForm({
             onChange={(e) => {
               setName(e.target.value);
             }}
-            placeholder="Weekly CPU Report"
+            placeholder="Weekly CPU report"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label>Report Type</Label>
+            <Label>Report type</Label>
             <Select value={reportType} onValueChange={setReportType}>
               <SelectTrigger>
                 <SelectValue />
@@ -190,7 +190,7 @@ export function ReportScheduleForm({
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label>Cron Schedule</Label>
+            <Label>Cron schedule</Label>
             <Input
               value={schedule}
               onChange={(e) => {
@@ -201,7 +201,7 @@ export function ReportScheduleForm({
           </div>
 
           <div className="space-y-2">
-            <Label>Time Range (hours)</Label>
+            <Label>Time range (hours)</Label>
             <Input
               type="number"
               min={1}
@@ -281,8 +281,8 @@ export function ReportScheduleForm({
           {isPending
             ? "Saving..."
             : isEditing
-              ? "Update Schedule"
-              : "Create Schedule"}
+              ? "Update schedule"
+              : "Create schedule"}
         </Button>
       </div>
     </DialogContent>
@@ -304,7 +304,7 @@ export function ReportScheduleForm({
       <DialogTrigger asChild>
         <Button variant="outline">
           <Plus className="mr-2 h-4 w-4" />
-          New Schedule
+          New schedule
         </Button>
       </DialogTrigger>
       {content}

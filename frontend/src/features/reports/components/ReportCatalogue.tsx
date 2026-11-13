@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { CalendarClock, Play } from "lucide-react";
+import { Panel } from "@/components/page/Panel";
+import { CalendarClock } from "lucide-react";
 import { formatRelativeTime } from "@/lib/format";
 import type { ReportRun } from "@/types/api";
 import { REPORT_TYPES, type ReportTypeInfo } from "../report-types";
@@ -15,7 +15,7 @@ interface ReportCatalogueProps {
 }
 
 /**
- * One card per report type: what it answers, what is inside, and the most
+ * One entry per report type: what it answers, what is inside, and the most
  * recent finished run so a reader can open it without regenerating.
  */
 export function ReportCatalogue({
@@ -35,23 +35,28 @@ export function ReportCatalogue({
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {REPORT_TYPES.map((info) => (
-        <CatalogueCard
-          key={info.value}
-          info={info}
-          latest={latestByType.get(info.value)}
-          canGenerate={canGenerate}
-          canManage={canManage}
-          onGenerate={onGenerate}
-          onSchedule={onSchedule}
-        />
-      ))}
-    </div>
+    <Panel
+      title="Report types"
+      aside={`${String(REPORT_TYPES.length)} to choose from`}
+    >
+      <ul className="divide-y">
+        {REPORT_TYPES.map((info) => (
+          <CatalogueEntry
+            key={info.value}
+            info={info}
+            latest={latestByType.get(info.value)}
+            canGenerate={canGenerate}
+            canManage={canManage}
+            onGenerate={onGenerate}
+            onSchedule={onSchedule}
+          />
+        ))}
+      </ul>
+    </Panel>
   );
 }
 
-function CatalogueCard({
+function CatalogueEntry({
   info,
   latest,
   canGenerate,
@@ -67,59 +72,63 @@ function CatalogueCard({
   onSchedule: (type: string) => void;
 }) {
   return (
-    <Card className="flex flex-col">
-      <CardContent className="flex flex-1 flex-col gap-2 p-4">
-        <div>
-          <h3 className="text-sm font-semibold leading-tight">{info.label}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{info.blurb}</p>
-        </div>
-        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-          {info.sections.map((s) => (
-            <li key={s}>{s}</li>
-          ))}
-        </ul>
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-2 text-xs">
-          {latest ? (
-            <Link
-              to={`/reports/runs/${latest.id}`}
-              className="text-primary hover:underline"
-              title={new Date(latest.created_at).toLocaleString()}
-            >
-              Last run {formatRelativeTime(latest.created_at)} ›
-            </Link>
-          ) : (
-            <span className="text-muted-foreground">Never run</span>
-          )}
-          <div className="flex gap-1">
-            {canManage && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2"
-                onClick={() => {
-                  onSchedule(info.value);
-                }}
-                title="Schedule this report"
-              >
-                <CalendarClock className="h-3.5 w-3.5" />
-              </Button>
-            )}
-            {canGenerate && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2"
-                onClick={() => {
-                  onGenerate(info.value);
-                }}
-              >
-                <Play className="mr-1 h-3.5 w-3.5" />
-                Generate
-              </Button>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <li className="py-3.5 first:pt-0 last:pb-0">
+      <div className="flex items-start gap-2">
+        <h3 className="min-w-0 flex-1 text-sm font-semibold leading-7">
+          {info.label}
+        </h3>
+        {canManage && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 text-muted-foreground"
+            onClick={() => {
+              onSchedule(info.value);
+            }}
+            title="Schedule this report"
+            aria-label={`Schedule ${info.label}`}
+          >
+            <CalendarClock className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {canGenerate && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0 px-2.5"
+            aria-label={`Generate ${info.label}`}
+            onClick={() => {
+              onGenerate(info.value);
+            }}
+          >
+            Generate
+          </Button>
+        )}
+      </div>
+      <p className="mt-0.5 text-[13px] text-muted-foreground">{info.blurb}</p>
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[12.5px]">
+        {latest ? (
+          <Link
+            to={`/reports/runs/${latest.id}`}
+            className="text-primary hover:underline"
+            title={new Date(latest.created_at).toLocaleString()}
+          >
+            Open the run from {formatRelativeTime(latest.created_at)}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground/75">Never run</span>
+        )}
+        <details className="min-w-0 basis-full text-muted-foreground">
+          <summary className="w-fit cursor-pointer rounded-sm outline-hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+            What is inside
+          </summary>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            {info.sections.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
+        </details>
+      </div>
+    </li>
   );
 }

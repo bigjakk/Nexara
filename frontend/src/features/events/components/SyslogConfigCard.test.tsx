@@ -141,7 +141,7 @@ const protocolField = () => screen.getByLabelText("Protocol");
 const facilityField = () => screen.getByLabelText("Facility");
 const saveButton = () => screen.getByRole("button", { name: /^Save$/ });
 const testButton = () =>
-  screen.getByRole("button", { name: /Test Connection/ });
+  screen.getByRole("button", { name: /Test connection/ });
 
 /**
  * Types over the port field's whole value the way an operator selecting it

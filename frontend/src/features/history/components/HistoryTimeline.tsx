@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Activity, ChevronLeft, ChevronRight } from "lucide-react";
+import { Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
@@ -13,7 +15,6 @@ import { haRequester, linkedTaskRole } from "@/components/layout/linked-task";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
 import { formatDateTime } from "@/lib/format";
 import { useTaskLogStore } from "@/stores/task-log-store";
-import { selectClass } from "@/features/tasks/lib/task-filters";
 import { useTaskLog, useTaskStatus } from "@/features/tasks/api/tasks-queries";
 import {
   HISTORY_PAGE_SIZE,
@@ -61,6 +62,10 @@ type HistoryLayout = ColumnLayout<
   HistoryColumnKey,
   HistoryCellCtx
 >;
+
+/** A filter in the row above the table: compact, and named by its aria-label. */
+const filterClass =
+  "h-8 min-w-0 max-w-[13rem] rounded-md border border-input bg-transparent px-2 text-[13px] transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 /** The timeline is newest first and sorts no other way. */
 const noSort = () => null;
@@ -141,7 +146,7 @@ function HistoryRow({
   return (
     <>
       <tr
-        className="cursor-pointer border-b hover:bg-muted/20"
+        className="cursor-pointer border-b transition-colors hover:bg-foreground/[0.035]"
         onClick={onToggle}
       >
         <DataTableCells
@@ -162,9 +167,13 @@ function HistoryRow({
         />
       </tr>
       {expanded && (
-        <tr className="border-b bg-muted/10">
-          <td colSpan={layout.columns.length} className="px-4 py-3">
-            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+        <tr className="border-b">
+          {/* Recessed: what the row above opened, not another row. */}
+          <td
+            colSpan={layout.columns.length}
+            className="bg-foreground/[0.03] px-[18px] py-3.5"
+          >
+            <div className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1 text-[12.5px]">
               <span className="text-muted-foreground">
                 {shared("row.event")}
               </span>
@@ -252,7 +261,9 @@ function HistoryRow({
                   <span className="text-muted-foreground">
                     {shared("row.exitStatus")}
                   </span>
-                  <span className="break-all text-red-500">{exitText}</span>
+                  <span className="break-all text-red-700 dark:text-red-400">
+                    {exitText}
+                  </span>
                 </>
               )}
 
@@ -261,7 +272,7 @@ function HistoryRow({
                   <span className="text-muted-foreground">
                     {shared("row.upid")}
                   </span>
-                  <span className="break-all font-mono text-[10px]">
+                  <span className="break-all font-mono text-[11px] text-muted-foreground">
                     {entry.upid}
                   </span>
                 </>
@@ -269,15 +280,17 @@ function HistoryRow({
             </div>
 
             {note !== undefined && (
-              <p className="mt-2 text-xs text-muted-foreground">{note}</p>
+              <p className="mt-2.5 text-[12.5px] text-muted-foreground">
+                {note}
+              </p>
             )}
 
             {details && (
-              <div className="mt-2 border-t pt-2">
-                <span className="text-xs font-medium text-muted-foreground">
+              <div className="mt-3 border-t pt-2.5">
+                <span className="text-[12.5px] font-medium text-muted-foreground">
                   {shared("row.details")}
                 </span>
-                <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-5 gap-y-1 text-[12.5px]">
                   {details.map(([key, value]) => (
                     <div key={key} className="contents">
                       <span className="text-muted-foreground">{key}</span>
@@ -289,7 +302,7 @@ function HistoryRow({
             )}
 
             {parts?.lists.map(({ key, items }) => (
-              <details key={key} className="mt-2 text-xs">
+              <details key={key} className="mt-2.5 text-[12.5px]">
                 <summary className="cursor-pointer text-muted-foreground">
                   {shared("row.list", {
                     key: key.replace(/_/g, " "),
@@ -303,7 +316,7 @@ function HistoryRow({
 
             {hasTask && (
               <>
-                <div className="mt-2">
+                <div className="mt-3">
                   <Button
                     variant="outline"
                     size="sm"
@@ -513,7 +526,7 @@ export function HistoryTimeline({
     return (
       <select
         aria-label={label}
-        className={selectClass}
+        className={filterClass}
         value={value}
         onChange={(e) => {
           onChange(e.target.value as T);
@@ -535,7 +548,7 @@ export function HistoryTimeline({
     onChange: (v: boolean) => void,
   ) {
     return (
-      <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+      <label className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
         <input
           type="checkbox"
           checked={checked}
@@ -549,9 +562,30 @@ export function HistoryTimeline({
     );
   }
 
+  const notes =
+    data?.guests !== undefined ||
+    wholeFrom !== undefined ||
+    categoryNote !== "";
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+    // One flat surface: the filters in its top row, the table edge to edge,
+    // the count and the paging along its foot.
+    <Panel flush bodyClassName="pt-0">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 px-[18px] pb-3 pt-3.5">
+        <Segmented
+          aria-label={shared("filters.time")}
+          value={timeWindow}
+          onValueChange={(value) => {
+            setTimeWindow(value);
+            setPage(0);
+          }}
+          options={WINDOW_OPTIONS.map((value) => ({
+            value,
+            label: shared(`windowsShort.${value || "all"}`),
+            ariaLabel: shared(`windows.${value || "all"}`),
+            title: shared(`windows.${value || "all"}`),
+          }))}
+        />
         {filterSelect(
           shared("filters.type"),
           category,
@@ -566,15 +600,6 @@ export function HistoryTimeline({
             label: shared(`sourceOptions.${value || "all"}`),
           })),
           setSource,
-        )}
-        {filterSelect(
-          shared("filters.time"),
-          timeWindow,
-          WINDOW_OPTIONS.map((value) => ({
-            value,
-            label: shared(`windows.${value || "all"}`),
-          })),
-          setTimeWindow,
         )}
         {(kind.routine ?? []).length > 0 &&
           filterCheckbox(
@@ -592,56 +617,58 @@ export function HistoryTimeline({
         <ResetColumnsButton layout={layout} />
       </div>
 
-      {data?.guests !== undefined && (
-        <p className="text-xs text-muted-foreground">
-          {shared("guestsFollowed", {
-            followed: data.guests.followed.toLocaleString(),
-            total: data.guests.total.toLocaleString(),
-          })}
-        </p>
-      )}
-
-      {wholeFrom !== undefined && (
-        <p className="text-xs text-muted-foreground">
-          {shared(
-            !atEnd
-              ? "searchedFromPaged"
-              : olderOn && !canShowOlder
-                ? "searchedFromStuck"
-                : "searchedFrom",
-            { when: formatDateTime(wholeFrom) },
-          )}
-          {!narrowed &&
-            kind.rowCap !== undefined &&
-            kind.filteredRowCap !== undefined &&
-            kind.filteredRowCap > kind.rowCap &&
-            " " +
-              shared("narrowingSearchesDeeper", {
-                cap: kind.rowCap.toLocaleString(),
-                narrowed: kind.filteredRowCap.toLocaleString(),
+      {notes && (
+        <div className="space-y-1 px-[18px] pb-3 text-[12.5px] text-muted-foreground">
+          {data?.guests !== undefined && (
+            <p>
+              {shared("guestsFollowed", {
+                followed: data.guests.followed.toLocaleString(),
+                total: data.guests.total.toLocaleString(),
               })}
-        </p>
-      )}
+            </p>
+          )}
 
-      {categoryNote !== "" && (
-        <p className="text-xs text-muted-foreground">{categoryNote}</p>
+          {wholeFrom !== undefined && (
+            <p>
+              {shared(
+                !atEnd
+                  ? "searchedFromPaged"
+                  : olderOn && !canShowOlder
+                    ? "searchedFromStuck"
+                    : "searchedFrom",
+                { when: formatDateTime(wholeFrom) },
+              )}
+              {!narrowed &&
+                kind.rowCap !== undefined &&
+                kind.filteredRowCap !== undefined &&
+                kind.filteredRowCap > kind.rowCap &&
+                " " +
+                  shared("narrowingSearchesDeeper", {
+                    cap: kind.rowCap.toLocaleString(),
+                    narrowed: kind.filteredRowCap.toLocaleString(),
+                  })}
+            </p>
+          )}
+
+          {categoryNote !== "" && <p>{categoryNote}</p>}
+        </div>
       )}
 
       {isLoading ? (
-        <div className="space-y-2">
+        <div className="space-y-2 px-[18px] pb-1">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-10 w-full" />
           ))}
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-md border">
+          <div className="overflow-x-auto">
             <table
               className="table-fixed text-sm"
               style={{ width: layout.totalWidth }}
             >
               <thead>
-                <tr className="border-b bg-muted/50">
+                <tr className="border-b">
                   <DataTableHeadCells
                     layout={layout}
                     directionFor={noSort}
@@ -655,7 +682,7 @@ export function HistoryTimeline({
                   <tr>
                     <td
                       colSpan={layout.columns.length}
-                      className="px-4 py-8 text-center text-destructive"
+                      className="px-[18px] py-10 text-center text-destructive"
                     >
                       {error.message}
                     </td>
@@ -684,7 +711,7 @@ export function HistoryTimeline({
                   <tr>
                     <td
                       colSpan={layout.columns.length}
-                      className="px-4 py-8 text-center text-destructive"
+                      className="px-[18px] py-10 text-center text-destructive"
                     >
                       {older.error.message}
                     </td>
@@ -694,7 +721,7 @@ export function HistoryTimeline({
                   <tr>
                     <td
                       colSpan={layout.columns.length}
-                      className="px-4 py-8 text-center text-muted-foreground"
+                      className="px-[18px] py-10 text-center text-muted-foreground"
                     >
                       {category || source
                         ? shared("noMatches")
@@ -708,8 +735,8 @@ export function HistoryTimeline({
             </table>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-[18px] pt-3">
+            <p className="text-[12.5px] text-muted-foreground">
               {error ? "" : shared("entries", { count: listed })}
               {!error &&
                 absorbedHere > 0 &&
@@ -730,11 +757,15 @@ export function HistoryTimeline({
               </Button>
             )}
             {totalPages > 1 && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <span className="mr-1 text-[12.5px] text-muted-foreground">
+                  {shared("page", { page: page + 1, pages: totalPages })}
+                </span>
                 <Button
                   aria-label={shared("previousPage")}
-                  variant="outline"
-                  size="sm"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
                   disabled={page === 0}
                   onClick={() => {
                     setPage(Math.max(0, page - 1));
@@ -742,13 +773,11 @@ export function HistoryTimeline({
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <span className="text-sm">
-                  {shared("page", { page: page + 1, pages: totalPages })}
-                </span>
                 <Button
                   aria-label={shared("nextPage")}
-                  variant="outline"
-                  size="sm"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
                   disabled={page + 1 >= totalPages}
                   onClick={() => {
                     setPage(page + 1);
@@ -761,6 +790,6 @@ export function HistoryTimeline({
           </div>
         </>
       )}
-    </div>
+    </Panel>
   );
 }

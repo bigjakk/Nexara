@@ -22,10 +22,10 @@ export function PackagePreviewTable({ packages }: PackagePreviewTableProps) {
   }
 
   return (
-    <div className="max-h-64 overflow-auto rounded-md border">
+    <div className="max-h-64 overflow-auto">
       <Table>
         <TableHeader>
-          <TableRow>
+          <TableRow className="hover:bg-transparent">
             <TableHead>Package</TableHead>
             <TableHead>Current</TableHead>
             <TableHead>Available</TableHead>
@@ -35,12 +35,16 @@ export function PackagePreviewTable({ packages }: PackagePreviewTableProps) {
         <TableBody>
           {packages.map((pkg) => (
             <TableRow key={`${pkg.Package}-${pkg.Version}`}>
-              <TableCell className="font-mono text-xs">{pkg.Package}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">
+              <TableCell className="py-1.5 font-mono text-xs">
+                {pkg.Package}
+              </TableCell>
+              <TableCell className="py-1.5 text-xs text-muted-foreground">
                 {pkg.OldVersion}
               </TableCell>
-              <TableCell className="text-xs">{pkg.Version}</TableCell>
-              <TableCell className="text-xs">{pkg.Priority}</TableCell>
+              <TableCell className="py-1.5 text-xs">{pkg.Version}</TableCell>
+              <TableCell className="py-1.5 text-xs text-muted-foreground">
+                {pkg.Priority}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

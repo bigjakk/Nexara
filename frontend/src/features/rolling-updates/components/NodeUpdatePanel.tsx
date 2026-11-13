@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, PackageCheck, ShieldAlert } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/page/Panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -77,22 +76,29 @@ export function NodeUpdatePanel({
 
   const failure = describeError(update.error);
 
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-        <CardTitle className="flex items-center gap-2 text-base">
-          Pending updates
-          {count > 0 && <Badge variant="secondary">{count}</Badge>}
-          {securityCount > 0 && (
-            <Badge variant="destructive" className="gap-1">
-              <ShieldAlert className="h-3 w-3" />
-              {securityCount} security
-            </Badge>
-          )}
-        </CardTitle>
+  const hasTable = count > 0 && packages !== undefined;
 
-        {count > 0 && allowed && (
+  return (
+    <Panel
+      flush
+      title="Pending updates"
+      aside={
+        count > 0 ? (
+          <>
+            {count} {count === 1 ? "package" : "packages"}
+            {securityCount > 0 && (
+              <span className="text-amber-700 dark:text-amber-400">
+                , {securityCount} security
+              </span>
+            )}
+          </>
+        ) : undefined
+      }
+      actions={
+        count > 0 && allowed ? (
           <Button
+            // Outline: the node page's header holds the screen's primary.
+            variant="outline"
             size="sm"
             disabled={(!hasSSH && !sshUnknown) || busy}
             title={
@@ -107,28 +113,33 @@ export function NodeUpdatePanel({
             {busy && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
             Update this node
           </Button>
-        )}
-      </CardHeader>
-
-      <CardContent className="space-y-3">
-        {/* Rendered in place of the table, never alongside it, so a read that
-            failed can never be mistaken for a node with nothing pending — the
-            distinction this badge is read for. */}
-        {count > 0 && packages ? (
-          <PackagePreviewTable packages={packages} />
-        ) : (
+        ) : undefined
+      }
+    >
+      {/* Rendered in place of the table, never alongside it, so a read that
+          failed can never be mistaken for a node with nothing pending — the
+          distinction this panel is read for. */}
+      {hasTable ? (
+        <PackagePreviewTable packages={packages} />
+      ) : (
+        <div className="px-[18px] pb-1 text-sm">
           <QueryStateNotice
             query={query}
             subject="pending updates"
             empty={
-              <span className="flex items-center gap-2">
-                <PackageCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              <span className="flex items-center gap-[7px]">
+                <span
+                  aria-hidden="true"
+                  className="h-2 w-2 shrink-0 rounded-full bg-emerald-500"
+                />
                 Up to date — no pending packages.
               </span>
             }
           />
-        )}
+        </div>
+      )}
 
+      <div className="space-y-2 px-[18px] empty:hidden [&>*:first-child]:pt-3">
         {count > 0 && !hasSSH && !sshUnknown && (
           <p className="text-sm text-muted-foreground">
             Applying updates needs SSH credentials for this cluster. Add them
@@ -158,7 +169,7 @@ export function NodeUpdatePanel({
             .
           </p>
         )}
-      </CardContent>
+      </div>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
@@ -209,6 +220,6 @@ export function NodeUpdatePanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </Panel>
   );
 }
