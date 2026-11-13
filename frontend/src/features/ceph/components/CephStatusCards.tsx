@@ -77,7 +77,7 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
             </p>
             <div className="mt-2 h-2 rounded-full bg-muted">
               <div
-                className="h-2 rounded-full bg-primary"
+                className="h-2 rounded-full bg-data"
                 style={{ width: `${String(Math.min(Number(usedPct), 100))}%` }}
               />
             </div>

@@ -40,7 +40,7 @@ export function VeeamRepositoryCards({
             ? "bg-destructive"
             : usedPct >= 75
               ? "bg-amber-500"
-              : "bg-primary";
+              : "bg-data";
 
         return (
           <Card key={repo.id}>

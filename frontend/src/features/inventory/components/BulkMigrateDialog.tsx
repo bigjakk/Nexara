@@ -1057,7 +1057,7 @@ function BulkJobProgress({
       {(status === "pending" || status === "migrating") && (
         <div className="h-1.5 overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full bg-primary transition-all"
+            className="h-full bg-data transition-all"
             style={{
               width: `${String(Math.max(progress * 100, 5))}%`,
             }}

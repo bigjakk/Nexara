@@ -630,7 +630,7 @@ export function MigrateWizard() {
               <div className="space-y-2">
                 <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full bg-primary transition-all"
+                    className="h-full bg-data transition-all"
                     style={{
                       width: `${String(Math.max(job.progress * 100, 5))}%`,
                     }}

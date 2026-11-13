@@ -23,6 +23,12 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useCluster, useClusterNodes } from "../api/cluster-queries";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { useClusterMetrics } from "@/hooks/useMetrics";
+import { nodePVEVersion } from "@/lib/pve-version";
+import { GuestCells } from "@/features/dashboard/components/GuestCell";
+import {
+  fleetGuestFromRow,
+  type FleetGuest,
+} from "@/features/dashboard/lib/fleet";
 import { LiveMetricCards } from "@/features/dashboard/components/LiveMetricCards";
 import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { ResourceTable } from "@/features/inventory/components/ResourceTable";
@@ -73,7 +79,11 @@ export function ClusterDetailPage() {
 
   // All guests in the cluster, as inventory rows so the VMs tab gets the
   // full ResourceTable (context menu, bulk actions) like the folder view.
-  const { rows: inventoryRows, failedClusterIds } = useInventoryData();
+  const {
+    rows: inventoryRows,
+    failedClusterIds,
+    isLoading: inventoryLoading,
+  } = useInventoryData();
   const clusterVmRows = useMemo(
     () =>
       inventoryRows.filter(
@@ -82,6 +92,23 @@ export function ClusterDetailPage() {
     [inventoryRows, clusterId],
   );
   const nodes = nodesQuery.data ?? [];
+  // Until the guest list has answered, or when it could not be read, an empty
+  // list is not "no guests": the Nodes table shows a dash instead.
+  const guestsKnown =
+    !inventoryLoading && !failedClusterIds.includes(clusterId ?? "");
+  // Each node's guests as cells for the Nodes table, in VMID order.
+  const guestsByNode = useMemo(() => {
+    const map = new Map<string, FleetGuest[]>();
+    for (const row of clusterVmRows) {
+      const guest = fleetGuestFromRow(row);
+      if (!guest) continue;
+      const list = map.get(row.nodeName) ?? [];
+      list.push(guest);
+      map.set(row.nodeName, list);
+    }
+    for (const list of map.values()) list.sort((a, b) => a.vmid - b.vmid);
+    return map;
+  }, [clusterVmRows]);
 
   const { canConsole, hasPermission } = usePermissions();
   // History is read from the audit log, and its rows open Proxmox task logs:
@@ -226,10 +253,11 @@ export function ClusterDetailPage() {
                           <TableHead>Status</TableHead>
                           <TableHead>CPU Usage</TableHead>
                           <TableHead>Memory Usage</TableHead>
+                          <TableHead>Guests</TableHead>
                           <TableHead>CPUs</TableHead>
                           <TableHead>Memory</TableHead>
                           <TableHead>Disk</TableHead>
-                          <TableHead>PVE Version</TableHead>
+                          <TableHead>Version</TableHead>
                           <TableHead>Uptime</TableHead>
                           <TableHead className="w-20">Actions</TableHead>
                         </TableRow>
@@ -240,7 +268,7 @@ export function ClusterDetailPage() {
                             <TableCell className="font-medium">
                               <Link
                                 to={`/clusters/${clusterId ?? ""}/nodes/${node.id}`}
-                                className="text-primary hover:underline"
+                                className="hover:underline"
                               >
                                 {node.name}
                               </Link>
@@ -280,13 +308,31 @@ export function ClusterDetailPage() {
                                 }
                               />
                             </TableCell>
-                            <TableCell>{node.cpu_count}</TableCell>
-                            <TableCell>{formatBytes(node.mem_total)}</TableCell>
                             <TableCell>
+                              {guestsKnown ? (
+                                <GuestCells
+                                  guests={guestsByNode.get(node.name) ?? []}
+                                  className="max-w-64"
+                                />
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  —
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>{node.cpu_count}</TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {formatBytes(node.mem_total)}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">
                               {formatBytes(node.disk_total)}
                             </TableCell>
-                            <TableCell>{node.pve_version}</TableCell>
-                            <TableCell>{formatUptime(node.uptime)}</TableCell>
+                            <TableCell title={node.pve_version}>
+                              {nodePVEVersion(node.pve_version)}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {formatUptime(node.uptime)}
+                            </TableCell>
                             <TableCell>
                               {node.status === "online" &&
                                 canConsole("node") && (

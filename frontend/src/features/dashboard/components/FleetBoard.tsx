@@ -10,26 +10,8 @@ import { useHealthDismissStore } from "@/stores/health-dismiss-store";
 import { useHealthMuteStore } from "@/stores/health-mute-store";
 import type { AggregatedMetrics } from "@/types/ws";
 import type { DashboardData } from "../api/dashboard-queries";
-import {
-  buildFleet,
-  type FleetGuest,
-  type FleetLoad,
-  type FleetNode,
-} from "../lib/fleet";
-
-/**
- * A running guest's fill, idle to busy: the data colour at four strengths.
- * The palest fills are too faint to find on their own, so a running cell also
- * wears RUNNING_RING, which clears 3:1 against the card in both themes.
- */
-const LOAD_CLASS: Record<FleetLoad, string> = {
-  1: "bg-data/25",
-  2: "bg-data/50",
-  3: "bg-data/75",
-  4: "bg-data",
-};
-const RUNNING_RING = "ring-1 ring-inset ring-data/80";
-const STOPPED_RING = "ring-1 ring-inset ring-muted-foreground/70";
+import { buildFleet, type FleetNode } from "../lib/fleet";
+import { GuestCells, GuestCellSwatch } from "./GuestCell";
 
 /** One column template for the header line and every node row, from md up. */
 const COLUMNS = "md:grid-cols-[9rem_11rem_17rem_minmax(0,1fr)]";
@@ -96,42 +78,6 @@ function Meter({
   );
 }
 
-function GuestCell({ guest }: { guest: FleetGuest }) {
-  const { t } = useTranslation("dashboard");
-  const label = guest.running
-    ? guest.cpuPercent === null
-      ? t("fleetGuestRunningNoMetric", { vmid: guest.vmid, name: guest.name })
-      : t("fleetGuestRunning", {
-          vmid: guest.vmid,
-          name: guest.name,
-          cpu: Math.round(guest.cpuPercent),
-        })
-    : t("fleetGuestOther", {
-        vmid: guest.vmid,
-        name: guest.name,
-        status: guest.status,
-      });
-  return (
-    <Link
-      to={guest.href}
-      title={label}
-      aria-label={label}
-      className={cn(
-        "h-3.5 w-3.5 shrink-0 transition-transform hover:scale-125 pointer-coarse:h-5 pointer-coarse:w-5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card",
-        // Shape is the type, so it reads without colour: a VM is a square, a
-        // container a circle.
-        guest.kind === "ct" ? "rounded-full" : "rounded-[3px]",
-        guest.load !== null
-          ? cn(LOAD_CLASS[guest.load], RUNNING_RING)
-          : guest.status === "stopped"
-            ? STOPPED_RING
-            : // Paused, suspended, mid-migration: not running, not simply off.
-              "ring-1 ring-inset ring-amber-600 dark:ring-amber-500",
-      )}
-    />
-  );
-}
-
 function NodeRow({ node }: { node: FleetNode }) {
   const { t } = useTranslation("dashboard");
   return (
@@ -161,15 +107,7 @@ function NodeRow({ node }: { node: FleetNode }) {
               })
         }
       />
-      <div className="col-span-2 flex flex-wrap items-center gap-1 pointer-coarse:gap-2 md:col-span-1">
-        {node.guests.length === 0 ? (
-          <span className="text-xs text-muted-foreground">
-            {t("fleetNoGuests")}
-          </span>
-        ) : (
-          node.guests.map((guest) => <GuestCell key={guest.id} guest={guest} />)
-        )}
-      </div>
+      <GuestCells guests={node.guests} className="col-span-2 md:col-span-1" />
     </div>
   );
 }
@@ -227,26 +165,17 @@ export function FleetBoard({ data, metrics }: FleetBoardProps) {
             {t("fleetLegendCpu")}: {t("fleetLegendIdle")}
             <span className="flex gap-0.5">
               {([1, 2, 3, 4] as const).map((level) => (
-                <span
-                  key={level}
-                  className={cn(
-                    "h-3 w-3 rounded-[3px]",
-                    LOAD_CLASS[level],
-                    RUNNING_RING,
-                  )}
-                />
+                <GuestCellSwatch key={level} load={level} />
               ))}
             </span>
             {t("fleetLegendBusy")}
           </span>
           <span className="flex items-center gap-1.5">
-            <span className={cn("h-3 w-3 rounded-[3px]", STOPPED_RING)} />
+            <GuestCellSwatch />
             {t("fleetLegendStopped")}
           </span>
           <span className="flex items-center gap-1.5">
-            <span
-              className={cn("h-3 w-3 rounded-full bg-data/50", RUNNING_RING)}
-            />
+            <GuestCellSwatch load={2} container />
             {t("fleetLegendContainer")}
           </span>
         </div>

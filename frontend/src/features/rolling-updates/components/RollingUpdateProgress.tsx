@@ -67,7 +67,7 @@ function StepIndicator({ node }: { node: RollingUpdateNode }) {
         } else if (i < currentIdx) {
           color = "bg-emerald-500";
         } else if (i === currentIdx) {
-          color = "bg-primary";
+          color = "bg-data";
         }
 
         return (

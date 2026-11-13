@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
+import { makeNode } from "@/test/cluster.fixtures";
 import { deferred } from "@/test/fake-server";
 import { flushInAct } from "@/test/save-outcome-kit";
 import { useAuthStore } from "@/stores/auth-store";
@@ -133,8 +134,9 @@ function serve(nodes: { a: string[]; b: string[] }) {
       digest: "d7",
     },
   };
+  // Whole nodes: the Overview tab the page opens on renders every column.
   const names = (list: string[]) =>
-    list.map((name) => ({ name, node_name: name }));
+    list.map((name) => ({ ...makeNode({ id: name, name }), node_name: name }));
   listMock.mockImplementation((path: string) => {
     if (path === nodesPath(CLUSTER_A)) return Promise.resolve(names(nodes.a));
     if (path === nodesPath(CLUSTER_B)) return Promise.resolve(names(nodes.b));

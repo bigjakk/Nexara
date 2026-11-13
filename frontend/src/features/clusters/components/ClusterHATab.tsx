@@ -107,7 +107,7 @@ function statusBadge(status: string) {
     case "active":
     case "started":
     case "online":
-      return <Badge className="bg-emerald-600 text-white">{status}</Badge>;
+      return <Badge variant="healthy">{status}</Badge>;
     case "stopped":
     case "disabled":
     case "offline":
@@ -782,9 +782,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                           ) : r.disable === 1 ? (
                             <Badge variant="secondary">Disabled</Badge>
                           ) : (
-                            <Badge className="bg-emerald-600 text-white">
-                              Enabled
-                            </Badge>
+                            <Badge variant="healthy">Enabled</Badge>
                           )}
                         </TableCell>
                         {canManage("ha") && (

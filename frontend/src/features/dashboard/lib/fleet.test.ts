@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildFleet, loadLevel } from "./fleet";
+import { buildFleet, fleetGuestFromRow, loadLevel } from "./fleet";
+import type { InventoryRow } from "@/features/inventory/types/inventory";
 import { makeCluster, makeNode, makeVM } from "@/test/cluster.fixtures";
 import type { AggregatedMetrics, VmLiveMetric } from "@/types/ws";
 import type { ClusterSummary } from "../api/dashboard-queries";
@@ -123,5 +124,43 @@ describe("buildFleet", () => {
       // Running with no reading yet: the idle shade, and no invented 0%.
       [300, "vm", null, 1, "/inventory/vm/c1/v3"],
     ]);
+  });
+});
+
+describe("fleetGuestFromRow", () => {
+  const row = (over: Partial<InventoryRow>): InventoryRow =>
+    ({
+      id: "v1",
+      type: "vm",
+      name: "linux01",
+      status: "running",
+      clusterId: "c1",
+      vmid: 100,
+      template: false,
+      cpuPercent: 30,
+      ...over,
+    }) as InventoryRow;
+
+  it.each([
+    {
+      name: "a running VM is shaded by its CPU",
+      over: {},
+      want: { kind: "vm", load: 3, href: "/inventory/vm/c1/v1" },
+    },
+    {
+      name: "a stopped container has nothing to shade",
+      over: { type: "ct" as const, status: "stopped" as const },
+      want: { kind: "ct", load: null, href: "/inventory/ct/c1/v1" },
+    },
+  ])("$name", ({ over, want }) => {
+    const guest = fleetGuestFromRow(row(over));
+    expect({ kind: guest?.kind, load: guest?.load, href: guest?.href }).toEqual(
+      want,
+    );
+  });
+
+  it("has no cell for a template or a node row", () => {
+    expect(fleetGuestFromRow(row({ template: true }))).toBeNull();
+    expect(fleetGuestFromRow(row({ type: "node" }))).toBeNull();
   });
 });

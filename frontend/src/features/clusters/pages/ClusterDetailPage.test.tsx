@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { makeCluster, makeNode } from "@/test/cluster.fixtures";
 import { ClusterDetailPage } from "./ClusterDetailPage";
 
 vi.mock("react-router-dom", async () => {
@@ -41,8 +42,23 @@ vi.mock("../components/ClusterDRSTab", () => ({
   ClusterDRSTab: () => <div data-testid="drs-tab">DRS Tab</div>,
 }));
 
+const mockUseInventoryData = vi.fn();
+
+vi.mock("@/features/inventory/api/inventory-queries", () => ({
+  useInventoryData: () => mockUseInventoryData() as unknown,
+}));
+
+const inventory = (over: object = {}) => ({
+  rows: [],
+  isLoading: false,
+  error: null,
+  failedClusterIds: [],
+  ...over,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mockUseInventoryData.mockReturnValue(inventory());
 });
 
 describe("ClusterDetailPage", () => {
@@ -146,5 +162,54 @@ describe("ClusterDetailPage", () => {
     expect(
       screen.getByText("Failed to load cluster data."),
     ).toBeInTheDocument();
+  });
+
+  describe("the Nodes table's guests", () => {
+    const guestRow = {
+      id: "v1",
+      type: "vm",
+      name: "linux01",
+      status: "running",
+      clusterId: "test-cluster-id",
+      nodeName: "pve-01",
+      vmid: 100,
+      template: false,
+      cpuPercent: 12,
+    };
+
+    beforeEach(() => {
+      mockUseCluster.mockReturnValue({
+        data: makeCluster({ id: "test-cluster-id" }),
+        isLoading: false,
+        error: null,
+      });
+      mockUseClusterNodes.mockReturnValue({
+        data: [makeNode({ id: "n1", name: "pve-01" })],
+        isLoading: false,
+        error: null,
+      });
+    });
+
+    it("draws a node's guests as linked cells", () => {
+      mockUseInventoryData.mockReturnValue(inventory({ rows: [guestRow] }));
+      renderWithProviders(<ClusterDetailPage />);
+      expect(
+        screen.getByRole("link", { name: "100 linux01, running, CPU 12%" }),
+      ).toHaveAttribute("href", "/inventory/vm/test-cluster-id/v1");
+    });
+
+    // An empty list is only "no guests" once the list has actually answered.
+    it.each([
+      { name: "still loading", over: { isLoading: true } },
+      { name: "unreadable", over: { failedClusterIds: ["test-cluster-id"] } },
+    ])(
+      "does not claim a node is empty while the guest list is $name",
+      ({ over }) => {
+        mockUseInventoryData.mockReturnValue(inventory(over));
+        renderWithProviders(<ClusterDetailPage />);
+        expect(screen.getByText("pve-01")).toBeInTheDocument();
+        expect(screen.queryByText("No guests")).toBeNull();
+      },
+    );
   });
 });

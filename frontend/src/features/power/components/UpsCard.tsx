@@ -9,7 +9,7 @@ import { UpsStatusBadges } from "./UpsBadges";
 import { ProtectionBadge } from "./UpsPowers";
 
 const BAR: Record<UpsTone, string> = {
-  ok: "bg-emerald-500",
+  ok: "bg-data",
   warn: "bg-amber-500",
   err: "bg-red-500",
   idle: "bg-muted-foreground/40",
@@ -60,7 +60,7 @@ export function UpsCard({ device }: { device: UpsDevice }) {
         <div
           className={cn(
             "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-            tone === "ok" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+            tone === "ok" && "bg-muted text-muted-foreground",
             tone === "warn" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
             tone === "err" && "bg-red-500/10 text-red-600 dark:text-red-400",
             tone === "idle" && "bg-muted text-muted-foreground",

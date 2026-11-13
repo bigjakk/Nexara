@@ -1,14 +1,23 @@
 import { useState } from "react";
 import {
   Camera,
+  ChevronDown,
   Copy,
   ArrowRightLeft,
+  MoreHorizontal,
   Trash2,
   FileBox,
   Rocket,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +30,7 @@ import { useVMAction } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import { lifecycleActions, type ActionConfig } from "../lib/vm-action-defs";
 import type { VMAction, ResourceKind } from "../types/vm";
+import { cn } from "@/lib/utils";
 
 /** Map a completed lifecycle action to the expected VM status. */
 function expectedStatus(action: VMAction): string | null {
@@ -53,6 +63,8 @@ interface VMActionsProps {
   onMigrate: () => void;
   onDestroy: () => void;
   onConvertToTemplate?: () => void;
+  /** Shown first in the row: the page's primary action (its console button). */
+  children?: React.ReactNode;
 }
 
 export function VMActions({
@@ -69,6 +81,7 @@ export function VMActions({
   onMigrate,
   onDestroy,
   onConvertToTemplate,
+  children,
 }: VMActionsProps) {
   const queryClient = useQueryClient();
   const actionMutation = useVMAction();
@@ -126,30 +139,73 @@ export function VMActions({
     }
   }
 
-  const visibleActions = lifecycleActions.filter((a) =>
+  // The actions are ranked rather than laid out ten abreast: the power action
+  // that fits the guest's state is a button, its alternatives fold in beside
+  // it, and what is rarely wanted or cannot be undone sits behind "More".
+  const powerActions = lifecycleActions.filter((a) =>
     a.showWhen(normalizedStatus, kind),
   );
+  // A suspended guest can be started cold or resumed; resuming is what was
+  // paused for, so it leads.
+  const primaryPower =
+    powerActions.find((a) => a.action === "resume") ?? powerActions[0];
+  const otherPower = powerActions.filter((a) => a !== primaryPower);
+  const canConvert =
+    !template && normalizedStatus === "stopped" && onConvertToTemplate;
 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        {visibleActions.map((config) => (
-          <Button
-            key={config.action}
-            variant={config.variant}
-            size="sm"
-            className="gap-1.5"
-            disabled={isPending}
-            onClick={() => {
-              handleClick(config);
-            }}
-          >
-            {config.icon}
-            {config.label}
-          </Button>
-        ))}
+        {children}
 
-        <div className="h-6 w-px bg-border" />
+        {primaryPower && (
+          <div className="flex">
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn(
+                "gap-1.5",
+                otherPower.length > 0 && "rounded-r-none",
+              )}
+              disabled={isPending}
+              onClick={() => {
+                handleClick(primaryPower);
+              }}
+            >
+              {primaryPower.icon}
+              {primaryPower.label}
+            </Button>
+            {otherPower.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-l-none border-l-0 px-2"
+                    aria-label="More power actions"
+                    disabled={isPending}
+                  >
+                    <ChevronDown />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {otherPower.map((config) => (
+                    <DropdownMenuItem
+                      key={config.action}
+                      className="gap-2"
+                      onClick={() => {
+                        handleClick(config);
+                      }}
+                    >
+                      {config.icon}
+                      {config.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        )}
 
         {!template && onSnapshot && (
           <Button
@@ -182,59 +238,54 @@ export function VMActions({
           size="sm"
           className="gap-1.5"
           disabled={isPending}
-          onClick={onClone}
-        >
-          <Copy className="h-4 w-4" />
-          Clone
-        </Button>
-
-        {!template && onCloneToTemplate && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={isPending}
-            onClick={onCloneToTemplate}
-          >
-            <FileBox className="h-4 w-4" />
-            Clone to Template
-          </Button>
-        )}
-
-        {!template && normalizedStatus === "stopped" && onConvertToTemplate && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={isPending}
-            onClick={onConvertToTemplate}
-          >
-            <FileBox className="h-4 w-4" />
-            Convert to Template
-          </Button>
-        )}
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          disabled={isPending}
           onClick={onMigrate}
         >
           <ArrowRightLeft className="h-4 w-4" />
           Migrate
         </Button>
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5 text-destructive"
-          disabled={isPending || normalizedStatus === "running"}
-          onClick={onDestroy}
-        >
-          <Trash2 className="h-4 w-4" />
-          Destroy
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="px-2"
+              aria-label="More actions"
+              disabled={isPending}
+            >
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem className="gap-2" onClick={onClone}>
+              <Copy className="h-4 w-4" />
+              Clone
+            </DropdownMenuItem>
+            {!template && onCloneToTemplate && (
+              <DropdownMenuItem className="gap-2" onClick={onCloneToTemplate}>
+                <FileBox className="h-4 w-4" />
+                Clone to Template
+              </DropdownMenuItem>
+            )}
+            {canConvert && (
+              <DropdownMenuItem className="gap-2" onClick={onConvertToTemplate}>
+                <FileBox className="h-4 w-4" />
+                Convert to Template
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            {/* A running guest cannot be destroyed; the item says so by being
+                unavailable rather than by vanishing. */}
+            <DropdownMenuItem
+              className="gap-2 text-destructive focus:text-destructive"
+              disabled={normalizedStatus === "running"}
+              onClick={onDestroy}
+            >
+              <Trash2 className="h-4 w-4" />
+              Destroy
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <TaskProgressBanner

@@ -72,7 +72,7 @@ export function TopConsumers({ consumers, vmNames }: TopConsumersProps) {
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-primary transition-all"
+                      className="h-full rounded-full bg-data transition-all"
                       style={{ width: `${Math.min(value, 100).toFixed(1)}%` }}
                     />
                   </div>

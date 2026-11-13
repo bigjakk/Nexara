@@ -314,42 +314,11 @@ export function VMDetailPage() {
         </div>
       </div>
 
-      {/* Console + Actions */}
-      <div className="flex flex-wrap items-center gap-2">
-        {/* Consoles open regardless of power state (iLO-style): a stopped
-            guest parks as "powered off" with a Start button and connects
-            automatically on power-on. Only templates can't be consoled.
-            Hidden without the console:* permission — the mint would 403. */}
-        {kind === "vm" && consoleAllowed && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={(e) => {
-              openGuestConsole("vnc", e);
-            }}
-            disabled={vm.template}
-          >
-            <Monitor className="h-4 w-4" />
-            VNC Console
-          </Button>
-        )}
-        {kind === "ct" && consoleAllowed && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={(e) => {
-              openGuestConsole("terminal", e);
-            }}
-            disabled={vm.template}
-          >
-            <Terminal className="h-4 w-4" />
-            Attach
-          </Button>
-        )}
-      </div>
-
+      {/* Console + Actions. Consoles open regardless of power state
+          (iLO-style): a stopped guest parks as "powered off" with a Start
+          button and connects automatically on power-on. Only templates can't
+          be consoled. Hidden without the console:* permission — the mint
+          would 403. */}
       <VMActions
         clusterId={clusterId}
         resourceId={vmId}
@@ -378,7 +347,34 @@ export function VMDetailPage() {
         onConvertToTemplate={() => {
           setConvertTemplateOpen(true);
         }}
-      />
+      >
+        {kind === "vm" && consoleAllowed && (
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={(e) => {
+              openGuestConsole("vnc", e);
+            }}
+            disabled={vm.template}
+          >
+            <Monitor className="h-4 w-4" />
+            VNC Console
+          </Button>
+        )}
+        {kind === "ct" && consoleAllowed && (
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={(e) => {
+              openGuestConsole("terminal", e);
+            }}
+            disabled={vm.template}
+          >
+            <Terminal className="h-4 w-4" />
+            Attach
+          </Button>
+        )}
+      </VMActions>
 
       {/* Tabs */}
       <Tabs defaultValue={initialTab}>

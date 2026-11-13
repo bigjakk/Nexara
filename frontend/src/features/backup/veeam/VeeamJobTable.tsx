@@ -143,7 +143,7 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
               className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted"
             >
               <div
-                className="h-full rounded-full bg-primary transition-all"
+                className="h-full rounded-full bg-data transition-all"
                 style={{
                   width: `${String(Math.min(Math.max(job.progress_percent, 0), 100))}%`,
                 }}

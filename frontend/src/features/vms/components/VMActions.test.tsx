@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { VMActions } from "./VMActions";
 
@@ -14,64 +15,96 @@ const defaultProps = {
   onDestroy: vi.fn(),
 };
 
+const menuItems = () =>
+  screen.getAllByRole("menuitem").map((item) => item.textContent);
+
 describe("VMActions", () => {
-  it("shows shutdown, reboot, stop, reset, suspend for running VM", () => {
+  it.each([
+    {
+      name: "a running VM leads with Shutdown",
+      props: { status: "running" },
+      button: "Shutdown",
+      others: ["Reboot", "Stop", "Reset", "Suspend"],
+    },
+    {
+      name: "a running container has no Reset",
+      props: { status: "running", kind: "ct" as const },
+      button: "Shutdown",
+      others: ["Reboot", "Stop", "Suspend"],
+    },
+    {
+      name: "a suspended guest leads with Resume, not a cold Start",
+      props: { status: "suspended" },
+      button: "Resume",
+      others: ["Start"],
+    },
+  ])(
+    "$name and folds the rest beside it",
+    async ({ props, button, others }) => {
+      renderWithProviders(<VMActions {...defaultProps} {...props} />);
+      expect(screen.getByRole("button", { name: button })).toBeEnabled();
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "More power actions" }),
+      );
+      expect(menuItems()).toEqual(others);
+    },
+  );
+
+  it("asks before a destructive power action chosen from the menu", async () => {
     renderWithProviders(<VMActions {...defaultProps} />);
-    expect(screen.getByRole("button", { name: /shutdown/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /reboot/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /stop/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /reset/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /suspend/i })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: /^start$/i })).toBeNull();
-  });
-
-  it("shows start for stopped VM", () => {
-    renderWithProviders(<VMActions {...defaultProps} status="stopped" />);
-    expect(screen.getByRole("button", { name: /start/i })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: /shutdown/i })).toBeNull();
-  });
-
-  it("does not show reset for CT", () => {
-    renderWithProviders(
-      <VMActions {...defaultProps} kind="ct" status="running" />,
+    await userEvent.click(
+      screen.getByRole("button", { name: "More power actions" }),
     );
-    expect(screen.queryByRole("button", { name: /reset/i })).toBeNull();
-  });
-
-  it("shows migrate button for both VMs and CTs", () => {
-    const { unmount } = renderWithProviders(
-      <VMActions {...defaultProps} kind="ct" />,
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Stop" }));
     expect(
-      screen.getByRole("button", { name: /migrate/i }),
+      await screen.findByRole("dialog", { name: "Confirm Stop" }),
     ).toBeInTheDocument();
+  });
+
+  it("offers a stopped guest Start alone", () => {
+    renderWithProviders(<VMActions {...defaultProps} status="stopped" />);
+    expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "More power actions" }),
+    ).toBeNull();
+  });
+
+  it("keeps Snapshot and Migrate one click away, and Snapshot off a template", () => {
+    const { unmount } = renderWithProviders(
+      <VMActions {...defaultProps} onSnapshot={vi.fn()} />,
+    );
+    expect(screen.getByRole("button", { name: "Snapshot" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Migrate" })).toBeEnabled();
     unmount();
 
-    renderWithProviders(<VMActions {...defaultProps} kind="vm" />);
-    expect(
-      screen.getByRole("button", { name: /migrate/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("shows snapshot button when onSnapshot is provided", () => {
-    renderWithProviders(<VMActions {...defaultProps} onSnapshot={vi.fn()} />);
-    expect(screen.getByRole("button", { name: /snapshot/i })).toBeEnabled();
-  });
-
-  it("hides snapshot button for templates", () => {
     renderWithProviders(
       <VMActions {...defaultProps} template onSnapshot={vi.fn()} />,
     );
-    expect(screen.queryByRole("button", { name: /snapshot/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Snapshot" })).toBeNull();
   });
 
-  it("disables destroy when running", () => {
-    renderWithProviders(<VMActions {...defaultProps} status="running" />);
-    expect(screen.getByRole("button", { name: /destroy/i })).toBeDisabled();
-  });
+  it.each([
+    { status: "running", destroyDisabled: "true" },
+    { status: "stopped", destroyDisabled: null },
+  ])(
+    "puts Clone and Destroy under More, Destroy unavailable while running ($status)",
+    async ({ status, destroyDisabled }) => {
+      const onClone = vi.fn();
+      renderWithProviders(
+        <VMActions {...defaultProps} status={status} onClone={onClone} />,
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: "More actions" }),
+      );
 
-  it("enables destroy when stopped", () => {
-    renderWithProviders(<VMActions {...defaultProps} status="stopped" />);
-    expect(screen.getByRole("button", { name: /destroy/i })).toBeEnabled();
-  });
+      expect(
+        screen
+          .getByRole("menuitem", { name: "Destroy" })
+          .getAttribute("aria-disabled"),
+      ).toBe(destroyDisabled);
+      await userEvent.click(screen.getByRole("menuitem", { name: "Clone" }));
+      expect(onClone).toHaveBeenCalledOnce();
+    },
+  );
 });

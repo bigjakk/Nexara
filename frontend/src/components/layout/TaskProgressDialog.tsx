@@ -134,7 +134,7 @@ export function TaskProgressDialog() {
             <div className="space-y-2">
               <div className="h-2 overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full bg-primary transition-all duration-300"
+                  className="h-full bg-data transition-all duration-300"
                   style={{ width: `${String(progressPct ?? 2)}%` }}
                 />
               </div>

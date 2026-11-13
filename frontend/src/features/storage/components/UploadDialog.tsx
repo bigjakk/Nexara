@@ -173,7 +173,7 @@ export function UploadDialog({
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full bg-primary transition-all duration-300"
+                  className="h-full rounded-full bg-data transition-all duration-300"
                   style={{ width: `${String(progress)}%` }}
                 />
               </div>

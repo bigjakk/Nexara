@@ -65,7 +65,7 @@ export function MigrationsPage() {
                       <div className="flex items-center gap-2">
                         <div className="h-2 w-20 overflow-hidden rounded-full bg-muted">
                           <div
-                            className="h-full bg-primary transition-all"
+                            className="h-full bg-data transition-all"
                             style={{
                               width: `${String(Math.max(job.progress * 100, 5))}%`,
                             }}

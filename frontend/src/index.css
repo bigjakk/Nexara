@@ -225,6 +225,15 @@
       sans-serif;
     font-variant-numeric: tabular-nums;
   }
+  /* A column header is a quiet label wherever the table comes from: about a
+     hundred tables write their own <th> rather than use ui/table's TableHead.
+     A utility class on the cell still wins. */
+  thead th {
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+  }
   /* Archivo's width axis is the hierarchy: page titles run wide, everything
      else at the normal width. */
   h1 {

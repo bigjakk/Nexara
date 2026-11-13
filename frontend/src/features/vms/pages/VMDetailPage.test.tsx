@@ -247,8 +247,9 @@ describe("VMDetailPage", () => {
     expect(
       screen.getByRole("button", { name: /shutdown/i }),
     ).toBeInTheDocument();
+    // Clone and the other rare actions sit behind this (VMActions.test).
     expect(
-      screen.getByRole("button", { name: /^Clone$/i }),
+      screen.getByRole("button", { name: "More actions" }),
     ).toBeInTheDocument();
   });
 

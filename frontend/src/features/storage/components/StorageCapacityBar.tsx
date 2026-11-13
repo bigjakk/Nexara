@@ -8,7 +8,7 @@ interface StorageCapacityBarProps {
 export function StorageCapacityBar({ used, total }: StorageCapacityBarProps) {
   const pct = total > 0 ? (used / total) * 100 : 0;
   const color =
-    pct > 90 ? "bg-destructive" : pct > 70 ? "bg-amber-500" : "bg-primary";
+    pct > 90 ? "bg-destructive" : pct > 70 ? "bg-amber-500" : "bg-data";
 
   return (
     <div className="space-y-1">

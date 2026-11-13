@@ -27,7 +27,7 @@ export function DatastoreCards({ datastores, pbsId }: DatastoreCardsProps) {
             ? "bg-destructive"
             : usedPct > 75
               ? "bg-amber-500"
-              : "bg-primary";
+              : "bg-data";
 
         return (
           <Card key={ds.store}>

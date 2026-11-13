@@ -6,6 +6,7 @@
 import type { NodeResponse, VMResponse } from "@/types/api";
 import type { AggregatedMetrics } from "@/types/ws";
 import type { ClusterSummary } from "../api/dashboard-queries";
+import type { InventoryRow } from "@/features/inventory/types/inventory";
 
 /** How strongly a running guest's cell is shaded, idle to busy. */
 export type FleetLoad = 1 | 2 | 3 | 4;
@@ -67,6 +68,27 @@ export function loadLevel(cpuPercent: number | null): FleetLoad {
   if (cpuPercent < 25) return 2;
   if (cpuPercent < 60) return 3;
   return 4;
+}
+
+/**
+ * A guest cell from an inventory row, for pages that already hold the
+ * inventory instead of the dashboard's lists. Null for a template or a node.
+ */
+export function fleetGuestFromRow(row: InventoryRow): FleetGuest | null {
+  if (row.type === "node" || row.template) return null;
+  const running = row.status === "running";
+  const cpuPercent = running ? row.cpuPercent : null;
+  return {
+    id: row.id,
+    vmid: row.vmid ?? 0,
+    name: row.name,
+    kind: row.type,
+    status: row.status,
+    running,
+    cpuPercent,
+    load: running ? loadLevel(cpuPercent) : null,
+    href: `/inventory/${row.type}/${row.clusterId}/${row.id}`,
+  };
 }
 
 export function buildFleet(

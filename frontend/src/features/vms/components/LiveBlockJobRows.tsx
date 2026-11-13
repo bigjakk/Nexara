@@ -70,7 +70,7 @@ export function LiveBlockJobRows({
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded bg-muted">
                   <div
-                    className="h-full bg-primary"
+                    className="h-full bg-data"
                     style={{ width: `${String(Math.min(100, pct))}%` }}
                   />
                 </div>
