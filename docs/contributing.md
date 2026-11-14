@@ -440,7 +440,7 @@ For anything that mutates Proxmox access control, capture a baseline **before**
 and diff **after**, rather than eyeballing the UI:
 
 ```bash
-# users / tokens / ACL / groups, via the Access Control tab or the API
+# users / tokens / ACL / groups, via Configure → Access control or the API
 GET /api/v1/clusters/:id/access/users
 GET /api/v1/clusters/:id/access/acl
 ```

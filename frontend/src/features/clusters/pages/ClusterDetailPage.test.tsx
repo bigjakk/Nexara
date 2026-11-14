@@ -138,9 +138,35 @@ describe("ClusterDetailPage", () => {
     // Tab triggers should be present
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Ceph" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Networks" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Firewall" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "DRS" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Configure" })).toBeInTheDocument();
+  });
+
+  // The search bar's shortcuts, the DRS card and older bookmarks link to a
+  // setting by the ?tab= it had as a tab of its own.
+  it("opens Configure on the setting a ?tab= link names", () => {
+    mockUseCluster.mockReturnValue({
+      data: makeCluster({ id: "test-cluster-id" }),
+      isLoading: false,
+      error: null,
+    });
+    mockUseClusterNodes.mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithProviders(<ClusterDetailPage />, {
+      router: { initialEntries: ["/clusters/test-cluster-id?tab=firewall"] },
+    });
+
+    expect(
+      screen.getByRole("tab", { name: "Configure", selected: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Firewall" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByTestId("firewall-tab")).toBeInTheDocument();
   });
 
   it("maps legacy ?tab=nodes deep links to the Overview tab", () => {

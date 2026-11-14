@@ -78,19 +78,13 @@ import {
   ClusterCertificateBanner,
   TLS_FINGERPRINT_ISSUE,
 } from "../components/ClusterCertificateBanner";
-import { ClusterNetworksTab } from "../components/ClusterNetworksTab";
-import { ClusterFirewallTab } from "../components/ClusterFirewallTab";
-import { ClusterDRSTab } from "../components/ClusterDRSTab";
-import { ClusterGuestToolsTab } from "@/features/guest-tools/components/ClusterGuestToolsTab";
-import { ClusterOptionsTab } from "../components/ClusterOptionsTab";
-import { ClusterHATab } from "../components/ClusterHATab";
-import { ClusterPoolsTab } from "../components/ClusterPoolsTab";
-import { ClusterResourceMappingsTab } from "../components/ClusterResourceMappingsTab";
-import { ClusterAccessTab } from "../components/ClusterAccessTab";
-import { ClusterReplicationTab } from "../components/ClusterReplicationTab";
-import { ClusterACMETab } from "../components/ClusterACMETab";
-import { ClusterMetricServersTab } from "../components/ClusterMetricServersTab";
+import { ClusterConfigureTab } from "../components/ClusterConfigureTab";
 import { ClusterHistoryTab } from "../components/ClusterHistoryTab";
+import {
+  DEFAULT_CONFIGURE_SECTION,
+  isConfigureSection,
+  type ConfigureSection,
+} from "../lib/configure-sections";
 import { EditClusterDialog } from "../components/EditClusterDialog";
 import { DeleteClusterDialog } from "../components/DeleteClusterDialog";
 import { nodesNote } from "../lib/cluster-summary";
@@ -111,6 +105,18 @@ export function ClusterDetailPage() {
   // "nodes" was the default tab's value before it became "overview" — keep old
   // ?tab=nodes deep links landing on the same content.
   const tabParam = rawTabParam === "nodes" ? "" : rawTabParam;
+  // The settings sit under Configure and keep the ?tab= values they had as
+  // tabs of their own, so ?tab=firewall selects Configure with Firewall in it.
+  // Configure itself goes back to the setting last shown.
+  const section = isConfigureSection(tabParam) ? tabParam : null;
+  const [lastSection, setLastSection] = useState<ConfigureSection>(
+    DEFAULT_CONFIGURE_SECTION,
+  );
+  if (section !== null && section !== lastSection) setLastSection(section);
+  const topTab =
+    section !== null || tabParam === "configure"
+      ? "configure"
+      : tabParam || "overview";
   // Controlled + URL-synced tabs: ?tab= deep links (SearchBar shortcuts,
   // GlobalHealthIndicator, DRSConfigCard) select a tab even when the page is
   // already mounted, and clicking a tab rewrites the param (replace, so tab
@@ -361,7 +367,14 @@ export function ClusterDetailPage() {
 
           {cluster != null && <ClusterCertificateBanner cluster={cluster} />}
 
-          <Tabs value={tabParam || "overview"} onValueChange={setTab}>
+          {/* The strip holds what is looked at; what is set up once is under
+              Configure. */}
+          <Tabs
+            value={topTab}
+            onValueChange={(v) => {
+              setTab(v === "configure" ? lastSection : v);
+            }}
+          >
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="vms">
@@ -369,19 +382,8 @@ export function ClusterDetailPage() {
               </TabsTrigger>
               <TabsTrigger value="storage">Storage</TabsTrigger>
               <TabsTrigger value="backup">Backup</TabsTrigger>
-              <TabsTrigger value="options">Options</TabsTrigger>
-              <TabsTrigger value="ha">HA</TabsTrigger>
-              <TabsTrigger value="pools">Pools</TabsTrigger>
-              <TabsTrigger value="mappings">Resource mappings</TabsTrigger>
-              <TabsTrigger value="access">Access control</TabsTrigger>
-              <TabsTrigger value="replication">Replication</TabsTrigger>
               <TabsTrigger value="ceph">Ceph</TabsTrigger>
-              <TabsTrigger value="networks">Networks</TabsTrigger>
-              <TabsTrigger value="firewall">Firewall</TabsTrigger>
-              <TabsTrigger value="certificates">Certificates</TabsTrigger>
-              <TabsTrigger value="metric-servers">Metrics</TabsTrigger>
-              <TabsTrigger value="drs">DRS</TabsTrigger>
-              <TabsTrigger value="guest-tools">Guest tools</TabsTrigger>
+              <TabsTrigger value="configure">Configure</TabsTrigger>
               {canHistory && <TabsTrigger value="history">History</TabsTrigger>}
             </TabsList>
 
@@ -461,14 +463,6 @@ export function ClusterDetailPage() {
               </TabsContent>
             )}
 
-            <TabsContent value="networks">
-              <ClusterNetworksTab clusterId={clusterId ?? ""} />
-            </TabsContent>
-
-            <TabsContent value="firewall">
-              <ClusterFirewallTab clusterId={clusterId ?? ""} />
-            </TabsContent>
-
             <TabsContent value="vms">
               {clusterId !== undefined &&
                 failedClusterIds.includes(clusterId) && (
@@ -501,50 +495,13 @@ export function ClusterDetailPage() {
               />
             </TabsContent>
 
-            <TabsContent value="options">
-              <ClusterOptionsTab
+            <TabsContent value="configure">
+              <ClusterConfigureTab
                 clusterId={clusterId ?? ""}
                 pveVersion={cluster?.pve_version ?? ""}
+                section={section ?? lastSection}
+                onSectionChange={setTab}
               />
-            </TabsContent>
-
-            <TabsContent value="ha">
-              <ClusterHATab
-                clusterId={clusterId ?? ""}
-                pveVersion={cluster?.pve_version ?? ""}
-              />
-            </TabsContent>
-
-            <TabsContent value="pools">
-              <ClusterPoolsTab clusterId={clusterId ?? ""} />
-            </TabsContent>
-
-            <TabsContent value="mappings">
-              <ClusterResourceMappingsTab clusterId={clusterId ?? ""} />
-            </TabsContent>
-
-            <TabsContent value="access">
-              <ClusterAccessTab clusterId={clusterId ?? ""} />
-            </TabsContent>
-
-            <TabsContent value="replication">
-              <ClusterReplicationTab clusterId={clusterId ?? ""} />
-            </TabsContent>
-
-            <TabsContent value="certificates">
-              <ClusterACMETab clusterId={clusterId ?? ""} />
-            </TabsContent>
-
-            <TabsContent value="metric-servers">
-              <ClusterMetricServersTab clusterId={clusterId ?? ""} />
-            </TabsContent>
-
-            <TabsContent value="drs">
-              <ClusterDRSTab clusterId={clusterId ?? ""} />
-            </TabsContent>
-
-            <TabsContent value="guest-tools">
-              <ClusterGuestToolsTab clusterId={clusterId ?? ""} />
             </TabsContent>
           </Tabs>
 

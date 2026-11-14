@@ -102,7 +102,7 @@ Removing a cluster leaves its audit entries untouched, so it takes no longer for
 
 ### The Cluster Page
 
-Click a cluster in the inventory tree. Its tabs are **Overview**, **VMs**, **Storage**, **Backup**, **Options**, **HA**, **Pools**, **Resource Mappings**, **Access Control**, **Replication**, **Ceph**, **Networks**, **Firewall**, **Certificates**, **Metrics**, **DRS**, **Guest Tools** and **History**, each covered in its own section below.
+Click a cluster in the inventory tree. Its tabs are **Overview**, **VMs**, **Storage**, **Backup**, **Ceph**, **Configure** and **History**. **Configure** lists the cluster's settings beside the one open (a drop-down on a narrow screen), in four groups: **Options**, **Resource pools**, **Resource mappings**, **Guest tools** and **Metric servers**; **High availability**, **DRS** and **Replication**; **Networks** and **Firewall**; **Access control** and **Certificates**. It opens on the setting last shown, **Options** at first. Each is covered in its own section below.
 
 ### When a Node's Certificate Changes
 
@@ -128,7 +128,7 @@ For full functionality, the token needs `Administrator` on `/`: grant the role t
 
 A grant that stops at `/nodes` therefore blocks every DRS evaluation, every evacuation that leaves the targets to Nexara, and every rolling update that drains guests.
 
-Once a cluster is connected, the cluster's **Access Control** tab manages Proxmox's own users, tokens, groups, roles and ACLs from Nexara — see [Proxmox Access Control](#proxmox-access-control).
+Once a cluster is connected, the cluster's **Configure** → **Access control** manages Proxmox's own users, tokens, groups, roles and ACLs from Nexara — see [Proxmox Access Control](#proxmox-access-control).
 
 ---
 
@@ -357,13 +357,15 @@ A running VM's [History](#a-guests-history) tab opens with the QEMU block jobs w
 
 ## Pools, Replication and Cluster Options
 
-**Pools** (`view:pool`, `manage:pool`). **Create Pool**, then expand a pool's row for **Add VM** and **Add Storage**. Proxmox refuses to delete a pool that still has members, and on success the delete removes the ACL entries on it too.
+All four are under the cluster's **Configure** tab.
+
+**Resource pools** (`view:pool`, `manage:pool`). **Create Pool**, then expand a pool's row for **Add VM** and **Add Storage**. Proxmox refuses to delete a pool that still has members, and on success the delete removes the ACL entries on it too.
 
 **Replication** (`view:replication`, `manage:replication`). **Create Job** takes the guest, **Target Node**, **Schedule** (a Proxmox calendar event, `*/15` by default), **Rate Limit** and **Comment**. A row's action triggers a sync now. Deleting a job also removes the target's copy once Proxmox gets to it. A job's log is available only through the API.
 
 **Options** (`manage:cluster`). **Notes**; **General**, whose **Datacenter Options** are the migration network, fencing, the HA **Shutdown Policy**, [CRS](#native-crs-coexistence-proxmox-ve-92), **Bandwidth Limits** and the **Next VMID Range**, saved with **Save Changes**; **Tags**; and **Cluster Info**.
 
-**Metrics** (`manage:cluster`). **Add Server** points Proxmox at an external metrics server by ID, Type, Server and Port. There is no edit, and an InfluxDB v2 server, which needs a token and a bucket, can be added only through the API.
+**Metric servers** (`manage:cluster`). **Add Server** points Proxmox at an external metrics server by ID, Type, Server and Port. There is no edit, and an InfluxDB v2 server, which needs a token and a bucket, can be added only through the API.
 
 ---
 
@@ -513,7 +515,7 @@ The assignment's scope shows as a badge next to the role name in the user's role
 
 ## Proxmox Access Control
 
-A cluster's **Access Control** tab manages its **own** Proxmox users, API tokens,
+A cluster's **Configure** → **Access control** manages its **own** Proxmox users, API tokens,
 groups, roles and ACL entries, so you do not have to leave for the Proxmox UI.
 
 This is not Nexara's RBAC. The two are separate systems:
@@ -742,7 +744,7 @@ The Distributed Resource Scheduler automatically balances VM workloads across cl
 ### Enable DRS
 
 1. Navigate to a cluster's detail page
-2. Go to the **DRS** tab
+2. Open **Configure** → **DRS**
 3. Choose a **Mode**:
    - **Advisory — recommend only** — DRS generates migration recommendations for you to review; carry out the ones you agree with using **Migrate**
    - **Automatic — migrate VMs** — DRS executes the migrations itself
@@ -786,19 +788,19 @@ If Nexara shuts down while following a migration, the attempt is recorded as `in
 
 ### Native CRS Coexistence (Proxmox VE 9.2+)
 
-Proxmox VE 9.2 added a native dynamic load balancer to its Cluster Resource Scheduler (CRS). When a cluster has it enabled (`crs: ha=dynamic, ha-auto-rebalance=1` in the datacenter options), Nexara detects it and **disables its own automatic migrations** so the two balancers don't fight — Advisory mode still works as a read-only second opinion, and a banner on the DRS tab explains the state. You can manage the native CRS options from the cluster's **Options** tab, under **General** → **Cluster Resource Scheduling (CRS)**: choose the scheduler **Dynamic — live load balancing**, turn on **Automatic Rebalancing**, and set the threshold, hold rounds, margin and method.
+Proxmox VE 9.2 added a native dynamic load balancer to its Cluster Resource Scheduler (CRS). When a cluster has it enabled (`crs: ha=dynamic, ha-auto-rebalance=1` in the datacenter options), Nexara detects it and **disables its own automatic migrations** so the two balancers don't fight — Advisory mode still works as a read-only second opinion, and a banner on **Configure** → **DRS** explains the state. You can manage the native CRS options from the cluster's **Configure** → **Options**, under **General** → **Cluster Resource Scheduling (CRS)**: choose the scheduler **Dynamic — live load balancing**, turn on **Automatic Rebalancing**, and set the threshold, hold rounds, margin and method.
 
 ---
 
 ## High Availability
 
-Nexara manages Proxmox HA from each cluster's **HA** tab.
+Nexara manages Proxmox HA from each cluster's **Configure** → **High availability**.
 
 On its **Resources** sub-tab, a resource's **State** sets the HA request state. `started` and `ignored` apply at once; `stopped` and `disabled`, which shut the guest down, ask first. HA still moves a `stopped` resource to another node when its node fails, and not a `disabled` one.
 
 ### HA Rules
 
-On Proxmox VE 9 and later, create rules from the **HA** tab's **Groups / Rules** sub-tab: **HA Rules** → **Add Rule**. Proxmox VE 8 has **Add Group** there instead. Rule names must start with a letter, be at least 2 characters, and contain only letters, numbers, hyphens, and underscores — the form validates this up front instead of letting Proxmox reject the rule later.
+On Proxmox VE 9 and later, create rules from the **Groups / Rules** sub-tab of **High availability**: **HA Rules** → **Add Rule**. Proxmox VE 8 has **Add Group** there instead. Rule names must start with a letter, be at least 2 characters, and contain only letters, numbers, hyphens, and underscores — the form validates this up front instead of letting Proxmox reject the rule later.
 
 While picking resources for a rule, the search also lists guests that are not yet HA-managed. When you select one, the form offers to add it to HA management with the settings below, ticked by default, and Nexara enrolls it as part of creating the rule — no need to leave the form and add the resource separately.
 
@@ -812,7 +814,7 @@ To service a node without fighting HA (without the cluster's [SSH credentials](#
 
 ### Cluster-Wide HA Arm/Disarm (PVE 9.2+)
 
-On Proxmox VE 9.2+, the **HA Maintenance** card on the HA tab's **Status** sub-tab (`manage:ha`) can take HA offline cluster-wide for major maintenance:
+On Proxmox VE 9.2+, the **HA Maintenance** card on the **Status** sub-tab of **High availability** (`manage:ha`) can take HA offline cluster-wide for major maintenance:
 
 - **Disarm HA…** — choose what happens to HA resources while disarmed:
   - **Freeze — lock services in place**
@@ -964,13 +966,13 @@ Creating or destroying an OSD and creating a CephFS are not offered.
 
 ### Network Interfaces
 
-A cluster's **Networks** → **Interfaces**, after picking a node in **Filter by node:**, or a node's **Network** tab. **Create Interface** offers Linux Bridge, Bond and VLAN, and OVS Bridge, Bond and IntPort, each with Proxmox's own options for that type. Edits stay pending, with no marker, until you apply them.
+A cluster's **Configure** → **Networks** → **Interfaces**, after picking a node in **Filter by node:**, or a node's **Network** tab. **Create Interface** offers Linux Bridge, Bond and VLAN, and OVS Bridge, Bond and IntPort, each with Proxmox's own options for that type. Edits stay pending, with no marker, until you apply them.
 
 **Apply Config** makes every pending edit live and reloads the node's network, and **Revert** discards every pending edit. Both act on edits made outside Nexara too, and both ask first. A bad configuration can cut the node off from Nexara, and then needs fixing from its console. `view:network`, `manage:network` and `delete:network` gate reading, changing and deleting.
 
 ### Cluster Firewall
 
-A cluster's **Firewall** tab has **Cluster Rules**, **Templates**, **Aliases**, **IP Sets**, **Security Groups**, **Log**, **Options** and **History**.
+A cluster's **Configure** → **Firewall** has **Cluster Rules**, **Templates**, **Aliases**, **IP Sets**, **Security Groups**, **Log**, **Options** and **History**.
 
 - **Add Rule** inserts at the top, live within about 10 seconds. Rules cannot be edited or reordered here; deleting one needs `delete:network`
 - **Options** — **Enable/Disable Firewall** and **Inbound/Outbound Policy** take effect immediately, without asking
@@ -992,13 +994,13 @@ A guest's own firewall is API only (`/clusters/:id/vms/:vmid/firewall/…`, wher
 
 ### SDN
 
-A cluster's **Networks** → **SDN** has **Zones** (simple, VLAN, QinQ, VXLAN, EVPN), **VNets** (expand one for **Add Subnet**, with **Enable SNAT** and a **DHCP Range**), **Controllers** (EVPN, BGP, IS-IS), **IPAM** (Proxmox, NetBox, phpIPAM) and **DNS** (PowerDNS). Changes to zones, VNets and subnets stay pending until **Apply Changes**, which asks first.
+A cluster's **Configure** → **Networks** → **SDN** has **Zones** (simple, VLAN, QinQ, VXLAN, EVPN), **VNets** (expand one for **Add Subnet**, with **Enable SNAT** and a **DHCP Range**), **Controllers** (EVPN, BGP, IS-IS), **IPAM** (Proxmox, NetBox, phpIPAM) and **DNS** (PowerDNS). Changes to zones, VNets and subnets stay pending until **Apply Changes**, which asks first.
 
 ---
 
 ## Certificates (ACME)
 
-A cluster's **Certificates** tab reads with `view:certificate` and changes with `manage:certificate`, which among the built-in roles only Admin holds.
+A cluster's **Configure** → **Certificates** reads with `view:certificate` and changes with `manage:certificate`, which among the built-in roles only Admin holds.
 
 - **Accounts** are read-only here: create one in the Proxmox web UI. The API has routes for them
 - **Plugins** — **Add Plugin** takes Standalone (HTTP) or DNS with its **Validation Delay (seconds)** (30 by default). A plugin can be deleted but not edited
@@ -1043,11 +1045,11 @@ The dialog also offers **PCIe**, only when the VM uses the q35 machine type, whe
 
 A PCI device passed through directly in Proxmox, or one with a ROM file, says in its row that only `root@pam` can remove it, as a direct USB passthrough does.
 
-As for USB, a mapping Nexara creates has an entry for the VM's current node only. The cluster's **Resource Mappings** tab gives it one for the other nodes the VM may run on, and manages PCI mappings the way it manages USB ones (see [Managing mappings](#managing-mappings)).
+As for USB, a mapping Nexara creates has an entry for the VM's current node only. The cluster's **Configure** → **Resource mappings** gives it one for the other nodes the VM may run on, and manages PCI mappings the way it manages USB ones (see [Managing mappings](#managing-mappings)).
 
 ### Managing mappings
 
-A cluster's **Resource Mappings** tab lists its USB mappings and its PCI mappings, each on a card of its own. The USB card lists each mapping with each node entry: the node, the device's vendor:product ID, and the port, or *Any port* for a mapping that follows the device. Every entry shows what Proxmox reports when it checks the mapping **on that node**: *OK*, the problem (the device is missing, or a different device is on the port), or *Not checked* with the reason — the node is offline or not a node of this cluster, it did not answer in time, the mappings changed while they were being checked, or Nexara could not read the cluster's node list (it then checks no node rather than guess which names are real). A node that was not checked is never shown as OK. Proxmox lists only the mappings the cluster's API token may see.
+A cluster's **Configure** → **Resource mappings** lists its USB mappings and its PCI mappings, each on a card of its own. The USB card lists each mapping with each node entry: the node, the device's vendor:product ID, and the port, or *Any port* for a mapping that follows the device. Every entry shows what Proxmox reports when it checks the mapping **on that node**: *OK*, the problem (the device is missing, or a different device is on the port), or *Not checked* with the reason — the node is offline or not a node of this cluster, it did not answer in time, the mappings changed while they were being checked, or Nexara could not read the cluster's node list (it then checks no node rather than guess which names are real). A node that was not checked is never shown as OK. Proxmox lists only the mappings the cluster's API token may see.
 
 With `manage:cluster` (and `Mapping.Modify` on the cluster's token, as for creating one), the USB card offers:
 
@@ -1486,7 +1488,7 @@ So Nexara does not run the installer through the guest agent. It writes a script
 
 ### Configuring a Cluster
 
-**Cluster → Guest Tools**. The cluster `mode` is:
+The cluster's **Configure** → **Guest tools**. The cluster `mode` is:
 
 | Mode | Behaviour |
 |------|-----------|
@@ -1514,7 +1516,7 @@ The fleet table's actions are icon buttons. On the guest's **Guest Tools** tab t
 
 ### virtio-win ISOs
 
-An update needs an ISO to install from, and Nexara can keep one in Proxmox storage for you. The **Cluster → Guest Tools** tab stacks everything on one page: the virtio-win storage config at the top, then the cluster's guest-tools policy, the fleet table, and the ISO download history at the bottom.
+An update needs an ISO to install from, and Nexara can keep one in Proxmox storage for you. The cluster's **Configure** → **Guest tools** stacks everything on one page: the virtio-win storage config at the top, then the cluster's guest-tools policy, the fleet table, and the ISO download history at the bottom.
 
 These actions are gated on the **storage** permissions (`view:storage` / `manage:storage`), not the guest-tools ones, because downloading writes into a Proxmox storage.
 
@@ -1989,11 +1991,11 @@ A cluster's page has a **History** tab: everything that happened in the cluster,
 
 ### A Cluster Page's History
 
-Every tab of a cluster's page has a **History**: what was done to the tab's objects, newest first — created, changed, deleted, applied, and the tasks Nexara saw Proxmox run on them — with who did it, when, and for a task how it ended. The tabs that have sub-tabs (HA, Access Control, Ceph, Networks, Firewall, Certificates, DRS, Options) end with a **History** sub-tab; Pools, Replication and Metrics have a History button beside their title, and Resource Mappings one above its cards. Filter by type (the tab's kinds of object, or what happened to one), by source and by time.
+Every tab of a cluster's page, and every setting under its **Configure** tab, has a **History**: what was done to its objects, newest first — created, changed, deleted, applied, and the tasks Nexara saw Proxmox run on them — with who did it, when, and for a task how it ended. **Ceph** and the settings that have sub-tabs (High availability, Access control, Networks, Firewall, Certificates, DRS, Options) end with a **History** sub-tab; Resource pools, Replication and Metric servers have a History button beside their title, and Resource mappings one above its cards. Filter by type (its kinds of object, or what happened to one), by source and by time.
 
-- **Rows.** An object with a stable name has a History button in its row, for what happened to that one object: an HA resource, group or rule; a pool; a resource mapping; a Proxmox user, group or role; a replication job; a Ceph OSD, pool or monitor; a node interface and the SDN's zones, VNets, subnets, controllers, IPAMs and DNS plugins; a firewall alias, IP set, security group or template; an ACME account or plugin and a node's certificate; a metric server; a DRS rule. A firewall rule has no name — its position changes with every insert — so the Firewall tab's History holds the cluster's rule set and options as a whole.
+- **Rows.** An object with a stable name has a History button in its row, for what happened to that one object: an HA resource, group or rule; a pool; a resource mapping; a Proxmox user, group or role; a replication job; a Ceph OSD, pool or monitor; a node interface and the SDN's zones, VNets, subnets, controllers, IPAMs and DNS plugins; a firewall alias, IP set, security group or template; an ACME account or plugin and a node's certificate; a metric server; a DRS rule. A firewall rule has no name — its position changes with every insert — so the History of the cluster's **Firewall** holds its rule set and options as a whole.
 - **Window.** Every History opens on the last 7 days; pick **All time** for the rest. Each source is read newest first up to 20,000 entries whatever the time chosen, and **Show older** reads on below where one reaches that, as on a folder's History.
-- **What a row's History holds beyond its object.** An HA resource: the starts, stops, migrations and relocations the HA manager ordered for its guest, to those who may open the guest. (Rows an older Nexara filed under a bare VMID, before it resolved the resource's `vm:` or `ct:`, are not listed there; the HA tab's History lists them.) A pool: the guests moved into or out of it from their own pages. A Proxmox user: its API tokens, and the permissions granted to it or revoked from it directly; a group's and a role's: the permissions that name them. A group's History is its creation, changes and removal and those permissions; its members are not listed, a user joining or leaving it is in that user's History (the user's creation or edit, which says that the user's groups were set, not which). A node interface: the node's network configuration applied or reverted. A VNet: its subnets. An IP set: its entries. A security group: its rules.
+- **What a row's History holds beyond its object.** An HA resource: the starts, stops, migrations and relocations the HA manager ordered for its guest, to those who may open the guest. (Rows an older Nexara filed under a bare VMID, before it resolved the resource's `vm:` or `ct:`, are not listed there; the History of **High availability** lists them.) A pool: the guests moved into or out of it from their own pages. A Proxmox user: its API tokens, and the permissions granted to it or revoked from it directly; a group's and a role's: the permissions that name them. A group's History is its creation, changes and removal and those permissions; its members are not listed, a user joining or leaving it is in that user's History (the user's creation or edit, which says that the user's groups were set, not which). A node interface: the node's network configuration applied or reverted. A VNet: its subnets. An IP set: its entries. A security group: its rules.
 - **Aliases, IP sets and security groups** are listed under their lower-case name, the one Proxmox stores them under.
 - **Firewall templates** belong to Nexara, not to a cluster: a template's creation, change and removal are in the template's own History, which needs `view:audit` and `view:network` on every cluster (an instance-wide grant). Applying a template to a cluster is in that cluster's Firewall History too.
 - **DRS.** The sub-tab that lists the moves DRS made is now **Migrations**; **History** is what was done to the DRS configuration, its rules and Proxmox's HA rules.
@@ -2028,7 +2030,7 @@ The tab and the buttons need `view:audit` and `view:task`, and the object's own 
 An edit made in the Proxmox GUI, its API or a node's shell often runs no task — a VM's memory, a container's options, a pool's members, a storage definition, a node's DNS — and so leaves no audit entry. Every `OBJECT_OBSERVE_INTERVAL` (default `5m`, between `1m` and `1h`; `0` stops these reads, though a Proxmox Backup Server's job edits are still recorded, as below) Nexara reads each cluster's objects and compares them with what it read last, and a History shows what changed as **Changed in Proxmox**, **Created in Proxmox** or **Removed in Proxmox**, between the two reads.
 
 - **What is read:** every guest's configuration; the HA resources, groups and rules; the resource pools and their members; the SDN zones, VNets, subnets, controllers, IPAMs and DNS servers; the cluster firewall's options, rules, aliases, IP sets and their entries, and security groups and their rules; the Proxmox users, API tokens, groups, roles and ACLs; the ACME accounts and plugins; the storage definitions, the backup jobs, the USB and PCI mappings, the metric servers and the datacenter options; and each online node's network interfaces, options, notes, ACME domains, DNS, time zone and firewall rules. A Proxmox Backup Server's sync and verify jobs — their datastore, remote, schedule and comment — are compared from what the PBS pass already reads, so they cost no call of their own; Nexara never edits them, so every change to one shows. A PBS's rows belong to no cluster and stay when a cluster is removed, and they are recorded whatever `OBJECT_OBSERVE_INTERVAL` is: setting it to `0` stops the reads of the clusters, not the PBS's.
-- **Where it shows, and to whom:** a guest's configuration on the guest's History and its folder's; a node's options, DNS, time zone, notes, interfaces, firewall rules and ACME domains on the node's History; an object of a cluster page's tab — an HA group, a pool, a firewall alias, a user — on its tab's History and its own; every change filed under a cluster on the cluster's History. Each is listed only to someone who holds the view permission of its own kind of object in that cluster — a pool's change to `view:pool`, a node's firewall rules to `view:network`, a guest's configuration to `view:vm` or `view:container` — whichever History it appears in. A change an entry of the History explains is not listed on its own: what it changed beyond the fields the entry names shows on the entry, object by object — **Also changed in Proxmox: boot; Pool pool01 (vms)**.
+- **Where it shows, and to whom:** a guest's configuration on the guest's History and its folder's; a node's options, DNS, time zone, notes, interfaces, firewall rules and ACME domains on the node's History; an object under a cluster's **Configure** tab — an HA group, a pool, a firewall alias, a user — on its setting's History and its own; every change filed under a cluster on the cluster's History. Each is listed only to someone who holds the view permission of its own kind of object in that cluster — a pool's change to `view:pool`, a node's firewall rules to `view:network`, a guest's configuration to `view:vm` or `view:container` — whichever History it appears in. A change an entry of the History explains is not listed on its own: what it changed beyond the fields the entry names shows on the entry, object by object — **Also changed in Proxmox: boot; Pool pool01 (vms)**.
 - **Field names only, never values.** A row names the fields that changed — `memory`, `net0`, `nodes` — and for a firewall rule set how many rules came and went. An ACL path's fields are the kinds of grantee and their grants; which role was granted is kept only as a keyed hash. What Nexara keeps of the last reading is a keyed hash of each value (an HMAC under a key derived from `ENCRYPTION_KEY`), so a guest's cloud-init password, an IPAM token or a node's notes cannot be read or guessed from the database.
 - **Only what nothing explains.** A change shows about five minutes after it is seen, once Nexara has ingested the Proxmox tasks that ran meanwhile, and only when no audit entry in its window explains it — and only an entry of the change's own kind and direction does: an object created by a create, changed by an update, removed by a delete, made through Nexara, or by the Proxmox task that can make that change. A disk move explains the disk it moved, not the memory someone changed in the GUI while it ran; a guest's destroy explains that guest leaving its pools, backup jobs and HA rules, not another guest leaving them, and a pool's edit the guests and storages it names joining it, or with delete leaving it, not another; an edit made through Nexara explains the settings it made — its audit entry names the fields it changed: an edit of a storage, a backup job, an interface, an SDN object, a metric server or an ACME plugin reads the object just before it writes it and compares as Nexara does here, and an edit of a guest's configuration, the datacenter options, the cluster firewall's options or an HA resource, group or rule reads it just before and again just after and names what moved, so a dialog that sends its whole form names only what differs (a guest's entry, which also keeps the values it sent, a secret among them as `(set)`, names them in `changed`, and a disk re-sent as it was, in whatever form Proxmox writes it back, names nothing); when a read fails the entry lists every field it sent, says `fields_unverified`, and explains nothing seen in Proxmox — together with the ones Proxmox rewrites with them (an interface's method and its address, netmask and CIDR, which follow from one another; a backup job's other guest selections; all of a firewall alias, which an edit writes whole), and a firewall rule set's own edits only as many rules as they added, removed or moved. Only a Proxmox `qmconfig` task — the GUI's own asynchronous configuration edit, which can write any key — explains any field of its guest changed in its window. A realm sync explains what its task log says it did: the users and groups of its realm it added and removed, and the ACL entries it purged; of a user it replaced whole (remove-vanished `properties`, logged `overwriting user`) every field but enable, which Proxmox keeps from the old record; of a user it already had, the names, e-mail and comment, and enable, expiry and SSH keys only where the realm's sync attributes map them (none while Nexara cannot read the realm, which needs Sys.Audit); and a user joining one of its groups, seen on the user or on the group, only when its log added, replaced or updated that user (`adding`, `overwriting`, `updating user`). Its log counts only as a sync writes it, each line in its own section of a sync that finished and wrote them — one with a line out of place, or with a warning whose quoted directory value runs past its line, explains nothing — and only a sync Nexara has an audit entry of is read, its log kept once it is final. An entry from more than an hour before the change was seen (three intervals, if `OBJECT_OBSERVE_INTERVAL` is set longer than 20 minutes) explains nothing, so after an outage one action from early in the gap does not hide everything found at its end. A guest created, cloned, restored or destroyed is never a row of its own here: those are tasks, already in its History; a guest read while a clone or a create is still writing it is read again once it is done, and only that reading is its baseline.
 - **What it ignores:** what Proxmox rewrites by itself — the file's digest, a guest's lock and snapshot pointer, the state a hibernated VM carries, an interface's run state, a backup job's next run, the order of a list Proxmox re-encodes on every request. A guest is read with its pending changes applied, so an edit that waits for a restart shows when it is made. The first read of a cluster, of a node or of a guest, and the first read after a new `ENCRYPTION_KEY` or a Nexara release that reads a kind's fields another way, is a baseline and shows nothing. A Proxmox VE upgrade (or a node's new kernel) is compared across: what moved shows, marked as during an upgrade and grouped as one — but for the Proxmox users, groups, tokens, roles and ACLs and the firewall, each change of which shows on its own — and is explained or not like any change. A change to the cluster token's privileges on `/` is shown in the cluster's History as a change of its own, since a privilege granted or taken away can make objects in a filtered list appear or vanish; it re-baselines only the ACME plugins (`Sys.Modify`) and containers (`VM.Config.Options`, which a container's `env` needs), and everything else is compared as ever.

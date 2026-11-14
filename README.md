@@ -105,7 +105,7 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 - Template management and resource pools
 - **VM folders** — vCenter-style folder tree with a per-folder detail page (summary, guests, History, alerts)
 - **Favorites** — star clusters, nodes and guests to pin them above the inventory tree
-- **USB and PCI passthrough** — through Proxmox resource mappings, which Nexara builds from the node's own report of the device, so it works with an API token; a Resource Mappings tab shows Proxmox's check of each mapping on each node
+- **USB and PCI passthrough** — through Proxmox resource mappings, which Nexara builds from the node's own report of the device, so it works with an API token; the cluster's Resource mappings, under Configure, show Proxmox's check of each mapping on each node
 - Live migration with pre-flight checks — within a cluster or across clusters, with per-disk storage placement and network mapping
 - **Node evacuation** — bulk migrate a node's running guests off it
 - **Health rollup** — Ceph, disk S.M.A.R.T., quorum, storage, and task failures aggregated into one dismissible health indicator

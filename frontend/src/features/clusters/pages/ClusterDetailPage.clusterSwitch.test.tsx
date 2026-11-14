@@ -466,23 +466,35 @@ describe("the cluster page when it moves to another cluster: what it keeps", () 
     ).toBeInTheDocument();
     const title = screen.getByRole("heading", { level: 1 });
 
-    await user.click(screen.getByRole("tab", { name: "Metrics" }));
-    expect(
-      await screen.findByRole("heading", { name: "Metric servers" }),
-    ).toBeInTheDocument();
-    expect(where()).toBe(`/clusters/${CLUSTER_A}?tab=metric-servers`);
-
-    await user.click(screen.getByRole("tab", { name: "Options" }));
+    // Configure opens on Options until another setting has been chosen.
+    await user.click(screen.getByRole("tab", { name: "Configure" }));
     expect(
       await screen.findByPlaceholderText(/Enter cluster notes/),
     ).toBeVisible();
     expect(where()).toBe(`/clusters/${CLUSTER_A}?tab=options`);
+
+    await user.click(screen.getByRole("link", { name: "Metric servers" }));
+    expect(
+      await screen.findByRole("heading", { name: "Metric servers" }),
+    ).toBeInTheDocument();
+    expect(where()).toBe(`/clusters/${CLUSTER_A}?tab=metric-servers`);
 
     await user.click(screen.getByRole("tab", { name: "Overview" }));
     expect(
       await screen.findByText("No nodes found for this cluster."),
     ).toBeInTheDocument();
     expect(where()).toBe(`/clusters/${CLUSTER_A}`);
+
+    // and goes back to the setting last shown.
+    await user.click(screen.getByRole("tab", { name: "Configure" }));
+    expect(where()).toBe(`/clusters/${CLUSTER_A}?tab=metric-servers`);
+
+    // The select that stands in for the list on a narrow screen.
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Cluster setting" }),
+      "options",
+    );
+    expect(where()).toBe(`/clusters/${CLUSTER_A}?tab=options`);
 
     // Choosing a tab is not a change of cluster: the header is the same one.
     expect(screen.getByRole("heading", { level: 1 })).toBe(title);
@@ -498,8 +510,11 @@ describe("the cluster page when it moves to another cluster: what it keeps", () 
 
     expect(where()).toBe(`/clusters/${CLUSTER_B}?tab=metric-servers`);
     expect(
-      screen.getByRole("tab", { name: "Metrics", selected: true }),
+      screen.getByRole("tab", { name: "Configure", selected: true }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Metric servers" }),
+    ).toHaveAttribute("aria-current", "page");
     expect(await screen.findByText("192.0.2.21")).toBeInTheDocument();
     expect(screen.queryByText("192.0.2.11")).toBeNull();
   });
