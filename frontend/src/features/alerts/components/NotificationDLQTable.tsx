@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -242,6 +243,7 @@ function DLQRow({
   retryPending,
   feedback,
 }: DLQRowProps) {
+  const { t } = useTranslation("alerts");
   return (
     <>
       <TableRow className="cursor-pointer" onClick={onToggle}>
@@ -351,9 +353,13 @@ function DLQRow({
           </div>
           <div className="text-xs">
             <div className="mb-1 text-muted-foreground">Stored payload</div>
-            <pre className="whitespace-pre-wrap rounded-md bg-background p-2.5">
-              {JSON.stringify(entry.payload, null, 2)}
-            </pre>
+            {entry.payload === null ? (
+              <p className="text-muted-foreground">{t("dlqPayloadHidden")}</p>
+            ) : (
+              <pre className="whitespace-pre-wrap rounded-md bg-background p-2.5">
+                {JSON.stringify(entry.payload, null, 2)}
+              </pre>
+            )}
           </div>
         </ExpandedDetailRow>
       )}

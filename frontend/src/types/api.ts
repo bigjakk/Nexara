@@ -497,7 +497,8 @@ export interface NotificationDLQEntry {
   channel_name: string;
   alert_id?: string;
   rule_id?: string;
-  payload: Record<string, unknown>;
+  /** null when hidden: a CVE notice's, without view:cve_scan on its cluster. */
+  payload: Record<string, unknown> | null;
   last_error: string;
   attempt_count: number;
   state: DLQState;

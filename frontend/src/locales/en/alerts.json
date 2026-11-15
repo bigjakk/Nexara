@@ -4,6 +4,7 @@
   "alertRules": "Alert rules",
   "channels": "Channels",
   "deadLetterQueue": "Dead-letter queue",
+  "dlqPayloadHidden": "This CVE notice lists the cluster's vulnerabilities. Seeing them needs the vulnerability scan view permission (view:cve_scan) on that cluster.",
   "summaryPurpose": "Alerts your rules have raised, and where they are sent",
   "summaryNoneFiring": "Nothing is firing",
   "summaryFiring": "{{count}} firing",

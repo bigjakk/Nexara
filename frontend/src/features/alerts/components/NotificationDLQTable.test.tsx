@@ -119,3 +119,19 @@ describe("NotificationDLQTable — delete", () => {
     expect(api.writes()).toEqual(["DELETE /api/v1/notification-dlq/dlq-2"]);
   });
 });
+
+describe("NotificationDLQTable — hidden payload", () => {
+  // The server hides a CVE notice's payload (null) from a caller without
+  // view:cve_scan on its cluster; the page says so instead of printing null.
+  it("explains a hidden payload rather than showing null", async () => {
+    stubApi({
+      "/api/v1/notification-dlq": listOf([{ ...entry("dlq-3", "cve-webhook"), payload: null }]),
+      "/api/v1/notification-dlq/summary": { pending: 1, rate_limited: 0, retrying: 0, resolved: 0, dismissed: 0 },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<NotificationDLQTable />);
+    await user.click(await screen.findByText("cve-webhook"));
+    expect(screen.getByText(/needs the vulnerability scan view permission/)).toBeInTheDocument();
+    expect(screen.queryByText("null")).not.toBeInTheDocument();
+  });
+});
