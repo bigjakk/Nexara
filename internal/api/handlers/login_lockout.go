@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -88,16 +90,18 @@ type loginAttempt struct {
 
 // loginSubject is what the lockout counts an identifier under: a keyed digest of it
 // (JWTService.Digest), so that nothing in Redis can be read back, or guessed
-// offline, as what was typed. Case and surrounding spaces are ignored, so that
+// offline, as what was typed. Surrounding spaces, case and compatibility forms are
+// ignored (NFKC, then Unicode case folding, which also folds what a directory's
+// matching folds and Go's ToLower does not, such as fullwidth letters), so that
 // spelling an address differently is not a fresh budget. A handler built without a
 // JWT service (only in tests: production builds none without one) digests unkeyed.
 func (h *AuthHandler) loginSubject(identifier string) uuid.UUID {
-	norm := strings.ToLower(strings.TrimSpace(identifier))
+	folded := cases.Fold().String(norm.NFKC.String(strings.TrimSpace(identifier)))
 	var d [32]byte
 	if h.jwtService != nil {
-		d = h.jwtService.Digest("login lockout", norm)
+		d = h.jwtService.Digest("login lockout", folded)
 	} else {
-		d = sha256.Sum256([]byte("login lockout: " + norm))
+		d = sha256.Sum256([]byte("login lockout: " + folded))
 	}
 	return uuid.UUID(d[:16])
 }
@@ -150,7 +154,7 @@ func (h *AuthHandler) admitLoginAttempt(c fiber.Ctx, identifier string) (loginAt
 // reason the class of the failure; they decide only what is recorded (see
 // recordFailedSignIn), never the answer.
 func (h *AuthHandler) refuseSignIn(c fiber.Ctx, a loginAttempt, account *db.User, reason string) error {
-	h.recordFailedSignIn(c, account, reason)
+	h.recordFailedSignIn(c, a, account, reason)
 	if a.counted && a.res.admission == lockoutAdmittedLast {
 		h.recordLoginLock(c, a, account)
 		return lockedFor(c, a.res.retryAfter, loginLockedMessage(a.res.retryAfter))
@@ -242,7 +246,8 @@ func (h *AuthHandler) forgetLoginFailures(c fiber.Ctx, a loginAttempt) {
 // bound them, so they are bounded per source address: one row the first time an
 // address fails this way in a minute (unknownSignInWindow), carrying the number of
 // such failures in that address's previous minute of them, within the last hour.
-// Without Redis to count in, none is written.
+// Without Redis to count in, or when the attempt could not be counted there, none
+// is written.
 const (
 	unknownSignInWindow = time.Minute
 	unknownSignInCarry  = time.Hour
@@ -270,7 +275,7 @@ return {n, last}
 `)
 
 // recordFailedSignIn audits a failed sign-in (see the note above).
-func (h *AuthHandler) recordFailedSignIn(c fiber.Ctx, account *db.User, reason string) {
+func (h *AuthHandler) recordFailedSignIn(c fiber.Ctx, a loginAttempt, account *db.User, reason string) {
 	ip := c.IP()
 	if account != nil {
 		details, _ := json.Marshal(map[string]string{"email": account.Email, "ip": ip, "method": signInMethod, "reason": reason})
@@ -279,7 +284,10 @@ func (h *AuthHandler) recordFailedSignIn(c fiber.Ctx, account *db.User, reason s
 		})
 		return
 	}
-	if h.rdb == nil {
+	// Not when the attempt itself could not be counted: a Redis that does not answer
+	// would hold this failure for a second bound that a known account's does not
+	// wait, and the time would tell the two apart.
+	if h.rdb == nil || !a.counted {
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)

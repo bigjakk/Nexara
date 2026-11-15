@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ type stuckRedis struct {
 	stuck   func(cmd redis.Cmder) bool
 	release chan struct{}
 	done    chan error
+	held    atomic.Int32 // how many commands have been held
 }
 
 func (h *stuckRedis) DialHook(next redis.DialHook) redis.DialHook { return next }
@@ -28,6 +30,7 @@ func (h *stuckRedis) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 		if !h.stuck(cmd) {
 			return next(ctx, cmd)
 		}
+		h.held.Add(1)
 		<-h.release
 		err := next(ctx, cmd)
 		h.done <- err
@@ -59,6 +62,7 @@ func isSessionMirrorWrite(cmd redis.Cmder) bool {
 func TestLogin_ARedisThatNeverAnswersDoesNotHoldTheSignIn(t *testing.T) {
 	user := epochUser(t, epochLoginEmail, 2)
 	a := newEpochApp(t, newEpochStore(user), epochOptions{})
+	a.auth.SetPasswordLockoutStore(a.rdb) // the sign-in's lockout counts in this Redis too
 
 	hook := &stuckRedis{stuck: isSessionMirrorWrite, release: make(chan struct{}), done: make(chan error, 8)}
 	var once sync.Once
@@ -98,5 +102,25 @@ func TestLogin_ARedisThatNeverAnswersDoesNotHoldTheSignIn(t *testing.T) {
 	}
 	if !a.redis.Exists(key) {
 		t.Error("the released write never landed: it was abandoned, not left to finish")
+	}
+}
+
+// TestLogin_AHungRedisDoesNotTellUnknownIdentifiersApart: while Redis does not answer, a
+// failed sign-in with an identifier that names no account makes no Redis call beyond
+// the attempt's own count, as a known account's does not: a second bounded wait would
+// make it a second slower, and the time an oracle for which accounts exist.
+func TestLogin_AHungRedisDoesNotTellUnknownIdentifiersApart(t *testing.T) {
+	t.Parallel()
+	a := newEpochApp(t, newEpochStore(epochUser(t, epochLoginEmail, 0)), epochOptions{})
+	a.auth.SetPasswordLockoutStore(a.rdb)
+	hook := &stuckRedis{stuck: func(redis.Cmder) bool { return true }, release: make(chan struct{}), done: make(chan error, 8)}
+	t.Cleanup(func() { close(hook.release) })
+	a.rdb.AddHook(hook)
+
+	if resp, _ := a.loginAs(t, "carol@example.com", false); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	if n := hook.held.Load(); n != 1 {
+		t.Errorf("the failed sign-in waited on %d Redis calls, want 1: the attempt's count, as a known account's", n)
 	}
 }

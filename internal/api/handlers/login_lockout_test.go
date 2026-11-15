@@ -189,3 +189,19 @@ func TestLogin_AFailedSignInIsAudited(t *testing.T) {
 		t.Errorf("the second minute's row %s, want the first minute's count, 3", details[1])
 	}
 }
+
+// TestLoginSubject_OneBudgetPerSpelling: spaces, case and fullwidth forms of one
+// address are one identifier, so respelling it is not a fresh budget.
+func TestLoginSubject_OneBudgetPerSpelling(t *testing.T) {
+	t.Parallel()
+	h := &AuthHandler{}
+	base := h.loginSubject("alice@example.com")
+	for _, v := range []string{" Alice@Example.COM ", "ａｌｉｃｅ@ｅｘａｍｐｌｅ.ｃｏｍ", "ＡＬＩＣＥ@example.com"} {
+		if h.loginSubject(v) != base {
+			t.Errorf("%q has a budget of its own", v)
+		}
+	}
+	if h.loginSubject("bob@example.com") == base {
+		t.Error("two addresses share a budget")
+	}
+}
