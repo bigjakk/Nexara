@@ -689,7 +689,7 @@ Navigate to **Admin > LDAP** to configure LDAP/AD authentication. Only one enabl
    - **Group Search Base DN** — where to search for groups; left empty, no groups are read
    - **Group Filter** — filter for group membership (e.g., `(member={{userDN}})`)
    - **Group-to-Role Mapping** — map a group's **full DN**, as the directory returns it, to a Nexara role
-   - **Default Role (no group match)** — what a user gets when no group matches. Left at no default, a new user has no permissions at all
+   - **Default Role (no group match)** — what a user gets when no group matches. Left at no default, a new user has no permissions at all. A role that an LDAP or OIDC config names as its default cannot be deleted until the config names another; a mapping whose role was deleted assigns nothing (the log says so), so its users get the default role
 6. Click **Create**
 
 The **Test Connection** panel appears only once the config is saved, and tests the saved values: **Test** and **Sync Now**.

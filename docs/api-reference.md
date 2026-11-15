@@ -2303,7 +2303,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | POST | `/rbac/roles` | Create role |
 | GET | `/rbac/roles/:id` | Get role |
 | PUT | `/rbac/roles/:id` | Update role |
-| DELETE | `/rbac/roles/:id` | Delete role |
+| DELETE | `/rbac/roles/:id` | Delete role. `409` `role_in_use` while an LDAP or OIDC config names it as its default role, with `details.used_by` listing each config's `kind` (`ldap` or `oidc`) and `name`; nothing is deleted |
 | GET | `/rbac/permissions` | List all permissions |
 | GET | `/rbac/users/:user_id/roles` | List user's roles |
 | POST | `/rbac/users/:user_id/roles` | Assign role to user. With `scope_type: "cluster"`, `scope_id` must name an existing cluster, or the answer is `400`; the assignment is deleted with that cluster |

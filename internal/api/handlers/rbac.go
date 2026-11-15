@@ -302,10 +302,27 @@ func (h *RBACHandler) DeleteRole(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusForbidden, "Cannot delete built-in roles")
 	}
 
+	// A role that an LDAP or OIDC config hands out by default cannot be deleted: the
+	// config's default_role_id references it. Answered 409 naming the configs, before
+	// anything is touched; a config that takes the role up in between is the same
+	// foreign-key refusal, and the same answer.
+	users, err := h.queries.ListDirectoryConfigsUsingRole(c.Context(), id)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check what uses the role")
+	}
+	if len(users) > 0 {
+		return roleInUse(c, users)
+	}
+
 	// Invalidate cache for all users holding this role before deletion
 	h.invalidateRoleUsers(c, id)
 
 	if err := h.queries.DeleteRole(c.Context(), id); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
+			users, _ = h.queries.ListDirectoryConfigsUsingRole(c.Context(), id)
+			return roleInUse(c, users)
+		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete role")
 	}
 
@@ -313,6 +330,20 @@ func (h *RBACHandler) DeleteRole(c fiber.Ctx, p *apischema.Params) error {
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "role", id.String(), "role_deleted", details)
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// roleInUse answers a delete of a role that directory configs still name as their
+// default: 409, with each config's kind (ldap or oidc) and name.
+func roleInUse(c fiber.Ctx, users []db.ListDirectoryConfigsUsingRoleRow) error {
+	usedBy := make([]fiber.Map, 0, len(users))
+	for _, u := range users {
+		usedBy = append(usedBy, fiber.Map{"kind": u.Kind, "name": u.Name})
+	}
+	return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+		"error":   "role_in_use",
+		"message": "The role is the default role of a directory configuration. Choose another default role there first.",
+		"details": fiber.Map{"used_by": usedBy},
+	})
 }
 
 // -- Permissions --

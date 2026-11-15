@@ -824,11 +824,13 @@ func (h *OIDCHandler) syncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []stri
 		if err != nil {
 			continue
 		}
-		_, _ = h.queries.AssignUserRole(c.Context(), db.AssignUserRoleParams{
+		if _, err := h.queries.AssignUserRole(c.Context(), db.AssignUserRoleParams{
 			UserID:    userID,
 			RoleID:    roleID,
 			ScopeType: "global",
-		})
+		}); !mappedRoleAssigned(err, "oidc", userID, roleID) {
+			continue
+		}
 		assigned = true
 	}
 

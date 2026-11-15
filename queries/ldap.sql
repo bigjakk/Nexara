@@ -73,3 +73,12 @@ SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_so
 FROM users
 WHERE auth_source = 'ldap'
 ORDER BY email;
+
+-- name: ListDirectoryConfigsUsingRole :many
+-- The LDAP and OIDC configs whose default role is this one. Their default_role_id
+-- references roles(id) with no ON DELETE, so the role cannot be deleted while any
+-- names it; DeleteRole answers 409 with this list instead of the foreign-key error.
+SELECT 'ldap'::text AS kind, name FROM ldap_configs WHERE default_role_id = sqlc.arg(role_id)::uuid
+UNION ALL
+SELECT 'oidc'::text AS kind, name FROM oidc_configs WHERE default_role_id = sqlc.arg(role_id)::uuid
+ORDER BY kind, name;

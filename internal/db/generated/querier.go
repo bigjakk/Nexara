@@ -1761,6 +1761,10 @@ type Querier interface {
 	// read and let an old run of failures age out.
 	ListDRSMigrationFailures(ctx context.Context, clusterID uuid.UUID) ([]ListDRSMigrationFailuresRow, error)
 	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsRule, error)
+	// The LDAP and OIDC configs whose default role is this one. Their default_role_id
+	// references roles(id) with no ON DELETE, so the role cannot be deleted while any
+	// names it; DeleteRole answers 409 with this list instead of the foreign-key error.
+	ListDirectoryConfigsUsingRole(ctx context.Context, roleID uuid.UUID) ([]ListDirectoryConfigsUsingRoleRow, error)
 	ListDistinctAuditActions(ctx context.Context) ([]string, error)
 	ListDistinctAuditUsers(ctx context.Context) ([]ListDistinctAuditUsersRow, error)
 	ListDueReportSchedules(ctx context.Context) ([]ReportSchedule, error)

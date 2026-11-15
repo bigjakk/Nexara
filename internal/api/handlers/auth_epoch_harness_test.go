@@ -53,6 +53,11 @@ type epochStore struct {
 	// grants are the global "action:resource" permissions GetUserScopedPermissions
 	// answers for a user, for a real RBAC engine over this store.
 	grants map[uuid.UUID][]string
+	// roles, when not nil, is the roles table: AssignUserRole of a role not in it fails
+	// as its foreign key does, and roleUsers are the directory configs naming a role as
+	// their default (ListDirectoryConfigsUsingRole).
+	roles     map[uuid.UUID]db.Role
+	roleUsers map[uuid.UUID][]db.ListDirectoryConfigsUsingRoleRow
 }
 
 func newEpochStore(users ...db.User) *epochStore {
@@ -204,6 +209,9 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "InsertAuditLog":
 		return s.insertAudit(args)
+	case "DeleteRole":
+		delete(s.roles, args[0].(uuid.UUID))
+		return pgconn.NewCommandTag("DELETE 1"), nil
 	default:
 		return pgconn.CommandTag{}, fmt.Errorf("unexpected Exec: %s", name)
 	}
@@ -241,7 +249,15 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		remember(func() { delete(s.users, u.ID) })
 		return authFakeRow{value: *u}
 	case "AssignUserRole":
+		if _, ok := s.roles[args[1].(uuid.UUID)]; s.roles != nil && !ok {
+			return authFakeRow{err: &pgconn.PgError{Code: "23503", ConstraintName: "user_roles_role_id_fkey"}}
+		}
 		return authFakeRow{value: db.UserRole{}}
+	case "GetRole":
+		if r, ok := s.roles[args[0].(uuid.UUID)]; ok {
+			return authFakeRow{value: r}
+		}
+		return authFakeRow{err: pgx.ErrNoRows}
 	case "GetUserByEmailAndSource":
 		for _, u := range s.users {
 			if u.Email == args[0].(string) && u.AuthSource == args[1].(string) {
@@ -383,6 +399,14 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 			}
 		}
 		return &authFakeRows{items: items}, nil
+	case "ListDirectoryConfigsUsingRole":
+		var items []any
+		for _, r := range s.roleUsers[args[0].(uuid.UUID)] {
+			items = append(items, r)
+		}
+		return &authFakeRows{items: items}, nil
+	case "ListUserIDsByRole":
+		return &authFakeRows{}, nil
 	case "GetUserScopedPermissions":
 		var items []any
 		for _, g := range s.grants[args[0].(uuid.UUID)] {

@@ -12,7 +12,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -673,11 +675,13 @@ func (h *LDAPHandler) syncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []stri
 		if err != nil {
 			continue
 		}
-		_, _ = h.queries.AssignUserRole(c.Context(), db.AssignUserRoleParams{
+		if _, err := h.queries.AssignUserRole(c.Context(), db.AssignUserRoleParams{
 			UserID:    userID,
 			RoleID:    roleID,
 			ScopeType: "global",
-		})
+		}); !mappedRoleAssigned(err, "ldap", userID, roleID) {
+			continue
+		}
 		assigned = true
 	}
 
@@ -695,6 +699,24 @@ func (h *LDAPHandler) syncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []stri
 	if h.rbac != nil {
 		h.rbac.InvalidateUser(c.Context(), userID)
 	}
+}
+
+// mappedRoleAssigned says whether a group mapping's role was assigned, and logs one
+// that was not. A mapping can name a role deleted since (nothing ties the mapping's
+// JSON to roles), and that assigns nothing: the user then gets the default role, as a
+// user no mapping matches does.
+func mappedRoleAssigned(err error, source string, userID, roleID uuid.UUID) bool {
+	if err == nil || isDuplicateKeyError(err) { // a second group mapping to a role already assigned
+		return true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
+		slog.Warn("group mapping names a role that no longer exists; it assigns nothing",
+			"source", source, "user_id", userID, "role_id", roleID)
+	} else {
+		slog.Warn("could not assign a group mapping's role", "source", source, "user_id", userID, "role_id", roleID, "error", err)
+	}
+	return false
 }
 
 // BuildLDAPConfigFromDB creates an auth.LDAPConfig from a DB model. Exported for use by auth handler.

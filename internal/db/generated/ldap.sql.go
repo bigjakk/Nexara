@@ -235,6 +235,41 @@ func (q *Queries) GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmai
 	return i, err
 }
 
+const listDirectoryConfigsUsingRole = `-- name: ListDirectoryConfigsUsingRole :many
+SELECT 'ldap'::text AS kind, name FROM ldap_configs WHERE default_role_id = $1::uuid
+UNION ALL
+SELECT 'oidc'::text AS kind, name FROM oidc_configs WHERE default_role_id = $1::uuid
+ORDER BY kind, name
+`
+
+type ListDirectoryConfigsUsingRoleRow struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// The LDAP and OIDC configs whose default role is this one. Their default_role_id
+// references roles(id) with no ON DELETE, so the role cannot be deleted while any
+// names it; DeleteRole answers 409 with this list instead of the foreign-key error.
+func (q *Queries) ListDirectoryConfigsUsingRole(ctx context.Context, roleID uuid.UUID) ([]ListDirectoryConfigsUsingRoleRow, error) {
+	rows, err := q.db.Query(ctx, listDirectoryConfigsUsingRole, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDirectoryConfigsUsingRoleRow{}
+	for rows.Next() {
+		var i ListDirectoryConfigsUsingRoleRow
+		if err := rows.Scan(&i.Kind, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLDAPConfigs = `-- name: ListLDAPConfigs :many
 SELECT id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at FROM ldap_configs ORDER BY created_at
 `
