@@ -31,8 +31,8 @@ import (
 // (or with lookErr), records every write by its sqlc name, and answers
 // FailRollingUpdateNode with zero rows — "already terminal" — so failNode
 // stops there instead of failing the whole job, which is not what these tests
-// are about. With audits set it also records the audit rows the engine writes
-// and accepts the two CRS markers. Anything else fails the test.
+// are about. With audits set it also records the audit rows and task rows the
+// engine writes and accepts the two CRS markers. Anything else fails the test.
 type memberDB struct {
 	t        *testing.T
 	cluster  uuid.UUID
@@ -43,6 +43,7 @@ type memberDB struct {
 	asked    []string
 	failures []string   // the reason of each FailRollingUpdateNode
 	rows     []auditRow // each InsertAuditLog, when audits is set
+	tasks    []string   // each InsertTaskHistory's "upid task_type", when audits is set
 
 	// accept answers each write it names with that many rows and records it
 	// in writes.
@@ -186,6 +187,13 @@ func (d *memberDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row 
 		return structRow{db.RollingUpdateJob{ID: id, ClusterID: d.cluster, Status: d.jobStatus}}
 	case d.ssh != nil && slices.Contains(sshLookups, name):
 		return d.ssh.row(d.cluster, name, args)
+	case d.audits && name == "InsertTaskHistory":
+		upid, _ := args[2].(string)
+		taskType, _ := args[6].(string)
+		d.mu.Lock()
+		d.tasks = append(d.tasks, upid+" "+taskType)
+		d.mu.Unlock()
+		return structRow{db.TaskHistory{}}
 	case name != "GetNodeByClusterAndName":
 		d.t.Errorf("unexpected query row %s", name)
 		return rowErr{errors.New("unexpected")}

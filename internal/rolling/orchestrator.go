@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -617,6 +618,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 				o.failNode(ctx, job, node, fmt.Sprintf("shutdown passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
 				return
 			}
+			o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "shutdown", "", true)
 
 			status := o.waitForTask(ctx, client, node.NodeName, upid)
 			if status == "interrupted" {
@@ -638,6 +640,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 					o.failNode(ctx, job, node, fmt.Sprintf("force stop passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
 					return
 				}
+				o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "stop", "", true)
 				if forceStatus := o.waitForTask(ctx, client, node.NodeName, upid); forceStatus == "interrupted" {
 					o.logger.Info("drain interrupted by shutdown during passthrough force-stop; next leader will resume",
 						"node", node.NodeName, "vmid", guest.VMID)
@@ -685,6 +688,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			o.failNode(ctx, job, node, fmt.Sprintf("migrate %s %d: %v", guest.Type, guest.VMID, migrateErr))
 			return
 		}
+		o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "migrate", target, true)
 
 		o.logger.Info("migrating guest for drain",
 			"vmid", guest.VMID, "type", guest.Type,
@@ -861,6 +865,7 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 				o.failNode(ctx, job, node, fmt.Sprintf("resume drain — shutdown passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
 				return
 			}
+			o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "shutdown", "", true)
 			status := o.waitForTask(ctx, client, node.NodeName, upid)
 			if status == "interrupted" {
 				o.logger.Info("resume drain interrupted by shutdown during passthrough shutdown; next leader will resume",
@@ -878,6 +883,7 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 					o.failNode(ctx, job, node, fmt.Sprintf("resume drain — force stop passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
 					return
 				}
+				o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "stop", "", true)
 				if forceStatus := o.waitForTask(ctx, client, node.NodeName, upid); forceStatus == "interrupted" {
 					o.logger.Info("resume drain interrupted by shutdown during passthrough force-stop; next leader will resume",
 						"node", node.NodeName, "vmid", guest.VMID)
@@ -925,6 +931,7 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — migrate %s %d: %v", guest.Type, guest.VMID, migrateErr))
 			return
 		}
+		o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "migrate", target, true)
 
 		o.logger.Info("resume drain: migrating guest",
 			"vmid", guest.VMID, "type", guest.Type, "from", node.NodeName, "to", target)
@@ -1524,6 +1531,7 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 				"vmid", guest.VMID, "type", guest.Type, "error", migrateErr)
 			continue // Non-fatal for restore — skip the guest.
 		}
+		o.recordGuestTask(ctx, job, currentNode, guest, upid, "migrate", node.NodeName, true)
 
 		o.logger.Info("restoring guest to node",
 			"vmid", guest.VMID, "type", guest.Type,
@@ -2580,6 +2588,8 @@ func (o *Orchestrator) restartStoppedPassthrough(ctx context.Context, client *pr
 			pending = append(pending, guest)
 			continue
 		}
+		// Its audit row is the one below, which already carries the UPID.
+		o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "start", "", false)
 		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_passthrough_started",
 			map[string]string{
 				"vmid": fmt.Sprintf("%d", guest.VMID), "type": guest.Type,
@@ -3238,6 +3248,50 @@ func (o *Orchestrator) callWithRetryFailover(
 func (o *Orchestrator) publishEvent(ctx context.Context, clusterID uuid.UUID, jobID uuid.UUID, action string) {
 	if o.eventPub != nil {
 		o.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindRollingUpdate, "rolling_update", jobID.String(), action)
+	}
+}
+
+// recordGuestTask records a guest task the engine started the way the DRS
+// executor and the scheduler record theirs: a task_history row, running, for
+// the collector's reconciler to finish, then an audit row on the job carrying
+// the UPID, then task_created. Without the row the collector later ingests the
+// task as Proxmox's own. A failed insert skips the rest, as trackTask does in
+// the scheduler, so the collector still ingests the task. audit is false where
+// the caller files its own audit row with the UPID.
+func (o *Orchestrator) recordGuestTask(ctx context.Context, job db.RollingUpdateJob, node string, guest GuestSnapshot, upid, verb, target string, audit bool) {
+	if upid == "" {
+		return
+	}
+	ctx, cancel := cleanupCtxFor(ctx)
+	defer cancel()
+	description := fmt.Sprintf("Rolling update: %s %s %d on %s", verb, guest.Type, guest.VMID, node)
+	if target != "" {
+		description += " to " + target
+	}
+	if _, err := o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
+		ClusterID:   job.ClusterID,
+		UserID:      auth.SystemUserID,
+		Upid:        upid,
+		Description: description,
+		Status:      "running",
+		Node:        node,
+		TaskType:    "rolling_" + verb,
+	}); err != nil {
+		o.logger.Warn("failed to insert task history for a rolling-update guest task",
+			"job_id", job.ID, "upid", upid, "error", err)
+		return
+	}
+	if audit {
+		details := map[string]string{
+			"vmid": strconv.Itoa(guest.VMID), "type": guest.Type, "name": guest.Name, "node": node, "upid": upid,
+		}
+		if target != "" {
+			details["target"] = target
+		}
+		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_guest_"+verb, details)
+	}
+	if o.eventPub != nil {
+		o.eventPub.ClusterEvent(ctx, job.ClusterID.String(), events.KindTaskCreated, "task", upid, "rolling_"+verb)
 	}
 }
 

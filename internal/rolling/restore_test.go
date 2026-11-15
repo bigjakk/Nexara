@@ -63,3 +63,45 @@ func TestRestore_StopsBetweenGuestsWhenTheJobIsPausedOrCancelled(t *testing.T) {
 		})
 	}
 }
+
+// TestRestore_RecordsTheMigrationItStarts: a guest task the engine starts gets
+// its task_history row and an audit row carrying the UPID, as DRS and the
+// scheduler record theirs; without them the collector ingests it as Proxmox's.
+func TestRestore_RecordsTheMigrationItStarts(t *testing.T) {
+	t.Parallel()
+	const upid = "UPID:pve-02:00001234:00000000:68000000:qmigrate:101:nexara@pve!api:"
+	d := &memberDB{t: t, jobStatus: "running", audits: true, accept: map[string]int64{"SetNodeRestoreStarted": 1}}
+	o, client, _ := engineOn(t, d, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api2/json/nodes":
+			_, _ = w.Write([]byte(`{"data":[{"node":"pve-01","status":"online"},{"node":"pve-02","status":"online"}]}`))
+		case "/api2/json/nodes/pve-02/qemu":
+			_, _ = w.Write([]byte(`{"data":[{"vmid":101,"status":"running"}]}`))
+		case "/api2/json/nodes/pve-02/qemu/101/migrate":
+			_, _ = w.Write([]byte(`{"data":"` + upid + `"}`))
+		default:
+			http.Error(w, "refused", http.StatusInternalServerError)
+		}
+	})
+	// A shutting-down engine stops waiting on the task at once: the record is
+	// written before the wait, so that is all this needs.
+	shutdown, cancel := context.WithCancel(context.Background())
+	cancel()
+	o.shutdownCtx = shutdown
+	job := db.RollingUpdateJob{ID: uuid.New(), Status: "running", AutoRestoreGuests: true}
+	node := db.RollingUpdateNode{ID: uuid.New(), JobID: job.ID, NodeName: "pve-01", Step: "health_check",
+		GuestsJson: []byte(`[{"vmid":101,"type":"qemu"}]`), StoppedPassthroughJson: []byte(`[]`)}
+
+	o.advanceHealthCheck(context.Background(), client, job, node)
+
+	if !slices.Equal(d.tasks, []string{upid + " rolling_migrate"}) {
+		t.Errorf("task rows = %q, want the migration's", d.tasks)
+	}
+	audits := d.rowsOf("rolling_update")
+	if !slices.ContainsFunc(audits, func(r auditRow) bool {
+		return r.action == "rolling_update_guest_migrate" && r.details["upid"] == upid
+	}) {
+		t.Errorf("no rolling_update_guest_migrate audit row with the UPID in %v", audits)
+	}
+}
