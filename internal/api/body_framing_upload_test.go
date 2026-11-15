@@ -195,8 +195,9 @@ func serveUploadDeclaration(t *testing.T, rows uploadRows, grants uploadGrants, 
 	mountRegistry(app, reg, func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		c.Locals("rbac_engine", grants)
+		asSession(c)
 		return c.Next()
-	}, nil, nil)
+	}, nil, everySessionIsLive())
 	hits := new(atomic.Int32)
 	app.Get(hiddenRequestProbe, func(c fiber.Ctx) error {
 		hits.Add(1)

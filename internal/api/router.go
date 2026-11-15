@@ -58,7 +58,10 @@ func (s *Server) setupRoutes() {
 	// TestOIDCCallbackIsStillLegacy pins that one.
 	if s.authHandler != nil {
 		authGroup := v1.Group("/auth")
-		authGroup.Post("/register", s.authOptional(), s.authHandler.Register)
+		// Register creates an account for an admin caller, so a session that has
+		// ended must not: liveIfAuthenticated holds a caller authOptional found to a
+		// live credential, and lets an anonymous one (the first user) through.
+		authGroup.Post("/register", s.authOptional(), liveIfAuthenticated(s.credentialLiveness), s.authHandler.Register)
 		// Logout intentionally uses authOptional so a user with an expired
 		// access token (but a valid refresh cookie) can still revoke the
 		// server-side session. The cookie itself is the auth artefact for
@@ -87,7 +90,7 @@ func (s *Server) setupRoutes() {
 	// for them here. The group survives because the legacy blocks below still
 	// hang off it.
 	if s.clusterHandler != nil {
-		clusters := v1.Group("/clusters", s.authRequired())
+		clusters := v1.Group("/clusters", s.authRequired(), liveCredentialGate(s.credentialLiveness))
 
 		// Nested resources by cluster.
 		//
@@ -258,7 +261,7 @@ func (s *Server) setupRoutes() {
 	// TestFirewallTemplateWritesAreStillLegacy pins that it is a decision
 	// rather than a gap.
 	if s.networkHandler != nil {
-		templates := v1.Group("/firewall-templates", s.authRequired())
+		templates := v1.Group("/firewall-templates", s.authRequired(), liveCredentialGate(s.credentialLiveness))
 		templates.Post("/", s.networkHandler.CreateTemplate)
 		templates.Put("/:id", s.networkHandler.UpdateTemplate)
 	}
@@ -281,7 +284,7 @@ func (s *Server) setupRoutes() {
 	// TestAlertRuleWritesAreStillLegacy pins that it is a decision rather than
 	// a gap.
 	if s.alertHandler != nil {
-		alertRules := v1.Group("/alert-rules", s.authRequired())
+		alertRules := v1.Group("/alert-rules", s.authRequired(), liveCredentialGate(s.credentialLiveness))
 		alertRules.Post("/", s.alertHandler.CreateRule)
 		alertRules.Put("/:id", s.alertHandler.UpdateRule)
 	}
@@ -371,7 +374,7 @@ func (s *Server) setupRoutes() {
 		// way. See internal/api/api_docs.go for why the payload is pushed
 		// rather than pulled.
 		s.apiDocsHandler.SetDeclaredEndpoints(docEndpoints(s.registry))
-		v1.Get("/api-docs", s.authRequired(), s.apiDocsHandler.GetDocs)
+		v1.Get("/api-docs", s.authRequired(), liveCredentialGate(s.credentialLiveness), s.apiDocsHandler.GetDocs)
 	}
 
 	// Settings routes.
@@ -403,7 +406,7 @@ func (s *Server) setupRoutes() {
 	//     either, and the comment on instanceSharedRoutes explains why folding
 	//     them into selfServiceRoutes would make that list's invariant false.
 	if s.settingsHandler != nil {
-		settings := v1.Group("/settings", s.authRequired())
+		settings := v1.Group("/settings", s.authRequired(), liveCredentialGate(s.credentialLiveness))
 		settings.Get("/", s.settingsHandler.ListSettings)
 		settings.Get("/branding", s.settingsHandler.GetBranding)
 		settings.Get("/branding/logo-file", s.settingsHandler.ServeLogo)

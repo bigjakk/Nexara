@@ -51,8 +51,7 @@ func (c *capture) handler() Handler {
 func noAuth() fiber.Handler {
 	return func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.MustParse(testUserID))
-		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
-		c.Locals(handlers.LocalsSessionID, uuid.MustParse(callerSessionID))
+		asSession(c)
 		return c.Next()
 	}
 }
@@ -72,11 +71,12 @@ func (anyNodeLookup) GetNodeByClusterAndName(_ context.Context, arg db.GetNodeBy
 	return db.Node{ClusterID: arg.ClusterID, Name: arg.Name}, nil
 }
 
-// everySessionIsLive is the same stand-in for the InteractiveOnly gate's question,
-// whether the caller's session is still live, for the tests that are not about a
-// session that has ended: it answers yes for any session named. mountRegistry
-// refuses a nil one when an endpoint is held to a live session. A session that has
-// ended is newInteractiveHarness's subject, through the real query.
+// everySessionIsLive is the same stand-in for the liveness gates' question, whether
+// the caller's session is still live, for the tests that are not about a session
+// that has ended: it answers yes for any session named. mountRegistry refuses a nil
+// one when an endpoint is held to a live session, which every authenticated one is.
+// A session that has ended is the subject of registry_live_session_test.go and
+// newInteractiveHarness, through the real query.
 func everySessionIsLive() handlers.CredentialLiveness { return liveSessions{} }
 
 type liveSessions struct{}
@@ -274,7 +274,7 @@ func TestRegistryAnswers500ForADeclarationBug(t *testing.T) {
 	reg.endpoints = append(reg.endpoints, broken)
 
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	mountRegistry(app, reg, noAuth(), nil, nil)
+	mountRegistry(app, reg, noAuth(), nil, everySessionIsLive())
 
 	logged := captureSlog(t)
 
@@ -426,7 +426,7 @@ func TestRegistryOmitsUnseenKeysRatherThanPassingEmptyStrings(t *testing.T) {
 		e.pathParams = pathParamNames(e.Path)
 		reg.endpoints = append(reg.endpoints, e)
 		app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-		mountRegistry(app, reg, noAuth(), nil, nil)
+		mountRegistry(app, reg, noAuth(), nil, everySessionIsLive())
 
 		status, env := send(t, app, httptest.NewRequest(http.MethodGet, "/api/v1/widgets", nil))
 		if status != fiber.StatusNoContent {
@@ -714,7 +714,7 @@ func TestRegistryLeavesAStreamedNonJSONBodyAlone(t *testing.T) {
 					return c.SendStatus(fiber.StatusNoContent)
 				},
 			})
-			mountRegistry(app, reg, noAuth(), nil, nil)
+			mountRegistry(app, reg, noAuth(), nil, everySessionIsLive())
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads?filename=disk.img", strings.NewReader(payload))
 			if contentType != "" {
@@ -780,7 +780,7 @@ func TestRegistryLogsAHandlerPanic(t *testing.T) {
 			return errors.New(p.String("undeclared"))
 		},
 	})
-	mountRegistry(app, reg, noAuth(), nil, nil)
+	mountRegistry(app, reg, noAuth(), nil, everySessionIsLive())
 
 	logged := captureSlog(t)
 
@@ -904,7 +904,7 @@ func TestBodyIsBoundedOnAnEndpointThatDeclaresNoBodyParameter(t *testing.T) {
 		Parameters:  apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")},
 		Handler:     func(c fiber.Ctx, _ *apischema.Params) error { return c.SendString("ok") },
 	})
-	mountRegistry(app, reg, func(c fiber.Ctx) error { return c.Next() }, nil, nil)
+	mountRegistry(app, reg, noAuth(), nil, everySessionIsLive())
 
 	path := "/api/v1/clusters/" + testClusterID + "/nobody"
 
@@ -1003,7 +1003,7 @@ func TestEncodedBodyIsNeverDecodedOnAnEndpointDeclaringNoBodyParameter(t *testin
 			return c.SendString("ok")
 		},
 	})
-	mountRegistry(app, reg, noAuth(), nil, nil)
+	mountRegistry(app, reg, noAuth(), nil, everySessionIsLive())
 
 	empty := []byte("{}")
 	for _, tt := range []struct {

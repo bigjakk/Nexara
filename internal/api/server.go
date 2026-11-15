@@ -36,9 +36,10 @@ type Server struct {
 	// route without one. Set in New from queries.
 	nodeLookup handlers.NodeLookup
 
-	// credentialLiveness answers whether a session is still live, for the
-	// registry's InteractiveOnly gate. setupRoutes hands it to mountRegistry,
-	// which refuses to mount an InteractiveOnly route without one. Set in New
+	// credentialLiveness answers whether a session is still live, for every
+	// authenticated route (liveCredentialGate, the InteractiveOnly gate).
+	// setupRoutes hands it to mountRegistry, which refuses to mount an
+	// authenticated route without one, and to the legacy groups. Set in New
 	// from queries, like nodeLookup and for the same reason.
 	credentialLiveness handlers.CredentialLiveness
 

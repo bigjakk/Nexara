@@ -119,12 +119,12 @@ func stubAuthKeyAware(c fiber.Ctx) error {
 	switch c.Get("X-Test-Auth-Method") {
 	case "key":
 		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodAPIKey)
+		c.Locals(handlers.LocalsAPIKeyID, uuid.MustParse(callerSessionID))
 	case "other":
 		c.Locals(handlers.LocalsAuthMethod, "service-token")
 	case "unmarked":
 	default:
-		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
-		c.Locals(handlers.LocalsSessionID, uuid.MustParse(callerSessionID))
+		asSession(c)
 	}
 	return c.Next()
 }

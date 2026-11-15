@@ -1397,7 +1397,7 @@ func TestGuard_RouteSweepCatchesAnUndeclaredParamRead(t *testing.T) {
 
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
 	app.Use(recover.New(recover.Config{PanicHandler: sweepPanicHandler}))
-	mountRegistry(app, reg, sweepAuth(reg), nil, nil)
+	mountRegistry(app, reg, sweepAuth(reg), nil, everySessionIsLive())
 
 	outcome := sweepDispatch(app, fiber.MethodGet, "/api/v1/sweep-harness-demo/"+testClusterID, nil)
 	if outcome.dispatchErr != nil {

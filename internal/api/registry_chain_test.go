@@ -60,11 +60,17 @@ func stubAuthWith(engine *stubRBACEngine) fiber.Handler {
 		}
 		c.Locals("user_id", uuid.MustParse(testUserID))
 		c.Locals("rbac_engine", engine)
-		// An interactive session, as authRequired records one (see noAuth).
-		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
-		c.Locals(handlers.LocalsSessionID, uuid.MustParse(callerSessionID))
+		asSession(c)
 		return c.Next()
 	}
+}
+
+// asSession records the caller as an interactive session, callerSessionID, the way
+// authRequired does: the liveness gate on every authenticated route refuses a caller
+// that names no session (everySessionIsLive answers yes to this one).
+func asSession(c fiber.Ctx) {
+	c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
+	c.Locals(handlers.LocalsSessionID, uuid.MustParse(callerSessionID))
 }
 
 const testUserID = "11111111-2222-3333-4444-555555555555"
@@ -120,7 +126,7 @@ func gatedEndpoint(cap *capture, perms Permissions) Endpoint {
 
 // TestRegistryChainOrder pins the middleware order:
 //
-//	authRequired -> rate limiter -> permission -> handler
+//	authRequired -> liveness gate -> rate limiter -> permission -> handler
 //
 // The limiter sits ahead of the permission check so that a caller
 // hammering an endpoint they are not entitled to spends their own bucket
@@ -141,6 +147,7 @@ func TestRegistryChainOrder(t *testing.T) {
 
 	want := []string{
 		"internal/api.stubAuth",
+		"internal/api.liveCredentialGate",
 		"middleware/limiter.",
 		"internal/api/handlers.RequireClusterPermission",
 		"internal/api.Endpoint.serve",
@@ -164,7 +171,7 @@ func TestRegistryChainForEachPermissionShape(t *testing.T) {
 		{
 			name:  "global check",
 			perms: Permissions{Check: &Check{Action: "manage", Resource: "widget", Scope: ScopeGlobal}},
-			want:  []string{"internal/api.stubAuth", "internal/api/handlers.RequirePermission", "internal/api.Endpoint.serve"},
+			want:  []string{"internal/api.stubAuth", "internal/api.liveCredentialGate", "internal/api/handlers.RequirePermission", "internal/api.Endpoint.serve"},
 		},
 		{
 			name: "alternatives",
@@ -172,7 +179,7 @@ func TestRegistryChainForEachPermissionShape(t *testing.T) {
 				{Action: "view", Resource: "vm", Scope: ScopeCluster},
 				{Action: "view", Resource: "container", Scope: ScopeCluster},
 			}},
-			want: []string{"internal/api.stubAuth", "internal/api/handlers.RequireAnyPermission", "internal/api.Endpoint.serve"},
+			want: []string{"internal/api.stubAuth", "internal/api.liveCredentialGate", "internal/api/handlers.RequireAnyPermission", "internal/api.Endpoint.serve"},
 		},
 		{
 			// The four shapes that install no gate still install auth —
@@ -180,7 +187,7 @@ func TestRegistryChainForEachPermissionShape(t *testing.T) {
 			// reason has to justify.
 			name:  "deferred",
 			perms: Permissions{Deferred: "the resource depends on which object the body names"},
-			want:  []string{"internal/api.stubAuth", "internal/api.Endpoint.serve"},
+			want:  []string{"internal/api.stubAuth", "internal/api.liveCredentialGate", "internal/api.Endpoint.serve"},
 		},
 		{
 			name: "advisory",
@@ -188,12 +195,12 @@ func TestRegistryChainForEachPermissionShape(t *testing.T) {
 				Check:  Check{Action: "view", Resource: "cluster", Scope: ScopeCluster},
 				Reason: "accessibleClusters filters the listing to the caller's clusters",
 			}},
-			want: []string{"internal/api.stubAuth", "internal/api.Endpoint.serve"},
+			want: []string{"internal/api.stubAuth", "internal/api.liveCredentialGate", "internal/api.Endpoint.serve"},
 		},
 		{
 			name:  "self-service",
 			perms: Permissions{SelfService: "acts on the caller's own identity, taken from the session"},
-			want:  []string{"internal/api.stubAuth", "internal/api.Endpoint.serve"},
+			want:  []string{"internal/api.stubAuth", "internal/api.liveCredentialGate", "internal/api.Endpoint.serve"},
 		},
 		{
 			// Public is the one shape that drops authentication.
@@ -469,6 +476,7 @@ func TestSetupRoutesMountsTheRegistry(t *testing.T) {
 		// setupRoutes passes s.authRequired(), so the real production
 		// authentication middleware is what lands here.
 		"internal/api.(*Server).authRequired",
+		"internal/api.liveCredentialGate",
 		// From Permissions{Check: manage:vm, ScopeCluster} — nothing in
 		// the handler body places this any more.
 		"internal/api/handlers.RequireClusterPermission",

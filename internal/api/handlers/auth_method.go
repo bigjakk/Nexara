@@ -80,21 +80,18 @@ var (
 )
 
 // LiveCredential is the credential the request was authenticated with, on a route
-// that is held to a live one: the API key authenticateAPIKey checked in this very
+// that is held to a live one — every authenticated route but the owner's remedies
+// (Endpoint.AdmitsEndedSession): the API key authenticateAPIKey checked in this very
 // request, or the session the access token belongs to, which is looked up here.
-// Its callers are the routes that mint something that outlives the request — the
-// console token, which names the answer and is held to it while its console is
-// open; the hub token; and, through the registry's InteractiveOnly gate, the
-// routes that change the account's own credentials or factors: an API key's
-// creation, a second factor's enrolment, disabling, recovery codes. The owner's
-// remedies (Endpoint.AdmitsEndedSession) are the exception.
+// The registry asks it on every route (liveCredentialGate, and the InteractiveOnly
+// gate), and so do the legacy groups in router.go; the console-token and hub-token
+// mints ask it again for the credential they name.
 //
 // An access token outlives its session by up to its own lifetime (ACCESS_TOKEN_TTL,
 // fifteen minutes by default): a sign-out, a revoke from the session list and every
 // revoke-all (a password change, Sign out all devices, a deactivation) end the
-// session at once, and authRequired, which trusts the token's signature, admits it
-// for the rest of it. A token that was stolen and then cut off that way must not, in
-// that time, mint a key or a second factor that outlives it.
+// session at once, and authRequired trusts the token's signature for the rest of it.
+// This lookup is what ends the token with its session.
 //
 // A session that has ended, and an access token that names none (issued before
 // tokens named their session), get 401 "Session has ended": the SPA answers a 401

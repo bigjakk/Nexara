@@ -328,6 +328,24 @@ The exchange code it ends with lives 5 seconds, so exchange it at once.
 A link from someone else's sign-in, the callback it ends in or the
 `/oidc-callback?oidc_token=` page that follows, signs nobody in.
 
+### Ended Sessions
+
+Every authenticated request is checked against its sign-in, reads included. An
+access token is signed for its whole lifetime (`ACCESS_TOKEN_TTL`, 15 minutes by
+default), but once its session ends — signed out, revoked from the session list,
+ended by a password change, *Sign Out All Devices* or the account's deactivation
+(by an administrator or an LDAP sync), or expired — its next request is refused
+with `401` ("Session has ended"). A client that answers a `401` by refreshing
+finds the session gone and must sign in again. An access token issued before
+tokens named their session is refused the same way, once: a refresh replaces it.
+`503` means the session could not be checked, and the request can be retried; it
+is never answered as if the session were live. The exceptions are the owner's
+remedies, which admit a session that has ended: `POST /auth/logout`,
+`POST /auth/logout-all`, `DELETE /auth/sessions/:id` and
+`POST /auth/change-password` (see below). An API key is checked on every request
+too: a revoked or expired key, or one whose owner is deactivated, is refused with
+`401` at once.
+
 ### Interactive-Only Routes
 
 An API key (`Authorization: Bearer nxra_…`) carries its owner's permissions, but
@@ -344,16 +362,9 @@ an interactive login session instead. The routes are
 each of them an `interactive_only` field holding the reason; it is absent for
 every other route.
 
-The session must also still be live, on every one of these routes but three. An
-access token stays valid for the rest of its lifetime (`ACCESS_TOKEN_TTL`, 15
-minutes by default) after its session ends — signed out, revoked from the session
-list, ended by a password change, *Sign Out All Devices* or the account's
-deactivation, or expired — and such a token is refused with `401`
-("Session has ended"), at the same point as a key's `403`; `503` means the session
-could not be checked, and the request can be retried. A client that answers a
-`401` by refreshing finds the session gone and must sign in again. An access token
-issued before tokens named their session is refused the same way, once: a refresh
-replaces it. The three that admit it are `POST /auth/logout-all`,
+The session must also still be live, as on every route (see Ended Sessions above),
+and a session that has ended is refused with `401` at the same point as a key's
+`403`. The three that admit it are `POST /auth/logout-all`,
 `DELETE /auth/sessions/:id` and `POST /auth/change-password`, the owner's remedy
 when someone else holds a live session of the account: whoever it is can end each
 session the owner opens, so the owner's access token, which outlives its session, is

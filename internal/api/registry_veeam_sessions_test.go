@@ -48,6 +48,7 @@ func TestVeeamRunListIsNarrowedToTheJobNamed(t *testing.T) {
 			viewer := func(c fiber.Ctx) error {
 				c.Locals("user_id", uuid.MustParse(testUserID))
 				c.Locals("rbac_engine", &instanceWideVeeamViewer{&stubRBACEngine{}})
+				asSession(c)
 				return c.Next()
 			}
 			app := newRegistryApp(t, viewer, e)

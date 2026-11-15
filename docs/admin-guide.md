@@ -379,9 +379,9 @@ The user menu (your name, top right) holds **Profile**, **Security**, **API Keys
 
 **Profile** shows your email, role, auth source, 2FA status and join date. A local account can change its **Display Name** and use **Change Password**: 8 to 72 characters with an upper-case letter, a lower-case letter, a digit and a special character. Changing it ends every session. Five wrong current passwords within 60 minutes, here and at Enable 2FA together, lock both for 30 minutes on that sign-in; signing in again starts afresh.
 
-**Security** has [two-factor authentication](#two-factor-authentication-totp) and **Active Sessions**: each sign-in's device and address, when it was last active and **This device**. **Revoke** ends one, and asks first for your own. An access token that sign-in already holds keeps working until it expires, within 15 minutes by default. Once an hour Nexara deletes the records of sessions that have expired.
+**Security** has [two-factor authentication](#two-factor-authentication-totp) and **Active Sessions**: each sign-in's device and address, when it was last active and **This device**. **Revoke** ends one, and asks first for your own. That sign-in is refused at its next request. Once an hour Nexara deletes the records of sessions that have expired.
 
-**Sign Out All Devices** ends every session without asking. An API key is not affected, and an access token already issued keeps working until it expires, within 15 minutes by default.
+**Sign Out All Devices** ends every session without asking, and each is refused at its next request. An API key is not affected.
 
 ### API Keys
 
@@ -413,7 +413,7 @@ Creating a user takes an account whose legacy `role` field is `admin`, which is 
 From the Users page, administrators can:
 
 - **View** all registered users with their roles, auth source, and 2FA status. The Roles column lists global roles only, so a user who holds only cluster-scoped roles reads "No roles"
-- **Active** — a switch that deactivates the account, without asking: it ends the user's sessions and refuses their API keys at once, though an access token already issued keeps working until it expires, within 15 minutes by default. You cannot switch off your own, but nothing stops the last administrator being deactivated by another
+- **Active** — a switch that deactivates the account, without asking: it ends the user's sessions and refuses their API keys at once, and a browser they are signed in on is signed out at its next request. You cannot switch off your own, but nothing stops the last administrator being deactivated by another
 - **Manage roles** — the shield icon
 - **Reset 2FA** — remove a user's TOTP enrollment if they lose access to their authenticator
 - **Delete user** — answers *Failed to delete user* for anyone who has created an alert rule, channel, maintenance window, report, rolling update or import, or acknowledged or resolved an alert, since those records name them. Deactivate such an account instead

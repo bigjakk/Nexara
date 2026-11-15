@@ -127,6 +127,7 @@ func authWithEngine(engine any) fiber.Handler {
 		}
 		c.Locals("user_id", uuid.MustParse(testUserID))
 		c.Locals("rbac_engine", engine)
+		asSession(c)
 		return c.Next()
 	}
 }

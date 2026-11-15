@@ -78,11 +78,11 @@ type Endpoint struct {
 	// (APIEndpoint.InteractiveOnly) and read by the next person deciding whether
 	// a new route belongs in the set.
 	//
-	// The session must also still be LIVE: an access token whose session has
-	// ended — signed out, revoked, every session of the account revoked, expired,
-	// the account deactivated — is refused at the same point, 401 "Session has
-	// ended" (interactiveOnlyGate has the reason), except on the owner's remedies
-	// (AdmitsEndedSession).
+	// The session must also still be LIVE, as on every authenticated route
+	// (liveCredentialGate): an access token whose session has ended — signed out,
+	// revoked, every session of the account revoked, expired, the account
+	// deactivated — is refused at the same point, 401 "Session has ended", except
+	// on the owner's remedies (AdmitsEndedSession).
 	//
 	// "Ahead of the RateLimiter" means THIS field's route-level one. The
 	// application-level limiters (setupMiddleware) run before authentication, so a
@@ -106,7 +106,7 @@ type Endpoint struct {
 	InteractiveOnly string
 
 	// AdmitsEndedSession, on an InteractiveOnly route, lets its gate admit a
-	// session that has ENDED, which every other InteractiveOnly route refuses. The
+	// session that has ENDED, which every other authenticated route refuses. The
 	// string is the reason. It is for the owner's remedies against whoever holds a
 	// live session of theirs — sign out everywhere, end one session, change the
 	// password: that holder can end each session the owner opens the moment it
@@ -666,9 +666,57 @@ func interactiveOnlyGate(live handlers.CredentialLiveness, endedAdmitted bool) f
 	}
 }
 
+// liveCredentialGate is the link every authenticated route that is not
+// InteractiveOnly installs right after authentication (interactiveOnlyGate does
+// the same check on the routes that are): the credential must still be live, by
+// handlers.LiveCredential. authRequired trusts an access token's signature for
+// its whole lifetime (up to ACCESS_TOKEN_TTL), and a session can end long before
+// that — a sign-out, a revoke, a revoke-all (which is what moving the auth epoch
+// does), an expiry, the account deactivated by an admin or an LDAP sync. Asked
+// here, a token whose session has ended is refused 401 "Session has ended" at its
+// next call, reads included; the SPA answers that with one refresh, which an ended
+// session refuses, and signs out. The lookup is one indexed query per request
+// (IsConsoleCredentialLive), never cached; a lookup that cannot answer is a 503 or
+// a 500, never a yes.
+//
+// An API key needs no second lookup: authenticateAPIKey read it in this request
+// and refused it revoked, expired or with its owner inactive. Anything that is
+// neither a session nor a key is refused 401 by LiveCredential, which finds no
+// session in it.
+//
+// A nil live (a Server built without a database) refuses every request 500:
+// mountRegistry refuses to mount one at all, and the legacy groups in router.go
+// must not be the place a missing check turns into no check.
+func liveCredentialGate(live handlers.CredentialLiveness) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		if live == nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Session check not configured")
+		}
+		if _, err := handlers.LiveCredential(c, live); err != nil {
+			return err
+		}
+		return c.Next()
+	}
+}
+
+// liveIfAuthenticated is liveCredentialGate for a route mounted with
+// authOptional (POST /auth/register): a caller authOptional authenticated is held
+// to a live credential, and a request that names none goes through as the
+// anonymous request it is — authOptional has already dropped a token it could not
+// validate.
+func liveIfAuthenticated(live handlers.CredentialLiveness) fiber.Handler {
+	gate := liveCredentialGate(live)
+	return func(c fiber.Ctx) error {
+		if method, _ := c.Locals(handlers.LocalsAuthMethod).(string); method == "" {
+			return c.Next()
+		}
+		return gate(c)
+	}
+}
+
 // mountRegistry attaches every endpoint in reg to router.
 //
-// The chain is authRequired -> [interactive-only gate] -> rate limiter ->
+// The chain is authRequired -> interactive-only gate or liveness gate -> rate limiter ->
 // permission -> handler — the handler being serve, which validates the
 // parameters and refuses a node the cluster does not hold before it calls the
 // endpoint's Handler — and every link is attached PER ROUTE rather than through
@@ -699,11 +747,12 @@ func interactiveOnlyGate(live handlers.CredentialLiveness, endedAdmitted bool) f
 // it is given. It may be nil when none does. A test that is not about
 // membership passes everyNodeIsAMember, which, like noAuth, says so.
 //
-// sessions answers whether a session is still live, for the InteractiveOnly
-// gate, on the same terms: it must not be nil when any endpoint is
-// InteractiveOnly and does not admit an ended session, because a gate with
-// nothing to ask would have to admit an ended session or refuse a live one. A
-// test that is not about ended sessions passes everySessionIsLive.
+// sessions answers whether a session is still live, for every authenticated
+// route (liveCredentialGate, and the InteractiveOnly gate), on the same terms:
+// it must not be nil when any authenticated endpoint does not admit an ended
+// session, because a gate with nothing to ask would have to admit an ended
+// session or refuse a live one. A test that is not about ended sessions passes
+// everySessionIsLive.
 func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes handlers.NodeLookup, sessions handlers.CredentialLiveness) {
 	if auth == nil {
 		panic("api: mountRegistry needs an authentication middleware; pass an explicit pass-through if that is really the intent")
@@ -716,12 +765,13 @@ func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes
 				"which is checked against the cluster's nodes before its handler runs",
 				e.Method, e.Path, strings.Join(names, ", ")))
 		}
-		if sessions == nil && e.InteractiveOnly != "" && e.AdmitsEndedSession == "" {
-			panic(fmt.Sprintf("api: mountRegistry needs a session check: %s %s is InteractiveOnly, which admits a session "+
+		if sessions == nil && e.Permissions.authenticated() && e.AdmitsEndedSession == "" {
+			panic(fmt.Sprintf("api: mountRegistry needs a session check: %s %s is authenticated, which admits a session "+
 				"only while it is live", e.Method, e.Path))
 		}
 	}
 	liveOnly, endedAdmitted := interactiveOnlyGate(sessions, false), interactiveOnlyGate(sessions, true)
+	live := liveCredentialGate(sessions)
 	for _, e := range reg.endpoints {
 		// []any rather than []fiber.Handler because that is what Fiber
 		// v3's Add takes; the elements are all fiber.Handler.
@@ -738,6 +788,8 @@ func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes
 			chain = append(chain, endedAdmitted)
 		case e.InteractiveOnly != "":
 			chain = append(chain, liveOnly)
+		case e.Permissions.authenticated():
+			chain = append(chain, live)
 		}
 		if e.RateLimiter != nil {
 			chain = append(chain, e.RateLimiter)
