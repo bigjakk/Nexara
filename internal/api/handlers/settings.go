@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -349,8 +351,13 @@ func (h *SettingsHandler) GetSetting(c fiber.Ctx) error {
 		Scope:   scope,
 		ScopeID: scopeID,
 	})
-	if err != nil {
+	// Only a missing row is "not found": a client reads that as nothing saved
+	// and applies its defaults, which a database failure must not cause.
+	if errors.Is(err, pgx.ErrNoRows) {
 		return fiber.NewError(fiber.StatusNotFound, "Setting not found")
+	}
+	if err != nil {
+		return fmt.Errorf("get setting: %w", err)
 	}
 
 	return c.JSON(toSettingResponse(setting))

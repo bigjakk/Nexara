@@ -248,6 +248,9 @@ type captureDBTX struct {
 	// be untestable — the deny cases all stop at the gate, before any query,
 	// so they pass whichever side of the write the audit call sits on.
 	execErr error
+	// rowErr, when non-nil and row is nil, is what QueryRow fails with
+	// instead of errCaptured (pgx.ErrNoRows for a row that is not there).
+	rowErr error
 }
 
 func (c *captureDBTX) record(sql string, args []any) {
@@ -273,6 +276,9 @@ func (c *captureDBTX) Query(_ context.Context, sql string, args ...any) (pgx.Row
 func (c *captureDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	c.record(sql, args)
 	if c.row == nil {
+		if c.rowErr != nil {
+			return failRow{err: c.rowErr}
+		}
 		return failRow{err: errCaptured}
 	}
 	return settingRow{s: *c.row}
@@ -486,6 +492,37 @@ func TestSettingsHandlersKeyRowsOnCaller(t *testing.T) {
 				t.Errorf("scope_id = NULL, want %s — the row is shared instead of keyed on the caller", tt.wantScopeID)
 			case tt.wantScopeID != "" && uuid.UUID(gotID.Bytes).String() != tt.wantScopeID:
 				t.Errorf("scope_id = %s, want %s", uuid.UUID(gotID.Bytes), tt.wantScopeID)
+			}
+		})
+	}
+}
+
+// TestGetSettingNotFoundOnlyForNoRow protects that only a missing row reads as
+// 404: the SPA applies its defaults over the browser's copy on a 404, so a
+// database failure answering 404 would wipe a user's preferences.
+func TestGetSettingNotFoundOnlyForNoRow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"no row", pgx.ErrNoRows, http.StatusNotFound},
+		{"database error", errors.New("connection reset"), http.StatusInternalServerError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			app := newSettingsApp(t, db.New(&captureDBTX{rowErr: tt.err}))
+			req := httptest.NewRequest(http.MethodGet, "/settings/user.preferences", nil)
+			req.Header.Set("X-Test-Role", "viewer")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != tt.want {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.want)
 			}
 		})
 	}
