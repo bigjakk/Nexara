@@ -2455,7 +2455,7 @@ message carries a `type` and an array of `channels`:
 {"type": "ping"}
 ```
 
-A message from the client over 4,096 bytes closes the socket, which is about 70 channels, so split a long list. The server pings every `WS_PING_INTERVAL` and drops a connection that sends no WebSocket Pong within `WS_PONG_TIMEOUT`; a browser answers by itself, and the JSON `ping` message does not count.
+A message from the client over 4,096 bytes closes the socket, which is about 70 channels, so split a long list. One socket may hold 256 subscriptions; a subscribe past that is refused with `{"type": "error", "message": "too many subscriptions"}`. The server pings every `WS_PING_INTERVAL` and drops a connection that sends no WebSocket Pong within `WS_PONG_TIMEOUT`; a browser answers by itself, and the JSON `ping` message does not count.
 
 Valid channels:
 

@@ -60,6 +60,15 @@ func setupIntegrationEvery(t *testing.T, checkEvery time.Duration) *testEnv {
 		TestPermissionChecker: func(_ context.Context, _ uuid.UUID, _, _, _ string, _ uuid.UUID) (bool, error) {
 			return !denied.Load(), nil
 		},
+		// Every grant, globally, until denied: the hub's per-tick re-check.
+		TestPermissionLoader: func(context.Context, uuid.UUID) (*auth.UserPermissions, error) {
+			if denied.Load() {
+				return &auth.UserPermissions{}, nil
+			}
+			return &auth.UserPermissions{Permissions: []auth.ScopedPermission{
+				{Action: "view", Resource: "cluster", ScopeType: "global"},
+			}}, nil
+		},
 		Queries: db.New(lookups),
 	})
 	server.checkEvery = checkEvery

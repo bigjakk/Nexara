@@ -36,6 +36,9 @@ type Server struct {
 	// spinning up a real RBAC engine. When set, it takes precedence
 	// over rbacEngine.HasPermission. Never set in production builds.
 	testPermissionChecker PermissionChecker
+	// testPermissionLoader likewise overrides rbacEngine.LoadUserPermissions for
+	// the hub's per-tick re-check of subscriptions. Never set in production.
+	testPermissionLoader PermissionLoader
 	// allowedOrigins is the WebSocket upgrade Origin allow-list. nil or
 	// empty preserves the gofiber/contrib/v3/websocket default of allowing
 	// all origins (the historical behaviour, suitable for dev/lab
@@ -65,6 +68,9 @@ type ServerConfig struct {
 	// the subscribe gate. Reserved for integration tests that exercise
 	// the gate without a full Postgres+Redis-backed engine.
 	TestPermissionChecker PermissionChecker
+	// TestPermissionLoader, when non-nil, overrides the RBAC engine's
+	// LoadUserPermissions for the hub's re-check of subscriptions. Tests only.
+	TestPermissionLoader PermissionLoader
 	// AllowedOrigins, when non-empty, enables strict Origin checking on
 	// the /ws, /ws/console, and /ws/vnc upgrade endpoints. Each entry is
 	// matched against the request's Origin header byte-for-byte (so the
@@ -96,6 +102,7 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		s.vncHandler = opts[0].VNCHandler
 		s.rbacEngine = opts[0].RBACEngine
 		s.testPermissionChecker = opts[0].TestPermissionChecker
+		s.testPermissionLoader = opts[0].TestPermissionLoader
 		s.allowedOrigins = opts[0].AllowedOrigins
 		s.queries = opts[0].Queries
 	}
@@ -620,6 +627,18 @@ func (s *Server) permissionChecker() PermissionChecker {
 	return nil
 }
 
+// permissionLoader is permissionChecker's counterpart for the hub's per-tick
+// re-check of subscriptions, which loads the user's permissions once.
+func (s *Server) permissionLoader() PermissionLoader {
+	switch {
+	case s.testPermissionLoader != nil:
+		return s.testPermissionLoader
+	case s.rbacEngine != nil:
+		return s.rbacEngine.LoadUserPermissions
+	}
+	return nil
+}
+
 // handleWS handles a WebSocket connection after upgrade. The socket is held to the
 // session or API key that minted its token, as a console is: refused at open when
 // that has ended, and closed with closeSessionEnded when it ends while open.
@@ -640,7 +659,7 @@ func (s *Server) handleWS(conn *websocket.Conn) {
 		clientID, conn, s.hub, s.logger, s.pingInterval, s.pongTimeout,
 		userID, s.permissionChecker(),
 	)
-
+	client.loadPermissions = s.permissionLoader()
 	s.hub.Register(client)
 
 	// Send welcome message.

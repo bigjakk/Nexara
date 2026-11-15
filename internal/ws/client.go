@@ -11,6 +11,8 @@ import (
 
 	"github.com/gofiber/contrib/v3/websocket"
 	"github.com/google/uuid"
+
+	"github.com/bigjakk/nexara/internal/auth"
 )
 
 // PermissionChecker resolves "does this user have <action>:<resource>
@@ -79,7 +81,19 @@ type Client struct {
 	subMu  sync.Mutex
 	subs   map[string]uint64
 	subGen uint64
+
+	// loadPermissions loads the user's permissions once per re-check
+	// (recheckSubscriptions). Server.handleWS sets it; nil fails the re-check.
+	loadPermissions PermissionLoader
 }
+
+// PermissionLoader loads every permission a user holds, as
+// auth.RBACEngine.LoadUserPermissions does, to be asked many times in memory.
+type PermissionLoader func(ctx context.Context, userID uuid.UUID) (*auth.UserPermissions, error)
+
+// maxSubscriptions caps one client's subscriptions; each is re-checked on every
+// tick, and a channel can name any cluster id.
+const maxSubscriptions = 256
 
 // closeSend signals the writer to exit. Idempotent.
 //
@@ -242,6 +256,11 @@ func (c *Client) handleMessage(msg IncomingMessage) {
 				continue
 			}
 			c.subMu.Lock()
+			if _, already := c.subs[ch]; !already && len(c.subs) >= maxSubscriptions {
+				c.subMu.Unlock()
+				c.trySend(newErrorMsg("too many subscriptions"))
+				continue
+			}
 			c.subGen++
 			c.subs[ch] = c.subGen
 			c.hub.Subscribe(c, ch)
@@ -368,9 +387,11 @@ func (c *Client) canSubscribe(channel string) bool {
 // to, whether it may still be, and drops each it may not, telling the client
 // with a "forbidden" error naming the channel. The hub's credential watcher calls
 // it on each tick (Server.handleWS), so a revoked grant stops the stream within
-// a tick of RBAC seeing it. A lookup that fails drops nothing: it is returned,
-// and the watcher counts it as it counts a failed liveness check. It answers
-// true when it could look, as the watcher's permission check.
+// a tick of RBAC seeing it. The user's permissions are loaded once per tick,
+// whatever the number of subscriptions, and not at all when none is gated. A load
+// that fails drops nothing: it is returned, and the watcher counts it as it
+// counts a failed liveness check. It answers true when it could look, as the
+// watcher's permission check.
 func (c *Client) recheckSubscriptions(ctx context.Context) (bool, error) {
 	c.subMu.Lock()
 	snapshot := make(map[string]uint64, len(c.subs))
@@ -379,25 +400,23 @@ func (c *Client) recheckSubscriptions(ctx context.Context) (bool, error) {
 	}
 	c.subMu.Unlock()
 
-	answers := make(map[channelGrant]bool) // channels that need the same grant ask once
+	var perms *auth.UserPermissions
 	var drop []string
 	for ch := range snapshot {
 		g, open, ok := grantFor(ch)
 		if open {
 			continue
 		}
-		allowed, asked := answers[g]
-		if ok && !asked {
-			if c.checkPermission == nil {
-				return false, errors.New("no permission checker configured")
+		if ok && perms == nil {
+			if c.loadPermissions == nil {
+				return false, errors.New("no permission loader configured")
 			}
 			var err error
-			if allowed, err = c.checkPermission(ctx, c.userID, g.action, g.resource, g.scopeType, g.scopeID); err != nil {
-				return false, fmt.Errorf("re-checking subscription %s: %w", ch, err)
+			if perms, err = c.loadPermissions(ctx, c.userID); err != nil {
+				return false, fmt.Errorf("re-checking subscriptions: %w", err)
 			}
-			answers[g] = allowed
 		}
-		if !ok || !allowed {
+		if !ok || !perms.Has(g.action, g.resource, g.scopeType, g.scopeID) {
 			drop = append(drop, ch)
 		}
 	}

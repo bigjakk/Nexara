@@ -3,11 +3,15 @@ package ws
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/bigjakk/nexara/internal/auth"
 )
 
 // TestChannelClusterID covers the channel-name parsing helper that the
@@ -436,25 +440,121 @@ func TestClientCanSubscribe_UnclassifiedSystemChannelDenied(t *testing.T) {
 	}
 }
 
-// TestRecheckSubscriptions_KeepsThemWhenTheLookupFails: a failing RBAC lookup is
-// not a removed grant. Nothing is dropped and the error goes back to the watcher,
-// which counts it as a failed check (console_credential.go).
-func TestRecheckSubscriptions_KeepsThemWhenTheLookupFails(t *testing.T) {
-	t.Parallel()
+// newRecheckClient is a client of a running hub whose permissions load through
+// load, with what the hub sends it drained into the returned channel.
+func newRecheckClient(t *testing.T, load PermissionLoader) (*Client, <-chan []byte) {
+	t.Helper()
 	hub := NewHub(testLogger(), 0)
 	hub.Run()
 	t.Cleanup(hub.Stop)
-	c := NewClient("c1", nil, hub, testLogger(), time.Minute, time.Minute, uuid.New(),
-		func(context.Context, uuid.UUID, string, string, string, uuid.UUID) (bool, error) {
-			return false, errors.New("rbac unavailable")
-		})
-	channel := "cluster:550e8400-e29b-41d4-a716-446655440000:metrics"
-	c.subs[channel] = 1
+	allow := func(context.Context, uuid.UUID, string, string, string, uuid.UUID) (bool, error) { return true, nil }
+	c := NewClient("c1", nil, hub, testLogger(), time.Minute, time.Minute, uuid.New(), allow)
+	c.loadPermissions = load
+	out := make(chan []byte, 2*maxSubscriptions)
+	go func() {
+		for {
+			select {
+			case m := <-c.send:
+				out <- m
+			case <-c.closing:
+				return
+			}
+		}
+	}()
+	t.Cleanup(c.closeSend)
+	return c, out
+}
+
+// clusterChannel is the metrics channel of the n-th made-up cluster.
+func clusterChannel(n int) string {
+	return fmt.Sprintf("cluster:00000000-0000-4000-8000-%012d:metrics", n)
+}
+
+// TestRecheckSubscriptions_KeepsThemWhenTheLookupFails: a failing RBAC load is
+// not a removed grant. Nothing is dropped, not even in part, and the error goes
+// back to the watcher, which counts it as a failed check (console_credential.go).
+func TestRecheckSubscriptions_KeepsThemWhenTheLookupFails(t *testing.T) {
+	t.Parallel()
+	c, out := newRecheckClient(t, func(context.Context, uuid.UUID) (*auth.UserPermissions, error) {
+		return nil, errors.New("rbac unavailable")
+	})
+	c.subs[clusterChannel(1)], c.subs[clusterChannel(2)] = 1, 2
 
 	if _, err := c.recheckSubscriptions(context.Background()); err == nil {
 		t.Error("recheckSubscriptions returned no error for a failing lookup")
 	}
-	if _, ok := c.subs[channel]; !ok || len(c.send) != 0 {
-		t.Errorf("the subscription was dropped (kept %v, %d messages sent), want it kept", ok, len(c.send))
+	if len(c.subs) != 2 || len(out) != 0 {
+		t.Errorf("kept %d of 2 subscriptions and sent %d messages, want both kept and none sent", len(c.subs), len(out))
+	}
+}
+
+// TestRecheckSubscriptions_LoadsOncePerTick: any cluster id is a valid channel,
+// so a tick must cost one permission load however many a client holds.
+func TestRecheckSubscriptions_LoadsOncePerTick(t *testing.T) {
+	t.Parallel()
+	loads := 0
+	c, _ := newRecheckClient(t, func(context.Context, uuid.UUID) (*auth.UserPermissions, error) {
+		loads++
+		return &auth.UserPermissions{Permissions: []auth.ScopedPermission{{Action: "view", Resource: "cluster", ScopeType: "global"}}}, nil
+	})
+	for n := range 200 {
+		c.subs[clusterChannel(n)] = uint64(n + 1)
+	}
+	if _, err := c.recheckSubscriptions(context.Background()); err != nil {
+		t.Fatalf("recheckSubscriptions: %v", err)
+	}
+	if loads != 1 || len(c.subs) != 200 {
+		t.Errorf("%d loads, %d of 200 subscriptions kept; want 1 load and all kept", loads, len(c.subs))
+	}
+}
+
+// TestRecheckSubscriptions_KeepsAChannelSubscribedAgainMeanwhile: a subscribe that
+// lands while a re-check is asking passed a newer check of its own, so the
+// re-check's refusal must not drop it.
+func TestRecheckSubscriptions_KeepsAChannelSubscribedAgainMeanwhile(t *testing.T) {
+	t.Parallel()
+	var c *Client
+	c, out := newRecheckClient(t, func(context.Context, uuid.UUID) (*auth.UserPermissions, error) {
+		c.subMu.Lock()
+		c.subGen++
+		c.subs[clusterChannel(1)] = c.subGen
+		c.subMu.Unlock()
+		return &auth.UserPermissions{}, nil
+	})
+	c.subGen = 1
+	c.subs[clusterChannel(1)] = 1
+
+	if _, err := c.recheckSubscriptions(context.Background()); err != nil {
+		t.Fatalf("recheckSubscriptions: %v", err)
+	}
+	if _, ok := c.subs[clusterChannel(1)]; !ok || len(out) != 0 {
+		t.Errorf("the channel subscribed again was dropped (kept %v, %d messages sent)", ok, len(out))
+	}
+}
+
+// TestClient_CapsItsSubscriptions: every subscription is re-checked on every
+// tick, so a client may hold maxSubscriptions and is refused the next.
+func TestClient_CapsItsSubscriptions(t *testing.T) {
+	t.Parallel()
+	c, out := newRecheckClient(t, nil)
+	channels := make([]string, maxSubscriptions+1)
+	for n := range channels {
+		channels[n] = clusterChannel(n)
+	}
+	c.handleMessage(IncomingMessage{Type: MsgTypeSubscribe, Channels: channels})
+
+	if len(c.subs) != maxSubscriptions {
+		t.Errorf("%d subscriptions held, want the cap of %d", len(c.subs), maxSubscriptions)
+	}
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case m := <-out:
+			if strings.Contains(string(m), "too many subscriptions") {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the subscription past the cap was not refused with an error")
+		}
 	}
 }

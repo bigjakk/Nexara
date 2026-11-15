@@ -53,22 +53,26 @@ func (e *RBACEngine) HasPermission(ctx context.Context, userID uuid.UUID, action
 	if err != nil {
 		return false, fmt.Errorf("loading user permissions: %w", err)
 	}
+	return perms.Has(action, resource, scopeType, scopeID), nil
+}
 
-	for _, p := range perms.Permissions {
+// Has reports whether the permissions hold action:resource at the given scope:
+// HasPermission's rule, for a caller that loaded them once to ask many times.
+func (u *UserPermissions) Has(action, resource, scopeType string, scopeID uuid.UUID) bool {
+	for _, p := range u.Permissions {
 		if p.Action != action || p.Resource != resource {
 			continue
 		}
 		// Global scope covers everything
 		if p.ScopeType == "global" {
-			return true, nil
+			return true
 		}
 		// Cluster scope matches if types and IDs match
 		if p.ScopeType == scopeType && p.ScopeID == scopeID.String() {
-			return true, nil
+			return true
 		}
 	}
-
-	return false, nil
+	return false
 }
 
 // HasGlobalPermission is a convenience for checking a global-scoped permission.
