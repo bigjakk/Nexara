@@ -222,12 +222,13 @@ type AuthHandler struct {
 	memoryLockoutWarning sync.Once
 
 	// loginLockout counts failed sign-ins (login_lockout.go); nil means loginMemory,
-	// this handler's own, made once. lockoutRedis is the client both lockouts were
-	// given, for the sign-in lock's record of its release.
+	// this handler's own, made once. rdb is the client SetPasswordLockoutStore was
+	// given: what sign-in records besides its counts (a lock's release, the failures
+	// that name no account), and the window of the silent console mints' audit.
 	loginLockout    passwordLockoutStore
 	loginMemory     *memoryPasswordLockout
 	loginMemoryOnce sync.Once
-	lockoutRedis    *redis.Client
+	rdb             *redis.Client
 
 	// passwordChecker stands in for auth.CheckPassword in ChangePassword when a
 	// test sets it, and is nil in production (checkCurrentPassword): it exists so a
@@ -1325,7 +1326,11 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	// Honour silent only for VNC types — the "preview thumbnail" use case.
-	// Terminal/serial mints are always user-initiated and always audit.
+	// Terminal/serial mints are always user-initiated and always audit. A silent
+	// mint is audited too, but at most once per user and guest in
+	// silentMintAuditedEvery: any console holder can send silent, so skipping its row
+	// altogether would be console access nobody could see, and the preview mints one
+	// every few seconds.
 	silent := p.Bool("silent") && (consoleType == "vm_vnc" || consoleType == "ct_vnc")
 	if silent {
 		slog.Info("console_token_mint (silent)",
@@ -1335,16 +1340,21 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 			"vmid", vmid,
 			"type", consoleType,
 		)
-	} else {
+	}
+	if !silent || h.firstSilentMintInWindow(c, userID, clusterID, vmid) {
 		// Field by field rather than p.Raw(): view:audit is a default Viewer
 		// grant, and Raw() would publish whatever the caller sent — including
 		// any parameter this route later gains.
-		details, _ := json.Marshal(map[string]any{
+		fields := map[string]any{
 			"cluster_id": clusterID,
 			"node":       node,
 			"vmid":       vmid,
 			"type":       consoleType,
-		})
+		}
+		if silent {
+			fields["silent"] = true
+		}
+		details, _ := json.Marshal(fields)
 		// The mint is scoped to one cluster — the same clusterUUID the
 		// permission check above gates on — so the audit row carries it.
 		// Auditing NULL here marked the mint a global entry, which the scoped
@@ -1358,6 +1368,26 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 		Token:     token,
 		ExpiresIn: int(consoleTokenTTL.Seconds()),
 	})
+}
+
+// silentMintAuditedEvery is how often a silent console mint is audited for one user
+// and guest.
+const silentMintAuditedEvery = 10 * time.Minute
+
+// firstSilentMintInWindow reports whether this silent mint is the first for the user
+// and guest in silentMintAuditedEvery, and so is to be audited. Without Redis to keep
+// the window, or when Redis does not answer, every one is.
+func (h *AuthHandler) firstSilentMintInWindow(c fiber.Ctx, userID uuid.UUID, clusterID string, vmid int) bool {
+	if h.rdb == nil {
+		return true
+	}
+	key := "console:silent-audit:" + userID.String() + ":" + clusterID + ":" + strconv.Itoa(vmid)
+	ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)
+	defer cancel()
+	first, err := boundedByContext(ctx, func(ctx context.Context) (bool, error) {
+		return h.rdb.SetNX(ctx, key, "1", silentMintAuditedEvery).Result()
+	})
+	return err != nil || first
 }
 
 type wsTokenResponse struct {

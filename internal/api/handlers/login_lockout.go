@@ -171,10 +171,10 @@ func (h *AuthHandler) recordLoginLock(c fiber.Ctx, a loginAttempt, account *db.U
 	}
 	slog.Warn("sign-in: the account is locked out of signing in with a password after repeated failed sign-ins",
 		"user_id", account.ID, "ip", c.IP(), "failed_attempts", a.res.attempts, "lockout_seconds", lockSeconds)
-	if h.lockoutRedis != nil {
+	if h.rdb != nil {
 		ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)
 		_, err := boundedByContext(ctx, func(ctx context.Context) (struct{}, error) {
-			return struct{}{}, h.lockoutRedis.Set(ctx, loginLockedKey(a.subject), account.ID.String(), loginLockRecordTTL).Err()
+			return struct{}{}, h.rdb.Set(ctx, loginLockedKey(a.subject), account.ID.String(), loginLockRecordTTL).Err()
 		})
 		cancel()
 		if err != nil {
@@ -195,12 +195,12 @@ func (h *AuthHandler) recordLoginLock(c fiber.Ctx, a loginAttempt, account *db.U
 // it, when there is a record of one (recordLoginLock): the lock itself ends in Redis,
 // where nothing can watch it go.
 func (h *AuthHandler) recordLoginLockRelease(c fiber.Ctx, subject uuid.UUID) {
-	if h.lockoutRedis == nil {
+	if h.rdb == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)
 	owner, err := boundedByContext(ctx, func(ctx context.Context) (string, error) {
-		return h.lockoutRedis.GetDel(ctx, loginLockedKey(subject)).Result()
+		return h.rdb.GetDel(ctx, loginLockedKey(subject)).Result()
 	})
 	cancel()
 	if err != nil {
@@ -279,12 +279,12 @@ func (h *AuthHandler) recordFailedSignIn(c fiber.Ctx, account *db.User, reason s
 		})
 		return
 	}
-	if h.lockoutRedis == nil {
+	if h.rdb == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)
 	vals, err := boundedByContext(ctx, func(ctx context.Context) ([]int64, error) {
-		return countUnknownSignIn.Run(ctx, h.lockoutRedis, []string{unknownSignInKey(ip), unknownSignInCarryKey(ip)},
+		return countUnknownSignIn.Run(ctx, h.rdb, []string{unknownSignInKey(ip), unknownSignInCarryKey(ip)},
 			unknownSignInWindow.Milliseconds(), unknownSignInCarry.Milliseconds()).Int64Slice()
 	})
 	cancel()

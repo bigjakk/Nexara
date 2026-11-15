@@ -2367,8 +2367,10 @@ the target cluster, not `view:*`: `console:node` for `node_shell`,
 `console:vm` for `vm_serial`/`vm_vnc`, and `console:container` for
 `ct_attach`/`ct_vnc`. The built-in Viewer role holds every `view:*`
 permission and deliberately holds none of these. Each mint is written to the
-audit log unless the request sets `"silent": true`, which is honoured only for
-the two VNC types (background thumbnail previews) and still enforces RBAC.
+audit log. A request that sets `"silent": true`, which is honoured only for the
+two VNC types (background thumbnail previews) and still enforces RBAC, is written
+at most once per user and guest every 10 minutes, with `"silent": true` in its
+details.
 
 Either token is minted only for a sign-in that is still live: an API key (which
 authenticating the request has just checked), or a session that has not ended. An

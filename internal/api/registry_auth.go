@@ -440,10 +440,10 @@ func consoleTokenParams() apischema.Properties {
 			Optional: true,
 			Default:  false,
 			Typetext: "<boolean>",
-			Description: "Skip the audit row for this mint, for a background VNC preview that would " +
-				"otherwise flood the activity feed. Honoured for vm_vnc and ct_vnc only — a terminal " +
-				"mint is always user-initiated and always audited — and it grants no authority: the " +
-				"permission check is unchanged and the mint is still logged at INFO.",
+			Description: "Audit this mint at most once per user and guest every 10 minutes, for a " +
+				"background VNC preview that would otherwise flood the activity feed. Honoured for vm_vnc " +
+				"and ct_vnc only — a terminal mint is always user-initiated and always audited — and it " +
+				"grants no authority: the permission check is unchanged and the mint is still logged at INFO.",
 		},
 	}
 }

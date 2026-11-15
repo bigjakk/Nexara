@@ -235,7 +235,7 @@ func (h *AuthHandler) SetPasswordLockoutStore(rdb *redis.Client) {
 	}
 	h.passwordLockout = redisPasswordLockout{rdb: rdb, policy: passwordLockoutPolicy}
 	h.loginLockout = redisPasswordLockout{rdb: rdb, policy: loginLockoutPolicy}
-	h.lockoutRedis = rdb
+	h.rdb = rdb
 }
 
 // processPasswordLockout is the counts of every handler without a Redis client:

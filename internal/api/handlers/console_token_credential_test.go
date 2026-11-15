@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,5 +137,47 @@ func TestWSToken_RefusesASessionThatHasEnded(t *testing.T) {
 				t.Fatalf("status %d, want %d", resp.StatusCode, tt.status)
 			}
 		})
+	}
+}
+
+// TestConsoleToken_ASilentMintIsAuditedOncePerGuestAndWindow: the VM page's preview
+// mints silently every few seconds, and any console holder can ask for silent, so it
+// is audited once per user and guest every silentMintAuditedEvery — never not at all.
+func TestConsoleToken_ASilentMintIsAuditedOncePerGuestAndWindow(t *testing.T) {
+	t.Parallel()
+	user := epochUser(t, epochLoginEmail, 0)
+	store := newEpochStore(user)
+	live := db.Session{ID: uuid.New(), UserID: user.ID, ExpiresAt: time.Now().Add(time.Hour)}
+	store.sessions = append(store.sessions, live)
+	a := newEpochApp(t, store, epochOptions{})
+	a.auth.SetPasswordLockoutStore(a.rdb)
+	cluster := uuid.New()
+	mint := func(vmid int) {
+		t.Helper()
+		resp := a.send(t, http.MethodPost, "/auth/console-token",
+			fmt.Sprintf(`{"cluster_id":%q,"node":"pve-01","type":"vm_vnc","vmid":%d,"silent":true}`, cluster, vmid),
+			map[string]string{"X-Test-Acting-User": user.ID.String(), "X-Test-Session": live.ID.String()}, 5*time.Second)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("silent mint for %d = %d, want 200", vmid, resp.StatusCode)
+		}
+	}
+	mint(100)
+	mint(100)
+	mint(101)
+	a.redis.FastForward(silentMintAuditedEvery + time.Second)
+	mint(100)
+	var rows []string
+	for i, action := range store.auditActions() {
+		if action == "console_token_mint" {
+			rows = append(rows, store.auditDetailsWritten()[i])
+		}
+	}
+	if len(rows) != 3 {
+		t.Fatalf("console_token_mint rows %v, want 3: guest 100, guest 101, guest 100 after the window", rows)
+	}
+	for _, d := range rows {
+		if !strings.Contains(d, `"silent":true`) {
+			t.Errorf("row %s does not say the mint was silent", d)
+		}
 	}
 }
