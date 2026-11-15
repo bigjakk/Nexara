@@ -803,7 +803,7 @@ On the **Rules** sub-tab, **Add Rule** controls VM placement:
 - **Anti-affinity** — keep guests on different nodes (e.g., HA pairs); needs at least two
 - **Pin** — lock a guest to one or more nodes
 
-Its **Target** is **Nexara Only**, which only DRS honours, or **Proxmox HA**, which writes a rule to Proxmox under the **Rule Name** you give it.
+Its **Target** is **Nexara Only**, which only DRS honours, or **Proxmox HA**, which writes a rule to Proxmox under the **Rule Name** you give it. Clearing **Enabled** creates the rule disabled, for either target. A Proxmox HA rule needs Proxmox VE 9 or later, which introduced HA rules.
 
 ### Manual Evaluation
 

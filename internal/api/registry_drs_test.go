@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // These tests drive the REAL declarations — the ones setupRoutes mounts —
@@ -582,6 +583,38 @@ func TestEveryDRSEndpointIsDocumented(t *testing.T) {
 			if strings.TrimSpace(prop.Description) == "" {
 				t.Errorf("%s: parameter %q has no description", key, name)
 			}
+		}
+	}
+}
+
+// The create dialog's Enabled box reaches Proxmox: an explicit false sends
+// pve-ha-manager's disable=1, and true or an omitted key sends no disable,
+// which Proxmox creates enabled. Real declaration and handler, stand-in Proxmox.
+func TestDRSCreateHARuleForwardsEnabled(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		enabled     string // the body's "enabled" member, or "" to omit it
+		wantDisable string
+	}{
+		{enabled: `,"enabled":false`, wantDisable: "1"},
+		{enabled: `,"enabled":true`},
+		{},
+	} {
+		pve, dbtx := &haCreatePVE{}, &haCreateDBTX{}
+		e := declaredEndpoint(t, fiber.MethodPost, drsScope+"/ha-rules")
+		e.Handler = handlers.NewDRSHandler(db.New(dbtx), haCreateEncKey, nil, nil).CreateHARule
+		app := newHAStandInApp(t, e, pve, dbtx, map[string]bool{"manage:drs": true})
+		body := `{"rule_name":"ha-rule01","rule_type":"anti-affinity","vm_ids":[100,101]` + tt.enabled + `}`
+		req := jsonRequest(http.MethodPost, drsRoute(drsScope+"/ha-rules"), body)
+		req.Header.Set("X-Test-User", "yes")
+		if status, env := send(t, app, req); status != fiber.StatusCreated {
+			t.Fatalf("%s: status = %d (%q), want 201", body, status, env.Message)
+		}
+		if len(pve.seen) != 1 || pve.seen[0].path != "/api2/json/cluster/ha/rules" {
+			t.Fatalf("%s: Proxmox received %+v, want one POST to /cluster/ha/rules", body, pve.seen)
+		}
+		if got := pve.seen[0].form.Get("disable"); got != tt.wantDisable {
+			t.Errorf("%s: disable = %q, want %q", body, got, tt.wantDisable)
 		}
 	}
 }

@@ -2061,6 +2061,9 @@ type CreateHARuleParams struct {
 	Strict    int    `json:"strict,omitempty"`
 	Affinity  string `json:"affinity,omitempty"`
 	Comment   string `json:"comment,omitempty"`
+	// Disable creates the rule disabled when non-zero. pve-ha-manager's
+	// create_rule drops a false disable, so only a true one is sent.
+	Disable int `json:"disable,omitempty"`
 }
 
 // UpdateHARuleParams holds parameters for updating an HA rule via

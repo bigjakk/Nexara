@@ -783,6 +783,13 @@ func (h *DRSHandler) CreateHARule(c fiber.Ctx, p *apischema.Params) error {
 		haRuleType = "resource-affinity"
 		params.Affinity = "negative"
 	}
+	// Only an explicit false disables: Proxmox creates a rule enabled, and a
+	// caller that omits the key has always got an enabled one. PVE 9's rule
+	// schema (PVE::HA::Rules) carries `disable`; PVE 8 has no rules at all.
+	enabled, enabledSent := p.OptBool("enabled")
+	if enabledSent && !enabled {
+		params.Disable = 1
+	}
 
 	client, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -793,7 +800,7 @@ func (h *DRSHandler) CreateHARule(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	haDetails, _ := json.Marshal(map[string]interface{}{"rule_name": ruleName, "rule_type": ruleType, "vm_ids": vmIDs, "ha_type": haRuleType})
+	haDetails, _ := json.Marshal(map[string]interface{}{"rule_name": ruleName, "rule_type": ruleType, "vm_ids": vmIDs, "ha_type": haRuleType, "enabled": params.Disable == 0})
 	// "created", not "ha_rule_created": the row's resource_type already says
 	// ha_rule, and HAHandler.CreateRule has always written the short verb. One
 	// resource type, one vocabulary.

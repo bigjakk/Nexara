@@ -70,6 +70,9 @@ func (c *Client) CreateHARule(ctx context.Context, ruleType string, params Creat
 	if params.Comment != "" {
 		form.Set("comment", params.Comment)
 	}
+	if params.Disable != 0 {
+		form.Set("disable", "1")
+	}
 	if err := c.doPost(ctx, "/cluster/ha/rules", form, nil); err != nil {
 		return fmt.Errorf("create HA rule %q: %w", params.Rule, err)
 	}

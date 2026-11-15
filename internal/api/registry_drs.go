@@ -279,8 +279,15 @@ func registerDRSEndpoints(reg *Registry, h *handlers.DRSHandler) {
 				"Proxmox VMIDs the rule applies to. At least one is required — Proxmox's rule has no "+
 					"meaning without a resource."),
 			"node_names": drsNodeNamesParam,
-			"enabled": optFlag("Accepted for symmetry with the Nexara rule body, but NOT yet forwarded: " +
-				"Proxmox creates the rule active, and disabling one is a separate write through the HA tab."),
+			// Not optFlag: its Default of false would read an omitted key as
+			// "create it disabled". The handler reads it with OptBool.
+			"enabled": {
+				Type:     apischema.Boolean,
+				Optional: true,
+				Typetext: "<boolean>",
+				Description: "false creates the rule disabled (Proxmox's disable flag). Omitted or true " +
+					"creates it enabled.",
+			},
 		}),
 		Handler: h.CreateHARule,
 	})
