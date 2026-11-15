@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,22 +22,28 @@ import (
 // ends in to somebody else, whose browser would otherwise finish it.
 
 // TestOIDCCallback_RefusesASignInThisBrowserDidNotStart: a callback whose state the
-// browser holds no binding for is refused before anything else is looked at — a
-// stray cookie of the name sent ahead of the real one does not lock it out — and the
-// browser that started it gets past, its binding spent at the redirect URI's path.
+// browser holds no binding for — no cookie whose secret hashes to the digest stored with
+// the state — is refused before anything else is looked at. The state itself in the
+// cookie, which a leaked callback URL gives away, is no binding; a stray cookie of the
+// name sent ahead of the real one does not lock it out; the binding is spent at the
+// redirect URI's path.
 func TestOIDCCallback_RefusesASignInThisBrowserDidNotStart(t *testing.T) {
 	t.Parallel()
-	const state = "state-this-browser-started"
-	bound := oidcStateBinding.cookieName(state)
+	const state, secret = "state-this-browser-started", "secret-this-browser-holds"
+	bound := oidcStateBinding.cookieName(false, state)
+	stored := "nonce|verifier|" + bindingDigest(secret)
 	for _, tc := range []struct {
-		name, cookie string
-		passes       bool
+		name, cookie, stored string
+		passes               bool
 	}{
-		{"no binding", "", false},
-		{"another sign-in's binding", oidcStateBinding.cookieName("another-state") + "=another-state", false},
-		{"this sign-in's cookie holding another value", bound + "=another-state", false},
-		{"this sign-in's binding", bound + "=" + state, true},
-		{"this sign-in's binding behind a stray one", bound + "=stray; " + bound + "=" + state, true},
+		{"no binding", "", stored, false},
+		{"another sign-in's binding", oidcStateBinding.cookieName(false, "another-state") + "=" + secret, stored, false},
+		{"this sign-in's cookie holding another secret", bound + "=another-secret", stored, false},
+		{"this sign-in's cookie holding the state", bound + "=" + state, stored, false},
+		{"this sign-in's binding, its state gone", bound + "=" + secret, "", false},
+		{"a state stored before the binding was (an upgrade)", bound + "=" + secret, "nonce|verifier", false},
+		{"this sign-in's binding", bound + "=" + secret, stored, true},
+		{"this sign-in's binding behind a stray one", bound + "=stray; " + bound + "=" + secret, stored, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -46,6 +53,11 @@ func TestOIDCCallback_RefusesASignInThisBrowserDidNotStart(t *testing.T) {
 			store.oidcConfig = &db.OidcConfig{RedirectUri: "https://nexara.example.com/nexara/api/v1/auth/oidc/callback",
 				ClientSecretEncrypted: "not-a-ciphertext"}
 			a := newEpochApp(t, store, epochOptions{})
+			if tc.stored != "" {
+				if err := a.redis.Set("oidc:state:"+state, tc.stored); err != nil {
+					t.Fatal(err)
+				}
+			}
 			headers := map[string]string{}
 			if tc.cookie != "" {
 				headers["Cookie"] = tc.cookie
@@ -74,20 +86,22 @@ func TestOIDCCallback_RefusesASignInThisBrowserDidNotStart(t *testing.T) {
 }
 
 // TestOIDCExchange_RefusesACodeThisBrowserWasNotGiven: the exchange code the callback
-// stores comes with its binding, and the exchange refuses — before it spends the code —
-// one the browser trading it was not given.
+// stores comes with its binding, a secret the code's data holds only the digest of, and
+// the exchange refuses — before it spends the code — one the browser trading it was not
+// given, the code itself in the cookie included.
 func TestOIDCExchange_RefusesACodeThisBrowserWasNotGiven(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name   string
-		cookie func(given *http.Cookie) string
+		cookie func(given *http.Cookie, code string) string
 		status int
 	}{
-		{"no binding", func(*http.Cookie) string { return "" }, http.StatusUnauthorized},
-		{"another code's binding", func(*http.Cookie) string {
-			return oidcExchangeBinding.cookieName("another-code") + "=another-code"
+		{"no binding", func(*http.Cookie, string) string { return "" }, http.StatusUnauthorized},
+		{"another code's binding", func(*http.Cookie, string) string {
+			return oidcExchangeBinding.cookieName(false, "another-code") + "=another-secret"
 		}, http.StatusUnauthorized},
-		{"the binding the callback gave", func(given *http.Cookie) string { return given.Name + "=" + given.Value }, http.StatusOK},
+		{"the code in the binding's cookie", func(given *http.Cookie, code string) string { return given.Name + "=" + code }, http.StatusUnauthorized},
+		{"the binding the callback gave", func(given *http.Cookie, _ string) string { return given.Name + "=" + given.Value }, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -100,13 +114,13 @@ func TestOIDCExchange_RefusesACodeThisBrowserWasNotGiven(t *testing.T) {
 				return c.SendStatus(http.StatusNoContent)
 			}
 			probe := a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)
-			given := cookiesNamed(probe, oidcExchangeBinding.cookieName(code))
-			if code == "" || len(given) != 1 || given[0].Value != code {
-				t.Fatalf("the callback stored code %q and set bindings %v: want one holding the code", code, given)
+			given := cookiesNamed(probe, oidcExchangeBinding.cookieName(false, code))
+			if code == "" || len(given) != 1 || given[0].Value == "" || given[0].Value == code {
+				t.Fatalf("the callback stored code %q and set bindings %v: want one holding a secret", code, given)
 			}
 
 			headers := map[string]string{}
-			if cookie := tc.cookie(given[0]); cookie != "" {
+			if cookie := tc.cookie(given[0], code); cookie != "" {
 				headers["Cookie"] = cookie
 			}
 			resp := a.send(t, http.MethodPost, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`, headers, 10*time.Second)
@@ -135,12 +149,15 @@ func TestOIDCBrowserBindings_AreLaxHttpOnlyCookiesForTheirOneRoute(t *testing.T)
 		{oidcExchangeBinding, "/api/v1/auth/oidc/token-exchange"},
 	} {
 		app := fiber.New()
-		app.Get("/set", func(c fiber.Ctx) error { tc.binding.set(c, "value"); return c.SendStatus(http.StatusNoContent) })
+		app.Get("/set", func(c fiber.Ctx) error {
+			tc.binding.set(c, "value", "secret")
+			return c.SendStatus(http.StatusNoContent)
+		})
 		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/set", nil))
 		if err != nil {
 			t.Fatalf("%s: %v", tc.binding.prefix, err)
 		}
-		got := cookiesNamed(resp, tc.binding.cookieName("value"))
+		got := cookiesNamed(resp, tc.binding.cookieName(false, "value"))
 		if len(got) != 1 || got[0].Path != tc.route || !got[0].HttpOnly || got[0].SameSite != http.SameSiteLaxMode || got[0].MaxAge <= 0 {
 			t.Errorf("%s: Set-Cookie = %+v, want one, HttpOnly, SameSite=Lax, with a Max-Age and Path %s", tc.binding.prefix, got, tc.route)
 		}
@@ -152,10 +169,53 @@ func TestOIDCBrowserBindings_AreLaxHttpOnlyCookiesForTheirOneRoute(t *testing.T)
 		// cookies.
 		names := map[string]bool{}
 		for i := range 1000 {
-			names[tc.binding.cookieName(strconv.Itoa(i))] = true
+			names[tc.binding.cookieName(false, strconv.Itoa(i))] = true
 		}
 		if len(names) != 16 {
 			t.Errorf("%s: 1000 values got %d cookie names, want 16", tc.binding.prefix, len(names))
+		}
+	}
+}
+
+// TestOIDCBrowserBindings_AreHostPrefixedWhenSecure: a Secure binding is a __Host-
+// cookie at / (which the prefix requires), and only that name is read, so the same
+// secret under the unprefixed name — which a sibling subdomain or a plain-http page
+// can plant — is no binding. Not parallel: it sets SECURE_COOKIES, process-wide.
+func TestOIDCBrowserBindings_AreHostPrefixedWhenSecure(t *testing.T) {
+	was := cookieSecureMode
+	SetCookieSecureMode("always")
+	t.Cleanup(func() { cookieSecureMode = was })
+	digest := bindingDigest("secret")
+	app := fiber.New()
+	app.Get("/set", func(c fiber.Ctx) error {
+		oidcStateBinding.set(c, "value", "secret")
+		return c.SendStatus(http.StatusNoContent)
+	})
+	app.Get("/match", func(c fiber.Ctx) error {
+		return c.SendString(strconv.FormatBool(oidcStateBinding.matches(c, "value", digest)))
+	})
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/set", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := oidcStateBinding.cookieName(true, "value")
+	got := cookiesNamed(resp, name)
+	if !strings.HasPrefix(name, "__Host-") || len(got) != 1 || got[0].Path != "/" || !got[0].Secure || got[0].Domain != "" {
+		t.Fatalf("Set-Cookie %s = %+v, want one __Host- cookie, Secure, at /, with no Domain", name, got)
+	}
+	for cookie, want := range map[string]string{
+		name + "=secret": "true",
+		oidcStateBinding.cookieName(false, "value") + "=secret": "false",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/match", nil)
+		req.Header.Set("Cookie", cookie)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if string(body) != want {
+			t.Errorf("matches with %q = %s, want %s", cookie, body, want)
 		}
 	}
 }

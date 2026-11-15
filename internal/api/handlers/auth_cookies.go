@@ -3,6 +3,8 @@ package handlers
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -111,25 +113,33 @@ func readRefreshTokenFromCookie(c fiber.Ctx) string {
 }
 
 // browserBinding is a cookie that ties a step of the SSO sign-in to the browser that
-// took the step before it: the login-CSRF defence of the OIDC flow. Its value is what
-// the next step is handed in its URL or body — the state, the exchange code — and that
-// step refuses a value this browser was not given. Without it, anyone could start a
-// sign-in of their own, sign in at the identity provider as themselves, and send the
-// callback link it ends in, or the /oidc-callback link with its exchange code, to
-// somebody else: their browser finished the sign-in and was signed in as the attacker,
-// and out of their own session, which a sign-in ends when it replaces its cookie.
+// took the step before it: the login-CSRF defence of the OIDC flow. Without it, anyone
+// could start a sign-in of their own, sign in at the identity provider as themselves,
+// and send the callback link it ends in, or the /oidc-callback link with its exchange
+// code, to somebody else: their browser finished the sign-in and was signed in as the
+// attacker, and out of their own session, which a sign-in ends when it replaces its
+// cookie.
+//
+// The cookie holds a random secret (newBindingSecret), and the server keeps only its
+// SHA-256 beside the value the next step is handed in its URL or body — the state, the
+// exchange code. That step refuses a value whose stored digest the browser's cookie
+// does not hash to. The value alone is not enough: a callback or /oidc-callback URL
+// that leaks to a log cannot be redeemed by setting the cookie by hand.
 //
 // HttpOnly, Secure as the refresh cookie is (refreshCookieSecure), and SameSite=Lax,
 // not Strict: the callback is a top-level navigation from the identity provider's site,
-// a cross-site request a Strict cookie is not sent on. Its path is the one route that
-// reads it, under RefreshCookiePath's subtree like every auth cookie (the callback's
-// follows the redirect URI, see oidcCallbackCookiePath). Its lifetime is a Max-Age,
-// which the browser counts from when it got the cookie: an Expires is judged by the
-// browser's own clock, and a lab laptop a minute ahead of the server would drop the
-// exchange's binding on arrival. A response that sets or spends one is marked
-// no-store, so that no shared cache hands one browser's binding to another. And the
-// cookie's name follows the value (cookieName), so that two sign-ins in one browser —
-// two tabs, a second install on another port of the host — seldom overwrite each other's.
+// a cross-site request a Strict cookie is not sent on. When Secure, its name carries the
+// __Host- prefix, which the browser accepts only from a secure origin, with Path=/ and
+// no Domain: a sibling subdomain or a plain-http page cannot plant one. Without Secure
+// (a plain-http install) it keeps an unprefixed name and the path of the one route that
+// reads it (the callback's follows the redirect URI, see oidcCallbackCookiePath). Its
+// lifetime is a Max-Age, which the browser counts from when it got the cookie: an
+// Expires is judged by the browser's own clock, and a lab laptop a minute ahead of the
+// server would drop the exchange's binding on arrival. A response that sets or spends
+// one is marked no-store, so that no shared cache hands one browser's binding to
+// another. And the cookie's name follows the value (cookieName), so that two sign-ins
+// in one browser — two tabs, a second install on another port of the host — seldom
+// overwrite each other's.
 type browserBinding struct {
 	prefix, path string
 	ttl          time.Duration
@@ -153,12 +163,45 @@ var (
 // nginx's default 8 KB header line, and near the 180 cookies a browser keeps for a site.
 const bindingSlots = 16
 
+// hostCookiePrefix is the prefix a browser accepts only on a Secure cookie with Path=/
+// and no Domain, set from a secure origin.
+const hostCookiePrefix = "__Host-"
+
+// newBindingSecret is a binding's secret, for the browser's cookie, and its digest, for
+// the server to keep beside the value it binds.
+func newBindingSecret() (secret, digest string, err error) {
+	secret, err = auth.GenerateRandomString(32)
+	if err != nil {
+		return "", "", fmt.Errorf("generating a browser binding: %w", err)
+	}
+	return secret, bindingDigest(secret), nil
+}
+
+// bindingDigest is the SHA-256 of a binding's secret, hex: what the server keeps.
+func bindingDigest(secret string) string {
+	sum := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(sum[:])
+}
+
 // cookieName is the binding's cookie for value: one of bindingSlots names, picked by a
-// digest of the value, never the value itself. The value is still compared (matches):
-// the name only picks the cookie out.
-func (b browserBinding) cookieName(value string) string {
+// digest of the value, never the value itself, and __Host- prefixed when the cookie is
+// Secure. The secret is still compared (matches): the name only picks the cookie out.
+func (b browserBinding) cookieName(secure bool, value string) string {
 	sum := sha256.Sum256([]byte(value))
-	return b.prefix + "_" + strconv.FormatUint(uint64(sum[0]%bindingSlots), 16)
+	name := b.prefix + "_" + strconv.FormatUint(uint64(sum[0]%bindingSlots), 16)
+	if secure {
+		return hostCookiePrefix + name
+	}
+	return name
+}
+
+// cookiePath is where the binding's cookie lives: / for a __Host- cookie, which the
+// prefix requires, its route's path otherwise.
+func (b browserBinding) cookiePath(secure bool) string {
+	if secure {
+		return "/"
+	}
+	return b.path
 }
 
 // at is the binding with its cookie at path instead of its own.
@@ -167,15 +210,16 @@ func (b browserBinding) at(path string) browserBinding {
 	return b
 }
 
-// set gives the browser the binding for value.
-func (b browserBinding) set(c fiber.Ctx, value string) {
+// set gives the browser the binding for value: its secret, in a cookie.
+func (b browserBinding) set(c fiber.Ctx, value, secret string) {
+	secure := refreshCookieSecure(c)
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	c.Cookie(&fiber.Cookie{
-		Name:     b.cookieName(value),
-		Value:    value,
-		Path:     b.path,
+		Name:     b.cookieName(secure, value),
+		Value:    secret,
+		Path:     b.cookiePath(secure),
 		HTTPOnly: true,
-		Secure:   refreshCookieSecure(c),
+		Secure:   secure,
 		SameSite: "Lax",
 		MaxAge:   int(b.ttl / time.Second),
 	})
@@ -184,31 +228,35 @@ func (b browserBinding) set(c fiber.Ctx, value string) {
 // spend expires the binding for value — a binding is good for one step — with the
 // attributes it was set with, which the browser needs to accept the deletion.
 func (b browserBinding) spend(c fiber.Ctx, value string) {
+	secure := refreshCookieSecure(c)
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	c.Cookie(&fiber.Cookie{
-		Name:     b.cookieName(value),
+		Name:     b.cookieName(secure, value),
 		Value:    "",
-		Path:     b.path,
+		Path:     b.cookiePath(secure),
 		HTTPOnly: true,
-		Secure:   refreshCookieSecure(c),
+		Secure:   secure,
 		SameSite: "Lax",
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 	})
 }
 
-// matches reports whether the request carries a binding that holds value: a cookie
-// that is missing, or holds another value, is no match, and nor is an empty value.
-// Every cookie of the name is looked at, not only the first: a stray one planted
-// under another path or domain, which the browser would send first, must not lock
-// the real one out.
-func (b browserBinding) matches(c fiber.Ctx, value string) bool {
-	if value == "" {
+// matches reports whether the request carries a binding for value whose secret hashes
+// to digest, the one the server kept for value: a cookie that is missing, or holds
+// another secret, is no match, and nor is an empty value or digest. Only the name this
+// request's Secure setting gives is read, so an unprefixed cookie never stands in for a
+// __Host- one. Every cookie of the name is looked at, not only the first: a stray one
+// planted under another path, which the browser would send first, must not lock the
+// real one out.
+func (b browserBinding) matches(c fiber.Ctx, value, digest string) bool {
+	if value == "" || digest == "" {
 		return false
 	}
-	name := b.cookieName(value)
+	name := b.cookieName(refreshCookieSecure(c), value)
 	for held, got := range c.Request().Header.Cookies() {
-		if string(held) == name && len(got) > 0 && subtle.ConstantTimeCompare(got, []byte(value)) == 1 {
+		if string(held) == name && len(got) > 0 &&
+			subtle.ConstantTimeCompare([]byte(bindingDigest(string(got))), []byte(digest)) == 1 {
 			return true
 		}
 	}

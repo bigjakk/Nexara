@@ -2388,7 +2388,10 @@ func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error 
 	}
 
 	code := p.String("code")
-	if !oidcExchangeBinding.matches(c, code) {
+	// Read, not spent, to check the binding: a code lifted from another browser must
+	// not cost the browser it was given to its sign-in.
+	stored, _ := h.oidcHandler.rdb.Get(c.Context(), "oidc:exchange:"+code).Result()
+	if !oidcExchangeBinding.matches(c, code, exchangeBindingDigest(stored)) {
 		// Info, not Warn: the route has no rate limit, and anybody can send it.
 		slog.Info("oidc token exchange: refused a code that was not handed to this browser", "ip", c.IP())
 		return fiber.NewError(fiber.StatusUnauthorized, oidcNotThisBrowserMessage)
@@ -2427,6 +2430,16 @@ func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error 
 	}
 
 	return h.issueOrTOTP(c, user, epoch, "oidc_login")
+}
+
+// exchangeBindingDigest is the browser binding's digest an exchange code was stored
+// with (storeExchange), "" for none.
+func exchangeBindingDigest(stored string) string {
+	var data map[string]string
+	if json.Unmarshal([]byte(stored), &data) != nil {
+		return ""
+	}
+	return data[oidcExchangeBindingKey]
 }
 
 // issueOrTOTP checks if the user has TOTP enabled. If so, returns a pending token

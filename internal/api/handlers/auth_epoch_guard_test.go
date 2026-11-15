@@ -305,7 +305,7 @@ func TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead(t *testing.T) {
 	t.Run("the SSO exchange code is stored only from the provisioning, for the user it returned", func(t *testing.T) {
 		want := map[string][]string{
 			"internal/api/handlers/oidc.go:Callback:provisionAndStoreExchange":      {"c, cfg, userInfo"},
-			"internal/api/handlers/oidc.go:provisionAndStoreExchange:storeExchange": {"c.Context(), user"},
+			"internal/api/handlers/oidc.go:provisionAndStoreExchange:storeExchange": {"c.Context(), user, digest"},
 		}
 		if !reflect.DeepEqual(handOffs, want) {
 			t.Errorf("OIDC hand-offs = %v, want %v: the exchange code must be stored by provisionAndStoreExchange, "+

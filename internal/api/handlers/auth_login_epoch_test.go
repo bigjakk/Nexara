@@ -418,7 +418,7 @@ func TestLogin_TheRefusalAuditRunsOnAFollowUpDeadline(t *testing.T) {
 // storeExchange.
 func epochSeedExchange(t *testing.T, a *epochApp, user db.User) string {
 	t.Helper()
-	code, err := a.oidc.storeExchange(t.Context(), user)
+	code, err := a.oidc.storeExchange(t.Context(), user, bindingDigest(epochBindingSecret))
 	if err != nil {
 		t.Fatalf("storeExchange: %v", err)
 	}
@@ -555,7 +555,9 @@ func TestOIDCExchange_ACodeWithoutAUsableEpochIsRefused(t *testing.T) {
 			user := epochUser(t, epochLoginEmail, 0)
 			user.AuthSource = "oidc"
 			a := newEpochApp(t, newEpochStore(user), epochOptions{})
-			raw, _ := json.Marshal(tt.data(user.ID))
+			data := tt.data(user.ID)
+			data[oidcExchangeBindingKey] = bindingDigest(epochBindingSecret)
+			raw, _ := json.Marshal(data)
 			if err := a.redis.Set("oidc:exchange:handmade", string(raw)); err != nil {
 				t.Fatal(err)
 			}

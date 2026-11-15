@@ -46,6 +46,11 @@ import (
 // travels with the code instead of being read again at the exchange.
 const oidcExchangeEpochKey = "auth_epoch"
 
+// oidcExchangeBindingKey is the key, in the same JSON, of the digest of the browser
+// binding's secret (oidcExchangeBinding), which the exchange checks before it spends
+// the code.
+const oidcExchangeBindingKey = "binding"
+
 // OIDCHandler handles OIDC/SSO configuration and auth flow endpoints.
 type OIDCHandler struct {
 	queries       *db.Queries
@@ -516,12 +521,16 @@ func (h *OIDCHandler) Authorize(c fiber.Ctx, _ *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to initialize OIDC provider")
 	}
 
-	authURL, state, err := provider.GenerateAuthURL(c.Context())
+	secret, digest, err := newBindingSecret()
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
+	}
+	authURL, state, err := provider.GenerateAuthURL(c.Context(), digest)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
 	}
 	// The callback refuses a state this browser was not given (oidcStateBinding).
-	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).set(c, state)
+	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).set(c, state, secret)
 
 	return c.JSON(fiber.Map{"redirect_url": authURL})
 }
@@ -538,8 +547,9 @@ const oidcNotThisBrowserMessage = "The single sign-on could not be finished: it 
 // stores short-lived exchange code in Redis, and redirects to frontend.
 //
 // The browser that comes back must be the one the sign-in was started in: a state it
-// holds no binding for (oidcStateBinding) is refused before anything else is looked
-// at. The binding is spent once the configuration says where its cookie lives (the
+// holds no binding for (oidcStateBinding) — no cookie whose secret hashes to the digest
+// stored with the state — is refused before anything else is looked at, and so is a
+// state that is not stored at all. The binding is spent once the configuration says where its cookie lives (the
 // redirect URI's path); a binding that does not match is left alone, as it may be the
 // browser's own sign-in, still in flight.
 func (h *OIDCHandler) Callback(c fiber.Ctx) error {
@@ -549,7 +559,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		errMsg := c.Query("error_description", c.Query("error", "unknown error"))
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("SSO failed: "+errMsg))
 	}
-	if !oidcStateBinding.matches(c, state) {
+	if !oidcStateBinding.matches(c, state, auth.OIDCStateBindingDigest(c.Context(), h.rdb, state)) {
 		slog.Warn("oidc callback: refused a sign-in that was not started in this browser", "ip", c.IP())
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcNotThisBrowserMessage))
 	}
@@ -650,14 +660,18 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 	}
 	h.syncUserRoles(c, user.ID, userInfo.Groups, mapping, cfg.DefaultRoleID)
 
-	// Store short-lived exchange code in Redis (5 second TTL)
-	exchangeCode, err = h.storeExchange(c.Context(), user)
+	// Store short-lived exchange code in Redis (5 second TTL), with the digest of the
+	// browser binding's secret: the exchange refuses a code this browser was not given
+	// (oidcExchangeBinding).
+	secret, digest, err := newBindingSecret()
+	if err == nil {
+		exchangeCode, err = h.storeExchange(c.Context(), user, digest)
+	}
 	if err != nil {
 		slog.Error("OIDC callback: could not store the exchange code", "user_id", user.ID, "error", err)
 		return db.User{}, "", "Internal error"
 	}
-	// The exchange refuses a code this browser was not given (oidcExchangeBinding).
-	oidcExchangeBinding.set(c, exchangeCode)
+	oidcExchangeBinding.set(c, exchangeCode, secret)
 	return user, exchangeCode, ""
 }
 
@@ -673,15 +687,17 @@ const oidcExchangeTTL = 5 * time.Second
 // value and not against whatever the user's row holds when the browser comes back
 // with the code, so that a password change, a sign-out of all devices or a
 // deactivation that lands in between refuses the session instead of being
-// outlived by it.
-func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User) (string, error) {
+// outlived by it. bindingDigest is the digest of the secret the browser's binding
+// cookie holds (oidcExchangeBinding), kept under oidcExchangeBindingKey.
+func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, bindingDigest string) (string, error) {
 	code, err := auth.GenerateRandomString(32)
 	if err != nil {
 		return "", fmt.Errorf("generating the exchange code: %w", err)
 	}
 	data, _ := json.Marshal(map[string]string{
-		"user_id":            user.ID.String(),
-		oidcExchangeEpochKey: strconv.FormatInt(user.AuthEpoch, 10),
+		"user_id":              user.ID.String(),
+		oidcExchangeEpochKey:   strconv.FormatInt(user.AuthEpoch, 10),
+		oidcExchangeBindingKey: bindingDigest,
 	})
 	if err := h.rdb.Set(ctx, "oidc:exchange:"+code, string(data), oidcExchangeTTL).Err(); err != nil {
 		return "", fmt.Errorf("storing the exchange code: %w", err)

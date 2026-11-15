@@ -595,12 +595,16 @@ func (a *epochApp) post(t *testing.T, path, body string) *http.Response {
 	return a.send(t, http.MethodPost, path, body, nil, 20*time.Second)
 }
 
+// epochBindingSecret is the browser binding's secret of the exchange codes the tests
+// seed (epochSeedExchange); the code's data holds its digest.
+const epochBindingSecret = "binding-secret-of-the-browser"
+
 // exchange trades an SSO exchange code as the browser the callback handed it to
-// does: the code in the body, and its binding in a cookie (oidcExchangeBinding).
+// does: the code in the body, and its binding's secret in a cookie (oidcExchangeBinding).
 func (a *epochApp) exchange(t *testing.T, code string) *http.Response {
 	t.Helper()
 	return a.send(t, http.MethodPost, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`,
-		map[string]string{"Cookie": oidcExchangeBinding.cookieName(code) + "=" + code}, 20*time.Second)
+		map[string]string{"Cookie": oidcExchangeBinding.cookieName(false, code) + "=" + epochBindingSecret}, 20*time.Second)
 }
 
 // epochLoginBody is the body of a password login.

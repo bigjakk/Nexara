@@ -319,12 +319,17 @@ password. A pending token issued before this rule existed is refused as expired.
    between the callback and the exchange refuses the sign-in with the `401` described
    under Login, and the code is spent either way.
 
-The flow is bound to the browser that starts it, by a cookie for each step. Step 2
-sets an HttpOnly, SameSite=Lax cookie (`nexara_oidc_state_…`, sent only to the
-callback, at the redirect URI's path), and the callback refuses a state no such
-cookie holds, redirecting to the login page with an error; the callback sets one for
-the exchange code in turn (`nexara_oidc_exchange_…`, sent only to the exchange), and
-the exchange refuses, with `401` and before spending it, a code no such cookie holds.
+The flow is bound to the browser that starts it, by a cookie for each step. Each
+holds a random secret, and the server keeps only its SHA-256 beside the state or the
+code, so the state or code alone, from a leaked URL, cannot be turned into the cookie.
+Step 2 sets an HttpOnly, SameSite=Lax cookie (`__Host-nexara_oidc_state_…` at `/` when
+the cookie is `Secure`; `nexara_oidc_state_…` at the redirect URI's path on a
+plain-http install), and the callback refuses a state no such cookie holds the secret
+of, redirecting to the login page with an error; the callback sets one for the
+exchange code in turn (`__Host-nexara_oidc_exchange_…`, or `nexara_oidc_exchange_…`
+sent only to the exchange), and the exchange refuses, with `401` and before spending
+it, a code no such cookie holds the secret of. A `Secure` install reads only the
+`__Host-` names. `Secure` follows `SECURE_COOKIES`, as the refresh cookie's does.
 So a client keeps cookies between the steps and starts and finishes the sign-in at
 one address, the one the redirect URI names, within the 10 minutes the state lives.
 The exchange code it ends with lives 5 seconds, so exchange it at once.

@@ -127,8 +127,10 @@ const OIDCStateTTL = 10 * time.Minute
 
 // GenerateAuthURL generates state+nonce+PKCE, stores them in Redis, and returns the
 // auth URL and the state, which the caller binds to the browser it hands the URL to:
-// the callback refuses a state the browser it comes back in was not given (login CSRF).
-func (p *OIDCProvider) GenerateAuthURL(ctx context.Context) (authURL, state string, err error) {
+// bindingDigest, the digest of the secret that browser's cookie holds, is stored with
+// the state, and the callback refuses a state the browser it comes back in cannot show
+// the secret of (login CSRF; see OIDCStateBindingDigest).
+func (p *OIDCProvider) GenerateAuthURL(ctx context.Context, bindingDigest string) (authURL, state string, err error) {
 	state, err = generateRandomString(32)
 	if err != nil {
 		return "", "", fmt.Errorf("generate state: %w", err)
@@ -145,8 +147,8 @@ func (p *OIDCProvider) GenerateAuthURL(ctx context.Context) (authURL, state stri
 	}
 
 	// Store state data in Redis for OIDCStateTTL
-	stateData := nonce + "|" + codeVerifier
-	if err := p.rdb.Set(ctx, "oidc:state:"+state, stateData, OIDCStateTTL).Err(); err != nil {
+	stateData := nonce + "|" + codeVerifier + "|" + bindingDigest
+	if err := p.rdb.Set(ctx, oidcStateKey(state), stateData, OIDCStateTTL).Err(); err != nil {
 		return "", "", fmt.Errorf("store state: %w", err)
 	}
 
@@ -166,12 +168,12 @@ func (p *OIDCProvider) GenerateAuthURL(ctx context.Context) (authURL, state stri
 // and extracts user claims.
 func (p *OIDCProvider) ExchangeAndVerify(ctx context.Context, code, state string) (*OIDCUserInfo, error) {
 	// Validate state — atomic GetDel ensures single-use
-	stateData, err := p.rdb.GetDel(ctx, "oidc:state:"+state).Result()
+	stateData, err := p.rdb.GetDel(ctx, oidcStateKey(state)).Result()
 	if err != nil {
 		return nil, fmt.Errorf("%w: state not found or expired", ErrOIDCInvalidState)
 	}
 
-	nonce, codeVerifier, err := splitStateData(stateData)
+	nonce, codeVerifier, _, err := splitStateData(stateData)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrOIDCInvalidState, err)
 	}
@@ -266,12 +268,31 @@ func generateCodeChallenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
-func splitStateData(data string) (nonce, codeVerifier string, err error) {
-	parts := strings.SplitN(data, "|", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("malformed state data")
+// oidcStateKey is where a sign-in's state data waits for its callback.
+func oidcStateKey(state string) string { return "oidc:state:" + state }
+
+// OIDCStateBindingDigest is the browser binding's digest stored with state by
+// GenerateAuthURL, without spending the state; "" when there is none — an unknown or
+// expired state, Redis not answering, or state data written before the binding was
+// stored (a sign-in in flight across that upgrade), which the callback refuses.
+func OIDCStateBindingDigest(ctx context.Context, rdb *redis.Client, state string) string {
+	data, err := rdb.Get(ctx, oidcStateKey(state)).Result()
+	if err != nil {
+		return ""
 	}
-	return parts[0], parts[1], nil
+	_, _, digest, err := splitStateData(data)
+	if err != nil {
+		return ""
+	}
+	return digest
+}
+
+func splitStateData(data string) (nonce, codeVerifier, bindingDigest string, err error) {
+	parts := strings.SplitN(data, "|", 3)
+	if len(parts) != 3 {
+		return "", "", "", fmt.Errorf("malformed state data")
+	}
+	return parts[0], parts[1], parts[2], nil
 }
 
 func extractStringClaim(claims map[string]interface{}, key string) string {
