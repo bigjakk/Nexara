@@ -88,13 +88,33 @@ type sessionDB struct {
 	cluster db.Cluster
 	// revoked makes checker answer that the console permission is gone.
 	revoked atomic.Bool
+	// asked is every permission checker was asked for.
+	asked []permissionAsk
 }
 
-// checker stands in for RBAC: every permission is held until revoked is set.
+// permissionAsk is one question to the permission checker.
+type permissionAsk struct {
+	userID                      uuid.UUID
+	action, resource, scopeType string
+	scopeID                     uuid.UUID
+}
+
+// checker stands in for RBAC: every permission is held until revoked is set. It
+// records what it was asked.
 func (d *sessionDB) checker() PermissionChecker {
-	return func(context.Context, uuid.UUID, string, string, string, uuid.UUID) (bool, error) {
+	return func(_ context.Context, userID uuid.UUID, action, resource, scopeType string, scopeID uuid.UUID) (bool, error) {
+		d.mu.Lock()
+		d.asked = append(d.asked, permissionAsk{userID, action, resource, scopeType, scopeID})
+		d.mu.Unlock()
 		return !d.revoked.Load(), nil
 	}
+}
+
+// permissionsAsked is every permission checker has been asked for so far.
+func (d *sessionDB) permissionsAsked() []permissionAsk {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]permissionAsk(nil), d.asked...)
 }
 
 func (d *sessionDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
@@ -176,12 +196,15 @@ func openSessionWith(t *testing.T, kind string, scope auth.ConsoleScope, sdb *se
 	cfg := wsConfigWithSubprotocol(nil)
 	consoleHandler := NewConsoleHandler(queries, sessionKey, jwtSvc, logger)
 	consoleHandler.checkEvery = checkEvery
-	consoleHandler.checkPermission = sdb.checker()
+	vncHandler := NewVNCHandler(queries, sessionKey, jwtSvc, logger)
+	vncHandler.checkEvery = checkEvery
+	// Through NewServer, which is what hands the handlers their permission checker.
+	newTestServer(t, NewHub(logger, 0), jwtSvc, logger, ServerConfig{
+		ConsoleHandler: consoleHandler, VNCHandler: vncHandler,
+		TestPermissionChecker: sdb.checker(), Queries: queries,
+	})
 	handler := fiberws.New(consoleHandler.HandleConsole, cfg)
 	if kind == "vnc" {
-		vncHandler := NewVNCHandler(queries, sessionKey, jwtSvc, logger)
-		vncHandler.checkEvery = checkEvery
-		vncHandler.checkPermission = sdb.checker()
 		handler = fiberws.New(vncHandler.HandleVNC, cfg)
 	}
 	app := fiber.New()
@@ -379,14 +402,25 @@ func TestConsoleRelay_HeldToItsCredential(t *testing.T) {
 		})
 
 		// A revoked console grant closes it with its own code, which the SPA does
-		// not read as a sign-out.
+		// not read as a sign-out. What is asked is the grant the console was minted
+		// under: console:vm on its cluster, for both kinds here.
 		t.Run(kind+": closed when its console permission is removed while open", func(t *testing.T) {
 			t.Parallel()
+			sockets := make(chan *gorillaws.Conn, 1)
 			pve := newFakeProxmox(t, func(c *gorillaws.Conn) {
+				sockets <- c
 				for {
 					if _, _, err := c.ReadMessage(); err != nil {
 						return
 					}
+				}
+			})
+			// Lets the stand-in's reader return however the test ends.
+			t.Cleanup(func() {
+				select {
+				case c := <-sockets:
+					_ = c.Close()
+				default:
 				}
 			})
 			sdb := newSessionDB(t, scope, pve.srv.URL)
@@ -398,6 +432,12 @@ func TestConsoleRelay_HeldToItsCredential(t *testing.T) {
 			_ = browser.SetReadDeadline(time.Now().Add(5 * time.Second))
 			if _, _, err := browser.ReadMessage(); !gorillaws.IsCloseError(err, closeAccessRemoved) {
 				t.Fatalf("after the permission was removed: %v, want a Close %d", err, closeAccessRemoved)
+			}
+			want := permissionAsk{testCredential.UserID, "console", "vm", "cluster", uuid.MustParse(scope.ClusterID)}
+			for _, got := range sdb.permissionsAsked() {
+				if got != want {
+					t.Fatalf("the checker was asked %+v, want %+v", got, want)
+				}
 			}
 		})
 	}
