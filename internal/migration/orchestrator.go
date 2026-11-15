@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,6 +56,9 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 const (
 	defaultPollInterval   = 5 * time.Second
 	defaultPollStaleGrace = 24 * time.Hour
+	// defaultHAStartGrace is how long a job waits for the HA manager to start the
+	// migration an hamigrate asked for: DRS's haStartGrace, for the same reason.
+	defaultHAStartGrace = 2 * time.Minute
 )
 
 // Orchestrator manages migration job execution.
@@ -70,6 +74,7 @@ type Orchestrator struct {
 	// production never sets them and NewOrchestrator supplies the defaults.
 	pollInterval   time.Duration
 	pollStaleGrace time.Duration
+	haStartGrace   time.Duration
 }
 
 // NewOrchestrator creates a new migration orchestrator.
@@ -84,6 +89,7 @@ func NewOrchestrator(queries *db.Queries, encryptionKey string, logger *slog.Log
 		eventPub:       eventPub,
 		pollInterval:   defaultPollInterval,
 		pollStaleGrace: defaultPollStaleGrace,
+		haStartGrace:   defaultHAStartGrace,
 	}
 }
 
@@ -606,6 +612,19 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 	})
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskUpdate, "task", upid, "completed")
 
+	// An HA request ends OK once queued; the disks can only move once the HA
+	// manager's migration has put the guest on the target.
+	if since, isHA := haRequestStart(upid); isHA {
+		worker, err := o.followHAMigration(ctx, client, job.SourceNode, int(job.Vmid), since)
+		if err == nil {
+			err = o.waitForTask(ctx, client, job.SourceNode, worker)
+		}
+		if err != nil {
+			o.failJob(ctx, jobID, fmt.Sprintf("live migration phase failed: %v", err), mc)
+			return
+		}
+	}
+
 	o.logger.Info("live migration phase completed, starting storage migration", "job_id", jobID)
 
 	// Phase 2: Storage migration on the target node (VM is now on target_node).
@@ -1076,6 +1095,68 @@ func (o *Orchestrator) abandonTaskRow(ctx context.Context, upid, exitStatus stri
 	})
 }
 
+// haRequestStart returns the start time of a task that only asks the HA manager
+// for a migration, and whether upid is one: Proxmox answers a migrate call for
+// an HA-managed guest with an hamigrate task that queues the request and ends OK
+// within a second. The same rule as internal/drs's haRequestStart.
+func haRequestStart(upid string) (int64, bool) {
+	parts := strings.Split(upid, ":")
+	if len(parts) < 7 || parts[5] != "hamigrate" {
+		return 0, false
+	}
+	start, err := strconv.ParseInt(parts[4], 16, 64)
+	return start, err == nil
+}
+
+// followHAMigration finds the migration the HA manager starts on node for vmid
+// after an hamigrate that started at since, the way DRS follows one
+// (internal/drs, followHAMigration): the node's task list from since, polled
+// until a qmigrate or vzmigrate for the guest appears or haStartGrace passes.
+//
+// None within the grace means nothing moved. The HA manager drops a request it
+// cannot carry out, logging why only on the node (pve-ha-manager, Manager.pm:
+// a target offline or already the guest's node, a node or resource affinity
+// rule; LRM.pm: the migration failing before it starts). When no read of the
+// task list succeeded in the grace, nothing was looked at, so the error says
+// the outcome could not be confirmed instead.
+func (o *Orchestrator) followHAMigration(ctx context.Context, client *proxmox.Client, node string, vmid int, since int64) (string, error) {
+	deadline := time.NewTimer(o.haStartGrace)
+	defer deadline.Stop()
+	ticker := time.NewTicker(o.pollInterval)
+	defer ticker.Stop()
+
+	id := strconv.Itoa(vmid)
+	read := false
+	var readErr error
+	for {
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("context cancelled: %w", ctx.Err())
+		case <-deadline.C:
+			if !read {
+				return "", fmt.Errorf("could not confirm the migration: the task list of %s could not be read "+
+					"for %s after the HA manager queued it: %w", node, o.haStartGrace, readErr)
+			}
+			return "", fmt.Errorf("not moved: the HA manager started no migration within %s of the request. "+
+				"Its log on %s says why; a stopped guest can be started and migrated live instead",
+				o.haStartGrace, node)
+		case <-ticker.C:
+			tasks, err := client.GetNodeTasks(ctx, node, since, 0)
+			if err != nil {
+				o.logger.Warn("failed to list tasks for an HA migration", "vmid", vmid, "error", err)
+				readErr = err
+				continue
+			}
+			read = true
+			for _, t := range tasks {
+				if t.ID == id && (t.Type == "qmigrate" || t.Type == "vzmigrate") {
+					return t.UPID, nil
+				}
+			}
+		}
+	}
+}
+
 // pollTaskStatus watches a dispatched Proxmox task to completion and finalizes
 // both the migration job and its task_history row.
 //
@@ -1088,6 +1169,11 @@ func (o *Orchestrator) abandonTaskRow(ctx context.Context, upid, exitStatus stri
 func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Client, node, upid string, jobID uuid.UUID, mc *migrationContext) {
 	ticker := time.NewTicker(o.pollInterval)
 	defer ticker.Stop()
+
+	// The row Nexara inserted, the one this loop may finalize. After an HA
+	// request upid becomes the HA manager's migration, whose row is the
+	// collector's: it is followed, never written.
+	owned := upid
 
 	// When polling started failing, zeroed by any successful poll. Bounds the
 	// loop on how long Proxmox has been unable to answer, not on how long the
@@ -1108,7 +1194,9 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 			// later sync can revise it. A permanently-wrong terminal state is
 			// the deliberate trade against a row stuck at Running forever, and
 			// failJob already did the same to the job row before this existed.
-			o.abandonTaskRow(ctx, upid, "interrupted")
+			if upid == owned {
+				o.abandonTaskRow(ctx, upid, "interrupted")
+			}
 			o.failJob(ctx, jobID, "context cancelled", mc)
 			return
 		case <-ticker.C:
@@ -1126,7 +1214,9 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 					o.logger.Error("giving up polling task status",
 						"job_id", jobID, "upid", upid,
 						"unreachable_for", time.Since(unreachableSince))
-					o.abandonTaskRow(ctx, upid, "vanished")
+					if upid == owned {
+						o.abandonTaskRow(ctx, upid, "vanished")
+					}
 					o.failJob(ctx, jobID, "task status unavailable past the stale grace", mc)
 					return
 				}
@@ -1146,6 +1236,28 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 
 			// Task completed — update both migration job and task history.
 			now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+
+			// An HA request ends OK once the HA manager has queued it, whatever
+			// becomes of the migration. Close its row and follow the migration.
+			if since, isHA := haRequestStart(upid); isHA && proxmox.TaskSucceeded(status.ExitStatus) {
+				_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
+					Upid: upid, Status: "completed", ExitStatus: mc.scrub(status.ExitStatus), FinishedAt: now,
+				})
+				o.eventPub.ClusterEvent(ctx, mc.job.SourceClusterID.String(), events.KindTaskUpdate, "task", upid, "completed")
+				worker, err := o.followHAMigration(ctx, client, node, int(mc.job.Vmid), since)
+				if err != nil {
+					if ctx.Err() != nil {
+						err = errors.New("context cancelled")
+					}
+					o.failJob(ctx, jobID, err.Error(), mc)
+					return
+				}
+				upid = worker
+				_ = o.queries.UpdateMigrationJobProgress(ctx, db.UpdateMigrationJobProgressParams{
+					ID: jobID, Progress: 0.5, Upid: upid,
+				})
+				continue
+			}
 
 			// Update task history record (guarded on status='running' so it
 			// won't clobber a row the collector reconciler already finalized).
@@ -1231,12 +1343,14 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 			// When the retention prunes the row, DeleteCompletedTasks copies it
 			// to task_history_archive for a guest's History — without a failed
 			// migration's exit text, so the archive keeps no copy of it.
-			_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
-				Upid:       upid,
-				Status:     taskStatus,
-				ExitStatus: mc.scrub(status.ExitStatus),
-				FinishedAt: now,
-			})
+			if upid == owned {
+				_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
+					Upid:       upid,
+					Status:     taskStatus,
+					ExitStatus: mc.scrub(status.ExitStatus),
+					FinishedAt: now,
+				})
+			}
 
 			job := mc.job
 
