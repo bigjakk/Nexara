@@ -20,7 +20,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ApiClientError, sessionScope } from "@/lib/api-client";
+import { sessionScope } from "@/lib/api-client";
+import { describeError } from "@/lib/api-error";
 import {
   useProfile,
   useUpdateProfile,
@@ -28,6 +29,10 @@ import {
 } from "../api/profile-queries";
 import { useAuthStore } from "@/stores/auth-store";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+
+/** What a save that never got an answer reads as (describeError gives ""). */
+const CONNECTION_FAILED =
+  "The request failed — check your connection and try again.";
 
 const AUTH_SOURCE_LABELS: Record<string, string> = {
   local: "Local",
@@ -77,11 +82,7 @@ export function ProfilePage() {
         }, 3000);
       },
       onError: (err: unknown) => {
-        setProfileError(
-          err instanceof ApiClientError
-            ? err.message
-            : "Failed to update profile",
-        );
+        setProfileError(describeError(err) || CONNECTION_FAILED);
       },
     });
   };
@@ -123,11 +124,7 @@ export function ProfilePage() {
         // the same.
         onLateSuccess: signOut,
         onError: (err: unknown) => {
-          setPasswordError(
-            err instanceof ApiClientError
-              ? err.message
-              : "Failed to change password",
-          );
+          setPasswordError(describeError(err) || CONNECTION_FAILED);
         },
       },
     );

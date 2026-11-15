@@ -198,6 +198,29 @@ describe("the local sign-out after a password change", () => {
   });
 });
 
+type Clicker = ReturnType<typeof userEvent.setup>;
+
+async function savesTheDisplayName(user: Clicker) {
+  await user.type(await screen.findByLabelText("Display name"), "x");
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+}
+
+async function savesThePassword(user: Clicker) {
+  const [opens] = await screen.findAllByRole("button", {
+    name: "Change password",
+  });
+  await user.click(opens as HTMLElement);
+  await user.type(screen.getByLabelText("Current password"), "old-01");
+  await user.type(screen.getByLabelText("New password"), "new-01");
+  await user.type(screen.getByLabelText("Confirm new password"), "new-01");
+  await user.click(screen.getByRole("button", { name: "Change password" }));
+}
+
+const refused = () => json({ message: "Refused for a reason" }, 400);
+// A limiter's answer: plain text, and over HTTP/2 no status text either.
+const limited = () =>
+  new Response("Too Many Requests", { status: 429, statusText: "" });
+
 describe("a save that fails", () => {
   // Shown on the page, and not toasted as well: the app's error toast cannot
   // see an onError given to mutate() (lib/query-client.ts).
@@ -205,44 +228,35 @@ describe("a save that fails", () => {
     [
       "the display name",
       "PUT /api/v1/auth/profile",
-      async (user: ReturnType<typeof userEvent.setup>) => {
-        await user.type(await screen.findByLabelText("Display name"), "x");
-        await user.click(screen.getByRole("button", { name: "Save changes" }));
-      },
+      savesTheDisplayName,
+      refused,
+      "Refused for a reason",
     ],
+    ["the password", CHANGE, savesThePassword, refused, "Refused for a reason"],
     [
-      "the password",
+      "the password, by a limiter",
       CHANGE,
-      async (user: ReturnType<typeof userEvent.setup>) => {
-        const [opens] = await screen.findAllByRole("button", {
-          name: "Change password",
-        });
-        await user.click(opens as HTMLElement);
-        await user.type(screen.getByLabelText("Current password"), "old-01");
-        await user.type(screen.getByLabelText("New password"), "new-01");
-        await user.type(
-          screen.getByLabelText("Confirm new password"),
-          "new-01",
-        );
-        await user.click(
-          screen.getByRole("button", { name: "Change password" }),
-        );
-      },
+      savesThePassword,
+      limited,
+      "HTTP 429",
     ],
-  ])("is reported once, on the page: %s", async (_name, route, save) => {
-    const toastError = vi.spyOn(toast, "error");
-    await signInAs(ADMIN);
-    server.routes[route] = () => json({ message: "Refused for a reason" }, 400);
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ProfilePage />
-      </QueryClientProvider>,
-    );
+  ])(
+    "is reported once, on the page: %s",
+    async (_name, route, save, answer, shown) => {
+      const toastError = vi.spyOn(toast, "error");
+      await signInAs(ADMIN);
+      server.routes[route] = answer;
+      render(
+        <QueryClientProvider client={queryClient}>
+          <ProfilePage />
+        </QueryClientProvider>,
+      );
 
-    await save(userEvent.setup());
+      await save(userEvent.setup());
 
-    expect(await screen.findByText("Refused for a reason")).toBeInTheDocument();
-    await flush();
-    expect(toastError).not.toHaveBeenCalled();
-  });
+      expect(await screen.findByText(shown)).toBeInTheDocument();
+      await flush();
+      expect(toastError).not.toHaveBeenCalled();
+    },
+  );
 });
