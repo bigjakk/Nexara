@@ -19,6 +19,7 @@ import { emptyPerSessionStores } from "@/test/per-session-stores";
 import type { User } from "@/types/api";
 import { useAuthStore } from "@/stores/auth-store";
 import type { StorageContentItem } from "../types/storage";
+import { MOVE_NOTES } from "../lib/resolve-disk";
 import { BulkMoveDialog } from "./BulkMoveDialog";
 
 /**
@@ -48,6 +49,10 @@ const config = (n: string) =>
   `GET /api/v1/clusters/${CLUSTER}/vms/guest-${n}/config`;
 const move = (n: string) =>
   `POST /api/v1/clusters/${CLUSTER}/vms/guest-${n}/disks/move`;
+const upidOf = (n: string) =>
+  `UPID:pve-01:0000000${n}:00000001:00000001:qmmove:1${n}:admin@example.com:`;
+const taskStatus = (upid: string) =>
+  `GET /api/v1/clusters/${CLUSTER}/tasks/${encodeURIComponent(upid)}`;
 
 let server: FakeServer;
 let heldMove: ReturnType<typeof deferred<Response>>;
@@ -145,11 +150,13 @@ beforeEach(() => {
     server.routes[move(n)] = (init) => {
       if (n === "01") return heldMove.promise;
       laterMoveCallers.push(callerOf(init));
-      return json({
-        upid: `UPID:pve-01:0000000${n}:00000001:00000001:qmmove:1${n}:admin@example.com:`,
-      });
+      return json({ upid: upidOf(n) });
     };
+    server.routes[taskStatus(upidOf(n))] = () =>
+      json({ status: "stopped", exit_status: "OK" });
   }
+  server.routes[taskStatus(FIRST_MOVE.upid)] = () =>
+    json({ status: "stopped", exit_status: "OK" });
   holdFirstConfig = false;
   holdVmList = false;
 });
@@ -252,6 +259,47 @@ describe("BulkMoveDialog", () => {
     ).toBe(true);
   });
 
+  // A disk move holds its guest's config lock until it ends: the next move
+  // waits for the task, not for Proxmox to take the request.
+  it("starts the next move only once the task has ended", async () => {
+    const firstTask = deferred<Response>();
+    server.routes[taskStatus(FIRST_MOVE.upid)] = () => firstTask.promise;
+    await signInAs(ADMIN);
+    await startTheEvacuation();
+    heldMove.resolve(json(FIRST_MOVE));
+    await waitFor(() => {
+      expect(server.times(taskStatus(FIRST_MOVE.upid))).toBe(1);
+    });
+    await flush();
+    expect(server.times(move("02"))).toBe(0);
+
+    firstTask.resolve(json({ status: "stopped", exit_status: "OK" }));
+    await waitFor(() => {
+      expect(server.times(move("03"))).toBe(1);
+    });
+  });
+
+  // Stop ends the wait for the current task without cancelling it, and no
+  // further move goes out.
+  it("stops at once on Stop, leaving the current move running and starting no other", async () => {
+    const firstTask = deferred<Response>();
+    server.routes[taskStatus(FIRST_MOVE.upid)] = () => firstTask.promise;
+    await signInAs(ADMIN);
+    await startTheEvacuation();
+    heldMove.resolve(json(FIRST_MOVE));
+    await waitFor(() => {
+      expect(server.times(taskStatus(FIRST_MOVE.upid))).toBe(1);
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    expect(await screen.findByText(MOVE_NOTES.detached)).toBeInTheDocument();
+    expect(screen.getAllByText(MOVE_NOTES.skipped)).toHaveLength(2);
+    firstTask.resolve(json({ status: "stopped", exit_status: "OK" }));
+    await flush();
+    expect(server.times(move("02"))).toBe(0);
+  });
+
   // Evacuate once resolved only bus disks, so an EFI disk failed the move
   // with "could not resolve"; move_disk takes it by its key.
   it("moves an EFI disk by its key", async () => {
@@ -259,7 +307,7 @@ describe("BulkMoveDialog", () => {
       json({ efidisk0: `${STORAGE}:vm-102-disk-0,efitype=4m,size=4M` });
     const bodies: unknown[] = [];
     server.routes[move("02")] = (init) => {
-      bodies.push(JSON.parse(String(init?.body)));
+      bodies.push(JSON.parse(init?.body as string));
       return json({ upid: FIRST_MOVE.upid });
     };
     await signInAs(ADMIN);

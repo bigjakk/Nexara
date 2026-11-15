@@ -1,10 +1,12 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   ArrowRightLeft,
   Loader2,
   CheckCircle2,
   XCircle,
   Circle,
+  CircleMinus,
+  Clock,
 } from "lucide-react";
 import {
   Dialog,
@@ -20,13 +22,22 @@ import { apiPath } from "@/lib/api-path";
 import { useStorageContent } from "../api/storage-queries";
 import type { StorageContentItem } from "../types/storage";
 import type { VMActionResponse } from "@/features/vms/types/vm";
-import { resolveVolume } from "../lib/resolve-disk";
+import { MOVE_NOTES, resolveVolume, waitForTask } from "../lib/resolve-disk";
 
 interface DiskMoveJob {
   vmid: number;
   diskKey: string;
   volid: string;
-  status: "pending" | "running" | "completed" | "failed";
+  // detached and unknown: left running in Proxmox, after Stop or with its
+  // status unreadable; skipped: never started, as the evacuation stopped.
+  status:
+    | "pending"
+    | "running"
+    | "completed"
+    | "failed"
+    | "detached"
+    | "unknown"
+    | "skipped";
   error?: string;
   upid?: string;
 }
@@ -70,6 +81,9 @@ export function BulkMoveDialog({
   const [jobs, setJobs] = useState<DiskMoveJob[]>([]);
   const [running, setRunning] = useState(false);
   const [buildingJobs, setBuildingJobs] = useState(false);
+  // Stop: aborted, no further move starts and the current wait ends.
+  const stopRef = useRef<AbortController | null>(null);
+  const [stopping, setStopping] = useState(false);
 
   const contentQuery = useStorageContent(clusterId, storageId);
 
@@ -89,6 +103,9 @@ export function BulkMoveDialog({
     // for it — it would carry whoever signs in next's token, and each move is a
     // disk move on the cluster.
     const ended = sessionScope();
+    const stop = new AbortController();
+    stopRef.current = stop;
+    setStopping(false);
 
     setRunning(true);
     setBuildingJobs(true);
@@ -154,7 +171,7 @@ export function BulkMoveDialog({
 
     // Execute moves sequentially
     for (let i = 0; i < newJobs.length; i++) {
-      if (ended()) break;
+      if (ended() || stop.signal.aborted) break;
       const job = newJobs[i];
       if (!job || job.status === "failed") continue;
 
@@ -174,7 +191,28 @@ export function BulkMoveDialog({
           { disk: job.diskKey, storage: targetStorage, delete: deleteOriginal },
         );
 
-        newJobs[i] = { ...job, status: "completed", upid: resp.upid };
+        // Ticked when the move has ended, and the next starts only then: a
+        // guest's second move would meet the lock the first holds.
+        const outcome = resp.upid
+          ? await waitForTask(clusterId, resp.upid, ended, stop.signal)
+          : { status: "ended" as const, ok: true, exit: "" };
+        if (ended()) break;
+        const upid = resp.upid;
+        if (outcome.status === "ended") {
+          newJobs[i] = outcome.ok
+            ? { ...job, status: "completed", upid }
+            : { ...job, status: "failed", upid, error: outcome.exit };
+        } else {
+          // Stopped, or the status could not be read: the move may still
+          // hold the guest's lock, so nothing further starts.
+          newJobs[i] = {
+            ...job,
+            upid,
+            status: outcome.status === "unknown" ? "unknown" : "detached",
+          };
+          setJobs([...newJobs]);
+          break;
+        }
         setJobs([...newJobs]);
       } catch (err) {
         newJobs[i] = {
@@ -186,6 +224,13 @@ export function BulkMoveDialog({
       }
     }
 
+    if (!ended()) {
+      setJobs(
+        newJobs.map((j) =>
+          j.status === "pending" ? { ...j, status: "skipped" } : j,
+        ),
+      );
+    }
     setRunning(false);
   }, [targetStorage, imageItems, clusterId, deleteOriginal]);
 
@@ -196,7 +241,7 @@ export function BulkMoveDialog({
     <Dialog
       open={open}
       onOpenChange={(v) => {
-        if (!running) setOpen(v);
+        if (!running || stopping) setOpen(v);
       }}
     >
       {!controlled && (
@@ -285,8 +330,22 @@ export function BulkMoveDialog({
                     {job.status === "failed" && (
                       <XCircle className="h-3 w-3 text-destructive" />
                     )}
+                    {(job.status === "detached" ||
+                      job.status === "unknown") && (
+                      <Clock className="h-3 w-3 text-muted-foreground" />
+                    )}
+                    {job.status === "skipped" && (
+                      <CircleMinus className="h-3 w-3 text-muted-foreground" />
+                    )}
                     <span className="font-mono">VM {job.vmid}</span>
                     <span className="text-muted-foreground">{job.diskKey}</span>
+                    {(job.status === "detached" ||
+                      job.status === "unknown" ||
+                      job.status === "skipped") && (
+                      <span className="truncate text-muted-foreground">
+                        {MOVE_NOTES[job.status]}
+                      </span>
+                    )}
                     {job.error && (
                       <span className="truncate text-destructive">
                         {job.error}
@@ -327,6 +386,19 @@ export function BulkMoveDialog({
                 "Start evacuation"
               )}
             </Button>
+            {running && !buildingJobs && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setStopping(true);
+                  stopRef.current?.abort();
+                }}
+                disabled={stopping}
+                className="w-full"
+              >
+                Stop
+              </Button>
+            )}
           </>
         )}
       </DialogContent>

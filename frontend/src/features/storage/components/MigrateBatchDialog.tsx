@@ -1,8 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ArrowRightLeft,
   CheckCircle2,
   Circle,
+  CircleMinus,
+  Clock,
   Loader2,
   XCircle,
 } from "lucide-react";
@@ -18,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { useTaskLogStore } from "@/stores/task-log-store";
-import { resolveVolume } from "../lib/resolve-disk";
+import { MOVE_NOTES, resolveVolume, waitForTask } from "../lib/resolve-disk";
 import type { VMActionResponse } from "@/features/vms/types/vm";
 
 export interface MigrateBatchJob {
@@ -33,7 +35,16 @@ export interface MigrateBatchJob {
   running: boolean;
 }
 
-type JobStatus = "pending" | "running" | "completed" | "failed";
+type JobStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  // Left running in Proxmox: after Stop, or with its status unreadable.
+  | "detached"
+  | "unknown"
+  // Never started, because the batch stopped first.
+  | "skipped";
 
 interface JobState extends MigrateBatchJob {
   status: JobStatus;
@@ -65,26 +76,44 @@ export function MigrateBatchDialog({
   const [running, setRunning] = useState(false);
   const [states, setStates] = useState<JobState[]>([]);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
+  // The running batch's Stop: aborted, it starts no further move and ends the
+  // wait for the current one. A closed dialog's loop would otherwise run on
+  // out of sight beside the next batch, so a close waits for Stop.
+  const stopRef = useRef<AbortController | null>(null);
+  const [stopping, setStopping] = useState(false);
+  // The batch whose loop may write the rows; one closed after Stop may not.
+  const batchRef = useRef(0);
 
   // Reset state when the dialog closes so the next open starts clean.
   const handleOpenChange = useCallback(
     (next: boolean) => {
       if (!next) {
+        if (running && !stopping) return;
+        batchRef.current++;
         setTargetStorage("");
         setStates([]);
         setRunning(false);
+        setStopping(false);
       }
       onOpenChange(next);
     },
-    [onOpenChange],
+    [onOpenChange, running, stopping],
   );
 
   const handleMigrate = useCallback(async () => {
     if (!targetStorage || jobs.length === 0) return;
     setRunning(true);
+    setStopping(false);
+    const stop = new AbortController();
+    stopRef.current = stop;
+    const stopped = () => stop.signal.aborted;
+    const batch = ++batchRef.current;
+    const show = (rows: JobState[]) => {
+      if (batchRef.current === batch) setStates(rows);
+    };
 
     const initial: JobState[] = jobs.map((j) => ({ ...j, status: "pending" }));
-    setStates(initial);
+    show(initial);
 
     const working = [...initial];
 
@@ -95,12 +124,12 @@ export function MigrateBatchDialog({
     const ended = sessionScope();
 
     for (let i = 0; i < working.length; i++) {
-      if (ended()) break;
+      if (ended() || stopped()) break;
       const job = working[i];
       if (!job) continue;
 
       working[i] = { ...job, status: "running" };
-      setStates([...working]);
+      show([...working]);
 
       try {
         const resolved = await resolveVolume(
@@ -110,11 +139,16 @@ export function MigrateBatchDialog({
         );
 
         if (ended()) break;
+        // Stop came during the config read: the move was never sent.
+        if (stopped()) {
+          working[i] = job;
+          break;
+        }
 
         const configKey = resolved.key;
         if (configKey === null) {
           working[i] = { ...job, status: "failed", error: resolved.reason };
-          setStates([...working]);
+          show([...working]);
           continue;
         }
 
@@ -138,9 +172,6 @@ export function MigrateBatchDialog({
 
         const resp = await apiClient.post<VMActionResponse>(path, body);
 
-        working[i] = { ...job, status: "completed", upid: resp.upid };
-        setStates([...working]);
-
         if (resp.upid && i === 0 && !ended()) {
           // Surface the first task in the global task log so the user can
           // open it from the activity panel; subsequent jobs are tracked
@@ -151,17 +182,48 @@ export function MigrateBatchDialog({
             description: `Migrate ${job.label} → ${targetStorage}`,
           });
         }
+
+        // Ticked when the move has ended, not when Proxmox took it, and the
+        // next starts only then: a guest's second move would meet the lock.
+        const outcome = resp.upid
+          ? await waitForTask(clusterId, resp.upid, ended, stop.signal)
+          : { status: "ended" as const, ok: true, exit: "" };
+        if (ended()) break;
+        const upid = resp.upid;
+        if (outcome.status === "ended") {
+          working[i] = outcome.ok
+            ? { ...job, status: "completed", upid }
+            : { ...job, status: "failed", upid, error: outcome.exit };
+        } else {
+          // Stopped, or the status could not be read: the move may still
+          // hold the guest's lock, so nothing further starts.
+          working[i] = {
+            ...job,
+            upid,
+            status: outcome.status === "unknown" ? "unknown" : "detached",
+          };
+          show([...working]);
+          break;
+        }
+        show([...working]);
       } catch (err) {
         working[i] = {
           ...job,
           status: "failed",
           error: err instanceof Error ? err.message : "Migration failed",
         };
-        setStates([...working]);
+        show([...working]);
       }
     }
 
-    setRunning(false);
+    if (!ended()) {
+      show(
+        working.map((j) =>
+          j.status === "pending" ? { ...j, status: "skipped" } : j,
+        ),
+      );
+    }
+    if (batchRef.current === batch) setRunning(false);
   }, [clusterId, deleteOriginal, jobs, setFocusedTask, targetStorage]);
 
   const total = jobs.length;
@@ -229,6 +291,13 @@ export function MigrateBatchDialog({
                   <span className="flex-1 truncate font-mono text-xs">
                     {s.label}
                   </span>
+                  {(s.status === "detached" ||
+                    s.status === "unknown" ||
+                    s.status === "skipped") && (
+                    <span className="text-xs text-muted-foreground">
+                      {MOVE_NOTES[s.status]}
+                    </span>
+                  )}
                   {s.error && (
                     <span className="text-xs text-destructive" title={s.error}>
                       {s.error.length > 40
@@ -249,15 +318,27 @@ export function MigrateBatchDialog({
           )}
         </div>
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => {
-              handleOpenChange(false);
-            }}
-            disabled={running}
-          >
-            {finished ? "Close" : "Cancel"}
-          </Button>
+          {running ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setStopping(true);
+                stopRef.current?.abort();
+              }}
+              disabled={stopping}
+            >
+              Stop
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => {
+                handleOpenChange(false);
+              }}
+            >
+              {finished ? "Close" : "Cancel"}
+            </Button>
+          )}
           {!finished && (
             <Button
               onClick={() => {
@@ -284,5 +365,10 @@ function JobIcon({ status }: { status: JobStatus }) {
       return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
     case "failed":
       return <XCircle className="h-3.5 w-3.5 text-destructive" />;
+    case "detached":
+    case "unknown":
+      return <Clock className="h-3.5 w-3.5 text-muted-foreground" />;
+    case "skipped":
+      return <CircleMinus className="h-3.5 w-3.5 text-muted-foreground" />;
   }
 }

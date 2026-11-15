@@ -1,5 +1,7 @@
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { isOkExit } from "@/components/layout/task-status";
+import type { TaskStatusResponse } from "@/features/vms/types/vm";
 
 interface ConfigMap {
   [key: string]: unknown;
@@ -111,3 +113,89 @@ export async function resolveVolume(
     ? ctVolumeKey(config, volid, guest.running)
     : vmVolumeKey(config, volid, guest.running);
 }
+
+const TASK_POLL_MS = 2_000;
+const TASK_POLL_MAX_MS = 30_000;
+/** How long the status may go unread before the wait gives up on it. */
+export const TASK_UNREADABLE_MS = 120_000;
+
+/** How a wait for a move's task ended. */
+export type TaskOutcome =
+  | { status: "ended"; ok: boolean; exit: string }
+  /** The status could not be read for TASK_UNREADABLE_MS: it may still run. */
+  | { status: "unknown" }
+  /** The session ended or the batch was stopped; the task was not cancelled. */
+  | { status: "halted" };
+
+/** Resolves after ms, or at once when stop is aborted. */
+function pause(ms: number, stop: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      stop.removeEventListener("abort", done);
+      resolve();
+    }
+    stop.addEventListener("abort", done);
+  });
+}
+
+/**
+ * Waits for a move's task to end. A VM's disk move holds the config lock for
+ * its whole run (move_vm_disk's worker runs in lock_config, qemu-server
+ * src/PVE/API2/Qemu.pm, and a second move's worker gives up after the lock's
+ * 10 s timeout); a container's sets a 'disk' lock that refuses the next. So a
+ * batch starts a guest's next move only once this says the task ended. A read
+ * that fails is no failed move: it is retried, backing off, and only a status
+ * unread for TASK_UNREADABLE_MS is "unknown". Stop ends the wait at once.
+ */
+export async function waitForTask(
+  clusterId: string,
+  upid: string,
+  ended: () => boolean,
+  stop: AbortSignal,
+): Promise<TaskOutcome> {
+  const stopped = new Promise<null>((resolve) => {
+    if (stop.aborted) resolve(null);
+    stop.addEventListener("abort", () => {
+      resolve(null);
+    });
+  });
+  let failingSince: number | null = null;
+  let delay = TASK_POLL_MS;
+  for (;;) {
+    if (ended() || stop.aborted) return { status: "halted" };
+    try {
+      const task = await Promise.race([
+        apiClient.get<TaskStatusResponse>(
+          apiPath`/api/v1/clusters/${clusterId}/tasks/${upid}`,
+        ),
+        stopped,
+      ]);
+      if (task === null) return { status: "halted" };
+      failingSince = null;
+      delay = TASK_POLL_MS;
+      if (task.status === "stopped") {
+        return {
+          status: "ended",
+          ok: isOkExit(task.exit_status),
+          exit: task.exit_status,
+        };
+      }
+    } catch {
+      const now = Date.now();
+      failingSince ??= now;
+      if (now - failingSince >= TASK_UNREADABLE_MS)
+        return { status: "unknown" };
+      delay = Math.min(delay * 2, TASK_POLL_MAX_MS);
+    }
+    await pause(delay, stop);
+  }
+}
+
+/** What a row says when its move was left running, or never started. */
+export const MOVE_NOTES = {
+  unknown: "Status unknown: the move may still be running. Check Tasks.",
+  detached: "Still running in Proxmox: follow it in Tasks",
+  skipped: "Not started",
+} as const;
