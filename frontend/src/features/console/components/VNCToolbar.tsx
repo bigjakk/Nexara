@@ -39,6 +39,7 @@ import { useTaskLogStore } from "@/stores/task-log-store";
 import { useMountISO } from "../api/console-queries";
 import { ISOPickerDialog } from "./ISOPickerDialog";
 import { typeTextIntoVnc } from "../lib/vnc-keys";
+import { guestState } from "@/lib/guest-state";
 
 // X11 keysyms
 const XK = {
@@ -121,7 +122,8 @@ export function VNCToolbar({
   const vmKind = tab.kind ?? "vm";
 
   const { data: vmData } = useVM(tab.clusterID, tab.resourceId ?? "", vmKind);
-  const vmStatus = vmData?.status.toLowerCase() ?? "";
+  // A halted VM's QEMU state, as the guest page's actions read it.
+  const vmStatus = vmData ? guestState(vmData.status, vmData.run_state) : "";
 
   const isVM = tab.kind === "vm" || tab.type === "vm_vnc";
   const { data: vmConfig } = useVMConfig(

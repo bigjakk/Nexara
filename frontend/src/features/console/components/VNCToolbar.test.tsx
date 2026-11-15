@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type RFB from "@novnc/novnc";
 import { renderWithProviders } from "@/test/test-utils";
 import { stubApi } from "@/test/fetch-stub";
+import { makeVM } from "@/test/cluster.fixtures";
 import type { ConsoleTab } from "../types/console";
 import { VNCToolbar } from "./VNCToolbar";
 
@@ -71,5 +72,26 @@ describe("VNCToolbar — paste", () => {
       expect(document.activeElement).toBe(paste);
     });
     expect(focus).not.toHaveBeenCalled();
+  });
+});
+
+describe("VNCToolbar — power", () => {
+  it("offers a VM asleep in S3 the actions its QEMU state allows", async () => {
+    stubApi({
+      "/api/v1/clusters/c1/vms/v1": makeVM({
+        status: "running",
+        run_state: "suspended",
+      }),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <VNCToolbar
+        rfb={fakeConsole().rfb}
+        tab={{ ...TAB, resourceId: "v1", kind: "vm" }}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Power" }));
+    const items = screen.getAllByRole("menuitem").map((i) => i.textContent);
+    expect(items).toEqual(["Stop", "Reset", "Resume"]);
   });
 });
