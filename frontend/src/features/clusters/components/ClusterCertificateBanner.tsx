@@ -51,16 +51,13 @@ export function ClusterCertificateBanner({
   if (!issue) return null;
 
   function handleVerify() {
+    // A refusal (the server will not resolve a disagreement) is the app's error
+    // toast, in the server's words, with the manual route left open. Not a
+    // toast of its own here as well: the global one cannot see an onError given
+    // to mutate(), and would raise its own beside it (lib/query-client.ts).
     verify.mutate(undefined, {
       onSuccess: (result) => {
         toast.success(result.message);
-      },
-      onError: (error) => {
-        // The server refuses on a disagreement rather than resolving it, so
-        // surface its reason and leave the manual route open.
-        toast.error(
-          error instanceof Error ? error.message : "Verification failed",
-        );
       },
     });
   }
