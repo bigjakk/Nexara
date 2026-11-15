@@ -694,7 +694,7 @@ Navigate to **Admin > LDAP** to configure LDAP/AD authentication. Only one enabl
 
 The **Test Connection** panel appears only once the config is saved, and tests the saved values: **Test** and **Sync Now**.
 
-> **StartTLS needs Skip TLS Verify today.** With verification on, Nexara starts the TLS handshake with no server name and it fails. Use `ldaps://` to keep the certificate checked.
+> **StartTLS and `ldaps://` both check the certificate** against the host in the Server URL, unless **Skip TLS Verify** is on. Use the name the certificate was issued for, not an IP address it does not list.
 >
 > **Sync is manual.** The **Sync Interval (minutes)** field is stored, but nothing runs it: only **Sync Now** syncs. A sync disables a user the search does not find, and ends their sessions, and that includes any search error, such as a directory outage; a later sync re-enables anyone still in the directory, including someone you deactivated by hand.
 

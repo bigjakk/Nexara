@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
@@ -55,10 +56,22 @@ func NewLDAPClient(cfg LDAPConfig) *LDAPClient {
 	return &LDAPClient{cfg: cfg}
 }
 
-func (c *LDAPClient) dial() (*ldap.Conn, error) {
-	tlsCfg := &tls.Config{
+// tlsConfig is the TLS configuration of both ldaps:// and StartTLS. ServerName is the
+// configured host: StartTLS hands the config to tls.Client, which, unlike the dial of
+// ldaps://, does not infer it from the address, and with no name and verification on
+// every handshake failed.
+func (c *LDAPClient) tlsConfig() *tls.Config {
+	cfg := &tls.Config{
 		InsecureSkipVerify: c.cfg.SkipTLSVerify, //nolint:gosec // user-configurable for self-signed certs
 	}
+	if u, err := url.Parse(c.cfg.ServerURL); err == nil {
+		cfg.ServerName = u.Hostname()
+	}
+	return cfg
+}
+
+func (c *LDAPClient) dial() (*ldap.Conn, error) {
+	tlsCfg := c.tlsConfig()
 
 	isLDAPS := strings.HasPrefix(c.cfg.ServerURL, "ldaps://")
 	if !isLDAPS && !c.cfg.StartTLS {
