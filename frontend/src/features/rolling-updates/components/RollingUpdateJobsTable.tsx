@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -10,6 +11,10 @@ import {
 import { cn } from "@/lib/utils";
 import type { RollingUpdateJob } from "@/types/api";
 import { Loader2 } from "lucide-react";
+import {
+  RollingUpdateJobConfirm,
+  type PendingJobAction,
+} from "./RollingUpdateJobConfirm";
 
 const STATUS_LABEL: Record<RollingUpdateJob["status"], string> = {
   pending: "Pending",
@@ -67,6 +72,8 @@ export function RollingUpdateJobsTable({
   onStart,
   onCancel,
 }: RollingUpdateJobsTableProps) {
+  const [pending, setPending] = useState<PendingJobAction | null>(null);
+
   if (jobs.length === 0) {
     return (
       <p className="px-[18px] pb-1 text-sm text-muted-foreground">
@@ -76,93 +83,105 @@ export function RollingUpdateJobsTable({
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="hover:bg-transparent">
-          <TableHead>Status</TableHead>
-          <TableHead className="whitespace-nowrap">Nodes at a time</TableHead>
-          <TableHead>Reboot</TableHead>
-          <TableHead>Created</TableHead>
-          <TableHead>Completed</TableHead>
-          <TableHead className="text-right">
-            <span className="sr-only">Actions</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {jobs.map((job) => (
-          <TableRow key={job.id}>
-            {/* A floor on the width: on a phone the table scrolls sideways
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead>Status</TableHead>
+            <TableHead className="whitespace-nowrap">Nodes at a time</TableHead>
+            <TableHead>Reboot</TableHead>
+            <TableHead>Created</TableHead>
+            <TableHead>Completed</TableHead>
+            <TableHead className="text-right">
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {jobs.map((job) => (
+            <TableRow key={job.id}>
+              {/* A floor on the width: on a phone the table scrolls sideways
                 rather than squeeze a failure's reason into a ribbon. */}
-            <TableCell
-              className={job.failure_reason ? "min-w-[16rem] py-2" : "py-2"}
-            >
-              <JobStatus status={job.status} />
-              {job.failure_reason && (
-                <div className="mt-0.5 max-w-[30rem] text-[12.5px] text-red-700 [overflow-wrap:anywhere] dark:text-red-400">
-                  {job.failure_reason}
-                </div>
-              )}
-            </TableCell>
-            <TableCell className="py-2 tabular-nums">
-              {job.parallelism}
-            </TableCell>
-            <TableCell className="py-2">
-              {job.reboot_after_update ? "Yes" : "No"}
-            </TableCell>
-            <TableCell className="whitespace-nowrap py-2 text-muted-foreground">
-              {new Date(job.created_at).toLocaleString()}
-            </TableCell>
-            <TableCell className="whitespace-nowrap py-2 text-muted-foreground">
-              {job.completed_at
-                ? new Date(job.completed_at).toLocaleString()
-                : "—"}
-            </TableCell>
-            <TableCell className="py-1.5 text-right">
-              <div className="flex items-center justify-end gap-1">
-                {/* View first: Start begins a rolling update without asking,
-                    so it does not sit where a habitual click lands. */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-primary hover:text-primary"
-                  onClick={() => {
-                    onSelect(job);
-                  }}
-                >
-                  View
-                </Button>
-                {canManage && job.status === "pending" && (
+              <TableCell
+                className={job.failure_reason ? "min-w-[16rem] py-2" : "py-2"}
+              >
+                <JobStatus status={job.status} />
+                {job.failure_reason && (
+                  <div className="mt-0.5 max-w-[30rem] text-[12.5px] text-red-700 [overflow-wrap:anywhere] dark:text-red-400">
+                    {job.failure_reason}
+                  </div>
+                )}
+              </TableCell>
+              <TableCell className="py-2 tabular-nums">
+                {job.parallelism}
+              </TableCell>
+              <TableCell className="py-2">
+                {job.reboot_after_update ? "Yes" : "No"}
+              </TableCell>
+              <TableCell className="whitespace-nowrap py-2 text-muted-foreground">
+                {new Date(job.created_at).toLocaleString()}
+              </TableCell>
+              <TableCell className="whitespace-nowrap py-2 text-muted-foreground">
+                {job.completed_at
+                  ? new Date(job.completed_at).toLocaleString()
+                  : "—"}
+              </TableCell>
+              <TableCell className="py-1.5 text-right">
+                <div className="flex items-center justify-end gap-1">
+                  {/* View first, so a habitual click lands on the harmless
+                    action; Start and Cancel each ask first. */}
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
+                    className="text-primary hover:text-primary"
                     onClick={() => {
-                      onStart(job.id);
+                      onSelect(job);
                     }}
                   >
-                    Start
+                    View
                   </Button>
-                )}
-                {canManage &&
-                  (job.status === "pending" ||
-                    job.status === "running" ||
-                    job.status === "paused") && (
+                  {canManage && job.status === "pending" && (
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
-                      className="text-muted-foreground"
                       onClick={() => {
-                        onCancel(job.id);
+                        setPending({ kind: "start", job });
                       }}
                     >
-                      Cancel
+                      Start
                     </Button>
                   )}
-              </div>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+                  {canManage &&
+                    (job.status === "pending" ||
+                      job.status === "running" ||
+                      job.status === "paused") && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground"
+                        onClick={() => {
+                          setPending({ kind: "cancel", job });
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <RollingUpdateJobConfirm
+        pending={pending}
+        onClose={() => {
+          setPending(null);
+        }}
+        onConfirm={(action) => {
+          if (action.kind === "start") onStart(action.job.id);
+          else onCancel(action.job.id);
+        }}
+      />
+    </>
   );
 }

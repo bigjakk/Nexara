@@ -21,6 +21,10 @@ import { cn } from "@/lib/utils";
 import { NodeStepBadge } from "./NodeStepBadge";
 import { PackagePreviewTable } from "./PackagePreviewTable";
 import {
+  RollingUpdateJobConfirm,
+  type PendingJobAction,
+} from "./RollingUpdateJobConfirm";
+import {
   useRollingUpdateJob,
   useRollingUpdateNodes,
   useConfirmNodeUpgrade,
@@ -418,6 +422,9 @@ export function RollingUpdateProgress({
   const pauseJob = usePauseRollingUpdateJob();
   const resumeJob = useResumeRollingUpdateJob();
   const cancelJob = useCancelRollingUpdateJob();
+  const [pendingCancel, setPendingCancel] = useState<PendingJobAction | null>(
+    null,
+  );
 
   const crumbs = [
     { label: "Security", to: "/security" },
@@ -511,13 +518,22 @@ export function RollingUpdateProgress({
                   size="sm"
                   className="text-destructive hover:text-destructive"
                   onClick={() => {
-                    cancelJob.mutate({ clusterId, jobId });
+                    setPendingCancel({ kind: "cancel", job });
                   }}
                   disabled={cancelJob.isPending}
                 >
                   Cancel
                 </Button>
               )}
+            <RollingUpdateJobConfirm
+              pending={pendingCancel}
+              onClose={() => {
+                setPendingCancel(null);
+              }}
+              onConfirm={() => {
+                cancelJob.mutate({ clusterId, jobId });
+              }}
+            />
           </>
         }
       />

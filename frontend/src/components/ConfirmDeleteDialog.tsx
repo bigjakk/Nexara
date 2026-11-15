@@ -34,6 +34,8 @@ interface ConfirmDeleteDialogProps<T> {
    * shows, so it holds while the dialog closes.
    */
   confirmLabel?: string | ((target: T) => string);
+  /** The dismiss button's text, for a dialog whose action is itself a cancel. */
+  cancelLabel?: string | ((target: T) => string) | undefined;
   /**
    * Holds the confirm button shut, for a description that is still being
    * read — what the delete would affect, say. Cancel stays available.
@@ -76,6 +78,7 @@ export function ConfirmDeleteDialog<T>({
   title,
   description,
   confirmLabel = "Delete",
+  cancelLabel = "Cancel",
   confirmDisabled = false,
   fallbackFocus,
   onCloseAutoFocus,
@@ -112,7 +115,11 @@ export function ConfirmDeleteDialog<T>({
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>
+                {typeof cancelLabel === "function"
+                  ? cancelLabel(current)
+                  : cancelLabel}
+              </AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 disabled={confirmDisabled}
