@@ -75,7 +75,7 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 			// "running" well past any plausible lifetime, mark it failed so it
 			// doesn't hang forever; otherwise leave it and retry next tick.
 			if time.Since(row.StartedAt) > staleTaskGrace {
-				s.finalizeTask(ctx, cluster, row.Upid, "failed", vanishedExitStatus)
+				s.finalizeTask(ctx, cluster, row.Upid, "failed", vanishedExitStatus, time.Now())
 			}
 			continue
 		}
@@ -83,8 +83,38 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 			continue // still running
 		}
 		status, exit := classifyTaskExit(st.ExitStatus)
-		s.finalizeTask(ctx, cluster, row.Upid, status, exit)
+		s.finalizeTask(ctx, cluster, row.Upid, status, exit, taskEndTime(ctx, client, row))
 	}
+}
+
+// nodeTaskFinder is the optional client call that reads a task's entry from
+// the node task list, where its end time is; the status call carries none.
+type nodeTaskFinder interface {
+	FindNodeTask(ctx context.Context, node, upid string) (*proxmox.NodeTask, error)
+}
+
+// taskEndTime is when a stopped task ended by Proxmox's own record, so a row
+// closed late (a node that was down, a missed tick) still says when the task
+// ended rather than when a poll noticed. Now when Proxmox gives no end time;
+// held between the row's start and now, as the node's clock is not ours.
+func taskEndTime(ctx context.Context, client ProxmoxClient, row db.TaskHistory) time.Time {
+	now := time.Now()
+	finder, ok := client.(nodeTaskFinder)
+	if !ok {
+		return now
+	}
+	task, err := finder.FindNodeTask(ctx, row.Node, row.Upid)
+	if err != nil || task == nil || task.EndTime <= 0 {
+		return now
+	}
+	end := time.Unix(task.EndTime, 0)
+	switch {
+	case end.After(now):
+		return now
+	case end.Before(row.StartedAt):
+		return row.StartedAt
+	}
+	return end
 }
 
 // finalizeTask flips a still-running task_history row to a terminal state and,
@@ -97,12 +127,12 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 // first decides the stored text. Where that mattered — the cross-cluster
 // migration die message, which the orchestrator scrubs and this pass cannot —
 // it is settled by keeping the row out of the caller's SELECT entirely.
-func (s *Syncer) finalizeTask(ctx context.Context, cluster db.Cluster, upid, status, exitStatus string) {
+func (s *Syncer) finalizeTask(ctx context.Context, cluster db.Cluster, upid, status, exitStatus string, finishedAt time.Time) {
 	n, err := s.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 		Upid:       upid,
 		Status:     status,
 		ExitStatus: exitStatus,
-		FinishedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		FinishedAt: pgtype.Timestamptz{Time: finishedAt, Valid: true},
 	})
 	if err != nil {
 		s.logger.Warn("task reconcile: failed to update task",

@@ -164,8 +164,9 @@ WHERE c.id = m.id;
 -- How late it may be depends on whether the migration's end is known. It is only
 -- for one the collector ingested already finished (its row's recorded status is
 -- the exit text, not RUNNING): finished_at is then Proxmox's own, and the start
--- must come before it. Every other finished_at is when a poll noticed — the
--- reconciler's up to a pass late, a day late for a task on a node that died —
+-- must come before it. Any other finished_at may be when a poll noticed — the
+-- reconciler's when the node's task list gave no end time, a day late for a task
+-- on a node that died; DRS's and the orchestrator's when their poll saw it end —
 -- so for those, as for a migration still running or with no task row, the start
 -- must come within 5 seconds of the migration's. What that keeps out is a start
 -- made after an offline migration: the second half of an HA relocation, or the

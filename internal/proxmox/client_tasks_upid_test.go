@@ -263,3 +263,24 @@ func assertNodeTaskUPIDRefused(t *testing.T, err error, seen *[]string) {
 		t.Errorf("err = %v, want one wrapping ErrInvalidInput — anything else maps to a 500", err)
 	}
 }
+
+// TestFindNodeTaskNarrowsTheListToTheTask: PVE filters since/until on start
+// time, so the list is asked for the UPID's start second and type, and the
+// entry returned is the one whose UPID matches.
+func TestFindNodeTaskNarrowsTheListToTheTask(t *testing.T) {
+	t.Parallel()
+	upid := "UPID:pve-01:0000ABCD:00001234:6700000A:qmigrate:100:alice@pve:"
+	srv, seen := newCaptureServer(t, `{"data":[{"upid":"UPID:pve-01:0000ABCE:00001235:6700000A:qmigrate:101:alice@pve:","endtime":5},{"upid":"`+upid+`","endtime":1728053260}]}`)
+	c := newTestClient(t, srv.URL)
+	task, err := c.FindNodeTask(context.Background(), "pve-01", upid)
+	if err != nil {
+		t.Fatalf("FindNodeTask: %v", err)
+	}
+	if task == nil || task.EndTime != 1728053260 {
+		t.Fatalf("FindNodeTask = %+v, want the entry for %s", task, upid)
+	}
+	want := "/api2/json/nodes/pve-01/tasks?limit=50&since=1728053258&source=all&typefilter=qmigrate&until=1728053258"
+	if len(*seen) != 1 || (*seen)[0] != want {
+		t.Fatalf("requests = %v, want [%s]", *seen, want)
+	}
+}

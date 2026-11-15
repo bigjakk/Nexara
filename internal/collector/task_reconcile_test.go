@@ -136,6 +136,51 @@ func TestReconcileRunningTasks(t *testing.T) {
 	})
 }
 
+// endTimeReconcileClient also answers FindNodeTask, with the end time the
+// node task list records for a task.
+type endTimeReconcileClient struct {
+	reconcileFakeClient
+	ended map[string]int64
+}
+
+func (f *endTimeReconcileClient) FindNodeTask(_ context.Context, _ string, upid string) (*proxmox.NodeTask, error) {
+	if end, ok := f.ended[upid]; ok {
+		return &proxmox.NodeTask{UPID: upid, EndTime: end}, nil
+	}
+	return nil, nil
+}
+
+// TestReconcileRunningTasks_FinishedAtIsTheTasksOwnEnd: a row closed late
+// records when Proxmox says the task ended, not when the poll noticed; with
+// no end time from Proxmox, now.
+func TestReconcileRunningTasks_FinishedAtIsTheTasksOwnEnd(t *testing.T) {
+	t.Parallel()
+	started := time.Now().Add(-3 * time.Hour).Truncate(time.Second)
+	ended := started.Add(time.Hour)
+	q := newMockQueries()
+	q.runningTasks = []db.TaskHistory{runningRow("UPID:a", started), runningRow("UPID:b", started)}
+	stopped := &proxmox.TaskStatus{Status: "stopped", ExitStatus: "OK"}
+	client := &endTimeReconcileClient{
+		reconcileFakeClient: reconcileFakeClient{statuses: map[string]*proxmox.TaskStatus{"UPID:a": stopped, "UPID:b": stopped}},
+		ended:               map[string]int64{"UPID:a": ended.Unix()},
+	}
+	s := &Syncer{queries: q, logger: testLogger()}
+	before := time.Now()
+
+	s.reconcileRunningTasks(context.Background(), client, memberCluster(q))
+
+	got := map[string]time.Time{}
+	for _, c := range q.reconcileCalls {
+		got[c.Upid] = c.FinishedAt.Time
+	}
+	if !got["UPID:a"].Equal(ended) {
+		t.Errorf("finished_at = %v, want the task's end %v", got["UPID:a"], ended)
+	}
+	if got["UPID:b"].Before(before) {
+		t.Errorf("finished_at = %v with no end time from Proxmox, want now", got["UPID:b"])
+	}
+}
+
 // TestReconcileRunningTasks_NeverPollsANodeTheClusterDoesNotHold: a
 // task_history row's node can be what a caller named (POST /api/v1/tasks),
 // and GetTaskStatus sends it to Proxmox as /nodes/{node}/tasks/…, which

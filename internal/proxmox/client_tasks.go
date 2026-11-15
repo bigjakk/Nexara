@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // validateTaskUPID guards a caller-supplied UPID that becomes exactly one
@@ -136,6 +137,46 @@ func (c *Client) GetNodeTasks(ctx context.Context, node string, since int64, lim
 		return nil, fmt.Errorf("get tasks on %s: %w", node, err)
 	}
 	return tasks, nil
+}
+
+// FindNodeTask returns the node task list's entry for one task, which carries
+// the task's own end time (the task status call carries none). PVE filters
+// since/until on a task's start time, so the list is narrowed to the start
+// second and type the UPID carries. nil, nil when the list holds no such task
+// or the UPID does not carry them.
+func (c *Client) FindNodeTask(ctx context.Context, node, upid string) (*NodeTask, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateTaskUPID(upid); err != nil {
+		return nil, err
+	}
+	parts := strings.Split(upid, ":")
+	if len(parts) < 8 || parts[0] != "UPID" {
+		return nil, nil
+	}
+	start, err := strconv.ParseInt(parts[4], 16, 64)
+	if err != nil {
+		return nil, nil
+	}
+	q := url.Values{}
+	q.Set("source", "all")
+	q.Set("since", strconv.FormatInt(start, 10))
+	q.Set("until", strconv.FormatInt(start, 10))
+	q.Set("limit", "50")
+	if parts[5] != "" {
+		q.Set("typefilter", parts[5])
+	}
+	var tasks []NodeTask
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/tasks?"+q.Encode(), &tasks); err != nil {
+		return nil, fmt.Errorf("find task on %s: %w", node, err)
+	}
+	for i := range tasks {
+		if tasks[i].UPID == upid {
+			return &tasks[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // activeTaskLimit is set because PVE would otherwise cap the list at 50 (and a
