@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { DataTableCells } from "./DataTableCells";
+import { DataTableFrame } from "./DataTableFrame";
+import { ExpandedDetailRow } from "./ExpandedDetailRow";
+import { TableBody, TableRow } from "@/components/ui/table";
 import type { ColumnDef, ColumnLayout } from "@/hooks/useColumnLayout";
 
 interface Row {
@@ -90,5 +93,36 @@ describe("DataTableCells", () => {
 
   it("right-aligns a column that asked for it", () => {
     expect(cellsOf(COLUMNS)[2]?.className).toContain("text-right");
+  });
+
+  // In a panel wider than the columns the rules reach the edge: the table
+  // spans the panel and a trailing filler cell, with no width, takes the slack.
+  it("adds a filler cell inside a DataTableFrame, which spans its panel", () => {
+    const { container } = render(
+      <DataTableFrame layout={layoutOf(COLUMNS)}>
+        <TableBody>
+          <TableRow>
+            <DataTableCells
+              row={{ id: "1", name: "web-01", note: "it broke" }}
+              layout={layoutOf(COLUMNS)}
+              ctx={undefined}
+            />
+          </TableRow>
+          <ExpandedDetailRow colSpan={COLUMNS.length}>detail</ExpandedDetailRow>
+        </TableBody>
+      </DataTableFrame>,
+    );
+
+    const table = container.querySelector("table");
+    expect(table?.style.width).toBe("260px");
+    expect(table?.style.minWidth).toBe("100%");
+    const [row, detail] = [...container.querySelectorAll("tbody tr")];
+    const cells = [...(row?.querySelectorAll("td") ?? [])];
+    expect(cells).toHaveLength(COLUMNS.length + 1);
+    // A detail row spans the filler as well.
+    expect(detail?.querySelector("td")?.colSpan).toBe(COLUMNS.length + 1);
+    expect(cells.at(-1)?.getAttribute("style")).toBeNull();
+    // Outside a frame, no filler.
+    expect(cellsOf(COLUMNS)).toHaveLength(COLUMNS.length);
   });
 });

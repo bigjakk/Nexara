@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { use, type ReactNode } from "react";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { DataTableFillerContext } from "@/components/data-table-filler";
 
 /**
  * The full-width row a table opens underneath an expanded row.
@@ -25,10 +26,13 @@ export function ExpandedDetailRow({
   spacing?: "space-y-3" | "space-y-4";
   children: ReactNode;
 }) {
+  // Inside a DataTableFrame the filler cell is spanned too, so the row reaches
+  // the panel's edge like the rows around it.
+  const filler = use(DataTableFillerContext);
   return (
     // Recessed and unhovered: this is the row above opened up, not a row.
     <TableRow className="bg-foreground/[0.035] hover:bg-foreground/[0.035]">
-      <TableCell colSpan={colSpan}>
+      <TableCell colSpan={colSpan + (filler ? 1 : 0)}>
         <div className={cn(spacing, "py-1.5")}>{children}</div>
       </TableCell>
     </TableRow>

@@ -1,4 +1,6 @@
-import { TableRow } from "@/components/ui/table";
+import { use } from "react";
+import { TableHead, TableRow } from "@/components/ui/table";
+import { DataTableFillerContext } from "@/components/data-table-filler";
 import { DataTableHead } from "@/components/DataTableHead";
 import type { SortDirection } from "@/hooks/useTableSort";
 import type { ColumnLayout } from "@/hooks/useColumnLayout";
@@ -25,6 +27,7 @@ export function DataTableHeadCells<Row, K extends string, Ctx>({
   directionFor,
   onSort,
 }: HeadProps<Row, K, Ctx>) {
+  const filler = use(DataTableFillerContext);
   return (
     <>
       {layout.columns.map((col) => (
@@ -38,6 +41,8 @@ export function DataTableHeadCells<Row, K extends string, Ctx>({
           }}
         />
       ))}
+      {/* DataTableFrame's filler: takes the slack, so no column is widened. */}
+      {filler && <TableHead aria-hidden="true" className="p-0" />}
     </>
   );
 }

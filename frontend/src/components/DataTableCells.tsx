@@ -1,4 +1,6 @@
+import { use } from "react";
 import { TableCell } from "@/components/ui/table";
+import { DataTableFillerContext } from "@/components/data-table-filler";
 import { cn } from "@/lib/utils";
 import type { ColumnLayout } from "@/hooks/useColumnLayout";
 
@@ -27,6 +29,7 @@ export function DataTableCells<Row, K extends string, Ctx>({
   layout: ColumnLayout<Row, K, Ctx>;
   ctx: Ctx;
 }) {
+  const filler = use(DataTableFillerContext);
   return (
     <>
       {layout.columns.map((col) => (
@@ -44,6 +47,7 @@ export function DataTableCells<Row, K extends string, Ctx>({
           {col.cell(row, ctx)}
         </TableCell>
       ))}
+      {filler && <TableCell aria-hidden="true" className="p-0" />}
     </>
   );
 }
