@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -80,6 +82,18 @@ type EvalResult struct {
 	// avoid conflicting migrations. No recommendations are produced in this case.
 	BlockedByNativeCRS bool
 	BlockReason        string
+	// HeldNodes are the nodes left out of planning because they booted less
+	// than the cluster's hold-off ago (see bootHeldNodes). They are still
+	// scored and counted in Imbalance.
+	HeldNodes []HeldNode
+}
+
+// HeldNode is a node DRS plans no move onto or off, because it booted
+// UptimeSeconds ago and the hold-off is HoldoffSeconds.
+type HeldNode struct {
+	Node           string
+	UptimeSeconds  int64
+	HoldoffSeconds int64
 }
 
 // Engine is the DRS evaluation engine.
@@ -370,6 +384,13 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 		Weights:    weights,
 	}
 
+	result.HeldNodes = bootHeldNodes(nodeEntries, cfg.BootHoldoffMinutes)
+	for _, h := range result.HeldNodes {
+		e.logger.Info("DRS leaving a node alone after its boot",
+			"cluster_id", clusterID, "node", h.Node,
+			"uptime_seconds", h.UptimeSeconds, "holdoff_seconds", h.HoldoffSeconds)
+	}
+
 	if imbalance <= cfg.ImbalanceThreshold {
 		e.logger.Info("cluster balanced", "cluster_id", clusterID,
 			"imbalance", fmt.Sprintf("%.4f", imbalance),
@@ -420,9 +441,39 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 
 	// Plan migrations over the full workload set; the planner keeps pinned VMs
 	// for scoring and rule visibility but never selects them for migration.
-	result.Recommendations = Plan(scores, nodeWorkloads, nodeEntries, rules, weights, cfg.ImbalanceThreshold, e.logger)
+	//
+	// A node in its boot hold-off is neither source nor target: it is left out
+	// of the scores and entries the planner pairs from, while its guests stay
+	// in nodeWorkloads so every rule still sees where they are.
+	planScores, planEntries := scores, nodeEntries
+	if len(result.HeldNodes) > 0 {
+		planScores = maps.Clone(scores)
+		planEntries = maps.Clone(nodeEntries)
+		for _, h := range result.HeldNodes {
+			delete(planScores, h.Node)
+			delete(planEntries, h.Node)
+		}
+	}
+	result.Recommendations = Plan(planScores, nodeWorkloads, planEntries, rules, weights, cfg.ImbalanceThreshold, e.logger)
 
 	return result, nil
+}
+
+// bootHeldNodes returns, by name, the nodes that booted less than holdoffMinutes
+// ago: on a cold boot the guests are still starting and their load means
+// nothing. The uptime is the one GET /nodes carries, which the collector stores
+// too. 0 there means Proxmox has no reading for the node, and such a node is not
+// held; nor is any node when holdoffMinutes is 0.
+func bootHeldNodes(nodes map[string]proxmox.NodeListEntry, holdoffMinutes int32) []HeldNode {
+	holdoff := int64(holdoffMinutes) * 60
+	var held []HeldNode
+	for name, n := range nodes {
+		if n.Uptime > 0 && n.Uptime < holdoff {
+			held = append(held, HeldNode{Node: name, UptimeSeconds: n.Uptime, HoldoffSeconds: holdoff})
+		}
+	}
+	slices.SortFunc(held, func(a, b HeldNode) int { return strings.Compare(a.Node, b.Node) })
+	return held
 }
 
 // collectNodeWorkloads reads one node's running guests.

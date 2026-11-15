@@ -791,6 +791,7 @@ The Distributed Resource Scheduler automatically balances VM workloads across cl
    - **Resource Weights** — how heavily CPU vs. memory pressure counts toward a node's load score
    - **Imbalance Threshold** — the cluster imbalance percentage that triggers migration planning (5–100%, in 5% steps)
    - **Evaluation Interval** — how often DRS evaluates balance, in seconds, at least 60
+   - **Hold-off after a node boots** — for this many minutes after a node boots, DRS moves no guest onto it or off it (10 by default, up to 1440; 0 turns it off). See [Guests DRS Leaves in Place](#guests-drs-leaves-in-place)
    - **Include containers in balancing** — balance CTs alongside VMs
 5. Click **Save Configuration**
 
@@ -815,6 +816,8 @@ The **Migrations** tab within DRS shows the moves DRS proposed or carried out. A
 ### Guests DRS Leaves in Place
 
 DRS does not pick a guest Proxmox cannot migrate right now: one with a config lock (a backup or a snapshot, say) or with a task running on it, such as a disk move. An open console does not count. If a node's tasks cannot be read, its guests stay put until the next evaluation. All of these still count toward their node's load and toward rules.
+
+DRS also leaves a whole node alone for the **Hold-off after a node boots** (10 minutes by default) after it boots, so a cluster started from cold is not rebalanced while its guests are still starting. It moves no guest onto that node or off it; the node still counts in the scores and the variance, and its guests still count toward rules. It goes by the uptime Proxmox reports for the node, and a node with no uptime reading is not held. **Run Evaluation** names each node it left alone and when it booted. A manual migrate is not affected.
 
 After a failed migration DRS leaves that guest alone for 15 minutes, doubling with each failure in a row up to 6 hours, and balances with other guests meanwhile. A completed DRS migration resets the count, and failures older than 7 days stop counting. The wait comes from the DRS history, so restarting Nexara does not clear it, and **Run Evaluation** does not skip it. To move the guest sooner, migrate it by hand; that does not reset the count.
 

@@ -159,6 +159,15 @@ func registerDRSEndpoints(reg *Registry, h *handlers.DRSHandler) {
 				Typetext:    "<integer>",
 				Description: "Seconds between scheduled evaluations. The scheduler refuses anything under 60.",
 			},
+			"boot_holdoff_minutes": {
+				Type:     apischema.Integer,
+				Optional: true,
+				Minimum:  apischema.Ptr(0.0),
+				Maximum:  apischema.Ptr(1440.0),
+				Typetext: "<integer>",
+				Description: "Minutes after a node boots during which DRS plans no move onto it or off it. " +
+					"0 turns it off. OMITTING this leaves the stored value alone; a new configuration gets 10.",
+			},
 			"include_containers": optFlag("Consider LXC containers as well as VMs when planning moves."),
 			"exclude_veeam_workers": optTristateBool(
 				"Pin the guests Veeam owns — worker appliances, and the VBR server where it runs on the " +

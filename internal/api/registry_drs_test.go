@@ -300,6 +300,8 @@ func TestDRSConfigBody(t *testing.T) {
 		{"missing threshold", `{"mode":"advisory","eval_interval_seconds":300}`, "imbalance_threshold:"},
 		{"interval under a minute", `{"mode":"advisory","imbalance_threshold":0.25,"eval_interval_seconds":59}`, "eval_interval_seconds:"},
 		{"interval past int32", `{"mode":"advisory","imbalance_threshold":0.25,"eval_interval_seconds":4294967296}`, "eval_interval_seconds:"},
+		{"hold-off past a day", `{"mode":"advisory","imbalance_threshold":0.25,"eval_interval_seconds":300,"boot_holdoff_minutes":1441}`, "boot_holdoff_minutes:"},
+		{"negative hold-off", `{"mode":"advisory","imbalance_threshold":0.25,"eval_interval_seconds":300,"boot_holdoff_minutes":-1}`, "boot_holdoff_minutes:"},
 		{"weights as an array", `{"mode":"advisory","weights":[1,2],"imbalance_threshold":0.25,"eval_interval_seconds":300}`, "weights:"},
 		{"a misspelled key", `{"mode":"advisory","imbalance_threshold":0.25,"eval_interval_seconds":300,"include_container":true}`, "include_container:"},
 	} {

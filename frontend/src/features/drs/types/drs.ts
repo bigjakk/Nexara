@@ -32,6 +32,8 @@ export interface DRSConfig {
    * to true.
    */
   exclude_veeam_workers: boolean;
+  /** Minutes after a node boots during which DRS plans no move onto or off it. 0 = off. */
+  boot_holdoff_minutes: number;
   created_at: string;
   updated_at: string;
   /** Proxmox native CRS state (PVE 9.2+); present when the cluster has CRS configured. */
@@ -45,6 +47,7 @@ export interface DRSConfigRequest {
   eval_interval_seconds: number;
   include_containers: boolean;
   exclude_veeam_workers: boolean;
+  boot_holdoff_minutes: number;
 }
 
 export type RuleSource = "manual" | "ha";
@@ -93,12 +96,20 @@ export interface NodeScore {
   mem_load: number;
 }
 
+/** A node DRS left out of planning because it booted less than the hold-off ago. */
+export interface HeldNode {
+  node: string;
+  uptime_seconds: number;
+  holdoff_seconds: number;
+}
+
 export interface EvaluateResponse {
   recommendations: DRSRecommendation[];
   count: number;
   node_scores: NodeScore[] | null;
   imbalance: number;
   threshold: number;
+  held_nodes?: HeldNode[];
   /** True when DRS automatic migrations were suppressed by Proxmox native CRS. */
   blocked?: boolean;
   block_reason?: string;

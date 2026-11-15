@@ -59,6 +59,7 @@ type drsConfigResponse struct {
 	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
 	IncludeContainers   bool            `json:"include_containers"`
 	ExcludeVeeamWorkers bool            `json:"exclude_veeam_workers"`
+	BootHoldoffMinutes  int32           `json:"boot_holdoff_minutes"`
 	CreatedAt           string          `json:"created_at"`
 	UpdatedAt           string          `json:"updated_at"`
 	// NativeCRS describes the cluster's Proxmox CRS dynamic load-balancer config
@@ -100,6 +101,16 @@ func optionalBool(v *bool) pgtype.Bool {
 	return pgtype.Bool{Bool: *v, Valid: true}
 }
 
+// optionalInt4 is optionalBool for an integer: an omitted key is SQL NULL, which
+// the upsert reads as "leave the stored value alone". The declaration bounds the
+// value to 0..1440, so the conversion cannot overflow.
+func optionalInt4(v int64, supplied bool) pgtype.Int4 {
+	if !supplied {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: safeconv.Int32(int(v)), Valid: true}
+}
+
 func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 	return drsConfigResponse{
 		ID:                  c.ID,
@@ -111,6 +122,7 @@ func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 		EvalIntervalSeconds: c.EvalIntervalSeconds,
 		IncludeContainers:   c.IncludeContainers,
 		ExcludeVeeamWorkers: c.ExcludeVeeamWorkers,
+		BootHoldoffMinutes:  c.BootHoldoffMinutes,
 		CreatedAt:           c.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:           c.UpdatedAt.Format(time.RFC3339Nano),
 	}
@@ -221,6 +233,7 @@ func (h *DRSHandler) GetConfig(c fiber.Ctx, p *apischema.Params) error {
 			EvalIntervalSeconds: 300,
 			IncludeContainers:   false,
 			ExcludeVeeamWorkers: true,
+			BootHoldoffMinutes:  10, // the column default (migration 000147)
 		}
 	} else {
 		resp = toDRSConfigResponse(cfg)
@@ -312,6 +325,8 @@ func (h *DRSHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error {
 		// A *bool, so that omitting the key leaves the stored value alone
 		// rather than writing false. See the comment on the declaration.
 		ExcludeVeeamWorkers: optionalBool(optBoolPtr(p.OptBool("exclude_veeam_workers"))),
+		// Omitted leaves the stored value alone, as above.
+		BootHoldoffMinutes: optionalInt4(p.OptInt("boot_holdoff_minutes")),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update DRS config")
@@ -326,6 +341,7 @@ func (h *DRSHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error {
 		"imbalance_threshold":   threshold,
 		"include_containers":    cfg.IncludeContainers,
 		"exclude_veeam_workers": cfg.ExcludeVeeamWorkers,
+		"boot_holdoff_minutes":  cfg.BootHoldoffMinutes,
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs", cfg.ID.String(), "config_update", details)
 
@@ -481,6 +497,7 @@ func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx, p *apischema.Params) error {
 			"recommendations": []any{},
 			"count":           0,
 			"node_scores":     []any{},
+			"held_nodes":      []any{},
 			"imbalance":       0,
 			"threshold":       0,
 		})
@@ -560,10 +577,22 @@ func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx, p *apischema.Params) error {
 		}
 	}
 
+	// The nodes left out of planning for their boot hold-off, so the panel can
+	// say why a node got no move.
+	type heldNodeResponse struct {
+		Node           string `json:"node"`
+		UptimeSeconds  int64  `json:"uptime_seconds"`
+		HoldoffSeconds int64  `json:"holdoff_seconds"`
+	}
+	heldNodes := []heldNodeResponse{}
+
 	// Build node scores for the response.
 	var nodeScores []nodeScoreResponse
 	var imbalance, threshold float64
 	if result != nil {
+		for _, h := range result.HeldNodes {
+			heldNodes = append(heldNodes, heldNodeResponse{Node: h.Node, UptimeSeconds: h.UptimeSeconds, HoldoffSeconds: h.HoldoffSeconds})
+		}
 		for _, s := range result.NodeScores {
 			nodeScores = append(nodeScores, nodeScoreResponse{
 				Node:    s.Node,
@@ -588,6 +617,7 @@ func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx, p *apischema.Params) error {
 		"recommendations": resp,
 		"count":           len(resp),
 		"node_scores":     nodeScores,
+		"held_nodes":      heldNodes,
 		"imbalance":       imbalance,
 		"threshold":       threshold,
 		// queued=true means an evaluation was queued for the scheduler

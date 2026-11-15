@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Panel } from "@/components/page/Panel";
 import {
@@ -28,6 +29,7 @@ interface DRSConfigCardProps {
 }
 
 export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
+  const { t } = useTranslation("clusters");
   const { data: config, isLoading } = useDRSConfig(clusterId);
   const updateConfig = useUpdateDRSConfig(clusterId);
   const nativeRebalance = config?.native_crs?.auto_rebalance ?? false;
@@ -37,6 +39,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   const [memWeight, setMemWeight] = useState(0.5);
   const [threshold, setThreshold] = useState(0.25);
   const [evalInterval, setEvalInterval] = useState(300);
+  const [bootHoldoff, setBootHoldoff] = useState(10);
   const [includeContainers, setIncludeContainers] = useState(false);
   // Armed by default, matching the column default: an unsaved form must not
   // be the thing that disarms it.
@@ -61,6 +64,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       }
       setThreshold(config.imbalance_threshold);
       setEvalInterval(config.eval_interval_seconds);
+      setBootHoldoff(config.boot_holdoff_minutes);
       setIncludeContainers(config.include_containers);
       setExcludeVeeamWorkers(config.exclude_veeam_workers);
     }
@@ -81,6 +85,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       weights: { cpu: cpuWeight, memory: memWeight },
       imbalance_threshold: threshold,
       eval_interval_seconds: evalInterval,
+      boot_holdoff_minutes: bootHoldoff,
       include_containers: includeContainers,
       exclude_veeam_workers: excludeVeeamWorkers,
     };
@@ -254,6 +259,27 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
         />
         <span className="whitespace-nowrap text-sm text-muted-foreground">
           seconds
+        </span>
+      </SettingRow>
+
+      <SettingRow
+        label={t("drsBootHoldoff")}
+        description={t("drsBootHoldoffDesc")}
+        htmlFor="boot-holdoff"
+      >
+        <Input
+          id="boot-holdoff"
+          type="number"
+          min={0}
+          max={1440}
+          className="w-32"
+          value={bootHoldoff}
+          onChange={(e) => {
+            setBootHoldoff(Number(e.target.value));
+          }}
+        />
+        <span className="whitespace-nowrap text-sm text-muted-foreground">
+          {t("drsBootHoldoffUnit")}
         </span>
       </SettingRow>
 

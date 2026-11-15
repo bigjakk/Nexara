@@ -21,17 +21,18 @@ const baseConfig: DRSConfig = {
   eval_interval_seconds: 300,
   include_containers: false,
   exclude_veeam_workers: true,
+  boot_holdoff_minutes: 10,
   created_at: "",
   updated_at: "",
 };
 
-function mockHooks(config: DRSConfig) {
+function mockHooks(config: DRSConfig, mutate = vi.fn()) {
   vi.mocked(useDRSConfig).mockReturnValue({
     data: config,
     isLoading: false,
   } as unknown as ReturnType<typeof useDRSConfig>);
   vi.mocked(useUpdateDRSConfig).mockReturnValue({
-    mutate: vi.fn(),
+    mutate,
     isPending: false,
     error: null,
   } as unknown as ReturnType<typeof useUpdateDRSConfig>);
@@ -74,5 +75,31 @@ describe("DRSConfigCard native-CRS coexistence", () => {
     expect(
       screen.queryByText(/native Dynamic Load Balancer is active/i),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("DRSConfigCard boot hold-off", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows the stored hold-off and saves the edited one", async () => {
+    const mutate = vi.fn();
+    mockHooks({ ...baseConfig, boot_holdoff_minutes: 15 }, mutate);
+    const user = userEvent.setup();
+    renderWithProviders(<DRSConfigCard clusterId="c1" />);
+
+    const input = screen.getByLabelText("Hold-off after a node boots");
+    expect(input).toHaveValue(15);
+    await user.clear(input);
+    await user.type(input, "0");
+    await user.click(
+      screen.getByRole("button", { name: /Save Configuration/i }),
+    );
+
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ boot_holdoff_minutes: 0 }),
+      expect.anything(),
+    );
   });
 });

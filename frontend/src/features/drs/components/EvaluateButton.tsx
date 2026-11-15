@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
 import { UsageBar } from "@/components/UsageBar";
 import { cn } from "@/lib/utils";
 import { usageLevel, USAGE_TEXT_CLASS } from "@/lib/usage-level";
+import { formatUptime } from "@/lib/format";
 import { useTriggerEvaluation } from "../api/drs-queries";
-import type { DRSRecommendation, NodeScore } from "../types/drs";
+import type { DRSRecommendation, HeldNode, NodeScore } from "../types/drs";
 import { Play, Loader2, AlertTriangle } from "lucide-react";
 
 interface EvaluateButtonProps {
@@ -40,9 +42,11 @@ function LoadBar({ value, label }: { value: number; label: string }) {
 }
 
 export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
+  const { t } = useTranslation("clusters");
   const evaluation = useTriggerEvaluation(clusterId);
   const [results, setResults] = useState<DRSRecommendation[] | null>(null);
   const [nodeScores, setNodeScores] = useState<NodeScore[] | null>(null);
+  const [heldNodes, setHeldNodes] = useState<HeldNode[]>([]);
   const [imbalance, setImbalance] = useState(0);
   const [threshold, setThreshold] = useState(0);
   const [evaluated, setEvaluated] = useState(false);
@@ -61,6 +65,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   const clearEvaluation = useCallback((didEvaluate: boolean) => {
     setResults(null);
     setNodeScores(null);
+    setHeldNodes([]);
     setImbalance(0);
     setThreshold(0);
     setBlocked(false);
@@ -81,6 +86,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
       onSuccess: (data) => {
         setResults(data.recommendations);
         setNodeScores(data.node_scores);
+        setHeldNodes(data.held_nodes ?? []);
         setImbalance(data.imbalance);
         setThreshold(data.threshold);
         setBlocked(data.blocked ?? false);
@@ -225,8 +231,22 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
               </p>
             )}
 
+            {/* Nodes in their boot hold-off: no move onto or off them */}
+            {heldNodes.map((h) => (
+              <p key={h.node} className="text-sm text-muted-foreground">
+                {t("drsHeldNode", {
+                  node: h.node,
+                  uptime:
+                    h.uptime_seconds < 60
+                      ? "<1m"
+                      : formatUptime(h.uptime_seconds),
+                  holdoff: Math.round(h.holdoff_seconds / 60),
+                })}
+              </p>
+            ))}
+
             {/* Imbalanced but no moves help */}
-            {isImbalancedNoMoves && (
+            {isImbalancedNoMoves && heldNodes.length === 0 && (
               <p className="text-sm text-muted-foreground">
                 Load variance ({pct(imbalance)}) exceeds the threshold (
                 {pct(threshold)}), but no single VM migration would improve the

@@ -131,3 +131,59 @@ func TestMigrationBackoff(t *testing.T) {
 		}
 	}
 }
+
+// A node that booted less than the hold-off ago is neither source nor target
+// (pve-01 holds VMs 101 and 102, pve-02 nothing, so a free plan moves 101). An
+// uptime of 0 is no reading and holds nothing; neither does a hold-off of 0.
+func TestEvaluate_LeavesANodeAloneAfterItBoots(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name             string
+		holdoff          int32
+		uptime1, uptime2 int64
+		want             []int
+		wantHeld         []string
+	}{
+		{name: "target booted 2 minutes ago", holdoff: 10, uptime1: 86400, uptime2: 120, wantHeld: []string{"pve-02"}},
+		{name: "source booted 2 minutes ago", holdoff: 10, uptime1: 120, uptime2: 86400, wantHeld: []string{"pve-01"}},
+		{name: "hold-off over", holdoff: 10, uptime1: 86400, uptime2: 600, want: []int{101}},
+		{name: "uptime unknown", holdoff: 10, want: []int{101}},
+		{name: "hold-off off", holdoff: 0, uptime1: 120, uptime2: 120, want: []int{101}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			handlers := evaluateHandlers()
+			handlers[nodesPath] = func(w http.ResponseWriter, _ *http.Request) {
+				haData(w, []proxmox.NodeListEntry{
+					{Node: "pve-01", Status: "online", MaxCPU: evalNodeMaxCPU, MaxMem: evalNodeMaxMem, Uptime: tc.uptime1},
+					{Node: "pve-02", Status: "online", MaxCPU: evalNodeMaxCPU, MaxMem: evalNodeMaxMem, Uptime: tc.uptime2},
+				})
+			}
+			handlers[node1QemuPath] = func(w http.ResponseWriter, _ *http.Request) {
+				haData(w, []proxmox.VirtualMachine{
+					{VMID: 101, Status: "running", CPU: 0.5, CPUs: 4, Mem: 8 << 30, MaxMem: 8 << 30},
+					{VMID: 102, Status: "running", CPU: 0.25, CPUs: 4, Mem: 4 << 30, MaxMem: 4 << 30},
+				})
+			}
+			handlers[node1VM102Cfg] = func(w http.ResponseWriter, _ *http.Request) { haData(w, proxmox.VMConfig{}) }
+			e, q, _ := newEvaluateEngine(t, handlers)
+			q.cfg.BootHoldoffMinutes = tc.holdoff
+
+			result, err := e.Evaluate(context.Background(), uuid.New())
+			if err != nil {
+				t.Fatalf("Evaluate: %v", err)
+			}
+			got := make([]int, 0, len(result.Recommendations))
+			for _, r := range result.Recommendations {
+				got = append(got, r.VMID)
+			}
+			held := make([]string, 0, len(result.HeldNodes))
+			for _, h := range result.HeldNodes {
+				held = append(held, h.Node)
+			}
+			if !slices.Equal(got, tc.want) || !slices.Equal(held, tc.wantHeld) {
+				t.Errorf("recommended %v with %v held, want %v with %v held", got, held, tc.want, tc.wantHeld)
+			}
+		})
+	}
+}

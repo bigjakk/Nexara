@@ -66,7 +66,7 @@ func (q *Queries) DeleteDRSRule(ctx context.Context, arg DeleteDRSRuleParams) (i
 }
 
 const getDRSConfig = `-- name: GetDRSConfig :one
-SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers, eval_requested_at, exclude_veeam_workers FROM drs_configs WHERE cluster_id = $1
+SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers, eval_requested_at, exclude_veeam_workers, boot_holdoff_minutes FROM drs_configs WHERE cluster_id = $1
 `
 
 func (q *Queries) GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error) {
@@ -85,6 +85,7 @@ func (q *Queries) GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsCon
 		&i.IncludeContainers,
 		&i.EvalRequestedAt,
 		&i.ExcludeVeeamWorkers,
+		&i.BootHoldoffMinutes,
 	)
 	return i, err
 }
@@ -370,7 +371,7 @@ func (q *Queries) ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsR
 }
 
 const listEnabledDRSConfigs = `-- name: ListEnabledDRSConfigs :many
-SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers, eval_requested_at, exclude_veeam_workers FROM drs_configs WHERE enabled = true AND mode != 'disabled'
+SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers, eval_requested_at, exclude_veeam_workers, boot_holdoff_minutes FROM drs_configs WHERE enabled = true AND mode != 'disabled'
 `
 
 func (q *Queries) ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error) {
@@ -395,6 +396,7 @@ func (q *Queries) ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error
 			&i.IncludeContainers,
 			&i.EvalRequestedAt,
 			&i.ExcludeVeeamWorkers,
+			&i.BootHoldoffMinutes,
 		); err != nil {
 			return nil, err
 		}
@@ -479,8 +481,9 @@ func (q *Queries) UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) (i
 }
 
 const upsertDRSConfig = `-- name: UpsertDRSConfig :one
-INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, include_containers, exclude_veeam_workers)
-VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::boolean, true))
+INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, include_containers, exclude_veeam_workers, boot_holdoff_minutes)
+VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::boolean, true),
+        COALESCE($9::integer, 10))
 ON CONFLICT (cluster_id) DO UPDATE SET
     mode = EXCLUDED.mode,
     enabled = EXCLUDED.enabled,
@@ -489,8 +492,9 @@ ON CONFLICT (cluster_id) DO UPDATE SET
     eval_interval_seconds = EXCLUDED.eval_interval_seconds,
     include_containers = EXCLUDED.include_containers,
     exclude_veeam_workers = COALESCE($8::boolean, drs_configs.exclude_veeam_workers),
+    boot_holdoff_minutes = COALESCE($9::integer, drs_configs.boot_holdoff_minutes),
     updated_at = now()
-RETURNING id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers, eval_requested_at, exclude_veeam_workers
+RETURNING id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers, eval_requested_at, exclude_veeam_workers, boot_holdoff_minutes
 `
 
 type UpsertDRSConfigParams struct {
@@ -502,15 +506,18 @@ type UpsertDRSConfigParams struct {
 	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
 	IncludeContainers   bool            `json:"include_containers"`
 	ExcludeVeeamWorkers pgtype.Bool     `json:"exclude_veeam_workers"`
+	BootHoldoffMinutes  pgtype.Int4     `json:"boot_holdoff_minutes"`
 }
 
-// exclude_veeam_workers is the only field a caller may OMIT, and omitting it
+// exclude_veeam_workers may be OMITTED by a caller, and omitting it
 // preserves whatever is stored rather than asserting a value. It defaults to
 // TRUE, so a plain boolean would read an absent key as false and let any
 // client that predates the field disarm the protection on its next save; and
 // forcing true instead would re-arm a flag an operator had deliberately turned
 // off, from a stale browser tab saving an unrelated threshold change. Neither
 // is a decision the caller made. A new row gets the armed default.
+// boot_holdoff_minutes is omittable for the same reason: a client predating it
+// must not reset it. A new row gets the column default of 10.
 func (q *Queries) UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error) {
 	row := q.db.QueryRow(ctx, upsertDRSConfig,
 		arg.ClusterID,
@@ -521,6 +528,7 @@ func (q *Queries) UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams
 		arg.EvalIntervalSeconds,
 		arg.IncludeContainers,
 		arg.ExcludeVeeamWorkers,
+		arg.BootHoldoffMinutes,
 	)
 	var i DrsConfig
 	err := row.Scan(
@@ -536,6 +544,7 @@ func (q *Queries) UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams
 		&i.IncludeContainers,
 		&i.EvalRequestedAt,
 		&i.ExcludeVeeamWorkers,
+		&i.BootHoldoffMinutes,
 	)
 	return i, err
 }

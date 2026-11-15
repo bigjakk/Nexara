@@ -174,3 +174,40 @@ describe("EvaluateButton failed evaluation", () => {
     expect(screen.queryByText(/Node Load Scores/i)).not.toBeInTheDocument();
   });
 });
+
+describe("EvaluateButton boot hold-off", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // A node in its hold-off is why no move was planned: say so instead of the
+  // generic "no single VM migration would improve the balance".
+  it("names a held node in place of the no-moves explanation", async () => {
+    mockEvaluation({
+      blocked: false,
+      recommendations: [],
+      count: 0,
+      node_scores: [
+        { node: "pve-01", score: 0.7, cpu_load: 0.7, mem_load: 0.7 },
+        { node: "pve-02", score: 0.1, cpu_load: 0.1, mem_load: 0.1 },
+      ],
+      held_nodes: [
+        { node: "pve-02", uptime_seconds: 180, holdoff_seconds: 600 },
+      ],
+      imbalance: 0.75,
+      threshold: 0.25,
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<EvaluateButton clusterId="c1" />);
+    await user.click(screen.getByRole("button", { name: /Run Evaluation/i }));
+
+    expect(
+      screen.getByText(
+        "pve-02 booted 3m ago, so DRS leaves it alone until its 10-minute hold-off ends.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/no single VM migration would improve the balance/i),
+    ).not.toBeInTheDocument();
+  });
+});

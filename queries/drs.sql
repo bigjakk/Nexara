@@ -3,15 +3,18 @@ SELECT * FROM drs_configs WHERE cluster_id = $1;
 
 -- name: UpsertDRSConfig :one
 --
--- exclude_veeam_workers is the only field a caller may OMIT, and omitting it
+-- exclude_veeam_workers may be OMITTED by a caller, and omitting it
 -- preserves whatever is stored rather than asserting a value. It defaults to
 -- TRUE, so a plain boolean would read an absent key as false and let any
 -- client that predates the field disarm the protection on its next save; and
 -- forcing true instead would re-arm a flag an operator had deliberately turned
 -- off, from a stale browser tab saving an unrelated threshold change. Neither
 -- is a decision the caller made. A new row gets the armed default.
-INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, include_containers, exclude_veeam_workers)
-VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(sqlc.narg('exclude_veeam_workers')::boolean, true))
+-- boot_holdoff_minutes is omittable for the same reason: a client predating it
+-- must not reset it. A new row gets the column default of 10.
+INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, include_containers, exclude_veeam_workers, boot_holdoff_minutes)
+VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(sqlc.narg('exclude_veeam_workers')::boolean, true),
+        COALESCE(sqlc.narg('boot_holdoff_minutes')::integer, 10))
 ON CONFLICT (cluster_id) DO UPDATE SET
     mode = EXCLUDED.mode,
     enabled = EXCLUDED.enabled,
@@ -20,6 +23,7 @@ ON CONFLICT (cluster_id) DO UPDATE SET
     eval_interval_seconds = EXCLUDED.eval_interval_seconds,
     include_containers = EXCLUDED.include_containers,
     exclude_veeam_workers = COALESCE(sqlc.narg('exclude_veeam_workers')::boolean, drs_configs.exclude_veeam_workers),
+    boot_holdoff_minutes = COALESCE(sqlc.narg('boot_holdoff_minutes')::integer, drs_configs.boot_holdoff_minutes),
     updated_at = now()
 RETURNING *;
 
