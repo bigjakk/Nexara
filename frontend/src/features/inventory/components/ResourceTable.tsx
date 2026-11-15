@@ -716,6 +716,18 @@ function buildColumns(
 
 const PAGE_SIZE = 25;
 
+/** The selection less any row not among `rows`; the same object when none goes. */
+function pruneSelection(
+  selection: RowSelectionState,
+  rows: InventoryRow[],
+): RowSelectionState {
+  const keys = new Set(rows.map((r) => r.key));
+  const kept = Object.entries(selection).filter(([key]) => keys.has(key));
+  return kept.length === Object.keys(selection).length
+    ? selection
+    : Object.fromEntries(kept);
+}
+
 interface ResourceTableProps {
   data: InventoryRow[];
   /**
@@ -813,6 +825,16 @@ export function ResourceTable({
   const handleQueryChange = useCallback((parsed: ParsedQuery) => {
     setQuery(parsed);
   }, []);
+
+  // The selection is always a subset of the rows in view: a row that leaves
+  // it (the search changed, or a guest stopped under status:running) is
+  // unticked, so it cannot come back ticked into a bulk action. Done while
+  // rendering, so no bulk action sees the stale selection in between.
+  const [selectionRows, setSelectionRows] = useState(filteredData);
+  if (selectionRows !== filteredData) {
+    setSelectionRows(filteredData);
+    setRowSelection((prev) => pruneSelection(prev, filteredData));
+  }
 
   // A new filter starts with nothing selected. A row ticked under the old
   // one may have left the view since (it was stopped while only running

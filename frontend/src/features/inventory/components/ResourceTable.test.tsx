@@ -132,6 +132,26 @@ describe("ResourceTable", () => {
     }
   });
 
+  // The same through the search, by a row leaving it while the search stays.
+  it("unticks a row that leaves the search's view", async () => {
+    const user = userEvent.setup();
+    const web = makeRow({ key: "c1:vm:1", name: "web-01", status: "running" });
+    const db = makeRow({ key: "c1:vm:2", name: "db-01", status: "stopped" });
+    const view = renderWithProviders(<ResourceTable data={[web, db]} />);
+    const search = screen.getByPlaceholderText(/Search/);
+    await user.type(search, "status:running");
+    await user.click(screen.getByRole("checkbox", { name: "Select row" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    view.rerender(<ResourceTable data={[{ ...web, status: "stopped" }, db]} />);
+    await user.clear(search);
+
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+    for (const box of screen.getAllByRole("checkbox", { name: "Select row" })) {
+      expect(box).not.toBeChecked();
+    }
+  });
+
   it("shows correct resource count", () => {
     const data = generateRows(50);
     renderWithProviders(<ResourceTable data={data} />);
