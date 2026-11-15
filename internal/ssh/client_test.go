@@ -297,6 +297,62 @@ func TestExecute_failsClosedOnHostKeyMismatch(t *testing.T) {
 	}
 }
 
+// ErrAuthRejected starts the sensor reads' login back-off, so it must mark a
+// login x/crypto/ssh reports refused, which it does only in text, and nothing
+// else: not a changed host key, not a port that refuses the connection.
+func TestExecute_marksOnlyARefusedLogin(t *testing.T) {
+	t.Parallel()
+	addr, hostKey, stop := newTestServer(t)
+	t.Cleanup(stop)
+	host, port := splitHostPort(t, addr)
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, closedPort := splitHostPort(t, closed.Addr().String())
+	_ = closed.Close()
+	_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
+	otherSigner, _ := ssh.NewSignerFromKey(otherPriv)
+	hangsUp, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hangsUp.Close() })
+	go func() {
+		for {
+			conn, err := hangsUp.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+	_, hangsUpPort := splitHostPort(t, hangsUp.Addr().String())
+
+	for _, tt := range []struct {
+		name     string
+		edit     func(*Config)
+		rejected bool
+	}{
+		{"a host that hangs up mid-handshake", func(c *Config) { c.Port = hangsUpPort }, false},
+		{"wrong password", func(c *Config) { c.Password = "nope" }, true},
+		{"changed host key", func(c *Config) { c.KnownHostKey = otherSigner.PublicKey() }, false},
+		{"connection refused", func(c *Config) { c.Port = closedPort }, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := Config{Host: host, Port: port, Username: "test-user", Password: "test-pass", KnownHostKey: hostKey}
+			tt.edit(&cfg)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, err := Execute(ctx, cfg, "echo ok")
+			if err == nil || errors.Is(err, ErrAuthRejected) != tt.rejected {
+				t.Errorf("Execute = %v, want an error with ErrAuthRejected %v", err, tt.rejected)
+			}
+		})
+	}
+}
+
 func TestParseAuthorizedKey_roundTrip(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	signer, _ := ssh.NewSignerFromKey(priv)

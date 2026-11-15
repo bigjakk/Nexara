@@ -1033,6 +1033,8 @@ func (h *RollingUpdateHandler) TestSSHConnection(c fiber.Ctx, p *apischema.Param
 		})
 	}
 
+	// A person's login that worked ends the back-off sensor reads are under.
+	rolling.ForgetSSHRejection(clusterID, nodeName)
 	return c.JSON(fiber.Map{
 		"success":     true,
 		"message":     "SSH connection successful",

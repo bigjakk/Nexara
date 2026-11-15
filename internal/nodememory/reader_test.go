@@ -102,6 +102,12 @@ func TestRunDue(t *testing.T) {
 			wantRun: true, wantStored: StatusError, wantReason: "could not be read", wantAudit: "store_failed",
 		},
 		{
+			// Answered from memory during the back-off: no login, so no audit
+			// row, no wait, and the next pass tries again.
+			name: "a held-back refusal dialed nothing", nodeStatus: "online",
+			err: rolling.ErrSSHLoginHeldBack, wantRun: true, wantStored: StatusUnavailable, wantReason: "refused the SSH login",
+		},
+		{
 			name: "an unclassified error says nothing of its detail", nodeStatus: "online", err: errors.New("SSH handshake with 192.0.2.10:22: unable to authenticate"),
 			wantRun: true, wantStored: StatusError, wantReason: "Could not read the memory layout",
 		},

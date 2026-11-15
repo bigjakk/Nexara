@@ -169,6 +169,15 @@ var errCaptureDone = errors.New("nexara/ssh: host key captured")
 // caller's limit. The session is closed at that point rather than read on.
 var ErrOutputTooLarge = errors.New("ssh: command output exceeded the limit")
 
+// ErrAuthRejected reports a login the host refused: every credential offered
+// was turned down. A timeout, a refused connection or a changed host key is
+// not one.
+var ErrAuthRejected = errors.New("ssh: the node refused the login")
+
+// authRejectedText is how x/crypto/ssh reports running out of auth methods
+// (client_auth.go); it has no error type for it.
+const authRejectedText = "ssh: unable to authenticate"
+
 // ErrNotRoot reports an account that logs in but is not root (RequireRoot).
 var ErrNotRoot = errors.New("ssh: the SSH user is not root")
 
@@ -354,6 +363,9 @@ func execute(ctx context.Context, cfg Config, command string, setupTimeout time.
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("SSH handshake with %s: %w", addr, ctxErr)
+		}
+		if strings.Contains(err.Error(), authRejectedText) {
+			return nil, fmt.Errorf("SSH handshake with %s: %w (%w)", addr, ErrAuthRejected, err)
 		}
 		return nil, fmt.Errorf("SSH handshake with %s: %w", addr, err)
 	}

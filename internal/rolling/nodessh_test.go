@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -31,6 +33,8 @@ func TestUnavailableReason(t *testing.T) {
 		{"an unpinned host key asks for Test Connection", fmt.Errorf("%w (192.0.2.10)", ErrHostKeyNotPinned), true, []string{"Test Connection"}},
 		{"an unknown node address blames the collector", fmt.Errorf("%w (node %q)", ErrNodeAddressUnknown, "pve-01"), true, []string{"collector"}},
 		{"a changed host key is named, and still logged", &sshpkg.HostKeyMismatchError{Host: "192.0.2.10"}, false, []string{"does not match the pinned one"}},
+		{"a held-back refusal says for how long, and is not logged", &heldBackError{remaining: 9*time.Minute + 40*time.Second}, true, []string{"refused the SSH login", "10 min", "Test Connection"}},
+		{"a refused login points at the credentials, and is still logged", fmt.Errorf("SSH handshake with 192.0.2.10:22: %w", sshpkg.ErrAuthRejected), false, []string{"refused the SSH login", "Test Connection"}},
 		{"anything else is generic", errors.New("dial 192.0.2.10:22: connect: connection refused"), false, []string{"Could not read the memory layout"}},
 	}
 	for _, tt := range tests {
@@ -259,5 +263,66 @@ func TestAdvanceUpgrading_WaitsOutAnSSHLookupThatFails(t *testing.T) {
 				t.Errorf("failures %q, want failed = %v", d.failures, tt.failed)
 			}
 		})
+	}
+}
+
+// A refused login is answered from memory for loginBackoffWindow instead of
+// dialling the node again; it ends at the window's end, on changed credentials
+// and on a success. A timeout or a refused connection starts nothing.
+func TestRunNodeCommand_BacksOffAfterARefusedLogin(t *testing.T) {
+	t.Parallel()
+	cluster := uuid.New()
+	answers := sshAnswers{
+		creds:   &db.ClusterSshCredential{ClusterID: cluster, Username: "root", Port: 22},
+		address: "192.0.2.11",
+		key:     testHostKey(t),
+	}
+	q := db.New(&memberDB{t: t, cluster: cluster, ssh: &answers})
+	now := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
+	backoff := newRejectionBackoff(func() time.Time { return now })
+	rejected := fmt.Errorf("SSH handshake with 192.0.2.11:22: %w", sshpkg.ErrAuthRejected)
+	run := func(answer error, during func()) (dialled bool, err error) {
+		_, err = runNodeCommand(context.Background(), q, "", cluster, sshNode, "true", 0, backoff,
+			func(context.Context, sshpkg.Config, string, int) (*sshpkg.ExecResult, error) {
+				dialled = true
+				if during != nil {
+					during()
+				}
+				if answer != nil {
+					return nil, answer
+				}
+				return &sshpkg.ExecResult{}, nil
+			})
+		return dialled, err
+	}
+
+	for _, step := range []struct {
+		name    string
+		before  func()
+		answer  error // what a dial answers
+		during  func()
+		dialled bool
+	}{
+		{"a refused login dials", nil, rejected, nil, true},
+		{"the next call does not", nil, nil, nil, false},
+		{"nor one just inside the window", func() { now = now.Add(loginBackoffWindow - time.Second) }, nil, nil, false},
+		{"the window's end dials again", func() { now = now.Add(time.Second) }, rejected, nil, true},
+		{"changed credentials dial at once", func() { answers.creds.UpdatedAt = now }, rejected, nil, true},
+		{"a moved node dials at once", func() { answers.address = "192.0.2.12" }, nil, nil, true},
+		{"a success clears a refusal made while it ran", nil, nil, func() { _, _ = run(rejected, nil) }, true},
+		{"so the next call dials, and times out", nil, context.DeadlineExceeded, nil, true},
+		{"a timeout starts nothing, so this dials, and is refused a connection", nil, syscall.ECONNREFUSED, nil, true},
+		{"nor does a refused connection", nil, nil, nil, true},
+	} {
+		if step.before != nil {
+			step.before()
+		}
+		dialled, err := run(step.answer, step.during)
+		if dialled != step.dialled {
+			t.Fatalf("%s: dialled = %v", step.name, dialled)
+		}
+		if !dialled && !errors.Is(err, ErrSSHLoginHeldBack) {
+			t.Fatalf("%s: held back with %v, want the remembered refusal", step.name, err)
+		}
 	}
 }

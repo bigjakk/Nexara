@@ -2,8 +2,12 @@ package rolling
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strconv"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -39,7 +43,23 @@ var (
 	// ErrHostKeyNotPinned means credentials exist but the node's host key was
 	// never pinned. Actionable: run Test Connection and confirm the fingerprint.
 	ErrHostKeyNotPinned = errors.New("the SSH host key for this node is not pinned")
+
+	// ErrSSHLoginHeldBack means the node refused a recent login and this call
+	// was answered from memory without dialling (RunNodeCommandLimited). It
+	// wraps sshpkg.ErrAuthRejected. Classified: no login happened, so nothing
+	// is audited as one.
+	ErrSSHLoginHeldBack = fmt.Errorf("%w recently, so it was not tried again", sshpkg.ErrAuthRejected)
 )
+
+// heldBackError is ErrSSHLoginHeldBack with how long the pause has left.
+type heldBackError struct{ remaining time.Duration }
+
+func (e *heldBackError) Error() string {
+	return fmt.Sprintf("%s; not tried again for %s, or until the SSH credentials are changed or Test Connection passes",
+		ErrSSHLoginHeldBack, e.remaining)
+}
+
+func (e *heldBackError) Unwrap() error { return ErrSSHLoginHeldBack }
 
 // UnavailableReason maps a RunNodeCommand failure to a sentence for the
 // operator that names what could not be read ("hardware temperatures", "the
@@ -62,6 +82,18 @@ func UnavailableReason(err error, what string) (reason string, classified bool) 
 		return "This node's SSH host key is not pinned. Open Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint.", true
 	case errors.Is(err, ErrNodeAddressUnknown):
 		return "No IP address is known for this node yet — the collector has not reported one.", true
+	case errors.Is(err, ErrSSHLoginHeldBack):
+		wait := "a few minutes"
+		var held *heldBackError
+		if errors.As(err, &held) {
+			wait = fmt.Sprintf("%d min", max(1, int(held.remaining.Round(time.Minute)/time.Minute)))
+		}
+		return "This node refused the SSH login, so Nexara is not trying it again for " + wait +
+			". Saving new credentials under Security → Rolling Updates → SSH Credentials, or a Test Connection that logs in, ends the pause.", true
+	case errors.Is(err, sshpkg.ErrAuthRejected):
+		// Unclassified so the caller still logs it: the first one is a real
+		// failed login, and a node's own lockout may follow.
+		return "This node refused the SSH login. Check the credentials under Security → Rolling Updates → SSH Credentials and run Test Connection.", false
 	case errors.As(err, &mismatch):
 		return "This node presented an SSH host key that does not match the pinned one. If it was not reinstalled, treat this as a possible interception; otherwise re-pin it under Security → Rolling Updates → SSH Credentials.", false
 	default:
@@ -84,15 +116,128 @@ func RunNodeCommand(ctx context.Context, queries *db.Queries, encryptionKey stri
 // RunNodeCommandLimited is RunNodeCommand keeping at most maxOutput bytes of
 // the command's stdout and of its stderr (sshpkg.ExecuteLimited); 0 keeps
 // Execute's default cap.
+//
+// After the node refuses the login (sshpkg.ErrAuthRejected), every caller gets
+// that refusal back without a dial for loginBackoffWindow, so a page polling a
+// node's sensors cannot add a failed login to the node's auth log every minute
+// and trip its lockout. Changed credentials, a changed node address, a success
+// or a passing Test Connection (ForgetSSHRejection) end it at once.
 func RunNodeCommandLimited(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName, command string, maxOutput int) (*sshpkg.ExecResult, error) {
-	cfg, err := NodeSSHConfig(ctx, queries, encryptionKey, clusterID, nodeName)
-	if err != nil {
-		return nil, err
-	}
+	return runNodeCommand(ctx, queries, encryptionKey, clusterID, nodeName, command, maxOutput, loginBackoff, executeSSH)
+}
+
+func executeSSH(ctx context.Context, cfg sshpkg.Config, command string, maxOutput int) (*sshpkg.ExecResult, error) {
 	if maxOutput > 0 {
 		return sshpkg.ExecuteLimited(ctx, cfg, command, maxOutput)
 	}
 	return sshpkg.Execute(ctx, cfg, command)
+}
+
+type sshExecFunc func(ctx context.Context, cfg sshpkg.Config, command string, maxOutput int) (*sshpkg.ExecResult, error)
+
+func runNodeCommand(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName, command string, maxOutput int, backoff *rejectionBackoff, exec sshExecFunc) (*sshpkg.ExecResult, error) {
+	cfg, stamp, err := nodeSSHConfig(ctx, queries, encryptionKey, clusterID, nodeName)
+	if err != nil {
+		return nil, err
+	}
+	key := nodeKey{clusterID, nodeName}
+	if err := backoff.held(key, stamp); err != nil {
+		return nil, err
+	}
+	res, err := exec(ctx, cfg, command, maxOutput)
+	switch {
+	case errors.Is(err, sshpkg.ErrAuthRejected):
+		backoff.remember(key, stamp)
+	case err == nil:
+		backoff.forget(key)
+	}
+	return res, err
+}
+
+// loginBackoffWindow is how long a refused login is answered from memory. Ten
+// minutes keeps a node to two failures in any fifteen, under pam_faillock's
+// default of three, and to one in fail2ban's default ten-minute window.
+const loginBackoffWindow = 10 * time.Minute
+
+// maxRememberedRejections bounds the map: one entry per node whose login was
+// refused, so a cap far above any estate's node count only matters if
+// something goes wrong.
+const maxRememberedRejections = 4096
+
+var loginBackoff = newRejectionBackoff(time.Now)
+
+// ForgetSSHRejection ends the back-off for a node, for a Test Connection that
+// logged in to it.
+func ForgetSSHRejection(clusterID uuid.UUID, nodeName string) {
+	loginBackoff.forget(nodeKey{clusterID, nodeName})
+}
+
+type nodeKey struct {
+	cluster uuid.UUID
+	node    string
+}
+
+// credStamp identifies the credentials and address a login used, without
+// holding either secret: a digest of the stored ciphertexts (re-encrypted with
+// a fresh nonce on every save), the account, the port, the row's updated_at
+// and the node's address.
+type credStamp [sha256.Size]byte
+
+type rejection struct {
+	stamp credStamp
+	until time.Time
+}
+
+// rejectionBackoff remembers which nodes refused a login, and until when. It
+// holds the error class only, never a password, key or passphrase.
+type rejectionBackoff struct {
+	mu      sync.Mutex
+	now     func() time.Time
+	entries map[nodeKey]rejection
+}
+
+func newRejectionBackoff(now func() time.Time) *rejectionBackoff {
+	return &rejectionBackoff{now: now, entries: map[nodeKey]rejection{}}
+}
+
+// held answers a remembered refusal for key, unless it has expired or the
+// credentials have changed since, in which case it is dropped.
+func (b *rejectionBackoff) held(key nodeKey, stamp credStamp) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	r, ok := b.entries[key]
+	if !ok {
+		return nil
+	}
+	now := b.now()
+	if r.stamp != stamp || !now.Before(r.until) {
+		delete(b.entries, key)
+		return nil
+	}
+	return &heldBackError{remaining: r.until.Sub(now).Round(time.Second)}
+}
+
+func (b *rejectionBackoff) remember(key nodeKey, stamp credStamp) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.now()
+	if _, ok := b.entries[key]; !ok && len(b.entries) >= maxRememberedRejections {
+		for k, r := range b.entries {
+			if !now.Before(r.until) {
+				delete(b.entries, k)
+			}
+		}
+		if len(b.entries) >= maxRememberedRejections {
+			return
+		}
+	}
+	b.entries[key] = rejection{stamp: stamp, until: now.Add(loginBackoffWindow)}
+}
+
+func (b *rejectionBackoff) forget(key nodeKey) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.entries, key)
 }
 
 // NodeSSHConfig resolves how to reach a node over SSH: the cluster's stored
@@ -104,28 +249,49 @@ func RunNodeCommandLimited(ctx context.Context, queries *db.Queries, encryptionK
 // the check before a drain then logs in with what it returns (sshReady).
 // A database error is ErrSSHLookup; a missing piece is its own sentinel.
 func NodeSSHConfig(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName string) (sshpkg.Config, error) {
+	cfg, _, err := nodeSSHConfig(ctx, queries, encryptionKey, clusterID, nodeName)
+	return cfg, err
+}
+
+func nodeSSHConfig(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName string) (sshpkg.Config, credStamp, error) {
+	cfg, creds, err := resolveNodeSSH(ctx, queries, encryptionKey, clusterID, nodeName)
+	if err != nil {
+		return sshpkg.Config{}, credStamp{}, err
+	}
+	h := sha256.New()
+	for _, part := range []string{creds.EncryptedPassword, creds.EncryptedPrivateKey, creds.Username,
+		strconv.Itoa(int(creds.Port)), creds.UpdatedAt.UTC().Format(time.RFC3339Nano), cfg.Host} {
+		h.Write([]byte(part))
+		h.Write([]byte{0})
+	}
+	var stamp credStamp
+	h.Sum(stamp[:0])
+	return cfg, stamp, nil
+}
+
+func resolveNodeSSH(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName string) (sshpkg.Config, db.ClusterSshCredential, error) {
 	creds, err := queries.GetClusterSSHCredentials(ctx, clusterID)
 	if err != nil {
 		// Only a genuinely absent row means "not configured". A database
 		// outage lands here too, and classifying that as a missing row would
 		// send the operator to add credentials that already exist.
 		if errors.Is(err, pgx.ErrNoRows) {
-			return sshpkg.Config{}, ErrSSHNotConfigured
+			return sshpkg.Config{}, db.ClusterSshCredential{}, ErrSSHNotConfigured
 		}
-		return sshpkg.Config{}, fmt.Errorf("%w: look up SSH credentials: %w", ErrSSHLookup, err)
+		return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("%w: look up SSH credentials: %w", ErrSSHLookup, err)
 	}
 
 	var password, privateKey string
 	if creds.EncryptedPassword != "" {
 		password, err = crypto.Decrypt(creds.EncryptedPassword, encryptionKey)
 		if err != nil {
-			return sshpkg.Config{}, fmt.Errorf("decrypt SSH password: %w", err)
+			return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("decrypt SSH password: %w", err)
 		}
 	}
 	if creds.EncryptedPrivateKey != "" {
 		privateKey, err = crypto.Decrypt(creds.EncryptedPrivateKey, encryptionKey)
 		if err != nil {
-			return sshpkg.Config{}, fmt.Errorf("decrypt SSH key: %w", err)
+			return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("decrypt SSH key: %w", err)
 		}
 	}
 
@@ -136,11 +302,11 @@ func NodeSSHConfig(ctx context.Context, queries *db.Queries, encryptionKey strin
 		Name:      nodeName,
 	})
 	if addrErr != nil && !errors.Is(addrErr, pgx.ErrNoRows) {
-		return sshpkg.Config{}, fmt.Errorf("%w: look up node address: %w", ErrSSHLookup, addrErr)
+		return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("%w: look up node address: %w", ErrSSHLookup, addrErr)
 	}
 	// Covers both a missing row and a row the collector has not filled in yet.
 	if sshHost == "" {
-		return sshpkg.Config{}, fmt.Errorf("%w (node %q; the collector hasn't reported it)", ErrNodeAddressUnknown, nodeName)
+		return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("%w (node %q; the collector hasn't reported it)", ErrNodeAddressUnknown, nodeName)
 	}
 
 	pinned, pinErr := queries.GetSSHKnownHost(ctx, db.GetSSHKnownHostParams{
@@ -150,13 +316,13 @@ func NodeSSHConfig(ctx context.Context, queries *db.Queries, encryptionKey strin
 	})
 	if pinErr != nil {
 		if !errors.Is(pinErr, pgx.ErrNoRows) {
-			return sshpkg.Config{}, fmt.Errorf("%w: look up pinned host key for %s: %w", ErrSSHLookup, sshHost, pinErr)
+			return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("%w: look up pinned host key for %s: %w", ErrSSHLookup, sshHost, pinErr)
 		}
-		return sshpkg.Config{}, fmt.Errorf("%w (%s) — open Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint", ErrHostKeyNotPinned, sshHost)
+		return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("%w (%s) — open Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint", ErrHostKeyNotPinned, sshHost)
 	}
 	knownKey, parseErr := sshpkg.ParseAuthorizedKey(pinned.PublicKey)
 	if parseErr != nil {
-		return sshpkg.Config{}, fmt.Errorf("stored SSH host key for %s is corrupt: %w — delete and re-pin", sshHost, parseErr)
+		return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("stored SSH host key for %s is corrupt: %w — delete and re-pin", sshHost, parseErr)
 	}
 
 	return sshpkg.Config{
@@ -166,5 +332,5 @@ func NodeSSHConfig(ctx context.Context, queries *db.Queries, encryptionKey strin
 		Password:     password,
 		PrivateKey:   privateKey,
 		KnownHostKey: knownKey,
-	}, nil
+	}, creds, nil
 }
