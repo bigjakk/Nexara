@@ -116,7 +116,9 @@ export function useResolveAlert() {
   return useMutation({
     mutationFn: (id: string) =>
       apiClient.post(apiPath`/api/v1/alerts/${id}/resolve`),
-    onSuccess: () => {
+    // Settled, not only succeeded: a resolve that lost the race to the engine
+    // answers 409, and the row must then show the state the alert is in.
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["alerts"] });
       void qc.invalidateQueries({ queryKey: ["alert-summary"] });
     },
