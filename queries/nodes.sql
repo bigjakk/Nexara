@@ -70,3 +70,16 @@ SELECT name, address, ssl_fingerprint, status FROM nodes WHERE cluster_id = $1 A
 -- name: UpdateNodeStatusFast :execrows
 UPDATE nodes SET status = $3, updated_at = now()
 WHERE cluster_id = $1 AND name = $2 AND status IS DISTINCT FROM $3;
+
+-- DeleteClusterNodes removes the node rows the collector found the cluster no
+-- longer lists as members (Syncer.pruneRemovedNodes), with what cascades from
+-- them: the node's guests, storage and hardware rows. Never the cluster's
+-- every row: unless a row of the cluster outside @ids remains, the statement
+-- deletes nothing, whatever the caller asked.
+-- name: DeleteClusterNodes :many
+DELETE FROM nodes
+WHERE nodes.cluster_id = @cluster_id
+  AND nodes.id = ANY(@ids::uuid[])
+  AND EXISTS (SELECT 1 FROM nodes kept
+              WHERE kept.cluster_id = nodes.cluster_id AND NOT (kept.id = ANY(@ids::uuid[])))
+RETURNING id, name;

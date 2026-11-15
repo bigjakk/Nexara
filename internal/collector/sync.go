@@ -152,6 +152,7 @@ type SyncQueries interface {
 	UpsertStoragePool(ctx context.Context, arg db.UpsertStoragePoolParams) (db.UpsertStoragePoolRow, error)
 	DeleteStaleStoragePools(ctx context.Context, arg db.DeleteStaleStoragePoolsParams) (int64, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
+	DeleteClusterNodes(ctx context.Context, arg db.DeleteClusterNodesParams) ([]db.DeleteClusterNodesRow, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
 	DeleteStaleVMsForNodes(ctx context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error)
 	UpdateNodeAddress(ctx context.Context, arg db.UpdateNodeAddressParams) error
@@ -342,6 +343,7 @@ type Syncer struct {
 	backupLogTimeouts    sync.Map                // backup job UPID → reads of its log that ran out their own time
 	cephMu               sync.Mutex              // guards cephSeen
 	cephSeen             map[uuid.UUID]*cephSeen // each cluster's last Ceph reading, for the change diff
+	nodeAbsent           sync.Map                // cluster ID → map[string]bool: the nodes the last membership reading lacked (pruneRemovedNodes)
 
 	// objectObserveInterval is OBJECT_OBSERVE_INTERVAL, which bounds how far
 	// back an observed change's explanation is looked for (observedLookback).
@@ -526,6 +528,8 @@ func (s *Syncer) SetHealthMonitor(h *HealthMonitor) {
 func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterMetricResult, error) {
 	client, err := s.proxmoxClient(ctx, cluster)
 	if err != nil {
+		// No reading: the next one that lacks a node is the first in a row.
+		s.nodeAbsent.Delete(cluster.ID)
 		return nil, fmt.Errorf("sync cluster %s: %w", cluster.ID, err)
 	}
 	s.reportEndpointSubstitution(ctx, cluster)
@@ -539,6 +543,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		// retried; auth/permission errors surface unchanged.
 		failClient, failNodes, ok := s.failoverCluster(ctx, cluster, err)
 		if !ok {
+			s.nodeAbsent.Delete(cluster.ID)
 			return nil, fmt.Errorf("sync cluster %s: get nodes: %w", cluster.ID, err)
 		}
 		client, nodes = failClient, failNodes
@@ -687,8 +692,11 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		}
 	}
 
-	// Update node addresses + quorum status from corosync cluster status.
-	s.syncNodeAddresses(ctx, client, cluster.ID)
+	// Update node addresses + quorum status from corosync cluster status, and
+	// remove the rows of nodes the cluster no longer lists as members.
+	clusterStatus, statusErr := client.GetClusterStatus(ctx)
+	s.syncNodeAddresses(ctx, cluster.ID, clusterStatus, statusErr)
+	nodesRemoved := s.pruneRemovedNodes(ctx, cluster, nodes, clusterStatus, statusErr)
 
 	// Collect storage-replication job status.
 	s.syncReplication(ctx, client, cluster.ID)
@@ -706,7 +714,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// Check for inventory changes: VM status/placement/identity, node state,
 	// and storage activation. Anything detected ORs into inventoryChanged,
 	// which publishes a single inventory_change at the end of the pass.
-	inventoryChanged := storageAdded
+	inventoryChanged := storageAdded || nodesRemoved
 	if s.eventPub != nil {
 		if oldVMs == nil {
 			inventoryChanged = true
@@ -1672,9 +1680,9 @@ func (s *Syncer) markPBSJobBaseline(ctx context.Context, server db.PbsServer, jo
 	}
 }
 
-// syncNodeAddresses fetches corosync cluster status and updates node IP addresses.
-func (s *Syncer) syncNodeAddresses(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID) {
-	entries, err := client.GetClusterStatus(ctx)
+// syncNodeAddresses updates node IP addresses and quorum from the corosync
+// cluster status.
+func (s *Syncer) syncNodeAddresses(ctx context.Context, clusterID uuid.UUID, entries []proxmox.ClusterStatusEntry, err error) {
 	if err != nil {
 		s.logger.Debug("failed to get cluster status for node addresses", "cluster_id", clusterID, "error", err)
 		return

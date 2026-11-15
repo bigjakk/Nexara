@@ -385,6 +385,17 @@ func (m *mockQueries) DeleteVMsAbsentFromCluster(_ context.Context, arg db.Delet
 	return removed, nil
 }
 
+func (m *mockQueries) DeleteClusterNodes(_ context.Context, arg db.DeleteClusterNodesParams) ([]db.DeleteClusterNodesRow, error) {
+	var out []db.DeleteClusterNodesRow
+	for k, n := range m.nodes {
+		if n.ClusterID == arg.ClusterID && slices.Contains(arg.Ids, n.ID) {
+			delete(m.nodes, k)
+			out = append(out, db.DeleteClusterNodesRow{ID: n.ID, Name: n.Name})
+		}
+	}
+	return out, nil
+}
+
 func (m *mockQueries) DeleteStaleVMsForNodes(_ context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error) {
 	m.deleteStaleVMsForNodesCalls = append(m.deleteStaleVMsForNodesCalls, arg)
 	return m.deleteStaleVMsForNodesRemoved, nil

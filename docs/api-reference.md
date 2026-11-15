@@ -958,9 +958,10 @@ leaves provenance intact.
 > case included. A node that has just joined the Proxmox cluster is refused
 > until Nexara's next collection pass records it; passes run every
 > `METRICS_COLLECT_INTERVAL` (10 seconds in the Docker deployment, 30 when
-> unset). Nexara keeps a node it has recorded after it leaves the cluster, so
-> what is refused is a name Nexara never recorded for the cluster — which
-> includes a node that left before Nexara first collected it.
+> unset). A node removed from the Proxmox cluster (`pvecm delnode`) is dropped
+> once two passes in a row read the cluster's node list and status cleanly and
+> neither lists it; from then on its name is refused too. An offline node is
+> still a member and stays. See [Node removal](admin-guide.md#node-removal).
 >
 > Node names stored for later are checked again each time they are used, and
 > one the cluster does not hold is never contacted: a schedule's run fails with

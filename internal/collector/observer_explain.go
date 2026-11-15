@@ -730,7 +730,7 @@ var observedActionsExplainingNothing = map[string][]string{
 	"network": {"network_applied"},
 	"node": {"acme_register", "apt_update", "create_directory", "create_lvm", "create_lvmthin", "create_zfs_pool",
 		"delete_lvm", "delete_lvmthin", "delete_zfs_pool", "download", "download_report", "evacuate", "image_copy",
-		"initialize_gpt", "node_maintenance_enter", "node_maintenance_exit", "read_memory_modules", "reboot",
+		"initialize_gpt", "node_maintenance_enter", "node_maintenance_exit", "node_removed", "read_memory_modules", "reboot",
 		"service_reload", "shutdown", "start_all", "stop_all", "wipe_disk"},
 	"usb_mapping": {"already_deleted"},
 	"pci_mapping": {"already_deleted"},

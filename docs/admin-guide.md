@@ -279,6 +279,12 @@ A node's tabs are **Summary**, **VMs**, **Network**, **Disks**, **Services**, **
 
 **Updates.** **Pending updates** with [**Update this node**](#updating-a-single-node-in-place) (`view:rolling_update` and `manage:rolling_update`), and **APT Repositories**, which switches repositories on and off and adds the standard Proxmox ones (`view:apt_repository` and `manage:apt_repository`).
 
+### Node Removal
+
+Nexara's nodes follow the Proxmox cluster's members. A node removed with `pvecm delnode` leaves Nexara after two collection passes in a row that each read the cluster's node list and status, find them in agreement, find the cluster quorate, and do not list the node. Open pages drop it, and the audit log records `node_removed` by the system. An offline node is still a member and stays. A pass that fails, gets an empty or disagreeing answer, reaches a node that is not part of a cluster, or would remove every node removes nothing and starts the count again. The token needs `Sys.Audit` on `/` to read the cluster status; without it no node is ever removed.
+
+The node's guests, storage and hardware rows go with it. Proxmox keeps a removed node's guest configurations under `/etc/pve/nodes/<node>/` and goes on listing those guests on that node, so move their configurations to a member and they come back as usual. The node's CVE scan results, alert rules and alerts, maintenance windows, metrics, audit entries and tasks stay. A node that rejoins appears again on the next pass, as a new node: its alert rules and maintenance windows do not follow it back.
+
 ---
 
 ## Node Options

@@ -45,6 +45,50 @@ func (q *Queries) CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeSt
 	return items, nil
 }
 
+const deleteClusterNodes = `-- name: DeleteClusterNodes :many
+DELETE FROM nodes
+WHERE nodes.cluster_id = $1
+  AND nodes.id = ANY($2::uuid[])
+  AND EXISTS (SELECT 1 FROM nodes kept
+              WHERE kept.cluster_id = nodes.cluster_id AND NOT (kept.id = ANY($2::uuid[])))
+RETURNING id, name
+`
+
+type DeleteClusterNodesParams struct {
+	ClusterID uuid.UUID   `json:"cluster_id"`
+	Ids       []uuid.UUID `json:"ids"`
+}
+
+type DeleteClusterNodesRow struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// DeleteClusterNodes removes the node rows the collector found the cluster no
+// longer lists as members (Syncer.pruneRemovedNodes), with what cascades from
+// them: the node's guests, storage and hardware rows. Never the cluster's
+// every row: unless a row of the cluster outside @ids remains, the statement
+// deletes nothing, whatever the caller asked.
+func (q *Queries) DeleteClusterNodes(ctx context.Context, arg DeleteClusterNodesParams) ([]DeleteClusterNodesRow, error) {
+	rows, err := q.db.Query(ctx, deleteClusterNodes, arg.ClusterID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DeleteClusterNodesRow{}
+	for rows.Next() {
+		var i DeleteClusterNodesRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getNode = `-- name: GetNode :one
 SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version, swap_total, swap_used, swap_free, dns_servers, dns_search, timezone, subscription_status, subscription_level, load_avg, io_wait, ha_state, rootfs_used FROM nodes WHERE id = $1
 `

@@ -600,6 +600,12 @@ type Querier interface {
 	// caller can clear those users' cached permissions, which would otherwise keep the
 	// grant for up to five minutes after the rows are gone.
 	DeleteClusterAndScopedRoles(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error)
+	// DeleteClusterNodes removes the node rows the collector found the cluster no
+	// longer lists as members (Syncer.pruneRemovedNodes), with what cascades from
+	// them: the node's guests, storage and hardware rows. Never the cluster's
+	// every row: unless a row of the cluster outside @ids remains, the statement
+	// deletes nothing, whatever the caller asked.
+	DeleteClusterNodes(ctx context.Context, arg DeleteClusterNodesParams) ([]DeleteClusterNodesRow, error)
 	// DeleteClusterObjectState drops what the observer holds of a kind's objects —
 	// a guest that left the inventory, the HA groups Proxmox VE 9 migrated to
 	// rules. Nothing is recorded for them.
