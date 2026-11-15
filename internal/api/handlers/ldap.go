@@ -38,6 +38,15 @@ type LDAPHandler struct {
 	encryptionKey string
 	rbac          *auth.RBACEngine
 	eventPub      *events.Publisher
+
+	// directory, when set, replaces auth.NewLDAPClient as Sync's directory; only
+	// tests set it, to answer a search without an LDAP server.
+	directory func(auth.LDAPConfig) ldapDirectory
+}
+
+// ldapDirectory is the part of *auth.LDAPClient that Sync asks.
+type ldapDirectory interface {
+	SearchUser(username string) (*auth.LDAPUser, error)
 }
 
 // NewLDAPHandler creates a new LDAP handler.
@@ -528,7 +537,10 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to build LDAP config: "+err.Error())
 	}
 
-	client := auth.NewLDAPClient(ldapCfg)
+	var client ldapDirectory = auth.NewLDAPClient(ldapCfg)
+	if h.directory != nil {
+		client = h.directory(ldapCfg)
+	}
 
 	// Get all LDAP users from DB
 	ldapUsers, err := h.queries.ListLDAPUsers(c.Context())
@@ -555,6 +567,16 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 					ID:       dbUser.ID,
 					IsActive: false,
 				})
+				// And end the sessions, as an admin's deactivation does: flipping
+				// is_active only suspends them, and the re-enable below — which a
+				// directory outage read as "gone" leads to — would revive every one
+				// with no sign-in. After the flip, as separate statements: a sign-in
+				// racing it is refused by CreateSessionAtEpoch's is_active, and every
+				// session older than the flip is listed and revoked here.
+				if _, err := auth.RevokeAllUserSessionsIn(c.Context(), h.queries, dbUser.ID); err != nil {
+					slog.Error("LDAP sync: disabled a user but could not end their sessions; the sync that re-enables them retries it",
+						"user_id", dbUser.ID, "error", err)
+				}
 				disabled++
 				slog.Info("LDAP sync: disabled user removed from directory", "email", dbUser.Email)
 			}
@@ -563,6 +585,14 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 
 		// User exists in directory — re-enable if previously disabled
 		if !dbUser.IsActive {
+			// End any session left from before the deactivation first: the revoke
+			// above may have failed, and nothing else retries it. A no-op when they
+			// are already ended; if it fails, the user stays disabled for the next sync.
+			if _, err := auth.RevokeAllUserSessionsIn(c.Context(), h.queries, dbUser.ID); err != nil {
+				slog.Error("LDAP sync: could not end a disabled user's old sessions; leaving the user disabled",
+					"user_id", dbUser.ID, "error", err)
+				continue
+			}
 			_ = h.queries.SetLDAPUserActive(c.Context(), db.SetLDAPUserActiveParams{
 				ID:       dbUser.ID,
 				IsActive: true,

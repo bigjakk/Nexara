@@ -690,7 +690,7 @@ The **Test Connection** panel appears only once the config is saved, and tests t
 
 > **StartTLS needs Skip TLS Verify today.** With verification on, Nexara starts the TLS handshake with no server name and it fails. Use `ldaps://` to keep the certificate checked.
 >
-> **Sync is manual.** The **Sync Interval (minutes)** field is stored, but nothing runs it: only **Sync Now** syncs. A sync disables a user the search does not find, and that includes any search error, such as a directory outage; a later sync re-enables anyone still in the directory, including someone you deactivated by hand.
+> **Sync is manual.** The **Sync Interval (minutes)** field is stored, but nothing runs it: only **Sync Now** syncs. A sync disables a user the search does not find, and ends their sessions, and that includes any search error, such as a directory outage; a later sync re-enables anyone still in the directory, including someone you deactivated by hand.
 
 #### How LDAP Login Works
 

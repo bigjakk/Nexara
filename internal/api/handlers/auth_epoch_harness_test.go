@@ -48,6 +48,8 @@ type epochStore struct {
 
 	// oidcConfig is what GetEnabledOIDCConfig answers; nil is no enabled configuration.
 	oidcConfig *db.OidcConfig
+	// ldapConfig is what GetLDAPConfig answers, for any id; nil is none.
+	ldapConfig *db.LdapConfig
 }
 
 func newEpochStore(users ...db.User) *epochStore {
@@ -166,6 +168,16 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "RevokeAllUserRoles":
 		return pgconn.NewCommandTag("DELETE 0"), nil
+	case "SetLDAPUserActive":
+		// id, is_active: only for an LDAP account, as the SQL's WHERE.
+		if u, ok := s.users[args[0].(uuid.UUID)]; ok && u.AuthSource == "ldap" {
+			was := u.IsActive
+			remember(func() { u.IsActive = was })
+			u.IsActive = args[1].(bool)
+		}
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case "UpdateLDAPConfigLastSync":
+		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "DeleteRecoveryCode":
 		id := args[0].(uuid.UUID)
 		for uid, codes := range s.recoveryCodes {
@@ -296,6 +308,11 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		}
 		s.sessions = append(s.sessions, sess)
 		return authFakeRow{value: sess}
+	case "GetLDAPConfig":
+		if s.ldapConfig == nil {
+			return authFakeRow{err: pgx.ErrNoRows}
+		}
+		return authFakeRow{value: *s.ldapConfig}
 	case "GetEnabledOIDCConfig":
 		if s.oidcConfig == nil {
 			return authFakeRow{err: pgx.ErrNoRows}
@@ -338,6 +355,15 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 		items := make([]any, 0, len(codes))
 		for _, rc := range codes {
 			items = append(items, rc)
+		}
+		return &authFakeRows{items: items}, nil
+	case "ListLDAPUsers":
+		var items []any
+		for _, u := range s.users {
+			if u.AuthSource == "ldap" {
+				items = append(items, db.ListLDAPUsersRow{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName,
+					Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource})
+			}
 		}
 		return &authFakeRows{items: items}, nil
 	case "ListUserSessions":
