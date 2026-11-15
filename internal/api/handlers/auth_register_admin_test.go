@@ -238,7 +238,7 @@ func TestRegister_TheTransactionTakesTheAdvisoryLockBeforeItCounts(t *testing.T)
 				names = append(names, st.name)
 			}
 		}
-		if want := []string{"SELECT", "CountUsers", "CreateUser"}; !reflect.DeepEqual(names, want) {
+		if want := []string{"SELECT", "CountUsers", "EmailTakenIgnoringCase", "CreateUser"}; !reflect.DeepEqual(names, want) {
 			t.Fatalf("the registration transaction ran %v, want %v: the advisory lock first, then the count, then the account", names, want)
 		}
 		if lock.sql != registerLockSQL {

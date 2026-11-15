@@ -110,6 +110,20 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const emailTakenIgnoringCase = `-- name: EmailTakenIgnoringCase :one
+SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower($1::text))
+`
+
+// Whether an account already has this address in any case: a new account whose
+// address differs from an existing one only by case is refused as a duplicate. There
+// is no unique index to say so (existing installs may hold such pairs).
+func (q *Queries) EmailTakenIgnoringCase(ctx context.Context, email string) (bool, error) {
+	row := q.db.QueryRow(ctx, emailTakenIgnoringCase, email)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const getPasswordHashForSettle = `-- name: GetPasswordHashForSettle :one
 SELECT password_hash FROM users WHERE id = $1 FOR SHARE
 `
@@ -135,9 +149,17 @@ func (q *Queries) GetPasswordHashForSettle(ctx context.Context, id uuid.UUID) (s
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory FROM users WHERE email = $1
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory FROM users
+WHERE users.email = $1::text
+   OR (lower(users.email) = lower($1::text)
+       AND (SELECT count(*) FROM users y WHERE lower(y.email) = lower($1::text)) = 1)
 `
 
+// The account an address names, ignoring case: the account spelled exactly so, else
+// the one account whose address differs from it only by case. Two accounts that differ
+// only by case are both kept, unmerged, and each answers to its own exact spelling; a
+// spelling that matches both only by case names neither. idx_users_email_lower serves
+// the case-insensitive half.
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i User

@@ -872,6 +872,10 @@ type Querier interface {
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	// Removing a node feed keeps the row, so the node's login does not find it again.
 	DismissUpsNodeFeed(ctx context.Context, arg DismissUpsNodeFeedParams) (UpsFeed, error)
+	// Whether an account already has this address in any case: a new account whose
+	// address differs from an existing one only by case is refused as a duplicate. There
+	// is no unique index to say so (existing installs may hold such pairs).
+	EmailTakenIgnoringCase(ctx context.Context, email string) (bool, error)
 	// A job that was created and never started holds nothing on the cluster (DRS,
 	// the rebalancer and HA rules are first touched on its first running tick), but
 	// it counts as active, so it blocks every later job on its cluster, and the
@@ -1271,7 +1275,14 @@ type Querier interface {
 	// the UPS was on battery at any point. The values come through a LEFT JOIN to
 	// a CTE so that sqlc types them nullable (see GetNodePressure).
 	GetUpsMetricSeries(ctx context.Context, arg GetUpsMetricSeriesParams) ([]GetUpsMetricSeriesRow, error)
+	// The account an address names, ignoring case: the account spelled exactly so, else
+	// the one account whose address differs from it only by case. Two accounts that differ
+	// only by case are both kept, unmerged, and each answers to its own exact spelling; a
+	// spelling that matches both only by case names neither. idx_users_email_lower serves
+	// the case-insensitive half.
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	// GetUserByEmail's match (exact spelling first, else the one account differing only by
+	// case), of the given source.
 	GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]GetUserPermissionsRow, error)

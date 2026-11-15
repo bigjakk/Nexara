@@ -623,6 +623,16 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		}
 	}
 
+	// An address that differs from an account's only by case is that account's: refused
+	// as a duplicate, under the advisory lock, so two registrations cannot both pass.
+	taken, err := q.EmailTakenIgnoringCase(c.Context(), req.Email)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check the email address")
+	}
+	if taken {
+		return fiber.NewError(fiber.StatusConflict, "Email already registered")
+	}
+
 	// Admin gate passed (or this is the first user). Hash the password now.
 	// Note: bcrypt runs while we still hold the advisory lock and a pool
 	// connection. That's deliberate — non-admin attempts were already
@@ -993,18 +1003,30 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 			return db.User{}, false
 		}
 
-		// JIT provision
-		displayName := ldapUser.DisplayName
-		if displayName == "" {
-			displayName = userEmail
+		// JIT provision, unless another account already has the address in some case: a
+		// new account must not differ from an existing one only by case. That is refused
+		// like the duplicate key below, by the same second lookup, which finds the account
+		// a concurrent sign-in of this user created and nothing else.
+		taken, takenErr := h.queries.EmailTakenIgnoringCase(c.Context(), userEmail)
+		if takenErr != nil {
+			slog.Warn("ldap login: failed to check the address", "error", takenErr)
+			return db.User{}, false
 		}
-		user, err = h.queries.CreateLDAPUser(c.Context(), db.CreateLDAPUserParams{
-			Email:       userEmail,
-			DisplayName: displayName,
-		})
+		if taken {
+			err = errEmailTakenInAnotherCase
+		} else {
+			displayName := ldapUser.DisplayName
+			if displayName == "" {
+				displayName = userEmail
+			}
+			user, err = h.queries.CreateLDAPUser(c.Context(), db.CreateLDAPUserParams{
+				Email:       userEmail,
+				DisplayName: displayName,
+			})
+		}
 		if err != nil {
 			// Handle race condition: another concurrent request may have created this user
-			if isDuplicateKeyError(err) {
+			if isDuplicateKeyError(err) || errors.Is(err, errEmailTakenInAnotherCase) {
 				user, err = h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
 					Email:      userEmail,
 					AuthSource: "ldap",
@@ -1042,6 +1064,10 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 
 	return user, true
 }
+
+// errEmailTakenInAnotherCase is a directory account not provisioned because another
+// account has its address, spelled differently only in case.
+var errEmailTakenInAnotherCase = errors.New("an account has this address in another case")
 
 // signInSupersededMessage is what a sign-in says when its session was refused: the
 // user's sessions were ended — by a password change, a sign-out of all devices or

@@ -61,6 +61,12 @@ so no browser or proxy cache keeps a token or a read.
    Body: { "email": "admin@example.com", "password": "..." }
    Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": ["view:cluster", ...], "global_permissions": [...] }
    ```
+   The address is matched ignoring case: the account spelled exactly so, else the one
+   account whose address differs only by case (two accounts that differ only by case
+   each answer to their own spelling). Typing it in another case spends the same
+   sign-in budget. A registration whose address differs from an existing account's only
+   by case is refused `409`, like a duplicate.
+
    The refresh token is **never** returned in the body — it is set as an
    HttpOnly, SameSite=Strict cookie, and the `refresh_token` response field is
    always an empty string (retained only so the response shape stays stable).

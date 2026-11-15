@@ -280,7 +280,11 @@ func (q *Queries) GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, 
 }
 
 const getUserByEmailAndSource = `-- name: GetUserByEmailAndSource :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory FROM users WHERE email = $1 AND auth_source = $2
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory FROM users
+WHERE (users.email = $1::text
+       OR (lower(users.email) = lower($1::text)
+           AND (SELECT count(*) FROM users y WHERE lower(y.email) = lower($1::text)) = 1))
+  AND users.auth_source = $2
 `
 
 type GetUserByEmailAndSourceParams struct {
@@ -288,6 +292,8 @@ type GetUserByEmailAndSourceParams struct {
 	AuthSource string `json:"auth_source"`
 }
 
+// GetUserByEmail's match (exact spelling first, else the one account differing only by
+// case), of the given source.
 func (q *Queries) GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmailAndSource, arg.Email, arg.AuthSource)
 	var i User

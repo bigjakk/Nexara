@@ -701,7 +701,7 @@ The **Test Connection** panel appears only once the config is saved, and tests t
 #### How LDAP Login Works
 
 1. User enters their email and password on the login page
-2. Nexara looks the address up locally first:
+2. Nexara looks the address up locally first, ignoring case (an exact spelling wins; two accounts that differ only by case are kept apart, each signing in with its own spelling). A directory user is not provisioned when another account has their address in another case:
    - **no local user** — and LDAP is enabled: the credentials go to LDAP, and a successful bind provisions the account (JIT)
    - **local user with `auth_source=ldap`** — the credentials go to LDAP
    - **local user with `auth_source=local`** — the password is checked against the stored hash and LDAP is never contacted, so a local account shadows a directory account with the same address

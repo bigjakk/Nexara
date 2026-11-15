@@ -139,3 +139,40 @@ func TestLDAPSyncState_SQL(t *testing.T) {
 		}
 	})
 }
+
+// TestUserByEmail_IgnoresCaseWhenUnique: an address names the account spelled exactly so,
+// else the one account differing only by case; a pair that differs only by case is kept,
+// each answering to its own spelling and neither to a third. The lookup has its index.
+func TestUserByEmail_IgnoresCaseWhenUnique(t *testing.T) {
+	directoryTx(t, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) {
+		for _, e := range []string{"Carol@example.com", "dave@example.com", "DAVE@example.com"} {
+			if _, err := tx.Exec(ctx, `INSERT INTO users (email, password_hash, display_name) VALUES ($1, '', 'x')`, e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for typed, want := range map[string]string{
+			"carol@EXAMPLE.com": "Carol@example.com",
+			"DAVE@example.com":  "DAVE@example.com",
+			"dave@example.com":  "dave@example.com",
+			"Dave@example.com":  "",
+		} {
+			u, err := q.GetUserByEmail(ctx, typed)
+			if want == "" && !errors.Is(err, pgx.ErrNoRows) || want != "" && (err != nil || u.Email != want) {
+				t.Errorf("GetUserByEmail(%q) = %q, %v; want %q", typed, u.Email, err, want)
+			}
+		}
+		if u, err := q.GetUserByEmailAndSource(ctx, gen.GetUserByEmailAndSourceParams{Email: "CAROL@example.com", AuthSource: "local"}); err != nil || u.Email != "Carol@example.com" {
+			t.Errorf("GetUserByEmailAndSource(CAROL, local) = %q, %v", u.Email, err)
+		}
+		if _, err := q.GetUserByEmailAndSource(ctx, gen.GetUserByEmailAndSourceParams{Email: "CAROL@example.com", AuthSource: "ldap"}); !errors.Is(err, pgx.ErrNoRows) {
+			t.Errorf("GetUserByEmailAndSource(CAROL, ldap) = %v, want no row", err)
+		}
+		if taken, err := q.EmailTakenIgnoringCase(ctx, "CAROL@EXAMPLE.COM"); err != nil || !taken {
+			t.Errorf("EmailTakenIgnoringCase = %t, %v; want true", taken, err)
+		}
+		var indexed bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'users' AND indexdef LIKE '%lower(email)%')`).Scan(&indexed); err != nil || !indexed {
+			t.Errorf("no index on users (lower(email)): %v", err)
+		}
+	})
+}

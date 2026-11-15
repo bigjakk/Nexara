@@ -52,7 +52,13 @@ DELETE FROM ldap_configs WHERE id = $1;
 UPDATE ldap_configs SET last_sync_at = now() WHERE id = $1;
 
 -- name: GetUserByEmailAndSource :one
-SELECT * FROM users WHERE email = $1 AND auth_source = $2;
+-- GetUserByEmail's match (exact spelling first, else the one account differing only by
+-- case), of the given source.
+SELECT * FROM users
+WHERE (users.email = sqlc.arg(email)::text
+       OR (lower(users.email) = lower(sqlc.arg(email)::text)
+           AND (SELECT count(*) FROM users y WHERE lower(y.email) = lower(sqlc.arg(email)::text)) = 1))
+  AND users.auth_source = sqlc.arg(auth_source);
 
 -- name: CreateLDAPUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source)

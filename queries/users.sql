@@ -4,7 +4,21 @@ VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetUserByEmail :one
-SELECT * FROM users WHERE email = $1;
+-- The account an address names, ignoring case: the account spelled exactly so, else
+-- the one account whose address differs from it only by case. Two accounts that differ
+-- only by case are both kept, unmerged, and each answers to its own exact spelling; a
+-- spelling that matches both only by case names neither. idx_users_email_lower serves
+-- the case-insensitive half.
+SELECT * FROM users
+WHERE users.email = sqlc.arg(email)::text
+   OR (lower(users.email) = lower(sqlc.arg(email)::text)
+       AND (SELECT count(*) FROM users y WHERE lower(y.email) = lower(sqlc.arg(email)::text)) = 1);
+
+-- name: EmailTakenIgnoringCase :one
+-- Whether an account already has this address in any case: a new account whose
+-- address differs from an existing one only by case is refused as a duplicate. There
+-- is no unique index to say so (existing installs may hold such pairs).
+SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower(sqlc.arg(email)::text));
 
 -- name: GetUserByID :one
 SELECT * FROM users WHERE id = $1;

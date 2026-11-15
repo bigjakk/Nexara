@@ -147,6 +147,24 @@ func requireStallCutShort(t *testing.T, store *epochStore, name string) {
 	}
 }
 
+// byEmail is the account GetUserByEmail matches, as its SQL: the exact spelling, else
+// the one account differing only by case. Called with the store locked.
+func (s *epochStore) byEmail(email string) *db.User {
+	var folded []*db.User
+	for _, u := range s.users {
+		if u.Email == email {
+			return u
+		}
+		if strings.EqualFold(u.Email, email) {
+			folded = append(folded, u)
+		}
+	}
+	if len(folded) == 1 {
+		return folded[0]
+	}
+	return nil
+}
+
 func (s *epochStore) afterHook(name string) {
 	if fn := s.after[name]; fn != nil {
 		fn(s)
@@ -233,12 +251,17 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 	defer s.afterHook(name)
 	switch name {
 	case "GetUserByEmail":
-		for _, u := range s.users {
-			if u.Email == args[0].(string) {
-				return authFakeRow{value: *u}
-			}
+		if u := s.byEmail(args[0].(string)); u != nil {
+			return authFakeRow{value: *u}
 		}
 		return authFakeRow{err: pgx.ErrNoRows}
+	case "EmailTakenIgnoringCase":
+		for _, u := range s.users {
+			if strings.EqualFold(u.Email, args[0].(string)) {
+				return authFakeScalar{value: true}
+			}
+		}
+		return authFakeScalar{value: false}
 	case "GetUserByID":
 		if u, ok := s.users[args[0].(uuid.UUID)]; ok {
 			return authFakeRow{value: *u}
@@ -271,10 +294,8 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		}
 		return authFakeRow{err: pgx.ErrNoRows}
 	case "GetUserByEmailAndSource":
-		for _, u := range s.users {
-			if u.Email == args[0].(string) && u.AuthSource == args[1].(string) {
-				return authFakeRow{value: *u}
-			}
+		if u := s.byEmail(args[0].(string)); u != nil && u.AuthSource == args[1].(string) {
+			return authFakeRow{value: *u}
 		}
 		return authFakeRow{err: pgx.ErrNoRows}
 	case "CreateLDAPUser", "CreateOIDCUser":
