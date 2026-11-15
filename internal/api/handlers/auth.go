@@ -1468,16 +1468,18 @@ func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 }
 
 // wsTokenRefusal answers a hub token refused by LiveCredential. A session that has
-// ended is 403, not the helper's 401, because of who asks: the SPA mints a hub token
-// in the background, at every load and every reconnect (websocket-store.ts), and
-// answers a 401 by refreshing — which an ended session refuses, so the app signs out
-// and drops its access token. When someone else ended the session, that token is
-// what the owner's remedies still accept (Endpoint.AdmitsEndedSession: sign out
-// everywhere, change the password), and a 401 here would throw it away within a
-// second of the page loading, every time the owner signed in. A 403 only makes the
-// hub back off. An access token that names no session (errNoSession: issued before
-// tokens named their session) keeps the 401, whose refresh replaces it with one that
-// does, and every other refusal (503, 500) is the helper's own.
+// ended is 403, not the helper's 401: the SPA mints a hub token in the background, at
+// every load and every reconnect (websocket-store.ts), and a 403 only makes the hub
+// back off, where a 401 would start a refresh of its own. That no longer keeps the
+// owner signed in: an open hub socket is closed with 3000 when its session ends
+// (internal/ws/server.go, handleWS), on which the SPA asks its session to refresh,
+// which is refused, and the app signs out within seconds, as it does on the next
+// request any other route refuses. The operator chose that, and left the owner's
+// remedies (Endpoint.AdmitsEndedSession: sign out everywhere, change the password)
+// to the window they already had. An access token that names no session
+// (errNoSession: issued before tokens named their session) keeps the 401, whose
+// refresh replaces it with one that does, and every other refusal (503, 500) is the
+// helper's own.
 func wsTokenRefusal(err error) error {
 	if errors.Is(err, errSessionEnded) {
 		return fiber.NewError(fiber.StatusForbidden, sessionEndedMessage)
