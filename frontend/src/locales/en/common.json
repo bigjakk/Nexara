@@ -86,6 +86,7 @@
   "waitingForTaskLog": "Waiting for task log...",
   "closeTaskBackground": "Close (task continues in background)",
   "datacenter": "Datacenter",
+  "allClusters": "All clusters",
   "favorites": "Favorites",
   "noClustersAdded": "No clusters added.",
   "details": "Details",

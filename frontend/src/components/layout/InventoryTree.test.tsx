@@ -73,3 +73,14 @@ describe("InventoryTree — focus after deleting a cluster", () => {
     });
   });
 });
+
+describe("InventoryTree — heading", () => {
+  it("links the Datacenter heading to the Clusters page", async () => {
+    api = stubApi({ "/api/v1/clusters": listOf([cluster("c1", "cluster01")]) });
+    renderWithProviders(<InventoryTree />);
+
+    expect(
+      await screen.findByRole("link", { name: "Datacenter" }),
+    ).toHaveAttribute("href", "/clusters");
+  });
+});

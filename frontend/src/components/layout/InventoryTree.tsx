@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useLocation } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
   AlertTriangle,
   Server,
@@ -519,7 +519,14 @@ export function InventoryTree({ filter = "" }: { filter?: string }) {
             />
           }
         >
-          {t("datacenter")}
+          {/* The Clusters page: every cluster in a table, with Edit and Delete. */}
+          <Link
+            to="/clusters"
+            title={t("allClusters")}
+            className="rounded-sm hover:text-foreground hover:underline focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            {t("datacenter")}
+          </Link>
         </TreeHeading>
 
         {isLoading && <TreeSkeleton />}
