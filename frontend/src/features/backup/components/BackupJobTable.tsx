@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import type { BackupJob } from "../types/backup";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useDeleteBackupJob, useRunBackupJob } from "../api/backup-queries";
 import { describeBackupJobRunConfirm } from "../lib/backup-job-run";
 import { describeSchedule } from "../lib/schedule";
@@ -72,6 +73,11 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
   const [confirmDelete, setConfirmDelete] = useState<BackupJob | null>(null);
   const deleteMutation = useDeleteBackupJob();
   const runMutation = useRunBackupJob();
+  // Each action shows only to a caller its route admits: run and edit take
+  // manage:backup, delete takes delete:backup (registry_backup.go).
+  const { hasPermission } = usePermissions();
+  const canManage = hasPermission("manage", "backup");
+  const canDelete = hasPermission("delete", "backup");
 
   const runJob = (job: BackupJob) => {
     setConfirmRun(null);
@@ -184,42 +190,48 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                         history={backupHistories.backupJob(clusterId, job.id)}
                         title={job.id}
                       />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title="Run Now"
-                        onClick={() => {
-                          setConfirmRun(job);
-                        }}
-                        disabled={runningJobId === job.id}
-                      >
-                        {runningJobId === job.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Play className="h-4 w-4" />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title="Edit"
-                        onClick={() => {
-                          setEditJob(job);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title="Delete"
-                        onClick={() => {
-                          setConfirmDelete(job);
-                        }}
-                        disabled={deleteMutation.isPending}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      {canManage && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Run Now"
+                            onClick={() => {
+                              setConfirmRun(job);
+                            }}
+                            disabled={runningJobId === job.id}
+                          >
+                            {runningJobId === job.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Edit"
+                            onClick={() => {
+                              setEditJob(job);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+                      {canDelete && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Delete"
+                          onClick={() => {
+                            setConfirmDelete(job);
+                          }}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

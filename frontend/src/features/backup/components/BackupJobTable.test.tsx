@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { queryClient } from "@/lib/query-client";
 import { signInAsAdmin, signOutForGood } from "@/test/late-toast-sessions";
+import { useAuthStore } from "@/stores/auth-store";
 import { BackupJobTable } from "./BackupJobTable";
 import type { BackupJob } from "../types/backup";
 
@@ -88,6 +89,8 @@ async function openConfirm(user: ReturnType<typeof userEvent.setup>) {
 beforeEach(() => {
   sent = [];
   signInAsAdmin();
+  // What the table's actions are gated on; the gate's own test sets less.
+  useAuthStore.setState({ permissions: ["manage:backup", "delete:backup"] });
   stubFetch(200, {
     tasks: [],
     skipped: [],
@@ -102,6 +105,28 @@ afterEach(() => {
   vi.clearAllMocks();
   queryClient.clear();
   signOutForGood();
+  useAuthStore.setState({ permissions: [] });
+});
+
+// Each action shows only to a caller its route admits, so a Viewer is not
+// offered a click that answers 403.
+describe("BackupJobTable — permissions", () => {
+  it.each([
+    [["view:backup"], []],
+    [
+      ["view:backup", "manage:backup"],
+      ["Run Now", "Edit"],
+    ],
+    [["view:backup", "delete:backup"], ["Delete"]],
+  ])("with %j offers %j", (permissions, offered) => {
+    useAuthStore.setState({ permissions });
+    renderTable([job()]);
+    for (const name of ["Run Now", "Edit", "Delete"]) {
+      expect(screen.queryAllByRole("button", { name })).toHaveLength(
+        offered.includes(name) ? 1 : 0,
+      );
+    }
+  });
 });
 
 describe("BackupJobTable — Run now", () => {

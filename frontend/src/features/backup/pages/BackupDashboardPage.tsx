@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
 import { ApiClientError } from "@/lib/api-client";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   usePBSServers,
   usePBSDatastoreStatus,
@@ -124,6 +125,7 @@ export function BackupDashboardPage() {
     ? selectedClusterId
     : (clusters[0]?.id ?? "");
   const backupJobsQuery = useBackupJobs(activeClusterId);
+  const { hasPermission } = usePermissions();
 
   const datastores = dsStatusQuery.data ?? [];
   const snapshots = snapshotsQuery.data ?? [];
@@ -365,7 +367,9 @@ export function BackupDashboardPage() {
                             }))}
                           />
                         )}
-                        <BackupJobDialog clusterId={activeClusterId} />
+                        {hasPermission("manage", "backup") && (
+                          <BackupJobDialog clusterId={activeClusterId} />
+                        )}
                       </>
                     }
                   >
