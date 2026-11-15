@@ -493,11 +493,11 @@ function buildColumns(
     enableHiding: false,
   });
 
-  // Touch replacement for right-click: a per-row kebab opening the same
-  // actions menu. It swaps in for the bulk-select column below md.
+  // A per-row kebab opening the same actions menu as a right click: the
+  // menu's only way in on a touch screen, and the one a mouse can see.
   const actionsColumn = columnHelper.display({
     id: "actions",
-    header: () => null,
+    header: () => <span className="sr-only">Actions</span>,
     cell: ({ row }) => {
       const target = toContextTarget(row.original);
       if (!target) return null;
@@ -707,11 +707,11 @@ function buildColumns(
     }) as ColumnDef<InventoryRow>,
   ];
 
-  // The row's own control sits where a hand expects it: the checkbox leads
-  // on a desktop, the actions button trails on a phone.
+  // The checkbox leads on a desktop; a phone has no bulk selection. The
+  // actions button trails on both.
   return isMobile
     ? [...dataColumns, actionsColumn]
-    : [selectColumn, ...dataColumns];
+    : [selectColumn, ...dataColumns, actionsColumn];
 }
 
 const PAGE_SIZE = 25;
@@ -966,6 +966,7 @@ export function ResourceTable({
                     className={cn(
                       "whitespace-nowrap px-2.5",
                       header.column.id === "select" && "w-9",
+                      header.column.id === "actions" && "w-10",
                     )}
                   >
                     {header.isPlaceholder

@@ -200,7 +200,7 @@ A VM's tabs are **Overview**, **Hardware**, **Snapshots**, **Cloud-Init**, **Gue
 | **Migrate** | `manage:migration` | See [Migration](#migration) |
 | **Destroy** | `delete:vm` / `delete:container` | Disabled while the guest runs. Irreversible, so you type the name |
 
-These are also on a guest's right-click menu, in the tree and in tables, with **Console** and **Move to folder…**. The Inventory page lists templates under **Templates**.
+These are also on a guest's right-click menu, in the tree and in tables, with **Console** and **Move to folder…**. In the guest and node table the menu is also on each guest row's **⋮** button, at the end of the row. The Inventory page lists templates under **Templates**.
 
 **Hardware** (`manage:vm`). Changes are staged until **Save Changes**, and on a running VM stay pending until it restarts. **Add Device** offers Hard Disk, CD/DVD Drive, Network Device, USB Device and PCI Device ([Device Passthrough](#device-passthrough)), Serial Port, VirtIO RNG, Cloud-Init Drive, VirtioFS Share, EFI Disk and TPM State. A disk row has move, **Resize To** (growing only) and **Remove**. A container's **Resources** tab is the equivalent for it.
 

@@ -152,6 +152,21 @@ describe("ResourceTable", () => {
     }
   });
 
+  // Right-click is not the only way to the row menu on a desktop.
+  it("opens the row menu from the row's Actions button on a desktop", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ResourceTable data={[makeRow({ key: "c1:vm:0" })]} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Actions for test-vm" }),
+    );
+
+    expect(screen.getByRole("button", { name: "Clone" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Select row" }),
+    ).not.toBeChecked();
+  });
+
   it("shows correct resource count", () => {
     const data = generateRows(50);
     renderWithProviders(<ResourceTable data={data} />);
