@@ -683,21 +683,26 @@ const UNUSED_KEY_RE = /^unused(\d+)$/;
 
 // The fields a Save deletes when they are cleared. pve-container refuses an
 // empty value for most (a type or format check: integer, number, dns-name,
-// pve-startup-order), and the whole write with it; features it takes empty,
+// pve-startup-order), and the whole write with it; features, nameserver,
+// searchdomain and tags it takes empty (verify_nameserver_list,
+// verify_searchdomain_list and get_unique_tags join an empty list to ""),
 // but stores as sent and reads back as " ". Absent, each reads as unset
 // (src/PVE/LXC.pm, src/PVE/LXC/Config.pm): all of the host's cores, no CPU
 // limit, the cgroup's default CPU weight, no swap (`$conf->{swap} // 0`;
 // deleting it hotplugs 0), the hostname CT<vmid>, no startup order, no
-// features. Memory is not one: update_pct_config refuses to delete it, so a
-// Save waits until it has a value.
+// features, the host's DNS settings, no tags. Memory is not one:
+// update_pct_config refuses to delete it, so a Save waits until it has a value.
 const DELETED_WHEN_CLEARED = new Set([
   "cores",
   "cpulimit",
   "cpuunits",
   "swap",
   "hostname",
+  "nameserver",
+  "searchdomain",
   "startup",
   "features",
+  "tags",
 ]);
 
 const consoleModes = [

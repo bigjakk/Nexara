@@ -177,6 +177,13 @@ describe("ContainerResourcesPanel change tracking", () => {
       { delete: "cores,cpulimit,cpuunits,swap,hostname" },
     ],
     [
+      "deletes a nameserver, search domain and tags cleared",
+      { nameserver: "192.0.2.53", searchdomain: "example.com", tags: "web" },
+      ["Nameserver", "Search domain", "Tags"],
+      "",
+      { delete: "nameserver,searchdomain,tags" },
+    ],
+    [
       "deletes features once the last flag is unticked",
       { features: "nesting=1", unprivileged: 1 },
       "Nesting",
