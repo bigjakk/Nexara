@@ -229,7 +229,8 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 			old.Template == isTemplate &&
 			old.Pool == r.Pool &&
 			old.HaState == r.HAState &&
-			old.Tags == r.Tags {
+			old.Tags == r.Tags &&
+			old.LockState == r.Lock {
 			seenStatus[vmid] = listedStatus
 			continue
 		}
@@ -242,6 +243,10 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 				Tags:    r.Tags,
 				HaState: r.HAState,
 				Pool:    r.Pool,
+				// The lock is the guest's config lock, which the listing
+				// reads from pmxcfs (get_guest_config_properties), as the
+				// slow pass's node list does.
+				LockState: r.Lock,
 			})
 		} else {
 			_, writeErr = s.queries.UpsertVM(ctx, db.UpsertVMParams{
@@ -259,6 +264,7 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 				Tags:      r.Tags,
 				HaState:   r.HAState,
 				Pool:      r.Pool,
+				LockState: r.Lock,
 			})
 		}
 		if writeErr != nil {

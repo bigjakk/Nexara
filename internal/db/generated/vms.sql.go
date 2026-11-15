@@ -311,20 +311,21 @@ func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UU
 }
 
 const listVMStatusesByCluster = `-- name: ListVMStatusesByCluster :many
-SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags
+SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags, lock_state
 FROM vms WHERE cluster_id = $1
 `
 
 type ListVMStatusesByClusterRow struct {
-	ID       uuid.UUID `json:"id"`
-	Vmid     int32     `json:"vmid"`
-	NodeID   uuid.UUID `json:"node_id"`
-	Status   string    `json:"status"`
-	Name     string    `json:"name"`
-	Template bool      `json:"template"`
-	Pool     string    `json:"pool"`
-	HaState  string    `json:"ha_state"`
-	Tags     string    `json:"tags"`
+	ID        uuid.UUID `json:"id"`
+	Vmid      int32     `json:"vmid"`
+	NodeID    uuid.UUID `json:"node_id"`
+	Status    string    `json:"status"`
+	Name      string    `json:"name"`
+	Template  bool      `json:"template"`
+	Pool      string    `json:"pool"`
+	HaState   string    `json:"ha_state"`
+	Tags      string    `json:"tags"`
+	LockState string    `json:"lock_state"`
 }
 
 // ListVMStatusesByCluster feeds the collector's pre/post-sync inventory diff.
@@ -350,6 +351,7 @@ func (q *Queries) ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UU
 			&i.Pool,
 			&i.HaState,
 			&i.Tags,
+			&i.LockState,
 		); err != nil {
 			return nil, err
 		}
@@ -489,18 +491,19 @@ func (q *Queries) SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error 
 }
 
 const updateUnreportedVM = `-- name: UpdateUnreportedVM :exec
-UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6,
+UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6, lock_state = $7,
     uptime = CASE WHEN $3 = 'unknown' THEN 0 ELSE uptime END, last_seen_at = now()
 WHERE id = $1
 `
 
 type UpdateUnreportedVMParams struct {
-	ID      uuid.UUID `json:"id"`
-	NodeID  uuid.UUID `json:"node_id"`
-	Status  string    `json:"status"`
-	Tags    string    `json:"tags"`
-	HaState string    `json:"ha_state"`
-	Pool    string    `json:"pool"`
+	ID        uuid.UUID `json:"id"`
+	NodeID    uuid.UUID `json:"node_id"`
+	Status    string    `json:"status"`
+	Tags      string    `json:"tags"`
+	HaState   string    `json:"ha_state"`
+	Pool      string    `json:"pool"`
+	LockState string    `json:"lock_state"`
 }
 
 // UpdateUnreportedVM is the fast sync's UpsertVM for a guest /cluster/resources
@@ -513,7 +516,8 @@ type UpdateUnreportedVMParams struct {
 // clears it. A write that carries the row's own status (the fast sync keeps it
 // while the listing repeats itself) keeps the uptime that went with it. Sets
 // last_seen_at as UpsertVM does, and records the change in
-// guest_status_changes too, by trigger.
+// guest_status_changes too, by trigger. The lock is written like the tags: it
+// comes from the guest's configuration, not from pvestatd.
 func (q *Queries) UpdateUnreportedVM(ctx context.Context, arg UpdateUnreportedVMParams) error {
 	_, err := q.db.Exec(ctx, updateUnreportedVM,
 		arg.ID,
@@ -522,6 +526,7 @@ func (q *Queries) UpdateUnreportedVM(ctx context.Context, arg UpdateUnreportedVM
 		arg.Tags,
 		arg.HaState,
 		arg.Pool,
+		arg.LockState,
 	)
 	return err
 }

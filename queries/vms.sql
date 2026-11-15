@@ -60,9 +60,10 @@ UPDATE vms SET status = $2, updated_at = now() WHERE id = $1;
 -- clears it. A write that carries the row's own status (the fast sync keeps it
 -- while the listing repeats itself) keeps the uptime that went with it. Sets
 -- last_seen_at as UpsertVM does, and records the change in
--- guest_status_changes too, by trigger.
+-- guest_status_changes too, by trigger. The lock is written like the tags: it
+-- comes from the guest's configuration, not from pvestatd.
 -- name: UpdateUnreportedVM :exec
-UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6,
+UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6, lock_state = $7,
     uptime = CASE WHEN $3 = 'unknown' THEN 0 ELSE uptime END, last_seen_at = now()
 WHERE id = $1;
 
@@ -77,7 +78,7 @@ UPDATE vms SET config_ostype = $2, updated_at = now() WHERE id = $1;
 -- publish an inventory_change event, so external edits (Proxmox UI, qm/pct)
 -- become visible to the frontend within one tick.
 -- name: ListVMStatusesByCluster :many
-SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags
+SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags, lock_state
 FROM vms WHERE cluster_id = $1;
 
 -- name: ListAllVMs :many

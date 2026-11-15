@@ -250,6 +250,39 @@ func TestSyncClusterResources(t *testing.T) {
 		}
 	})
 
+	// The listing carries the guest's config lock. The fast sync's upsert
+	// once left it out, so every fast pass blanked vms.lock_state until the
+	// next slow pass, and a lock taken since never woke a write at all.
+	t.Run("the listed lock is written, and a row that holds it is left alone", func(t *testing.T) {
+		for _, tc := range []struct {
+			stored     string
+			wantWrites int
+		}{{"", 1}, {"backup", 0}} {
+			guest := guestRunning
+			guest.Lock = "backup"
+			srv := newResourceServer(t, []proxmox.ClusterResource{nodeOnline, guest})
+			mq := newMockQueries()
+			s := newTestSyncer(mq)
+			cluster := makeCluster(t, srv.URL)
+			seedFastSync(mq, cluster, "online", "running", "web-server")
+			key := fmt.Sprintf("%s:%d", cluster.ID.String(), 100)
+			row := mq.vms[key]
+			row.LockState = tc.stored
+			mq.vms[key] = row
+
+			if err := s.syncClusterResources(context.Background(), cluster); err != nil {
+				t.Fatalf("stored %q: syncClusterResources: %v", tc.stored, err)
+			}
+			srv.Close()
+			if len(mq.upsertVMCalls) != tc.wantWrites {
+				t.Fatalf("stored %q: %d upserts, want %d", tc.stored, len(mq.upsertVMCalls), tc.wantWrites)
+			}
+			if got := mq.vms[key].LockState; got != "backup" {
+				t.Errorf("stored %q: lock_state = %q, want backup", tc.stored, got)
+			}
+		}
+	})
+
 	t.Run("guest absent from cluster config is deleted immediately", func(t *testing.T) {
 		srv := newResourceServer(t, []proxmox.ClusterResource{nodeOnline})
 		defer srv.Close()

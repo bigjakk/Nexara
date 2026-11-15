@@ -247,6 +247,7 @@ func (m *mockQueries) UpsertVM(_ context.Context, arg db.UpsertVMParams) (db.Vm,
 		Tags:      arg.Tags,
 		HaState:   arg.HaState,
 		Pool:      arg.Pool,
+		LockState: arg.LockState,
 	}
 	m.vms[key] = vm
 	return vm, nil
@@ -307,15 +308,16 @@ func (m *mockQueries) ListVMStatusesByCluster(_ context.Context, clusterID uuid.
 			continue
 		}
 		rows = append(rows, db.ListVMStatusesByClusterRow{
-			ID:       vm.ID,
-			Vmid:     vm.Vmid,
-			NodeID:   vm.NodeID,
-			Status:   vm.Status,
-			Name:     vm.Name,
-			Template: vm.Template,
-			Pool:     vm.Pool,
-			HaState:  vm.HaState,
-			Tags:     vm.Tags,
+			ID:        vm.ID,
+			Vmid:      vm.Vmid,
+			NodeID:    vm.NodeID,
+			Status:    vm.Status,
+			Name:      vm.Name,
+			Template:  vm.Template,
+			Pool:      vm.Pool,
+			HaState:   vm.HaState,
+			Tags:      vm.Tags,
+			LockState: vm.LockState,
 		})
 	}
 	return rows, nil
@@ -354,7 +356,7 @@ func (m *mockQueries) UpdateUnreportedVM(_ context.Context, arg db.UpdateUnrepor
 	m.unreportedVMCalls = append(m.unreportedVMCalls, arg)
 	for k, vm := range m.vms {
 		if vm.ID == arg.ID {
-			vm.NodeID, vm.Status, vm.Tags, vm.HaState, vm.Pool = arg.NodeID, arg.Status, arg.Tags, arg.HaState, arg.Pool
+			vm.NodeID, vm.Status, vm.Tags, vm.HaState, vm.Pool, vm.LockState = arg.NodeID, arg.Status, arg.Tags, arg.HaState, arg.Pool, arg.LockState
 			if arg.Status == "unknown" {
 				vm.Uptime = 0
 			}
@@ -769,7 +771,7 @@ func TestSyncCluster_Success(t *testing.T) {
 		},
 		"/api2/json/nodes/pve1/lxc": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.Container{
-				{VMID: 200, Name: "dns-ct", Status: "running", CPUs: 1, MaxMem: 536870912, MaxDisk: 10737418240,
+				{VMID: 200, Name: "dns-ct", Status: "running", Lock: "backup", CPUs: 1, MaxMem: 536870912, MaxDisk: 10737418240,
 					CPU: 0.1, Mem: 268435456, NetIn: 500, NetOut: 600, DiskRead: 700, DiskWrite: 800},
 			})
 		},
@@ -837,6 +839,10 @@ func TestSyncCluster_Success(t *testing.T) {
 	// LXC container on pve1.
 	if mq.upsertVMCalls[1].Vmid != 200 || mq.upsertVMCalls[1].Type != "lxc" {
 		t.Errorf("vm[1]: vmid=%d type=%q, want vmid=200 type=lxc", mq.upsertVMCalls[1].Vmid, mq.upsertVMCalls[1].Type)
+	}
+	// A container's config lock is stored like a VM's.
+	if got := mq.upsertVMCalls[1].LockState; got != "backup" {
+		t.Errorf("vm[1]: lock_state=%q, want backup", got)
 	}
 	// QEMU 101 on pve2.
 	if mq.upsertVMCalls[2].Vmid != 101 || mq.upsertVMCalls[2].Type != "qemu" {

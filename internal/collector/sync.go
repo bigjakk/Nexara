@@ -1248,7 +1248,7 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 			Tags:      ct.Tags,
 			HaState:   extra.HAState,
 			Pool:      extra.Pool,
-			LockState: "",
+			LockState: ct.Lock,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upsert container %d on %s: %w", ct.VMID, nodeName, err)
