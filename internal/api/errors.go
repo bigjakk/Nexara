@@ -25,9 +25,16 @@ func errorHandler(c fiber.Ctx, err error) error {
 		code = e.Code
 		message = e.Message
 	}
+	slug := statusText(code)
+	// An error that names its own slug, so the SPA can tell one 409 from
+	// another: the self-credential guards' (handlers.CredentialGuardCode).
+	var named interface{ ErrorSlug() string }
+	if errors.As(err, &named) {
+		slug = named.ErrorSlug()
+	}
 
 	return c.Status(code).JSON(ErrorResponse{
-		Error:   statusText(code),
+		Error:   slug,
 		Message: message,
 	})
 }

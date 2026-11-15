@@ -125,7 +125,10 @@ const capabilities: AccessCapabilities = {
 let user: UserEvent;
 
 function refused(): ApiClientError {
-  return new ApiClientError(409, { error: "Conflict", message: REFUSAL });
+  return new ApiClientError(409, {
+    error: "self_credential_conflict",
+    message: REFUSAL,
+  });
 }
 
 function unreachable(): ApiClientError {

@@ -162,10 +162,10 @@ func selfCredentialRefusal(force bool, lookupErr error, ownTokenID, userid, toke
 	if !conflict {
 		return nil
 	}
-	return fiber.NewError(fiber.StatusConflict,
-		"This is the "+subject+" Nexara uses to reach this cluster. "+
-			"Continuing can cut Nexara off, or take away permissions it relies on, "+
-			"until its credentials are updated in Nexara or the change is undone in Proxmox. "+
+	return credentialGuardRefusal(
+		"This is the " + subject + " Nexara uses to reach this cluster. " +
+			"Continuing can cut Nexara off, or take away permissions it relies on, " +
+			"until its credentials are updated in Nexara or the change is undone in Proxmox. " +
 			"Retry with force=true to proceed anyway.")
 }
 

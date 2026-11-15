@@ -1,6 +1,13 @@
 import { ApiClientError } from "@/lib/api-client";
 
 /**
+ * The error slug of the self-credential guards' 409 (handlers.CredentialGuardCode).
+ * Any other 409 — one Proxmox answers, say — is an ordinary error, which force
+ * would not get past.
+ */
+export const CREDENTIAL_GUARD_CODE = "self_credential_conflict";
+
+/**
  * Whether the server refused an action because it can cut Nexara off from the
  * cluster, or take away permissions it relies on: a 409 from the self-credential
  * guards (handlers/access.go, handlers/access_dependency.go), which says why and
@@ -9,7 +16,11 @@ import { ApiClientError } from "@/lib/api-client";
  * action again with force, and decides to open that override with this.
  */
 export function isOverridable(err: unknown): err is ApiClientError {
-  return err instanceof ApiClientError && err.status === 409;
+  return (
+    err instanceof ApiClientError &&
+    err.status === 409 &&
+    err.body.error === CREDENTIAL_GUARD_CODE
+  );
 }
 
 /**

@@ -413,7 +413,10 @@ describe.each(CONFIRMATIONS)("a $name that settles", (c) => {
     await c.send(user);
     cleanup();
     held.reject(
-      new ApiClientError(409, { error: "Conflict", message: REFUSAL }),
+      new ApiClientError(409, {
+        error: "self_credential_conflict",
+        message: REFUSAL,
+      }),
     );
 
     await expectOneToast(refusedToast(c.action));

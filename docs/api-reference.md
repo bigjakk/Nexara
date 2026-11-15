@@ -1365,7 +1365,8 @@ with, deleting the user that owns it, editing that user to disable it
 (`enable=false`), give it an expiry (a non-zero `expire`) or change its groups
 (any `groups` value), or editing that token to give it an expiry (a non-zero
 `expire`) or turn privilege separation on (`privsep=true`) returns `409` with an
-explanation instead of proceeding. Append `?force=true` to override. A delete, a
+explanation, and `"error": "self_credential_conflict"` in place of `conflict`,
+instead of proceeding. Append `?force=true` to override. A delete, a
 regenerate or a disable cuts Nexara off at once, and an expiry does when it
 arrives; a group change, or `privsep=true`, can take away permissions the token
 relies on — a separated token holds only what is granted to the token itself, and

@@ -158,6 +158,9 @@ func requireGuardRefusal(t *testing.T, app *fiber.App, pve *accessUpdatePVE, sto
 	if got != status {
 		t.Fatalf("status = %d (%q), want %d", got, env.Message, status)
 	}
+	if status == fiber.StatusConflict && env.Error != handlers.CredentialGuardCode {
+		t.Errorf("the conflict's slug is %q, want %q: the SPA offers its override for that alone", env.Error, handlers.CredentialGuardCode)
+	}
 	for _, f := range fragments {
 		if !strings.Contains(env.Message, f) {
 			t.Errorf("the refusal %q does not carry %q", env.Message, f)

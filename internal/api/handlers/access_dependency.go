@@ -186,6 +186,25 @@ func roleDependency(o ownCredential, userGroups []string, acl []proxmox.AccessAC
 	return "", !sawOwn && o.userEntriesCount()
 }
 
+// CredentialGuardCode is the error slug of every 409 the self-credential
+// guards send (guardSelfCredential and guardCredentialDependency), so that the
+// SPA offers its override for those and for no other conflict: a 409 Proxmox
+// answers (mapProxmoxError) is an ordinary error, which force would not get past.
+const CredentialGuardCode = "self_credential_conflict"
+
+// credentialGuardConflict is a guard's 409: a *fiber.Error underneath, for the
+// status and the message, and CredentialGuardCode as the envelope's slug, which
+// errorHandler reads through ErrorSlug.
+type credentialGuardConflict struct{ err *fiber.Error }
+
+func (e credentialGuardConflict) Error() string   { return e.err.Message }
+func (e credentialGuardConflict) Unwrap() error   { return e.err }
+func (credentialGuardConflict) ErrorSlug() string { return CredentialGuardCode }
+
+func credentialGuardRefusal(message string) error {
+	return credentialGuardConflict{err: fiber.NewError(fiber.StatusConflict, message)}
+}
+
 // credentialDependencyTail is what every refusal below ends with: what can follow,
 // how to recover, and how to go ahead.
 const credentialDependencyTail = " Continuing can take away permissions Nexara relies on, or cut it off, " +
@@ -199,16 +218,16 @@ const credentialDependencyTail = " Continuing can take away permissions Nexara r
 // get past would block every such change on a token that may not read the ACL.
 func credentialDependencyRefusal(o ownCredential, reason string, checkErr error) error {
 	if checkErr != nil {
-		return fiber.NewError(fiber.StatusConflict,
-			"Nexara could not check whether this change touches the permissions of token "+o.tokenID+
-				", which it uses to reach this cluster."+credentialDependencyTail)
+		return credentialGuardRefusal(
+			"Nexara could not check whether this change touches the permissions of token " + o.tokenID +
+				", which it uses to reach this cluster." + credentialDependencyTail)
 	}
 	if reason == "" {
 		return nil
 	}
-	return fiber.NewError(fiber.StatusConflict,
-		"This change touches the permissions of token "+o.tokenID+", which Nexara uses to reach this "+
-			"cluster: "+reason+"."+credentialDependencyTail)
+	return credentialGuardRefusal(
+		"This change touches the permissions of token " + o.tokenID + ", which Nexara uses to reach this " +
+			"cluster: " + reason + "." + credentialDependencyTail)
 }
 
 // errCredentialUnknown is the checkErr a decide function reports when what it

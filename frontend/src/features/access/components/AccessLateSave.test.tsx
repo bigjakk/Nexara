@@ -34,6 +34,7 @@ import type { AccessCapabilities } from "../api/access-queries";
 import { AccessACLSection } from "./AccessACLSection";
 import { AccessGroupsSection } from "./AccessGroupsSection";
 import { AccessRolesSection } from "./AccessRolesSection";
+import { CREDENTIAL_GUARD_CODE } from "./selfCredentialRefusal";
 
 /**
  * What the group, role and permission sections pass useSaveOutcome: the `shown`
@@ -946,7 +947,7 @@ describe.each(OVERRIDES)("a refused $name", (o) => {
     await o.send(user);
     held.reject(
       new ApiClientError(409, {
-        error: "conflict",
+        error: CREDENTIAL_GUARD_CODE,
         message: "This change touches the permissions of token nexara@pve!api.",
       }),
     );
@@ -969,4 +970,22 @@ describe.each(OVERRIDES)("a refused $name", (o) => {
     expect(forced?.slice(1)).toEqual(first?.slice(1));
     expectNoToast();
   });
+});
+
+// A 409 that is not the guard's (one Proxmox answered) is an ordinary error:
+// force would not get past it, so no override is offered.
+it("shows a conflict that is not the guard's as an error, with no override", async () => {
+  const user = userEvent.setup();
+  const held = heldOnce(mockedPut);
+  renderRoles();
+  const editor = await saveRole(user, "Operator");
+  held.reject(
+    new ApiClientError(409, { error: "conflict", message: "role is in use" }),
+  );
+
+  expect(await within(editor).findByText("role is in use")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("dialog", { name: /can cut off Nexara's access/ }),
+  ).toBeNull();
+  expect(mockedPut).toHaveBeenCalledTimes(1);
 });

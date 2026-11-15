@@ -109,6 +109,10 @@ func TestAccessDependencyGuardRoutes(t *testing.T) {
 			if status != fiber.StatusConflict || !strings.Contains(env.Message, tc.wantIn) || !strings.Contains(env.Message, "force=true") {
 				t.Fatalf("status = %d (%q), want a 409 carrying %q", status, env.Message, tc.wantIn)
 			}
+			// The SPA offers its override for this slug alone.
+			if env.Error != handlers.CredentialGuardCode {
+				t.Errorf("the refusal's slug is %q, want %q", env.Error, handlers.CredentialGuardCode)
+			}
 			if sent := changes(pve); len(sent) != 0 || len(store.auditRows()) != 0 {
 				t.Errorf("the refused change reached Proxmox (%v) or was audited (%d rows)", sent, len(store.auditRows()))
 			}
