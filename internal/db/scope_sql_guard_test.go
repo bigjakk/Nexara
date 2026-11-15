@@ -97,6 +97,13 @@ var auditReadsExemptFromScope = map[string]string{
 	// The collector linking the tasks Proxmox ran as parts of one action: the same.
 	"proxmox_task_sync.sql.LinkMigrationTargetStarts": "collector-internal; one cluster by a required arg, rewrites its own rows, no user context",
 	"proxmox_task_sync.sql.LinkHAWorkerTasks":         "collector-internal; one cluster by a required arg, rewrites its own rows, no user context",
+
+	// The task outcomes of an audit page: read by the ids of the rows the
+	// scoped ListAuditLogAdvanced just returned, so the scope is that query's.
+	"audit_log.sql.ListAuditTaskOutcomes": "by the ids of a page the scoped ListAuditLogAdvanced returned; a status per row",
+	// The digest's task counts: one cluster by a required arg, audit_log only
+	// tested for whether an HA request has a linked worker, and counts returned.
+	"tasks.sql.CountTaskHistoryByStatusInWindow": "one cluster by a required arg; audit_log only tests an HA request's link, counts returned",
 }
 
 // readsAuditLogRe identifies a query that reads audit_log, through FROM or a
