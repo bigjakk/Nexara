@@ -46,7 +46,7 @@ export function ImportsPage() {
             ["pending", "running"],
           ) ?? "No imports yet"
         }, ${plural(new Set(sources.map((s) => s.storage)).size, "source")} to import from`
-      : "Guests imported from OVA and OVF appliances, disk images and ESXi or vCenter hosts.";
+      : "Guests imported from ESXi or vCenter hosts, or from OVA and OVF appliances.";
 
   // The dialog the Create menu opens, started here for the cluster on show.
   const importButton =

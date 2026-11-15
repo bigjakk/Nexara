@@ -606,8 +606,8 @@ export function ImportVMDialog({
         <DialogHeader>
           <DialogTitle>Import VM</DialogTitle>
           <DialogDescription>
-            Import a virtual machine from an OVA/OVF appliance, a disk image, or
-            an ESXi/vCenter host.
+            Import a virtual machine from an ESXi or vCenter host, or from an
+            OVA/OVF appliance.
           </DialogDescription>
         </DialogHeader>
 
