@@ -1266,13 +1266,25 @@ func (e *Engine) ReplayDLQ(ctx context.Context, dlqID uuid.UUID) error {
 	// stale one.
 	payload.FiredAt = time.Now().UTC().Format(time.RFC3339Nano)
 
+	// The entry reads "retrying" while the replay is in flight. Its outcome is
+	// written even when the caller has gone, so it is not left retrying.
+	if err := e.queries.UpdateNotificationDLQState(ctx, db.UpdateNotificationDLQStateParams{
+		ID:           dlqID,
+		State:        "retrying",
+		LastError:    row.LastError,
+		AttemptCount: row.AttemptCount,
+	}); err != nil {
+		return fmt.Errorf("mark DLQ entry retrying: %w", err)
+	}
+	done := context.WithoutCancel(ctx)
+
 	attempts, sendErr := retryableSend(ctx, func(c context.Context) error {
 		return dispatcher.Send(c, json.RawMessage(configJSON), payload)
 	}, RetrySchedule)
 
 	totalAttempts := safeconv.Int32(int(row.AttemptCount) + attempts)
 	if sendErr != nil {
-		_ = e.queries.UpdateNotificationDLQState(ctx, db.UpdateNotificationDLQStateParams{
+		_ = e.queries.UpdateNotificationDLQState(done, db.UpdateNotificationDLQStateParams{
 			ID:           dlqID,
 			State:        "pending",
 			LastError:    truncateError(sendErr.Error()),
@@ -1281,9 +1293,9 @@ func (e *Engine) ReplayDLQ(ctx context.Context, dlqID uuid.UUID) error {
 		return fmt.Errorf("replay attempts=%d: %w", attempts, sendErr)
 	}
 
-	_ = e.queries.MarkNotificationDLQResolved(ctx, dlqID)
+	_ = e.queries.MarkNotificationDLQResolved(done, dlqID)
 	if row.AlertID.Valid {
-		_ = e.queries.MarkAlertNotificationSent(ctx, uuidFromPgtype(row.AlertID))
+		_ = e.queries.MarkAlertNotificationSent(done, uuidFromPgtype(row.AlertID))
 	}
 	e.logger.Info("DLQ entry replayed",
 		"dlq_id", dlqID, "channel_id", channelID, "attempts", attempts)

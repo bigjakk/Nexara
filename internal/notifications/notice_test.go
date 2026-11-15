@@ -110,3 +110,33 @@ func TestNotifyResolved(t *testing.T) {
 		t.Errorf("channel lookups %v, want step 1's channel only", got)
 	}
 }
+
+// funcDispatcher sends by calling itself.
+type funcDispatcher func(AlertPayload) error
+
+func (funcDispatcher) Type() string { return "webhook" }
+func (f funcDispatcher) Send(_ context.Context, _ json.RawMessage, p AlertPayload) error { return f(p) }
+
+// A dead letter reads "retrying" while its replay is in flight, and its
+// outcome after.
+func TestReplayDLQMarksRetrying(t *testing.T) {
+	t.Parallel()
+	var fake *engineDB
+	stateDuringSend := ""
+	e, fake, ch := newDispatchEngine(t, funcDispatcher(func(AlertPayload) error {
+		if u := fake.callsOf("UpdateNotificationDLQState"); len(u) > 0 {
+			stateDuringSend = u[len(u)-1][1].(string)
+		}
+		return nil
+	}))
+	id := uuid.New()
+	fake.rows["GetNotificationDLQ"] = db.NotificationDlq{ID: id, ChannelID: pgtype.UUID{Bytes: ch.ID, Valid: true},
+		Payload: json.RawMessage(`{}`), State: "pending"}
+	if err := e.ReplayDLQ(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if stateDuringSend != "retrying" || len(fake.callsOf("MarkNotificationDLQResolved")) != 1 {
+		t.Errorf("state during the send %q, resolved %d times: want retrying, then resolved once",
+			stateDuringSend, len(fake.callsOf("MarkNotificationDLQResolved")))
+	}
+}
