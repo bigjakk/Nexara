@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -173,5 +174,48 @@ func TestOIDCCallbackCookiePath_IsTheRedirectURIs(t *testing.T) {
 		if got := oidcCallbackCookiePath(tc.uri); got != tc.want {
 			t.Errorf("oidcCallbackCookiePath(%q) = %q, want %q", tc.uri, got, tc.want)
 		}
+	}
+}
+
+// TestOIDCCallback_AnUnverifiedEmailIsAFailedSignIn: the login page is told to verify
+// the address with the provider, and the refusal is audited as a failed sign-in, under
+// the SSO account the address names or under none.
+func TestOIDCCallback_AnUnverifiedEmailIsAFailedSignIn(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		account bool
+		action  string
+	}{
+		{"an existing account", true, "login_failed"},
+		{"no account yet", false, "login_failed_unknown_account"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			u := epochUser(t, epochLoginEmail, 0)
+			u.AuthSource = "oidc"
+			store := newEpochStore()
+			if tc.account {
+				store = newEpochStore(u)
+			}
+			a := newEpochApp(t, store, epochOptions{})
+			var message string
+			a.probe = func(c fiber.Ctx) error {
+				message = a.oidc.exchangeFailure(c, &auth.OIDCEmailNotVerifiedError{Email: epochLoginEmail})
+				return c.SendStatus(http.StatusNoContent)
+			}
+			a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)
+
+			if message != oidcEmailNotVerifiedMessage {
+				t.Errorf("message %q, want the unverified-email one", message)
+			}
+			rows := store.auditRowsWritten()
+			if len(rows) != 1 || rows[0].action != tc.action || (rows[0].actor == u.ID) != tc.account {
+				t.Fatalf("audit rows %v, want one %s (under the account: %v)", rows, tc.action, tc.account)
+			}
+			if d := store.auditDetailsWritten()[0]; !strings.Contains(d, `"reason":"email_not_verified"`) {
+				t.Errorf("audit details %s, want the reason email_not_verified", d)
+			}
+		})
 	}
 }

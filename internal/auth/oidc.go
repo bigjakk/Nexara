@@ -26,6 +26,32 @@ var (
 	ErrOIDCDomainNotAllowed = errors.New("oidc: email domain not allowed")
 )
 
+// OIDCEmailNotVerifiedError refuses a sign-in whose ID token says, in
+// email_verified, that the provider has not verified the address: whoever
+// registered it there could otherwise sign in as the account that holds it.
+// Email is the address, for the audit row; Error does not carry it.
+type OIDCEmailNotVerifiedError struct {
+	Email string
+}
+
+func (e *OIDCEmailNotVerifiedError) Error() string {
+	return "oidc: the identity provider has not verified the email address"
+}
+
+// emailUnverified reports an email_verified claim that says false: the JSON
+// boolean, or the string "false" that some providers send. A missing claim, or
+// any other value, is not a refusal.
+func emailUnverified(claims map[string]interface{}) bool {
+	switch v := claims["email_verified"].(type) {
+	case bool:
+		return !v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "false")
+	default:
+		return false
+	}
+}
+
 // OIDCConfig holds the configuration for connecting to an OIDC provider.
 type OIDCConfig struct {
 	IssuerURL        string
@@ -183,6 +209,9 @@ func (p *OIDCProvider) ExchangeAndVerify(ctx context.Context, code, state string
 	email := extractStringClaim(claims, p.cfg.EmailClaim)
 	if email == "" {
 		return nil, fmt.Errorf("%w: missing email claim %q", ErrOIDCClaimExtract, p.cfg.EmailClaim)
+	}
+	if emailUnverified(claims) {
+		return nil, &OIDCEmailNotVerifiedError{Email: email}
 	}
 
 	// Check allowed domains

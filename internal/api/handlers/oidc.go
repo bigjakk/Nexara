@@ -574,11 +574,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 	userInfo, err := provider.ExchangeAndVerify(c.Context(), code, state)
 	if err != nil {
 		slog.Error("OIDC exchange failed", "error", err)
-		errMsg := "Authentication failed"
-		if errors.Is(err, auth.ErrOIDCDomainNotAllowed) {
-			errMsg = "Your email domain is not allowed"
-		}
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(errMsg))
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(h.exchangeFailure(c, err)))
 	}
 
 	user, exchangeCode, failure := h.provisionAndStoreExchange(c, cfg, userInfo)
@@ -597,6 +593,36 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 	})
 
 	return c.Redirect().Status(fiber.StatusFound).To("/oidc-callback?oidc_token=" + exchangeCode)
+}
+
+// oidcEmailNotVerifiedMessage answers a sign-in whose identity provider says it has
+// not verified the account's email address.
+const oidcEmailNotVerifiedMessage = "Your identity provider has not verified your email address. " +
+	"Verify it with your provider, then sign in again."
+
+// exchangeFailure is the message the login page shows for a callback whose exchange
+// with the identity provider failed. An unverified email address is audited as a
+// failed sign-in, as a password sign-in's is (recordFailedSignIn): under the SSO
+// account the address names, or under none when there is no such account yet.
+func (h *OIDCHandler) exchangeFailure(c fiber.Ctx, err error) string {
+	var unverified *auth.OIDCEmailNotVerifiedError
+	switch {
+	case errors.As(err, &unverified):
+		details, _ := json.Marshal(map[string]string{"email": unverified.Email, "ip": c.IP(),
+			"method": "oidc", "reason": "email_not_verified"})
+		account, lookupErr := h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
+			Email: unverified.Email, AuthSource: "oidc"})
+		if lookupErr == nil {
+			AuditLogAs(c, h.queries, h.eventPub, account.ID, pgtype.UUID{}, "auth", account.ID.String(), "login_failed", details)
+		} else {
+			AuditLogAs(c, h.queries, h.eventPub, uuid.Nil, pgtype.UUID{}, "auth", "", "login_failed_unknown_account", details)
+		}
+		return oidcEmailNotVerifiedMessage
+	case errors.Is(err, auth.ErrOIDCDomainNotAllowed):
+		return "Your email domain is not allowed"
+	default:
+		return "Authentication failed"
+	}
 }
 
 // provisionAndStoreExchange is Callback once the identity provider has vouched for
