@@ -206,7 +206,7 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 			"not answer within 15 seconds of the revoke beginning — which is after the lookup, up to 5 " +
 			"seconds into the request — it answers 503, the sessions may still be active, and the cookie " +
 			"is left alone so the call can be repeated. Allow up to 30 seconds in all: the lookup, then " +
-			"the revoke, then the audit entry and the cleanup, which have up to 5 seconds each. Each user " +
+			"the revoke, then the audit entry and the cleanup, which have up to 5 seconds each. Each session " +
 			"may make at most 5 calls a minute, from every address together: the next is answered 429 " +
 			"with a Retry-After header (in seconds), revokes nothing and leaves the refresh cookie in place.",
 		Group:       "Authentication",
@@ -233,7 +233,7 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Path:   authScope + "/sessions/:id",
 		Description: "Revoke one of the caller's own sessions. Somebody else's id answers 404 rather than " +
 			"403, so the endpoint cannot be used to probe which session ids exist; revoking the current " +
-			"session also clears the refresh cookie. Each user may make at most 30 calls a minute, from " +
+			"session also clears the refresh cookie. Each session may make at most 30 calls a minute, from " +
 			"every address together: the next is answered 429 with a Retry-After header (in seconds), " +
 			"revokes nothing and leaves the refresh cookie in place.",
 		Group:       "Authentication",
@@ -305,7 +305,7 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 			"password is answered 403 as well, not 401, because a 401 makes a client refresh its session " +
 			"and send the request again, which would count every wrong attempt twice. The current " +
 			"password can be tried only so often, here and at POST /auth/totp/setup, which asks for it " +
-			"too: five wrong ones within 60 minutes, on either route, lock the account out of both for 30 " +
+			"too: five wrong ones within 60 minutes, on either route, lock the session out of both for 30 " +
 			"minutes, the fifth wrong one is itself the 429 that says so, and while it is locked every " +
 			"request, the right password included, answers 429 with a Retry-After header (in seconds) and " +
 			"changes nothing. The lock is those two routes' own: signing in and everything else carry on, " +

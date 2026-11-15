@@ -29,16 +29,23 @@ import (
 // attacker's own password and ends every session of the owner, or enrols the
 // attacker's authenticator and takes the recovery codes. The per-IP cap on
 // change-password (authLimitedPaths) bounds what one address can try; this bounds
-// what ALL addresses together can try against one account, through either route:
+// what ALL addresses together can try through one session, through either route:
 // they count in ONE budget, because two would give whoever holds a stolen token
 // twice the guesses at the same password.
 //
+// The budget is the SESSION's, not the account's (passwordLockoutSubject). Counted
+// per account, the holder of one stolen session could spend it at will and keep the
+// owner's own change of password — the remedy for the theft — at 429. Per session
+// it costs the thief his own budget only, and he cannot open sessions of his own
+// without the password he is guessing. A token that names no session (issued before
+// tokens named their session) counts in the account's.
+//
 // The rule: passwordLockoutThreshold wrong current passwords within
-// passwordLockoutWindow lock the account out of these TWO routes for
+// passwordLockoutWindow lock the session out of these TWO routes for
 // passwordLockoutDuration. While it is locked every request to either — the right
 // password included — answers 429 with a Retry-After and changes nothing. Nothing
 // else is locked: login, the sessions and every other route read none of this
-// state, and its keys (pwchange:user:*) are its own, apart from the TOTP login
+// state, and its keys (pwchange:*) are its own, apart from the TOTP login
 // lockout's. Nothing that ends a session — logout-all, the revoke of one session,
 // any revoke-all — clears it either: only the two routes touch the state, through
 // ChangePassword and ProveCurrentPassword — a password change that commits (clear),
@@ -238,12 +245,25 @@ func (h *AuthHandler) lockoutStore() passwordLockoutStore {
 	return processPasswordLockout
 }
 
-// passwordFailKey is the Redis key holding an account's attempts in the current
+// passwordFailKey is the Redis key holding a subject's attempts in the current
 // window, and passwordLockKey the one whose presence is the lock. They are
-// pwchange:user:* — apart from totp:user:*, which login's second factor reads, so
+// pwchange:* — apart from totp:user:*, which login's second factor reads, so
 // that locking one cannot lock the other.
-func passwordFailKey(userID uuid.UUID) string { return "pwchange:user:fail:" + userID.String() }
-func passwordLockKey(userID uuid.UUID) string { return "pwchange:user:lock:" + userID.String() }
+//
+// The id is the lockout's subject (passwordLockoutSubject): a session's, or an
+// account's for a token that names none. Both are random UUIDs, so one cannot name
+// the other's keys.
+func passwordFailKey(subject uuid.UUID) string { return "pwchange:fail:" + subject.String() }
+func passwordLockKey(subject uuid.UUID) string { return "pwchange:lock:" + subject.String() }
+
+// passwordLockoutSubject is whose budget an attempt by this caller is counted in:
+// the session its access token names, or the account when it names none.
+func passwordLockoutSubject(c fiber.Ctx, userID uuid.UUID) uuid.UUID {
+	if sid, ok := c.Locals(LocalsSessionID).(uuid.UUID); ok && sid != uuid.Nil {
+		return sid
+	}
+	return userID
+}
 
 // reservePasswordAttempt counts one attempt, and arms the lock when it is the
 // last of the budget, in ONE script, so that nothing can come between the count
@@ -589,7 +609,7 @@ func (h *AuthHandler) admitPasswordAttempt(c fiber.Ctx, userID uuid.UUID, proof 
 		return db.User{}, lockoutReservation{}, fiber.NewError(fiber.StatusForbidden, "Password is managed by your identity provider")
 	}
 
-	attempt, err = h.lockoutStore().reserve(ctx, userID)
+	attempt, err = h.lockoutStore().reserve(ctx, passwordLockoutSubject(c, userID))
 	if err != nil {
 		return db.User{}, lockoutReservation{}, passwordLockoutUnavailable(userID, err, proof)
 	}
@@ -704,8 +724,8 @@ func passwordLockoutRecord(c fiber.Ctx, userID uuid.UUID, attempt lockoutReserva
 // follow-up's deadline: the change is made, and a Redis that cannot be reached now
 // leaves the counts where they were — conservative: the next wrong guess is counted
 // on top of them — so it must not fail the request that earned the clear.
-func (h *AuthHandler) forgetPasswordFailures(ctx context.Context, userID uuid.UUID) {
-	if err := h.lockoutStore().clear(ctx, userID); err != nil {
+func (h *AuthHandler) forgetPasswordFailures(ctx context.Context, subject, userID uuid.UUID) {
+	if err := h.lockoutStore().clear(ctx, subject); err != nil {
 		slog.Warn("change password: could not clear the failed-attempt count after the password was changed; it stays until it runs out "+
 			"(and so does the lock, when this very attempt was the one that armed it)",
 			"user_id", userID, "error", err)
@@ -726,7 +746,7 @@ func (h *AuthHandler) forgetPasswordFailures(ctx context.Context, userID uuid.UU
 func (h *AuthHandler) handBackAttempt(c fiber.Ctx, userID uuid.UUID, attempt lockoutReservation, proof passwordProof) {
 	ctx, cancel := h.followUp(c.Context())
 	defer cancel()
-	if err := h.lockoutStore().release(ctx, userID, attempt); err != nil {
+	if err := h.lockoutStore().release(ctx, passwordLockoutSubject(c, userID), attempt); err != nil {
 		slog.Warn(proof.what+": could not give back the attempt a verified password took; it stays counted until its window ends",
 			"user_id", userID, "error", err)
 	}
@@ -771,7 +791,7 @@ func passwordLockedMessage(wait time.Duration) string {
 		unit = "minute"
 	}
 	return fmt.Sprintf("Too many incorrect attempts at the current password. Changing the password and setting up two-factor "+
-		"authentication are locked for %d more %s; you stay signed in and nothing else about the account is affected.", minutes, unit)
+		"authentication are locked for %d more %s on this sign-in; you stay signed in and nothing else about the account is affected.", minutes, unit)
 }
 
 // passwordLockoutUnavailable answers an attempt that could not be counted: 503,

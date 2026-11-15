@@ -176,11 +176,11 @@ https://nexara.example.com/api/v1
    caller's sessions are revoked all the same. With more than one refresh cookie
    in the request the cookie is deleted without being looked at. The lookup has a
    deadline of its own, up to 5 seconds, and runs before the revoke begins, so a
-   slow lookup never takes any of the revoke's time. Each user may make at most 5
+   slow lookup never takes any of the revoke's time. Each session may make at most 5
    calls a minute to it, from every address together: the next is answered `429`
    with a `Retry-After` header, revokes nothing and leaves the refresh cookie in
    place. `DELETE /auth/sessions/:id`, which ends one session, is capped at 30 a
-   minute per user and refuses in the same way.
+   minute per session and refuses in the same way.
 
    If the session cannot be looked up or revoked — the database cannot be
    reached, is shutting down or too busy, or does not answer within 15 seconds —
@@ -205,8 +205,9 @@ https://nexara.example.com/api/v1
    refresh its session and send the request again, which would count every wrong
    attempt twice. The current password can be tried only so often, here and at
    `POST /auth/totp/setup`, which asks for it too and counts in the same budget.
-   Five wrong ones within 60 minutes, on either route, lock the account out of
-   both for 30 minutes: the fifth wrong one is itself answered `429`, and while
+   Five wrong ones within 60 minutes, on either route, lock the session out of
+   both for 30 minutes (the session the access token names: another sign-in has
+   a budget of its own, so a stolen session cannot lock the owner out): the fifth wrong one is itself answered `429`, and while
    the lock lasts every request, the right password included, is answered `429`
    with a `Retry-After` header (in seconds) and changes nothing. The lock covers
    those two routes alone — signing in, the sessions and every other route carry
@@ -363,7 +364,7 @@ per-address limiters, which run before any request is authenticated: a key that
 is refused still spends a request of the per-address Auth budget on the flagged
 routes that budget covers: `POST /auth/change-password`, `POST /auth/totp/setup`,
 `DELETE /auth/totp` and `POST /auth/totp/recovery-codes/regenerate`. It spends nothing of the caps on
-`POST /auth/logout-all` and `DELETE /auth/sessions/:id`, which are per user. A
+`POST /auth/logout-all` and `DELETE /auth/sessions/:id`, which are per session. A
 session that has ended spends a request of the Auth budget in the same way when it
 is refused on `POST /auth/totp/setup`, `DELETE /auth/totp` or
 `POST /auth/totp/recovery-codes/regenerate`.
@@ -551,8 +552,8 @@ envelope documented above, with a `Retry-After` header. Requests that pass carry
 | Scope | Budget | Applies to |
 |-------|--------|------------|
 | Auth | 15/min, one budget for all of them | `/auth/login`, `/auth/register`, `/auth/change-password`, `/auth/totp/setup`, `/auth/totp/verify-login`, `DELETE /auth/totp`, `/auth/totp/recovery-codes/regenerate`, `/auth/oidc/authorize`, `/auth/oidc/callback` |
-| Sign out everywhere | 5/min per user | `POST /auth/logout-all` — keyed on the signed-in user, not the address, and deliberately not part of the Auth budget above: that budget is spent before a request is authenticated, so anyone could use it up and leave an account's owner without the way to end a stolen session. Only the account's own sessions spend this one; a refused API key spends none of it. A call over the cap revokes nothing and leaves the refresh cookie in place |
-| End one session | 30/min per user | `DELETE /auth/sessions/:id` — keyed on the signed-in user, with a budget of its own: ending one session is signing out everywhere one device at a time, so it is capped too, but a person ends several devices in a sitting, which is why the cap is larger. A refused API key spends none of it, and a call over the cap revokes nothing and leaves the refresh cookie in place |
+| Sign out everywhere | 5/min per session | `POST /auth/logout-all` — keyed on the caller's session (on the user for a token that names none), not the address, and deliberately not part of the Auth budget above: that budget is spent before a request is authenticated, so anyone could use it up and leave an account's owner without the way to end a stolen session. Each session spends its own, so one session cannot use up another's; a refused API key spends none of it. A call over the cap revokes nothing and leaves the refresh cookie in place |
+| End one session | 30/min per session | `DELETE /auth/sessions/:id` — keyed on the caller's session like sign out everywhere, with a budget of its own: ending one session is signing out everywhere one device at a time, so it is capped too, but a person ends several devices in a sitting, which is why the cap is larger. A refused API key spends none of it, and a call over the cap revokes nothing and leaves the refresh cookie in place |
 | Refresh | 30/min | `/auth/refresh` |
 | WS token | 60/min | `/auth/ws-token` |
 | Snapshot resync | 30/min | `/clusters/:id/guest-snapshots/resync` |
@@ -573,7 +574,7 @@ endpoints (`/auth/me`, `/auth/logout`,
 
 `POST /auth/change-password` and `POST /auth/totp/setup` share a second guard that
 is not a rate limit and is not in the table: five wrong current passwords within
-60 minutes, on either route, lock both for the account for 30 minutes, whatever
+60 minutes, on either route, lock both for that session for 30 minutes, whatever
 addresses they came from. Its `429` is the handlers' own — the JSON error envelope,
 with a `Retry-After` header in seconds — and is described under Authentication
 above.
@@ -730,7 +731,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | POST | `/auth/register` | Register a new user (the first user becomes admin and is signed in; later registrations need an admin caller and sign nobody in) |
 | POST | `/auth/login` | Login with email and password |
 | GET | `/auth/sessions` | List the caller's own active sessions (`{items,total}`): device, user agent, address and times, never the token hash. `is_current` marks the one whose refresh cookie the request carries, so a caller with no cookie sees none marked |
-| DELETE | `/auth/sessions/:id` | End one of the caller's own sessions (interactive session only: `403` for an API key). Another user's id, an unknown one or one already ended answers `404`; ending the current one clears the refresh cookie. 30 calls a minute per user |
+| DELETE | `/auth/sessions/:id` | End one of the caller's own sessions (interactive session only: `403` for an API key). Another user's id, an unknown one or one already ended answers `404`; ending the current one clears the refresh cookie. 30 calls a minute per session |
 | POST | `/auth/refresh` | Refresh access token |
 | POST | `/auth/logout` | Logout: end the session the refresh token names; `403`, with the cookie left alone, for a session that belongs to another user than the access token presented |
 | POST | `/auth/logout-all` | Logout all sessions; the refresh cookie is deleted only when it is the caller's own or names no live session |

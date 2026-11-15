@@ -2469,7 +2469,7 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx, p *apischema.Params) error {
 // How often the current password can be guessed is bounded. Each attempt is
 // counted BEFORE its password is checked, and passwordLockoutThreshold wrong ones
 // within passwordLockoutWindow — here or at the two-factor setup, which counts in
-// the same budget (ProveCurrentPassword) — lock the account out of both routes for
+// the same budget (ProveCurrentPassword) — lock the session out of both routes for
 // passwordLockoutDuration — 429 with a Retry-After, and the right password is
 // refused like any other until the lock ends (password_lockout.go has the rule and
 // the reasons). The order of the request is: the read of the account, the count
@@ -2651,7 +2651,7 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx, p *apischema.Params) error {
 		// The secret the counted guesses were aimed at is gone, so forget them. It
 		// follows the record and shares its deadline, so that clearing the count adds
 		// nothing to the worst case the API reference states.
-		h.forgetPasswordFailures(c.Context(), userID)
+		h.forgetPasswordFailures(c.Context(), passwordLockoutSubject(c, userID), userID)
 	})
 	h.forgetSessions(ctx, revoked...)
 

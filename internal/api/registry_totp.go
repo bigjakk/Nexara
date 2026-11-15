@@ -133,7 +133,7 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 			"otpauth:// URL. Nothing is stored on the account until the enrollment is confirmed. The caller " +
 			"proves it is the account's owner first. An account that signs in with a Nexara password sends " +
 			"the current one: a wrong one is answered 403, and the attempts count in the same limit as " +
-			"POST /auth/change-password — five wrong ones within 60 minutes, on either route, lock the account " +
+			"POST /auth/change-password — five wrong ones within 60 minutes, on either route, lock the session " +
 			"out of both for 30 minutes, and while the lock lasts every request with a password is answered 429 with a " +
 			"Retry-After header (in seconds); a right one gives back the attempt it took, and when the attempt " +
 			"cannot be counted (Redis cannot be reached) the answer is 503 and nothing is checked. The route is " +

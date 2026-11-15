@@ -77,7 +77,7 @@ func TestGuard_OnlyThePasswordRoutesTouchTheLockout(t *testing.T) {
 			}
 			if src.rel != owner {
 				t.Errorf("%s mentions the lockout's keys (pwchange:): only %s may, so that nothing else can read, clear or extend the lock", src.rel, owner)
-			} else if strings.Contains(string(src.text), `"pwchange:user:`) {
+			} else if strings.Contains(string(src.text), `"pwchange:fail:`) {
 				held = true
 			}
 		}

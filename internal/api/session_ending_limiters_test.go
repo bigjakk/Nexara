@@ -321,10 +321,11 @@ func TestSessionEndingRoutesHaveBudgetsOfTheirOwn(t *testing.T) {
 }
 
 // TestSessionLimiterKeys holds the two key functions to what the caps are: one bucket
-// per user however many addresses the user comes from, a bucket of one's own for each
-// user, none shared between the two limiters, and — for a request with no user — the
-// address, so that it still has a bucket. A key of the user AND the address would give
-// a user one bucket per address, and a loop only has to change address.
+// per session however many addresses it comes from, a bucket of its own for each session
+// — so the holder of one session of an account cannot spend the owner's other — the user
+// for a token that names no session, none shared between the two limiters, and the
+// address for a request with no user. A key of the address too would give a caller one
+// bucket per address, and a loop only has to change address.
 func TestSessionLimiterKeys(t *testing.T) {
 	cfg := &config.Config{ProxyHeader: fiber.HeaderXForwardedFor, TrustedProxies: []string{"0.0.0.0"}}
 	app := fiber.New(buildFiberConfig(cfg))
@@ -337,14 +338,20 @@ func TestSessionLimiterKeys(t *testing.T) {
 			if who := c.Get("X-Test-User"); who != "" {
 				c.Locals("user_id", uuid.MustParse(who))
 			}
+			if sid := c.Get("X-Test-Session"); sid != "" {
+				c.Locals(handlers.LocalsSessionID, uuid.MustParse(sid))
+			}
 			return c.SendString(key(c))
 		})
 	}
-	keyOf := func(route, user, from string) string {
+	keyOf := func(route, user, from string, session ...string) string {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/"+route, nil)
 		if user != "" {
 			req.Header.Set("X-Test-User", user)
+		}
+		if len(session) > 0 {
+			req.Header.Set("X-Test-Session", session[0])
 		}
 		req.Header.Set(fiber.HeaderXForwardedFor, from)
 		resp, err := app.Test(req)
@@ -358,7 +365,14 @@ func TestSessionLimiterKeys(t *testing.T) {
 	}
 
 	alice, bob := uuid.NewString(), uuid.NewString()
+	s1, s2 := uuid.NewString(), uuid.NewString()
 	for name := range keys {
+		if a, b := keyOf(name, alice, addressA, s1), keyOf(name, alice, addressA, s2); a == b {
+			t.Errorf("%s: two sessions of one user share the key %q: one session would spend the other's bucket", name, a)
+		}
+		if a, b := keyOf(name, alice, addressA, s1), keyOf(name, alice, addressB, s1); a != b {
+			t.Errorf("%s: one session has two keys, %q and %q, from two addresses", name, a, b)
+		}
 		if a, b := keyOf(name, alice, addressA), keyOf(name, alice, addressB); a != b {
 			t.Errorf("%s: one user has two keys, %q from one address and %q from another: a loop only has to change address", name, a, b)
 		}
@@ -417,7 +431,7 @@ func TestDocs_TheSessionEndingCapsAreStatedWhereTheyAreDocumented(t *testing.T) 
 		}
 
 		row := tableRow(tc.tableLabel)
-		if want := fmt.Sprintf("| %s | %d/min per user |", tc.tableLabel, tc.cap); !strings.HasPrefix(row, want) {
+		if want := fmt.Sprintf("| %s | %d/min per session |", tc.tableLabel, tc.cap); !strings.HasPrefix(row, want) {
 			t.Errorf("the rate-limit table of %s has no row starting %q (the row is %q): the reference and the limiter for %s %s have drifted",
 				apiReferencePath(), want, row, tc.method, tc.path)
 		}
@@ -426,11 +440,11 @@ func TestDocs_TheSessionEndingCapsAreStatedWhereTheyAreDocumented(t *testing.T) 
 		}
 	}
 
-	if got := referenceSentence(t, fmt.Sprintf("Each user may make at most %d calls a minute to it", logoutAllRateLimit)); !strings.Contains(got, refused) {
+	if got := referenceSentence(t, fmt.Sprintf("Each session may make at most %d calls a minute to it", logoutAllRateLimit)); !strings.Contains(got, refused) {
 		t.Errorf("the reference's account of sign-out everywhere gives its cap but not what a refused call leaves alone: %q", got)
 	}
-	if got := referenceSentence(t, "`DELETE /auth/sessions/:id`, which ends one session,"); !strings.Contains(got, fmt.Sprintf("is capped at %d a minute per user", sessionRevokeRateLimit)) ||
+	if got := referenceSentence(t, "`DELETE /auth/sessions/:id`, which ends one session,"); !strings.Contains(got, fmt.Sprintf("is capped at %d a minute per session", sessionRevokeRateLimit)) ||
 		!strings.Contains(got, "refuses in the same way") {
-		t.Errorf("the reference's account of ending one session does not give its cap, %d a minute per user, and say it refuses in the same way: %q", sessionRevokeRateLimit, got)
+		t.Errorf("the reference's account of ending one session does not give its cap, %d a minute per session, and say it refuses in the same way: %q", sessionRevokeRateLimit, got)
 	}
 }

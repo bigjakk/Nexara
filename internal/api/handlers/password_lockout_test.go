@@ -159,6 +159,30 @@ func (a *authRaceApp) lockoutArm(t *testing.T) {
 	}
 }
 
+// TestChangePassword_TheLockIsTheSessions: a session that used up its budget is locked,
+// and another session of the same account is not, so that the holder of one stolen
+// session cannot keep the owner from changing the password.
+func TestChangePassword_TheLockIsTheSessions(t *testing.T) {
+	t.Parallel()
+	a, _ := lockoutApp(t, "redis", raceOptions{})
+	as := func(session uuid.UUID, body string) int {
+		t.Helper()
+		resp, _ := a.postTimed(t, "/auth/change-password", body, "", map[string]string{
+			"X-Test-Acting-User": a.store.user.ID.String(), "X-Test-Session": session.String()}, 120*time.Second)
+		return resp.StatusCode
+	}
+	thief, owner := uuid.New(), uuid.New()
+	for range passwordLockoutThreshold {
+		as(thief, wrongChangeBody)
+	}
+	if status := as(thief, changeBody); status != http.StatusTooManyRequests {
+		t.Fatalf("the session that spent its budget = %d, want 429: this test proved nothing", status)
+	}
+	if status := as(owner, changeBody); status != http.StatusOK {
+		t.Errorf("another session of the account = %d, want 200: one session's wrong guesses locked another", status)
+	}
+}
+
 // TestPasswordLockoutStoresAgree runs one script of events against both stores and
 // holds them to the same answers, exactly: the budget, the lock, what a refused
 // attempt does and does not do, the window, the release of one attempt and the
@@ -453,23 +477,23 @@ func TestPasswordLockoutRedisKeys(t *testing.T) {
 	if _, err := l.store.reserve(ctx, id); err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
-	if got := l.mr.Keys(); len(got) != 1 || got[0] != "pwchange:user:fail:"+id.String() {
+	if got := l.mr.Keys(); len(got) != 1 || got[0] != "pwchange:fail:"+id.String() {
 		t.Fatalf("keys after one attempt = %v, want only the attempt counter", got)
 	}
-	if ttl := l.mr.TTL("pwchange:user:fail:" + id.String()); ttl != passwordLockoutWindow {
+	if ttl := l.mr.TTL("pwchange:fail:" + id.String()); ttl != passwordLockoutWindow {
 		t.Errorf("the counter expires in %v, want its window, %v: a counter without an expiry never goes away", ttl, passwordLockoutWindow)
 	}
 
 	// A counter that has somehow lost its expiry gets one back with the next attempt
 	// — the TOTP lockout's INCR and separate EXPIRE leave such a counter behind when
 	// the EXPIRE fails.
-	if err := l.rdb.Persist(ctx, "pwchange:user:fail:"+id.String()).Err(); err != nil {
+	if err := l.rdb.Persist(ctx, "pwchange:fail:"+id.String()).Err(); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
 	if _, err := l.store.reserve(ctx, id); err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
-	if ttl := l.mr.TTL("pwchange:user:fail:" + id.String()); ttl != passwordLockoutWindow {
+	if ttl := l.mr.TTL("pwchange:fail:" + id.String()); ttl != passwordLockoutWindow {
 		t.Errorf("a counter with no expiry was given %v, want %v", ttl, passwordLockoutWindow)
 	}
 
@@ -479,13 +503,13 @@ func TestPasswordLockoutRedisKeys(t *testing.T) {
 	if arming.token == "" {
 		t.Fatalf("the attempt that reached the threshold = %+v, want the last one, carrying a token", arming)
 	}
-	if got := l.mr.Keys(); len(got) != 1 || got[0] != "pwchange:user:lock:"+id.String() {
+	if got := l.mr.Keys(); len(got) != 1 || got[0] != "pwchange:lock:"+id.String() {
 		t.Errorf("keys while locked = %v, want only the lock", got)
 	}
-	if ttl := l.mr.TTL("pwchange:user:lock:" + id.String()); ttl != passwordLockoutDuration {
+	if ttl := l.mr.TTL("pwchange:lock:" + id.String()); ttl != passwordLockoutDuration {
 		t.Errorf("the lock expires in %v, want %v", ttl, passwordLockoutDuration)
 	}
-	if got, err := l.mr.Get("pwchange:user:lock:" + id.String()); err != nil || got != arming.token {
+	if got, err := l.mr.Get("pwchange:lock:" + id.String()); err != nil || got != arming.token {
 		t.Errorf("the lock holds %q (%v), want the token of the attempt that armed it, %q", got, err, arming.token)
 	}
 	for _, key := range l.mr.Keys() {
@@ -499,13 +523,13 @@ func TestPasswordLockoutRedisKeys(t *testing.T) {
 	if err := l.store.release(ctx, id, arming); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if got := l.mr.Keys(); len(got) != 1 || got[0] != "pwchange:user:fail:"+id.String() {
+	if got := l.mr.Keys(); len(got) != 1 || got[0] != "pwchange:fail:"+id.String() {
 		t.Fatalf("keys after the arming attempt was given back = %v, want only the attempt counter", got)
 	}
-	if got, err := l.mr.Get("pwchange:user:fail:" + id.String()); err != nil || got != fmt.Sprint(passwordLockoutThreshold-1) {
+	if got, err := l.mr.Get("pwchange:fail:" + id.String()); err != nil || got != fmt.Sprint(passwordLockoutThreshold-1) {
 		t.Errorf("the counter is %q (%v), want %d: one short of the threshold", got, err, passwordLockoutThreshold-1)
 	}
-	if ttl := l.mr.TTL("pwchange:user:fail:" + id.String()); ttl != passwordLockoutWindow {
+	if ttl := l.mr.TTL("pwchange:fail:" + id.String()); ttl != passwordLockoutWindow {
 		t.Errorf("the restored counter expires in %v, want its window, %v", ttl, passwordLockoutWindow)
 	}
 
@@ -1058,7 +1082,7 @@ func TestChangePassword_WhatTheLockoutDoesAfterTheDecisionIsBestEffort(t *testin
 		if !strings.Contains(out, "could not give back the attempt") {
 			t.Errorf("no log line for this user says the release failed: %q", out)
 		}
-		if !a.redis.Exists("pwchange:user:fail:" + a.store.user.ID.String()) {
+		if !a.redis.Exists("pwchange:fail:" + a.store.user.ID.String()) {
 			t.Error("the attempt is gone from Redis although the release failed: it must stay counted until its window ends")
 		}
 	})
@@ -1228,7 +1252,7 @@ func TestPasswordLockoutFiguresAreTheDocumentedOnes(t *testing.T) {
 	if !ok {
 		t.Fatalf("passwordLockoutThreshold is %d: add its word to this test, which spells the figure as the prose does", passwordLockoutThreshold)
 	}
-	want := fmt.Sprintf("%s wrong ones within %d minutes, on either route, lock the account out of both for %d minutes",
+	want := fmt.Sprintf("%s wrong ones within %d minutes, on either route, lock the session out of both for %d minutes",
 		word, int(passwordLockoutWindow/time.Minute), int(passwordLockoutDuration/time.Minute))
 
 	for _, file := range []string{"docs/api-reference.md", "internal/api/registry_auth.go", "internal/api/registry_totp.go"} {

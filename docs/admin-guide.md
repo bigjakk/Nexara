@@ -375,7 +375,7 @@ All four are under the cluster's **Configure** tab.
 
 The user menu (your name, top right) holds **Profile**, **Security**, **API Keys**, **What's New**, **About**, **Sign Out** and **Sign Out All Devices**.
 
-**Profile** shows your email, role, auth source, 2FA status and join date. A local account can change its **Display Name** and use **Change Password**: 8 to 72 characters with an upper-case letter, a lower-case letter, a digit and a special character. Changing it ends every session. Five wrong current passwords within 60 minutes, here and at Enable 2FA together, lock both for 30 minutes.
+**Profile** shows your email, role, auth source, 2FA status and join date. A local account can change its **Display Name** and use **Change Password**: 8 to 72 characters with an upper-case letter, a lower-case letter, a digit and a special character. Changing it ends every session. Five wrong current passwords within 60 minutes, here and at Enable 2FA together, lock both for 30 minutes on that sign-in; signing in again starts afresh.
 
 **Security** has [two-factor authentication](#two-factor-authentication-totp) and **Active Sessions**: each sign-in's device and address, when it was last active and **This device**. **Revoke** ends one, and asks first for your own. An access token that sign-in already holds keeps working until it expires, within 15 minutes by default. Once an hour Nexara deletes the records of sessions that have expired.
 
@@ -717,7 +717,7 @@ opened in another browser signs nobody in, so an attacker cannot sign a victim's
 2. Click **Enable 2FA**
 3. Enter your current password. An account that signs in through LDAP or single sign-on has no Nexara password to
    enter: it needs a sign-in from the last 10 minutes instead, so sign out and back in first if yours is older.
-   Five wrong passwords within an hour, here and at **Change Password** together, lock both for 30 minutes
+   Five wrong passwords within an hour, here and at **Change Password** together, lock both for 30 minutes on that sign-in
 4. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.)
 5. Enter the 6-digit code to verify
 6. Save the recovery codes in a secure location: 10 single-use `XXXX-XXXX` codes, shown once. **Regenerate Recovery Codes** needs a code from your authenticator

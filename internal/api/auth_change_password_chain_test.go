@@ -218,8 +218,9 @@ type chain struct {
 	uid  uuid.UUID
 	rdb  *redis.Client
 	mr   *miniredis.Miniredis
-	sess string // a valid access token for the user
-	key  string // an API key for the user
+	sess string    // a valid access token for the user
+	sid  uuid.UUID // the session sess names
+	key  string    // an API key for the user
 }
 
 // newChainDB is the fixtures a chain needs: a local user whose password is
@@ -284,11 +285,12 @@ func newChain(t *testing.T) *chain {
 	app.Use(fiberrecover.New())
 	mountRegistry(app, reg, s.authRequired(), everyNodeIsAMember(), queries)
 
-	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin", uuid.New())
+	sid := uuid.New()
+	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin", sid)
 	if err != nil {
 		t.Fatalf("access token: %v", err)
 	}
-	return &chain{app: app, db: fake, jwt: jwtSvc, uid: uid, rdb: rdb, mr: mr, sess: token, key: apiKey}
+	return &chain{app: app, db: fake, jwt: jwtSvc, uid: uid, rdb: rdb, mr: mr, sess: token, sid: sid, key: apiKey}
 }
 
 // change sends POST /auth/change-password with the bearer token and body.
@@ -369,12 +371,12 @@ func TestChangePassword_TheLockoutIsServedThroughTheRealChain(t *testing.T) {
 			t.Fatalf("wrong attempt %d = %d, error %q (%q), want 403 forbidden: Current password is incorrect", i, resp.StatusCode, env.Error, env.Message)
 		}
 		// One request is one attempt: what the client sent once, the server counted once.
-		if n, err := c.rdb.Get(context.Background(), "pwchange:user:fail:"+c.uid.String()).Int(); err != nil || n != i {
+		if n, err := c.rdb.Get(context.Background(), "pwchange:fail:"+c.sid.String()).Int(); err != nil || n != i {
 			t.Fatalf("the attempt counter is %d (%v) after %d wrong request(s), want %d", n, err, i, i)
 		}
 	}
-	if got := c.mr.Keys(); !slices.Equal(got, []string{"pwchange:user:fail:" + c.uid.String()}) {
-		t.Fatalf("Redis keys after four wrong attempts = %v, want only the account's attempt counter: registerAuth did not wire Redis to the handler", got)
+	if got := c.mr.Keys(); !slices.Equal(got, []string{"pwchange:fail:" + c.sid.String()}) {
+		t.Fatalf("Redis keys after four wrong attempts = %v, want only the session's attempt counter: registerAuth did not wire Redis to the handler", got)
 	}
 
 	resp, env := c.change(t, c.sess, chainWrongBody)
@@ -390,7 +392,7 @@ func TestChangePassword_TheLockoutIsServedThroughTheRealChain(t *testing.T) {
 	if !strings.Contains(env.Message, "30 more minutes") {
 		t.Errorf("message = %q, want the time the lock has left", env.Message)
 	}
-	if got := c.mr.Keys(); !slices.Equal(got, []string{"pwchange:user:lock:" + c.uid.String()}) {
+	if got := c.mr.Keys(); !slices.Equal(got, []string{"pwchange:lock:" + c.sid.String()}) {
 		t.Errorf("Redis keys while locked = %v, want only the lock", got)
 	}
 

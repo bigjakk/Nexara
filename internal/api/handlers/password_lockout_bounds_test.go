@@ -435,7 +435,7 @@ func TestChangePassword_AReleaseThatNeverAnswersIsHeldToTheFollowUpBound(t *test
 	if out := logLinesFor(logs, a.store.user.ID.String()); !strings.Contains(out, "could not give back the attempt") {
 		t.Errorf("no log line for this user says the release failed: %q", out)
 	}
-	if !a.redis.Exists("pwchange:user:fail:" + a.store.user.ID.String()) {
+	if !a.redis.Exists("pwchange:fail:" + a.store.user.ID.String()) {
 		t.Error("the attempt is gone from the count although the release never reached Redis")
 	}
 }

@@ -229,7 +229,7 @@ func (s *Server) setupMiddleware() {
 	// stolen token and a guess.
 	//
 	// Does NOT include logout-all, nor DELETE /auth/sessions/:id. Those routes are a
-	// loop and not a guess, and each is capped per USER on the route itself
+	// loop and not a guess, and each is capped per SESSION on the route itself
 	// (logoutAllLimiter, sessionRevokeLimiter) instead: this bucket is per ADDRESS
 	// and runs before authentication, so anyone could drain it — with no credentials
 	// at all, from one address, or from every client behind a proxy while
@@ -850,7 +850,7 @@ func mappingUsageLimiterKey(c fiber.Ctx) string {
 	return c.IP() + ":mapping-usage"
 }
 
-// The two routes that end sessions are each capped per USER, on the route, and
+// The two routes that end sessions are each capped per SESSION, on the route, and
 // the caps are these: five calls a minute of sign-out everywhere, thirty of ending
 // one session. They are constants so that the registry's Descriptions and the API
 // reference state the figures the limiters have, and tests hold them there
@@ -861,7 +861,7 @@ const (
 )
 
 // logoutAllLimiter caps POST /api/v1/auth/logout-all at logoutAllRateLimit (5) a
-// minute per user.
+// minute per session (sessionLimiterSubject).
 //
 // Logout-all is a loop and not a guess: it ends every session of the account, so
 // a caller that can repeat it keeps the owner signed out — every session the
@@ -870,22 +870,23 @@ const (
 // key can neither loop the route nor spend the owner's bucket.
 //
 // What this limiter does is bound how fast THIS route can be spent: five calls a
-// minute for the account, from every address together. It is not a bound on what a
+// minute for the session, from every address together. It is not a bound on what a
 // stolen access token can do overall. The token can still end sessions through
 // DELETE /auth/sessions/:id, at that route's own cap (sessionRevokeLimiter), for as
 // long as it lives; and the remedy stays with the OWNER, who signs out everywhere
 // (this route) and changes the password (which ends every session too).
 //
-// Keyed on the user and attached to the route, and NOT a member of
+// Keyed on the session and attached to the route, and NOT a member of
 // authLimitedPaths, for one reason: that set is a bucket per address that runs
 // before authentication and is shared with login, so anyone with no credentials at
 // all — from one address, or from every client behind a proxy while TRUSTED_PROXIES
 // is unset — could drain it and refuse the owner the remedy for a token thief,
 // "sign out everywhere". A route limiter runs after authRequired and the gate, so
-// only the account's own authenticated sessions spend its bucket. Five is a
-// working budget for a person (one press of the button, a retry or two) and far
-// from a loop. The IP is the fallback for a request without a user, which does not
-// reach here.
+// only the account's own authenticated sessions spend its bucket — and each session
+// its own: a bucket per user would let the holder of one stolen session spend the
+// owner's, and keep the owner's own sign-out everywhere at 429. Five is a working
+// budget for a person (one press of the button, a retry or two) and far from a
+// loop.
 func (s *Server) logoutAllLimiter() fiber.Handler {
 	return limiter.New(limiter.Config{
 		Max:          logoutAllRateLimit,
@@ -894,24 +895,34 @@ func (s *Server) logoutAllLimiter() fiber.Handler {
 	})
 }
 
-// logoutAllLimiterKey is logoutAllLimiter's bucket: the user when there is one,
-// else the IP.
+// logoutAllLimiterKey is logoutAllLimiter's bucket (sessionLimiterSubject).
 func logoutAllLimiterKey(c fiber.Ctx) string {
-	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
-		return "user:" + uid.String() + ":logout-all"
+	return sessionLimiterSubject(c) + ":logout-all"
+}
+
+// sessionLimiterSubject is whose bucket a per-caller route limiter spends: the
+// session the access token names, so that one session cannot spend another's; the
+// user for a token that names none (issued before tokens named their session); the
+// IP for a request without a user, which does not reach these limiters.
+func sessionLimiterSubject(c fiber.Ctx) string {
+	if sid, ok := c.Locals(handlers.LocalsSessionID).(uuid.UUID); ok && sid != uuid.Nil {
+		return "session:" + sid.String()
 	}
-	return c.IP() + ":logout-all"
+	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
+		return "user:" + uid.String()
+	}
+	return c.IP()
 }
 
 // sessionRevokeLimiter caps DELETE /api/v1/auth/sessions/:id at
-// sessionRevokeRateLimit (30) a minute per user.
+// sessionRevokeRateLimit (30) a minute per session (sessionLimiterSubject).
 //
 // Ending one session is sign-out everywhere one device at a time. A caller that can
 // list the account's sessions (GET /auth/sessions, which an API key may call too)
 // and end each new one in a loop keeps the owner signed out as surely as a loop of
 // logout-all — keeping its own session meanwhile — and with no limiter of its own it
 // would never meet logoutAllLimiter's cap: the first probe sent two hundred of
-// them for one user, all answered 204. So the route has a cap of its own, per user,
+// them for one user, all answered 204. So the route has a cap of its own, per session,
 // after the InteractiveOnly gate for the reasons logoutAllLimiter gives (a refused
 // key spends none of it), and a larger one, because ending several devices in one
 // sitting is what a person does with this route: thirty a minute is a long way from
@@ -930,13 +941,9 @@ func (s *Server) sessionRevokeLimiter() fiber.Handler {
 	})
 }
 
-// sessionRevokeLimiterKey is sessionRevokeLimiter's bucket: the user when there is
-// one, else the IP.
+// sessionRevokeLimiterKey is sessionRevokeLimiter's bucket (sessionLimiterSubject).
 func sessionRevokeLimiterKey(c fiber.Ctx) string {
-	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
-		return "user:" + uid.String() + ":session-revoke"
-	}
-	return c.IP() + ":session-revoke"
+	return sessionLimiterSubject(c) + ":session-revoke"
 }
 
 // veeamConnectLimiter caps the Veeam endpoints that spend a real logon at
@@ -1088,7 +1095,7 @@ var (
 	// Logout-all and DELETE /auth/sessions/:id are deliberately NOT here: a path in
 	// this set shares a bucket that anyone can drain without authenticating, which
 	// for the remedy against a stolen token is a denial of service (logoutAllLimiter
-	// and sessionRevokeLimiter cap them per user).
+	// and sessionRevokeLimiter cap them per session).
 	// TestGuard_CredentialRoutesKeepTheirRateLimit holds both out.
 	//
 	// The last two are the OIDC flow, which is unauthenticated and does real
