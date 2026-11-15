@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { apiClient } from "@/lib/api-client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import {
   CANCEL_BUTTON,
   type DialogSave,
@@ -780,6 +780,7 @@ const DELETES = [
     first: "operators",
     second: "auditors",
     title: (id: string) => `Delete group ${id}?`,
+    action: (id: string) => `Deleting group ${id}`,
     confirm: "Delete Group",
     url: (id: string) => `${ACCESS}/groups/${id}`,
   },
@@ -789,6 +790,7 @@ const DELETES = [
     first: "Operator",
     second: "Auditor",
     title: (id: string) => `Delete role ${id}?`,
+    action: (id: string) => `Deleting role ${id}`,
     confirm: "Delete Role",
     url: (id: string) => `${ACCESS}/roles/${id}`,
   },
@@ -827,7 +829,8 @@ describe.each(DELETES)(
 
         if (failing) {
           held.reject(denied());
-          await expectOneToast(DENIED);
+          // Its confirmation is gone, so the toast names what failed.
+          await expectOneToast(failedToast(d.action(d.first)));
         } else {
           held.resolve(undefined);
           await waitForSuccess(qc);
@@ -853,3 +856,117 @@ describe.each(DELETES)(
     );
   },
 );
+
+// ── The self-credential override of each change the server can refuse ───────
+
+/**
+ * Each dialog answers the 409 of the ACL, group and role guards with the
+ * type-to-confirm override, which re-sends the same request with ?force=true
+ * and nothing else changed. The guard's rule is the server's
+ * (handlers/access_dependency_test.go); this is the wiring, once per dialog.
+ */
+const OVERRIDES = [
+  {
+    name: "group delete",
+    render: renderGroups,
+    request: mockedDelete,
+    send: async (user: UserEvent) => {
+      await user.click(
+        await screen.findByRole("button", { name: "Delete operators" }),
+      );
+      const ask = await screen.findByRole("alertdialog", {
+        name: "Delete group operators?",
+      });
+      await user.click(
+        within(ask).getByRole("button", { name: "Delete Group" }),
+      );
+    },
+    title: "Deleting this group can cut off Nexara's access",
+    confirmValue: "operators",
+    button: "Delete Group",
+    url: `${ACCESS}/groups/operators`,
+  },
+  {
+    name: "role delete",
+    render: renderRoles,
+    request: mockedDelete,
+    send: async (user: UserEvent) => {
+      await user.click(
+        await screen.findByRole("button", { name: "Delete Operator" }),
+      );
+      const ask = await screen.findByRole("alertdialog", {
+        name: "Delete role Operator?",
+      });
+      await user.click(
+        within(ask).getByRole("button", { name: "Delete Role" }),
+      );
+    },
+    title: "Deleting this role can cut off Nexara's access",
+    confirmValue: "Operator",
+    button: "Delete Role",
+    url: `${ACCESS}/roles/Operator`,
+  },
+  {
+    name: "role edit",
+    render: renderRoles,
+    request: mockedPut,
+    send: (user: UserEvent) => saveRole(user, "Operator"),
+    title: "Saving this role can cut off Nexara's access",
+    confirmValue: "Operator",
+    button: "Save Anyway",
+    url: `${ACCESS}/roles/Operator`,
+  },
+  {
+    name: "permission grant",
+    render: renderACL,
+    request: mockedPut,
+    send: grantToToken,
+    title: "Granting this can cut off Nexara's access",
+    confirmValue: TOKEN_SUBJECT,
+    button: "Grant Anyway",
+    url: `${ACCESS}/acl`,
+  },
+  {
+    name: "permission revoke",
+    render: renderACL,
+    request: mockedPut,
+    send: (user: UserEvent) => revokeEntry(user, FIRST_ENTRY),
+    title: "Revoking this can cut off Nexara's access",
+    confirmValue: "alice@pve",
+    button: "Revoke",
+    url: `${ACCESS}/acl`,
+  },
+];
+
+describe.each(OVERRIDES)("a refused $name", (o) => {
+  it("offers the override, which re-sends it with force", async () => {
+    const user = userEvent.setup();
+    const held = heldOnce(o.request);
+    o.render();
+    await o.send(user);
+    held.reject(
+      new ApiClientError(409, {
+        error: "conflict",
+        message: "This change touches the permissions of token nexara@pve!api.",
+      }),
+    );
+
+    const override = await screen.findByRole("dialog", { name: o.title });
+    const confirm = within(override).getByRole("button", { name: o.button });
+    expect(confirm).toBeDisabled();
+    await user.type(
+      within(override).getByLabelText("Confirmation text"),
+      o.confirmValue,
+    );
+    await user.click(confirm);
+
+    await waitFor(() => {
+      expect(override).not.toBeInTheDocument();
+    });
+    const [first, forced] = o.request.mock.calls;
+    expect(first?.[0]).toBe(o.url);
+    expect(forced?.[0]).toBe(`${o.url}?force=true`);
+    expect(forced?.slice(1)).toEqual(first?.slice(1));
+    expectNoToast();
+  });
+});

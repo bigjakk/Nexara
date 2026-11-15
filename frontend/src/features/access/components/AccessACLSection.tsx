@@ -45,6 +45,7 @@ import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ApiClientError } from "@/lib/api-client";
 
 import {
+  type UpdateACLInput,
   type AccessACLEntry,
   type AccessCapabilities,
   useAccessACL,
@@ -53,6 +54,8 @@ import {
   useAccessUsers,
   useUpdateAccessACL,
 } from "../api/access-queries";
+import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
+import { isOverridable, refusedBeyondOverride } from "./selfCredentialRefusal";
 
 interface Props {
   clusterId: string;
@@ -85,6 +88,18 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
   // suppressed too — this banner is where a failed revoke has to show up.
   const [revokeError, setRevokeError] = useState("");
   const [revokeTarget, setRevokeTarget] = useState<AccessACLEntry | null>(null);
+  // The server's refusal of a grant or revoke for Nexara's own token, its user
+  // or one of the user's groups, and what its override re-sends with force. The
+  // grant's is stacked over the grant dialog, so Cancel goes back to the form.
+  const [grantConflict, setGrantConflict] = useState<{
+    message: string;
+    input: UpdateACLInput;
+    subject: string;
+  } | null>(null);
+  const [revokeConflict, setRevokeConflict] = useState<{
+    message: string;
+    entry: AccessACLEntry;
+  } | null>(null);
 
   const manageable = canManage("access") && capabilities.canModifyACL;
 
@@ -109,7 +124,11 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
   // behind whichever dialog is open next, and the next revoke clears it.
   const settleGrant = useSaveOutcome(grantOpen);
   const settleRevoke = useSaveOutcome(
-    revokeTarget === null ? null : entryKey(revokeTarget),
+    revokeTarget !== null
+      ? `ask:${entryKey(revokeTarget)}`
+      : revokeConflict
+        ? `force:${entryKey(revokeConflict.entry)}`
+        : null,
   );
 
   const subjectField = (kind: SubjectKind): "users" | "groups" | "tokens" =>
@@ -117,45 +136,63 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
   const handleGrant = (e: React.SyntheticEvent) => {
     e.preventDefault();
-    setError("");
     const onPath = path.trim();
     const to = subject.trim();
-    settleGrant(
-      updateACL.mutateAsync({
+    sendGrant(
+      {
         path: onPath,
         roles: role,
         [subjectField(subjectKind)]: to,
         propagate,
-      }),
-      {
-        action: `Granting ${role} on ${onPath} to ${to}`,
-        // Not once the dialog has been dismissed: this would close, and clear,
-        // whichever one has been opened in its place.
-        onSuccess: () => {
-          setGrantOpen(false);
-          setSubject("");
-        },
-        // A dismissal keeps what was filled in, which is this section's and not
-        // the dialog's, so a grant that went through after one would leave the
-        // subject it has just been made to for the next Grant to repeat. Put it
-        // away as a success does, unless a dialog is open: that one is showing
-        // the same text as its own.
-        onLateSuccess: (_, { open }) => {
-          if (!open) setSubject("");
-        },
-        onError: (err) => {
-          setError(
-            err instanceof ApiClientError
-              ? err.message
-              : "Failed to grant access",
-          );
-        },
       },
+      to,
+      false,
     );
   };
 
-  const handleRevoke = (entry: AccessACLEntry) => {
+  const sendGrant = (input: UpdateACLInput, to: string, force: boolean) => {
+    setError("");
+    const action = `Granting ${input.roles} on ${input.path} to ${to}`;
+    settleGrant(updateACL.mutateAsync({ ...input, force }), {
+      action,
+      lateFailure: (err) =>
+        !force && isOverridable(err)
+          ? refusedBeyondOverride(action)
+          : undefined,
+      // Not once the dialog has been dismissed: this would close, and clear,
+      // whichever one has been opened in its place.
+      onSuccess: () => {
+        setGrantConflict(null);
+        setGrantOpen(false);
+        setSubject("");
+      },
+      // A dismissal keeps what was filled in, which is this section's and not
+      // the dialog's, so a grant that went through after one would leave the
+      // subject it has just been made to for the next Grant to repeat. Put it
+      // away as a success does, unless a dialog is open: that one is showing
+      // the same text as its own.
+      onLateSuccess: (_, { open }) => {
+        if (!open) setSubject("");
+      },
+      onError: (err) => {
+        setGrantConflict(null);
+        // A forced grant is past the refusal: its 409 is an error like any other.
+        if (!force && isOverridable(err)) {
+          setGrantConflict({ message: err.message, input, subject: to });
+          return;
+        }
+        setError(
+          err instanceof ApiClientError
+            ? err.message
+            : "Failed to grant access",
+        );
+      },
+    });
+  };
+
+  const handleRevoke = (entry: AccessACLEntry, force: boolean) => {
     setRevokeError("");
+    const action = `Revoking ${entry.roleid} on ${entry.path} from ${entry.ugid}`;
     const kind =
       entry.type === "group"
         ? "groups"
@@ -168,17 +205,29 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
         roles: entry.roleid,
         [kind]: entry.ugid,
         delete: true,
+        force,
       }),
       {
-        action: `Revoking ${entry.roleid} on ${entry.path} from ${entry.ugid}`,
+        action,
+        lateFailure: (err) =>
+          !force && isOverridable(err)
+            ? refusedBeyondOverride(action)
+            : undefined,
         // These run only while the confirmation that sent the request is still
         // the one open — this entry's, not another's that has replaced it — so
         // closing it cannot close another's: useSaveOutcome holds them to that,
         // and nothing here checks it a second time.
         onSuccess: () => {
           setRevokeTarget(null);
+          setRevokeConflict(null);
         },
         onError: (err) => {
+          setRevokeConflict(null);
+          if (!force && isOverridable(err)) {
+            setRevokeTarget(null);
+            setRevokeConflict({ message: err.message, entry });
+            return;
+          }
           setRevokeError(
             err instanceof ApiClientError
               ? err.message
@@ -207,6 +256,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
             open={grantOpen}
             onOpenChange={(open) => {
               setGrantOpen(open);
+              if (!open) setGrantConflict(null);
               // Clear on close: error was only reset at the start of the next
               // submit, so reopening the dialog showed the previous failure.
               if (!open) setError("");
@@ -340,6 +390,26 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
                 {error && <p className="text-sm text-destructive">{error}</p>}
 
+                {grantConflict && (
+                  <SelfCredentialConfirm
+                    title="Granting this can cut off Nexara's access"
+                    message={grantConflict.message}
+                    confirmValue={grantConflict.subject}
+                    actionLabel="Grant Anyway"
+                    pending={updateACL.isPending}
+                    onCancel={() => {
+                      setGrantConflict(null);
+                    }}
+                    onConfirm={() => {
+                      sendGrant(
+                        grantConflict.input,
+                        grantConflict.subject,
+                        true,
+                      );
+                    }}
+                  />
+                )}
+
                 <DialogFooter>
                   <Button
                     type="submit"
@@ -472,7 +542,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                 disabled={updateACL.isPending}
                 onClick={(e: React.MouseEvent) => {
                   e.preventDefault();
-                  if (revokeTarget) handleRevoke(revokeTarget);
+                  if (revokeTarget) handleRevoke(revokeTarget, false);
                 }}
               >
                 {updateACL.isPending ? "Revoking..." : "Revoke"}
@@ -480,6 +550,23 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {revokeConflict && (
+          <SelfCredentialConfirm
+            key={entryKey(revokeConflict.entry)}
+            title="Revoking this can cut off Nexara's access"
+            message={revokeConflict.message}
+            confirmValue={revokeConflict.entry.ugid}
+            actionLabel="Revoke"
+            pending={updateACL.isPending}
+            onCancel={() => {
+              setRevokeConflict(null);
+            }}
+            onConfirm={() => {
+              handleRevoke(revokeConflict.entry, true);
+            }}
+          />
+        )}
       </>
     </Panel>
   );

@@ -422,6 +422,10 @@ var accessForceRoutes = []struct{ method, path string }{
 	{fiber.MethodDelete, accessScope + "/users/:userid"},
 	{fiber.MethodPut, accessScope + "/users/:userid/tokens/:tokenid"},
 	{fiber.MethodDelete, accessScope + "/users/:userid/tokens/:tokenid"},
+	{fiber.MethodPut, accessScope + "/acl"},
+	{fiber.MethodDelete, accessScope + "/groups/:groupid"},
+	{fiber.MethodPut, accessScope + "/roles/:roleid"},
+	{fiber.MethodDelete, accessScope + "/roles/:roleid"},
 }
 
 // TestAccessForceIsReadFromTheQueryString pins the source of the one parameter

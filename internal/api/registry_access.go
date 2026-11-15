@@ -203,6 +203,19 @@ func accessForceParam(what string) apischema.Property {
 	}
 }
 
+// accessDependencyForceParam is accessForceParam for the four routes that leave
+// Nexara's token in place but can change what it may do: an ACL change, a group
+// delete, a role edit and a role delete (handlers/access_dependency.go).
+func accessDependencyForceParam() apischema.Property {
+	prop := accessForceParam("")
+	prop.Description = "Proceed even though the change touches what the permissions of the token Nexara " +
+		"uses to reach this cluster rest on: an ACL entry for the token, its user or a group the user is " +
+		"in, a group the user is in, or a role such an entry grants. Omitted, such a change is refused with " +
+		"409 and an explanation, as is one Nexara could not check because it could not read the ACL, the " +
+		"group or the user; 500 (404 if the cluster does not exist) when it cannot read the cluster's record."
+	return prop
+}
+
 // accessExpireParam is a PVE account or token expiry, as a Unix timestamp.
 //
 // Zero means "never", which is Proxmox's own encoding and is why the minimum is
@@ -409,13 +422,17 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 		Handler: h.UpdateGroup,
 	})
 	reg.Register(Endpoint{
-		Method:      fiber.MethodDelete,
-		Path:        accessScope + "/groups/:groupid",
-		Description: "Delete a Proxmox group. ACL entries granted to it stop applying.",
+		Method: fiber.MethodDelete,
+		Path:   accessScope + "/groups/:groupid",
+		Description: "Delete a Proxmox group. ACL entries granted to it stop applying. Deleting a group the " +
+			"user of Nexara's own token is in requires ?force=true.",
 		Group:       "Proxmox Access Control",
 		Permissions: accessManage(),
-		Parameters:  clusterParams(apischema.Properties{"groupid": accessNameParam("PVE group id.")}),
-		Handler:     h.DeleteGroup,
+		Parameters: clusterParams(apischema.Properties{
+			"groupid": accessNameParam("PVE group id."),
+			"force":   accessDependencyForceParam(),
+		}),
+		Handler: h.DeleteGroup,
 	})
 
 	// ── Roles ─────────────────────────────────────────────────────────
@@ -464,7 +481,9 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 		Description: "Replace a role's privilege list, or extend it with append=true. privs is REQUIRED " +
 			"rather than optional: an absent value would have to mean either \"leave it alone\" or " +
 			"\"remove everything\", and a client that forgot the field must not be able to disarm a role " +
-			"by accident. Send it empty to clear the role deliberately.",
+			"by accident. Send it empty to clear the role deliberately. A replacement that removes a " +
+			"privilege from a role granted to Nexara's own token, its user or one of the user's groups " +
+			"requires ?force=true; append=true never does.",
 		Group:       "Proxmox Access Control",
 		Permissions: accessManage(),
 		Parameters: clusterParams(apischema.Properties{
@@ -477,6 +496,7 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 				Typetext:    "<boolean>",
 				Description: "Add the listed privileges to the role instead of replacing its list.",
 			},
+			"force": accessDependencyForceParam(),
 		}),
 		Handler: h.UpdateRole,
 	})
@@ -484,11 +504,15 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 		Method: fiber.MethodDelete,
 		Path:   accessScope + "/roles/:roleid",
 		Description: "Delete a custom Proxmox role. Proxmox refuses to delete a built-in one; the roles " +
-			"listing marks those with special=true.",
+			"listing marks those with special=true. Deleting a role granted to Nexara's own token, its " +
+			"user or one of the user's groups requires ?force=true.",
 		Group:       "Proxmox Access Control",
 		Permissions: accessManage(),
-		Parameters:  clusterParams(apischema.Properties{"roleid": accessNameParam("PVE role id.")}),
-		Handler:     h.DeleteRole,
+		Parameters: clusterParams(apischema.Properties{
+			"roleid": accessNameParam("PVE role id."),
+			"force":  accessDependencyForceParam(),
+		}),
+		Handler: h.DeleteRole,
 	})
 
 	// ── ACL ───────────────────────────────────────────────────────────
@@ -506,11 +530,14 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 		Path:   accessScope + "/acl",
 		Description: "Grant roles on an ACL path, or revoke them with delete=true — Proxmox uses one " +
 			"endpoint for both directions and the audit trail follows suit. At least one of users, groups " +
-			"or tokens must name a subject.",
+			"or tokens must name a subject. A grant or revoke for Nexara's own token, its user or one of the " +
+			"user's groups requires ?force=true: either direction can take away what the token may do.",
 		Group:       "Proxmox Access Control",
 		Permissions: accessManage(),
-		Parameters:  clusterParams(updateAccessACLParams()),
-		Handler:     h.UpdateACL,
+		Parameters: clusterParams(withParams(updateAccessACLParams(), apischema.Properties{
+			"force": accessDependencyForceParam(),
+		})),
+		Handler: h.UpdateACL,
 	})
 
 	// ── Realms (read-only) and the capability probe ───────────────────

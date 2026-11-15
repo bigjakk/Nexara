@@ -441,7 +441,12 @@ func TestGuard_CredentialReadsAreShapedBeforeResponding(t *testing.T) {
 		{clientCall: "GetSDNIPAMs", shaper: "sdnIPAMsForRead"},
 		{clientCall: "GetSDNDNSPlugins", shaper: "sdnDNSForRead"},
 		{clientCall: "GetAccessUsers", shaper: "accessUsersForRead"},
-		{clientCall: "GetAccessUser", shaper: "accessUserDetailForRead"},
+		{
+			clientCall: "GetAccessUser", shaper: "accessUserDetailForRead",
+			exempt: map[string]string{
+				"userGroupsOf": "returns only the user's groups to the self-credential guard; never the user, never keys",
+			},
+		},
 		{clientCall: "GetAccessDomains", shaper: "accessDomainsForRead"},
 		{clientCall: "GetAccessDomain", shaper: "accessDomainForRead"},
 		{

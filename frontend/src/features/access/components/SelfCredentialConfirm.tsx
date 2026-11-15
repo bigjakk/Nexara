@@ -17,7 +17,7 @@ import { holdFocusInDialog } from "./holdFocusInDialog";
 
 interface SelfCredentialConfirmProps {
   /**
-   * The action being confirmed, and what it does — "Revoking this token will
+   * The action being confirmed, and what it can do — "Revoking this token can
    * cut off Nexara's access". This dialog is raised for several different
    * actions, and the title is how the operator tells them apart before reading
    * on.
@@ -36,8 +36,8 @@ interface SelfCredentialConfirmProps {
 }
 
 /**
- * Confirms an action that would destroy the credential Nexara uses to reach
- * the cluster.
+ * Confirms an action that can destroy the credential Nexara uses to reach the
+ * cluster, or take away permissions it relies on.
  *
  * The server refuses these by default and returns 409 with an explanation;
  * this is the deliberate override. It is type-the-name rather than a plain
@@ -89,8 +89,10 @@ export function SelfCredentialConfirm({
           <div className="flex items-start gap-2.5 rounded-[8px] bg-amber-500/10 px-3.5 py-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
             <p className="min-w-0 text-sm">
-              After this, the cluster will show as unreachable until you update
-              its credentials in Nexara. You cannot do that from this screen.
+              Nexara can lose access to this cluster, or some of what it may do
+              there. If it does, the cluster shows as unreachable or actions
+              fail until you update its credentials in Nexara or undo the change
+              in Proxmox.
             </p>
           </div>
 

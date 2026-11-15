@@ -10,17 +10,15 @@ import { AccessGroupsSection } from "./AccessGroupsSection";
 import { AccessRolesSection } from "./AccessRolesSection";
 
 /**
- * A failed group or role delete reaches the operator through the app's global
- * error toast (lib/query-client.ts) and through nothing else: the confirmation
- * closes whatever the outcome, and neither section has anywhere to show a
- * delete's error. useDeleteAccessGroup and useDeleteAccessRole therefore keep
- * that toast, where the other access hooks opt out of it (errorsHandledLocally)
- * because their component shows the failure itself. Opting one of these out
- * too would make its failure silent, which is worse than reporting it twice.
+ * A failed group or role delete reaches the operator through one toast and
+ * nothing else: the confirmation closes whatever the outcome, and neither
+ * section has anywhere to show a delete's error. Their hooks opt out of the
+ * global toast (a 409 opens the self-credential override instead), so the
+ * section raises it; opting out without that would make the failure silent.
  *
  * These run on the app's own kind of client (test/app-query-client.ts), whose
- * mutation cache is the one that raises the toast. renderWithProviders' client
- * has none: nothing toasts on it, whatever a hook does.
+ * mutation cache is the one that would raise a second, global toast.
+ * renderWithProviders' client has none.
  */
 
 vi.mock("@/lib/api-client", async () =>
@@ -103,7 +101,7 @@ describe("a failed group delete", () => {
     });
     expect(
       screen.queryByText(/permission denied/i),
-      "the section shows the failure itself: give useDeleteAccessGroup errorsHandledLocally",
+      "the section shows the failure inline as well as in the toast",
     ).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(mockedDelete.mock.calls).toEqual([[`${ACCESS}/groups/${GROUP}`]]);
@@ -135,7 +133,7 @@ describe("a failed role delete", () => {
     });
     expect(
       screen.queryByText(/permission denied/i),
-      "the section shows the failure itself: give useDeleteAccessRole errorsHandledLocally",
+      "the section shows the failure inline as well as in the toast",
     ).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(mockedDelete.mock.calls).toEqual([[`${ACCESS}/roles/${ROLE}`]]);

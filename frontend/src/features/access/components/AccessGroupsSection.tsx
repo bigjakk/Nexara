@@ -1,5 +1,6 @@
 import { Fragment, useState } from "react";
 import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
@@ -47,6 +48,8 @@ import {
   useDeleteAccessGroup,
   useUpdateAccessGroup,
 } from "../api/access-queries";
+import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
+import { isOverridable, refusedBeyondOverride } from "./selfCredentialRefusal";
 
 interface Props {
   clusterId: string;
@@ -65,6 +68,12 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
   const [comment, setComment] = useState("");
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // Set when the server refuses a delete because the user of Nexara's own
+  // token is in the group; its override force-deletes.
+  const [deleteConflict, setDeleteConflict] = useState<{
+    message: string;
+    groupid: string;
+  } | null>(null);
   const [editTarget, setEditTarget] = useState<{
     groupid: string;
     comment: string;
@@ -79,6 +88,45 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
   // useSaveOutcome). This section opens the create dialog again and again, so
   // it is told apart by its open flag.
   const settleCreate = useSaveOutcome(createOpen);
+  // A delete is heard by the confirmation that sent it: the plain one, or the
+  // override over it. Neither is held while its request is out, and Enter on
+  // another group's Delete opens that one's in its place.
+  const settleDelete = useSaveOutcome(
+    deleteTarget !== null
+      ? `ask:${deleteTarget}`
+      : deleteConflict
+        ? `force:${deleteConflict.groupid}`
+        : null,
+  );
+
+  const handleDelete = (target: string, force: boolean) => {
+    const action = `Deleting group ${target}`;
+    settleDelete(deleteGroup.mutateAsync({ groupid: target, force }), {
+      action,
+      lateFailure: (err) =>
+        !force && isOverridable(err)
+          ? refusedBeyondOverride(action)
+          : undefined,
+      onSuccess: () => {
+        setDeleteTarget(null);
+        setDeleteConflict(null);
+      },
+      onError: (err) => {
+        setDeleteTarget(null);
+        setDeleteConflict(null);
+        if (!force && isOverridable(err)) {
+          setDeleteConflict({ message: err.message, groupid: target });
+          return;
+        }
+        // The section has nowhere to show it, so it is toasted.
+        toast.error(
+          err instanceof ApiClientError
+            ? err.message
+            : "Failed to delete group",
+        );
+      },
+    });
+  };
 
   const handleCreate = (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -340,20 +388,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                 disabled={deleteGroup.isPending}
                 onClick={(e: React.MouseEvent) => {
                   e.preventDefault();
-                  if (!deleteTarget) return;
-                  const target = deleteTarget;
-                  deleteGroup.mutate(target, {
-                    // Only this group's confirmation. It is not held while its
-                    // request is out, so Tab walks out of it to the Delete
-                    // buttons behind the modal, which a pointer cannot reach,
-                    // and Enter on another group's opens that one in its place:
-                    // this settling must not close it.
-                    onSettled: () => {
-                      setDeleteTarget((open) =>
-                        open === target ? null : open,
-                      );
-                    },
-                  });
+                  if (deleteTarget) handleDelete(deleteTarget, false);
                 }}
               >
                 {deleteGroup.isPending ? "Deleting..." : "Delete Group"}
@@ -361,6 +396,23 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {deleteConflict && (
+          <SelfCredentialConfirm
+            key={deleteConflict.groupid}
+            title="Deleting this group can cut off Nexara's access"
+            message={deleteConflict.message}
+            confirmValue={deleteConflict.groupid}
+            actionLabel="Delete Group"
+            pending={deleteGroup.isPending}
+            onCancel={() => {
+              setDeleteConflict(null);
+            }}
+            onConfirm={() => {
+              handleDelete(deleteConflict.groupid, true);
+            }}
+          />
+        )}
       </>
     </Panel>
   );

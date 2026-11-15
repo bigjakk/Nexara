@@ -1373,11 +1373,23 @@ never more than its user holds, so only turning separation on can. The cluster
 then shows as unreachable, or fails some actions with permission errors (403),
 until its credentials are updated in Nexara or, for an edit, the edit is undone in
 Proxmox. Other edits, a comment or e-mail change included, are not guarded, nor
-are `privsep=false` and a token `expire` of `0`. Nor is anything outside these
-routes: ACL changes (revoking the token's or its user's grant, granting `NoAccess`
-or a narrower role on a deeper path), deleting a group its user belongs to, and
-editing or deleting a custom role it holds can each take away permissions Nexara
-relies on, and none of them is guarded.
+are `privsep=false` and a token `expire` of `0`.
+
+Four more routes take `?force=true` for changes that leave the token in place but
+can take away what it may do: `PUT .../access/acl` naming the token, its user or
+a group the user is in (a grant as well as a revoke); `DELETE
+.../access/groups/:groupid` of a group the user is in; `PUT
+.../access/roles/:roleid` that removes a privilege from a role an ACL entry
+grants to the token, its user or one of the user's groups (`append=true`, or a
+list that keeps every privilege, is never refused); and `DELETE
+.../access/roles/:roleid` of such a role. For a token of `root@pam` only entries
+for the token itself count. Paths are not compared and the token's privilege
+separation is not read, so the check can refuse a change that would in fact
+leave the token's permissions as they were. When Nexara cannot read the ACL, the
+group or the user it needs, the answer is a `409` saying the check could not be
+made, and `force=true` goes ahead. A cluster record it cannot read is `500` or
+`404`, as above. Their audit rows carry `forced`, `true` whenever the request sent
+`force=true` (on a role edit, only one without `append=true`).
 
 If Nexara cannot read the cluster's record to check whether the credential is its
 own, it refuses the guarded request without sending anything to Proxmox, so

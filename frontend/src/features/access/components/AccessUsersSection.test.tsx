@@ -85,11 +85,11 @@ const TOKEN_URL = `${TOKENS_URL}/${TOKEN}`;
 
 // Each override's title names the action it confirms. They end alike, which
 // ANY_OVERRIDE matches, for asserting that none of them is open.
-const EDIT_TITLE = "Saving this edit will cut off Nexara's access";
-const DELETE_TITLE = "Deleting this user will cut off Nexara's access";
-const REVOKE_TITLE = "Revoking this token will cut off Nexara's access";
-const REGENERATE_TITLE = "Regenerating this token will cut off Nexara's access";
-const ANY_OVERRIDE = /will cut off Nexara's access$/;
+const EDIT_TITLE = "Saving this edit can cut off Nexara's access";
+const DELETE_TITLE = "Deleting this user can cut off Nexara's access";
+const REVOKE_TITLE = "Revoking this token can cut off Nexara's access";
+const REGENERATE_TITLE = "Regenerating this token can cut off Nexara's access";
+const ANY_OVERRIDE = /can cut off Nexara's access$/;
 // Worded as guardSelfCredential (internal/api/handlers/access.go) words it.
 const REFUSAL =
   "This is the user nexara@pve Nexara uses to reach this cluster. " +

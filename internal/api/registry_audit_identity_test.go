@@ -207,6 +207,8 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			bind: func(q *db.Queries) Handler {
 				return handlers.NewAccessHandler(q, haCreateEncKey, nil).UpdateACL
 			},
+			// The self-credential guard reads the cluster's token id.
+			models:   map[string]any{"GetCluster": db.Cluster{TokenID: "nexara@pve!api"}},
 			wantType: "pve_acl", wantID: "/vms/100", wantAction: "granted",
 		},
 		{
@@ -217,6 +219,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			bind: func(q *db.Queries) Handler {
 				return handlers.NewAccessHandler(q, haCreateEncKey, nil).UpdateACL
 			},
+			models:   map[string]any{"GetCluster": db.Cluster{TokenID: "nexara@pve!api"}},
 			wantType: "pve_acl", wantID: "/vms/100", wantAction: "granted", wantDetails: map[string]any{"propagate": false},
 		},
 		// An update names the fields it changes, never a value, so the change

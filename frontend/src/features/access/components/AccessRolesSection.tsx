@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { Lock, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
@@ -47,6 +48,8 @@ import {
   useDeleteAccessRole,
   useUpdateAccessRole,
 } from "../api/access-queries";
+import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
+import { isOverridable, refusedBeyondOverride } from "./selfCredentialRefusal";
 
 interface Props {
   clusterId: string;
@@ -119,6 +122,20 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
   const openings = useRef(0);
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // The server's refusal of an edit or a delete that touches a role Nexara's
+  // own token holds, and what its override re-sends with force. The edit's is
+  // stacked over the editor, so Cancel goes back to the edit as it was, and
+  // belongs to the opening it answered: another editor never shows it.
+  const [saveConflict, setSaveConflict] = useState<{
+    openingId: number;
+    message: string;
+    roleid: string;
+    privs: string;
+  } | null>(null);
+  const [deleteConflict, setDeleteConflict] = useState<{
+    message: string;
+    roleid: string;
+  } | null>(null);
 
   const manageable = canManage("access") && capabilities.canModifyRoles;
 
@@ -162,27 +179,97 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
 
   const handleSave = () => {
     if (!editing) return;
-    setError("");
     const privs = editing.privs.join(",");
     const roleid = editing.isNew ? editing.roleid.trim() : editing.roleid;
-    settle(
-      editing.isNew
-        ? createRole.mutateAsync({ roleid, privs })
-        : updateRole.mutateAsync({ roleid, privs }),
-      {
-        action: `${editing.isNew ? "Creating" : "Saving"} role ${roleid}`,
-        // Not once the editor has been dismissed: this would close whichever
-        // one has been opened in its place.
-        onSuccess: () => {
-          setEditing(null);
-        },
-        onError: (err) => {
-          setError(
-            err instanceof ApiClientError ? err.message : "Failed to save role",
-          );
-        },
+    if (editing.isNew) {
+      save(
+        createRole.mutateAsync({ roleid, privs }),
+        `Creating role ${roleid}`,
+      );
+      return;
+    }
+    saveEdit(editing.openingId, roleid, privs, false);
+  };
+
+  const saveEdit = (
+    openingId: number,
+    roleid: string,
+    privs: string,
+    force: boolean,
+  ) => {
+    const action = `Saving role ${roleid}`;
+    save(updateRole.mutateAsync({ roleid, privs, force }), action, (err) => {
+      // A forced save is past the refusal, so its 409 is an error like any
+      // other; only an unforced one has an override to be sent to.
+      if (force || !isOverridable(err)) return false;
+      setSaveConflict({ openingId, message: err.message, roleid, privs });
+      return true;
+    });
+  };
+
+  const save = (
+    request: Promise<unknown>,
+    action: string,
+    overridden?: (err: unknown) => boolean,
+  ) => {
+    setError("");
+    settle(request, {
+      action,
+      lateFailure: (err) =>
+        overridden && isOverridable(err)
+          ? refusedBeyondOverride(action)
+          : undefined,
+      // Not once the editor has been dismissed: this would close whichever
+      // one has been opened in its place.
+      onSuccess: () => {
+        setSaveConflict(null);
+        setEditing(null);
       },
-    );
+      onError: (err) => {
+        setSaveConflict(null);
+        if (overridden?.(err)) return;
+        setError(
+          err instanceof ApiClientError ? err.message : "Failed to save role",
+        );
+      },
+    });
+  };
+
+  // A delete is heard by the confirmation that sent it, the plain one or the
+  // override over it; neither is held while its request is out.
+  const settleDelete = useSaveOutcome(
+    deleteTarget !== null
+      ? `ask:${deleteTarget}`
+      : deleteConflict
+        ? `force:${deleteConflict.roleid}`
+        : null,
+  );
+
+  const handleDelete = (target: string, force: boolean) => {
+    const action = `Deleting role ${target}`;
+    settleDelete(deleteRole.mutateAsync({ roleid: target, force }), {
+      action,
+      lateFailure: (err) =>
+        !force && isOverridable(err)
+          ? refusedBeyondOverride(action)
+          : undefined,
+      onSuccess: () => {
+        setDeleteTarget(null);
+        setDeleteConflict(null);
+      },
+      onError: (err) => {
+        setDeleteTarget(null);
+        setDeleteConflict(null);
+        if (!force && isOverridable(err)) {
+          setDeleteConflict({ message: err.message, roleid: target });
+          return;
+        }
+        // The section has nowhere to show it, so it is toasted.
+        toast.error(
+          err instanceof ApiClientError ? err.message : "Failed to delete role",
+        );
+      },
+    });
   };
 
   const roleCount = rolesQuery.data?.length ?? 0;
@@ -404,6 +491,26 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
 
                 {error && <p className="text-sm text-destructive">{error}</p>}
               </div>
+              {saveConflict?.openingId === editing.openingId && (
+                <SelfCredentialConfirm
+                  title="Saving this role can cut off Nexara's access"
+                  message={saveConflict.message}
+                  confirmValue={saveConflict.roleid}
+                  actionLabel="Save Anyway"
+                  pending={updateRole.isPending}
+                  onCancel={() => {
+                    setSaveConflict(null);
+                  }}
+                  onConfirm={() => {
+                    saveEdit(
+                      saveConflict.openingId,
+                      saveConflict.roleid,
+                      saveConflict.privs,
+                      true,
+                    );
+                  }}
+                />
+              )}
               <DialogFooter>
                 <Button
                   variant="outline"
@@ -452,20 +559,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                 disabled={deleteRole.isPending}
                 onClick={(e: React.MouseEvent) => {
                   e.preventDefault();
-                  if (!deleteTarget) return;
-                  const target = deleteTarget;
-                  deleteRole.mutate(target, {
-                    // Only this role's confirmation. It is not held while its
-                    // request is out, so Tab walks out of it to the Delete
-                    // buttons behind the modal, which a pointer cannot reach,
-                    // and Enter on another role's opens that one in its place:
-                    // this settling must not close it.
-                    onSettled: () => {
-                      setDeleteTarget((open) =>
-                        open === target ? null : open,
-                      );
-                    },
-                  });
+                  if (deleteTarget) handleDelete(deleteTarget, false);
                 }}
               >
                 {deleteRole.isPending ? "Deleting..." : "Delete Role"}
@@ -473,6 +567,23 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {deleteConflict && (
+          <SelfCredentialConfirm
+            key={deleteConflict.roleid}
+            title="Deleting this role can cut off Nexara's access"
+            message={deleteConflict.message}
+            confirmValue={deleteConflict.roleid}
+            actionLabel="Delete Role"
+            pending={deleteRole.isPending}
+            onCancel={() => {
+              setDeleteConflict(null);
+            }}
+            onConfirm={() => {
+              handleDelete(deleteConflict.roleid, true);
+            }}
+          />
+        )}
       </>
     </Panel>
   );

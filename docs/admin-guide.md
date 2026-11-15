@@ -604,10 +604,10 @@ A request with `?force=true` skips the check. Neither is a **409**, so the UI
 reports an ordinary failure and does not offer the override.
 
 The UI puts each override behind a type-the-name confirmation whose title says
-what it confirms — "Deleting this user will cut off Nexara's access" (button
-**Delete User**), "Revoking this token will cut off Nexara's access" (**Revoke
-Token**), "Regenerating this token will cut off Nexara's access" (**Regenerate
-Token**) and, for an edit, "Saving this edit will cut off Nexara's access"
+what it confirms — "Deleting this user can cut off Nexara's access" (button
+**Delete User**), "Revoking this token can cut off Nexara's access" (**Revoke
+Token**), "Regenerating this token can cut off Nexara's access" (**Regenerate
+Token**) and, for an edit, "Saving this edit can cut off Nexara's access"
 (**Save Anyway**). Type the user id — the full `user@realm!token` id for a
 token — to enable the button. An edit sends only the fields you changed, and
 **Save Anyway** re-sends exactly the edit that was refused, with
@@ -620,11 +620,41 @@ cluster authenticates with, and only for changes that could actually break it.
 Edits that cannot affect an API token (comment, e-mail, names, the two-factor keys
 field) are not guarded, because making every edit to `nexara@pve` demand a force
 flag would train operators to pass it reflexively. The same goes for a token's
-comment, an expiry of 0 and privilege separation turned off. It does not watch
-every route to the same end, though: ACL changes (revoking the token's or its
-user's grant, granting NoAccess or a narrower role on a deeper path), deleting a
-group its user belongs to, and editing or deleting a custom role it holds can
-each take away permissions Nexara relies on, and none of them is guarded.
+comment, an expiry of 0 and privilege separation turned off.
+
+### Nor Quietly Narrow What Its Token May Do
+
+Four more changes leave the token in place but can take away what it may do,
+and get the same **409**, override and `forced` audit flag:
+
+- a **permission grant or revoke** for the token, its user or a group the user
+  is in. A grant counts as well as a revoke: a deeper entry replaces what is
+  inherited, and NoAccess cancels every other role;
+- **deleting a group** the token's user is in (Proxmox deletes the group's
+  permission entries with it);
+- **editing a role** granted to the token, its user or one of the user's groups,
+  when the edit removes a privilege the role has. Adding privileges is not asked
+  about;
+- **deleting such a role**.
+
+This follows how Proxmox works out a token's permissions: a token without
+privilege separation holds its user's, which come from the user's own entries
+and its groups'; a separated token holds only what both it and its user hold.
+For a token of `root@pam`, which holds everything, only entries for the token
+itself count. The check is broader than exact in a few ways, so it can ask when
+nothing would in fact change: it does not compare paths, it does not read
+whether the token is separated, and a role edit that removes any privilege
+counts, needed or not. A change that names none of these is never asked about.
+
+If Nexara cannot read the permission list, the group or the user it needs to
+check (for example because its token may not see them), it asks too, with a
+**409** that says it could not check, rather than letting the change through
+or refusing it outright. The override dialogs are titled "Granting this can cut
+off Nexara's access" (**Grant Anyway**), "Revoking this can cut off Nexara's
+access" (**Revoke**), "Deleting this group can cut off Nexara's access"
+(**Delete Group**), "Saving this role can cut off Nexara's access" (**Save
+Anyway**) and "Deleting this role can cut off Nexara's access" (**Delete
+Role**); type the subject, group or role named to enable the button.
 
 ---
 

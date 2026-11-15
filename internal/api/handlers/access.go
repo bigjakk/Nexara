@@ -978,10 +978,27 @@ func (h *AccessHandler) DeleteGroup(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	// Deleting a group the token's user is in drops the group's ACL entries
+	// (see access_dependency.go). The group is read with the privilege the
+	// delete itself needs (Group.Allocate on /access/groups), so a token that may
+	// delete it may also look.
+	force := p.Bool("force")
+	if err := h.guardCredentialDependency(c, clusterID, force, func(ctx context.Context, o ownCredential) (string, error) {
+		if !o.userEntriesCount() {
+			return "", nil
+		}
+		group, err := pxClient.GetAccessGroup(ctx, groupid)
+		if err != nil {
+			return "", err
+		}
+		return groupDeleteDependency(o, groupid, group.Members), nil
+	}); err != nil {
+		return err
+	}
 	if err := pxClient.DeleteAccessGroup(c.Context(), groupid); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"groupid": groupid})
+	details, _ := json.Marshal(map[string]any{"groupid": groupid, "forced": force})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_group", groupid, "deleted", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_group", groupid, "deleted")
 	return c.SendStatus(fiber.StatusNoContent)
@@ -1075,13 +1092,34 @@ func (h *AccessHandler) UpdateRole(c fiber.Ctx, p *apischema.Params) error {
 	// caller goes through, and this route is only one of them.
 	privs := p.String("privs")
 	appendPrivs := p.Bool("append")
+	// Only a replacement that drops a privilege the role holds can take
+	// anything away, so only that one reads the ACL (see access_dependency.go).
+	force := p.Bool("force")
+	if !appendPrivs {
+		if err := h.guardCredentialDependency(c, clusterID, force, func(ctx context.Context, o ownCredential) (string, error) {
+			current, err := pxClient.GetAccessRole(ctx, roleid)
+			if err != nil {
+				return "", err
+			}
+			if !roleUpdateCanTakeAway(false, current, privs) {
+				return "", nil
+			}
+			reason, err := roleChangeDecision(pxClient, roleid)(ctx, o)
+			if reason != "" {
+				reason += ", and this edit removes privileges from it"
+			}
+			return reason, err
+		}); err != nil {
+			return err
+		}
+	}
 	if err := pxClient.UpdateAccessRole(c.Context(), roleid, proxmox.UpdateAccessRoleParams{
 		Privs:  &privs,
 		Append: appendPrivs,
 	}); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"roleid": roleid, "privs": privs, "append": appendPrivs})
+	details, _ := json.Marshal(map[string]any{"roleid": roleid, "privs": privs, "append": appendPrivs, "forced": force && !appendPrivs})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_role", roleid, "updated", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_role", roleid, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -1101,10 +1139,14 @@ func (h *AccessHandler) DeleteRole(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	force := p.Bool("force")
+	if err := h.guardCredentialDependency(c, clusterID, force, roleChangeDecision(pxClient, roleid)); err != nil {
+		return err
+	}
 	if err := pxClient.DeleteAccessRole(c.Context(), roleid); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"roleid": roleid})
+	details, _ := json.Marshal(map[string]any{"roleid": roleid, "forced": force})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_role", roleid, "deleted", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_role", roleid, "deleted")
 	return c.SendStatus(fiber.StatusNoContent)
@@ -1154,6 +1196,22 @@ func (h *AccessHandler) UpdateACL(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	// A grant can take permissions away as a revoke can (a deeper entry
+	// replaces what is inherited, NoAccess cancels), so both are guarded when
+	// they name the token, its user or one of the user's groups.
+	force := p.Bool("force")
+	if err := h.guardCredentialDependency(c, clusterID, force, func(ctx context.Context, o ownCredential) (string, error) {
+		var groups []string
+		if aclChangeNeedsGroups(o, req) {
+			var err error
+			if groups, err = userGroupsOf(ctx, pxClient, o); err != nil {
+				return "", err
+			}
+		}
+		return aclChangeDependency(o, groups, req), nil
+	}); err != nil {
+		return err
+	}
 	// validateACLPath, the "at least one role" rule and the "at least one
 	// subject" rule all live in proxmox.UpdateAccessACL. The last of the three
 	// is a cross-field requirement apischema cannot state — Requires names a
@@ -1167,7 +1225,7 @@ func (h *AccessHandler) UpdateACL(c fiber.Ctx, p *apischema.Params) error {
 	if req.Delete {
 		action = "revoked"
 	}
-	details, _ := json.Marshal(accessACLDetails(req))
+	details, _ := json.Marshal(accessACLDetails(req, force))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_acl", auditkey.ACLPath(req.Path), action, details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_acl", auditkey.ACLPath(req.Path), action)
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -1176,13 +1234,16 @@ func (h *AccessHandler) UpdateACL(c fiber.Ctx, p *apischema.Params) error {
 // accessACLDetails builds the audit details of an ACL grant or revoke: the
 // path, roles and grantees as sent, and propagate only when the request sent
 // it — Proxmox's default, 1, applies otherwise — so the change observer
-// explains only the grants this row made. delete is the row's action.
+// explains only the grants this row made. delete is the row's action. forced
+// is whether the caller sent force, with DeleteUser's meaning: every ACL change
+// is one the guard covers, so it does not say the guard would have refused.
 //
 // Pinned, as accessAuditBuilders requires, by
 // TestAccessACLDetailsRecordsTheGrant and, through the real route,
 // TestClusterObjectAuditRowsFileUnderOneKey in internal/api.
-func accessACLDetails(req proxmox.UpdateAccessACLParams) map[string]any {
+func accessACLDetails(req proxmox.UpdateAccessACLParams, force bool) map[string]any {
 	details := map[string]any{
+		"forced": force,
 		"path":   req.Path,
 		"roles":  req.Roles,
 		"users":  req.Users,

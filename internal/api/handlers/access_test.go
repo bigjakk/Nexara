@@ -884,7 +884,7 @@ func TestAccessUserCreateDetails(t *testing.T) {
 func TestAccessACLDetailsRecordsTheGrant(t *testing.T) {
 	accessRequireDetailsClassified(t,
 		func(t *testing.T, req proxmox.UpdateAccessACLParams) string {
-			return accessDetailsJSON(t, accessACLDetails(req))
+			return accessDetailsJSON(t, accessACLDetails(req, false))
 		},
 		map[string]struct{ key, value string }{
 			"Path": {"path", `"sentinel-Path"`}, "Roles": {"roles", `"sentinel-Roles"`},

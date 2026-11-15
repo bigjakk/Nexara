@@ -66,6 +66,7 @@ import {
 } from "../api/access-queries";
 import { TokenSecretDialog } from "./TokenSecretDialog";
 import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
+import { isOverridable, refusedBeyondOverride } from "./selfCredentialRefusal";
 import { holdFocusInDialog } from "./holdFocusInDialog";
 
 interface Props {
@@ -81,28 +82,6 @@ function expiryLabel(expire?: number): string {
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiClientError ? err.message : fallback;
-}
-
-/**
- * Whether the server refused an action because it would cut Nexara off from the
- * cluster: a 409 from guardSelfCredential, which says why and how to go ahead
- * anyway (force=true). Every flow it can refuse answers it with a
- * type-to-confirm override, which sends the action again with force, and
- * decides to open that override with this.
- */
-function isOverridable(err: unknown): err is ApiClientError {
-  return err instanceof ApiClientError && err.status === 409;
-}
-
-/**
- * What a refusal that has an override says when there is no one left to give
- * it: the dialog is gone. The server's words end with "Retry with force=true to
- * proceed anyway", which is for an API caller and cannot be acted on from a
- * toast, so they are not used: this says what happened to the action, and what
- * to do to go ahead.
- */
-function refusedBeyondOverride(action: string): string {
-  return `${action} was refused, and nothing was changed, because it could cut Nexara off from the cluster. To go ahead anyway, do it again and confirm the override that is then offered.`;
 }
 
 /**
@@ -545,7 +524,7 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
             // A refusal for another user is a new dialog: nothing typed for the
             // last one carries over.
             key={deleteConflict.userid}
-            title="Deleting this user will cut off Nexara's access"
+            title="Deleting this user can cut off Nexara's access"
             message={deleteConflict.message}
             confirmValue={deleteConflict.userid}
             actionLabel="Delete User"
@@ -570,11 +549,11 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
  */
 const TOKEN_OVERRIDE = {
   revoke: {
-    title: "Revoking this token will cut off Nexara's access",
+    title: "Revoking this token can cut off Nexara's access",
     actionLabel: "Revoke Token",
   },
   regenerate: {
-    title: "Regenerating this token will cut off Nexara's access",
+    title: "Regenerating this token can cut off Nexara's access",
     actionLabel: "Regenerate Token",
   },
 } as const;
@@ -1191,7 +1170,7 @@ function EditUserDialog({
             dismissing it returns to the form with the edit intact. */}
         {conflict && (
           <SelfCredentialConfirm
-            title="Saving this edit will cut off Nexara's access"
+            title="Saving this edit can cut off Nexara's access"
             message={conflict.message}
             confirmValue={conflict.edit.userid}
             actionLabel="Save Anyway"

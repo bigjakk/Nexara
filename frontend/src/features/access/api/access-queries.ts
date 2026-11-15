@@ -392,14 +392,19 @@ export function useUpdateAccessGroup(clusterId: string) {
   });
 }
 
-/** Keeps the global toast on purpose: its caller shows no error inline. */
+/**
+ * force is the override for a delete of a group the user of Nexara's own token
+ * is in. The caller answers that refusal with its override and toasts any other
+ * failure itself, so the global toast is off.
+ */
 export function useDeleteAccessGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (groupid: string) =>
+    mutationFn: ({ groupid, force }: { groupid: string; force?: boolean }) =>
       apiClient.delete(
-        apiPath`/api/v1/clusters/${clusterId}/access/groups/${groupid}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/groups/${groupid}?${queryParams({ force: force ? "true" : undefined })}`,
       ),
+    ...errorsHandledLocally,
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
     },
@@ -435,10 +440,20 @@ export function useUpdateAccessRole(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     // privs is always sent: the API rejects an omitted value rather than
-    // treating it as "clear", because clearing strips every privilege.
-    mutationFn: ({ roleid, privs }: { roleid: string; privs: string }) =>
+    // treating it as "clear", because clearing strips every privilege. force is
+    // the override for an edit that removes privileges from a role Nexara's own
+    // token holds.
+    mutationFn: ({
+      roleid,
+      privs,
+      force,
+    }: {
+      roleid: string;
+      privs: string;
+      force?: boolean;
+    }) =>
       apiClient.put(
-        apiPath`/api/v1/clusters/${clusterId}/access/roles/${roleid}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/roles/${roleid}?${queryParams({ force: force ? "true" : undefined })}`,
         {
           privs,
         },
@@ -450,14 +465,18 @@ export function useUpdateAccessRole(clusterId: string) {
   });
 }
 
-/** Keeps the global toast on purpose: its caller shows no error inline. */
+/**
+ * force is the override for a delete of a role Nexara's own token holds. As
+ * with useDeleteAccessGroup, the caller toasts any other failure itself.
+ */
 export function useDeleteAccessRole(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (roleid: string) =>
+    mutationFn: ({ roleid, force }: { roleid: string; force?: boolean }) =>
       apiClient.delete(
-        apiPath`/api/v1/clusters/${clusterId}/access/roles/${roleid}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/roles/${roleid}?${queryParams({ force: force ? "true" : undefined })}`,
       ),
+    ...errorsHandledLocally,
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
     },
@@ -497,8 +516,13 @@ export interface UpdateACLInput {
 export function useUpdateAccessACL(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: UpdateACLInput) =>
-      apiClient.put(apiPath`/api/v1/clusters/${clusterId}/access/acl`, data),
+    // force is the override for a change to an entry Nexara's own token, its
+    // user or one of the user's groups holds. It goes in the query.
+    mutationFn: ({ force, ...data }: UpdateACLInput & { force?: boolean }) =>
+      apiClient.put(
+        apiPath`/api/v1/clusters/${clusterId}/access/acl?${queryParams({ force: force ? "true" : undefined })}`,
+        data,
+      ),
     ...errorsHandledLocally,
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
