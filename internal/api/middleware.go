@@ -82,6 +82,11 @@ func (s *Server) setupMiddleware() {
 		c.Set("X-Frame-Options", "DENY")
 		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		// No cross-origin window keeps a handle on ours, nor ours on one: the
+		// console opens its own tab with noopener and hands over by URL fragment
+		// and storage, and SSO returns by a full-page redirect, so neither needs an
+		// opener across origins.
+		c.Set("Cross-Origin-Opener-Policy", "same-origin")
 		c.Set("Content-Security-Policy", contentSecurityPolicy)
 		// HSTS is opt-in (HSTS_MAX_AGE > 0) — pinning HTTPS over a self-signed or
 		// plain-HTTP origin would make cert errors unbypassable.
