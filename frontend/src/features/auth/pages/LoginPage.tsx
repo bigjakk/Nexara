@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import { useAuthStore } from "@/stores/auth-store";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { sanitizeReturnTo } from "@/lib/return-to";
@@ -46,6 +47,8 @@ export function LoginPage() {
     clearTotpPending,
   } = useAuth();
   const [error, setError] = useState("");
+  // What the sign-out that brought them here left undone (auth-store).
+  const signOutNotice = useAuthStore((s) => s.signOutNotice);
   const [checkingSetup, setCheckingSetup] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [ssoStatus, setSSOStatus] = useState<SSOStatus | null>(null);
@@ -279,6 +282,11 @@ export function LoginPage() {
         onSubmit={(e) => void handleSubmit(onSubmit)(e)}
         className="space-y-4"
       >
+        {signOutNotice && (
+          <div role="status" className="rounded-md border p-3 text-sm">
+            {t(signOutNotice)}
+          </div>
+        )}
         {error && (
           <div className="rounded-md bg-destructive/10 p-3 text-sm text-red-700 dark:text-red-400">
             {error}

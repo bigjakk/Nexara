@@ -48,7 +48,18 @@ interface AuthState {
   // load. A sign-out note older than that was about an earlier session
   // (useSignOutFromOtherTabs).
   sessionBeganAt: number;
+  // What the login page says about the sign-out that brought the user there,
+  // when there is more to say than that they are signed out. Set only once the
+  // tab is signed out, and cleared by the next sign-in (adoptIdentity).
+  signOutNotice: SignOutNotice | null;
 }
+
+/**
+ * Sign out, or Sign out all devices, that the server did not confirm (a 503, a
+ * 429, no answer, or not sent at all): the tab is signed out all the same, and
+ * the login page says what may still be signed in. Keys of locales/en/auth.json.
+ */
+export type SignOutNotice = "signOutUnconfirmed" | "signOutAllUnconfirmed";
 
 interface AuthActions {
   login: (req: LoginRequest) => Promise<void>;
@@ -189,6 +200,19 @@ function storedSignOutNote(): Partial<SignedOutNote> | null {
 }
 
 /**
+ * Tells the login page that a sign-out the server did not confirm left
+ * something signed in — once this tab is signed out. A tab that is not (a new
+ * session began while the request was out: finishSignOut) has nothing to say.
+ */
+function noteUnconfirmed(
+  set: SetAuth,
+  get: () => Pick<AuthState, "isAuthenticated">,
+  notice: SignOutNotice,
+): void {
+  if (!get().isAuthenticated) set({ signOutNotice: notice });
+}
+
+/**
  * The last step of Sign out and Sign out everywhere, once the server has been
  * asked: the session they were for ends here.
  *
@@ -283,7 +307,9 @@ function adoptIdentity(
     globalPermissions: res.global_permissions ?? [],
     isAuthenticated: true,
     signedOutByUser: false,
-    ...(begins ? { isLoggingOut: false, sessionBeganAt: Date.now() } : {}),
+    ...(begins
+      ? { isLoggingOut: false, sessionBeganAt: Date.now(), signOutNotice: null }
+      : {}),
     ...extra,
   });
 }
@@ -300,6 +326,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   isLoggingOut: false,
   signedOutByUser: false,
   sessionBeganAt: Date.now(),
+  signOutNotice: null,
 
   initialize: async () => {
     // Register callback for forced logout on auth failure first so any
@@ -557,6 +584,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     const epoch = currentSessionEpoch();
     const held = get().user;
     let revoked = false;
+    let unconfirmed = false;
     // Whose cookie is in the jar decides whether there is anything to send. If
     // another tab has signed someone else in, nexara_user names them and the
     // cookie is theirs: this tab's own session was orphaned when theirs replaced
@@ -584,13 +612,16 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
         await signOutRequest();
         revoked = true;
       } catch {
-        // Proceed with local cleanup even if server logout fails
+        // Signed out here all the same, and told so on the login page: the
+        // session may still be active on the server.
+        unconfirmed = true;
       }
     }
     finishSignOut(set, get, epoch, held, {
       revoked,
       announce: options?.announce !== false,
     });
+    if (unconfirmed) noteUnconfirmed(set, get, "signOutUnconfirmed");
   },
 
   logoutAll: async () => {
@@ -598,13 +629,21 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     const epoch = currentSessionEpoch();
     const held = get().user;
     let revoked = false;
-    try {
-      await apiClient.post(apiPath`/api/v1/auth/logout-all`);
-      revoked = true;
-    } catch {
-      // Proceed with local cleanup even if server call fails
+    // Sent as a request is, so a token that has expired is refreshed first: the
+    // route needs one. That refresh runs on the cookie the tabs share, and when
+    // another tab has signed someone else in the cookie is theirs (see logout):
+    // it would rotate their session, and the request would end all of theirs.
+    // Not sent then; this tab is signed out, and told the rest was not.
+    if (!cookieIsAnotherUsers(held)) {
+      try {
+        await apiClient.post(apiPath`/api/v1/auth/logout-all`);
+        revoked = true;
+      } catch {
+        // Signed out here all the same, and told so on the login page.
+      }
     }
     finishSignOut(set, get, epoch, held, { revoked, announce: true });
+    if (!revoked) noteUnconfirmed(set, get, "signOutAllUnconfirmed");
   },
 
   clearAuth: (options) => {

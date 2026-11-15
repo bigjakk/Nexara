@@ -175,6 +175,50 @@ describe("Sign out", () => {
   });
 });
 
+describe("a sign-out the server did not confirm", () => {
+  // The tab is signed out either way; the login page says what may still be
+  // signed in, and the next sign-in clears it.
+  const unavailable = () => json({ message: "may still be active" }, 503);
+  it.each([
+    ["Sign out, refused", "logout", unavailable, null, "signOutUnconfirmed"],
+    [
+      "Sign out all devices, refused",
+      "logoutAll",
+      unavailable,
+      null,
+      "signOutAllUnconfirmed",
+    ],
+    // Its refresh would rotate their session, and the request end theirs.
+    [
+      "Sign out all devices, the cookie another user's: not sent",
+      "logoutAll",
+      unavailable,
+      VIEWER,
+      "signOutAllUnconfirmed",
+    ],
+    ["control: Sign out, confirmed", "logout", () => json({}), null, null],
+  ] as const)("%s", async (_name, action, answer, stored, notice) => {
+    await signInAs(ADMIN, { expiresIn: -600 });
+    server.routes[REFRESH] = () => json(authResponse(ADMIN));
+    server.routes[LOGOUT] = answer;
+    server.routes[LOGOUT_ALL] = answer;
+    if (stored) localStorage.setItem("nexara_user", JSON.stringify(stored));
+
+    await useAuthStore.getState()[action]();
+
+    expect(useAuthStore.getState().signOutNotice).toBe(notice);
+    await thisTabIsSignedOut();
+    if (stored) {
+      expect(server.times(REFRESH)).toBe(0);
+      expect(server.times(LOGOUT_ALL)).toBe(0);
+      expect(getStoredUser()).toMatchObject({ id: VIEWER.id });
+      return;
+    }
+    await signInAs(ADMIN);
+    expect(useAuthStore.getState().signOutNotice).toBeNull();
+  });
+});
+
 describe("signOutRequest", () => {
   const PROBE = "POST /api/v1/probe";
 

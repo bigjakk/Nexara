@@ -53,6 +53,7 @@ beforeEach(() => {
     totpPendingToken: null,
     isLoggingOut: false,
     signedOutByUser: false,
+    signOutNotice: null,
   });
   server = installFakeServer();
   server.routes["GET /api/v1/auth/setup-status"] = () =>
@@ -87,5 +88,17 @@ describe("LoginPage, once someone is signed in", () => {
 
     expect(await screen.findByText("somewhere in the app")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/");
+  });
+});
+
+describe("LoginPage, after a sign-out the server did not confirm", () => {
+  it("says what may still be signed in", async () => {
+    useAuthStore.setState({ signOutNotice: "signOutAllUnconfirmed" });
+
+    renderLoginAt("/login");
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /other devices may still be signed in/,
+    );
   });
 });

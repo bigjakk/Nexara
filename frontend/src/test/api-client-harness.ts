@@ -120,6 +120,7 @@ export const SIGNED_OUT = {
   isLoggingOut: false,
   signedOutByUser: false,
   sessionBeganAt: 0,
+  signOutNotice: null,
 };
 
 /**
