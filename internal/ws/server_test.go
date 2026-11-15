@@ -9,21 +9,33 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	gorillaws "github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/auth"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 type testEnv struct {
 	redisClient *redis.Client
 	jwtSvc      *auth.JWTService
 	port        int
+	// lookups answers the hub sockets' liveness checks (live, until setEnded).
+	lookups *gateLookupDB
 }
 
 func setupIntegration(t *testing.T) *testEnv {
 	t.Helper()
+	return setupIntegrationEvery(t, credentialCheckEvery)
+}
+
+// setupIntegrationEvery is setupIntegration with hub sockets re-checking their
+// credential every checkEvery.
+func setupIntegrationEvery(t *testing.T, checkEvery time.Duration) *testEnv {
+	t.Helper()
+	lookups := &gateLookupDB{}
 
 	mr := miniredis.RunT(t)
 
@@ -43,7 +55,9 @@ func setupIntegration(t *testing.T) *testEnv {
 		TestPermissionChecker: func(_ context.Context, _ uuid.UUID, _, _, _ string, _ uuid.UUID) (bool, error) {
 			return true, nil
 		},
+		Queries: db.New(lookups),
 	})
+	server.checkEvery = checkEvery
 
 	// Start Redis subscriber.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -68,6 +82,7 @@ func setupIntegration(t *testing.T) *testEnv {
 		redisClient: redisClient,
 		jwtSvc:      jwtSvc,
 		port:        port,
+		lookups:     lookups,
 	}
 }
 
@@ -76,7 +91,7 @@ func setupIntegration(t *testing.T) *testEnv {
 // so tests that open the hub path mint one (≤60s TTL) the way the SPA does.
 func mintHubToken(t *testing.T, jwtSvc *auth.JWTService) string {
 	t.Helper()
-	token, _, err := jwtSvc.GenerateWSHubToken(uuid.New(), "test@example.com", "admin", 60*time.Second)
+	token, _, err := jwtSvc.GenerateWSHubToken(uuid.New(), "test@example.com", "admin", auth.ConsoleCredential{SessionID: uuid.New()}, 60*time.Second)
 	if err != nil {
 		t.Fatalf("generate hub token: %v", err)
 	}
@@ -281,4 +296,69 @@ func TestIntegrationPingPong(t *testing.T) {
 	if pong.Type != MsgTypePong {
 		t.Errorf("expected pong, got %s", pong.Type)
 	}
+}
+
+// TestIntegrationHubHeldToItsCredential: a hub socket is held to the session or key
+// that minted its token, as a console is — refused at open when that has ended,
+// closed with the Close the SPA signs out on when it ends while open, and refused
+// when its token names none (minted before hub tokens did), so the client mints anew.
+func TestIntegrationHubHeldToItsCredential(t *testing.T) {
+	t.Parallel()
+	readClose := func(t *testing.T, conn *gorillaws.Conn) error {
+		t.Helper()
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return err
+			}
+		}
+	}
+
+	t.Run("closed when its session ends while open", func(t *testing.T) {
+		t.Parallel()
+		env := setupIntegrationEvery(t, 10*time.Millisecond)
+		conn := env.dialWS(t, mintHubToken(t, env.jwtSvc))
+		defer conn.Close()
+		if msg := readMsg(t, conn, 3*time.Second); msg.Type != MsgTypeWelcome {
+			t.Fatalf("expected welcome, got %s", msg.Type)
+		}
+		env.lookups.setEnded()
+		if err := readClose(t, conn); !gorillaws.IsCloseError(err, closeSessionEnded) {
+			t.Fatalf("after the session ended: %v, want a Close %d", err, closeSessionEnded)
+		}
+	})
+
+	t.Run("refused at open when its session has ended", func(t *testing.T) {
+		t.Parallel()
+		env := setupIntegration(t)
+		env.lookups.setEnded()
+		conn := env.dialWS(t, mintHubToken(t, env.jwtSvc))
+		defer conn.Close()
+		if err := readClose(t, conn); !gorillaws.IsCloseError(err, closeSessionEnded) {
+			t.Fatalf("got %v, want a Close %d and no welcome", err, closeSessionEnded)
+		}
+	})
+
+	t.Run("refused when its token names no credential", func(t *testing.T) {
+		t.Parallel()
+		env := setupIntegration(t)
+		now := time.Now()
+		legacy, err := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(now.Add(time.Minute)),
+				IssuedAt:  jwt.NewNumericDate(now),
+				Issuer:    "nexara",
+			},
+			UserID:  uuid.New(),
+			WSScope: auth.WSScopeHub,
+		}).SignedString([]byte("test-secret-key-for-testing-only"))
+		if err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		conn := env.dialWS(t, legacy)
+		defer conn.Close()
+		if err := readClose(t, conn); !gorillaws.IsCloseError(err, gorillaws.CloseInternalServerErr) {
+			t.Fatalf("got %v, want a Close %d and no welcome", err, gorillaws.CloseInternalServerErr)
+		}
+	})
 }

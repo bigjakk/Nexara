@@ -44,8 +44,8 @@ type Claims struct {
 	// SessionID is the sign-in session (sessions.id) the token belongs to: the one
 	// an access token was issued for, and on a console token the one whose access
 	// token minted it. APIKeyID is set instead on a console token an API key
-	// minted. A console is held to whichever it carries while it is open
-	// (internal/ws/console_credential.go).
+	// minted, and on a hub token likewise. A console or hub socket is held to
+	// whichever it carries while it is open (internal/ws/console_credential.go).
 	SessionID    uuid.UUID     `json:"sid,omitzero"`
 	APIKeyID     uuid.UUID     `json:"akid,omitzero"`
 	ConsoleScope *ConsoleScope `json:"console_scope,omitempty"`
@@ -69,8 +69,8 @@ type ConsoleScope struct {
 // WSScopeHub is the only value currently accepted in Claims.WSScope.
 const WSScopeHub = "hub"
 
-// ConsoleCredential is the sign-in a console token was minted under — a session
-// or an API key, exactly one — which its console is held to while it is open.
+// ConsoleCredential is the sign-in a console or hub token was minted under — a
+// session or an API key, exactly one — which its socket is held to while it is open.
 type ConsoleCredential struct {
 	SessionID uuid.UUID
 	APIKeyID  uuid.UUID
@@ -213,9 +213,13 @@ func (j *JWTService) GenerateConsoleToken(userID uuid.UUID, email, role string, 
 }
 
 // GenerateWSHubToken creates a short-lived JWT (ttl should be ≤ 60 seconds)
-// whose only valid use is upgrading the generic /ws hub. Per-channel
-// authorization happens later in the hub at subscribe time using UserID.
-func (j *JWTService) GenerateWSHubToken(userID uuid.UUID, email, role string, ttl time.Duration) (string, time.Time, error) {
+// whose only valid use is upgrading the generic /ws hub, held to cred while the
+// socket is open, as a console is. Per-channel authorization happens later in the
+// hub at subscribe time using UserID.
+func (j *JWTService) GenerateWSHubToken(userID uuid.UUID, email, role string, cred ConsoleCredential, ttl time.Duration) (string, time.Time, error) {
+	if !cred.Valid() {
+		return "", time.Time{}, errNoCredential
+	}
 	now := time.Now()
 	expiresAt := now.Add(ttl)
 	claims := Claims{
@@ -226,10 +230,12 @@ func (j *JWTService) GenerateWSHubToken(userID uuid.UUID, email, role string, tt
 			IssuedAt:  jwt.NewNumericDate(now),
 			Issuer:    "nexara",
 		},
-		UserID:  userID,
-		Email:   email,
-		Role:    role,
-		WSScope: WSScopeHub,
+		UserID:    userID,
+		Email:     email,
+		Role:      role,
+		SessionID: cred.SessionID,
+		APIKeyID:  cred.APIKeyID,
+		WSScope:   WSScopeHub,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

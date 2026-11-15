@@ -2437,6 +2437,13 @@ const ws = new WebSocket(
 
 With `WS_ALLOWED_ORIGINS` set, an upgrade with no `Origin` header is a `403`, so a non-browser client must send one that is on the list.
 
+The hub socket is held to the sign-in that minted its token, as a console is
+(below): it is refused at open, and closed while open (checked every 5 seconds),
+with WebSocket close code `3000` ("session ended") once that session or API key
+has ended, and with `1011` when it could not be checked for about a minute. A hub
+token minted before this release names no sign-in and is refused with `1011`;
+mint a new one.
+
 ### Subscribing to channels
 
 Once `/ws` is open, send JSON messages to subscribe to real-time data. The

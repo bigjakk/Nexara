@@ -28,6 +28,7 @@ import (
 // needs no publish in each of the paths that end a sign-in, no event for an
 // expiry, and no message that a replica can miss.
 //
+// The /ws hub socket is held to its sign-in the same way (Server.handleWS).
 // On the same tick a console also asks RBAC whether its user still holds the
 // console permission it was opened with (consoleAllowed). RBAC's cache can lag a
 // revoke by its TTL; that is accepted.
@@ -89,9 +90,11 @@ func nullableUUID(id uuid.UUID) pgtype.UUID {
 }
 
 // admitCredential is a console's check at open, before anything is looked up or
-// a Proxmox ticket minted. A credential that is missing, or names both a session
-// and a key or neither, is refused as any failure is; then stillLive. It returns
-// the user, the check to repeat, and the logger to log the credential's events with.
+// a Proxmox ticket minted, and the hub socket's before anything is sent on it. A
+// credential that is missing, or names both a session and a key or neither (a hub
+// token minted before hub tokens named one), is refused as any failure is; then
+// stillLive. It returns the user, the check to
+// repeat, and the logger to log the credential's events with.
 func admitCredential(conn *fiberWs.Conn, queries *db.Queries, logger *slog.Logger) (uuid.UUID, liveCheck, *slog.Logger, bool) {
 	cred, ok := conn.Locals(consoleCredentialLocal).(consoleCredential)
 	if !ok || cred.UserID == uuid.Nil || !cred.Valid() {

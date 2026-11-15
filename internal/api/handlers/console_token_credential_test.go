@@ -105,6 +105,7 @@ func TestConsoleToken_BindsTheCallersCredential(t *testing.T) {
 // account's events after the account was cut off. An ended session is 403, not 401,
 // so the SPA's background mint does not sign the owner out (wsTokenRefusal); a token
 // naming no session keeps the 401 a refresh answers; an API key may still mint one.
+// A minted token names the session or key, which the hub socket is held to.
 func TestWSToken_RefusesASessionThatHasEnded(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
@@ -135,6 +136,25 @@ func TestWSToken_RefusesASessionThatHasEnded(t *testing.T) {
 				map[string]string{"X-Test-Acting-User": user.ID.String(), tt.caller: named}, 5*time.Second)
 			if resp.StatusCode != tt.status {
 				t.Fatalf("status %d, want %d", resp.StatusCode, tt.status)
+			}
+			if tt.status != http.StatusOK {
+				return
+			}
+			// The hub socket is held to what minted it (internal/ws/server.go, handleWS).
+			var body wsTokenResponse
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			claims, err := a.jwt.ValidateAccessToken(body.Token)
+			if err != nil {
+				t.Fatalf("the minted token does not validate: %v", err)
+			}
+			want := auth.ConsoleCredential{SessionID: sess.ID}
+			if tt.caller == "X-Test-API-Key" {
+				want = auth.ConsoleCredential{APIKeyID: sess.ID}
+			}
+			if got := claims.ConsoleCredential(); got != want {
+				t.Errorf("the token names %+v, want %+v", got, want)
 			}
 		})
 	}

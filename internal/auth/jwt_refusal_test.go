@@ -228,7 +228,7 @@ func TestAccessTokenIsSomeoneElses(t *testing.T) {
 		{
 			name: "an expired WebSocket hub token",
 			token: func(t *testing.T) string {
-				tok, _, err := lapsedSvc.GenerateWSHubToken(user, "alice@example.com", "admin", -time.Hour)
+				tok, _, err := lapsedSvc.GenerateWSHubToken(user, "alice@example.com", "admin", ConsoleCredential{SessionID: uuid.New()}, -time.Hour)
 				if err != nil {
 					t.Fatalf("GenerateWSHubToken: %v", err)
 				}

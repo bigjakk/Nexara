@@ -3,6 +3,10 @@ import {
   mintWSHubToken,
   wsAuthProtocols,
 } from "@/features/console/api/console-queries";
+import {
+  SESSION_ENDED_CLOSE,
+  consoleSessionEnded,
+} from "@/features/console/lib/session-ended";
 import { queryClient } from "@/lib/query-client";
 import type {
   WsConnectionState,
@@ -177,11 +181,19 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
           }
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event: CloseEvent) => {
           // Only the socket the store currently owns may run teardown — an
           // orphaned socket closing must not null the live connection's
           // state or schedule a competing reconnect loop.
           if (get().socket !== ws) return;
+
+          // The server closed it because the sign-in that opened it has
+          // ended (internal/ws/server.go, handleWS). Ask the app's session to
+          // check itself: the refresh is refused and the app signs out. The
+          // reconnect below still backs off, as the mint now answers 403.
+          if (event.code === SESSION_ENDED_CLOSE) {
+            consoleSessionEnded();
+          }
 
           const cur = get();
           if (cur.pingTimer) {

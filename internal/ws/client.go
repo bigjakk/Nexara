@@ -48,6 +48,12 @@ type Client struct {
 	closeOnce sync.Once
 	logger    *slog.Logger
 
+	// closeMu guards closeCode and closeReason: the Close writePump sends when it
+	// is told to stop, set by closeWith. Zero sends a bare Close.
+	closeMu     sync.Mutex
+	closeCode   int
+	closeReason string
+
 	pingInterval time.Duration
 	pongTimeout  time.Duration
 
@@ -77,6 +83,27 @@ func (c *Client) closeSend() {
 	c.closeOnce.Do(func() {
 		close(c.closing)
 	})
+}
+
+// closeWith tells the writer to close the socket with code and reason — the
+// credential watcher's end (Server.handleWS). Idempotent, as closeSend is.
+func (c *Client) closeWith(code int, reason string) {
+	c.closeMu.Lock()
+	if c.closeCode == 0 {
+		c.closeCode, c.closeReason = code, reason
+	}
+	c.closeMu.Unlock()
+	c.closeSend()
+}
+
+// closeFrame is the payload of the Close writePump sends when it is told to stop.
+func (c *Client) closeFrame() []byte {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+	if c.closeCode == 0 {
+		return nil
+	}
+	return websocket.FormatCloseMessage(c.closeCode, c.closeReason)
 }
 
 // NewClient creates a new WebSocket client.
@@ -161,7 +188,7 @@ func (c *Client) writePump() {
 			// Hub asked us to shut down (or the connection's readPump exited
 			// and the hub unregistered us). Send a graceful close frame and
 			// exit. Any buffered messages in c.send are discarded.
-			_ = c.conn.WriteControl(websocket.CloseMessage, nil, time.Now().Add(writeWait))
+			_ = c.conn.WriteControl(websocket.CloseMessage, c.closeFrame(), time.Now().Add(writeWait))
 			return
 
 		case message := <-c.send:

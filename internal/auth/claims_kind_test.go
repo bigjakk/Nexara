@@ -180,7 +180,7 @@ func TestClaimsKind_TokensTheServiceIssuesHaveTheKindTheyWereIssuedFor(t *testin
 	if err != nil {
 		t.Fatalf("GenerateConsoleToken: %v", err)
 	}
-	hub, _, err := svc.GenerateWSHubToken(user, "alice@example.com", "admin", time.Minute)
+	hub, _, err := svc.GenerateWSHubToken(user, "alice@example.com", "admin", ConsoleCredential{SessionID: uuid.New()}, time.Minute)
 	if err != nil {
 		t.Fatalf("GenerateWSHubToken: %v", err)
 	}

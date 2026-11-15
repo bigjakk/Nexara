@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/auth"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // Server is the WebSocket server backed by Fiber.
@@ -39,6 +41,11 @@ type Server struct {
 	// homelabs); a non-empty list enforces an exact-match check at
 	// upgrade time, rejecting cross-origin upgrades with HTTP 403.
 	allowedOrigins []string
+	// queries answers whether a hub socket's sign-in is still live
+	// (console_credential.go). nil refuses every hub socket.
+	queries *db.Queries
+	// checkEvery is how often an open hub socket re-checks it; tests shorten it.
+	checkEvery time.Duration
 
 	pingInterval time.Duration
 	pongTimeout  time.Duration
@@ -65,6 +72,10 @@ type ServerConfig struct {
 	// permissive default — appropriate for dev/lab installs but logged
 	// as a warning at startup so production deploys catch the gap.
 	AllowedOrigins []string
+	// Queries is what a hub socket asks whether the session or API key that
+	// minted its token is still live; the socket is closed when it is not.
+	// Required: without it every hub socket is refused.
+	Queries *db.Queries
 }
 
 // NewServer creates a new WebSocket server.
@@ -75,6 +86,7 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		logger:       logger,
 		pingInterval: pingInterval,
 		pongTimeout:  pongTimeout,
+		checkEvery:   credentialCheckEvery,
 	}
 
 	if len(opts) > 0 {
@@ -83,6 +95,10 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		s.rbacEngine = opts[0].RBACEngine
 		s.testPermissionChecker = opts[0].TestPermissionChecker
 		s.allowedOrigins = opts[0].AllowedOrigins
+		s.queries = opts[0].Queries
+	}
+	if s.queries == nil {
+		s.logger.Warn("ws server: no database configured — every /ws hub socket will be refused")
 	}
 	// An open console re-checks its console permission with the same checker the
 	// hub's subscribe gate uses (console_credential.go, consoleAllowed).
@@ -394,6 +410,13 @@ func (s *Server) authenticate(c fiber.Ctx, consoleRoute bool) error {
 				"error": "ws-scoped token required",
 			})
 		}
+		// As on the console routes: the socket is held to the sign-in that minted
+		// its token. A token that names none (minted before hub tokens did) is
+		// refused by handleWS, and the client mints a new one.
+		c.Locals(consoleCredentialLocal, consoleCredential{
+			UserID:            claims.UserID,
+			ConsoleCredential: claims.ConsoleCredential(),
+		})
 	}
 
 	// Store claims in locals for the WebSocket handler.
@@ -595,10 +618,23 @@ func (s *Server) permissionChecker() PermissionChecker {
 	return nil
 }
 
-// handleWS handles a WebSocket connection after upgrade.
+// handleWS handles a WebSocket connection after upgrade. The socket is held to the
+// session or API key that minted its token, as a console is: refused at open when
+// that has ended, and closed with closeSessionEnded when it ends while open.
 func (s *Server) handleWS(conn *websocket.Conn) {
 	userID, _ := conn.Locals("userID").(uuid.UUID)
 	clientID := fmt.Sprintf("%s-%s", userID, uuid.New().String()[:8])
+
+	if s.queries == nil {
+		writeRefusal(conn, "no database to check the session with")
+		closeBrowserSocket(conn)
+		return
+	}
+	_, live, credLogger, admitted := admitCredential(conn, s.queries, s.logger.With("client", clientID))
+	if !admitted {
+		closeBrowserSocket(conn)
+		return
+	}
 
 	// Pass userID + a permission-check closure into the client so
 	// canSubscribe() can enforce per-cluster view permissions on each
@@ -615,8 +651,19 @@ func (s *Server) handleWS(conn *websocket.Conn) {
 	// Start write pump in a separate goroutine.
 	go client.writePump()
 
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		ticker := time.NewTicker(s.checkEvery)
+		defer ticker.Stop()
+		watchCredential(watchCtx, ticker.C, live, nil, client.closeWith, credLogger)
+	}()
+
 	// readPump blocks until the connection is closed.
 	client.readPump()
+	stopWatch()
+	<-watched
 
 	// Wait for writePump to finish before returning, so Fiber's
 	// releaseConn doesn't reset the conn while writePump still uses it.

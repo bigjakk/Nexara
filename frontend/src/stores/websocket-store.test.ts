@@ -3,6 +3,16 @@ import * as consoleQueries from "@/features/console/api/console-queries";
 import { queryClient } from "@/lib/query-client";
 import { useWebSocketStore } from "./websocket-store";
 
+// A session end asks the app to check its own (lib/session-ended.ts); these
+// tests only need to see that it asks.
+const { sessionEndedSpy } = vi.hoisted(() => ({ sessionEndedSpy: vi.fn() }));
+vi.mock("@/features/console/lib/session-ended", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/console/lib/session-ended")
+  >()),
+  consoleSessionEnded: sessionEndedSpy,
+}));
+
 // Mock WebSocket
 class MockWebSocket {
   static readonly CONNECTING = 0 as const;
@@ -14,7 +24,7 @@ class MockWebSocket {
   readyState: number = MockWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   sentMessages: string[] = [];
 
@@ -31,7 +41,7 @@ class MockWebSocket {
 
   close() {
     this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.({ code: 1005 });
   }
 
   simulateOpen() {
@@ -43,9 +53,9 @@ class MockWebSocket {
     this.onmessage?.({ data: JSON.stringify(data) });
   }
 
-  simulateClose() {
+  simulateClose(code = 1006) {
     this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.({ code });
   }
 }
 
@@ -246,6 +256,31 @@ describe("websocket-store", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
     expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  // The server closed it because its session ended: the app is asked to check
+  // its session (which signs out), and the mint's 403 keeps backing off.
+  it("asks the app to check its session when the server ends it, then backs off", async () => {
+    sessionEndedSpy.mockClear();
+    useWebSocketStore.getState().connect();
+    await flushPromises();
+    const ws = getLastInstance();
+    ws.simulateOpen();
+
+    ws.simulateClose(1006);
+    expect(sessionEndedSpy).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    MockWebSocket.instances[1]?.simulateOpen();
+
+    mintSpy.mockRejectedValue(new Error("403"));
+    MockWebSocket.instances[1]?.simulateClose(3000);
+    expect(sessionEndedSpy).toHaveBeenCalledTimes(1);
+
+    const minted = mintSpy.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    // 1 s, then 2 s, then 4 s: three mints in ten seconds, not a loop.
+    expect(mintSpy.mock.calls.length - minted).toBe(3);
   });
 
   it("does not reconnect after explicit disconnect", async () => {

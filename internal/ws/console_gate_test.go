@@ -202,7 +202,7 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 
 	userID := uuid.New()
 	// The hub token is what ANY signed-in account can mint.
-	hubToken, _, err := jwtSvc.GenerateWSHubToken(userID, "viewer@example.com", "viewer", time.Minute)
+	hubToken, _, err := jwtSvc.GenerateWSHubToken(userID, "viewer@example.com", "viewer", auth.ConsoleCredential{SessionID: uuid.New()}, time.Minute)
 	if err != nil {
 		t.Fatalf("hub token: %v", err)
 	}

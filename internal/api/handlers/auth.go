@@ -1429,9 +1429,10 @@ type wsTokenResponse struct {
 // An API key may mint one, as it always could. A session must still be live
 // (LiveCredential): its access token outlives a sign-out or a revoke for the rest
 // of its lifetime, and a hub token minted then would open a socket that streams
-// the account's events after the account was cut off. (A socket that is already
-// open when the session ends is not closed by this: the hub holds no credential.)
-// The refusal of an ended session is a 403, not a 401: see wsTokenRefusal.
+// the account's events after the account was cut off. The token names the session
+// or key, and the hub closes a socket that is open when it ends
+// (internal/ws/console_credential.go). The refusal of an ended session is a 403,
+// not a 401: see wsTokenRefusal.
 func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
@@ -1449,12 +1450,13 @@ func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 		AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "ws_token_denied_inactive", nil)
 		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
 	}
-	if _, err := LiveCredential(c, h.queries); err != nil {
+	cred, err := LiveCredential(c, h.queries)
+	if err != nil {
 		return wsTokenRefusal(err)
 	}
 
 	const wsHubTokenTTL = 60 * time.Second
-	token, _, err := h.jwtService.GenerateWSHubToken(user.ID, user.Email, user.Role, wsHubTokenTTL)
+	token, _, err := h.jwtService.GenerateWSHubToken(user.ID, user.Email, user.Role, cred, wsHubTokenTTL)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to mint ws token")
 	}

@@ -59,7 +59,7 @@ func TestAuthMiddlewares_AdmitOnlyASessionsAccessToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("console token: %v", err)
 	}
-	hub, _, err := jwtSvc.GenerateWSHubToken(user, chainEmail, "admin", time.Minute)
+	hub, _, err := jwtSvc.GenerateWSHubToken(user, chainEmail, "admin", auth.ConsoleCredential{SessionID: session}, time.Minute)
 	if err != nil {
 		t.Fatalf("hub token: %v", err)
 	}

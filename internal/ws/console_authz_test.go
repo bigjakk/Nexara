@@ -56,7 +56,7 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 		t.Fatalf("generate access token: %v", err)
 	}
 
-	hubToken, _, err := jwtSvc.GenerateWSHubToken(userID, "user@example.com", "admin", 60*time.Second)
+	hubToken, _, err := jwtSvc.GenerateWSHubToken(userID, "user@example.com", "admin", auth.ConsoleCredential{SessionID: uuid.New()}, 60*time.Second)
 	if err != nil {
 		t.Fatalf("generate hub token: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 		t.Fatalf("generate expired vm vnc console token: %v", err)
 	}
 	expiredHubToken, _, err := jwtSvc.GenerateWSHubToken(
-		userID, "user@example.com", "admin", -1*time.Minute,
+		userID, "user@example.com", "admin", auth.ConsoleCredential{SessionID: uuid.New()}, -1*time.Minute,
 	)
 	if err != nil {
 		t.Fatalf("generate expired hub token: %v", err)

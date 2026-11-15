@@ -178,6 +178,8 @@ func main() {
 		// behaviour and triggers a startup warning; explicit values
 		// enforce CSRF defence-in-depth at the upgrade boundary.
 		AllowedOrigins: ws.ParseAllowedOrigins(cfg.WSAllowedOrigins),
+		// Holds each /ws hub socket to the session or key that minted its token.
+		Queries: queries,
 	})
 	wsServer.RegisterRoutes(srv.App())
 

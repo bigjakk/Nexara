@@ -183,8 +183,8 @@ func TestHashToken_Deterministic(t *testing.T) {
 }
 
 // TestTokensNameTheirCredential: an access token is minted only for a session, and a
-// console token only for exactly one of a session and an API key — one naming
-// neither would hold its console to nothing (internal/ws/console_credential.go).
+// console or hub token only for exactly one of a session and an API key — one naming
+// neither would hold its socket to nothing (internal/ws/console_credential.go).
 func TestTokensNameTheirCredential(t *testing.T) {
 	t.Parallel()
 	svc := NewJWTService("test-secret", time.Minute, time.Hour)
@@ -192,6 +192,10 @@ func TestTokensNameTheirCredential(t *testing.T) {
 	id := uuid.New()
 	console := func(cred ConsoleCredential) error {
 		_, _, err := svc.GenerateConsoleToken(id, "test@example.com", "admin", cred, scope, time.Minute)
+		return err
+	}
+	hub := func(cred ConsoleCredential) error {
+		_, _, err := svc.GenerateWSHubToken(id, "test@example.com", "admin", cred, time.Minute)
 		return err
 	}
 	tests := []struct {
@@ -211,6 +215,8 @@ func TestTokensNameTheirCredential(t *testing.T) {
 		{"a console token for an API key", console(ConsoleCredential{APIKeyID: id}), true},
 		{"a console token for neither", console(ConsoleCredential{}), false},
 		{"a console token for both", console(ConsoleCredential{SessionID: id, APIKeyID: id}), false},
+		{"a hub token for a session", hub(ConsoleCredential{SessionID: id}), true},
+		{"a hub token for neither", hub(ConsoleCredential{}), false},
 	}
 	for _, tt := range tests {
 		if (tt.err == nil) != tt.ok {
