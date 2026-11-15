@@ -129,9 +129,11 @@ const METRIC_DEFAULT_THRESHOLD: Record<string, string> = {
   net_out: "104857600",
   snapshot_age_days: "30",
   veeam_rpo_hours: "24",
-  // >= 2 catches Suspicious and worse. Veeam's inline encryption detection
-  // flags a great many points Suspicious, so operators watching for confirmed
-  // findings will want 3.
+  // With the operator ">=" below, 2 catches Suspicious and worse: the engine
+  // rates a verdict Clean 0, Informative 1, Suspicious 2, Infected 3
+  // (GetClusterVeeamMalwareStats). Veeam's inline encryption detection flags a
+  // great many points Suspicious, so operators watching for confirmed findings
+  // will want 3.
   veeam_malware_status: "2",
   veeam_repo_used_percent: "85",
   // A count, so "> 0" is the rule almost everyone wants. Left adjustable for
@@ -159,12 +161,15 @@ const METRIC_DEFAULT_COOLDOWN: Record<string, string> = {
 };
 
 /**
- * The UPS rules that watch a level running down: "> 50" on charge would fire
- * on every healthy UPS, so the operator snaps to "<" with the threshold.
+ * Operator default per metric. The UPS rules that watch a level running down:
+ * "> 50" on charge would fire on every healthy UPS, so the operator snaps to
+ * "<" with the threshold.
  */
 const METRIC_DEFAULT_OPERATOR: Record<string, string> = {
   ups_battery_charge: "<",
   ups_runtime: "<",
+  // "> 2" would catch Infected alone.
+  veeam_malware_status: ">=",
 };
 
 /**

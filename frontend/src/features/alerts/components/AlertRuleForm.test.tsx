@@ -146,6 +146,14 @@ describe("AlertRuleForm", () => {
     expect(screen.getByLabelText("Threshold")).toHaveValue(104857600);
   });
 
+  // A verdict is Clean 0 … Infected 3, so "> 2" would catch Infected alone.
+  it("starts a Veeam malware rule at Suspicious and worse", async () => {
+    const user = await openForm();
+    await pickOption(user, "Metric", "Veeam malware verdict (0-3)");
+    expect(screen.getByLabelText("Threshold")).toHaveValue(2);
+    expect(screen.getByRole("combobox", { name: "Operator" })).toHaveTextContent(">=");
+  });
+
   // Its alerts name a UPS and its reading, so a UPS metric takes global view:ups.
   it("offers the UPS metrics only with a global view:ups", async () => {
     const user = await openForm();
