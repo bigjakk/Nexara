@@ -174,17 +174,23 @@ func TestRefusedUploadClosesItsConnectionMidStream(t *testing.T) {
 // serveUploadDeclaration serves the storage endpoints as registerStorageEndpoints
 // declares them — UploadFile among them — on a bare app with the server's
 // Fiber config, with wrap, when it is not nil, installed around Fiber's
-// handler, and hiddenRequestProbe mounted. Authentication is a stand-in that
+// handler, each configure applied to the storage handler, and
+// hiddenRequestProbe mounted. Authentication is a stand-in that
 // leaves in c.Locals what authRequired would: a user, and grants as the
 // permission engine. rows are the database rows the handlers may look up.
-func serveUploadDeclaration(t *testing.T, rows uploadRows, grants uploadGrants, wrap func(*fiber.App)) (string, *atomic.Int32) {
+func serveUploadDeclaration(t *testing.T, rows uploadRows, grants uploadGrants, wrap func(*fiber.App),
+	configure ...func(*handlers.StorageHandler)) (string, *atomic.Int32) {
 	t.Helper()
 	app := fiber.New(buildFiberConfig(&config.Config{}))
 	if wrap != nil {
 		wrap(app)
 	}
 	reg := NewRegistry()
-	registerStorageEndpoints(reg, handlers.NewStorageHandler(db.New(rows), sweepEncryptionKey, nil))
+	storage := handlers.NewStorageHandler(db.New(rows), sweepEncryptionKey, nil)
+	for _, c := range configure {
+		c(storage)
+	}
+	registerStorageEndpoints(reg, storage)
 	userID := uuid.New()
 	mountRegistry(app, reg, func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
@@ -312,5 +318,42 @@ func TestUploadFileStreamsWhatTheSharedMultipartTestAccepts(t *testing.T) {
 	}
 	if streamed == 0 || refused == 0 {
 		t.Fatalf("precondition: %d Content-Types multipart and %d not; the rows have to reach both", streamed, refused)
+	}
+}
+
+// TestUploadThatStopsSendingIsAnswered408 drives the real UploadFile as a
+// caller holding manage:storage: the body's head and a padding field arrive,
+// then nothing. The server arms no read deadline for a streamed upload, so it
+// is UploadFile's own bound on each read that answers, at a stall shortened
+// here; without it the read waits for ever.
+func TestUploadThatStopsSendingIsAnswered408(t *testing.T) {
+	t.Parallel()
+	clusterID, nodeID, poolID := uuid.New(), uuid.New(), uuid.New()
+	secret, err := crypto.Encrypt("token-secret-value", sweepEncryptionKey)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	rows := uploadRows{
+		"GetStoragePool": db.StoragePool{ID: poolID, ClusterID: clusterID, NodeID: nodeID, Storage: "store01",
+			Type: "dir", Content: "iso,vztmpl", Active: true, Enabled: true},
+		"GetCluster": db.Cluster{ID: clusterID, Name: "cluster01", ApiUrl: "https://192.0.2.10:8006",
+			TokenID: "user@pam!test", TokenSecretEncrypted: secret, IsActive: true},
+		"GetNode": db.Node{ID: nodeID, ClusterID: clusterID, Name: "pve-01"},
+	}
+	addr, _ := serveUploadDeclaration(t, rows, uploadGrants{"manage:storage": true}, withBodyTimeout(bodyReadTimeout),
+		func(h *handlers.StorageHandler) { h.SetUploadStall(200 * time.Millisecond) })
+
+	const boundary = "nexara-upload-boundary"
+	sent := "--" + boundary + "\r\nContent-Disposition: form-data; name=\"content\"\r\n\r\niso\r\n" +
+		"--" + boundary + "\r\nContent-Disposition: form-data; name=\"pad\"\r\n\r\n" + strings.Repeat("x", bodyPrefetch)
+	target := "/api/v1/clusters/" + clusterID.String() + "/storage/" + poolID.String() + "/upload"
+	conn, br := dialAndSend(t, addr, requestHead(fiber.MethodPost, target,
+		"Content-Type: multipart/form-data; boundary="+boundary)+"Content-Length: 1048576\r\n\r\n"+sent)
+	ans := readAnswer(t, conn, br, fiber.MethodPost)
+	if ans.status != fiber.StatusRequestTimeout || !strings.Contains(ans.envelope.Message, "no data arrived from the browser") {
+		t.Fatalf("status %d %q, want UploadFile's 408 for a browser that stopped sending", ans.status, ans.envelope.Message)
+	}
+	if !ans.connClose {
+		t.Error("the 408 does not carry Connection: close")
 	}
 }

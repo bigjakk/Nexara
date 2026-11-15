@@ -114,3 +114,113 @@ func TestUploadToStorage_AbandonsAStalledUpload(t *testing.T) {
 		t.Fatal("the stalled upload was never abandoned")
 	}
 }
+
+// fakeClock drives uploadBody's watchdog without waiting: its timers fire
+// when advance moves the clock past them. Single goroutine only.
+type fakeClock struct {
+	now    time.Duration
+	timers []*fakeTimer
+}
+
+type fakeTimer struct {
+	c      *fakeClock
+	at     time.Duration
+	f      func()
+	active bool
+}
+
+func (c *fakeClock) after(d time.Duration, f func()) uploadTimer {
+	t := &fakeTimer{c: c, at: c.now + d, f: f, active: true}
+	c.timers = append(c.timers, t)
+	return t
+}
+
+func (t *fakeTimer) Reset(d time.Duration) bool {
+	was := t.active
+	t.at, t.active = t.c.now+d, true
+	return was
+}
+
+func (t *fakeTimer) Stop() bool {
+	was := t.active
+	t.active = false
+	return was
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.now += d
+	for _, t := range c.timers {
+		if t.active && t.at <= c.now {
+			t.active = false
+			t.f()
+		}
+	}
+}
+
+// trickle gives one byte a read, n times, then ends.
+type trickle struct{ n int }
+
+func (r *trickle) Read(p []byte) (int, error) {
+	if r.n == 0 {
+		return 0, io.EOF
+	}
+	r.n--
+	return copy(p, "x"), nil
+}
+
+type timedOut struct{}
+
+func (timedOut) Error() string { return "i/o timeout" }
+func (timedOut) Timeout() bool { return true }
+
+type timingOutReader struct{}
+
+func (timingOutReader) Read([]byte) (int, error) { return 0, timedOut{} }
+
+// TestUploadBody covers the three things uploadBody decides on its own.
+func TestUploadBody(t *testing.T) {
+	t.Parallel()
+	const stall = time.Minute
+
+	// A slow upload that keeps moving is never cut: each byte restarts the
+	// watchdog, across several stall periods in all.
+	t.Run("a trickle is not a stall", func(t *testing.T) {
+		t.Parallel()
+		clock, aborted := &fakeClock{}, 0
+		b := newUploadBody(&trickle{n: 6}, stall, func() { aborted++ }, clock.after)
+		for {
+			clock.advance(stall * 6 / 10)
+			if _, err := b.Read(make([]byte, 8)); err == io.EOF {
+				break
+			}
+		}
+		if aborted != 0 || b.failure() != nil {
+			t.Errorf("aborted %d time(s), failure %v, after %v of a trickle; want neither", aborted, b.failure(), clock.now)
+		}
+	})
+
+	// Once released, the file is never read again: the handler's stream is
+	// recycled by then.
+	t.Run("no read after release", func(t *testing.T) {
+		t.Parallel()
+		inner := &trickle{n: 1}
+		b := newUploadBody(inner, stall, func() {}, (&fakeClock{}).after)
+		b.release()
+		if _, err := b.Read(make([]byte, 8)); !errors.Is(err, errUploadBodyReleased) || inner.n != 1 {
+			t.Errorf("read after release = %v, file read %v; want errUploadBodyReleased and no read", err, inner.n != 1)
+		}
+	})
+
+	// A browser that stops sending trips the watchdog a moment before its
+	// read times out; the timed-out read is the cause to report.
+	t.Run("a timed-out read is the browser's stall", func(t *testing.T) {
+		t.Parallel()
+		clock := &fakeClock{}
+		b := newUploadBody(timingOutReader{}, stall, func() {}, clock.after)
+		clock.advance(stall)
+		_, _ = b.Read(make([]byte, 8))
+		if err := b.failure(); !errors.Is(err, ErrUploadBodyRead) || errors.Is(err, ErrUploadStalled) {
+			t.Errorf("failure = %v, want ErrUploadBodyRead", err)
+		}
+	})
+}

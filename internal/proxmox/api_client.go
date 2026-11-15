@@ -325,16 +325,27 @@ type uploadBody struct {
 	released bool
 
 	stall   time.Duration
-	timer   *time.Timer
+	timer   uploadTimer
 	stalled atomic.Bool
 
 	errMu   sync.Mutex
 	readErr error
 }
 
-func newUploadBody(r io.Reader, stall time.Duration, abort context.CancelFunc) *uploadBody {
+// uploadTimer is the watchdog's timer: a *time.Timer, or a test's fake.
+type uploadTimer interface {
+	Reset(time.Duration) bool
+	Stop() bool
+}
+
+// afterFunc starts the watchdog's timer; tests pass a fake clock's.
+type afterFunc func(time.Duration, func()) uploadTimer
+
+func realAfterFunc(d time.Duration, f func()) uploadTimer { return time.AfterFunc(d, f) }
+
+func newUploadBody(r io.Reader, stall time.Duration, abort context.CancelFunc, after afterFunc) *uploadBody {
 	b := &uploadBody{r: r, stall: stall}
-	b.timer = time.AfterFunc(stall, func() {
+	b.timer = after(stall, func() {
 		b.stalled.Store(true)
 		abort()
 	})
@@ -372,14 +383,22 @@ func (b *uploadBody) release() {
 }
 
 // failure is why the upload's request failed, when it was the file's doing.
+//
+// A failed read of the file comes first, the watchdog second. When the browser
+// stops sending, the watchdog (reset as a read returns) fires a moment before
+// the handler's read deadline (armed as the next read starts), and that read
+// is still going; release, which runs first, waits for it, so its timeout is
+// here by now and the stall is reported as the browser's. Only a stall with no
+// failed read is Proxmox's.
 func (b *uploadBody) failure() error {
+	b.errMu.Lock()
+	readErr := b.readErr
+	b.errMu.Unlock()
+	if readErr != nil {
+		return fmt.Errorf("%w: %w", ErrUploadBodyRead, readErr)
+	}
 	if b.stalled.Load() {
 		return fmt.Errorf("%w: no data moved for %s", ErrUploadStalled, b.stall)
-	}
-	b.errMu.Lock()
-	defer b.errMu.Unlock()
-	if b.readErr != nil {
-		return fmt.Errorf("%w: %w", ErrUploadBodyRead, b.readErr)
 	}
 	return nil
 }
@@ -429,7 +448,7 @@ func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[str
 	if stall == 0 {
 		stall = UploadStallTimeout
 	}
-	file := newUploadBody(fileReader, stall, cancel)
+	file := newUploadBody(fileReader, stall, cancel, realAfterFunc)
 	defer file.release()
 	body := io.MultiReader(
 		bytes.NewReader(prefixBytes),

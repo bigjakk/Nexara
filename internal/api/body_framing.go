@@ -149,14 +149,19 @@ func closeConnectionsLeftMidBody(app *fiber.App, bodyTimeout time.Duration) {
 //   - No read deadline cuts a body while the connection is kept. A deadline
 //     that fires mid-body ends the read with an error, and Request.bodyBytes
 //     releases the stream on an error exactly as it does at the end, with the
-//     rest of the body still on the connection. The one deadline armed while
-//     a handler runs is closeConnectionsLeftMidBody's body deadline, and it
-//     closes the connection after any answer given once that deadline has
-//     passed — which a read it cut always is.
+//     rest of the body still on the connection. Two deadlines are armed
+//     while a handler runs. One is closeConnectionsLeftMidBody's body
+//     deadline, and it closes the connection after any answer given once that
+//     deadline has passed — which a read it cut always is.
 //     TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed fails without
 //     that close, and TestServerConfigKeepsTheBodyFramingInvariants fails if
 //     the server stops being served through the wrapper or the wrapper stops
-//     arming that deadline.
+//     arming that deadline. The other is the storage upload's bound on each
+//     read of its streamed body (handlers.stallBoundedBody), which nothing
+//     here closes on. It rests on the upload reading the stream itself, never
+//     through Request.bodyBytes: the stream then stays attached however a read
+//     ends, so bodyMayBeLeftUnread closes the connection after every upload
+//     with a body, cut or not (TestUploadThatStopsSendingIsAnswered408).
 //   - Nothing releases a stream it has not read to the end. Every request-side
 //     SetBody…, AppendBody…, ResetBody, CloseBodyStream, ReleaseBody and Reset
 //     does exactly that, and so does anything that overwrites the request or

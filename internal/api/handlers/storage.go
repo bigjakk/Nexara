@@ -47,6 +47,20 @@ type StorageHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	// uploadStall bounds each read of a streamed upload's body; zero means
+	// proxmox.UploadStallTimeout (see stallBoundedBody).
+	uploadStall time.Duration
+}
+
+// SetUploadStall replaces the bound on each read of a streamed upload's body;
+// tests shorten it.
+func (h *StorageHandler) SetUploadStall(d time.Duration) { h.uploadStall = d }
+
+func (h *StorageHandler) uploadStallTimeout() time.Duration {
+	if h.uploadStall == 0 {
+		return proxmox.UploadStallTimeout
+	}
+	return h.uploadStall
 }
 
 // NewStorageHandler creates a new storage handler.
@@ -266,7 +280,7 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 	if bodyStream == nil {
 		bodyStream = bytes.NewReader(c.Body())
 	} else if conn := c.RequestCtx().Conn(); conn != nil {
-		bodyStream = stallBoundedBody{r: bodyStream, conn: conn, stall: proxmox.UploadStallTimeout}
+		bodyStream = stallBoundedBody{r: bodyStream, conn: conn, stall: h.uploadStallTimeout()}
 	}
 
 	mr := multipart.NewReader(bodyStream, boundary)
@@ -281,7 +295,7 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 		}
 		if err != nil {
 			if isReadTimeout(err) {
-				return uploadStalledInBrowser()
+				return uploadStalledInBrowser(h.uploadStallTimeout())
 			}
 			return fiber.NewError(fiber.StatusBadRequest, "Failed to parse multipart form")
 		}
@@ -326,7 +340,7 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 			// Stream the file part directly to Proxmox without buffering.
 			upid, uploadErr := pxClient.UploadToStorage(c.Context(), node.Name, pool.Storage, uploadContent, filename, bufferedPart, fileSize)
 			if uploadErr != nil {
-				return mapUploadError(uploadErr)
+				return mapUploadError(uploadErr, h.uploadStallTimeout())
 			}
 
 			TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
@@ -379,23 +393,30 @@ func isReadTimeout(err error) bool {
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
-func uploadStalledInBrowser() error {
+func uploadStalledInBrowser(stall time.Duration) error {
 	return fiber.NewError(fiber.StatusRequestTimeout, fmt.Sprintf(
-		"Upload stopped: no data arrived from the browser for %d minutes. Upload the file again.",
-		int(proxmox.UploadStallTimeout/time.Minute)))
+		"Upload stopped: no data arrived from the browser for %s. Upload the file again.", stallWords(stall)))
+}
+
+// stallWords says a stall bound in plain words: "2 minutes".
+func stallWords(d time.Duration) string {
+	if d >= time.Minute && d%time.Minute == 0 {
+		return fmt.Sprintf("%d minutes", d/time.Minute)
+	}
+	return d.String()
 }
 
 // mapUploadError answers a failed streamed upload. A stall or a broken read of
 // the browser's body is not Proxmox failing, so it does not get
 // mapProxmoxError's "Failed to connect to Proxmox".
-func mapUploadError(err error) error {
+func mapUploadError(err error, stall time.Duration) error {
 	switch {
 	case errors.Is(err, proxmox.ErrUploadStalled):
 		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf(
-			"Upload stopped: no data moved for %d minutes. Check the network between the browser, Nexara and "+
-				"Proxmox, then upload the file again.", int(proxmox.UploadStallTimeout/time.Minute)))
+			"Upload stopped: Proxmox took no data for %s. Check the network between Nexara and Proxmox, "+
+				"then upload the file again.", stallWords(proxmox.UploadStallTimeout)))
 	case errors.Is(err, proxmox.ErrUploadBodyRead) && isReadTimeout(err):
-		return uploadStalledInBrowser()
+		return uploadStalledInBrowser(stall)
 	case errors.Is(err, proxmox.ErrUploadBodyRead):
 		return fiber.NewError(fiber.StatusBadRequest,
 			"Upload stopped before the whole file arrived. Upload the file again.")

@@ -50,7 +50,7 @@ func TestMapUploadError(t *testing.T) {
 		{"Proxmox unreachable", fmt.Errorf("upload: %w: dial", proxmox.ErrConnectionFailed), fiber.StatusBadGateway},
 	} {
 		var fe *fiber.Error
-		if !errors.As(mapUploadError(tt.err), &fe) || fe.Code != tt.want {
+		if !errors.As(mapUploadError(tt.err, time.Minute), &fe) || fe.Code != tt.want {
 			t.Errorf("%s: mapUploadError = %v, want status %d", tt.name, fe, tt.want)
 		}
 	}
