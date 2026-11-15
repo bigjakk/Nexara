@@ -980,3 +980,32 @@ func TestUpdateChannel_PrivateTarget(t *testing.T) {
 		}
 	}
 }
+
+// A Resolve whose update finds the alert already resolved — the engine, or
+// another caller, got there first and sent its own "resolved" — sends none.
+func TestResolveAlert_RacedSendsNoSecondResolution(t *testing.T) {
+	t.Parallel()
+	alert := db.AlertHistory{ID: uuid.New(), State: "firing", Metric: "cpu_usage"}
+	dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetAlertHistory": alert},
+		execNone: map[string]bool{"ResolveAlert": true}, execOK: map[string]bool{"InsertAuditLog": true}}
+	h := NewAlertHandler(db.New(dbtx), testEncryptionKey, nil, nil)
+	rec := &resolveRecorder{}
+	h.resolved = rec
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", newGrantEngine("acknowledge:alert"))
+		return c.Next()
+	})
+	app.Post("/alerts/:id/resolve", withRequestParams(t,
+		apischema.Properties{"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}},
+		[]string{"id"}, h.ResolveAlert))
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/alerts/"+alert.ID.String()+"/resolve", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict || len(rec.got) != 0 {
+		t.Errorf("status %d, notified %d times: want 409 and no notification", resp.StatusCode, len(rec.got))
+	}
+}

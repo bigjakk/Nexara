@@ -128,13 +128,20 @@ type auditRowsDBTX struct {
 	// recorded in execs, which mu guards since a handler's goroutine can
 	// write while the test reads. Any other exec fails with errCaptured.
 	execOK map[string]bool
-	mu     sync.Mutex
-	execs  []capturedQuery
+	// execNone names exec queries that succeed affecting no row.
+	execNone map[string]bool
+	mu       sync.Mutex
+	execs    []capturedQuery
 	// rowCalls records every QueryRow, so a test can show a write never ran.
 	rowCalls []capturedQuery
 }
 
 func (d *auditRowsDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	for name := range d.execNone {
+		if strings.Contains(sql, "-- name: "+name+" ") {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
+		}
+	}
 	for name := range d.execOK {
 		if strings.Contains(sql, "-- name: "+name+" ") {
 			d.mu.Lock()

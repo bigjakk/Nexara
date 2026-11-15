@@ -30,7 +30,7 @@ func (q *Queries) AcknowledgeAlert(ctx context.Context, arg AcknowledgeAlertPara
 	return err
 }
 
-const autoResolveAlert = `-- name: AutoResolveAlert :exec
+const autoResolveAlert = `-- name: AutoResolveAlert :execrows
 UPDATE alert_history
 SET state = 'resolved', resolved_at = now()
 WHERE id = $1 AND state IN ('pending', 'firing', 'acknowledged')
@@ -38,9 +38,12 @@ WHERE id = $1 AND state IN ('pending', 'firing', 'acknowledged')
 
 // An acknowledged alert is still active: it resolves when its condition
 // clears, as a firing one does.
-func (q *Queries) AutoResolveAlert(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, autoResolveAlert, id)
-	return err
+func (q *Queries) AutoResolveAlert(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, autoResolveAlert, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countActiveAlertsByCluster = `-- name: CountActiveAlertsByCluster :one
@@ -1540,7 +1543,7 @@ func (q *Queries) MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) e
 	return err
 }
 
-const resolveAlert = `-- name: ResolveAlert :exec
+const resolveAlert = `-- name: ResolveAlert :execrows
 UPDATE alert_history
 SET state = 'resolved', resolved_at = now(), resolved_by = $2
 WHERE id = $1 AND state IN ('firing', 'acknowledged')
@@ -1551,9 +1554,12 @@ type ResolveAlertParams struct {
 	ResolvedBy pgtype.UUID `json:"resolved_by"`
 }
 
-func (q *Queries) ResolveAlert(ctx context.Context, arg ResolveAlertParams) error {
-	_, err := q.db.Exec(ctx, resolveAlert, arg.ID, arg.ResolvedBy)
-	return err
+func (q *Queries) ResolveAlert(ctx context.Context, arg ResolveAlertParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveAlert, arg.ID, arg.ResolvedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const transitionAlertToFiring = `-- name: TransitionAlertToFiring :exec

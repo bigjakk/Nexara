@@ -755,8 +755,13 @@ func (e *Engine) handleVerdict(ctx context.Context, rule db.AlertRule, v verdict
 		return e.fireAlert(ctx, rule, existing.ID, value, resourceName)
 
 	case alertResolve:
-		if err := e.queries.AutoResolveAlert(ctx, existing.ID); err != nil {
+		resolved, err := e.queries.AutoResolveAlert(ctx, existing.ID)
+		if err != nil {
 			return fmt.Errorf("auto-resolve: %w", err)
+		}
+		if resolved == 0 {
+			// Resolved by hand meanwhile, which sent the "resolved" itself.
+			return nil
 		}
 		e.logger.Info("alert auto-resolved",
 			"rule", rule.Name, "resource", resourceName, "alert_id", existing.ID, "was", existing.State)

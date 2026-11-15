@@ -231,7 +231,7 @@ func TestListScope_AlertRulesAndMigrationJobs(t *testing.T) {
 			VALUES ($1, $2, 'acknowledged', 'cpu_usage', 95, 90)`, alertAcked, ruleGlobal); err != nil {
 			t.Fatalf("seed acknowledged alert: %v", err)
 		}
-		if err := queries.AutoResolveAlert(ctx, alertAcked); err != nil {
+		if _, err := queries.AutoResolveAlert(ctx, alertAcked); err != nil {
 			t.Fatalf("AutoResolveAlert: %v", err)
 		}
 		var state string

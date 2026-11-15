@@ -1430,11 +1430,17 @@ func (h *AlertHandler) ResolveAlert(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	userID, _ := c.Locals("user_id").(uuid.UUID)
-	if err := h.queries.ResolveAlert(c.Context(), db.ResolveAlertParams{
+	resolved, err := h.queries.ResolveAlert(c.Context(), db.ResolveAlertParams{
 		ID:         id,
 		ResolvedBy: pgtype.UUID{Bytes: userID, Valid: true},
-	}); err != nil {
+	})
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to resolve alert")
+	}
+	// Resolved meanwhile — by the engine, or another caller — which sent its
+	// own "resolved": sending a second would repeat it on every channel.
+	if resolved == 0 {
+		return fiber.NewError(fiber.StatusConflict, "Alert cannot be resolved from current state")
 	}
 
 	AuditLog(c, h.queries, h.eventPub, alert.ClusterID, "alert", id.String(), "alert_resolved", nil)

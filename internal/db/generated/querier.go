@@ -31,7 +31,7 @@ type Querier interface {
 	AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) (string, error)
 	// An acknowledged alert is still active: it resolves when its condition
 	// clears, as a firing one does.
-	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
+	AutoResolveAlert(ctx context.Context, id uuid.UUID) (int64, error)
 	// Moves the user's auth_epoch to its next value and says how many rows it changed
 	// (0: there is no such user). It is the FIRST statement of every revoke-all —
 	// before the listing of the live sessions and the revoke of them — and a statement
@@ -2928,7 +2928,7 @@ type Querier interface {
 	// this instead of executing migrations itself, so every dispatch goes through
 	// the single leader-held executor (see migration 000079).
 	RequestDRSEvaluation(ctx context.Context, clusterID uuid.UUID) error
-	ResolveAlert(ctx context.Context, arg ResolveAlertParams) error
+	ResolveAlert(ctx context.Context, arg ResolveAlertParams) (int64, error)
 	// ResolveVeeamInfrastructureGuests matches each row to a Proxmox guest.
 	//
 	// Name is the only key there is: neither the proxy state model nor the

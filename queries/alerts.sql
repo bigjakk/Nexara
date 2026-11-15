@@ -123,12 +123,12 @@ UPDATE alert_history
 SET state = 'acknowledged', acknowledged_at = now(), acknowledged_by = $2
 WHERE id = $1 AND state = 'firing';
 
--- name: ResolveAlert :exec
+-- name: ResolveAlert :execrows
 UPDATE alert_history
 SET state = 'resolved', resolved_at = now(), resolved_by = $2
 WHERE id = $1 AND state IN ('firing', 'acknowledged');
 
--- name: AutoResolveAlert :exec
+-- name: AutoResolveAlert :execrows
 -- An acknowledged alert is still active: it resolves when its condition
 -- clears, as a firing one does.
 UPDATE alert_history
