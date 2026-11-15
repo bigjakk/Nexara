@@ -250,6 +250,61 @@ func TestSyncClusterResources(t *testing.T) {
 		}
 	})
 
+	// A halted VM stays "running" and carries QEMU's state in run_state. The
+	// fast pass keeps a state the slow pass saw first while the listing repeats
+	// itself, and clears it once the listing moves on (resumed, stopped).
+	t.Run("a halted QEMU state is carried beside running, kept and cleared with the listing", func(t *testing.T) {
+		for _, tc := range []struct {
+			prev                      string   // seeded as the previous tick's listing
+			ticks                     []string // what each tick lists
+			storedRun                 string
+			wantStatus, wantRun       string
+			wantWrites, wantStateEvts int
+		}{
+			{"", []string{"io-error"}, "", "running", "io-error", 1, 1},
+			{"running", []string{"running"}, "io-error", "running", "io-error", 0, 0},
+			{"", []string{"io-error", "running"}, "", "running", "", 2, 2},
+			{"", []string{"io-error", "stopped"}, "", "stopped", "", 2, 2},
+		} {
+			var listed string
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/api2/json/cluster/resources": func(w http.ResponseWriter, _ *http.Request) {
+					guest := guestRunning
+					guest.Status = listed
+					jsonResponse(w, []proxmox.ClusterResource{nodeOnline, guest})
+				},
+			})
+			mq := newMockQueries()
+			pub := &mockEventPub{}
+			s := newTestSyncer(mq)
+			s.SetEventPublisher(pub)
+			cluster := makeCluster(t, srv.URL)
+			seedFastSync(mq, cluster, "online", "running", "web-server")
+			key := fmt.Sprintf("%s:%d", cluster.ID.String(), 100)
+			row := mq.vms[key]
+			row.RunState = tc.storedRun
+			mq.vms[key] = row
+			if tc.prev != "" {
+				s.resourceStatus.Store(cluster.ID, map[int32]string{100: tc.prev})
+			}
+
+			for _, listed = range tc.ticks {
+				if err := s.syncClusterResources(context.Background(), cluster); err != nil {
+					t.Fatalf("%v: syncClusterResources: %v", tc.ticks, err)
+				}
+			}
+			srv.Close()
+			got := mq.vms[key]
+			if len(mq.upsertVMCalls) != tc.wantWrites || got.Status != tc.wantStatus || got.RunState != tc.wantRun {
+				t.Errorf("%v after %q: %d writes left %s/%q, want %d leaving %s/%q", tc.ticks, tc.prev,
+					len(mq.upsertVMCalls), got.Status, got.RunState, tc.wantWrites, tc.wantStatus, tc.wantRun)
+			}
+			if n := pub.countKind(events.KindVMStateChange); n != tc.wantStateEvts {
+				t.Errorf("%v after %q: vm_state_change = %d, want %d", tc.ticks, tc.prev, n, tc.wantStateEvts)
+			}
+		}
+	})
+
 	// The listing carries the guest's config lock. The fast sync's upsert
 	// once left it out, so every fast pass blanked vms.lock_state until the
 	// next slow pass, and a lock taken since never woke a write at all.

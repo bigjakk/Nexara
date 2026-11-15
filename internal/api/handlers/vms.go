@@ -60,6 +60,11 @@ type vmResponse struct {
 	OSType       string    `json:"ostype"`
 	ConfigOSType string    `json:"config_ostype"`
 
+	// RunState is QEMU's halted state for a VM whose status is "running"
+	// (io-error, suspended (S3 sleep), watchdog, guest-panicked, shutdown,
+	// internal-error, debug), "" otherwise.
+	RunState string `json:"run_state"`
+
 	LastSeenAt time.Time `json:"last_seen_at"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
@@ -74,6 +79,7 @@ func toVMResponse(v db.Vm) vmResponse {
 		Name:         v.Name,
 		Type:         v.Type,
 		Status:       v.Status,
+		RunState:     v.RunState,
 		CPUCount:     v.CpuCount,
 		MemTotal:     v.MemTotal,
 		DiskTotal:    v.DiskTotal,

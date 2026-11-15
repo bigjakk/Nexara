@@ -202,7 +202,7 @@ func (q *Queries) ListHAErrorGuests(ctx context.Context) ([]ListHAErrorGuestsRow
 const listIOErrorGuests = `-- name: ListIOErrorGuests :many
 SELECT cluster_id, name
 FROM vms
-WHERE lock_state = 'io-error'
+WHERE run_state = 'io-error'
 `
 
 type ListIOErrorGuestsRow struct {
@@ -210,7 +210,9 @@ type ListIOErrorGuestsRow struct {
 	Name      string    `json:"name"`
 }
 
-// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).
+// VMs QEMU paused on a storage I/O error: QEMU's run state "io-error", which
+// the collector stores in run_state. (It is not a config lock: Proxmox has no
+// "io-error" lock, so the lock_state predicate this read once used never matched.)
 func (q *Queries) ListIOErrorGuests(ctx context.Context) ([]ListIOErrorGuestsRow, error) {
 	rows, err := q.db.Query(ctx, listIOErrorGuests)
 	if err != nil {

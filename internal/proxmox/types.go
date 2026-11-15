@@ -429,6 +429,39 @@ func (r ClusterResource) GuestStatus() string {
 	return r.Status
 }
 
+// haltedRunStates are the QEMU run states (qapi/run-state.json) in which the
+// VM's process is up and holds its memory while its vCPUs do not run, other
+// than "paused", which is the "suspended" status itself. A VM in one keeps the
+// status "running", for everything that drains, counts or places running
+// guests, and carries the state beside it (RunState). The transient states
+// (prelaunch, inmigrate, postmigrate, finish-migrate, save-vm, restore-vm,
+// colo) are left out: they pass on their own.
+var haltedRunStates = map[string]bool{
+	"io-error": true, "suspended": true, "watchdog": true, "guest-panicked": true,
+	"shutdown": true, "internal-error": true, "debug": true,
+}
+
+// RunState is the halted QEMU run state of a running VM, from its qmpstatus
+// (query-status, qemu-server vmstatus with full=1), or "" when it is not
+// halted. QEMU's "suspended" is S3 sleep, unlike the status "suspended".
+func (vm VirtualMachine) RunState() string {
+	if vm.Status == "running" && haltedRunStates[vm.QMPStatus] {
+		return vm.QMPStatus
+	}
+	return ""
+}
+
+// RunState is the halted QEMU run state of a /cluster/resources VM, or "".
+// The listing's status is the same qmpstatus (pvestatd stores
+// `$d->{qmpstatus} || $d->{status}`), so it agrees with the slow pass's
+// VirtualMachine.RunState, one pvestatd cycle later.
+func (r ClusterResource) RunState() string {
+	if r.Type == "qemu" && haltedRunStates[r.Status] {
+		return r.Status
+	}
+	return ""
+}
+
 // GuestCPU is a guest's CPU: the list's reading, or resources (pvestatd's
 // /cluster/resources figure) when a running guest lists exactly 0, as every
 // running guest does from a fresh pveproxy worker with no earlier reading in

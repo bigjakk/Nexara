@@ -1,9 +1,11 @@
 -- A write that changes status also records the change in guest_status_changes,
 -- by trigger (trg_vms_status_change, migrations/000115), for the guest's
--- History; so does UpdateVMStatus.
+-- History; so does UpdateVMStatus. run_state is QEMU's halted state beside a
+-- "running" status (migrations/000143); a change to it alone is not a status
+-- change and records nothing there.
 -- name: UpsertVM :one
-INSERT INTO vms (cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, lock_state, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
+INSERT INTO vms (cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, lock_state, run_state, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
 ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     node_id = EXCLUDED.node_id,
     name = EXCLUDED.name,
@@ -18,6 +20,7 @@ ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     ha_state = EXCLUDED.ha_state,
     pool = EXCLUDED.pool,
     lock_state = EXCLUDED.lock_state,
+    run_state = EXCLUDED.run_state,
     last_seen_at = now()
 RETURNING *;
 
@@ -47,8 +50,11 @@ SELECT * FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid;
 SELECT * FROM vms WHERE id = $1 AND type = 'lxc';
 
 -- Records the change in guest_status_changes too, by trigger (see UpsertVM).
+-- The task watcher writes it when a power task ends, which leaves no halted
+-- QEMU state behind that it knows of, so it clears run_state; the collector
+-- writes the state again if the guest is still halted.
 -- name: UpdateVMStatus :exec
-UPDATE vms SET status = $2, updated_at = now() WHERE id = $1;
+UPDATE vms SET status = $2, run_state = '', updated_at = now() WHERE id = $1;
 
 -- UpdateUnreportedVM is the fast sync's UpsertVM for a guest /cluster/resources
 -- lists as "unknown": one pvestatd has not reported, as on a node that is down.
@@ -63,7 +69,7 @@ UPDATE vms SET status = $2, updated_at = now() WHERE id = $1;
 -- guest_status_changes too, by trigger. The lock is written like the tags: it
 -- comes from the guest's configuration, not from pvestatd.
 -- name: UpdateUnreportedVM :exec
-UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6, lock_state = $7,
+UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6, lock_state = $7, run_state = $8,
     uptime = CASE WHEN $3 = 'unknown' THEN 0 ELSE uptime END, last_seen_at = now()
 WHERE id = $1;
 
@@ -78,7 +84,7 @@ UPDATE vms SET config_ostype = $2, updated_at = now() WHERE id = $1;
 -- publish an inventory_change event, so external edits (Proxmox UI, qm/pct)
 -- become visible to the frontend within one tick.
 -- name: ListVMStatusesByCluster :many
-SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags, lock_state
+SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags, lock_state, run_state
 FROM vms WHERE cluster_id = $1;
 
 -- name: ListAllVMs :many

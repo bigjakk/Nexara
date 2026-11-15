@@ -248,6 +248,7 @@ func (m *mockQueries) UpsertVM(_ context.Context, arg db.UpsertVMParams) (db.Vm,
 		HaState:   arg.HaState,
 		Pool:      arg.Pool,
 		LockState: arg.LockState,
+		RunState:  arg.RunState,
 	}
 	m.vms[key] = vm
 	return vm, nil
@@ -318,6 +319,7 @@ func (m *mockQueries) ListVMStatusesByCluster(_ context.Context, clusterID uuid.
 			HaState:   vm.HaState,
 			Tags:      vm.Tags,
 			LockState: vm.LockState,
+			RunState:  vm.RunState,
 		})
 	}
 	return rows, nil
@@ -356,7 +358,7 @@ func (m *mockQueries) UpdateUnreportedVM(_ context.Context, arg db.UpdateUnrepor
 	m.unreportedVMCalls = append(m.unreportedVMCalls, arg)
 	for k, vm := range m.vms {
 		if vm.ID == arg.ID {
-			vm.NodeID, vm.Status, vm.Tags, vm.HaState, vm.Pool, vm.LockState = arg.NodeID, arg.Status, arg.Tags, arg.HaState, arg.Pool, arg.LockState
+			vm.NodeID, vm.Status, vm.Tags, vm.HaState, vm.Pool, vm.LockState, vm.RunState = arg.NodeID, arg.Status, arg.Tags, arg.HaState, arg.Pool, arg.LockState, arg.RunState
 			if arg.Status == "unknown" {
 				vm.Uptime = 0
 			}
@@ -764,7 +766,7 @@ func TestSyncCluster_Success(t *testing.T) {
 		},
 		"/api2/json/nodes/pve2/qemu": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.VirtualMachine{
-				{VMID: 101, Name: "db-server", Status: "running", CPUs: 8, MaxMem: 8589934592, MaxDisk: 107374182400, Template: 0,
+				{VMID: 101, Name: "db-server", Status: "running", QMPStatus: "io-error", CPUs: 8, MaxMem: 8589934592, MaxDisk: 107374182400, Template: 0,
 					CPU: 0.8, Mem: 4294967296, NetIn: 5000, NetOut: 6000, DiskRead: 7000, DiskWrite: 8000,
 					BalloonInfo: balloon},
 			})
@@ -847,6 +849,10 @@ func TestSyncCluster_Success(t *testing.T) {
 	// QEMU 101 on pve2.
 	if mq.upsertVMCalls[2].Vmid != 101 || mq.upsertVMCalls[2].Type != "qemu" {
 		t.Errorf("vm[2]: vmid=%d type=%q, want vmid=101 type=qemu", mq.upsertVMCalls[2].Vmid, mq.upsertVMCalls[2].Type)
+	}
+	// Paused on a write error: still "running", with QEMU's state beside it.
+	if got := mq.upsertVMCalls[2]; got.Status != "running" || got.RunState != "io-error" {
+		t.Errorf("vm[2]: status=%q run_state=%q, want running/io-error", got.Status, got.RunState)
 	}
 
 	// Verify storage.

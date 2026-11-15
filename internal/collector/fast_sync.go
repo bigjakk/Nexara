@@ -158,7 +158,10 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 	// for good in its History (guest_status_changes, migrations/000115). The
 	// listing's status is adopted only when it CHANGED, or on the first tick,
 	// which has nothing to compare; the slow pass corrects anything else
-	// within one pass.
+	// within one pass. The listing's raw status is what is remembered: it is
+	// a VM's QEMU run state, so the rule covers vms.run_state too, and a VM
+	// whose halted state the slow pass saw first keeps it while the listing
+	// still says "running".
 	lastStatus, _ := s.resourceStatus.Load(cluster.ID)
 	prevStatus, _ := lastStatus.(map[int32]string)
 	seenStatus := make(map[int32]string, len(guests))
@@ -170,10 +173,10 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 	now := time.Now()
 
 	for vmid, r := range guests {
-		status := r.GuestStatus()
+		status, runState := r.GuestStatus(), r.RunState()
 		// Remembered once the row agrees with it, below: a write that fails
 		// must see the change again next tick, or it is never retried.
-		listedStatus := status
+		listedStatus := r.Status
 		if was, seen := prevStatus[vmid]; seen {
 			seenStatus[vmid] = was
 		}
@@ -219,8 +222,8 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 		if unreported {
 			name, isTemplate = old.Name, old.Template
 		}
-		if was, seen := prevStatus[vmid]; exists && seen && was == status {
-			status = old.Status
+		if was, seen := prevStatus[vmid]; exists && seen && was == listedStatus {
+			status, runState = old.Status, old.RunState
 		}
 		if exists &&
 			old.Status == status &&
@@ -230,7 +233,8 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 			old.Pool == r.Pool &&
 			old.HaState == r.HAState &&
 			old.Tags == r.Tags &&
-			old.LockState == r.Lock {
+			old.LockState == r.Lock &&
+			old.RunState == runState {
 			seenStatus[vmid] = listedStatus
 			continue
 		}
@@ -247,6 +251,7 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 				// reads from pmxcfs (get_guest_config_properties), as the
 				// slow pass's node list does.
 				LockState: r.Lock,
+				RunState:  runState,
 			})
 		} else {
 			_, writeErr = s.queries.UpsertVM(ctx, db.UpsertVMParams{
@@ -265,6 +270,7 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 				HaState:   r.HAState,
 				Pool:      r.Pool,
 				LockState: r.Lock,
+				RunState:  runState,
 			})
 		}
 		if writeErr != nil {
@@ -274,11 +280,12 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 		}
 		seenStatus[vmid] = listedStatus
 		inventoryChanged = true
-		if exists && old.Status != status && s.eventPub != nil {
+		if exists && (old.Status != status || old.RunState != runState) && s.eventPub != nil {
 			s.logger.Info("VM status changed (fast sync)",
 				"vmid", vmid,
 				"old_status", old.Status,
 				"new_status", status,
+				"run_state", runState,
 				"cluster_id", cluster.ID,
 			)
 			s.eventPub.ClusterEvent(ctx, cluster.ID.String(),

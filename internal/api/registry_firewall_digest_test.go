@@ -154,7 +154,7 @@ func (r fwGuestRow) Scan(dest ...any) error {
 		return err
 	}
 	const typeColumn = 5
-	if len(dest) != 21 {
+	if len(dest) != 22 { // the vms columns, run_state (000143) the last
 		return errHACreateUnexpectedQuery
 	}
 	typ, ok := dest[typeColumn].(*string)

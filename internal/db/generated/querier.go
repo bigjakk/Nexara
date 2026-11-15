@@ -2194,7 +2194,9 @@ type Querier interface {
 	// (observed_types), in the History's own cluster, a row naming no cluster only
 	// for a global kind. One row per audit row.
 	ListHistoryAlsoChanged(ctx context.Context, arg ListHistoryAlsoChangedParams) ([]ListHistoryAlsoChangedRow, error)
-	// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).
+	// VMs QEMU paused on a storage I/O error: QEMU's run state "io-error", which
+	// the collector stores in run_state. (It is not a config lock: Proxmox has no
+	// "io-error" lock, so the lock_state predicate this read once used never matched.)
 	ListIOErrorGuests(ctx context.Context) ([]ListIOErrorGuestsRow, error)
 	// Storage that is enabled but not currently active (unreachable). Shared pools
 	// appear once per node, so de-duplicate by (cluster_id, storage).
@@ -3322,6 +3324,9 @@ type Querier interface {
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	UpdateVMPool(ctx context.Context, arg UpdateVMPoolParams) error
 	// Records the change in guest_status_changes too, by trigger (see UpsertVM).
+	// The task watcher writes it when a power task ends, which leaves no halted
+	// QEMU state behind that it knows of, so it clears run_state; the collector
+	// writes the state again if the guest is still halted.
 	UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error
 	UpdateVeeamServer(ctx context.Context, arg UpdateVeeamServerParams) (VeeamServer, error)
 	UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) error
@@ -3451,7 +3456,9 @@ type Querier interface {
 	UpsertUpsDevice(ctx context.Context, arg UpsertUpsDeviceParams) (UpsDevice, error)
 	// A write that changes status also records the change in guest_status_changes,
 	// by trigger (trg_vms_status_change, migrations/000115), for the guest's
-	// History; so does UpdateVMStatus.
+	// History; so does UpdateVMStatus. run_state is QEMU's halted state beside a
+	// "running" status (migrations/000143); a change to it alone is not a status
+	// change and records nothing there.
 	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
 	UpsertVeeamBackupObject(ctx context.Context, arg UpsertVeeamBackupObjectParams) (VeeamBackupObject, error)
 	// Writes the session a start or stop returned inline, immediately.

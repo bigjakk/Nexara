@@ -1698,6 +1698,7 @@ type Vm struct {
 	Ostype       string    `json:"ostype"`
 	ConfigOstype string    `json:"config_ostype"`
 	LockState    string    `json:"lock_state"`
+	RunState     string    `json:"run_state"`
 }
 
 type VmFolder struct {

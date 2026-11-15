@@ -603,6 +603,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		Pool     string
 		HAState  string
 		Tags     string
+		RunState string
 	}
 	type nodeSnapshot struct {
 		Status  string
@@ -623,6 +624,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 					Pool:     r.Pool,
 					HAState:  r.HaState,
 					Tags:     r.Tags,
+					RunState: r.RunState,
 				}
 			}
 		}
@@ -716,11 +718,12 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 					inventoryChanged = true
 					continue
 				}
-				if old.Status != r.Status {
+				if old.Status != r.Status || old.RunState != r.RunState {
 					s.logger.Info("VM status changed during sync",
 						"vmid", r.Vmid,
 						"old_status", old.Status,
 						"new_status", r.Status,
+						"run_state", r.RunState,
 						"cluster_id", cluster.ID,
 					)
 					s.eventPub.ClusterEvent(ctx, cluster.ID.String(),
@@ -1200,6 +1203,7 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 			HaState:   extra.HAState,
 			Pool:      extra.Pool,
 			LockState: vm.Lock,
+			RunState:  vm.RunState(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upsert VM %d on %s: %w", vm.VMID, nodeName, err)
