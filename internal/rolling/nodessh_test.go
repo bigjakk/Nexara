@@ -232,3 +232,32 @@ func TestStartNode_ChecksSSHBeforeTheDrain(t *testing.T) {
 		})
 	}
 }
+
+// advanceUpgrading reads the SSH settings again before it starts the upgrade on
+// a drained node. A lookup that fails waits for the next tick, as sshReady
+// does; a setting the upgrade cannot run with still fails the node.
+func TestAdvanceUpgrading_WaitsOutAnSSHLookupThatFails(t *testing.T) {
+	t.Parallel()
+	cluster := uuid.New()
+	creds := &db.ClusterSshCredential{ClusterID: cluster, Username: "root", Port: 22}
+	for _, tt := range []struct {
+		name    string
+		answers sshAnswers
+		failed  bool
+	}{
+		{"settings unreadable", sshAnswers{failing: sshLookups[0]}, false},
+		{"not pinned", sshAnswers{creds: creds, address: "192.0.2.11"}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			d := &memberDB{t: t, cluster: cluster, ssh: &tt.answers}
+			o, client, _ := engineOn(t, d, nil)
+			job := db.RollingUpdateJob{ID: uuid.New(), ClusterID: cluster, AutoUpgrade: true}
+			o.advanceUpgrading(context.Background(), client, job,
+				db.RollingUpdateNode{ID: uuid.New(), JobID: job.ID, NodeName: sshNode, Step: "upgrading"})
+			if (len(d.failures) > 0) != tt.failed {
+				t.Errorf("failures %q, want failed = %v", d.failures, tt.failed)
+			}
+		})
+	}
+}

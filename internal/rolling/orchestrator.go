@@ -1051,6 +1051,12 @@ func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Cli
 	// dead SSH goroutine) — kick off the SSH upgrade. An unpinned host key
 	// fails closed; startNode made the same check before the drain.
 	sshCfg, err := NodeSSHConfig(ctx, o.queries, o.encryptionKey, job.ClusterID, node.NodeName)
+	if errors.Is(err, ErrSSHLookup) {
+		// The database, not the node: try again next tick, as sshReady does.
+		o.logger.Error("rolling update: SSH settings lookup failed, retrying next tick",
+			"job_id", job.ID, "node", node.NodeName, "error", err)
+		return
+	}
 	if err != nil {
 		o.failNode(ctx, job, node, err.Error())
 		return
