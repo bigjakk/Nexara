@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ func TestPollTaskStatus_FollowsTheHAManagersMigration(t *testing.T) {
 		name      string
 		tasks     []map[string]any
 		listFails bool
+		failAfter int // reads that succeed before every later one fails; 0 for none
 		wantError string
 	}{
 		{
@@ -36,6 +38,7 @@ func TestPollTaskStatus_FollowsTheHAManagersMigration(t *testing.T) {
 		},
 		{name: "no migration starts", wantError: "not moved"},
 		{name: "the task list cannot be read", listFails: true, wantError: "could not confirm"},
+		{name: "the task list stops being readable", failAfter: 1, wantError: "could not confirm"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -50,8 +53,9 @@ func TestPollTaskStatus_FollowsTheHAManagersMigration(t *testing.T) {
 			mux.HandleFunc("/api2/json/nodes/"+credTestNode+"/tasks/"+worker+"/status", func(w http.ResponseWriter, _ *http.Request) {
 				reply(w, map[string]any{"status": "stopped", "exitstatus": "migration aborted", "upid": worker})
 			})
+			var reads atomic.Int64
 			mux.HandleFunc("/api2/json/nodes/"+credTestNode+"/tasks", func(w http.ResponseWriter, _ *http.Request) {
-				if tc.listFails {
+				if n := reads.Add(1); tc.listFails || (tc.failAfter > 0 && n > int64(tc.failAfter)) {
 					w.WriteHeader(http.StatusInternalServerError)
 					return
 				}

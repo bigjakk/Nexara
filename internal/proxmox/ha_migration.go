@@ -27,22 +27,19 @@ func HAMigrationRequestStart(upid string) (int64, bool) {
 // manager runs it on the guest's node. A function, not a method: the UPID it
 // returns is of a task the HA manager started, not one the call started.
 //
-// When ctx ends first it returns ctx's error, and unread is the last read's
-// error when no read of the list succeeded (nil when one did): could not look
-// is not the same as no migration. onReadErr, when set, sees each failed read.
+// When ctx ends first it returns ctx's error, and unread is the error of the
+// last read when that read failed (nil when it succeeded): a migration can start
+// after the last good look, so could not look is not the same as no migration.
+// onReadErr, when set, sees each failed read.
 func AwaitHAMigration(ctx context.Context, c *Client, node string, vmid int, since int64, interval time.Duration,
 	onReadErr func(error)) (upid string, unread, err error) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	id := strconv.Itoa(vmid)
-	read := false
 	for {
 		select {
 		case <-ctx.Done():
-			if read {
-				unread = nil
-			}
 			return "", unread, ctx.Err()
 		case <-ticker.C:
 			tasks, listErr := c.GetNodeTasks(ctx, node, since, 0)
@@ -50,10 +47,13 @@ func AwaitHAMigration(ctx context.Context, c *Client, node string, vmid int, sin
 				if onReadErr != nil {
 					onReadErr(listErr)
 				}
-				unread = listErr
+				// A read cut off by ctx ending says nothing about the list.
+				if ctx.Err() == nil {
+					unread = listErr
+				}
 				continue
 			}
-			read = true
+			unread = nil
 			for _, t := range tasks {
 				if t.ID == id && (t.Type == "qmigrate" || t.Type == "vzmigrate") {
 					return t.UPID, nil, nil

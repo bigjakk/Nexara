@@ -1101,9 +1101,9 @@ func (o *Orchestrator) abandonTaskRow(ctx context.Context, upid, exitStatus stri
 // None within the grace means nothing moved. The HA manager drops a request it
 // cannot carry out, logging why only on the node (pve-ha-manager, Manager.pm:
 // a target offline or already the guest's node, a node or resource affinity
-// rule; LRM.pm: the migration failing before it starts). When no read of the
-// task list succeeded in the grace, nothing was looked at, so the error says
-// the outcome could not be confirmed instead.
+// rule; LRM.pm: the migration failing before it starts). When the last read of
+// the task list failed, the migration may have started unseen, so the error
+// says the outcome could not be confirmed instead.
 func (o *Orchestrator) followHAMigration(ctx context.Context, client *proxmox.Client, node string, vmid int, since int64) (string, error) {
 	graceCtx, cancel := context.WithTimeout(ctx, o.haStartGrace)
 	defer cancel()
