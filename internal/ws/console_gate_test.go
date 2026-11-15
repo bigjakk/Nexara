@@ -192,7 +192,7 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 	hub := NewHub(logger, 0)
 	hub.Run()
 	t.Cleanup(hub.Stop)
-	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second, ServerConfig{
+	server := newTestServer(t, hub, jwtSvc, logger, ServerConfig{
 		ConsoleHandler: NewConsoleHandler(queries, "unused", jwtSvc, logger),
 		VNCHandler:     NewVNCHandler(queries, "unused", jwtSvc, logger),
 	})

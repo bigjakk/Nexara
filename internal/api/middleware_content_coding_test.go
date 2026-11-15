@@ -62,10 +62,15 @@ func newAssembledServer(t *testing.T) *Server {
 	t.Helper()
 	s := newSweepServer(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ws.NewServer(ws.NewHub(logger, 1), s.jwtService, logger, time.Minute, time.Minute, ws.ServerConfig{
+	wsServer, err := ws.NewServer(ws.NewHub(logger, 1), s.jwtService, logger, time.Minute, time.Minute, ws.ServerConfig{
 		ConsoleHandler: ws.NewConsoleHandler(s.queries, sweepEncryptionKey, s.jwtService, logger),
 		VNCHandler:     ws.NewVNCHandler(s.queries, sweepEncryptionKey, s.jwtService, logger),
-	}).RegisterRoutes(s.App())
+		Queries:        s.queries,
+	})
+	if err != nil {
+		t.Fatalf("ws.NewServer: %v", err)
+	}
+	wsServer.RegisterRoutes(s.App())
 	s.RegisterFrontend(fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>Nexara</title>")}})
 	return s
 }

@@ -24,7 +24,7 @@ func TestConsoleEndpointRequiresAuth(t *testing.T) {
 	// Create a console handler with nil queries (it won't be reached).
 	consoleHandler := NewConsoleHandler(nil, "0000000000000000000000000000000000000000000000000000000000000000", jwtSvc, logger)
 
-	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second, ServerConfig{
+	server := newTestServer(t, hub, jwtSvc, logger, ServerConfig{
 		ConsoleHandler: consoleHandler,
 	})
 
@@ -67,7 +67,7 @@ func TestConsoleRouteRegistered(t *testing.T) {
 
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
 	consoleHandler := NewConsoleHandler(nil, "0000000000000000000000000000000000000000000000000000000000000000", jwtSvc, logger)
-	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second, ServerConfig{
+	server := newTestServer(t, hub, jwtSvc, logger, ServerConfig{
 		ConsoleHandler: consoleHandler,
 	})
 

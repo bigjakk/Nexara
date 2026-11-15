@@ -99,7 +99,7 @@ func TestIntegrationOriginRejection(t *testing.T) {
 
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
 
-	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second, ServerConfig{
+	server := newTestServer(t, hub, jwtSvc, logger, ServerConfig{
 		AllowedOrigins: []string{"https://allowed.example"},
 	})
 
@@ -180,7 +180,7 @@ func TestIntegrationOriginPermissiveDefault(t *testing.T) {
 
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
 
-	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second)
+	server := newTestServer(t, hub, jwtSvc, logger, ServerConfig{})
 	port := startTestServer(t, server)
 	defer server.Shutdown()
 

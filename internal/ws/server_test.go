@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -55,7 +56,7 @@ func setupIntegrationEvery(t *testing.T, checkEvery time.Duration) *testEnv {
 	// Test-mode permission checker grants every action — the integration
 	// suite exercises subscribe/publish wiring, not the gate (covered
 	// in subscribe_auth_test.go). Production wires RBACEngine instead.
-	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second, ServerConfig{
+	server := newTestServer(t, hub, jwtSvc, logger, ServerConfig{
 		TestPermissionChecker: func(_ context.Context, _ uuid.UUID, _, _, _ string, _ uuid.UUID) (bool, error) {
 			return !denied.Load(), nil
 		},
@@ -88,6 +89,30 @@ func setupIntegrationEvery(t *testing.T, checkEvery time.Duration) *testEnv {
 		port:        port,
 		lookups:     lookups,
 		denied:      denied,
+	}
+}
+
+// newTestServer is NewServer with the ping and pong timings every test uses, over
+// a database whose liveness check answers live when cfg names none.
+func newTestServer(t *testing.T, hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, cfg ServerConfig) *Server {
+	t.Helper()
+	if cfg.Queries == nil {
+		cfg.Queries = db.New(&gateLookupDB{})
+	}
+	s, err := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second, cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	return s
+}
+
+// TestNewServer_RefusesNoDatabase: without one every hub socket would be refused,
+// so a server missing it fails to build rather than at each connection.
+func TestNewServer_RefusesNoDatabase(t *testing.T) {
+	t.Parallel()
+	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", time.Minute, time.Hour)
+	if _, err := NewServer(NewHub(testLogger(), 0), jwtSvc, testLogger(), time.Minute, time.Minute); err == nil {
+		t.Error("NewServer built a server with no database")
 	}
 }
 

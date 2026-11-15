@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -42,7 +43,7 @@ type Server struct {
 	// upgrade time, rejecting cross-origin upgrades with HTTP 403.
 	allowedOrigins []string
 	// queries answers whether a hub socket's sign-in is still live
-	// (console_credential.go). nil refuses every hub socket.
+	// (console_credential.go).
 	queries *db.Queries
 	// checkEvery is how often an open hub socket re-checks it; tests shorten it.
 	checkEvery time.Duration
@@ -74,12 +75,13 @@ type ServerConfig struct {
 	AllowedOrigins []string
 	// Queries is what a hub socket asks whether the session or API key that
 	// minted its token is still live; the socket is closed when it is not.
-	// Required: without it every hub socket is refused.
+	// Required: NewServer refuses to build a server without it.
 	Queries *db.Queries
 }
 
-// NewServer creates a new WebSocket server.
-func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInterval, pongTimeout time.Duration, opts ...ServerConfig) *Server {
+// NewServer creates a new WebSocket server. It fails without a database to hold
+// hub sockets to their sign-in (ServerConfig.Queries).
+func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInterval, pongTimeout time.Duration, opts ...ServerConfig) (*Server, error) {
 	s := &Server{
 		hub:          hub,
 		jwt:          jwtSvc,
@@ -98,7 +100,7 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		s.queries = opts[0].Queries
 	}
 	if s.queries == nil {
-		s.logger.Warn("ws server: no database configured — every /ws hub socket will be refused")
+		return nil, errors.New("ws server: no database configured to hold /ws hub sockets to their sign-in")
 	}
 	// An open console re-checks its console permission with the same checker the
 	// hub's subscribe gate uses (console_credential.go, consoleAllowed).
@@ -133,7 +135,7 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 	s.mountRoutes(app)
 
 	s.app = app
-	return s
+	return s, nil
 }
 
 // Listen starts the HTTP server on the given port.
@@ -625,11 +627,6 @@ func (s *Server) handleWS(conn *websocket.Conn) {
 	userID, _ := conn.Locals("userID").(uuid.UUID)
 	clientID := fmt.Sprintf("%s-%s", userID, uuid.New().String()[:8])
 
-	if s.queries == nil {
-		writeRefusal(conn, "no database to check the session with")
-		closeBrowserSocket(conn)
-		return
-	}
 	_, live, credLogger, admitted := admitCredential(conn, s.queries, s.logger.With("client", clientID))
 	if !admitted {
 		closeBrowserSocket(conn)
@@ -643,6 +640,7 @@ func (s *Server) handleWS(conn *websocket.Conn) {
 		clientID, conn, s.hub, s.logger, s.pingInterval, s.pongTimeout,
 		userID, s.permissionChecker(),
 	)
+
 	s.hub.Register(client)
 
 	// Send welcome message.

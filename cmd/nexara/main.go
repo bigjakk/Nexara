@@ -163,7 +163,7 @@ func main() {
 		}
 	}
 
-	wsServer := ws.NewServer(hub, jwtSvc, logger.With("component", "ws"), cfg.WSPingInterval, cfg.WSPongTimeout, ws.ServerConfig{
+	wsServer, err := ws.NewServer(hub, jwtSvc, logger.With("component", "ws"), cfg.WSPingInterval, cfg.WSPongTimeout, ws.ServerConfig{
 		ConsoleHandler: consoleHandler,
 		VNCHandler:     vncHandler,
 		// RBAC engine comes from the composition root, so view:cluster
@@ -181,6 +181,9 @@ func main() {
 		// Holds each /ws hub socket to the session or key that minted its token.
 		Queries: queries,
 	})
+	if err != nil {
+		log.Fatalf("failed to build the WebSocket server: %v", err)
+	}
 	wsServer.RegisterRoutes(srv.App())
 
 	// Redis subscriber for WS fan-out.
