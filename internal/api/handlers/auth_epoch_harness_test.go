@@ -313,11 +313,25 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 			return authFakeRow{err: pgx.ErrNoRows}
 		}
 		return authFakeRow{value: *s.ldapConfig}
-	case "GetEnabledOIDCConfig":
+	case "GetEnabledOIDCConfig", "GetOIDCConfig":
 		if s.oidcConfig == nil {
 			return authFakeRow{err: pgx.ErrNoRows}
 		}
 		return authFakeRow{value: *s.oidcConfig}
+	case "CreateOIDCConfig", "UpdateOIDCConfig":
+		// The one configuration the store holds, as written: Update's arguments are
+		// Create's after the id.
+		cfg := db.OidcConfig{ID: uuid.New()}
+		if name == "UpdateOIDCConfig" {
+			cfg.ID, args = args[0].(uuid.UUID), args[1:]
+		}
+		cfg.Name, cfg.Enabled, cfg.IssuerUrl, cfg.ClientID = args[0].(string), args[1].(bool), args[2].(string), args[3].(string)
+		cfg.ClientSecretEncrypted, cfg.RedirectUri = args[4].(string), args[5].(string)
+		cfg.AllowPrivateAddress = args[14].(bool)
+		was := s.oidcConfig
+		remember(func() { s.oidcConfig = was })
+		s.oidcConfig = &cfg
+		return authFakeRow{value: cfg}
 	case "GetSessionByTokenHash":
 		// token_hash: the SQL's predicate, the session's current hash and not revoked.
 		for _, sess := range s.sessions {

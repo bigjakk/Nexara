@@ -356,6 +356,7 @@ export function ChannelForm({
         {privateWarning !== null && (
           <PrivateAddressWarning
             ip={privateWarning.ip}
+            privateOnly
             pending={createMutation.isPending}
             onConfirm={() => {
               create(true);

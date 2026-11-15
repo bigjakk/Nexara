@@ -99,6 +99,9 @@ type oidcConfigRequest struct {
 	// AcknowledgeInsecureRedirect is required to store a plain-http callback
 	// on anything but loopback.
 	AcknowledgeInsecureRedirect bool
+	// AllowPrivateAddress confirms an issuer on a private network address
+	// (checkOIDCIssuer).
+	AllowPrivateAddress bool
 }
 
 // oidcConfigFromParams reads the declared body.
@@ -128,6 +131,7 @@ func oidcConfigFromParams(p *apischema.Params) (oidcConfigRequest, error) {
 		AllowedDomains:   p.Strings("allowed_domains"),
 
 		AcknowledgeInsecureRedirect: p.Bool("acknowledge_insecure_redirect"),
+		AllowPrivateAddress:         p.Bool("allow_private_address"),
 	}, nil
 }
 
@@ -149,6 +153,10 @@ type oidcConfigResponse struct {
 	AllowedDomains   []string          `json:"allowed_domains"`
 	CreatedAt        string            `json:"created_at"`
 	UpdatedAt        string            `json:"updated_at"`
+
+	// AllowPrivateAddress: the operator confirmed this configuration's issuer on
+	// a private network address.
+	AllowPrivateAddress bool `json:"allow_private_address"`
 }
 
 func toOIDCConfigResponse(cfg db.OidcConfig) oidcConfigResponse {
@@ -168,6 +176,8 @@ func toOIDCConfigResponse(cfg db.OidcConfig) oidcConfigResponse {
 		AllowedDomains:   cfg.AllowedDomains,
 		CreatedAt:        cfg.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:        cfg.UpdatedAt.Format(time.RFC3339Nano),
+
+		AllowPrivateAddress: cfg.AllowPrivateAddress,
 	}
 
 	mapping := make(map[string]string)
@@ -235,8 +245,9 @@ func (h *OIDCHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	if err := validateOIDCIssuerURL(req.IssuerURL); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	allowPrivate, err := checkOIDCIssuer(c.Context(), req.IssuerURL, req.AllowPrivateAddress, oidcIssuerResubmit)
+	if err != nil {
+		return renderAddressPolicyError(c, err)
 	}
 	if err := validateOIDCRedirectURI(req.RedirectURI); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
@@ -286,6 +297,7 @@ func (h *OIDCHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		DefaultRoleID:         defaultRoleID,
 		AutoProvision:         req.AutoProvision,
 		AllowedDomains:        allowedDomains,
+		AllowPrivateAddress:   allowPrivate,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create OIDC config")
@@ -294,11 +306,15 @@ func (h *OIDCHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	// The redirect URI is recorded on create for the same reason Update records
 	// a change to it: nothing downstream can tell a legitimate callback from
 	// one pointed at a host the caller controls, so the row is the only trace.
-	details, _ := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"name":         cfg.Name,
 		"issuer_url":   auditSafe(cfg.IssuerUrl),
 		"redirect_uri": auditSafe(cfg.RedirectUri),
-	})
+	}
+	if allowPrivate {
+		fields["allow_private_address"] = true
+	}
+	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", cfg.ID.String(), "oidc_config_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(toOIDCConfigResponse(cfg))
@@ -324,8 +340,13 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	if err := validateOIDCIssuerURL(req.IssuerURL); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	// The issuer is checked again on every write. A confirmation is kept while the
+	// issuer stays the same, so that editing anything else does not ask again; a new
+	// issuer is decided anew.
+	confirmed := req.AllowPrivateAddress || existing.AllowPrivateAddress && req.IssuerURL == existing.IssuerUrl
+	allowPrivate, err := checkOIDCIssuer(c.Context(), req.IssuerURL, confirmed, oidcIssuerResubmit)
+	if err != nil {
+		return renderAddressPolicyError(c, err)
 	}
 
 	// Validated only when it changes: this rule is newer than the column, so an
@@ -402,6 +423,7 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		DefaultRoleID:         defaultRoleID,
 		AutoProvision:         req.AutoProvision,
 		AllowedDomains:        allowedDomains,
+		AllowPrivateAddress:   allowPrivate,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update OIDC config")
@@ -424,6 +446,11 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	if cfg.IssuerUrl != existing.IssuerUrl {
 		fields["previous_issuer_url"] = auditSafe(existing.IssuerUrl)
 		fields["new_issuer_url"] = auditSafe(cfg.IssuerUrl)
+	}
+	// Recorded whenever the confirmation is or was held: a write that confirms it
+	// again, grants it or drops it says so.
+	if allowPrivate || existing.AllowPrivateAddress {
+		fields["allow_private_address"] = allowPrivate
 	}
 	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", cfg.ID.String(), "oidc_config_updated", details)
@@ -462,17 +489,24 @@ func (h *OIDCHandler) TestConnection(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get OIDC config")
 	}
 
-	// Re-validate issuer URL before making the request
-	if err := validateOIDCIssuerURL(cfg.IssuerUrl); err != nil {
+	// Re-check the issuer before making the request, with the stored confirmation:
+	// an unconfirmed private address is the 422 a save answers, which the test cannot
+	// confirm itself; any other refusal is reported as the test's result.
+	if _, err := checkOIDCIssuer(c.Context(), cfg.IssuerUrl, cfg.AllowPrivateAddress, oidcIssuerSaveToConfirm); err != nil {
+		var pErr *addressPolicyError
+		if errors.As(err, &pErr) && !pErr.HardReject {
+			return renderAddressPolicyError(c, err)
+		}
 		return c.JSON(testConnectionResponse{
 			Success: false,
-			Message: "Issuer URL validation failed: " + err.Error(),
+			Message: "Issuer URL validation failed: " + errorMessage(err),
 		})
 	}
 
-	// Try to fetch the OIDC discovery document using SSRF-safe client.
+	// Try to fetch the OIDC discovery document using the address-checked client,
+	// which checks the address again at the dial.
 	discoveryURL := strings.TrimRight(cfg.IssuerUrl, "/") + "/.well-known/openid-configuration"
-	client := notifications.SafeHTTPClient(10 * time.Second)
+	client := notifications.SafeHTTPClientAllowingPrivate(10*time.Second, cfg.AllowPrivateAddress)
 	resp, err := client.Get(discoveryURL) //nolint:gosec // URL comes from admin-configured issuer
 	if err != nil {
 		slog.Error("OIDC test connection failed", "config_id", id, "error", err)
@@ -821,6 +855,8 @@ func (h *OIDCHandler) buildOIDCConfig(cfg db.OidcConfig) (auth.OIDCConfig, error
 		DisplayNameClaim: cfg.DisplayNameClaim,
 		GroupsClaim:      cfg.GroupsClaim,
 		AllowedDomains:   cfg.AllowedDomains,
+
+		AllowPrivateAddress: cfg.AllowPrivateAddress,
 	}, nil
 }
 
@@ -937,40 +973,59 @@ func validateOIDCRedirectURI(rawURL string) error {
 	return nil
 }
 
-func validateOIDCIssuerURL(rawURL string) error {
+// What a refusal of an unconfirmed private issuer tells the caller to do: a save
+// resends with the confirmation; a test of the stored configuration cannot give one.
+const (
+	oidcIssuerResubmit      = "Re-submit with allow_private_address=true to confirm it for this configuration."
+	oidcIssuerSaveToConfirm = "Save the configuration with its private address confirmed, then test it."
+)
+
+// checkOIDCIssuer checks the issuer URL of an OIDC configuration: https, a host, and
+// the address the host resolves to, by the notification channels' rule
+// (notifications.CheckTargetHost). It returns the confirmation to store — true only
+// for a private issuer the caller confirmed — or the refusal for
+// renderAddressPolicyError: a private address not confirmed (422
+// private_address_confirm_required, its address in details, with todo as the way
+// out), an address no configuration may use — loopback, link-local (the cloud
+// metadata addresses included), unspecified, or one with a zone — or a name that does
+// not resolve (400). Every contact with the provider checks it again at the dial
+// (auth.NewOIDCProvider).
+func checkOIDCIssuer(ctx context.Context, rawURL string, confirmed bool, todo string) (bool, error) {
 	if !strings.HasPrefix(rawURL, "https://") {
-		return fmt.Errorf("issuer_url must use https:// scheme")
+		return false, fiber.NewError(fiber.StatusBadRequest, "issuer_url must use https:// scheme")
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid issuer URL: %w", err)
+		return false, fiber.NewError(fiber.StatusBadRequest, "invalid issuer URL")
 	}
 	host := u.Hostname()
 	if host == "" {
-		return fmt.Errorf("issuer_url must include a hostname")
+		return false, fiber.NewError(fiber.StatusBadRequest, "issuer_url must include a hostname")
 	}
-	// Check literal IP
-	ip := net.ParseIP(host)
-	if ip != nil {
-		if isPrivateOrReserved(ip) {
-			return fmt.Errorf("issuer_url must not point to loopback or private addresses")
-		}
-		return nil
+	private, err := notifications.CheckTargetHost(ctx, host, confirmed)
+	var refused *notifications.TargetAddressError
+	switch {
+	case errors.As(err, &refused) && refused.Unreadable:
+		return false, &addressPolicyError{HardReject: true, IP: refused.IP, Reason: "The issuer URL has an " +
+			"address with a zone, or one that cannot be read, which an OIDC issuer may never use."}
+	case errors.As(err, &refused) && !refused.Overridable:
+		return false, &addressPolicyError{HardReject: true, IP: refused.IP, Reason: fmt.Sprintf(
+			"The issuer URL resolves to %s, a loopback, link-local or unspecified address, "+
+				"which an OIDC issuer may never use.", refused.IP)}
+	case errors.As(err, &refused):
+		return false, &addressPolicyError{IP: refused.IP, Reason: fmt.Sprintf(
+			"The issuer URL resolves to %s, an address on a private network. %s", refused.IP, todo)}
+	case err != nil:
+		return false, fiber.NewError(fiber.StatusBadRequest, "cannot resolve issuer hostname")
 	}
-	// Resolve DNS and check all returned IPs
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return fmt.Errorf("cannot resolve issuer hostname: %w", err)
-	}
-	for _, resolved := range ips {
-		if isPrivateOrReserved(resolved) {
-			return fmt.Errorf("issuer_url hostname resolves to a private/loopback address")
-		}
-	}
-	return nil
+	return private && confirmed, nil
 }
 
-func isPrivateOrReserved(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+// errorMessage is err's message for the caller: a fiber error's own, else err's.
+func errorMessage(err error) string {
+	var fe *fiber.Error
+	if errors.As(err, &fe) {
+		return fe.Message
+	}
+	return err.Error()
 }

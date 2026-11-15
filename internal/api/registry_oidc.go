@@ -66,7 +66,8 @@ func registerOIDCEndpoints(reg *Registry, h *handlers.OIDCHandler) {
 		Path:   oidcConfigScope,
 		Description: "Create an OIDC provider configuration. A plain-http callback on anything but " +
 			"loopback is refused with a confirmation prompt until acknowledge_insecure_redirect is sent: " +
-			"every login's authorization code rides back on that URL.",
+			"every login's authorization code rides back on that URL. An issuer on a private address is " +
+			"refused the same way until allow_private_address is sent.",
 		Group:       "Authentication",
 		Permissions: globalCheck("manage", "user"),
 		Parameters:  oidcConfigParams(nil),
@@ -106,7 +107,8 @@ func registerOIDCEndpoints(reg *Registry, h *handlers.OIDCHandler) {
 		Path:   oidcConfigScope + "/:id/test",
 		Description: "Fetch the provider's discovery document through the SSRF-safe client and report " +
 			"whether it answered. Answers 200 with success=false rather than an error status, so the " +
-			"admin page can show the reason.",
+			"admin page can show the reason — except for an issuer that now resolves to a private address " +
+			"the configuration has not confirmed, which answers 422 private_address_confirm_required.",
 		Group:       "Authentication",
 		Permissions: globalCheck("manage", "user"),
 		Parameters:  apischema.Properties{"id": oidcConfigIDParam},
@@ -157,8 +159,9 @@ func oidcConfigParams(extra apischema.Properties) apischema.Properties {
 			MinLength: apischema.Ptr(1),
 			MaxLength: apischema.Ptr(512),
 			Typetext:  "<https url>",
-			Description: "Provider issuer URL. The https rule and the private-address refusal belong to " +
-				"validateOIDCIssuerURL, which RESOLVES the hostname — an SSRF check no parameter schema could make.",
+			Description: "Provider issuer URL, https. Its host is RESOLVED (checkOIDCIssuer), an SSRF check no " +
+				"parameter schema could make: a private address needs allow_private_address, and a loopback, " +
+				"link-local, unspecified or zoned one is refused.",
 		},
 		"client_id": {
 			Type:        apischema.String,
@@ -227,6 +230,12 @@ func oidcConfigParams(extra apischema.Properties) apischema.Properties {
 			Typetext:    "<domain>[,<domain>...]",
 			Description: "E-mail domains permitted to sign in. Empty permits every domain the provider authenticates.",
 		},
+		"allow_private_address": optFlag("Confirm an issuer that resolves to a private address (RFC 1918, " +
+			"IPv6 unique-local or carrier-grade NAT), as a provider on the LAN does. Without it such an issuer " +
+			"answers 422 private_address_confirm_required with the address in details. Stored on the " +
+			"configuration and audited; on an update it is kept while issuer_url stays the same. Every contact " +
+			"with the provider checks the address again. A loopback, link-local, unspecified or zoned address " +
+			"is refused either way."),
 		"acknowledge_insecure_redirect": {
 			Type:     apischema.Boolean,
 			Optional: true,

@@ -714,7 +714,7 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on.
 1. Click **Add Config**
 2. Choose a **Provider Preset** (Keycloak, Authentik, Azure AD, Google, Okta or Custom), name it, and tick **Enabled** (off by default). The name is what the sign-in button says
 3. Configure provider:
-   - **Issuer URL** — OIDC issuer (e.g., `https://accounts.google.com`). It must be `https` and resolve only to public addresses, with no override, so a provider on your LAN is refused
+   - **Issuer URL** — OIDC issuer (e.g., `https://accounts.google.com`). It must be `https`. An issuer that resolves to a private address (RFC 1918, IPv6 unique-local or carrier-grade NAT), as a provider on your LAN does, is saved only once you confirm it: the form says which address it found and offers **Continue with private address**. The confirmation is stored with the configuration and recorded in the audit log (`allow_private_address`), kept while the issuer stays the same, and asked again for a new one. Every contact with the provider checks the address again. A loopback, link-local (the cloud metadata address included), unspecified or zoned address is refused, confirmed or not
    - **Client ID** — from your identity provider
    - **Client Secret** — from your identity provider (encrypted at rest)
    - **Redirect URI** — `https://your-nexara-domain/api/v1/auth/oidc/callback`. Users must open Nexara at this
@@ -730,7 +730,7 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on.
    - **Default Role (no group match)**
 6. Click **Create**
 
-**Test Discovery Endpoint** appears once the config is saved, and tests the saved values.
+**Test Discovery Endpoint** appears once the config is saved, and tests the saved values. An issuer that has come to resolve to a private address the configuration was not confirmed for is reported as such; save the configuration to confirm it.
 
 #### How OIDC Login Works
 

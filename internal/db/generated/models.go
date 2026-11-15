@@ -875,6 +875,7 @@ type OidcConfig struct {
 	AllowedDomains        []string        `json:"allowed_domains"`
 	CreatedAt             time.Time       `json:"created_at"`
 	UpdatedAt             time.Time       `json:"updated_at"`
+	AllowPrivateAddress   bool            `json:"allow_private_address"`
 }
 
 type PbsDatastoreMetric struct {

@@ -66,6 +66,7 @@ function oidcConfig(id: string, name: string): OIDCConfig {
     default_role_id: null,
     auto_provision: true,
     allowed_domains: [],
+    allow_private_address: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };
@@ -219,6 +220,39 @@ describe("an OIDC configuration save that settles", () => {
     ).toBeInTheDocument();
     await flushInAct();
     expect(mockedToastError).not.toHaveBeenCalled();
+  });
+
+  it("asks to confirm an issuer on a private address, and resends the save confirmed", async () => {
+    const user = userEvent.setup();
+    const held = deferred<unknown>();
+    mockedPost.mockReturnValueOnce(held.promise);
+    renderPage();
+
+    await createConfig(user);
+    held.reject(
+      new ApiClientError(422, {
+        error: "private_address_confirm_required",
+        message:
+          "The issuer URL resolves to 10.0.0.5, an address on a private network.",
+        details: { ip: "10.0.0.5", address_kind: "private" },
+      }),
+    );
+    expect(
+      await screen.findByText(/resolves to an address on a private network/),
+    ).toHaveTextContent("10.0.0.5");
+    await user.click(
+      screen.getByRole("button", { name: "Continue with private address" }),
+    );
+
+    await waitFor(() => {
+      expect(mockedPost).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedPost.mock.calls[0]?.[1]).not.toHaveProperty(
+      "allow_private_address",
+    );
+    expect(mockedPost.mock.calls[1]?.[1]).toMatchObject({
+      allow_private_address: true,
+    });
   });
 
   it.each(LEAVES)(

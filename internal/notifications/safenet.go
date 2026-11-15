@@ -163,6 +163,14 @@ func SafeHTTPClient(timeout time.Duration) *http.Client {
 	return safeHTTPClient(timeout, false)
 }
 
+// SafeHTTPClientAllowingPrivate is SafeHTTPClient with a private address
+// (checkTargetIP) allowed when allowPrivate, the operator's confirmation of
+// the host it is for: an OIDC issuer on the LAN. Loopback, link-local,
+// unspecified and zoned addresses stay refused at every dial.
+func SafeHTTPClientAllowingPrivate(timeout time.Duration, allowPrivate bool) *http.Client {
+	return safeHTTPClient(timeout, allowPrivate)
+}
+
 // targetHTTPClient is SafeHTTPClient for a send through a channel, with the
 // private allowance ctx carries (ChannelContext).
 func targetHTTPClient(ctx context.Context, timeout time.Duration) *http.Client {
@@ -237,13 +245,23 @@ func CheckChannelTarget(ctx context.Context, channelType string, config json.Raw
 	if host == "" {
 		return false, nil
 	}
-	ips, err := resolveTarget(ctx, host)
-	var unread *TargetAddressError
-	if errors.As(err, &unread) {
-		return false, err
+	private, err = CheckTargetHost(ctx, host, allowPrivate)
+	var refused *TargetAddressError
+	if err != nil && !errors.As(err, &refused) {
+		return false, nil // unresolvable passes; the send checks again
 	}
+	return private, err
+}
+
+// CheckTargetHost is CheckChannelTarget's check for a host named anywhere
+// else, an OIDC issuer's: private reports that host resolves to a private
+// address; err is a *TargetAddressError for an address refused (as
+// CheckChannelTarget's), or the resolver's error for a name that does not
+// resolve, which the caller decides about.
+func CheckTargetHost(ctx context.Context, host string, allowPrivate bool) (private bool, err error) {
+	ips, err := resolveTarget(ctx, host)
 	if err != nil {
-		return false, nil //nolint:nilerr // unresolvable passes; the send checks again
+		return false, err
 	}
 	for _, ip := range ips {
 		var refused *TargetAddressError

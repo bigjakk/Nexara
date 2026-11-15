@@ -2332,11 +2332,11 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/oidc/configs` | List OIDC configs |
-| POST | `/oidc/configs` | Create OIDC config. A plain-`http` redirect URI answers `422 insecure_oidc_redirect_confirm_required` until the body sets `acknowledge_insecure_redirect`; so does `PUT` |
+| POST | `/oidc/configs` | Create OIDC config. A plain-`http` redirect URI answers `422 insecure_oidc_redirect_confirm_required` until the body sets `acknowledge_insecure_redirect`; an issuer that resolves to a private address answers `422 private_address_confirm_required`, its address in `details.ip`, until the body sets `allow_private_address` (stored, audited; a loopback, link-local, unspecified or zoned address is `400` either way); so does `PUT`, which keeps a confirmation while `issuer_url` stays the same |
 | GET | `/oidc/configs/:id` | Get OIDC config |
 | PUT | `/oidc/configs/:id` | Update OIDC config |
 | DELETE | `/oidc/configs/:id` | Delete OIDC config |
-| POST | `/oidc/configs/:id/test` | Test OIDC connection |
+| POST | `/oidc/configs/:id/test` | Test OIDC connection. `422 private_address_confirm_required` when the issuer now resolves to a private address the config is not confirmed for |
 
 ### Settings
 

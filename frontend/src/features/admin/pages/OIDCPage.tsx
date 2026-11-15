@@ -34,14 +34,26 @@ import {
 } from "lucide-react";
 import { AdminNav } from "../components/AdminNav";
 import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
+import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
+  confirmDetailString,
   confirmRequiredFromError,
   type ConfirmRequired,
 } from "@/lib/confirm-gate";
+import { privateAddressWarningFromError } from "@/lib/private-address";
 
 /** The backend's code for a cleartext OIDC callback (oidc.go). */
 const INSECURE_OIDC_REDIRECT = "insecure_oidc_redirect_confirm_required";
+/** The backend's code for an issuer on a private address (checkOIDCIssuer). */
+const PRIVATE_ADDRESS = "private_address_confirm_required";
+
+/** The confirmations a save carries, each given at its own prompt. */
+interface SaveAcks {
+  insecureRedirect: boolean;
+  privateAddress: boolean;
+}
+const NO_ACKS: SaveAcks = { insecureRedirect: false, privateAddress: false };
 
 /**
  * A setting whose control runs the full width under its label: an issuer or
@@ -170,11 +182,14 @@ export function OIDCPage() {
   const createConfig = useCreateOIDCConfig();
   const updateConfig = useUpdateOIDCConfig();
 
-  // Confirm gate for a plain-http callback: the authorization code rides back
-  // on that URL, so off loopback it crosses the network in the clear. The
-  // backend refuses the first attempt rather than saving.
+  // Confirm gates the backend answers a save with rather than saving: a
+  // plain-http callback (the authorization code rides back on that URL, so off
+  // loopback it crosses the network in the clear) and an issuer on a private
+  // address. One shows at a time; acks are what the refused save carried, so
+  // confirming the second keeps the first.
   const [redirectWarning, setRedirectWarning] =
     useState<ConfirmRequired | null>(null);
+  const [acks, setAcks] = useState<SaveAcks>(NO_ACKS);
   // This page had no error display for create/update at all, so a refusal was
   // simply a Save button that did nothing.
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -310,15 +325,16 @@ export function OIDCPage() {
   // the id of the config being edited (null when there is none).
   const settle = useSaveOutcome(isNew ? "new" : editingId);
 
-  const save = (acknowledgeInsecureRedirect: boolean) => {
+  const save = (given: SaveAcks) => {
     const data: OIDCConfigRequest = {
       ...form,
       group_role_mapping: buildMappingFromRows(),
       allowed_domains: parseDomains(),
       scopes: parseScopes(),
-      ...(acknowledgeInsecureRedirect
+      ...(given.insecureRedirect
         ? { acknowledge_insecure_redirect: true }
         : {}),
+      ...(given.privateAddress ? { allow_private_address: true } : {}),
     };
     const target = saveTarget;
     // What a failure nobody is looking at names: the config as the operator
@@ -327,14 +343,15 @@ export function OIDCPage() {
     const named = `"${stored ?? data.name}"`;
 
     setSaveError(null);
-    if (!acknowledgeInsecureRedirect) {
+    setAcks(given);
+    if (!given.insecureRedirect && !given.privateAddress) {
       setRedirectWarning(null);
     }
 
     const onError = (err: unknown) => {
       const confirm = confirmRequiredFromError(
         err,
-        [INSECURE_OIDC_REDIRECT],
+        [INSECURE_OIDC_REDIRECT, PRIVATE_ADDRESS],
         target,
       );
       if (confirm != null) {
@@ -373,7 +390,7 @@ export function OIDCPage() {
   };
 
   const handleSave = () => {
-    save(false);
+    save(NO_ACKS);
   };
 
   const handleTest = () => {
@@ -383,8 +400,16 @@ export function OIDCPage() {
       onSuccess: (result) => {
         setTestResult(result);
       },
-      onError: () => {
-        setTestResult({ success: false, message: "Request failed" });
+      onError: (err) => {
+        // An issuer that now resolves to a private address the configuration
+        // has not confirmed: the server says how to confirm it.
+        setTestResult({
+          success: false,
+          message:
+            privateAddressWarningFromError(err) != null
+              ? err.message
+              : "Request failed",
+        });
       },
     });
   };
@@ -901,13 +926,31 @@ export function OIDCPage() {
             )}
 
             {redirectWarning != null &&
-              redirectWarning.target === saveTarget && (
+              redirectWarning.target === saveTarget &&
+              redirectWarning.code === PRIVATE_ADDRESS && (
+                <PrivateAddressWarning
+                  ip={confirmDetailString(redirectWarning, "ip") ?? ""}
+                  url={form.issuer_url}
+                  privateOnly
+                  onConfirm={() => {
+                    save({ ...acks, privateAddress: true });
+                  }}
+                  onCancel={() => {
+                    setRedirectWarning(null);
+                  }}
+                  pending={saving}
+                />
+              )}
+
+            {redirectWarning != null &&
+              redirectWarning.target === saveTarget &&
+              redirectWarning.code === INSECURE_OIDC_REDIRECT && (
                 <ConfirmRequiredWarning
                   title="Callback is not encrypted"
                   message={`${redirectWarning.message} This is fine for a self-hosted lab with no TLS — confirm to continue, or go back and use an https callback.`}
                   confirmLabel="Save with a cleartext callback"
                   onConfirm={() => {
-                    save(true);
+                    save({ ...acks, insecureRedirect: true });
                   }}
                   onCancel={() => {
                     setRedirectWarning(null);

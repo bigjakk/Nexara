@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -63,6 +64,9 @@ type OIDCConfig struct {
 	DisplayNameClaim string
 	GroupsClaim      string
 	AllowedDomains   []string
+	// AllowPrivateAddress is the operator's confirmation of an issuer on a private
+	// network address, which every contact with the provider then allows.
+	AllowPrivateAddress bool
 }
 
 // OIDCUserInfo represents a user extracted from an OIDC ID token.
@@ -80,18 +84,24 @@ type OIDCProvider struct {
 	verifier  *oidc.IDTokenVerifier
 	rdb       *redis.Client
 	cfg       OIDCConfig
+	// client is the address-checked client every request to the provider goes through.
+	client *http.Client
 }
 
 // NewOIDCProvider discovers OIDC metadata and creates a provider.
 //
-// go-oidc fetches the issuer's discovery document and signing keys via the
-// HTTP client attached to the context (or http.DefaultClient if none).
-// We bind notifications.SafeHTTPClient so each request goes through the
-// SSRF-safe DialContext and does not follow redirects — this prevents an
-// admin-supplied issuer URL from being used to probe the management LAN
-// even if validateOIDCIssuerURL's DNS check is bypassed by a redirect.
+// go-oidc fetches the issuer's discovery document and signing keys, and oauth2
+// posts to the token endpoint, through the HTTP client attached to the context
+// (or http.DefaultClient if none). Each of them gets the provider's client: the
+// notifications package's address-checked one, which checks every address it
+// dials — loopback, link-local, unspecified and zoned ones always refused, a
+// private one unless cfg.AllowPrivateAddress — against what the name resolves
+// to at that moment, and follows no redirect, so none can carry a request to
+// another host. Checking the issuer when it is saved is not enough: the name
+// can resolve elsewhere by the time a sign-in contacts it.
 func NewOIDCProvider(ctx context.Context, cfg OIDCConfig, rdb *redis.Client) (*OIDCProvider, error) {
-	safeCtx := oidc.ClientContext(ctx, notifications.SafeHTTPClient(15*time.Second))
+	client := notifications.SafeHTTPClientAllowingPrivate(15*time.Second, cfg.AllowPrivateAddress)
+	safeCtx := oidc.ClientContext(ctx, client)
 	provider, err := oidc.NewProvider(safeCtx, cfg.IssuerURL)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrOIDCProviderInit, err)
@@ -118,6 +128,7 @@ func NewOIDCProvider(ctx context.Context, cfg OIDCConfig, rdb *redis.Client) (*O
 		verifier:  verifier,
 		rdb:       rdb,
 		cfg:       cfg,
+		client:    client,
 	}, nil
 }
 
@@ -178,7 +189,9 @@ func (p *OIDCProvider) ExchangeAndVerify(ctx context.Context, code, state string
 		return nil, fmt.Errorf("%w: %v", ErrOIDCInvalidState, err)
 	}
 
-	// Exchange code with PKCE verifier
+	// Exchange code with PKCE verifier, through the provider's client: the token
+	// endpoint is whatever the discovery document names.
+	ctx = oidc.ClientContext(ctx, p.client)
 	token, err := p.oauth2Cfg.Exchange(ctx, code,
 		oauth2.SetAuthURLParam("code_verifier", codeVerifier),
 	)

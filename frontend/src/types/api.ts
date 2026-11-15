@@ -141,6 +141,8 @@ export interface OIDCConfig {
   default_role_id: string | null;
   auto_provision: boolean;
   allowed_domains: string[];
+  /** The operator confirmed this configuration's issuer on a private network address. */
+  allow_private_address: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -166,6 +168,12 @@ export interface OIDCConfigRequest {
    * clear. Only sent after the operator accepts the backend's refusal.
    */
   acknowledge_insecure_redirect?: boolean;
+  /**
+   * Confirms an issuer that resolves to a private network address. Only sent
+   * after the operator accepts the backend's refusal; stored on the
+   * configuration.
+   */
+  allow_private_address?: boolean;
 }
 
 export interface OIDCTestResponse {
