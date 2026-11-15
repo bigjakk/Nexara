@@ -318,6 +318,50 @@ func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdva
 	return items, nil
 }
 
+const listAuditTaskOutcomes = `-- name: ListAuditTaskOutcomes :many
+SELECT a.id,
+       COALESCE(th.status, ar.status)::text AS task_status,
+       COALESCE(th.exit_status, ar.exit_status)::text AS task_exit_status
+FROM audit_log a
+LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
+LEFT JOIN task_history_archive ar ON ar.upid = (a.details->>'upid') AND ar.cluster_id = a.cluster_id
+WHERE a.id = ANY($1::uuid[])
+  AND (th.upid IS NOT NULL OR ar.upid IS NOT NULL)
+`
+
+type ListAuditTaskOutcomesRow struct {
+	ID             uuid.UUID `json:"id"`
+	TaskStatus     string    `json:"task_status"`
+	TaskExitStatus string    `json:"task_exit_status"`
+}
+
+// ListAuditTaskOutcomes is the task outcome of each entry on an audit page that
+// carries a UPID: its task row's status, or the archive's once the row has been
+// archived. It is read for the page's own entries, by id, after the page is
+// listed, and never joined into ListAuditLogAdvanced's filter: audit_log is
+// large, and a join there would run for every row the filter scans. Each id is
+// a primary-key probe, and each UPID one on task_history's unique index or the
+// archive's primary key. An entry with no task row is not returned.
+func (q *Queries) ListAuditTaskOutcomes(ctx context.Context, ids []uuid.UUID) ([]ListAuditTaskOutcomesRow, error) {
+	rows, err := q.db.Query(ctx, listAuditTaskOutcomes, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuditTaskOutcomesRow{}
+	for rows.Next() {
+		var i ListAuditTaskOutcomesRow
+		if err := rows.Scan(&i.ID, &i.TaskStatus, &i.TaskExitStatus); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDistinctAuditActions = `-- name: ListDistinctAuditActions :many
 SELECT DISTINCT action FROM audit_log ORDER BY action
 `

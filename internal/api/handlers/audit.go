@@ -18,6 +18,7 @@ import (
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/redact"
 	"github.com/bigjakk/nexara/internal/reports"
 	"github.com/bigjakk/nexara/internal/safeconv"
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
@@ -374,6 +375,9 @@ func (h *AuditHandler) List(c fiber.Ctx, p *apischema.Params) error {
 		}
 		resp = append(resp, toAdvancedAuditResponse(a, visible))
 	}
+	if err := h.addTaskOutcomes(c.Context(), resp); err != nil {
+		return err
+	}
 
 	return RespondList(c, resp, total)
 }
@@ -533,8 +537,40 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
 		}
 		resp = append(resp, toAdvancedAuditResponse(a, visible))
 	}
+	if err := h.addTaskOutcomes(c.Context(), resp); err != nil {
+		return err
+	}
 
 	return RespondList(c, resp, total)
+}
+
+// addTaskOutcomes sets the task status of each entry on the page that carries
+// a UPID, read for the page's own ids (ListAuditTaskOutcomes), as the activity
+// feed carries it. The exit status is Proxmox's text, its URLs cut as the task
+// status route cuts them.
+func (h *AuditHandler) addTaskOutcomes(ctx context.Context, resp []auditLogResponse) error {
+	if len(resp) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, len(resp))
+	for i := range resp {
+		ids[i] = resp[i].ID
+	}
+	outcomes, err := h.queries.ListAuditTaskOutcomes(ctx, ids)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log")
+	}
+	byID := make(map[uuid.UUID]db.ListAuditTaskOutcomesRow, len(outcomes))
+	for _, o := range outcomes {
+		byID[o.ID] = o
+	}
+	for i := range resp {
+		if o, ok := byID[resp[i].ID]; ok {
+			status, exit := o.TaskStatus, redact.URLs(o.TaskExitStatus)
+			resp[i].TaskStatus, resp[i].TaskExitStatus = &status, &exit
+		}
+	}
+	return nil
 }
 
 // ListActions handles GET /api/v1/audit-log/actions — returns distinct action values.

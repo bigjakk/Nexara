@@ -2080,6 +2080,10 @@ the cluster, so a `?cluster_id=` there is refused with a 400
 (`cluster_id: must be sent in the request path, not as a query parameter`)
 rather than being overridden.
 
+On both, an entry that recorded a Proxmox task carries that task's outcome as
+`task_status` (`running`, `completed` or `failed`) and `task_exit_status`, as
+`/audit-log/recent` does; an entry with no task row carries neither.
+
 Each tab's History has the Histories of its objects beneath it, at
 `/clusters/:id/history/<tab>/<objects>/<id>`: `ha/resources/:sid`,
 `ha/groups/:group`, `ha/rules/:rule`, `pools/:pool_id`, `mappings/usb/:mapping_id`,

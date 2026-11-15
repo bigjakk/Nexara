@@ -1626,6 +1626,14 @@ type Querier interface {
 	// filter keeps working for destroyed guests and across the collector's vms.id
 	// churn — which is the whole reason the column exists.
 	ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error)
+	// ListAuditTaskOutcomes is the task outcome of each entry on an audit page that
+	// carries a UPID: its task row's status, or the archive's once the row has been
+	// archived. It is read for the page's own entries, by id, after the page is
+	// listed, and never joined into ListAuditLogAdvanced's filter: audit_log is
+	// large, and a join there would run for every row the filter scans. Each id is
+	// a primary-key probe, and each UPID one on task_history's unique index or the
+	// archive's primary key. An entry with no task row is not returned.
+	ListAuditTaskOutcomes(ctx context.Context, ids []uuid.UUID) ([]ListAuditTaskOutcomesRow, error)
 	ListCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) ([]uuid.UUID, error)
 	ListCVEScanNodes(ctx context.Context, scanID uuid.UUID) ([]CveScanNode, error)
 	// Highest risk first: the order of the Risk column the vulnerability table

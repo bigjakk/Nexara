@@ -194,6 +194,23 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluste
 ORDER BY a.created_at DESC
 LIMIT $1 OFFSET $2;
 
+-- ListAuditTaskOutcomes is the task outcome of each entry on an audit page that
+-- carries a UPID: its task row's status, or the archive's once the row has been
+-- archived. It is read for the page's own entries, by id, after the page is
+-- listed, and never joined into ListAuditLogAdvanced's filter: audit_log is
+-- large, and a join there would run for every row the filter scans. Each id is
+-- a primary-key probe, and each UPID one on task_history's unique index or the
+-- archive's primary key. An entry with no task row is not returned.
+-- name: ListAuditTaskOutcomes :many
+SELECT a.id,
+       COALESCE(th.status, ar.status)::text AS task_status,
+       COALESCE(th.exit_status, ar.exit_status)::text AS task_exit_status
+FROM audit_log a
+LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
+LEFT JOIN task_history_archive ar ON ar.upid = (a.details->>'upid') AND ar.cluster_id = a.cluster_id
+WHERE a.id = ANY(sqlc.arg('ids')::uuid[])
+  AND (th.upid IS NOT NULL OR ar.upid IS NOT NULL);
+
 -- CountAuditLogAdvanced returns the total matching the same filters, for the
 -- audit page pagination. Must stay filter-for-filter in sync with
 -- ListAuditLogAdvanced — in particular accessible_cluster_ids, with the

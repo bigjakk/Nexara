@@ -29,7 +29,7 @@ function statusIcon(status: DisplayStatus) {
 }
 
 /** Colour is state: a task in flight and a failed one, never a finished one. */
-const STATUS_TEXT: Record<DisplayStatus, string> = {
+export const STATUS_TEXT: Record<DisplayStatus, string> = {
   running: "font-medium text-info",
   ok: "text-muted-foreground",
   failed: "font-medium text-red-700 dark:text-red-400",

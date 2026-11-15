@@ -29,7 +29,12 @@ import {
   userLabel,
   type Severity,
 } from "@/components/layout/activity-columns";
-import { parseDetails } from "@/components/layout/task-status";
+import {
+  STATUS_LABEL,
+  deriveTaskStatus,
+  parseDetails,
+} from "@/components/layout/task-status";
+import { STATUS_TEXT } from "@/features/tasks/lib/task-column-defs";
 import { haRequester, linkedTaskRole } from "@/components/layout/linked-task";
 import { LinkedTaskBadge } from "@/components/LinkedTaskBadge";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -115,6 +120,22 @@ function formatDetailsSummary(entry: AuditLogEntry): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The outcome of the task an entry recorded, as the server read it from the
+ * task's row. Only a task in flight or a failed one is marked: a finished,
+ * healthy task stays quiet, as does an entry with no task row. The details'
+ * own status is not consulted: it is the status when the entry was written.
+ */
+function TaskOutcome({ entry }: { entry: AuditLogEntry }) {
+  const status = deriveTaskStatus(entry, {}, undefined);
+  if (status !== "running" && status !== "failed") return null;
+  return (
+    <span className={cn("text-[12.5px]", STATUS_TEXT[status])}>
+      {STATUS_LABEL[status]}
+    </span>
+  );
 }
 
 /** Who did it: the Nexara account, or the Proxmox account for an ingested task. */
@@ -229,6 +250,7 @@ function EventRow({
               requester={requester}
             />
             {formatAction(entry.action)}
+            <TaskOutcome entry={entry} />
           </span>
         </TableCell>
         <TableCell>

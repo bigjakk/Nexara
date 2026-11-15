@@ -97,6 +97,21 @@ describe("AuditLogPanel", () => {
     expect(screen.getByText("HA manager · for Ops")).toBeInTheDocument();
   });
 
+  it("marks a failed or running task's entry, and leaves a completed one quiet", () => {
+    renderFor(
+      ["view:audit"],
+      [
+        { ...removedClusterEntry, id: "a", task_status: "failed" },
+        { ...removedClusterEntry, id: "b", task_status: "running" },
+        { ...removedClusterEntry, id: "c", task_status: "completed" },
+      ],
+    );
+
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.queryByText("Completed")).not.toBeInTheDocument();
+  });
+
   it("leaves the syslog card out for a Viewer, whose every read of it would 403", () => {
     // view:audit opens this tab; the syslog routes all need manage:audit.
     renderFor(["view:audit"]);
