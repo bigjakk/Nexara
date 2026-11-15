@@ -12,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/redis/go-redis/v9"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -145,9 +146,11 @@ func (h *AuthHandler) admitLoginAttempt(c fiber.Ctx, identifier string) (loginAt
 
 // refuseSignIn answers a sign-in whose credential was not accepted: 401, or — for
 // the attempt that used up the budget — the 429 of the lock that is in place from now
-// on. account is the account the identifier names, nil when it names none; it
-// decides only what is recorded, never the answer.
-func (h *AuthHandler) refuseSignIn(c fiber.Ctx, a loginAttempt, account *db.User) error {
+// on. account is the account the identifier names, nil when it names none, and
+// reason the class of the failure; they decide only what is recorded (see
+// recordFailedSignIn), never the answer.
+func (h *AuthHandler) refuseSignIn(c fiber.Ctx, a loginAttempt, account *db.User, reason string) error {
+	h.recordFailedSignIn(c, account, reason)
 	if a.counted && a.res.admission == lockoutAdmittedLast {
 		h.recordLoginLock(c, a, account)
 		return lockedFor(c, a.res.retryAfter, loginLockedMessage(a.res.retryAfter))
@@ -224,6 +227,81 @@ func (h *AuthHandler) forgetLoginFailures(c fiber.Ctx, a loginAttempt) {
 	if err := h.loginLockoutStore().clear(ctx, a.subject); err != nil {
 		slog.Warn("sign-in: could not clear the failed-attempt count after a sign-in succeeded; it stays until it runs out", "error", err)
 	}
+}
+
+// Failed sign-ins are audited, as login_failed, under the account they named, with
+// the source address, the method and the class of the failure (wrong_password,
+// account_disabled, sso_only_account, directory_rejected): never what was typed.
+// The lockout bounds how many one account can have: a locked attempt is refused
+// before it gets here, so an account writes at most loginLockoutThreshold of them a
+// lock cycle (with Redis down, only the per-address limiter bounds them).
+//
+// An identifier that names no account is audited without it, as
+// login_failed_unknown_account: audit details are readable by every Viewer, and what
+// was typed into the address box is sometimes a password. Those have no account to
+// bound them, so they are bounded per source address: one row the first time an
+// address fails this way in a minute (unknownSignInWindow), carrying the number of
+// such failures in that address's previous minute of them, within the last hour.
+// Without Redis to count in, none is written.
+const (
+	unknownSignInWindow = time.Minute
+	unknownSignInCarry  = time.Hour
+	signInMethod        = "password"
+)
+
+func unknownSignInKey(ip string) string      { return "login:unknown:" + ip }
+func unknownSignInCarryKey(ip string) string { return "login:unknown:last:" + ip }
+
+// countUnknownSignIn counts one failure of an identifier that names no account
+// against its source address. KEYS: this window's counter, the carry of the last
+// window's count. ARGV: the window and the carry's life in milliseconds. It answers
+// {this window's count, the last window's count, or 0}.
+var countUnknownSignIn = redis.NewScript(`
+local n = redis.call('INCR', KEYS[1])
+local last = 0
+if n == 1 or redis.call('PTTL', KEYS[1]) < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+if n == 1 then
+  last = tonumber(redis.call('GET', KEYS[2]) or '0')
+end
+redis.call('SET', KEYS[2], n, 'PX', ARGV[2])
+return {n, last}
+`)
+
+// recordFailedSignIn audits a failed sign-in (see the note above).
+func (h *AuthHandler) recordFailedSignIn(c fiber.Ctx, account *db.User, reason string) {
+	ip := c.IP()
+	if account != nil {
+		details, _ := json.Marshal(map[string]string{"email": account.Email, "ip": ip, "method": signInMethod, "reason": reason})
+		h.withFollowUp(c, func() {
+			AuditLogAs(c, h.queries, h.eventPub, account.ID, pgtype.UUID{}, "auth", account.ID.String(), "login_failed", details)
+		})
+		return
+	}
+	if h.lockoutRedis == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)
+	vals, err := boundedByContext(ctx, func(ctx context.Context) ([]int64, error) {
+		return countUnknownSignIn.Run(ctx, h.lockoutRedis, []string{unknownSignInKey(ip), unknownSignInCarryKey(ip)},
+			unknownSignInWindow.Milliseconds(), unknownSignInCarry.Milliseconds()).Int64Slice()
+	})
+	cancel()
+	if err != nil || len(vals) != 2 {
+		slog.Warn("sign-in: could not count a failed sign-in that named no account; it is not audited", "ip", ip, "error", err)
+		return
+	}
+	if vals[0] != 1 {
+		return
+	}
+	details, _ := json.Marshal(map[string]any{
+		"ip": ip, "method": signInMethod, "reason": "unknown_account",
+		"window_seconds": int(unknownSignInWindow / time.Second), "failures_in_last_window": vals[1],
+	})
+	h.withFollowUp(c, func() {
+		AuditLogAs(c, h.queries, h.eventPub, uuid.Nil, pgtype.UUID{}, "auth", "", "login_failed_unknown_account", details)
+	})
 }
 
 // loginLockedMessage is the locked sign-in's answer, the same whether or not the

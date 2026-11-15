@@ -808,7 +808,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login")
 		}
 		auth.RunDummyBcrypt(password)
-		return h.refuseSignIn(c, attempt, nil)
+		return h.refuseSignIn(c, attempt, nil, "unknown_account")
 	}
 
 	switch user.AuthSource {
@@ -821,23 +821,23 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		// path. LDAP roundtrip dominates wall-clock anyway, so this is a
 		// best-effort defence-in-depth, not a strict equaliser.
 		auth.RunDummyBcrypt(password)
-		return h.refuseSignIn(c, attempt, &user)
+		return h.refuseSignIn(c, attempt, &user, "directory_rejected")
 	case "oidc":
 		// OIDC-sourced users cannot log in via password. Burn equivalent
 		// CPU so the response time is indistinguishable from a real
 		// local user with a wrong password.
 		auth.RunDummyBcrypt(password)
-		return h.refuseSignIn(c, attempt, &user)
+		return h.refuseSignIn(c, attempt, &user, "sso_only_account")
 	}
 
 	// auth_source == "local" from here.
 	if !user.IsActive {
 		auth.RunDummyBcrypt(password)
-		return h.refuseSignIn(c, attempt, &user)
+		return h.refuseSignIn(c, attempt, &user, "account_disabled")
 	}
 
 	if err := auth.CheckPassword(user.PasswordHash, password); err != nil {
-		return h.refuseSignIn(c, attempt, &user)
+		return h.refuseSignIn(c, attempt, &user, "wrong_password")
 	}
 	h.forgetLoginFailures(c, attempt)
 

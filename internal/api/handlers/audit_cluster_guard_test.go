@@ -51,6 +51,7 @@ var auditClusterExempt = map[string]string{
 	// The sign-in lockout of one account: its lock, and the lock's release.
 	"login_lockout.go.recordLoginLock":        "sign-in lockout for one user; install-global",
 	"login_lockout.go.recordLoginLockRelease": "sign-in lockout for one user; install-global",
+	"login_lockout.go.recordFailedSignIn":     "a failed sign-in; no cluster in scope",
 
 	"totp.go.VerifyLogin":             "the second factor of a sign-in; refusing a pending token the account has outgrown is an auth event, no cluster in scope",
 	"totp.go.ConfirmSetup":            "MFA enrolment for one user; install-global",

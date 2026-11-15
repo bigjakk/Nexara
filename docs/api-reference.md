@@ -578,6 +578,9 @@ signing in with it for 15 minutes. Every attempt while it lasts, the right passw
 included, is answered `429` with the JSON error envelope and a `Retry-After` header
 in seconds, the same whether or not the address names an account. A successful
 sign-in clears the count. When Redis cannot be reached the guard is not enforced.
+A failed sign-in is audited as `login_failed` under the account, or, when the address
+names none, as `login_failed_unknown_account` with no account and nothing that was
+typed, at most once a minute per client address.
 
 `POST /auth/change-password` and `POST /auth/totp/setup` share a second guard that
 is not a rate limit and is not in the table: five wrong current passwords within

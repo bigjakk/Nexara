@@ -141,9 +141,16 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 	// Deliberately does not return the error: every audited handler calls this
 	// after its mutation has committed, so there is no caller in a position to
 	// undo anything.
+	// uuid.Nil is an event with no account to name — a failed sign-in with an address
+	// that matches none — and is recorded with no user rather than a user that does
+	// not exist.
+	actorID := UserUUID(uid)
+	if uid == uuid.Nil {
+		actorID = pgtype.UUID{}
+	}
 	if err := queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
 		ClusterID:    clusterID,
-		UserID:       UserUUID(uid),
+		UserID:       actorID,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		Action:       action,
