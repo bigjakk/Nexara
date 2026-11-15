@@ -16,10 +16,12 @@ var errNoRow = errors.New("engineDB: no row for this query")
 
 // engineDB is the database the engine's dispatch tests run against: each
 // QueryRow named in rows answers with that sqlc row struct, every Exec
-// succeeds, and every call is recorded by its sqlc query name. onCall, when
-// set, runs after each is recorded.
+// succeeds — affecting one row, or none for one named in noRows — and every
+// call is recorded by its sqlc query name. onCall, when set, runs after each
+// is recorded.
 type engineDB struct {
 	rows   map[string]any
+	noRows map[string]bool
 	onCall func(name string)
 	mu     sync.Mutex
 	calls  []engineCall
@@ -60,6 +62,9 @@ func (d *engineDB) callsOf(name string) [][]any {
 
 func (d *engineDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	d.record(sql, args)
+	if d.noRows[queryName(sql)] {
+		return pgconn.NewCommandTag("UPDATE 0"), nil
+	}
 	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 

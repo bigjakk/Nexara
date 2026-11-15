@@ -211,3 +211,20 @@ func TestDeadLettersKeepTheFailureClass(t *testing.T) {
 		}
 	}
 }
+
+// An auto-resolve whose update finds the alert already resolved — by hand,
+// mid-tick, which sent its own "resolved" — sends no second one.
+func TestAutoResolveRacedSendsNoSecondResolution(t *testing.T) {
+	t.Parallel()
+	e, fake, ch := newDispatchEngine(t, recordingDispatcher{sent: make(chan AlertPayload, 1)})
+	chain, _ := json.Marshal([]escalationStep{{ChannelID: ch.ID}})
+	rule := db.AlertRule{ID: uuid.New(), Metric: "cpu_usage", Operator: ">", Threshold: 90, EscalationChain: chain}
+	fake.rows["GetLatestAlertForRule"] = db.AlertHistory{ID: uuid.New(), State: "firing"}
+	fake.noRows = map[string]bool{"AutoResolveAlert": true}
+	if err := e.handleVerdict(context.Background(), rule, verdict{latest: 10}, "pve-01", pgtype.UUID{}, pgtype.UUID{}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(fake.callsOf("GetNotificationChannelEnabled")); n != 0 {
+		t.Errorf("looked up %d channels, want none", n)
+	}
+}
