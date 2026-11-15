@@ -197,6 +197,9 @@ export function DashboardPage() {
         }
       }
     }
+    // Not before the saved layout has answered: a default chosen while it is
+    // still on its way would replace it for good.
+    if (layoutQuery.isPending) return;
     // If no saved layout (or stale), use default when clusters are ready
     if (clusters.length > 0) {
       setActivePreset(computedDefaultPreset);
@@ -204,6 +207,7 @@ export function DashboardPage() {
     }
   }, [
     layoutQuery.data?.value,
+    layoutQuery.isPending,
     clusters,
     computedDefaultPreset,
     initializedFromBackend,
@@ -272,6 +276,13 @@ export function DashboardPage() {
         value: updated,
         scope: "user",
       });
+      // The preset is now the one shown, so it is the layout a reload opens
+      // on, as a pick from the list is; not only once the layout is locked.
+      upsertSetting.mutate({
+        key: "dashboard.layout",
+        value: newPreset,
+        scope: "user",
+      });
       setActivePreset(newPreset);
     },
     [effectivePreset, savedPresets, upsertSetting],
@@ -286,10 +297,10 @@ export function DashboardPage() {
         scope: "user",
       });
       if (effectivePreset.name === name) {
-        setActivePreset(computedDefaultPreset);
+        handleReset();
       }
     },
-    [effectivePreset.name, savedPresets, upsertSetting, computedDefaultPreset],
+    [effectivePreset.name, savedPresets, upsertSetting, handleReset],
   );
 
   const toggleEditMode = useCallback(() => {

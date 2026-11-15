@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { makeVM } from "@/test/cluster.fixtures";
 import { DashboardPage } from "./DashboardPage";
@@ -87,20 +88,29 @@ vi.mock("react-grid-layout", async () => {
   };
 });
 
+interface SettingState {
+  data?: { value: unknown };
+  isPending?: boolean;
+}
+const settings = new Map<string, SettingState>();
+const mockMutate = vi.fn();
+
 vi.mock("@/features/settings/api/settings-queries", () => ({
-  useSetting: () => ({
+  useSetting: (key: string) => ({
     data: undefined,
-    isLoading: false,
+    isPending: false,
     error: null,
+    ...settings.get(key),
   }),
   useUpsertSetting: () => ({
-    mutate: vi.fn(),
+    mutate: mockMutate,
     isPending: false,
   }),
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  settings.clear();
 });
 
 describe("DashboardPage", () => {
@@ -206,5 +216,54 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("range-live")).not.toBeDisabled();
     expect(screen.getByTestId("range-1h")).not.toBeDisabled();
     expect(screen.getByTestId("range-7d")).not.toBeDisabled();
+  });
+
+  describe("the layout a reload opens on", () => {
+    beforeEach(() => {
+      mockUseDashboardData.mockReturnValue({
+        data: mockDashboardData,
+        isLoading: false,
+        error: null,
+      });
+    });
+
+    // A preset saved from the layout menu was only written as the layout
+    // once Lock was pressed, so a reload went back to the old one.
+    it("saves a new preset as the layout too", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<DashboardPage />);
+      await user.click(screen.getByRole("button", { name: "Layout: Default" }));
+      await user.click(screen.getByText("Save current as preset"));
+      await user.type(screen.getByPlaceholderText("Preset name"), "Mine");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(mockMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: "dashboard.layout",
+          value: expect.objectContaining({ name: "Mine" }) as unknown,
+        }),
+      );
+    });
+
+    // The clusters can answer before the saved layout does; the default
+    // must not be chosen in that gap and kept for good.
+    it("waits for the saved layout before falling back to the default", () => {
+      settings.set("dashboard.layout", { isPending: true });
+      const view = renderWithProviders(<DashboardPage />);
+      settings.set("dashboard.layout", {
+        data: {
+          value: {
+            name: "Mine",
+            widgetIds: ["top-consumers"],
+            layouts: [{ i: "top-consumers", x: 0, y: 0, w: 12, h: 5 }],
+          },
+        },
+      });
+      view.rerender(<DashboardPage />);
+
+      expect(
+        screen.getByRole("button", { name: "Layout: Mine" }),
+      ).toBeInTheDocument();
+    });
   });
 });
