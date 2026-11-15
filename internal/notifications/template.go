@@ -50,28 +50,82 @@ var (
 	// errTemplateCall: {{template}} and {{block}} call other templates, and
 	// chained calls run 2^n times writing nothing.
 	errTemplateCall = errors.New("a notification template cannot use template or block")
-	// errTemplatePrint: a print, printf or println whose result would pass
-	// the output cap — fmt builds the whole result before the cap sees it.
-	errTemplatePrint = fmt.Errorf("a print, printf or println in a notification template may produce at most %d bytes", maxTemplateOutput)
+	// errTemplateFuncInput: a print, printf, println, html, js or urlquery
+	// handed more than it may build from — refused before it builds anything,
+	// since each builds its whole result before the output cap sees a byte.
+	errTemplateFuncInput = fmt.Errorf("a print, printf, println, html, js or urlquery in a notification template may be handed at most %d bytes", maxTemplateOutput)
+	// errTemplateFuncOutput: one whose result would pass the output cap.
+	errTemplateFuncOutput = fmt.Errorf("a print, printf, println, html, js or urlquery in a notification template may produce at most %d bytes", maxTemplateOutput)
 )
 
-// templateFuncs replace text/template's print builtins (Funcs takes
-// precedence) with ones that refuse a result over the output cap, and a
-// printf whose widths and precisions alone would pass it before formatting.
+// templateFuncs replace (Funcs takes precedence) every text/template builtin
+// that can return a string longer than its input: print, println, printf,
+// html, js and urlquery. The invariant they keep: each checks its input
+// BEFORE it formats or escapes, and caps its result, so every string a
+// template can hold is at most maxTemplateOutput and no call builds more than
+// a small multiple of it (js, the widest escaper, at most 6x). The rest of the
+// builtins return no string longer than one they were handed: len, index and
+// slice return a length, a byte or a substring; and, or, not and the
+// comparisons return one of their operands or a bool; call needs a func value,
+// and AlertPayload has no func field and no methods.
 var templateFuncs = template.FuncMap{
-	"print":   func(a ...any) (string, error) { return capped(fmt.Sprint(a...)) },
-	"println": func(a ...any) (string, error) { return capped(fmt.Sprintln(a...)) },
+	"print":   bounded(fmt.Sprint),
+	"println": bounded(fmt.Sprintln),
 	"printf": func(format string, a ...any) (string, error) {
-		if printfPadding(format) > maxTemplateOutput {
-			return "", errTemplatePrint
+		if printfPadding(format) > maxTemplateOutput || printfSize(format, a) > maxTemplateOutput {
+			return "", errTemplateFuncInput
 		}
 		return capped(fmt.Sprintf(format, a...))
 	},
+	// The escapers keep text/template's own work, and so its output.
+	"html":     bounded(template.HTMLEscaper),
+	"js":       bounded(template.JSEscaper),
+	"urlquery": bounded(template.URLQueryEscaper),
+}
+
+// bounded is f refused for arguments over the cap before it runs, and for a
+// result over it after.
+func bounded(f func(...any) string) func(...any) (string, error) {
+	return func(a ...any) (string, error) {
+		if total, _ := argsSize(a); total > maxTemplateOutput {
+			return "", errTemplateFuncInput
+		}
+		return capped(f(a...))
+	}
+}
+
+// argsSize measures arguments before anything is built from them: a string
+// by its length, any other value by its own fmt.Sprint's (a payload's values
+// are small). It returns their total, stopping once it passes the cap, and
+// the largest one.
+func argsSize(a []any) (total, largest int) {
+	for _, v := range a {
+		n := 0
+		if s, ok := v.(string); ok {
+			n = len(s)
+		} else {
+			n = len(fmt.Sprint(v))
+		}
+		total += n
+		largest = max(largest, n)
+		if total > maxTemplateOutput {
+			return total, largest
+		}
+	}
+	return total, largest
+}
+
+// printfSize bounds what a printf builds from its arguments: every verb may
+// print any argument (%[1]s repeats one), and every argument no verb takes
+// is printed too (%!(EXTRA …)), so (verbs + arguments) × the largest.
+func printfSize(format string, a []any) int {
+	_, largest := argsSize(a)
+	return (strings.Count(format, "%") + len(a)) * largest
 }
 
 func capped(s string) (string, error) {
 	if len(s) > maxTemplateOutput {
-		return "", errTemplatePrint
+		return "", errTemplateFuncOutput
 	}
 	return s, nil
 }

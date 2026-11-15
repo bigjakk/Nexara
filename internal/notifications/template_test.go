@@ -116,11 +116,11 @@ func TestTemplateLimits(t *testing.T) {
 		{`{{define "a"}}x{{end}}{{template "a"}}`, errTemplateCall, true},
 		{`{{block "b" .}}x{{end}}`, errTemplateCall, true},
 		{strings.Repeat("x", MaxTemplateLen+1), errTemplateLength, true},
-		{`{{printf "%70000d" 1}}`, errTemplatePrint, false},
+		{`{{printf "%70000d" 1}}`, errTemplateFuncInput, false},
 		// Refused before formatting: with its argument missing fmt would not pad.
-		{`{{printf "%70000d"}}`, errTemplatePrint, false},
-		{`{{printf "%*d" 70000 1}}`, errTemplatePrint, false},
-		{`{{print (printf "%60000d%60000d" 1 2)}}`, errTemplatePrint, false},
+		{`{{printf "%70000d"}}`, errTemplateFuncInput, false},
+		{`{{printf "%*d" 70000 1}}`, errTemplateFuncInput, false},
+		{`{{print (printf "%60000d%60000d" 1 2)}}`, errTemplateFuncInput, false},
 	} {
 		if err := CheckTemplate(tt.tmpl); errors.Is(err, tt.want) != tt.atSave {
 			t.Errorf("CheckTemplate(%.40q) = %v, want refused %v", tt.tmpl, err, tt.atSave)
@@ -131,5 +131,38 @@ func TestTemplateLimits(t *testing.T) {
 	}
 	if got, err := renderTemplate(`{{printf "%s on %5s" .Severity "x"}}`, AlertPayload{Severity: "warning"}); err != nil || got != "warning on     x" {
 		t.Errorf("a plain printf = %q, %v", got, err)
+	}
+}
+
+// The builtins that can grow a string are refused before they build anything
+// from too much input (errTemplateFuncInput), and a growth that only shows in
+// the result is refused there: no string a template holds passes the cap, and
+// no call builds more than a small multiple of it. Sizes sit just past the
+// cap, so a mutant without the checks allocates kilobytes, not gigabytes.
+// Ordinary use still renders as before.
+func TestTemplateFuncsBoundWhatTheyBuild(t *testing.T) {
+	t.Parallel()
+	const x = `{{$x := printf "%30000s" "a"}}`
+	p := AlertPayload{RuleName: "rule01", Message: "a <b> & c", CurrentValue: 95.25}
+	for _, tt := range []struct {
+		name, tmpl, want string
+		err              error
+	}{
+		{"js chain", `{{"\\"` + strings.Repeat(" | js", 17) + `}}`, "", errTemplateFuncOutput},
+		{"print with many copies", x + `{{print $x $x $x}}`, "", errTemplateFuncInput},
+		{"println with many copies", x + `{{println $x $x $x}}`, "", errTemplateFuncInput},
+		{"printf repeating one argument", x + `{{printf "%[1]s%[1]s%[1]s" $x}}`, "", errTemplateFuncInput},
+		{"printf with extra arguments", x + `{{printf "" $x $x $x}}`, "", errTemplateFuncInput},
+		{"html with many arguments", x + `{{html $x $x $x}}`, "", errTemplateFuncInput},
+		{"urlquery with many arguments", x + `{{urlquery $x $x $x}}`, "", errTemplateFuncInput},
+		{"html", `{{.Message | html}}`, "a &lt;b&gt; &amp; c", nil},
+		{"js and urlquery", `{{js "it's"}} {{urlquery "a b&c"}}`, `it\'s a+b%26c`, nil},
+		{"printf", `{{printf "%.1f" .CurrentValue}}`, "95.2", nil},
+		{"print", `{{print .RuleName ": " .Message}}`, "rule01: a <b> & c", nil},
+	} {
+		got, err := renderTemplate(tt.tmpl, p)
+		if !errors.Is(err, tt.err) || (tt.err == nil && got != tt.want) {
+			t.Errorf("%s: %.40q, %v; want %q, %v", tt.name, got, err, tt.want, tt.err)
+		}
 	}
 }
