@@ -83,6 +83,7 @@ var auditClusterExempt = map[string]string{
 	"ldap.go.Update":                "LDAP config is install-global",
 	"ldap.go.Delete":                "LDAP config is install-global",
 	"ldap.go.Sync":                  "LDAP sync is install-global",
+	"ldap.go.RunScheduledSync":      "LDAP sync is install-global",
 	"oidc.go.Callback":              "OIDC login callback is an auth event; no cluster in scope",
 	"oidc.go.exchangeFailure":       "a failed SSO sign-in; no cluster in scope",
 	"settings.go.auditSettingWrite": "settings are install-global",
