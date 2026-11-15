@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import {
@@ -16,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Field, FormSection } from "@/components/page/Field";
+import { WarningCallout } from "@/components/WarningCallout";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -44,6 +46,7 @@ import {
   useExecuteMigration,
   useMigrationJob,
 } from "@/features/migrations/api/migration-queries";
+import { movesStoppedHAGuest } from "@/features/migrations/lib/ha-migrate";
 import { useVMConfig, useContainerConfig } from "../api/vm-queries";
 import { parseDisk } from "../lib/vm-config-parsers";
 import type { TaskLogLine } from "@/features/tasks/api/tasks-queries";
@@ -104,6 +107,7 @@ export function MigrateJobDialog({
   currentNode,
   status,
 }: MigrateJobDialogProps) {
+  const { t } = useTranslation("vms");
   const isRunning = status.toLowerCase() === "running";
   const [step, setStep] = useState<WizardStep>("config");
   const [jobId, setJobId] = useState("");
@@ -362,6 +366,21 @@ export function MigrateJobDialog({
   // Auto-select the best node (lowest combined CPU + memory + VM count).
   const clusterMetrics = useClusterMetrics(effectiveTargetClusterId);
   const { data: clusterVMs } = useClusterVMs(effectiveTargetClusterId);
+
+  // A node move within the cluster of a stopped HA guest: warned, and the
+  // execute button says it goes ahead anyway. clusterVMs is this cluster's here.
+  const haStopped =
+    migrationType === "intra-cluster" &&
+    migrationMode !== "storage" &&
+    movesStoppedHAGuest(
+      status,
+      clusterVMs?.find((vm) => vm.id === resourceId)?.ha_state ?? "",
+    );
+  const haStoppedWarning = haStopped && (
+    <WarningCallout title={t("haStoppedMigrateTitle")}>
+      <p>{t("haStoppedMigrateBody", { node: currentNode })}</p>
+    </WarningCallout>
+  );
 
   // Build a VM count per node_id (DB UUID) for scoring
   const vmCountByNodeId = useMemo(() => {
@@ -888,6 +907,8 @@ export function MigrateJobDialog({
               </div>
             </FormSection>
 
+            {haStoppedWarning}
+
             {(createMutation.isError || checkMutation.isError) && (
               <p className="text-sm text-destructive">
                 {createMutation.error?.message ?? checkMutation.error?.message}
@@ -948,6 +969,7 @@ export function MigrateJobDialog({
                     ? "The checks passed. Nothing has been moved yet."
                     : "Pre-flight checks failed. Fix the issues and try again."}
                 </p>
+                {job.check_results.passed && haStoppedWarning}
                 <DialogFooter className="gap-2 sm:gap-0">
                   <Button variant="outline" onClick={handleClose}>
                     Close
@@ -960,7 +982,9 @@ export function MigrateJobDialog({
                       {executeMutation.isPending ? (
                         <Loader2 className="animate-spin" />
                       ) : null}
-                      Execute migration
+                      {haStopped
+                        ? t("executeMigrationAnyway")
+                        : "Execute migration"}
                     </Button>
                   )}
                 </DialogFooter>

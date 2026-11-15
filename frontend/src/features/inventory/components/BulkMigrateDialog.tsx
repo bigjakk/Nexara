@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { UsageBar } from "@/components/UsageBar";
+import { WarningCallout } from "@/components/WarningCallout";
 import {
   Select,
   SelectContent,
@@ -45,6 +47,7 @@ import type {
   VMType,
 } from "@/features/migrations/types/migration";
 import { MigrationStatusText } from "@/features/migrations/components/MigrationStatusText";
+import { movesStoppedHAGuest } from "@/features/migrations/lib/ha-migrate";
 import type { InventoryRow } from "../types/inventory";
 import type { Row } from "@tanstack/react-table";
 import { ArrowLeftRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
@@ -74,6 +77,7 @@ export function BulkMigrateDialog({
   rows,
   onComplete,
 }: BulkMigrateDialogProps) {
+  const { t } = useTranslation("vms");
   const [step, setStep] = useState<WizardStep>("config");
 
   // Form state
@@ -415,6 +419,19 @@ export function BulkMigrateDialog({
   const passingCount = jobs.filter((j) => j.preflightPassed).length;
   const failingCount = jobs.filter((j) => j.preflightPassed === false).length;
 
+  // The selected guests a node move hands, stopped, to the HA manager: warned,
+  // and the execute button says it goes ahead anyway when one of them passed.
+  const haStoppedRows =
+    migrationType === "intra-cluster" && migrationMode !== "storage"
+      ? rows.filter((r) =>
+          movesStoppedHAGuest(r.original.status, r.original.haState),
+        )
+      : [];
+  const haStoppedVmids = new Set(haStoppedRows.map((r) => r.original.vmid));
+  const executesHAStopped = jobs.some(
+    (j) => j.preflightPassed && haStoppedVmids.has(j.vmid),
+  );
+
   return (
     <Dialog
       open={open}
@@ -435,6 +452,20 @@ export function BulkMigrateDialog({
             {rows.length !== 1 ? "s" : ""}
           </DialogDescription>
         </DialogHeader>
+
+        {singleCluster && step !== "progress" && haStoppedRows.length > 0 && (
+          <WarningCallout
+            title={t("haStoppedMigrateBulkTitle", {
+              count: haStoppedRows.length,
+            })}
+          >
+            <p>
+              {t("haStoppedMigrateBulkBody", {
+                names: haStoppedRows.map((r) => r.original.name).join(", "),
+              })}
+            </p>
+          </WarningCallout>
+        )}
 
         {!singleCluster ? (
           <p className="text-sm text-destructive">
@@ -555,8 +586,14 @@ export function BulkMigrateDialog({
                   {isExecuting ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : null}
-                  Execute {String(passingCount)} Migration
-                  {passingCount !== 1 ? "s" : ""}
+                  {executesHAStopped ? (
+                    t("executeMigrationsAnyway", { count: passingCount })
+                  ) : (
+                    <>
+                      Execute {String(passingCount)} Migration
+                      {passingCount !== 1 ? "s" : ""}
+                    </>
+                  )}
                 </Button>
               )}
               <Button variant="outline" onClick={handleClose}>

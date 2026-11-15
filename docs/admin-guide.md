@@ -235,7 +235,7 @@ A VM's button opens VNC, and a container's **Attach** is its VNC terminal. The `
 2. Set **Live Migration** (for a container, a restart migration), **Bandwidth Limit (KiB/s)**, **Format** where the target allows a choice, and **Delete Source After Migration**, which is on for a storage move and off across clusters, where it destroys the source
 3. Click **Create & Run Pre-Flight Checks**, then **Execute Migration**. A failed check blocks it; a warning does not
 
-For an HA-managed guest, Proxmox only queues the migration with the HA manager. The job follows the migration the HA manager starts and ends as that does; if the HA manager starts none within two minutes, the job fails as not moved, and the HA log on the source node says why.
+For an HA-managed guest, Proxmox only queues the migration with the HA manager. The job follows the migration the HA manager starts and ends as that does; if the HA manager starts none within two minutes, the job fails as not moved, and the HA log on the source node says why. A stopped HA guest is handed to the HA manager to move offline, and when that cannot run it stays where it is, so both migrate dialogs warn about one and execute only after **Execute migration anyway**; to move it now, start it and migrate it live.
 
 Within a cluster the checks are that the target node is online and the VMID is free. Across clusters they add both clusters being Proxmox VE 7 or later, CPU compatibility (a warning) and the storage and network mappings. Nothing checks capacity.
 

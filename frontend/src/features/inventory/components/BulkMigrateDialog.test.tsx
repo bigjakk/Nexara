@@ -50,6 +50,8 @@ const ROWS = [
       name: "linux01",
       vmid: 101,
       type: "vm",
+      status: "running",
+      haState: "",
     },
   },
 ] as unknown as Row<InventoryRow>[];
@@ -75,14 +77,14 @@ async function sessionEnds() {
   await signInAs(VIEWER);
 }
 
-async function pressCreate() {
+async function pressCreate(rows = ROWS) {
   const user = userEvent.setup();
   const view = render(
     <QueryClientProvider client={queryClient}>
       <BulkMigrateDialog
         open
         onOpenChange={() => undefined}
-        rows={ROWS}
+        rows={rows}
         onComplete={() => undefined}
       />
     </QueryClientProvider>,
@@ -166,5 +168,24 @@ describe("BulkMigrateDialog, creating jobs and checking them", () => {
     });
 
     expect(checkCallers).toEqual([ADMIN.id]);
+  });
+});
+
+describe("BulkMigrateDialog, a stopped HA guest", () => {
+  it("warns that the HA manager moves it, and executes only 'anyway'", async () => {
+    const [row] = ROWS;
+    const stopped = [
+      { original: { ...row?.original, status: "stopped", haState: "stopped" } },
+    ] as unknown as Row<InventoryRow>[];
+    await signInAs(ADMIN);
+    await pressCreate(stopped);
+
+    expect(
+      screen.getByText("1 selected guest is stopped and HA-managed"),
+    ).toBeInTheDocument();
+    created.resolve(json({ id: "job-01", status: "pending" }));
+    expect(
+      await screen.findByRole("button", { name: "Execute 1 migration anyway" }),
+    ).toBeEnabled();
   });
 });

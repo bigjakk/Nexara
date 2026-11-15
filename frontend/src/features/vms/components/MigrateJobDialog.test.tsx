@@ -61,7 +61,7 @@ async function sessionEnds() {
   await signInAs(VIEWER);
 }
 
-async function pressCreate() {
+async function pressCreate(status = "running") {
   const user = userEvent.setup();
   const view = render(
     <QueryClientProvider client={queryClient}>
@@ -74,7 +74,7 @@ async function pressCreate() {
         vmName="linux01"
         kind="vm"
         currentNode="pve-01"
-        status="running"
+        status={status}
       />
     </QueryClientProvider>,
   );
@@ -157,5 +157,31 @@ describe("MigrateJobDialog, creating a job and checking it", () => {
     });
 
     expect(checkCallers).toEqual([ADMIN.id]);
+  });
+});
+
+describe("MigrateJobDialog, a stopped HA guest", () => {
+  it("warns that the HA manager moves it, and executes only 'anyway'", async () => {
+    server.routes[`GET /api/v1/clusters/${CLUSTER}/vms`] = () =>
+      json({
+        items: [{ id: "guest-01", vmid: 101, ha_state: "stopped" }],
+        total: 1,
+      });
+    server.routes["GET /api/v1/migrations/job-01"] = () =>
+      json({
+        id: "job-01",
+        status: "pending",
+        check_results: { passed: true, checks: [] },
+      });
+    await signInAs(ADMIN);
+    await pressCreate("stopped");
+
+    expect(
+      await screen.findByText("This guest is stopped and HA-managed"),
+    ).toBeInTheDocument();
+    created.resolve(json({ id: "job-01", status: "pending" }));
+    expect(
+      await screen.findByRole("button", { name: "Execute migration anyway" }),
+    ).toBeEnabled();
   });
 });
