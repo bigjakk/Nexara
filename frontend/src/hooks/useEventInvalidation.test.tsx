@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { createTestQueryClient, createWrapper } from "@/test/test-utils";
 import { useWebSocketStore } from "@/stores/websocket-store";
+import { useTaskLogStore } from "@/stores/task-log-store";
 import {
   HISTORY_THROTTLE_MS,
   useEventInvalidation,
@@ -218,6 +219,63 @@ describe("useEventInvalidation — audit_entry and guest History", () => {
 // — the run's own task_update came first, while the row still read
 // "dispatched" — so an open Schedules tab depends on it to stop showing
 // Running.
+// A finished disk move rewrites its guest's config; with the task progress
+// dialog closed nothing else re-read it, and the Hardware panel kept the old
+// storage. The dialog re-reads itself when it shows the task, and any re-read
+// drops staged edits, so only config-changing workers, and only once.
+describe("useEventInvalidation — task_update and guest configs", () => {
+  const MOVE =
+    "UPID:pve-01:0000A1B2:0001C3D4:66F4E3C0:qmmove:100:nexara@pve!api:";
+  it.each([
+    ["re-reads after a disk move", MOVE, null, true],
+    ["leaves them for a task that changes no config", UPID, null, false],
+    ["leaves them to the dialog showing the move", MOVE, MOVE, false],
+  ])("%s", (_name, upid, shownUpid, reread) => {
+    vi.useFakeTimers();
+    useTaskLogStore
+      .getState()
+      .setFocusedTask(
+        shownUpid
+          ? { clusterId: CLUSTER, upid: shownUpid, description: "" }
+          : null,
+      );
+    const changed = [
+      ["clusters", CLUSTER, "vms", "vm-1", "config"],
+      ["clusters", CLUSTER, "containers", "ct-1", "config"],
+      ["clusters", CLUSTER, "storage"],
+    ];
+    const fresh = [
+      ["clusters", OTHER_CLUSTER, "vms", "vm-2", "config"],
+      ["clusters", CLUSTER, "vms"],
+      ["clusters", CLUSTER, "vms", "vm-1", "agent"],
+    ];
+    const client = mount([...changed, ...fresh]);
+
+    act(() => {
+      deliver(`cluster:${CLUSTER}:events`, {
+        kind: "task_update",
+        cluster_id: CLUSTER,
+        resource_type: "task",
+        resource_id: upid,
+        action: "completed",
+      });
+    });
+    flush();
+    useTaskLogStore.getState().setFocusedTask(null);
+
+    for (const key of changed) {
+      expect(client.getQueryState(key)?.isInvalidated, key.join("/")).toBe(
+        reread,
+      );
+    }
+    for (const key of fresh) {
+      expect(client.getQueryState(key)?.isInvalidated, key.join("/")).toBe(
+        false,
+      );
+    }
+  });
+});
+
 describe("useEventInvalidation — schedule_change", () => {
   it("marks the event's cluster's schedule list stale, and nothing else", () => {
     vi.useFakeTimers();

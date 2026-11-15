@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWebSocketStore } from "@/stores/websocket-store";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useTaskLogStore } from "@/stores/task-log-store";
+import { upidWorkerType } from "@/features/history/lib/history";
 import type { NexaraEvent } from "@/types/ws";
 
 const DEBOUNCE_MS = 300;
@@ -14,6 +16,22 @@ const DEBOUNCE_MS = 300;
  * wait for the window to end, and are one re-read, which opens the next window.
  */
 export const HISTORY_THROTTLE_MS = 5_000;
+
+/**
+ * The Proxmox workers that rewrite a guest's config (fork_worker names in
+ * qemu-server src/PVE/API2/Qemu.pm and pve-container src/PVE/API2/LXC.pm,
+ * LXC/Snapshot.pm): a disk or volume move, a resize, a snapshot rollback and
+ * an async config update. Only these re-read the guest editors on finishing,
+ * because a config re-read drops what an editor has staged.
+ */
+const CONFIG_CHANGING_TASKS = new Set([
+  "qmmove",
+  "move_volume",
+  "resize",
+  "qmrollback",
+  "vzrollback",
+  "qmconfig",
+]);
 
 /** An open throttle window: when it ends, and whether an event came in it. */
 interface ThrottleWindow {
@@ -38,6 +56,10 @@ export function useEventInvalidation(clusterIds: string[]): void {
   // only the literal key — used where a prefix would fan out too far.
   const pendingPrefixKeys = useRef<Set<string>>(new Set());
   const pendingExactKeys = useRef<Set<string>>(new Set());
+  // Clusters whose cached guest configs (["clusters", cid, "vms" or
+  // "containers", id, "config"]) are to be re-read. A task event names the
+  // guest by UPID, not by the id those keys hold, so it is each of them.
+  const pendingConfigClusters = useRef<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Each History key's open throttle window.
   const historyWindows = useRef(new Map<string, ThrottleWindow>());
@@ -45,9 +67,22 @@ export function useEventInvalidation(clusterIds: string[]): void {
   const flush = useCallback(() => {
     const prefixKeys = Array.from(pendingPrefixKeys.current);
     const exactKeys = Array.from(pendingExactKeys.current);
+    const configClusters = new Set(pendingConfigClusters.current);
     pendingPrefixKeys.current.clear();
     pendingExactKeys.current.clear();
+    pendingConfigClusters.current.clear();
     timerRef.current = null;
+
+    if (configClusters.size > 0) {
+      void queryClient.invalidateQueries({
+        predicate: ({ queryKey: k }) =>
+          k.length === 5 &&
+          k[0] === "clusters" &&
+          configClusters.has(k[1] as string) &&
+          (k[2] === "vms" || k[2] === "containers") &&
+          k[4] === "config",
+      });
+    }
 
     for (const serialized of prefixKeys) {
       const key = JSON.parse(serialized) as string[];
@@ -144,6 +179,22 @@ export function useEventInvalidation(clusterIds: string[]): void {
           if (cid) {
             scheduleInvalidation(["clusters", cid, "schedules"]);
             scheduleHistoryInvalidation(["history", cid]);
+          }
+          // A finished task that rewrote a guest's config (a disk move, say)
+          // re-reads the guest editors and the storage list, which the task
+          // progress dialog does itself when it is showing that task; this
+          // covers it closed. task_update is sent once the task has ended.
+          if (
+            event.kind === "task_update" &&
+            cid &&
+            event.resource_id &&
+            CONFIG_CHANGING_TASKS.has(upidWorkerType(event.resource_id))
+          ) {
+            const shown = useTaskLogStore.getState().focusedTask;
+            if (shown?.upid !== event.resource_id || shown.clusterId !== cid) {
+              pendingConfigClusters.current.add(cid);
+              scheduleInvalidation(["clusters", cid, "storage"]);
+            }
           }
           break;
 
