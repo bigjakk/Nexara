@@ -50,6 +50,9 @@ type epochStore struct {
 	oidcConfig *db.OidcConfig
 	// ldapConfig is what GetLDAPConfig answers, for any id; nil is none.
 	ldapConfig *db.LdapConfig
+	// grants are the global "action:resource" permissions GetUserScopedPermissions
+	// answers for a user, for a real RBAC engine over this store.
+	grants map[uuid.UUID][]string
 }
 
 func newEpochStore(users ...db.User) *epochStore {
@@ -378,6 +381,13 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 				items = append(items, db.ListLDAPUsersRow{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName,
 					Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource})
 			}
+		}
+		return &authFakeRows{items: items}, nil
+	case "GetUserScopedPermissions":
+		var items []any
+		for _, g := range s.grants[args[0].(uuid.UUID)] {
+			action, resource, _ := strings.Cut(g, ":")
+			items = append(items, db.GetUserScopedPermissionsRow{Action: action, Resource: resource, ScopeType: "global"})
 		}
 		return &authFakeRows{items: items}, nil
 	case "ListUserSessions":

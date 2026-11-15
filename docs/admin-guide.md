@@ -412,7 +412,7 @@ The **first** user self-registers via the registration page and is automatically
 
 To add a user, go to **Admin > Users** and click **Create User**, then supply an email, a password, and an optional display name. New accounts receive the **Viewer** role globally; assign anything more from the user's role dialog.
 
-Creating a user takes an account whose legacy `role` field is `admin`, which is a different thing from the Admin RBAC role. The first user has both. Someone you grant the Admin role to gets 403 *Only admins can register new users* until you also send `PUT /api/v1/users/:id` with `{"role":"admin"}` (that needs `manage:user` and `manage:role`) and they refresh their sign-in, since the check reads it from their token. The field shows as **Role** on the user's Profile.
+Creating a user takes the `manage:user` permission, which the Admin role carries. Until this release it took the legacy `role` field being `admin`, which only the first user had, so someone granted the Admin role got 403 *Only admins can register new users*.
 
 ### Managing Users
 

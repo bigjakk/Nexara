@@ -39,11 +39,9 @@ so no browser or proxy cache keeps a token or a read.
    `expires_at`, `permissions` and `global_permissions` (those of `permissions` held on the whole install, which is what an object that belongs to no one cluster — a backup server, a firewall template — is offered by), with the session's refresh token in the cookie, as
    under Login), and the `register` audit entry names the new account as the actor.
 
-   Every later registration needs an administrator as the caller, meaning an account
-   whose `role` field is `admin`: the legacy field, not an RBAC role. The first user has
-   it, and granting the Admin role does not set it; `PUT /users/:id` with `role` does, from
-   that user's next refresh or sign-in, since the check reads it from their token.
-   It creates a plain user and **signs nobody in**. The response is `201` with the new account's record
+   Every later registration needs a caller holding `manage:user` globally (the Admin RBAC
+   role has it), the permission the `/users` routes declare; anyone else gets `403`.
+   An API key of such a user may register accounts too. It creates a plain user and **signs nobody in**. The response is `201` with the new account's record
    and nothing else:
    ```
    Response: { "id": "...", "email": "...", "display_name": "...", "role": "user" }
@@ -761,7 +759,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/auth/register` | Register a new user (the first user becomes admin and is signed in; later registrations need an admin caller and sign nobody in) |
+| POST | `/auth/register` | Register a new user (the first user becomes admin and is signed in; later registrations need a caller holding `manage:user` and sign nobody in) |
 | POST | `/auth/login` | Login with email and password (`429` with `Retry-After` while the email address is locked after repeated failed sign-ins) |
 | GET | `/auth/sessions` | List the caller's own active sessions (`{items,total}`): device, user agent, address and times, never the token hash. `is_current` marks the one whose refresh cookie the request carries, so a caller with no cookie sees none marked (interactive session only: `403` for an API key) |
 | DELETE | `/auth/sessions/:id` | End one of the caller's own sessions (interactive session only: `403` for an API key). Another user's id, an unknown one or one already ended answers `404`; ending the current one clears the refresh cookie. 30 calls a minute per session |

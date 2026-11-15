@@ -2,12 +2,16 @@ package handlers
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -304,4 +308,39 @@ func TestRegister_ItsAuditRowsRunOnAFollowUpDeadline(t *testing.T) {
 
 		epochRequireNothingIssued(t, resp, decodeObject(t, resp))
 	})
+}
+
+// TestRegister_TheGateIsManageUserNotTheLegacyRole: a signed-in caller whose legacy
+// users.role is "user" (every account but the first) creates an account when RBAC grants
+// them manage:user, and is refused without it. No rbac_engine local is set, as
+// authOptional sets none for a session: the handler asks its own engine.
+func TestRegister_TheGateIsManageUserNotTheLegacyRole(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		grant string
+		want  int
+	}{{"manage:user", http.StatusCreated}, {"view:user", http.StatusForbidden}} {
+		caller := epochUser(t, epochAdminEmail, 0)
+		store := newEpochStore(caller)
+		store.grants = map[uuid.UUID][]string{caller.ID: {tc.grant}}
+		a := newEpochApp(t, store, epochOptions{})
+		a.auth.rbac = auth.NewRBACEngine(a.users.queries, a.rdb)
+		app := fiber.New(fiber.Config{ErrorHandler: authErrorHandler})
+		app.Use(func(c fiber.Ctx) error {
+			c.Locals("user_id", caller.ID)
+			c.Locals("role", "user")
+			return c.Next()
+		})
+		app.Post("/auth/register", a.auth.Register)
+		req := httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(registerAdminBody("carol@example.com")))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req, fiber.TestConfig{Timeout: 20 * time.Second, FailOnTimeout: true})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.grant, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != tc.want {
+			t.Errorf("a caller holding %s: status %d, want %d", tc.grant, resp.StatusCode, tc.want)
+		}
+	}
 }

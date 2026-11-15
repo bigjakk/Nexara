@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/mail"
 	"strconv"
@@ -175,7 +176,7 @@ const logoutMatchedPreviousToken = `{"matched":"previous_token"}`
 // Register and Logout stay in router.go, and it is a vocabulary gap rather than
 // a parameter type: both are mounted with authOptional, which parses a session
 // if one is presented and lets the request through either way. Register READS
-// c.Locals("role") to decide whether the caller may create an account, and
+// c.Locals("user_id") to decide whether the caller may create an account, and
 // Logout reads c.Locals("user_id") — and, for an access token that authOptional
 // did not parse into it, the Authorization header itself (signOutIsSomeoneElses)
 // — for its ownership cross-check; neither of which a Public declaration would
@@ -507,8 +508,8 @@ type authUserResponse struct {
 // Register handles user registration.
 //
 // First user is auto-promoted to admin and requires no auth. Subsequent
-// users require admin auth (checked via authOptional middleware + handler
-// check).
+// users require a caller holding manage:user (authOptional middleware +
+// callerMayCreateAccounts).
 //
 // The two answer differently, because they are for different callers. The first
 // registration signs the new administrator in: tokens, the refresh cookie and a
@@ -553,6 +554,11 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 	if h.pool == nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "registration unavailable")
 	}
+
+	// Whether the caller may create accounts, asked before the transaction: the RBAC
+	// engine reads the pool, and a request holding a connection must not ask for a
+	// second. It decides only when the count below says this is not the first account.
+	mayCreate, permErr := h.callerMayCreateAccounts(c)
 
 	// READ COMMITTED, by name. The count below has to see the registration that held
 	// the advisory lock before this one, and it does only if its snapshot is taken
@@ -608,8 +614,10 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 	if firstUser {
 		role = "admin"
 	} else {
-		callerRole, _ := c.Locals("role").(string)
-		if callerRole != "admin" {
+		if permErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Permission check failed")
+		}
+		if !mayCreate {
 			// Reject before bcrypt — this is the entire point of #17.
 			return fiber.NewError(fiber.StatusForbidden, "Only admins can register new users")
 		}
@@ -760,6 +768,30 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		Permissions:       perms,
 		GlobalPermissions: globalPerms,
 	})
+}
+
+// callerMayCreateAccounts says whether the caller holds manage:user globally, the
+// permission the user-management routes declare (registry_users.go). It used to be
+// the legacy users.role column, which only the first account has, so an RBAC Admin
+// could not add a user. An anonymous caller may not. authOptional installs the RBAC
+// engine for an API key only, so a session's caller is asked of the handler's own.
+func (h *AuthHandler) callerMayCreateAccounts(c fiber.Ctx) (bool, error) {
+	userID, _ := c.Locals("user_id").(uuid.UUID)
+	if userID == uuid.Nil {
+		return false, nil
+	}
+	eng, _ := c.Locals("rbac_engine").(permissionEngine)
+	if eng == nil && h.rbac != nil {
+		eng = h.rbac
+	}
+	if eng == nil {
+		return false, errors.New("register: no RBAC engine to ask")
+	}
+	ok, err := eng.HasGlobalPermission(c.Context(), userID, "manage", "user")
+	if err != nil {
+		return false, fmt.Errorf("register: permission check: %w", err)
+	}
+	return ok, nil
 }
 
 // Login handles user authentication.
