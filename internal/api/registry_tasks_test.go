@@ -334,12 +334,9 @@ func TestTaskCreateNodeIsHeldToTheNodeNameRule(t *testing.T) {
 	}{
 		{name: "a real node name", node: `"pve-01"`, want: fiber.StatusNoContent,
 			why: "the ordinary case, and the control that stops this test passing by refusing everything"},
-		// node-name is deliberately LOOSER than PVE's own rule: it admits a
-		// dot (catalogue.go's node-name Divergence). This is the value
-		// validateNodeName used to 500 on, so it is the case that catches
-		// someone "tightening" this site to PVE's literal class.
-		{name: "a dotted name", node: `"pve..01"`, want: fiber.StatusNoContent,
-			why: "the catalogue's documented divergence; refusing it would 400 a name PVE accepts"},
+		// node-name is PVE's pve-node class, which has no dot.
+		{name: "a dotted name", node: `"pve..01"`, want: fiber.StatusBadRequest,
+			why: "PVE's pve-node format has no dot, so no node is named this"},
 		{name: "the empty sentinel", node: `""`, want: fiber.StatusNoContent,
 			why: "the column's own default; refusing it would 400 a request that has always worked"},
 		{name: "omitted", node: "", want: fiber.StatusNoContent,

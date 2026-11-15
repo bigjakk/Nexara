@@ -400,7 +400,7 @@ func TestNodeNameFormatIsNoLooserThanTheShellGuard(t *testing.T) {
 		want     int
 	}{
 		{"an ordinary node name", "pve-01", fiber.StatusNoContent},
-		{"a dotted node name", "pve-01.example.com", fiber.StatusNoContent},
+		{"a dotted node name", "pve-01.example.com", fiber.StatusBadRequest},
 		// Every one of these is accepted by nodeMaintenanceNameRe and
 		// refused by the declaration, which is the direction that is safe.
 		{"an underscore", "pve_01", fiber.StatusBadRequest},

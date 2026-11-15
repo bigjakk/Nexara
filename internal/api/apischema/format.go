@@ -224,7 +224,7 @@ func formatNodeName(value string) (string, error) {
 		return "", errEmptyForm
 	}
 	if len(value) > 63 || !nodeNameRe.MatchString(value) {
-		return "", errors.New("expected a node name such as pve-01 (letters, digits, dot and dash, up to 63 characters)")
+		return "", errors.New("expected a node name such as pve-01 (letters, digits and dash, up to 63 characters)")
 	}
 	return value, nil
 }

@@ -320,9 +320,8 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 		t.Errorf("the cluster's own node: asked %+v, want %+v", got, want)
 	}
 
-	// A name the cluster does not hold is refused before the handler — the address is
-	// the shape the check exists for.
-	for _, stranger := range []string{"pve-02", "192.0.2.10"} {
+	// A well-formed name the cluster does not hold is refused before the handler.
+	for _, stranger := range []string{"pve-02", "unknown-node"} {
 		lookup := holdingMember()
 		got := dispatch(granted, lookup, stranger)
 		if got.status != fiber.StatusNotFound || got.message != "Node not found in this cluster" || got.reached {
@@ -333,8 +332,8 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 		}
 	}
 
-	// A caller the permission gate refuses, and a malformed name (the validator's 400),
-	// are never a lookup.
+	// A caller the permission gate refuses, and a malformed name (the validator's 400,
+	// an address included: pve-node has no dot), are never a lookup.
 	for _, tt := range []struct {
 		name   string
 		auth   fiber.Handler
@@ -343,6 +342,7 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 	}{
 		{"no grant", stubAuth(nil), "192.0.2.10", fiber.StatusForbidden},
 		{"a malformed name", granted, "pve_01", fiber.StatusBadRequest},
+		{"an address", granted, "192.0.2.10", fiber.StatusBadRequest},
 	} {
 		lookup = holdingMember()
 		if got := dispatch(tt.auth, lookup, tt.node); got.status != tt.status || got.reached {
@@ -441,7 +441,7 @@ func TestTaskRoutesRefuseAUPIDNamingANodeTheClusterDoesNotHold(t *testing.T) {
 			message       string
 			clientReached bool
 		}{
-			{"an address", "192.0.2.10", fiber.StatusNotFound, "Node not found in this cluster", false},
+			{"an address", "192.0.2.10", fiber.StatusBadRequest, "The UPID does not name a valid node", false},
 			// Percent-decoded before anything reads it: a NUL or a byte that is not UTF-8
 			// would be refused by Postgres as an error, not "no row" — a 500 and an error
 			// log line — so the node is held to the format first, and nothing is asked.

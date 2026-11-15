@@ -103,10 +103,9 @@ var formatCorpus = map[string]formatCases{
 			"pve-01":                "pve-01",
 			"a":                     "a",
 			"1":                     "1",
-			"node1.example.com":     "node1.example.com",
 			strings.Repeat("n", 63): strings.Repeat("n", 63),
 		},
-		reject: []string{"", "-pve", "pve-", ".pve", "pve_01", "pve 01", strings.Repeat("n", 64)},
+		reject: []string{"", "-pve", "pve-", ".pve", "pve_01", "pve 01", "node1.example.com", strings.Repeat("n", 64)},
 	},
 	"pve-configid": {
 		accept: map[string]string{

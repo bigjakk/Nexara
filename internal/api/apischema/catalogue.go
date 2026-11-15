@@ -258,23 +258,18 @@ func formatRules() []RuleDoc {
 		{
 			Name:         "node-name",
 			Kind:         KindFormat,
-			Permits:      "a Proxmox node name: letters, digits, dot and dash, starting and ending alphanumeric, up to 63 characters.",
-			Rule:         `^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`,
+			Permits:      "a Proxmox node name: letters, digits and dash, starting and ending alphanumeric, up to 63 characters.",
+			Rule:         `^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$`,
 			RuleIsRegex:  true,
 			Origin:       OriginProxmox,
 			Upstream:     "pve-common src/PVE/JSONSchema.pm pve_verify_node_name",
 			UpstreamRule: `^([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)\z`,
-			Divergence: "LOOSER: PVE's class is letters, digits and DASH only, so \"pve.01\" is a node name " +
-				"here and not to Proxmox. The 63-character cap is this package's, bounding a path segment; " +
-				"PVE states none.",
-			// "pve..01" is a name with two dots in it, not a traversal:
-			// ".." walks the path only as a WHOLE segment, and a dotted
-			// node name is one segment that merely contains the characters.
-			// It is a witness rather than a curiosity because
-			// proxmox.validateNodeName once refused ".." as a substring and
-			// so 500'd on a name this format admits.
-			Accepts: []string{"pve-01", "n", "node1", "pve.01", "pve..01"},
-			Rejects: []string{"", "-pve", "pve-", "pve_01", strings.Repeat("n", 64)},
+			Divergence: "STRICTER in length only: the 63-character cap is this package's, bounding a path " +
+				"segment; PVE states none. The character class is PVE's, so a dot is refused: no node is " +
+				"named with one, as PVE::INotify::nodename is the host name cut at its first dot and " +
+				"pmxcfs's valid_nodename skips a nodes/ directory whose name has one.",
+			Accepts: []string{"pve-01", "n", "node1", "PVE-01"},
+			Rejects: []string{"", "-pve", "pve-", "pve_01", "pve.01", "pve..01", "pve-01.example.com", strings.Repeat("n", 64)},
 		},
 		{
 			Name:         "pve-configid",

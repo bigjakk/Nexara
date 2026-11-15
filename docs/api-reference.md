@@ -935,6 +935,11 @@ leaves provenance intact.
 > are not interchangeable — a route taking `:node_id` rejects a node name with
 > `400 node_id: expected a UUID such as …`.
 >
+> A node name is held to Proxmox's own format: letters, digits and dash,
+> starting and ending with a letter or digit, up to 63 characters. Anything
+> else, an address or a dotted host name included, answers `400` before
+> anything is looked up or sent to Proxmox.
+>
 > A node name must be one of the cluster's nodes, not only well formed. Every
 > route that takes one — in its URL as `:node` in the path, wherever that
 > appears, or as `?node=`, or in its request body (`node`, `target`,

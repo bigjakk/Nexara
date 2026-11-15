@@ -569,7 +569,7 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 		members := func() map[string]string {
 			return nodesAll(func(param string) string { return memberOf[clusterIDs[check.clusterOf[param]]] })
 		}
-		strangers := func() map[string]string { return nodesAll(func(string) string { return "192.0.2.10" }) }
+		strangers := func() map[string]string { return nodesAll(func(string) string { return "unknown-node" }) }
 
 		t.Run(key+": members", func(t *testing.T) {
 			fake := newDB(t, nil)
@@ -592,7 +592,7 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 			if own == clusters[0] {
 				otherNode = memberOf[clusters[1]]
 			}
-			for _, stranger := range []string{"192.0.2.10", "unknown-node", otherNode} {
+			for _, stranger := range []string{"unknown-node", otherNode} {
 				t.Run(key+": "+param+"="+stranger, func(t *testing.T) {
 					fake := newDB(t, nil)
 					nodes := members()
@@ -742,7 +742,7 @@ func TestConsoleToken_ADisabledAccountIsRefusedBeforeItsNodeIsChecked(t *testing
 		rows: map[string]any{"GetUserByID": db.User{ID: uuid.MustParse(testUserID), Email: "user@example.com", IsActive: false}}}
 	e.Handler = check.handler(db.New(fake))
 	app := mountWith(stubAuth(grantsOf("console:node")), everyNodeIsAMember(), e)
-	for _, node := range []string{"pve-01", "192.0.2.10"} {
+	for _, node := range []string{"pve-01", "unknown-node"} {
 		req := jsonRequest(fiber.MethodPost, authScope+"/console-token",
 			`{"cluster_id":"`+testClusterID+`","node":"`+node+`","type":"node_shell"}`)
 		req.Header.Set("X-Test-User", "yes")
