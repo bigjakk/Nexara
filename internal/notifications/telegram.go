@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"regexp"
 	"strings"
 )
@@ -37,7 +38,11 @@ func (d *TelegramDispatcher) Send(ctx context.Context, config json.RawMessage, p
 		cfg.ParseMode = "HTML"
 	}
 
-	text := buildTelegramMessage(payload)
+	var escape func(string) string
+	if cfg.ParseMode == "HTML" {
+		escape = html.EscapeString
+	}
+	text := withMessage(buildTelegramMessage(payload), payload, escape)
 	if cfg.MessageTemplate != "" {
 		if rendered, err := renderTemplate(cfg.MessageTemplate, payload); err == nil {
 			text = rendered

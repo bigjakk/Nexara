@@ -59,6 +59,17 @@ func (d *PagerDutyDispatcher) Send(ctx context.Context, config json.RawMessage, 
 		eventAction = "resolve"
 	}
 
+	details := map[string]interface{}{
+		"metric":        payload.Metric,
+		"current_value": payload.CurrentValue,
+		"threshold":     payload.Threshold,
+		"operator":      payload.Operator,
+		"state":         payload.State,
+	}
+	if payload.Message != "" {
+		details["message"] = payload.Message
+	}
+
 	body := map[string]interface{}{
 		"routing_key":  cfg.RoutingKey,
 		"event_action": eventAction,
@@ -68,13 +79,7 @@ func (d *PagerDutyDispatcher) Send(ctx context.Context, config json.RawMessage, 
 			"severity":  pdSeverity,
 			"source":    payload.ResourceName,
 			"component": payload.Metric,
-			"custom_details": map[string]interface{}{
-				"metric":        payload.Metric,
-				"current_value": payload.CurrentValue,
-				"threshold":     payload.Threshold,
-				"operator":      payload.Operator,
-				"state":         payload.State,
-			},
+			"custom_details": details,
 		},
 	}
 

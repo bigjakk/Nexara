@@ -41,7 +41,7 @@ func (d *DiscordDispatcher) Send(ctx context.Context, config json.RawMessage, pa
 		"embeds": []map[string]interface{}{
 			{
 				"title":       fmt.Sprintf("%s %s", severityEmoji(payload.Severity), payload.RuleName),
-				"description": fmt.Sprintf("**%s** alert on **%s**", strings.ToUpper(payload.Severity), payload.ResourceName),
+				"description": withMessage(fmt.Sprintf("**%s** alert on **%s**", strings.ToUpper(payload.Severity), payload.ResourceName), payload, nil),
 				"color":       severityColor(payload.Severity),
 				"fields": []map[string]interface{}{
 					{"name": "Metric", "value": payload.Metric, "inline": true},

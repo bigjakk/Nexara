@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"text/template"
+	"unicode/utf8"
 )
 
 const maxTemplateOutput = 64 * 1024 // 64KB max rendered output
@@ -62,6 +63,32 @@ func defaultMessage(payload AlertPayload) string {
 		fmt.Fprintf(&sb, "Fired at: %s\n", payload.FiredAt)
 	}
 	return sb.String()
+}
+
+// maxChatMessage bounds the message a chat channel's text carries.
+const maxChatMessage = 3000
+
+// withMessage is a chat channel's built-in text with the notification's message
+// under it: a rule's rendered template, a CVE notice's list. Every chat
+// channel sends it, so the message reaches each channel type, not only email
+// and webhook; a channel's own template replaces the text and can place the
+// message itself with {{.Message}}. escape is applied to the message alone.
+func withMessage(text string, p AlertPayload, escape func(string) string) string {
+	if p.Message == "" {
+		return text
+	}
+	msg := p.Message
+	if len(msg) > maxChatMessage {
+		end := maxChatMessage
+		for end > 0 && !utf8.RuneStart(msg[end]) {
+			end--
+		}
+		msg = msg[:end] + "…"
+	}
+	if escape != nil {
+		msg = escape(msg)
+	}
+	return strings.TrimRight(text, "\n") + "\n\n" + msg
 }
 
 // severityColor returns a hex color for the severity level.

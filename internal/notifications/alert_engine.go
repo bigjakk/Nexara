@@ -780,8 +780,7 @@ func (e *Engine) handleVerdict(ctx context.Context, rule db.AlertRule, v verdict
 		}
 
 		// Create new pending alert.
-		msg := fmt.Sprintf("%s %s %s on %s (current: %.2f)",
-			rule.Metric, rule.Operator, formatThreshold(rule.Threshold), resourceName, value)
+		msg := alertMessage(rule, resourceName, value)
 
 		// Get the first escalation channel if any.
 		var channelID pgtype.UUID
@@ -1018,11 +1017,7 @@ func (e *Engine) dispatchToChannel(ctx context.Context, rule db.AlertRule, alert
 		payload.ClusterID = uuidFromPgtype(rule.ClusterID).String()
 	}
 
-	if rule.MessageTemplate != "" {
-		if rendered, err := renderTemplate(rule.MessageTemplate, payload); err == nil {
-			payload.Message = rendered
-		}
-	}
+	payload.Message = e.ruleMessage(rule, payload, alertMessage(rule, resourceName, value))
 
 	// Per-channel rate-limit: a flapping rule shouldn't drown the channel.
 	// Refused dispatches are recorded in the DLQ so the operator sees what
@@ -1257,6 +1252,31 @@ func (e *Engine) ReplayDLQ(ctx context.Context, dlqID uuid.UUID) error {
 	e.logger.Info("DLQ entry replayed",
 		"dlq_id", dlqID, "channel_id", channelID, "attempts", attempts)
 	return nil
+}
+
+// alertMessage is an alert's own one-line message, the one its history row
+// keeps.
+func alertMessage(rule db.AlertRule, resourceName string, value float64) string {
+	return fmt.Sprintf("%s %s %s on %s (current: %.2f)",
+		rule.Metric, rule.Operator, formatThreshold(rule.Threshold), resourceName, value)
+}
+
+// ruleMessage is the message a rule's notification carries, on every channel
+// type: its template rendered, in which {{.Message}} is the alert's own
+// message (builtIn), or "" for a rule with no template, whose channels then
+// send their own text alone. A template that fails to render sends builtIn.
+func (e *Engine) ruleMessage(rule db.AlertRule, p AlertPayload, builtIn string) string {
+	if rule.MessageTemplate == "" {
+		return ""
+	}
+	p.Message = builtIn
+	rendered, err := renderTemplate(rule.MessageTemplate, p)
+	if err != nil {
+		e.logger.Warn("alert rule message template did not render; sending the alert's own message",
+			"rule_id", rule.ID, "error", err)
+		return builtIn
+	}
+	return rendered
 }
 
 // --- Helpers ---

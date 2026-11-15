@@ -1633,7 +1633,7 @@ Navigate to **Alerts** from the sidebar. Its tabs are **Alert History**, **Alert
    - **Severity** — info, warning, critical
    - **Cooldown** — minimum time between re-fires, measured from when the previous alert resolved
 4. Add an **Escalation Chain** — this is how the rule notifies; a rule with an empty chain never sends anything
-5. Add a custom message template (optional)
+5. Add a custom message template (optional). It is a Go template, and every channel type carries it: under the chat channels' own text (Slack, Discord, Teams, Telegram), in the email's body, as the webhook payload's `message` and in a PagerDuty event's details. `{{.Message}}` in it is the alert's own one-line message, such as `cpu_usage > 90 on pve-01 (current: 95.00)`. A channel with a template of its own sends that instead, and can place the rule's message in it with `{{.Message}}`
 6. Click **Create Rule**
 
 A saved rule can be turned off or on from its row, or deleted, which also deletes every alert it has raised. There is no form for editing one: delete it and create it again, or send the change to `PUT /api/v1/alert-rules/:id`.

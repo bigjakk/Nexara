@@ -15,6 +15,7 @@ const TEMPLATE_VARS = [
   "{{.State}}",
   "{{.ClusterID}}",
   "{{.EscalationLevel}}",
+  "{{.Message}}",
 ];
 
 interface TemplateEditorProps {

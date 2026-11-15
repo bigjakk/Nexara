@@ -26,7 +26,7 @@ func (d *TeamsDispatcher) Send(ctx context.Context, config json.RawMessage, payl
 		return fmt.Errorf("teams config: webhook_url required")
 	}
 
-	text := defaultMessage(payload)
+	text := withMessage(defaultMessage(payload), payload, nil)
 	if cfg.MessageTemplate != "" {
 		if rendered, err := renderTemplate(cfg.MessageTemplate, payload); err == nil {
 			text = rendered
