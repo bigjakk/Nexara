@@ -71,3 +71,34 @@ describe("ChannelForm — webhook", () => {
     expect(screen.queryByRole("option", { name: "GET" })).not.toBeInTheDocument();
   });
 });
+
+describe("ChannelForm — private address", () => {
+  // The server refuses a target on a private network until it is confirmed;
+  // confirming resends the same channel with the allowance.
+  it("asks to confirm a private target and resends with allow_private_address", async () => {
+    const json = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+    let posts = 0;
+    stubApi({}, {
+      "POST /api/v1/notification-channels": () =>
+        ++posts === 1
+          ? json(422, {
+              error: "private_address_confirm_required",
+              message: "private",
+              details: { ip: "10.0.0.5", address_kind: "private" },
+            })
+          : json(201, { id: "ch-1" }),
+    });
+    const user = await openWebhookForm();
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Create" }));
+    await user.click(await screen.findByRole("button", { name: "Continue with private address" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    const bodies = bodiesOf("POST", "/api/v1/notification-channels") as {
+      allow_private_address?: boolean;
+    }[];
+    expect(bodies.map((b) => b.allow_private_address)).toEqual([undefined, true]);
+  });
+});

@@ -210,20 +210,24 @@ type notificationChannelResponse struct {
 	Name        string    `json:"name"`
 	ChannelType string    `json:"channel_type"`
 	Enabled     bool      `json:"enabled"`
-	CreatedBy   uuid.UUID `json:"created_by"`
-	CreatedAt   string    `json:"created_at"`
-	UpdatedAt   string    `json:"updated_at"`
+	// AllowPrivateAddress: the operator confirmed this channel's target on a
+	// private network address.
+	AllowPrivateAddress bool      `json:"allow_private_address"`
+	CreatedBy           uuid.UUID `json:"created_by"`
+	CreatedAt           string    `json:"created_at"`
+	UpdatedAt           string    `json:"updated_at"`
 }
 
 func toNotificationChannelResponse(ch db.NotificationChannel) notificationChannelResponse {
 	return notificationChannelResponse{
-		ID:          ch.ID,
-		Name:        ch.Name,
-		ChannelType: ch.ChannelType,
-		Enabled:     ch.Enabled,
-		CreatedBy:   ch.CreatedBy,
-		CreatedAt:   ch.CreatedAt.Format(time.RFC3339Nano),
-		UpdatedAt:   ch.UpdatedAt.Format(time.RFC3339Nano),
+		ID:                  ch.ID,
+		Name:                ch.Name,
+		ChannelType:         ch.ChannelType,
+		Enabled:             ch.Enabled,
+		AllowPrivateAddress: ch.AllowPrivateAddress,
+		CreatedBy:           ch.CreatedBy,
+		CreatedAt:           ch.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:           ch.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -391,6 +395,38 @@ func channelConfigJSON(p *apischema.Params) (json.RawMessage, error) {
 		return nil, fiber.NewError(fiber.StatusBadRequest, "Invalid config")
 	}
 	return raw, nil
+}
+
+// channelTargetAllowance applies the private-address gate to the target a
+// channel's settings send to, before they are stored
+// (notifications.CheckChannelTarget). It returns the allowance to store — true
+// only for a private target the caller confirmed with allow_private_address —
+// or the refusal for renderAddressPolicyError: a private target not confirmed
+// (422, which the form turns into a prompt), or one no channel may use, a
+// loopback, link-local or unspecified address (400).
+func channelTargetAllowance(c fiber.Ctx, channelType string, config json.RawMessage, confirmed bool) (bool, error) {
+	private, err := notifications.CheckChannelTarget(c.Context(), channelType, config, confirmed)
+	var refused *notifications.TargetAddressError
+	if errors.As(err, &refused) {
+		if !refused.Overridable {
+			return false, &addressPolicyError{HardReject: true, IP: refused.IP, Reason: fmt.Sprintf(
+				"The channel's target resolves to %s, a loopback, link-local or unspecified address, "+
+					"which a notification channel may never use.", refused.IP)}
+		}
+		return false, &addressPolicyError{IP: refused.IP, Reason: fmt.Sprintf(
+			"The channel's target resolves to %s, an address on a private network. "+
+				"Re-submit with allow_private_address=true to confirm it for this channel.", refused.IP)}
+	}
+	return private && confirmed, nil
+}
+
+// channelAllowanceDetails is the audit detail of a channel write that stores a
+// private-address allowance, nil for one that does not.
+func channelAllowanceDetails(allow bool) json.RawMessage {
+	if !allow {
+		return nil
+	}
+	return json.RawMessage(`{"allow_private_address":true}`)
 }
 
 // ====== Alert Rules ======
@@ -1484,6 +1520,10 @@ func (h *AlertHandler) CreateChannel(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	allowPrivate, err := channelTargetAllowance(c, p.String("channel_type"), config, p.Bool("allow_private_address"))
+	if err != nil {
+		return renderAddressPolicyError(c, err)
+	}
 
 	encrypted, err := crypto.Encrypt(string(config), h.encryptionKey)
 	if err != nil {
@@ -1493,17 +1533,19 @@ func (h *AlertHandler) CreateChannel(c fiber.Ctx, p *apischema.Params) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	ch, err := h.queries.InsertNotificationChannel(c.Context(), db.InsertNotificationChannelParams{
-		Name:            p.String("name"),
-		ChannelType:     p.String("channel_type"),
-		ConfigEncrypted: encrypted,
-		Enabled:         p.Bool("enabled"),
-		CreatedBy:       userID,
+		Name:                p.String("name"),
+		ChannelType:         p.String("channel_type"),
+		ConfigEncrypted:     encrypted,
+		Enabled:             p.Bool("enabled"),
+		CreatedBy:           userID,
+		AllowPrivateAddress: allowPrivate,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create channel")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "notification_channel", ch.ID.String(), "channel_created", nil)
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "notification_channel", ch.ID.String(), "channel_created",
+		channelAllowanceDetails(allowPrivate))
 
 	return c.Status(fiber.StatusCreated).JSON(toNotificationChannelResponse(ch))
 }
@@ -1550,11 +1592,19 @@ func (h *AlertHandler) UpdateChannel(c fiber.Ctx, p *apischema.Params) error {
 		channelType = v
 	}
 	configEncrypted := existing.ConfigEncrypted
+	// New settings are checked as a new channel's are, and the allowance is
+	// decided again for them; kept settings keep theirs.
+	allowPrivate := existing.AllowPrivateAddress
 	if p.Has("config") {
 		config, cErr := channelConfigJSON(p)
 		if cErr != nil {
 			return cErr
 		}
+		allow, aErr := channelTargetAllowance(c, channelType, config, p.Bool("allow_private_address"))
+		if aErr != nil {
+			return renderAddressPolicyError(c, aErr)
+		}
+		allowPrivate = allow
 		enc, encErr := crypto.Encrypt(string(config), h.encryptionKey)
 		if encErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt config")
@@ -1567,17 +1617,24 @@ func (h *AlertHandler) UpdateChannel(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	ch, err := h.queries.UpdateNotificationChannel(c.Context(), db.UpdateNotificationChannelParams{
-		ID:              id,
-		Name:            name,
-		ChannelType:     channelType,
-		ConfigEncrypted: configEncrypted,
-		Enabled:         enabled,
+		ID:                  id,
+		Name:                name,
+		ChannelType:         channelType,
+		ConfigEncrypted:     configEncrypted,
+		Enabled:             enabled,
+		AllowPrivateAddress: allowPrivate,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update channel")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "notification_channel", id.String(), "channel_updated", nil)
+	// Recorded whenever the allowance is or was held: a write that confirms it
+	// again, grants it or drops it says so.
+	var details json.RawMessage
+	if allowPrivate || existing.AllowPrivateAddress {
+		details = json.RawMessage(fmt.Sprintf(`{"allow_private_address":%t}`, allowPrivate))
+	}
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "notification_channel", id.String(), "channel_updated", details)
 
 	return c.JSON(toNotificationChannelResponse(ch))
 }
@@ -1645,7 +1702,7 @@ func (h *AlertHandler) TestChannel(c fiber.Ctx, p *apischema.Params) error {
 		EscalationLevel: 0,
 	}
 
-	if err := dispatcher.Send(c.Context(), json.RawMessage(configJSON), payload); err != nil {
+	if err := dispatcher.Send(notifications.ChannelContext(c.Context(), ch), json.RawMessage(configJSON), payload); err != nil {
 		// The reason goes to the caller and the log alike, with whatever secret
 		// the channel's settings hold cut out of it (FailureReason).
 		reason := notifications.FailureReason(err, json.RawMessage(configJSON))

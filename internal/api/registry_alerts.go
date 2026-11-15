@@ -319,7 +319,7 @@ func registerAlertEndpoints(reg *Registry, h *handlers.AlertHandler) {
 		Path:   channelScope,
 		Description: "Create a notification channel. The config object is encrypted at rest and never " +
 			"read back; its accepted keys are the dispatcher's own and are validated when the channel is " +
-			"tested or used.",
+			"tested or used. A target on a private network address needs allow_private_address.",
 		Group:       "Notification Channels",
 		Permissions: globalCheck("manage", "notification_channel"),
 		Parameters:  createChannelParams(),
@@ -339,7 +339,7 @@ func registerAlertEndpoints(reg *Registry, h *handlers.AlertHandler) {
 		Path:   channelScope + "/:id",
 		Description: "Change a notification channel. Every parameter is optional and the ones omitted " +
 			"keep their stored value; sending config replaces it whole, because it is stored encrypted " +
-			"and cannot be merged.",
+			"and cannot be merged, and checks its target as a create does.",
 		Group:       "Notification Channels",
 		Permissions: globalCheck("manage", "notification_channel"),
 		Parameters:  updateChannelParams(),
@@ -549,7 +549,18 @@ func createChannelParams() apischema.Properties {
 			Typetext:    "<boolean>",
 			Description: "Whether the channel delivers. Omitted creates it enabled.",
 		},
+		"allow_private_address": channelAllowPrivateParam(),
 	}
+}
+
+// channelAllowPrivateParam is the confirmation a channel whose target is on a
+// private network needs (handlers.channelTargetAllowance). Stored on the
+// channel and audited; every send checks it again.
+func channelAllowPrivateParam() apischema.Property {
+	return optFlag("Confirm a target — webhook URL, chat webhook or SMTP host with STARTTLS — that " +
+		"resolves to a private address (RFC 1918 or IPv6 unique-local), as a receiver on the LAN does. " +
+		"Without it such a target answers 422 private_address_confirm_required. A loopback, link-local or " +
+		"unspecified address is refused either way.")
 }
 
 // updateChannelParams is the body of PUT /api/v1/notification-channels/:id.
@@ -596,5 +607,7 @@ func updateChannelParams() apischema.Properties {
 			Typetext:    "<boolean>",
 			Description: "Whether the channel delivers. Omitted leaves it as it is.",
 		},
+		// Read only with config: kept settings keep their allowance.
+		"allow_private_address": channelAllowPrivateParam(),
 	}
 }

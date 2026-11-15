@@ -875,3 +875,104 @@ func TestResolveAlert_Notifies(t *testing.T) {
 		t.Errorf("status %d, notified %+v: want the firing alert notified once", resp.StatusCode, rec.got)
 	}
 }
+
+// A channel whose target is on a private network is refused with the prompt
+// code until the caller confirms it; the confirmation is stored and audited.
+// A loopback target is refused outright, confirmed or not.
+func TestCreateChannel_PrivateTargetNeedsConfirming(t *testing.T) {
+	t.Parallel()
+	mirror := apischema.Properties{
+		"name":                  {Type: apischema.String},
+		"channel_type":          {Type: apischema.String},
+		"config":                {Type: apischema.Object},
+		"enabled":               {Type: apischema.Boolean, Optional: true, Default: true},
+		"allow_private_address": {Type: apischema.Boolean, Optional: true, Default: false},
+	}
+	for _, tt := range []struct {
+		name, url string
+		allow     bool
+		status    int
+		stored    bool
+	}{
+		{"private, not confirmed", "https://10.0.0.5/hook", false, http.StatusUnprocessableEntity, false},
+		{"private, confirmed", "https://10.0.0.5/hook", true, http.StatusCreated, true},
+		{"loopback, confirmed", "https://127.0.0.1/hook", true, http.StatusBadRequest, false},
+		{"public, confirmed", "https://203.0.113.10/hook", true, http.StatusCreated, false},
+	} {
+		dbtx := &auditRowsDBTX{rowFor: map[string]any{"InsertNotificationChannel": db.NotificationChannel{ID: uuid.New()}},
+			execOK: map[string]bool{"InsertAuditLog": true}}
+		h := NewAlertHandler(db.New(dbtx), testEncryptionKey, nil, nil)
+		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+		app.Use(func(c fiber.Ctx) error { c.Locals("user_id", uuid.New()); return c.Next() })
+		app.Post("/notification-channels", withRequestParams(t, mirror, nil, h.CreateChannel))
+		body, _ := json.Marshal(map[string]any{"name": "hook01", "channel_type": "webhook",
+			"config": map[string]string{"url": tt.url}, "allow_private_address": tt.allow})
+		req := httptest.NewRequest(http.MethodPost, "/notification-channels", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := readBody(t, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != tt.status {
+			t.Errorf("%s: status %d %s, want %d", tt.name, resp.StatusCode, got, tt.status)
+		}
+		if tt.status == http.StatusUnprocessableEntity && !strings.Contains(got, "private_address_confirm_required") {
+			t.Errorf("%s: %s lacks the prompt code", tt.name, got)
+		}
+		inserts := slices.DeleteFunc(slices.Clone(dbtx.rowCalls), func(q capturedQuery) bool {
+			return !strings.Contains(q.sql, "-- name: InsertNotificationChannel ")
+		})
+		if stored := len(inserts) == 1 && inserts[0].args[5] == true; stored != tt.stored || (len(inserts) == 1) != (tt.status == http.StatusCreated) {
+			t.Errorf("%s: inserts %v, want allowance stored %v", tt.name, inserts, tt.stored)
+		}
+		audits := dbtx.execsOf("InsertAuditLog")
+		if tt.stored && (len(audits) != 1 || !strings.Contains(string(audits[0][5].(json.RawMessage)), `"allow_private_address":true`)) {
+			t.Errorf("%s: audit %v does not record the allowance", tt.name, audits)
+		}
+	}
+}
+
+// New settings on an update are checked as a create's are; an update that
+// keeps the settings keeps their allowance.
+func TestUpdateChannel_PrivateTarget(t *testing.T) {
+	t.Parallel()
+	mirror := apischema.Properties{
+		"id":                    {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+		"name":                  {Type: apischema.String, Optional: true},
+		"channel_type":          {Type: apischema.String, Optional: true},
+		"config":                {Type: apischema.Object, Optional: true},
+		"enabled":               {Type: apischema.Boolean, Optional: true},
+		"allow_private_address": {Type: apischema.Boolean, Optional: true, Default: false},
+	}
+	existing := db.NotificationChannel{ID: uuid.New(), ChannelType: "webhook", AllowPrivateAddress: true}
+	for _, tt := range []struct {
+		name, body string
+		status     int
+		stored     bool
+	}{
+		{"new private settings, not confirmed", `{"config":{"url":"https://10.0.0.5/hook"}}`, http.StatusUnprocessableEntity, false},
+		{"a rename", `{"name":"hook02"}`, http.StatusOK, true},
+	} {
+		dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetNotificationChannel": existing, "UpdateNotificationChannel": existing},
+			execOK: map[string]bool{"InsertAuditLog": true}}
+		h := NewAlertHandler(db.New(dbtx), testEncryptionKey, nil, nil)
+		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+		app.Use(func(c fiber.Ctx) error { c.Locals("user_id", uuid.New()); return c.Next() })
+		app.Put("/notification-channels/:id", withRequestParams(t, mirror, []string{"id"}, h.UpdateChannel))
+		req := httptest.NewRequest(http.MethodPut, "/notification-channels/"+existing.ID.String(), strings.NewReader(tt.body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		updates := slices.DeleteFunc(slices.Clone(dbtx.rowCalls), func(q capturedQuery) bool {
+			return !strings.Contains(q.sql, "-- name: UpdateNotificationChannel ")
+		})
+		if resp.StatusCode != tt.status || (len(updates) == 1) != tt.stored || (tt.stored && updates[0].args[5] != true) {
+			t.Errorf("%s: status %d, updates %v; want %d, allowance kept %v", tt.name, resp.StatusCode, updates, tt.status, tt.stored)
+		}
+	}
+}

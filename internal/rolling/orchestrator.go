@@ -2362,6 +2362,7 @@ func (o *Orchestrator) sendJobNotification(ctx context.Context, job db.RollingUp
 		// detach from the tick context so a tick rollover doesn't kill it.
 		sendCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Second)
 		defer cancel()
+		sendCtx = notifications.ChannelContext(sendCtx, channel)
 
 		if err := dispatcher.Send(sendCtx, json.RawMessage(configJSON), payload); err != nil {
 			o.logger.Error("rolling update notification dispatch failed",

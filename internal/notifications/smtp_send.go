@@ -28,6 +28,9 @@ type SMTPSendOptions struct {
 // the call fails closed before any auth or message data leaves the client,
 // and the TLS handshake verifies the certificate against opts.Host.
 //
+// With STARTTLS the host's addresses pass checkTargetIP: a private address
+// only for a channel the operator confirmed, carried by ctx (ChannelContext).
+//
 // Setting UseSTARTTLS=false enables a cleartext escape hatch for local mail
 // catchers (e.g. mailpit on 127.0.0.1) — the host must resolve only to
 // loopback addresses; non-loopback cleartext is rejected because there is
@@ -52,18 +55,8 @@ func SendSMTPMessage(ctx context.Context, opts SMTPSendOptions) error {
 		return fmt.Errorf("smtp: cannot resolve host: %w", err)
 	}
 
-	for _, ipStr := range ips {
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			return fmt.Errorf("smtp: malformed resolved IP %q", ipStr)
-		}
-		if opts.UseSTARTTLS {
-			if isPrivateOrReserved(ip) {
-				return errors.New("smtp: host resolves to a private/loopback address")
-			}
-		} else if !ip.IsLoopback() {
-			return fmt.Errorf("smtp: cleartext (TLS=off) is only allowed when host resolves to loopback (got %s)", ip)
-		}
+	if err := checkSMTPTarget(ips, opts.UseSTARTTLS, privateAllowed(ctx)); err != nil {
+		return err
 	}
 
 	dialAddr := net.JoinHostPort(ips[0], strconv.Itoa(opts.Port))
@@ -77,6 +70,26 @@ func SendSMTPMessage(ctx context.Context, opts SMTPSendOptions) error {
 	}
 
 	return runSMTPConversation(overallCtx, conn, opts)
+}
+
+// checkSMTPTarget applies the address rule to an SMTP host's addresses. With
+// STARTTLS it is checkTargetIP's, a private address allowed only for a channel
+// the operator confirmed (ChannelContext); cleartext goes to loopback alone.
+func checkSMTPTarget(ips []string, useSTARTTLS, allowPrivate bool) error {
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			return fmt.Errorf("smtp: malformed resolved IP %q", ipStr)
+		}
+		if useSTARTTLS {
+			if err := checkTargetIP(ip, allowPrivate); err != nil {
+				return fmt.Errorf("smtp: host resolves to %w", err)
+			}
+		} else if !ip.IsLoopback() {
+			return fmt.Errorf("smtp: cleartext (TLS=off) is only allowed when host resolves to loopback (got %s)", ip)
+		}
+	}
+	return nil
 }
 
 // runSMTPConversation drives the SMTP protocol over an already-dialed

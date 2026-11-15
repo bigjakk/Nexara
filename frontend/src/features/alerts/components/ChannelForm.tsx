@@ -28,6 +28,9 @@ import {
 } from "../api/alert-queries";
 import type { ChannelType } from "@/types/api";
 import { parseWebhookHeaders } from "../lib/webhook-headers";
+import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
+import { privateAddressWarningFromError } from "@/lib/private-address";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { Field, FormSection } from "./FormParts";
 
 const CHANNEL_TYPES: { value: ChannelType; label: string }[] = [
@@ -102,6 +105,14 @@ export function ChannelForm({
 
   const createMutation = useCreateNotificationChannel();
   const updateMutation = useUpdateNotificationChannel();
+  // The add dialog stays mounted and toggles, so its open flag tells one
+  // dialog's save from the next's.
+  const settle = useSaveOutcome(open);
+  // A target on a private network is refused until confirmed (422); the
+  // confirmation is stored on the channel.
+  const privateWarning = isEdit
+    ? null
+    : privateAddressWarningFromError(createMutation.error);
 
   // Invalid headers hold Save: sent as {} they would store a channel that
   // silently drops the Authorization the operator typed.
@@ -178,15 +189,30 @@ export function ChannelForm({
         },
       );
     } else {
-      createMutation.mutate(
-        { name, channel_type: channelType, config: buildConfig(), enabled },
-        {
-          onSuccess: () => {
-            setOpen(false);
-          },
-        },
-      );
+      create(false);
     }
+  };
+
+  const create = (allowPrivate: boolean) => {
+    settle(
+      createMutation.mutateAsync({
+        name,
+        channel_type: channelType,
+        config: buildConfig(),
+        enabled,
+        ...(allowPrivate ? { allow_private_address: true } : {}),
+      }),
+      {
+        // Named: a late failure is toasted, perhaps over another page.
+        action: `Adding notification channel ${name}`,
+        onSuccess: () => {
+          setOpen(false);
+        },
+        // Shown below from the mutation's own state: the private-address
+        // prompt, or the error itself.
+        onError: () => undefined,
+      },
+    );
   };
 
   const isPending = createMutation.isPending || updateMutation.isPending;
@@ -327,12 +353,31 @@ export function ChannelForm({
           </>
         )}
 
+        {privateWarning !== null && (
+          <PrivateAddressWarning
+            ip={privateWarning.ip}
+            pending={createMutation.isPending}
+            onConfirm={() => {
+              create(true);
+            }}
+            onCancel={() => {
+              createMutation.reset();
+            }}
+          />
+        )}
+        {!isEdit && createMutation.error !== null && privateWarning === null && (
+          <p role="alert" className="text-sm text-destructive">
+            {createMutation.error.message}
+          </p>
+        )}
+
         <DialogFooter className="gap-2 sm:space-x-0">
           <Button
             type="button"
             variant="outline"
             onClick={() => {
               setOpen(false);
+              createMutation.reset();
               onClose?.();
             }}
           >
@@ -366,7 +411,13 @@ export function ChannelForm({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) createMutation.reset();
+      }}
+    >
       <DialogTrigger asChild>
         <Button variant="outline" className="gap-1.5">
           <Plus className="h-4 w-4" />

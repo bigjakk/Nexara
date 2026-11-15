@@ -92,7 +92,7 @@ func SendReportEmail(ctx context.Context, queries *db.Queries, encryptionKey str
 		return fmt.Errorf("build message: %w", err)
 	}
 
-	if err := notifications.SendSMTPMessage(ctx, notifications.SMTPSendOptions{
+	if err := notifications.SendSMTPMessage(notifications.ChannelContext(ctx, channel), notifications.SMTPSendOptions{
 		Host:        cfg.Host,
 		Port:        cfg.Port,
 		Username:    cfg.Username,

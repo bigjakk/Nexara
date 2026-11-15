@@ -1091,6 +1091,7 @@ func (e *Engine) sendWithRetry(
 	// 5-second worst-case retry window and dispatcher HTTP timeouts.
 	sendCtx, cancel := context.WithTimeout(e.shutdownCtx, 60*time.Second)
 	defer cancel()
+	sendCtx = ChannelContext(sendCtx, channel)
 
 	attempts, err := retryableSend(sendCtx, func(c context.Context) error {
 		return dispatcher.Send(c, configJSON, payload)
@@ -1278,7 +1279,7 @@ func (e *Engine) ReplayDLQ(ctx context.Context, dlqID uuid.UUID) error {
 	}
 	done := context.WithoutCancel(ctx)
 
-	attempts, sendErr := retryableSend(ctx, func(c context.Context) error {
+	attempts, sendErr := retryableSend(ChannelContext(ctx, channel), func(c context.Context) error {
 		return dispatcher.Send(c, json.RawMessage(configJSON), payload)
 	}, RetrySchedule)
 

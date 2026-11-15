@@ -3,7 +3,8 @@ import { vi } from "vitest";
 /**
  * Replaces the global fetch with a recorder that answers GETs from `reads`
  * (keyed by exact URL), a write named in `writes` (keyed "METHOD url") with
- * that body, and every other method with 204. It records each request
+ * that body — or, for a function, with the Response it returns on each call,
+ * for a write answered with an error status — and every other method with 204. It records each request
  * apiClient actually sent as "METHOD url", the auth refresh aside, so a test
  * asserts on the wire rather than on a mocked hook.
  *
@@ -37,6 +38,10 @@ export function stubApi(
       sent.push(request);
       if (method !== "GET") {
         if (request in writes) {
+          const answer = writes[request];
+          if (typeof answer === "function") {
+            return Promise.resolve((answer as () => Response)());
+          }
           return Promise.resolve(
             new Response(JSON.stringify(writes[request]), {
               status: 200,

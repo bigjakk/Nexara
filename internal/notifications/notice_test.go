@@ -112,10 +112,12 @@ func TestNotifyResolved(t *testing.T) {
 }
 
 // funcDispatcher sends by calling itself.
-type funcDispatcher func(AlertPayload) error
+type funcDispatcher func(context.Context, AlertPayload) error
 
-func (funcDispatcher) Type() string                                                      { return "webhook" }
-func (f funcDispatcher) Send(_ context.Context, _ json.RawMessage, p AlertPayload) error { return f(p) }
+func (funcDispatcher) Type() string { return "webhook" }
+func (f funcDispatcher) Send(ctx context.Context, _ json.RawMessage, p AlertPayload) error {
+	return f(ctx, p)
+}
 
 // A dead letter reads "retrying" while its replay is in flight, and its
 // outcome after.
@@ -123,7 +125,7 @@ func TestReplayDLQMarksRetrying(t *testing.T) {
 	t.Parallel()
 	var fake *engineDB
 	stateDuringSend := ""
-	e, fake, ch := newDispatchEngine(t, funcDispatcher(func(AlertPayload) error {
+	e, fake, ch := newDispatchEngine(t, funcDispatcher(func(context.Context, AlertPayload) error {
 		if u := fake.callsOf("UpdateNotificationDLQState"); len(u) > 0 {
 			stateDuringSend = u[len(u)-1][1].(string)
 		}
@@ -138,5 +140,37 @@ func TestReplayDLQMarksRetrying(t *testing.T) {
 	if stateDuringSend != "retrying" || len(fake.callsOf("MarkNotificationDLQResolved")) != 1 {
 		t.Errorf("state during the send %q, resolved %d times: want retrying, then resolved once",
 			stateDuringSend, len(fake.callsOf("MarkNotificationDLQResolved")))
+	}
+}
+
+// Every send through a channel carries the channel's private-address
+// allowance to the address checks (ChannelContext): an engine send and a
+// dead-letter replay alike.
+func TestSendsCarryTheChannelsAllowance(t *testing.T) {
+	t.Parallel()
+	allowed := make(chan bool, 2)
+	var fake *engineDB
+	e, fake, ch := newDispatchEngine(t, funcDispatcher(func(ctx context.Context, _ AlertPayload) error {
+		allowed <- privateAllowed(ctx)
+		return nil
+	}))
+	ch.AllowPrivateAddress = true
+	fake.rows["GetNotificationChannelEnabled"] = ch
+	fake.rows["GetNotificationDLQ"] = db.NotificationDlq{ChannelID: pgtype.UUID{Bytes: ch.ID, Valid: true},
+		Payload: json.RawMessage(`{}`), State: "pending"}
+
+	e.SendNotice(context.Background(), ch.ID, uuid.New(), AlertPayload{})
+	if err := e.ReplayDLQ(context.Background(), uuid.New()); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"send", "replay"} {
+		select {
+		case got := <-allowed:
+			if !got {
+				t.Errorf("a %s through an allowed channel carried no allowance", path)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("no %s", path)
+		}
 	}
 }

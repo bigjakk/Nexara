@@ -191,8 +191,8 @@ WHERE id = $1;
 -- Notification Channels
 
 -- name: InsertNotificationChannel :one
-INSERT INTO notification_channels (name, channel_type, config_encrypted, enabled, created_by)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO notification_channels (name, channel_type, config_encrypted, enabled, created_by, allow_private_address)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetNotificationChannel :one
@@ -204,7 +204,7 @@ ORDER BY created_at DESC;
 
 -- name: UpdateNotificationChannel :one
 UPDATE notification_channels
-SET name = $2, channel_type = $3, config_encrypted = $4, enabled = $5, updated_at = now()
+SET name = $2, channel_type = $3, config_encrypted = $4, enabled = $5, allow_private_address = $6, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

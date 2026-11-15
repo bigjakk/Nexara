@@ -800,14 +800,15 @@ type NodeStatusChange struct {
 }
 
 type NotificationChannel struct {
-	ID              uuid.UUID `json:"id"`
-	Name            string    `json:"name"`
-	ChannelType     string    `json:"channel_type"`
-	ConfigEncrypted string    `json:"-"`
-	Enabled         bool      `json:"enabled"`
-	CreatedBy       uuid.UUID `json:"created_by"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                  uuid.UUID `json:"id"`
+	Name                string    `json:"name"`
+	ChannelType         string    `json:"channel_type"`
+	ConfigEncrypted     string    `json:"-"`
+	Enabled             bool      `json:"enabled"`
+	CreatedBy           uuid.UUID `json:"created_by"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	AllowPrivateAddress bool      `json:"allow_private_address"`
 }
 
 type NotificationDlq struct {

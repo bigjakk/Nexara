@@ -414,7 +414,7 @@ func (q *Queries) GetNodeRecentMetrics(ctx context.Context, arg GetNodeRecentMet
 }
 
 const getNotificationChannel = `-- name: GetNotificationChannel :one
-SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at FROM notification_channels WHERE id = $1
+SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address FROM notification_channels WHERE id = $1
 `
 
 func (q *Queries) GetNotificationChannel(ctx context.Context, id uuid.UUID) (NotificationChannel, error) {
@@ -429,12 +429,13 @@ func (q *Queries) GetNotificationChannel(ctx context.Context, id uuid.UUID) (Not
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AllowPrivateAddress,
 	)
 	return i, err
 }
 
 const getNotificationChannelEnabled = `-- name: GetNotificationChannelEnabled :one
-SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at FROM notification_channels WHERE id = $1 AND enabled = true
+SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address FROM notification_channels WHERE id = $1 AND enabled = true
 `
 
 func (q *Queries) GetNotificationChannelEnabled(ctx context.Context, id uuid.UUID) (NotificationChannel, error) {
@@ -449,6 +450,7 @@ func (q *Queries) GetNotificationChannelEnabled(ctx context.Context, id uuid.UUI
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AllowPrivateAddress,
 	)
 	return i, err
 }
@@ -717,17 +719,18 @@ func (q *Queries) InsertMaintenanceWindow(ctx context.Context, arg InsertMainten
 
 const insertNotificationChannel = `-- name: InsertNotificationChannel :one
 
-INSERT INTO notification_channels (name, channel_type, config_encrypted, enabled, created_by)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at
+INSERT INTO notification_channels (name, channel_type, config_encrypted, enabled, created_by, allow_private_address)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address
 `
 
 type InsertNotificationChannelParams struct {
-	Name            string    `json:"name"`
-	ChannelType     string    `json:"channel_type"`
-	ConfigEncrypted string    `json:"-"`
-	Enabled         bool      `json:"enabled"`
-	CreatedBy       uuid.UUID `json:"created_by"`
+	Name                string    `json:"name"`
+	ChannelType         string    `json:"channel_type"`
+	ConfigEncrypted     string    `json:"-"`
+	Enabled             bool      `json:"enabled"`
+	CreatedBy           uuid.UUID `json:"created_by"`
+	AllowPrivateAddress bool      `json:"allow_private_address"`
 }
 
 // Notification Channels
@@ -738,6 +741,7 @@ func (q *Queries) InsertNotificationChannel(ctx context.Context, arg InsertNotif
 		arg.ConfigEncrypted,
 		arg.Enabled,
 		arg.CreatedBy,
+		arg.AllowPrivateAddress,
 	)
 	var i NotificationChannel
 	err := row.Scan(
@@ -749,6 +753,7 @@ func (q *Queries) InsertNotificationChannel(ctx context.Context, arg InsertNotif
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AllowPrivateAddress,
 	)
 	return i, err
 }
@@ -1390,7 +1395,7 @@ func (q *Queries) ListMaintenanceWindows(ctx context.Context, arg ListMaintenanc
 }
 
 const listNotificationChannels = `-- name: ListNotificationChannels :many
-SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at FROM notification_channels
+SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address FROM notification_channels
 ORDER BY created_at DESC
 `
 
@@ -1412,6 +1417,7 @@ func (q *Queries) ListNotificationChannels(ctx context.Context) ([]NotificationC
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AllowPrivateAddress,
 		); err != nil {
 			return nil, err
 		}
@@ -1709,17 +1715,18 @@ func (q *Queries) UpdateMaintenanceWindow(ctx context.Context, arg UpdateMainten
 
 const updateNotificationChannel = `-- name: UpdateNotificationChannel :one
 UPDATE notification_channels
-SET name = $2, channel_type = $3, config_encrypted = $4, enabled = $5, updated_at = now()
+SET name = $2, channel_type = $3, config_encrypted = $4, enabled = $5, allow_private_address = $6, updated_at = now()
 WHERE id = $1
-RETURNING id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at
+RETURNING id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address
 `
 
 type UpdateNotificationChannelParams struct {
-	ID              uuid.UUID `json:"id"`
-	Name            string    `json:"name"`
-	ChannelType     string    `json:"channel_type"`
-	ConfigEncrypted string    `json:"-"`
-	Enabled         bool      `json:"enabled"`
+	ID                  uuid.UUID `json:"id"`
+	Name                string    `json:"name"`
+	ChannelType         string    `json:"channel_type"`
+	ConfigEncrypted     string    `json:"-"`
+	Enabled             bool      `json:"enabled"`
+	AllowPrivateAddress bool      `json:"allow_private_address"`
 }
 
 func (q *Queries) UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (NotificationChannel, error) {
@@ -1729,6 +1736,7 @@ func (q *Queries) UpdateNotificationChannel(ctx context.Context, arg UpdateNotif
 		arg.ChannelType,
 		arg.ConfigEncrypted,
 		arg.Enabled,
+		arg.AllowPrivateAddress,
 	)
 	var i NotificationChannel
 	err := row.Scan(
@@ -1740,6 +1748,7 @@ func (q *Queries) UpdateNotificationChannel(ctx context.Context, arg UpdateNotif
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AllowPrivateAddress,
 	)
 	return i, err
 }

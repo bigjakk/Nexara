@@ -135,6 +135,11 @@ export function useNotificationChannels() {
   });
 }
 
+/**
+ * Its failures are not toasted: the add dialog shows them, a target on a
+ * private network as a prompt, and toasts one that settles after it closed
+ * (useSaveOutcome).
+ */
 export function useCreateNotificationChannel() {
   const qc = useQueryClient();
   return useMutation({
@@ -143,6 +148,8 @@ export function useCreateNotificationChannel() {
       channel_type: string;
       config: Record<string, unknown>;
       enabled?: boolean;
+      /** Confirms a target on a private network address. */
+      allow_private_address?: boolean;
     }) =>
       apiClient.post<NotificationChannel>(
         apiPath`/api/v1/notification-channels`,
@@ -151,6 +158,7 @@ export function useCreateNotificationChannel() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["notification-channels"] });
     },
+    onError: () => undefined,
   });
 }
 

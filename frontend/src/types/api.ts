@@ -473,6 +473,8 @@ export interface NotificationChannel {
   name: string;
   channel_type: ChannelType;
   enabled: boolean;
+  /** The operator confirmed a target on a private network address. */
+  allow_private_address: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;
