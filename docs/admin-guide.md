@@ -735,7 +735,7 @@ When 2FA is enabled, login becomes a two-step process:
 2. Enter the 6-digit TOTP code from your authenticator app
 3. If you lose your device, use a recovery code instead. It signs you in, but **Disable** and **Regenerate** in the UI take only an authenticator code, so you then need an admin's **Reset 2FA** (or `DELETE /api/v1/auth/totp` with `recovery_code`)
 
-Five wrong codes in 10 minutes block further tries for 5 minutes.
+Five wrong codes in 10 minutes, at sign-in, **Disable** and **Regenerate** together, block further tries for 5 minutes. When Nexara cannot reach Redis to count a code, it does not check it: the request fails and can be retried.
 
 ---
 

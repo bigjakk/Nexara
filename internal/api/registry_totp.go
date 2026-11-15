@@ -178,7 +178,9 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 		Method: fiber.MethodDelete,
 		Path:   totpScope,
 		Description: "Disable the caller's own second factor. Requires a current code or a recovery " +
-			"code, so a stolen access token alone cannot remove it.",
+			"code, so a stolen access token alone cannot remove it. Codes count in the per-user cooldown " +
+			"login's second step uses (429 with a Retry-After header while it lasts); a code that cannot " +
+			"be counted (Redis cannot be reached) is answered 503 and not checked.",
 		Group:       "Two-Factor Authentication",
 		Permissions: Permissions{SelfService: "disables the caller's own second factor"},
 		Parameters: apischema.Properties{
@@ -209,7 +211,8 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 		Method: fiber.MethodPost,
 		Path:   totpScope + "/recovery-codes/regenerate",
 		Description: "Replace the caller's own recovery codes, which invalidates every previous one. " +
-			"Requires a current authenticator code — a recovery code is deliberately not accepted here.",
+			"Requires a current authenticator code — a recovery code is deliberately not accepted here. " +
+			"The code counts in the per-user cooldown as on DELETE /auth/totp, with the same 429 and 503.",
 		Group:       "Two-Factor Authentication",
 		Permissions: Permissions{SelfService: "regenerates the caller's own recovery codes"},
 		Parameters: apischema.Properties{

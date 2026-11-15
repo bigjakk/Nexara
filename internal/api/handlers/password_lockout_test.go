@@ -74,8 +74,8 @@ func newLockouts(t *testing.T) []lockoutUnderTest {
 	t.Cleanup(func() { _ = rdb.Close() })
 	clock := &lockoutClock{now: time.Unix(1_700_000_000, 0)}
 	return []lockoutUnderTest{
-		{name: "redis", store: redisPasswordLockout{rdb: rdb}, advance: mr.FastForward, mr: mr, rdb: rdb},
-		{name: "memory", store: newMemoryPasswordLockout(clock.Now), advance: clock.Advance},
+		{name: "redis", store: redisPasswordLockout{rdb: rdb, policy: passwordLockoutPolicy}, advance: mr.FastForward, mr: mr, rdb: rdb},
+		{name: "memory", store: newMemoryPasswordLockout(passwordLockoutPolicy, clock.Now), advance: clock.Advance},
 	}
 }
 
@@ -97,7 +97,7 @@ func lockoutAppWith(t *testing.T, kind string, tweak func(*raceStore), opts race
 		return a, a.redis.FastForward
 	case "memory":
 		clock := &lockoutClock{now: time.Unix(1_700_000_000, 0)}
-		a.handler.passwordLockout = newMemoryPasswordLockout(clock.Now)
+		a.handler.passwordLockout = newMemoryPasswordLockout(passwordLockoutPolicy, clock.Now)
 		return a, clock.Advance
 	default:
 		t.Fatalf("unknown lockout store %q", kind)
@@ -818,9 +818,6 @@ func TestChangePassword_TheLockoutIsPerAccountAndApartFromTheLoginLockout(t *tes
 		}
 	}
 
-	if (&TOTPHandler{rdb: a.rdb}).isUserTOTPLocked(context.Background(), locked) {
-		t.Error("the TOTP lockout reports the account locked: a locked password change must not lock the second factor of a login")
-	}
 	for _, key := range a.redis.Keys() {
 		if strings.HasPrefix(key, "totp:") || strings.HasPrefix(key, "nexara:rbac:") {
 			t.Errorf("key %q was written by a change-password attempt", key)
@@ -1068,7 +1065,7 @@ func TestChangePassword_WhatTheLockoutDoesAfterTheDecisionIsBestEffort(t *testin
 	t.Run("a release that fails does not fail the request", func(t *testing.T) {
 		logs := captureProductionLog(t)
 		a, _ := lockoutApp(t, "redis", raceOptions{})
-		a.handler.passwordLockout = faultyLockout{passwordLockoutStore: redisPasswordLockout{rdb: a.rdb}, releaseErr: errRaceBug}
+		a.handler.passwordLockout = faultyLockout{passwordLockoutStore: redisPasswordLockout{rdb: a.rdb, policy: passwordLockoutPolicy}, releaseErr: errRaceBug}
 
 		// The right password and a new one refused as too weak: the request goes on
 		// past a release that failed, to the answer it would have had — a 400, and not a
@@ -1090,7 +1087,7 @@ func TestChangePassword_WhatTheLockoutDoesAfterTheDecisionIsBestEffort(t *testin
 	t.Run("a clear that fails does not fail the change", func(t *testing.T) {
 		logs := captureProductionLog(t)
 		a, _ := lockoutApp(t, "redis", raceOptions{})
-		a.handler.passwordLockout = faultyLockout{passwordLockoutStore: redisPasswordLockout{rdb: a.rdb}, clearErr: errRaceBug}
+		a.handler.passwordLockout = faultyLockout{passwordLockoutStore: redisPasswordLockout{rdb: a.rdb, policy: passwordLockoutPolicy}, clearErr: errRaceBug}
 
 		status, body, _ := a.change(t, changeBody)
 
@@ -1290,7 +1287,7 @@ func TestPasswordLockoutTheLockCycleIsTheCeilingOnGuesses(t *testing.T) {
 	// lock was armed.
 	simulate := func(burst int, period time.Duration) (checked, locks int) {
 		clock := &lockoutClock{now: time.Unix(1_700_000_000, 0)}
-		store := newMemoryPasswordLockout(clock.Now)
+		store := newMemoryPasswordLockout(passwordLockoutPolicy, clock.Now)
 		id := uuid.New()
 		for elapsed := time.Duration(0); elapsed < day; elapsed += period {
 			for range burst {
@@ -1453,7 +1450,7 @@ func TestChangePassword_ALockedRequestIsRefusedBeforeAnyPasswordIsChecked(t *tes
 	// password ahead of the lock must be as visible here as checking the old one.
 	defer auth.SetBcryptCostForTesting(0)()
 	a := newAuthRaceAppWith(t, func(s *raceStore) { s.user.PasswordHash = slowPasswordHash(t) }, raceOptions{})
-	a.handler.passwordLockout = newMemoryPasswordLockout(time.Now)
+	a.handler.passwordLockout = newMemoryPasswordLockout(passwordLockoutPolicy, time.Now)
 
 	checkedFastest := time.Hour
 	for i := 1; i <= passwordLockoutThreshold; i++ {
@@ -1489,7 +1486,7 @@ func TestChangePassword_ALockedRequestIsRefusedBeforeAnyPasswordIsChecked(t *tes
 func TestMemoryPasswordLockoutForgetsWhatHasRunOut(t *testing.T) {
 	ctx := context.Background()
 	clock := &lockoutClock{now: time.Unix(1_700_000_000, 0)}
-	store := newMemoryPasswordLockout(clock.Now)
+	store := newMemoryPasswordLockout(passwordLockoutPolicy, clock.Now)
 
 	counted, locked, probe := uuid.New(), uuid.New(), uuid.New()
 	if _, err := store.reserve(ctx, counted); err != nil {

@@ -94,6 +94,25 @@ const (
 	passwordLockoutDuration  = 30 * time.Minute
 )
 
+// lockoutPolicy is one attempt lockout's rule and keys. The stores below and their
+// scripts are shared: the current-password lockout here, the second factor's
+// (totpLockoutPolicy) and sign-in's (loginLockoutPolicy) count in them, each with its
+// own figures and its own keys, so a fix to how attempts are counted is made once.
+type lockoutPolicy struct {
+	threshold        int           // the attempt that reaches it arms the lock
+	window, duration time.Duration // how long attempts are remembered, and the lock lasts
+	failKey, lockKey func(subject uuid.UUID) string
+}
+
+// passwordLockoutPolicy is the current-password lockout's.
+var passwordLockoutPolicy = lockoutPolicy{
+	threshold: passwordLockoutThreshold,
+	window:    passwordLockoutWindow,
+	duration:  passwordLockoutDuration,
+	failKey:   passwordFailKey,
+	lockKey:   passwordLockKey,
+}
+
 // passwordLockoutUnavailableMessage is change-password's 503 for an attempt that
 // could not be counted. It says the password was NOT changed, like every other
 // refusal of that route that is not the user's doing, and that it is worth
@@ -213,12 +232,12 @@ func (h *AuthHandler) SetPasswordLockoutStore(rdb *redis.Client) {
 	if rdb == nil {
 		return
 	}
-	h.passwordLockout = redisPasswordLockout{rdb: rdb}
+	h.passwordLockout = redisPasswordLockout{rdb: rdb, policy: passwordLockoutPolicy}
 }
 
 // processPasswordLockout is the counts of every handler without a Redis client:
 // one process, one set of counts.
-var processPasswordLockout = newMemoryPasswordLockout(time.Now)
+var processPasswordLockout = newMemoryPasswordLockout(passwordLockoutPolicy, time.Now)
 
 // lockoutStore is the store this handler counts in: Redis when it has been wired
 // (SetPasswordLockoutStore), the process's own memory when it has not.
@@ -398,10 +417,12 @@ func boundedByContext[T any](ctx context.Context, call func(context.Context) (T,
 	}
 }
 
-// redisPasswordLockout is the lockout kept in Redis. Every call is bounded by its
-// context's end (boundedByContext), not by what the client would wait.
+// redisPasswordLockout is a lockout kept in Redis, under policy's rule and keys.
+// Every call is bounded by its context's end (boundedByContext), not by what the
+// client would wait.
 type redisPasswordLockout struct {
-	rdb *redis.Client
+	rdb    *redis.Client
+	policy lockoutPolicy
 }
 
 // reserve counts one attempt with the script above, and inherits what go-redis does
@@ -425,8 +446,8 @@ func (r redisPasswordLockout) reserve(ctx context.Context, userID uuid.UUID) (lo
 	token := uuid.NewString()
 	vals, err := boundedByContext(ctx, func(ctx context.Context) ([]int64, error) {
 		return reservePasswordAttempt.Run(ctx, r.rdb,
-			[]string{passwordFailKey(userID), passwordLockKey(userID)},
-			passwordLockoutWindow.Milliseconds(), passwordLockoutDuration.Milliseconds(), passwordLockoutThreshold, token,
+			[]string{r.policy.failKey(userID), r.policy.lockKey(userID)},
+			r.policy.window.Milliseconds(), r.policy.duration.Milliseconds(), r.policy.threshold, token,
 		).Int64Slice()
 	})
 	if err != nil {
@@ -460,8 +481,8 @@ func (r redisPasswordLockout) release(ctx context.Context, userID uuid.UUID, res
 	}
 	_, err := boundedByContext(ctx, func(ctx context.Context) (struct{}, error) {
 		return struct{}{}, releasePasswordAttempt.Run(ctx, r.rdb,
-			[]string{passwordFailKey(userID), passwordLockKey(userID)},
-			passwordLockoutWindow.Milliseconds(), passwordLockoutThreshold, token,
+			[]string{r.policy.failKey(userID), r.policy.lockKey(userID)},
+			r.policy.window.Milliseconds(), r.policy.threshold, token,
 		).Err()
 	})
 	if err != nil {
@@ -472,7 +493,7 @@ func (r redisPasswordLockout) release(ctx context.Context, userID uuid.UUID, res
 
 func (r redisPasswordLockout) clear(ctx context.Context, userID uuid.UUID) error {
 	_, err := boundedByContext(ctx, func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, r.rdb.Del(ctx, passwordFailKey(userID), passwordLockKey(userID)).Err()
+		return struct{}{}, r.rdb.Del(ctx, r.policy.failKey(userID), r.policy.lockKey(userID)).Err()
 	})
 	if err != nil {
 		return fmt.Errorf("clear the password attempts: %w", err)
@@ -485,6 +506,7 @@ func (r redisPasswordLockout) clear(ctx context.Context, userID uuid.UUID) error
 // that the two agree (TestPasswordLockoutStoresAgree).
 type memoryPasswordLockout struct {
 	mu      sync.Mutex
+	policy  lockoutPolicy
 	now     func() time.Time
 	entries map[uuid.UUID]*memoryLockoutEntry
 }
@@ -496,8 +518,8 @@ type memoryLockoutEntry struct {
 	lockToken   string // names the attempt that armed the lock
 }
 
-func newMemoryPasswordLockout(now func() time.Time) *memoryPasswordLockout {
-	return &memoryPasswordLockout{now: now, entries: map[uuid.UUID]*memoryLockoutEntry{}}
+func newMemoryPasswordLockout(policy lockoutPolicy, now func() time.Time) *memoryPasswordLockout {
+	return &memoryPasswordLockout{policy: policy, now: now, entries: map[uuid.UUID]*memoryLockoutEntry{}}
 }
 
 func (m *memoryPasswordLockout) reserve(_ context.Context, userID uuid.UUID) (lockoutReservation, error) {
@@ -511,16 +533,16 @@ func (m *memoryPasswordLockout) reserve(_ context.Context, userID uuid.UUID) (lo
 		return lockoutReservation{admission: lockoutRefused, retryAfter: e.lockedUntil.Sub(now)}, nil
 	}
 	if e == nil || !e.windowEnds.After(now) {
-		e = &memoryLockoutEntry{windowEnds: now.Add(passwordLockoutWindow)}
+		e = &memoryLockoutEntry{windowEnds: now.Add(m.policy.window)}
 		m.entries[userID] = e
 	}
 	e.attempts++
-	if e.attempts >= passwordLockoutThreshold {
+	if e.attempts >= m.policy.threshold {
 		attempts := e.attempts
 		token := uuid.NewString()
-		e.lockedUntil, e.lockToken = now.Add(passwordLockoutDuration), token
+		e.lockedUntil, e.lockToken = now.Add(m.policy.duration), token
 		e.attempts, e.windowEnds = 0, time.Time{}
-		return lockoutReservation{admission: lockoutAdmittedLast, attempts: attempts, retryAfter: passwordLockoutDuration, token: token}, nil
+		return lockoutReservation{admission: lockoutAdmittedLast, attempts: attempts, retryAfter: m.policy.duration, token: token}, nil
 	}
 	return lockoutReservation{admission: lockoutAdmitted, attempts: e.attempts}, nil
 }
@@ -537,7 +559,7 @@ func (m *memoryPasswordLockout) release(_ context.Context, userID uuid.UUID, res
 	case lockoutAdmittedLast:
 		if e.lockedUntil.After(now) && e.lockToken == res.token {
 			e.lockedUntil, e.lockToken = time.Time{}, ""
-			e.attempts, e.windowEnds = passwordLockoutThreshold-1, now.Add(passwordLockoutWindow)
+			e.attempts, e.windowEnds = m.policy.threshold-1, now.Add(m.policy.window)
 		}
 	case lockoutAdmitted:
 		if e.attempts > 0 && e.windowEnds.After(now) {
@@ -769,12 +791,18 @@ func (h *AuthHandler) checkCurrentPassword(hash, password string) error {
 // long is not refused again, and in the message, which is what the SPA's form
 // shows.
 func passwordLocked(c fiber.Ctx, wait time.Duration) error {
+	return lockedFor(c, wait, passwordLockedMessage(wait))
+}
+
+// lockedFor is the 429 of every lockout that counts in these stores: the wait in a
+// Retry-After header, rounded up to whole seconds, and message.
+func lockedFor(c fiber.Ctx, wait time.Duration, message string) error {
 	seconds := int((wait + time.Second - 1) / time.Second)
 	if seconds < 1 {
 		seconds = 1
 	}
 	c.Set(fiber.HeaderRetryAfter, strconv.Itoa(seconds))
-	return fiber.NewError(fiber.StatusTooManyRequests, passwordLockedMessage(wait))
+	return fiber.NewError(fiber.StatusTooManyRequests, message)
 }
 
 // passwordLockedMessage says how long the lock has left, in whole minutes rounded

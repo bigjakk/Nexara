@@ -209,6 +209,11 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 			return authFakeRow{value: *u}
 		}
 		return authFakeRow{err: pgx.ErrNoRows}
+	case "GetUserTOTPSecret":
+		if u, ok := s.users[args[0].(uuid.UUID)]; ok {
+			return authFakeRow{value: db.GetUserTOTPSecretRow{ID: u.ID, TotpSecret: u.TotpSecret}}
+		}
+		return authFakeRow{err: pgx.ErrNoRows}
 	case "CountUsers":
 		return authFakeScalar{value: int64(len(s.users))}
 	case "CreateUser":
@@ -499,6 +504,8 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 	app.Get("/auth/oidc/callback", a.oidc.Callback)
 	if a.totp != nil {
 		app.Post("/auth/totp/verify-login", withRequestParams(t, totpVerifyLoginMirror(), nil, a.totp.VerifyLogin))
+		app.Delete("/auth/totp", withRequestParams(t, totpDisableMirror(), nil, a.totp.Disable))
+		app.Post("/auth/totp/recovery-codes/regenerate", withRequestParams(t, totpConfirmSetupMirror(), nil, a.totp.RegenerateRecoveryCodes))
 	}
 	app.Put("/users/:id", withRequestParams(t, epochUserUpdateMirror(), []string{"id"}, uh.Update))
 	app.Post("/auth/console-token", withRequestParams(t, consoleTokenMirror(), nil, ah.ConsoleToken))

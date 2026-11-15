@@ -95,9 +95,11 @@ func TestGuard_OnlyThePasswordRoutesTouchTheLockout(t *testing.T) {
 			"handBackAttempt":        {"ChangePassword", "ProveCurrentPassword"},
 			"forgetPasswordFailures": {"ChangePassword"},
 			"lockoutStore":           {"admitPasswordAttempt", "handBackAttempt", "forgetPasswordFailures"},
-			"reserve":                {"admitPasswordAttempt"},
-			"release":                {"handBackAttempt"},
-			"clear":                  {"forgetPasswordFailures"},
+			// and the second factor's lockout, which counts in the same stores under keys of
+			// its own (totpLockoutPolicy) and is cleared only by a code that verified.
+			"reserve": {"admitPasswordAttempt", "admitTOTPAttempt"},
+			"release": {"handBackAttempt"},
+			"clear":   {"forgetPasswordFailures", "forgetTOTPFailures"},
 		}
 		selectorOnly := map[string]bool{"reserve": true, "release": true, "clear": true}
 		// the store operations are implemented in password_lockout.go, where a method

@@ -334,10 +334,6 @@ func (h *TOTPHandler) Disable(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Code must be exactly 6 digits")
 	}
 
-	if h.isUserTOTPLocked(c.Context(), userID) {
-		return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
-	}
-
 	row, err := h.queries.GetUserTOTPSecret(c.Context(), userID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check TOTP status")
@@ -346,13 +342,17 @@ func (h *TOTPHandler) Disable(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusBadRequest, "TOTP is not enabled")
 	}
 
+	attempt, err := h.admitTOTPAttempt(c, userID)
+	if err != nil {
+		return err
+	}
 	validated, err := h.validateCodeOrRecovery(c.Context(), userID, row.TotpSecret.String, code, recoveryCode)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to validate code")
 	}
 	if !validated {
-		if h.recordTOTPFailure(c.Context(), userID) {
-			return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
+		if attempt.admission == lockoutAdmittedLast {
+			return lockedFor(c, attempt.retryAfter, totpLockedMessage)
 		}
 		if code != "" {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid TOTP code")
@@ -364,7 +364,7 @@ func (h *TOTPHandler) Disable(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to disable TOTP")
 	}
 	_ = h.queries.DeleteAllRecoveryCodes(c.Context(), userID)
-	h.clearTOTPFailures(c.Context(), userID)
+	h.forgetTOTPFailures(c, userID)
 
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "auth", userID.String(), "totp_disabled", nil)
 
@@ -406,26 +406,26 @@ func (h *TOTPHandler) RegenerateRecoveryCodes(c fiber.Ctx, p *apischema.Params) 
 	// let one leaked recovery code mint ten fresh ones.
 	code := p.String("code")
 
-	if h.isUserTOTPLocked(c.Context(), userID) {
-		return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
-	}
-
 	row, err := h.queries.GetUserTOTPSecret(c.Context(), userID)
 	if err != nil || !row.TotpSecret.Valid {
 		return fiber.NewError(fiber.StatusBadRequest, "TOTP is not enabled")
 	}
 
+	attempt, err := h.admitTOTPAttempt(c, userID)
+	if err != nil {
+		return err
+	}
 	valid, err := h.totpService.ValidateCode(row.TotpSecret.String, code)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to validate code")
 	}
 	if !valid {
-		if h.recordTOTPFailure(c.Context(), userID) {
-			return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
+		if attempt.admission == lockoutAdmittedLast {
+			return lockedFor(c, attempt.retryAfter, totpLockedMessage)
 		}
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid TOTP code")
 	}
-	h.clearTOTPFailures(c.Context(), userID)
+	h.forgetTOTPFailures(c, userID)
 
 	_ = h.queries.DeleteAllRecoveryCodes(c.Context(), userID)
 
@@ -501,10 +501,6 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Invalid user in pending data")
 	}
 
-	if h.isUserTOTPLocked(c.Context(), userID) {
-		return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
-	}
-
 	// A pending token minted without an epoch (by a release before it existed, in
 	// the minutes around an upgrade) cannot be tied to the password step's check, so
 	// the session it would create could not be conditional on anything. Refused as an
@@ -559,17 +555,23 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired pending token")
 	}
 
+	// Counted here, after every refusal above that spends no code, and before the
+	// code is checked: a locked account's code is not looked at.
+	attempt, err := h.admitTOTPAttempt(c, userID)
+	if err != nil {
+		return err
+	}
 	validated, verr := h.validateCodeOrRecovery(c.Context(), userID, user.TotpSecret.String, code, recoveryCode)
 	if verr != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to validate code")
 	}
 	if !validated {
-		if h.recordTOTPFailure(c.Context(), userID) {
+		if attempt.admission == lockoutAdmittedLast {
 			// Lockout just triggered — invalidate this pending session too so
 			// the attacker can't burn the rest of the per-token budget while
 			// the lock is in effect.
 			_ = h.rdb.Del(c.Context(), pendingKey, attemptKey).Err()
-			return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
+			return lockedFor(c, attempt.retryAfter, totpLockedMessage)
 		}
 		if code != "" {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid TOTP code")
@@ -583,7 +585,7 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 	// edge-case ergonomic. Race-detection via Del-result is deliberately not
 	// done because a recovery code might already be burned at this point.
 	_ = h.rdb.Del(c.Context(), pendingKey, attemptKey).Err()
-	h.clearTOTPFailures(c.Context(), userID)
+	h.forgetTOTPFailures(c, userID)
 
 	if h.issueTokens == nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Token issuer not configured")
@@ -682,43 +684,65 @@ func totpUserLockKey(userID uuid.UUID) string {
 	return fmt.Sprintf("totp:user:lock:%s", userID.String())
 }
 
-// isUserTOTPLocked reports whether the user is currently in a 2FA cooldown.
-// Fail-open on Redis errors: a transient outage must not block legitimate
-// logins. The per-IP auth limiter at the middleware layer remains in force.
-func (h *TOTPHandler) isUserTOTPLocked(ctx context.Context, userID uuid.UUID) bool {
-	n, err := h.rdb.Exists(ctx, totpUserLockKey(userID)).Result()
-	if err != nil {
-		return false
-	}
-	return n > 0
+// totpLockoutPolicy is the per-user second-factor lockout's rule, in the stores and
+// scripts the current-password lockout counts in (password_lockout.go): an attempt is
+// counted, atomically with the lock it may arm, BEFORE its code is checked, so that
+// requests in flight together cannot all be checked under one count, and a counter
+// cannot be left without an expiry. Its keys are the ones it always had.
+var totpLockoutPolicy = lockoutPolicy{
+	threshold: totpLockoutThreshold,
+	window:    totpLockoutWindow,
+	duration:  totpLockoutDuration,
+	failKey:   totpUserFailKey,
+	lockKey:   totpUserLockKey,
 }
 
-// recordTOTPFailure increments the per-user fail counter and applies a
-// cooldown if the threshold is reached. Returns true iff this call triggered
-// the lockout (so the caller can return 429 instead of 401 on the boundary).
-// Fail-open on Redis errors.
-func (h *TOTPHandler) recordTOTPFailure(ctx context.Context, userID uuid.UUID) bool {
-	failKey := totpUserFailKey(userID)
-	fails, err := h.rdb.Incr(ctx, failKey).Result()
-	if err != nil {
-		return false
-	}
-	if fails == 1 {
-		_ = h.rdb.Expire(ctx, failKey, totpLockoutWindow).Err()
-	}
-	if fails >= int64(totpLockoutThreshold) {
-		_ = h.rdb.Set(ctx, totpUserLockKey(userID), "1", totpLockoutDuration).Err()
-		_ = h.rdb.Del(ctx, failKey).Err()
-		return true
-	}
-	return false
+const (
+	totpLockedMessage = "Too many failed 2FA attempts — try again in a few minutes"
+	// totpLockoutUnavailableMessage is the 503 of a code that could not be counted,
+	// and so was not checked.
+	totpLockoutUnavailableMessage = "The two-factor code cannot be checked right now because its attempt limit could not be counted; " +
+		"nothing was changed. Try again shortly."
+)
+
+func (h *TOTPHandler) totpLockout() passwordLockoutStore {
+	return redisPasswordLockout{rdb: h.rdb, policy: totpLockoutPolicy}
 }
 
-// clearTOTPFailures wipes per-user fail and lock state. Called on every
-// successful TOTP authentication so a near-miss followed by a real success
-// doesn't carry over.
-func (h *TOTPHandler) clearTOTPFailures(ctx context.Context, userID uuid.UUID) {
-	_ = h.rdb.Del(ctx, totpUserFailKey(userID), totpUserLockKey(userID)).Err()
+// admitTOTPAttempt counts one attempt at the account's second factor before its code
+// is checked: the sign-in's second step, the disable and the regeneration of recovery
+// codes. A locked account is refused 429 with a Retry-After and its code is not
+// checked. An attempt that cannot be counted is refused 503 and its code is not
+// checked either: it fails closed, as the current-password lockout does, because a
+// code checked without being counted is a guess with no limit. The count is bounded by
+// the follow-up deadline, not by what the Redis client would wait (boundedByContext).
+func (h *TOTPHandler) admitTOTPAttempt(c fiber.Ctx, userID uuid.UUID) (lockoutReservation, error) {
+	ctx, cancel := context.WithTimeout(c.Context(), h.followUpDuration())
+	defer cancel()
+	res, err := h.totpLockout().reserve(ctx, userID)
+	if err != nil {
+		slog.Warn("two-factor: the failed-attempt counter could not be reached; the code was not checked and nothing was changed",
+			"user_id", userID, "error", err)
+		return lockoutReservation{}, fiber.NewError(fiber.StatusServiceUnavailable, totpLockoutUnavailableMessage)
+	}
+	switch res.admission {
+	case lockoutAdmitted, lockoutAdmittedLast:
+		return res, nil
+	default: // lockoutRefused, and anything this code does not know
+		return lockoutReservation{}, lockedFor(c, res.retryAfter, totpLockedMessage)
+	}
+}
+
+// forgetTOTPFailures clears the account's count and any lock once a code verified,
+// so a near miss followed by a success does not carry over. Best effort, on a
+// follow-up deadline: a count left behind runs out with its window.
+func (h *TOTPHandler) forgetTOTPFailures(c fiber.Ctx, userID uuid.UUID) {
+	ctx, cancel := context.WithTimeout(c.Context(), h.followUpDuration())
+	defer cancel()
+	if err := h.totpLockout().clear(ctx, userID); err != nil {
+		slog.Warn("two-factor: could not clear the failed-attempt count after a code verified; it stays until it runs out",
+			"user_id", userID, "error", err)
+	}
 }
 
 // validateCodeOrRecovery checks an input TOTP code or recovery code against

@@ -128,7 +128,7 @@ func TestPasswordLockoutIsBoundedByItsContextAndNotByTheRedisClient(t *testing.T
 	} {
 		t.Run(op.name, func(t *testing.T) {
 			t.Parallel()
-			store := redisPasswordLockout{rdb: productionClientTo(t, addr)}
+			store := redisPasswordLockout{rdb: productionClientTo(t, addr), policy: passwordLockoutPolicy}
 			// The clock starts before the context does, or a call that waits out its whole
 			// context could be measured a moment short of the bound.
 			began := time.Now()
@@ -360,7 +360,7 @@ func (l *lateCount) reserve(_ context.Context, id uuid.UUID) (lockoutReservation
 func TestChangePassword_AnAbandonedCountThatLandsLaterCanArmTheLockUnrecorded(t *testing.T) {
 	logs := captureProductionLog(t)
 	a, _ := lockoutApp(t, "redis", raceOptions{})
-	real := redisPasswordLockout{rdb: a.rdb}
+	real := redisPasswordLockout{rdb: a.rdb, policy: passwordLockoutPolicy}
 	id := a.store.user.ID
 	// Four attempts are counted already: the abandoned one is the fifth.
 	for range passwordLockoutThreshold - 1 {
@@ -410,8 +410,8 @@ func TestChangePassword_AReleaseThatNeverAnswersIsHeldToTheFollowUpBound(t *test
 	const followUp = 200 * time.Millisecond
 	logs := captureProductionLog(t)
 	a, _ := lockoutApp(t, "redis", raceOptions{followUpTimeout: followUp})
-	counting := redisPasswordLockout{rdb: a.rdb}
-	timed := &timedLockout{passwordLockoutStore: splitLockout{count: counting, after: redisPasswordLockout{rdb: productionClientTo(t, blackHole(t))}}}
+	counting := redisPasswordLockout{rdb: a.rdb, policy: passwordLockoutPolicy}
+	timed := &timedLockout{passwordLockoutStore: splitLockout{count: counting, after: redisPasswordLockout{rdb: productionClientTo(t, blackHole(t)), policy: passwordLockoutPolicy}}}
 	a.handler.passwordLockout = timed
 
 	resp, elapsed := a.postAs(t, "/auth/change-password", weakChangeBody, 3*time.Second)
@@ -450,8 +450,8 @@ func TestChangePassword_AClearThatNeverAnswersIsHeldToTheFollowUpBound(t *testin
 	logs := captureProductionLog(t)
 	a, _ := lockoutApp(t, "redis", raceOptions{followUpTimeout: followUp})
 	timed := &timedLockout{passwordLockoutStore: splitLockout{
-		count: redisPasswordLockout{rdb: a.rdb},
-		after: redisPasswordLockout{rdb: productionClientTo(t, blackHole(t))},
+		count: redisPasswordLockout{rdb: a.rdb, policy: passwordLockoutPolicy},
+		after: redisPasswordLockout{rdb: productionClientTo(t, blackHole(t)), policy: passwordLockoutPolicy},
 	}}
 	a.handler.passwordLockout = timed
 

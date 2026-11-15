@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +12,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/pquerna/otp/totp"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -94,6 +94,14 @@ func totpVerifyLoginMirror() apischema.Properties {
 		"totp_pending_token": {Type: apischema.String, MinLength: apischema.Ptr(1)},
 		"code":               {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(6)},
 		"recovery_code":      {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
+	}
+}
+
+// totpDisableMirror is DELETE /auth/totp's: a code or a recovery code, both optional.
+func totpDisableMirror() apischema.Properties {
+	return apischema.Properties{
+		"code":          {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(6)},
+		"recovery_code": {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
 	}
 }
 
@@ -262,51 +270,26 @@ func TestTOTP_ConfirmSetup_BadFormatReturns400(t *testing.T) {
 	}
 }
 
-// TestTOTP_VerifyLogin_BadCodePreservesPendingToken locks down the second
-// half of the bug: a typo on /totp/verify-login MUST NOT destroy the pending
-// session. Pre-existing lockout state on the user blocks DB lookup before
-// it's reached, so we use that to assert the path: pending intact, attempt
-// counter at 1, response 429.
+// TestTOTP_VerifyLogin_PreLockedUserReturns429: while the account's second factor is
+// locked even a right code is refused, 429 with a Retry-After, and the pending token is
+// kept, so the user can retry after the cooldown without the password step again.
 func TestTOTP_VerifyLogin_PreLockedUserReturns429(t *testing.T) {
-	handler, rdb, _ := newTOTPTestEnv(t)
-	userID := uuid.New()
-	app := newTOTPTestApp(t, handler, userID)
-
-	pendingToken := "test-pending-token"
-	pendingData, err := json.Marshal(map[string]string{
-		"user_id":      userID.String(),
-		"audit_action": "login",
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	pendingKey := "totp:pending:" + pendingToken
-	if err := rdb.Set(context.Background(), pendingKey, string(pendingData), totpPendingTTL).Err(); err != nil {
-		t.Fatalf("seed pending: %v", err)
-	}
-
-	// Pre-lock the user.
-	if err := rdb.Set(context.Background(), totpUserLockKey(userID), "1", totpLockoutDuration).Err(); err != nil {
+	user, plain := epochTOTPUser(t, epochLoginEmail, 0)
+	a := newEpochApp(t, newEpochStore(user), epochOptions{totp: true})
+	token := epochFirstStep(t, a, epochLoginEmail)
+	pendingKey := "totp:pending:" + token
+	before, _ := a.redis.Get(pendingKey)
+	if err := a.redis.Set(totpUserLockKey(user.ID), "1"); err != nil {
 		t.Fatalf("seed lock: %v", err)
 	}
+	a.redis.SetTTL(totpUserLockKey(user.ID), totpLockoutDuration)
 
-	body := `{"totp_pending_token":"` + pendingToken + `","code":"000000"}`
-	resp, err := app.Test(newJSONRequest(t, "/totp/verify-login", body))
-	if err != nil {
-		t.Fatalf("request: %v", err)
+	resp := a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, plain))
+	if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") == "" {
+		t.Errorf("status = %d, Retry-After %q, want 429 with a Retry-After", resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusTooManyRequests)
-	}
-
-	// Lockout must NOT consume the pending token — the user can retry after
-	// the cooldown without being forced through the password step again.
-	if got, err := rdb.Get(context.Background(), pendingKey).Result(); err != nil {
-		t.Errorf("pending token destroyed by lockout response: %v", err)
-	} else if got != string(pendingData) {
-		t.Errorf("pending token mutated by lockout response")
+	if got, err := a.redis.Get(pendingKey); err != nil || got != before {
+		t.Errorf("pending token after the lockout response = %q (%v), want it kept unchanged", got, err)
 	}
 }
 
@@ -367,94 +350,6 @@ func TestTOTP_VerifyLogin_PendingTokenBudgetExhaustion(t *testing.T) {
 	}
 }
 
-// TestTOTP_RecordTOTPFailure_TriggersLockoutAtThreshold is the direct
-// helper-level test for the per-user fail/lock state machine.
-func TestTOTP_RecordTOTPFailure_TriggersLockoutAtThreshold(t *testing.T) {
-	handler, rdb, _ := newTOTPTestEnv(t)
-	userID := uuid.New()
-	ctx := context.Background()
-
-	for i := 1; i < totpLockoutThreshold; i++ {
-		if locked := handler.recordTOTPFailure(ctx, userID); locked {
-			t.Fatalf("recordTOTPFailure returned true on call %d (before threshold)", i)
-		}
-		if handler.isUserTOTPLocked(ctx, userID) {
-			t.Fatalf("isUserTOTPLocked returned true after %d failures (before threshold)", i)
-		}
-	}
-
-	// Threshold call triggers lockout.
-	if locked := handler.recordTOTPFailure(ctx, userID); !locked {
-		t.Fatalf("recordTOTPFailure returned false on threshold call (call %d)", totpLockoutThreshold)
-	}
-	if !handler.isUserTOTPLocked(ctx, userID) {
-		t.Fatalf("isUserTOTPLocked returned false immediately after lockout was triggered")
-	}
-
-	// Fail counter is reset post-lockout (so the cooldown is the only gate).
-	if _, err := rdb.Get(ctx, totpUserFailKey(userID)).Result(); !errors.Is(err, redis.Nil) {
-		t.Errorf("fail counter should be cleared after lockout, got err = %v", err)
-	}
-
-	// Lock key TTL must be in the future (i.e. lock is real, not a stale
-	// already-expired key).
-	ttl := rdb.TTL(ctx, totpUserLockKey(userID)).Val()
-	if ttl <= 0 {
-		t.Errorf("lock key TTL = %v, want > 0", ttl)
-	}
-}
-
-// TestTOTP_ClearTOTPFailures_RemovesBothKeys verifies the success-path
-// cleanup wipes both fail counter and any active lock.
-func TestTOTP_ClearTOTPFailures_RemovesBothKeys(t *testing.T) {
-	handler, rdb, _ := newTOTPTestEnv(t)
-	userID := uuid.New()
-	ctx := context.Background()
-
-	// Pre-populate both keys with arbitrary values + TTLs.
-	if err := rdb.Set(ctx, totpUserFailKey(userID), "3", totpLockoutWindow).Err(); err != nil {
-		t.Fatalf("seed fail: %v", err)
-	}
-	if err := rdb.Set(ctx, totpUserLockKey(userID), "1", totpLockoutDuration).Err(); err != nil {
-		t.Fatalf("seed lock: %v", err)
-	}
-
-	handler.clearTOTPFailures(ctx, userID)
-
-	if _, err := rdb.Get(ctx, totpUserFailKey(userID)).Result(); !errors.Is(err, redis.Nil) {
-		t.Errorf("fail counter should be cleared, got err = %v", err)
-	}
-	if _, err := rdb.Get(ctx, totpUserLockKey(userID)).Result(); !errors.Is(err, redis.Nil) {
-		t.Errorf("lock key should be cleared, got err = %v", err)
-	}
-}
-
-// TestTOTP_RecordTOTPFailure_FailWindowAdvances verifies the rolling-window
-// behaviour: failures expire after totpLockoutWindow so a sparse failure
-// pattern doesn't trip the lockout.
-func TestTOTP_RecordTOTPFailure_FailWindowAdvances(t *testing.T) {
-	handler, _, mr := newTOTPTestEnv(t)
-	userID := uuid.New()
-	ctx := context.Background()
-
-	// Burn (threshold-1) failures.
-	for i := 1; i < totpLockoutThreshold; i++ {
-		_ = handler.recordTOTPFailure(ctx, userID)
-	}
-
-	// Advance miniredis past the window so the counter expires.
-	mr.FastForward(totpLockoutWindow + 1*time.Second)
-
-	// Next failure is treated as the first in a fresh window — does NOT
-	// trigger lockout, and is NOT lockout-triggering.
-	if locked := handler.recordTOTPFailure(ctx, userID); locked {
-		t.Errorf("recordTOTPFailure triggered lockout on first failure of fresh window")
-	}
-	if handler.isUserTOTPLocked(ctx, userID) {
-		t.Errorf("isUserTOTPLocked returned true after window reset")
-	}
-}
-
 // TestTOTP_BeginSetupAttemptsKey_DeletedOnReSetup is the contract behind
 // "BeginSetup grants a fresh budget": it can't be tested without DB (BeginSetup
 // reads users), but we can verify that Del on the attempts key is a no-op
@@ -484,5 +379,56 @@ func TestTOTP_BeginSetupKeyHelpers_AreUserScoped(t *testing.T) {
 	// doesn't accidentally double-delete the same key).
 	if totpUserFailKey(a) == totpUserLockKey(a) {
 		t.Errorf("totpUserFailKey collides with totpUserLockKey")
+	}
+}
+
+// TestTOTP_ACodeThatCannotBeCountedIsNotChecked: with Redis unreachable, disabling the
+// second factor and regenerating recovery codes are refused 503 even for a right code,
+// and change nothing. A code checked without being counted is a guess with no limit.
+func TestTOTP_ACodeThatCannotBeCountedIsNotChecked(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, method, path string }{
+		{"disable", http.MethodDelete, "/auth/totp"},
+		{"regenerate recovery codes", http.MethodPost, "/auth/totp/recovery-codes/regenerate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			user, plain := epochTOTPUser(t, epochLoginEmail, 0)
+			a := newEpochApp(t, newEpochStore(user), epochOptions{totp: true})
+			a.redis.Close()
+			code, err := totp.GenerateCode(plain, time.Now())
+			if err != nil {
+				t.Fatalf("generate a code: %v", err)
+			}
+			resp := a.send(t, tc.method, tc.path, `{"code":"`+code+`"}`, map[string]string{"X-Test-Acting-User": user.ID.String()}, 20*time.Second)
+			if resp.StatusCode != http.StatusServiceUnavailable {
+				t.Errorf("status = %d, want 503: the code must not be checked when it cannot be counted", resp.StatusCode)
+			}
+			for _, stmt := range []string{"ClearTOTPSecret", "DeleteAllRecoveryCodes", "InsertRecoveryCode"} {
+				if n := len(a.store.named(stmt)); n != 0 {
+					t.Errorf("%s was sent %d times: nothing may change", stmt, n)
+				}
+			}
+		})
+	}
+}
+
+// TestTOTP_AWrongCodeGivesItsCounterAnExpiry: a counter left without an expiry — what
+// the old INCR and separate EXPIRE left behind when the EXPIRE failed — gets its window
+// back with the next wrong code, so a count can never outlive its window.
+func TestTOTP_AWrongCodeGivesItsCounterAnExpiry(t *testing.T) {
+	t.Parallel()
+	user, _ := epochTOTPUser(t, epochLoginEmail, 0)
+	a := newEpochApp(t, newEpochStore(user), epochOptions{totp: true})
+	if err := a.redis.Set(totpUserFailKey(user.ID), "2"); err != nil {
+		t.Fatalf("seed the counter: %v", err)
+	}
+	resp := a.send(t, http.MethodPost, "/auth/totp/recovery-codes/regenerate", `{"code":"000000"}`,
+		map[string]string{"X-Test-Acting-User": user.ID.String()}, 20*time.Second)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for a wrong code", resp.StatusCode)
+	}
+	if ttl := a.redis.TTL(totpUserFailKey(user.ID)); ttl != totpLockoutWindow {
+		t.Errorf("the counter expires in %v, want its window, %v", ttl, totpLockoutWindow)
 	}
 }
