@@ -17,6 +17,11 @@ type Querier interface {
 	AcknowledgeAlert(ctx context.Context, arg AcknowledgeAlertParams) error
 	AddFavorite(ctx context.Context, arg AddFavoriteParams) error
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
+	// ApplySessionTimeoutDefaults sets the app pool's backstops on a new connection
+	// (internal/db/pool_backstop.go), each only where nothing else has set it: a
+	// value from DATABASE_URL or PGOPTIONS (source 'client'), ALTER ROLE or ALTER
+	// DATABASE, or postgresql.conf is left as it is.
+	ApplySessionTimeoutDefaults(ctx context.Context, arg ApplySessionTimeoutDefaultsParams) error
 	// ArmJobCleanupPending re-arms the sweep when held state is recorded onto a
 	// job that already reached a terminal status (the startNode cancel race);
 	// a no-op for active jobs, whose terminal transition sets the flag itself.

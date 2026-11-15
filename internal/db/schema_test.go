@@ -77,6 +77,12 @@ func TestToPgx5URL(t *testing.T) {
 			want: "pgx5://u@h/db",
 		},
 		{
+			// The app pool's timeouts, set by an operator, must not cut a migration.
+			name: "app_session_timeouts_dropped",
+			in:   "postgres://u@h/db?lock_timeout=5s&sslmode=disable&idle_in_transaction_session_timeout=30s",
+			want: "pgx5://u@h/db?sslmode=disable",
+		},
+		{
 			name: "keyword_value_dsn_untouched",
 			in:   "host=h dbname=db pool_max_conns=20",
 			want: "host=h dbname=db pool_max_conns=20",

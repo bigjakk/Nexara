@@ -19,7 +19,7 @@ func ConnectWithRetry(ctx context.Context, databaseURL string, logger *slog.Logg
 	var pool *pgxpool.Pool
 	var err error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		pool, err = pgxpool.New(ctx, databaseURL)
+		pool, err = newAppPool(ctx, databaseURL, logger)
 		if err == nil {
 			if pingErr := pool.Ping(ctx); pingErr == nil {
 				if attempt > 1 {
