@@ -203,7 +203,11 @@ WHERE id = sqlc.arg(id)
   AND is_revoked = false
   AND expires_at > now();
 
--- name: DeleteExpiredSessions :exec
+-- name: DeleteExpiredSessions :execrows
+-- The scheduler's hourly session retention. Every reader of a session row treats
+-- an expired one as absent: the lookups for a refresh, a sign-out and the
+-- console's liveness filter on expires_at, and the rest refuse one that has
+-- passed it.
 DELETE FROM sessions WHERE expires_at < now();
 
 -- name: ListUserSessions :many

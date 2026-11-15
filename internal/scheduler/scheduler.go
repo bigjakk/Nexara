@@ -584,6 +584,23 @@ func (s *Scheduler) RunTaskRetention(ctx context.Context) {
 	s.logger.Debug("task retention complete")
 }
 
+// RunSessionRetention deletes the session rows that have expired. Mirrors
+// RunTaskRetention. Nothing reads an expired row as anything but absent, and
+// without this tick every sign-in's row was kept forever.
+func (s *Scheduler) RunSessionRetention(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("session retention panicked", "panic", r)
+		}
+	}()
+	deleted, err := s.queries.DeleteExpiredSessions(ctx)
+	if err != nil {
+		s.logger.Warn("session retention failed", "error", err)
+		return
+	}
+	s.logger.Debug("session retention complete", "deleted_sessions", deleted)
+}
+
 // cveScanHistoryKeep is how many of each cluster's newest CVE scans
 // RunCVEScanRetention keeps: the 20 the Security page's Scan History lists
 // (?limit=20 in frontend/src/features/security/api/cve-queries.ts), so every

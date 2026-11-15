@@ -632,7 +632,11 @@ type Querier interface {
 	// that explained it, as long as an unexplained one is.
 	DeleteCompletedTasks(ctx context.Context, cutoff time.Time) error
 	DeleteDRSRule(ctx context.Context, arg DeleteDRSRuleParams) (int64, error)
-	DeleteExpiredSessions(ctx context.Context) error
+	// The scheduler's hourly session retention. Every reader of a session row treats
+	// an expired one as absent: the lookups for a refresh, a sign-out and the
+	// console's liveness filter on expires_at, and the rest refuse one that has
+	// passed it.
+	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
 	// DeleteGuestSmbiosForVanishedGuests drops cache rows for guests that are no
 	// longer in the cluster's vms inventory. vmids come from the vms table rather

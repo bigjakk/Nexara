@@ -377,7 +377,7 @@ The user menu (your name, top right) holds **Profile**, **Security**, **API Keys
 
 **Profile** shows your email, role, auth source, 2FA status and join date. A local account can change its **Display Name** and use **Change Password**: 8 to 72 characters with an upper-case letter, a lower-case letter, a digit and a special character. Changing it ends every session. Five wrong current passwords within 60 minutes, here and at Enable 2FA together, lock both for 30 minutes.
 
-**Security** has [two-factor authentication](#two-factor-authentication-totp) and **Active Sessions**: each sign-in's device and address, when it was last active and **This device**. **Revoke** ends one, and asks first for your own. An access token that sign-in already holds keeps working until it expires, within 15 minutes by default.
+**Security** has [two-factor authentication](#two-factor-authentication-totp) and **Active Sessions**: each sign-in's device and address, when it was last active and **This device**. **Revoke** ends one, and asks first for your own. An access token that sign-in already holds keeps working until it expires, within 15 minutes by default. Once an hour Nexara deletes the records of sessions that have expired.
 
 **Sign Out All Devices** ends every session without asking. An API key is not affected, and an access token already issued keeps working until it expires, within 15 minutes by default.
 

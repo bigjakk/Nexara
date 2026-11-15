@@ -323,6 +323,8 @@ type taskRunRecorder struct {
 	nodeLookups   []string
 	strangers     []string
 	nodeLookupErr error
+	// sessionPurges counts DeleteExpiredSessions calls.
+	sessionPurges int
 }
 
 // runWrite is one UPDATE of a scheduled_tasks row: the sqlc query that sent it,
@@ -345,6 +347,9 @@ func (r *taskRunRecorder) Exec(_ context.Context, sql string, args ...any) (pgco
 	switch {
 	case strings.Contains(sql, "INSERT INTO audit_log"):
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	case strings.Contains(sql, "-- name: DeleteExpiredSessions "):
+		r.sessionPurges++
+		return pgconn.NewCommandTag("DELETE 3"), nil
 	case strings.Contains(sql, "UPDATE scheduled_tasks"):
 		w, err := parseRunWrite(sql, args)
 		if err != nil {
@@ -819,5 +824,16 @@ func TestCVEScanDueKeepsTheSchedule(t *testing.T) {
 		if want := (168 + hours - 1) / hours; scans != want {
 			t.Errorf("every %dh: %d scans in a week, want %d", hours, scans, want)
 		}
+	}
+}
+
+// TestRunSessionRetention_DeletesTheExpiredSessions: the hourly job sends the
+// delete of expired session rows, which had no caller and so never ran.
+func TestRunSessionRetention_DeletesTheExpiredSessions(t *testing.T) {
+	t.Parallel()
+	recorder := &taskRunRecorder{}
+	newRecordingScheduler(recorder).RunSessionRetention(context.Background())
+	if recorder.err != nil || recorder.sessionPurges != 1 {
+		t.Fatalf("DeleteExpiredSessions sent %d times, want once (recorder error: %v)", recorder.sessionPurges, recorder.err)
 	}
 }

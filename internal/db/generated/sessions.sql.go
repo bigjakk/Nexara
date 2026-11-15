@@ -145,13 +145,20 @@ func (q *Queries) CreateSessionAtEpoch(ctx context.Context, arg CreateSessionAtE
 	return i, err
 }
 
-const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at < now()
 `
 
-func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteExpiredSessions)
-	return err
+// The scheduler's hourly session retention. Every reader of a session row treats
+// an expired one as absent: the lookups for a refresh, a sign-out and the
+// console's liveness filter on expires_at, and the rest refuse one that has
+// passed it.
+func (q *Queries) DeleteExpiredSessions(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredSessions)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
