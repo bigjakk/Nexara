@@ -24,15 +24,18 @@ export function FormSection({
   );
 }
 
-/** A label, the control it names, and a line of help under it. */
+/** A label, the control it names, and a line of help or an error under it. */
 export function Field({
   label,
   hint,
+  error,
   className,
   children,
 }: {
   label: string;
   hint?: ReactNode;
+  /** Why the value cannot be saved; shown in place of the hint. */
+  error?: string | null;
   className?: string;
   /** Renders the control, which takes the id the label points at. */
   children: (id: string) => ReactNode;
@@ -42,8 +45,14 @@ export function Field({
     <div className={cn("min-w-0 space-y-1.5", className)}>
       <Label htmlFor={id}>{label}</Label>
       {children(id)}
-      {hint !== undefined && (
-        <p className="text-[12.5px] text-muted-foreground">{hint}</p>
+      {error != null ? (
+        <p role="alert" className="text-[12.5px] text-destructive">
+          {error}
+        </p>
+      ) : (
+        hint !== undefined && (
+          <p className="text-[12.5px] text-muted-foreground">{hint}</p>
+        )
       )}
     </div>
   );

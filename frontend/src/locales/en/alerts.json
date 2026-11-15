@@ -93,6 +93,8 @@
   "url": "URL",
   "method": "Method",
   "headersJSON": "Headers (JSON, optional)",
+  "headersNotJSON": "Not valid JSON. Write the headers as an object, such as {\"Authorization\": \"Bearer …\"}.",
+  "headersNotStrings": "Write the headers as an object whose values are all text, such as {\"X-Team\": \"ops\"}.",
   "bodyTemplate": "Body Template (optional)",
   "leaveEmptyFullPayload": "Leave empty to send full alert payload as JSON",
   "pagerDutyConfiguration": "PagerDuty Configuration",

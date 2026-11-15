@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +27,7 @@ import {
   useUpdateNotificationChannel,
 } from "../api/alert-queries";
 import type { ChannelType } from "@/types/api";
+import { parseWebhookHeaders } from "../lib/webhook-headers";
 import { Field, FormSection } from "./FormParts";
 
 const CHANNEL_TYPES: { value: ChannelType; label: string }[] = [
@@ -53,6 +55,7 @@ export function ChannelForm({
   editEnabled,
   onClose,
 }: ChannelFormProps) {
+  const { t } = useTranslation("alerts");
   const isEdit = !!editId;
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(editName ?? "");
@@ -100,6 +103,14 @@ export function ChannelForm({
   const createMutation = useCreateNotificationChannel();
   const updateMutation = useUpdateNotificationChannel();
 
+  // Invalid headers hold Save: sent as {} they would store a channel that
+  // silently drops the Authorization the operator typed.
+  const parsedHeaders = parseWebhookHeaders(webhookHeaders);
+  const headersError =
+    !isEdit && channelType === "webhook" && parsedHeaders.error !== null
+      ? t(parsedHeaders.error === "json" ? "headersNotJSON" : "headersNotStrings")
+      : null;
+
   const buildConfig = (): Record<string, unknown> => {
     switch (channelType) {
       case "email":
@@ -135,22 +146,13 @@ export function ChannelForm({
           chat_id: telegramChatId,
           parse_mode: "HTML",
         };
-      case "webhook": {
-        let headers: Record<string, string> = {};
-        if (webhookHeaders.trim()) {
-          try {
-            headers = JSON.parse(webhookHeaders) as Record<string, string>;
-          } catch {
-            // ignore parse errors, validation will catch it
-          }
-        }
+      case "webhook":
         return {
           url: webhookUrl,
           method: webhookMethod,
-          headers,
+          headers: parsedHeaders.headers ?? {},
           body_template: webhookBodyTemplate || undefined,
         };
-      }
       case "pagerduty":
         return { routing_key: pdRoutingKey };
       default:
@@ -160,6 +162,7 @@ export function ChannelForm({
 
   const handleSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
+    if (headersError !== null) return;
 
     if (isEdit && editId) {
       // Edit shows no settings fields (the stored ones are never sent back),
@@ -310,6 +313,7 @@ export function ChannelForm({
                 setMethod={setWebhookMethod}
                 headers={webhookHeaders}
                 setHeaders={setWebhookHeaders}
+                headersError={headersError}
                 bodyTemplate={webhookBodyTemplate}
                 setBodyTemplate={setWebhookBodyTemplate}
               />
@@ -334,7 +338,7 @@ export function ChannelForm({
           >
             Cancel
           </Button>
-          <Button type="submit" disabled={isPending}>
+          <Button type="submit" disabled={isPending || headersError !== null}>
             {isPending ? "Saving..." : isEdit ? "Update" : "Create"}
           </Button>
         </DialogFooter>
@@ -707,6 +711,7 @@ function WebhookFields({
   setMethod,
   headers,
   setHeaders,
+  headersError,
   bodyTemplate,
   setBodyTemplate,
 }: {
@@ -716,6 +721,7 @@ function WebhookFields({
   setMethod: (v: string) => void;
   headers: string;
   setHeaders: (v: string) => void;
+  headersError: string | null;
   bodyTemplate: string;
   setBodyTemplate: (v: string) => void;
 }) {
@@ -741,8 +747,8 @@ function WebhookFields({
               <SelectTrigger id={id}>
                 <SelectValue />
               </SelectTrigger>
+              {/* No GET: a send refuses it (webhook.go). */}
               <SelectContent>
-                <SelectItem value="GET">GET</SelectItem>
                 <SelectItem value="POST">POST</SelectItem>
                 <SelectItem value="PUT">PUT</SelectItem>
                 <SelectItem value="PATCH">PATCH</SelectItem>
@@ -751,7 +757,7 @@ function WebhookFields({
           )}
         </Field>
       </div>
-      <Field label="Headers (JSON, optional)">
+      <Field label="Headers (JSON, optional)" error={headersError}>
         {(id) => (
           <Textarea
             id={id}
@@ -761,6 +767,7 @@ function WebhookFields({
             }}
             placeholder='{"Authorization": "Bearer xxx"}'
             rows={2}
+            aria-invalid={headersError !== null}
           />
         )}
       </Field>
