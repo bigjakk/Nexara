@@ -224,6 +224,11 @@ func TestMergeAlertRuleUpdate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "a template calling a template rejected",
+			body:    `{"message_template":"{{define \"a\"}}x{{end}}{{template \"a\"}}"}`,
+			wantErr: true,
+		},
+		{
 			name:    "out-of-range duration rejected",
 			body:    `{"duration_seconds":86401}`,
 			wantErr: true,
@@ -1016,5 +1021,31 @@ func TestResolveAlert_RacedSendsNoSecondResolution(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict || len(rec.got) != 0 {
 		t.Errorf("status %d, notified %d times: want 409 and no notification", resp.StatusCode, len(rec.got))
+	}
+}
+
+// A channel's own templates are held to a notification template's limits when
+// its settings are saved, and the answer names the setting.
+func TestCreateChannel_RefusesATemplatePastItsLimits(t *testing.T) {
+	t.Parallel()
+	h := NewAlertHandler(db.New(&auditRowsDBTX{}), testEncryptionKey, nil, nil)
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error { c.Locals("user_id", uuid.New()); return c.Next() })
+	app.Post("/notification-channels", withRequestParams(t, apischema.Properties{
+		"name": {Type: apischema.String}, "channel_type": {Type: apischema.String}, "config": {Type: apischema.Object},
+		"enabled":               {Type: apischema.Boolean, Optional: true, Default: true},
+		"allow_private_address": {Type: apischema.Boolean, Optional: true, Default: false},
+	}, nil, h.CreateChannel))
+	body := `{"name":"hook01","channel_type":"webhook","config":{"url":"https://203.0.113.10/x","body_template":"{{block \"b\" .}}x{{end}}"}}`
+	req := httptest.NewRequest(http.MethodPost, "/notification-channels", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readBody(t, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(got, "body_template") {
+		t.Errorf("status %d %s: want 400 naming body_template", resp.StatusCode, got)
 	}
 }

@@ -424,6 +424,26 @@ func channelTargetAllowance(c fiber.Ctx, channelType string, config json.RawMess
 	return private && confirmed, nil
 }
 
+// checkChannelTemplates refuses a channel's settings whose templates — an
+// email's subject, a webhook's body, a chat channel's message — break a
+// notification template's limits (notifications.CheckTemplate).
+func checkChannelTemplates(config json.RawMessage) error {
+	var cfg map[string]json.RawMessage
+	if json.Unmarshal(config, &cfg) != nil {
+		return nil
+	}
+	for _, key := range []string{"subject_template", "body_template", "message_template"} {
+		var tmpl string
+		if json.Unmarshal(cfg[key], &tmpl) != nil {
+			continue
+		}
+		if err := notifications.CheckTemplate(tmpl); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, key+": "+err.Error())
+		}
+	}
+	return nil
+}
+
 // channelAllowanceDetails is the audit detail of a channel write that stores a
 // private-address allowance, nil for one that does not.
 func channelAllowanceDetails(allow bool) json.RawMessage {
@@ -1533,6 +1553,9 @@ func (h *AlertHandler) CreateChannel(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	if err := checkChannelTemplates(config); err != nil {
+		return err
+	}
 	allowPrivate, err := channelTargetAllowance(c, p.String("channel_type"), config, p.Bool("allow_private_address"))
 	if err != nil {
 		return renderAddressPolicyError(c, err)
@@ -1613,6 +1636,9 @@ func (h *AlertHandler) UpdateChannel(c fiber.Ctx, p *apischema.Params) error {
 		config, cErr := channelConfigJSON(p)
 		if cErr != nil {
 			return cErr
+		}
+		if err := checkChannelTemplates(config); err != nil {
+			return err
 		}
 		allow, aErr := channelTargetAllowance(c, channelType, config, p.Bool("allow_private_address"))
 		if aErr != nil {

@@ -13,20 +13,19 @@ import (
 
 const maxTemplateOutput = 64 * 1024 // 64KB max rendered output
 
+// MaxTemplateLen caps a notification template's length, at save and at
+// render: with range and template refused, the template's own length is what
+// bounds how much work rendering it can do.
+const MaxTemplateLen = 8 * 1024
+
 // renderTemplate renders a Go text/template with the given payload.
 // Output is limited to 64KB to prevent memory exhaustion.
 func renderTemplate(tmpl string, payload AlertPayload) (string, error) {
 	if tmpl == "" {
 		return "", nil
 	}
-
-	t, err := template.New("alert").
-		Option("missingkey=error").
-		Parse(tmpl)
+	t, err := parseTemplate(tmpl)
 	if err != nil {
-		return "", fmt.Errorf("parse template: %w", err)
-	}
-	if err := refuseRange(t); err != nil {
 		return "", err
 	}
 
@@ -39,55 +38,143 @@ func renderTemplate(tmpl string, payload AlertPayload) (string, error) {
 	return buf.String(), nil
 }
 
-// errTemplateRange refuses a template with a range in it. A notification has
-// nothing to range over, and Go ranges over an integer: {{range 99999999999}}
-// runs for hours inside the alert engine's evaluation tick, writing nothing
-// the output cap could stop.
-var errTemplateRange = errors.New("a notification template cannot use range: a notification has nothing to range over")
+// The limits a notification template is held to, each refused by name.
+var (
+	// errTemplateLength: longer than MaxTemplateLen.
+	errTemplateLength = fmt.Errorf("a notification template may be at most %d bytes", MaxTemplateLen)
+	// errTemplateRange: a notification has nothing to range over, and Go
+	// ranges over an integer — {{range 99999999999}} runs for hours inside
+	// the alert engine's evaluation tick, writing nothing the output cap
+	// could stop.
+	errTemplateRange = errors.New("a notification template cannot use range: a notification has nothing to range over")
+	// errTemplateCall: {{template}} and {{block}} call other templates, and
+	// chained calls run 2^n times writing nothing.
+	errTemplateCall = errors.New("a notification template cannot use template or block")
+	// errTemplatePrint: a print, printf or println whose result would pass
+	// the output cap — fmt builds the whole result before the cap sees it.
+	errTemplatePrint = fmt.Errorf("a print, printf or println in a notification template may produce at most %d bytes", maxTemplateOutput)
+)
 
-// CheckTemplate refuses a template renderTemplate would refuse for its
-// shape — a range — before it is saved. One that does not parse passes; a
-// send then falls back to its built-in text.
+// templateFuncs replace text/template's print builtins (Funcs takes
+// precedence) with ones that refuse a result over the output cap, and a
+// printf whose widths and precisions alone would pass it before formatting.
+var templateFuncs = template.FuncMap{
+	"print":   func(a ...any) (string, error) { return capped(fmt.Sprint(a...)) },
+	"println": func(a ...any) (string, error) { return capped(fmt.Sprintln(a...)) },
+	"printf": func(format string, a ...any) (string, error) {
+		if printfPadding(format) > maxTemplateOutput {
+			return "", errTemplatePrint
+		}
+		return capped(fmt.Sprintf(format, a...))
+	},
+}
+
+func capped(s string) (string, error) {
+	if len(s) > maxTemplateOutput {
+		return "", errTemplatePrint
+	}
+	return s, nil
+}
+
+// printfPadding is the sum of the widths and precisions a format asks for —
+// the bytes its verbs pad to whatever their arguments — with a "*" width
+// counted as over any cap.
+func printfPadding(format string) int {
+	total := 0
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		for i++; i < len(format) && strings.IndexByte("+-# 0", format[i]) >= 0; i++ {
+		}
+		for i < len(format) && (format[i] == '.' || format[i] == '*' || format[i] == '[' ||
+			format[i] == ']' || (format[i] >= '0' && format[i] <= '9')) {
+			if format[i] == '*' {
+				return maxTemplateOutput + 1
+			}
+			n := 0
+			for ; i < len(format) && format[i] >= '0' && format[i] <= '9'; i++ {
+				if n = n*10 + int(format[i]-'0'); n > maxTemplateOutput {
+					return maxTemplateOutput + 1
+				}
+			}
+			total += n
+			if total > maxTemplateOutput {
+				return total
+			}
+			if i < len(format) && (format[i] == '.' || format[i] == '[' || format[i] == ']') {
+				i++
+			}
+		}
+	}
+	return total
+}
+
+// parseTemplate parses tmpl with templateFuncs, and refuses it for its length
+// or for using range, template or block.
+func parseTemplate(tmpl string) (*template.Template, error) {
+	if len(tmpl) > MaxTemplateLen {
+		return nil, errTemplateLength
+	}
+	t, err := template.New("alert").Funcs(templateFuncs).Option("missingkey=error").Parse(tmpl)
+	if err != nil {
+		return nil, fmt.Errorf("parse template: %w", err)
+	}
+	for _, tt := range t.Templates() {
+		if tt.Tree == nil {
+			continue
+		}
+		if err := refusedNode(tt.Root); err != nil {
+			return nil, err
+		}
+	}
+	return t, nil
+}
+
+// CheckTemplate refuses, before a template is saved, one renderTemplate
+// would refuse for a limit: its length, a range, a template or block. One
+// that does not parse passes; a send then falls back to its built-in text.
 func CheckTemplate(tmpl string) error {
 	if tmpl == "" {
 		return nil
 	}
-	t, err := template.New("alert").Parse(tmpl)
-	if err != nil {
-		return nil //nolint:nilerr // a parse failure is the send's to fall back from
-	}
-	return refuseRange(t)
-}
-
-// refuseRange walks every template t defines for a range node.
-func refuseRange(t *template.Template) error {
-	for _, tt := range t.Templates() {
-		if tt.Tree != nil && hasRange(tt.Root) {
-			return errTemplateRange
-		}
+	_, err := parseTemplate(tmpl)
+	if errors.Is(err, errTemplateLength) || errors.Is(err, errTemplateRange) || errors.Is(err, errTemplateCall) {
+		return err
 	}
 	return nil
 }
 
-func hasRange(n parse.Node) bool {
+// refusedNode walks a template's tree for a node a notification template may
+// not use.
+func refusedNode(n parse.Node) error {
 	switch n := n.(type) {
 	case *parse.RangeNode:
-		return true
+		return errTemplateRange
+	case *parse.TemplateNode:
+		return errTemplateCall
 	case *parse.ListNode:
 		if n == nil {
-			return false
+			return nil
 		}
 		for _, c := range n.Nodes {
-			if hasRange(c) {
-				return true
+			if err := refusedNode(c); err != nil {
+				return err
 			}
 		}
 	case *parse.IfNode:
-		return hasRange(n.List) || hasRange(n.ElseList)
+		return firstErr(refusedNode(n.List), refusedNode(n.ElseList))
 	case *parse.WithNode:
-		return hasRange(n.List) || hasRange(n.ElseList)
+		return firstErr(refusedNode(n.List), refusedNode(n.ElseList))
 	}
-	return false
+	return nil
+}
+
+func firstErr(a, b error) error {
+	if a != nil {
+		return a
+	}
+	return b
 }
 
 type limitWriter struct {

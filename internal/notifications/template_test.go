@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -25,6 +26,8 @@ func TestRuleMessage(t *testing.T) {
 		{"", ""},
 		{"{{.Severity}}: {{.Message}}", "warning: " + builtIn},
 		{"{{.NoSuchField}}", builtIn},
+		// A stored template past a limit: the alert still goes, with its own message.
+		{`{{block "b" .}}x{{end}}`, builtIn},
 	} {
 		if got := e.ruleMessage(db.AlertRule{MessageTemplate: tt.tmpl}, p, builtIn); got != tt.want {
 			t.Errorf("template %q = %q, want %q", tt.tmpl, got, tt.want)
@@ -97,23 +100,36 @@ func TestDispatchCarriesTheRuleMessage(t *testing.T) {
 	}
 }
 
-// A range, which over a large integer can stall the evaluation tick, is
-// refused at save and at render, nested in an if or a define too.
-func TestTemplatesRefuseRange(t *testing.T) {
+// Each limit a notification template is held to refuses at save
+// (CheckTemplate, where it is a shape) and at render, nested in an if or a
+// define too; a plain template passes. The print cases are bounded stand-ins
+// for a printf that would build gigabytes.
+func TestTemplateLimits(t *testing.T) {
 	t.Parallel()
-	for _, tmpl := range []string{
-		"{{range 3}}{{end}}",
-		"{{if .Severity}}{{range $i := 5}}x{{end}}{{end}}",
-		`{{define "x"}}{{range 3}}{{end}}{{end}}{{template "x"}}`,
+	for _, tt := range []struct {
+		tmpl   string
+		want   error
+		atSave bool
+	}{
+		{"{{range 3}}{{end}}", errTemplateRange, true},
+		{"{{if .Severity}}{{range $i := 5}}x{{end}}{{end}}", errTemplateRange, true},
+		{`{{define "a"}}x{{end}}{{template "a"}}`, errTemplateCall, true},
+		{`{{block "b" .}}x{{end}}`, errTemplateCall, true},
+		{strings.Repeat("x", MaxTemplateLen+1), errTemplateLength, true},
+		{`{{printf "%70000d" 1}}`, errTemplatePrint, false},
+		// Refused before formatting: with its argument missing fmt would not pad.
+		{`{{printf "%70000d"}}`, errTemplatePrint, false},
+		{`{{printf "%*d" 70000 1}}`, errTemplatePrint, false},
+		{`{{print (printf "%60000d%60000d" 1 2)}}`, errTemplatePrint, false},
 	} {
-		if err := CheckTemplate(tmpl); err == nil {
-			t.Errorf("CheckTemplate(%q) passed", tmpl)
+		if err := CheckTemplate(tt.tmpl); errors.Is(err, tt.want) != tt.atSave {
+			t.Errorf("CheckTemplate(%.40q) = %v, want refused %v", tt.tmpl, err, tt.atSave)
 		}
-		if _, err := renderTemplate(tmpl, AlertPayload{Severity: "warning"}); err == nil {
-			t.Errorf("renderTemplate(%q) ran", tmpl)
+		if _, err := renderTemplate(tt.tmpl, AlertPayload{Severity: "warning"}); !errors.Is(err, tt.want) {
+			t.Errorf("renderTemplate(%.40q) = %v, want %v", tt.tmpl, err, tt.want)
 		}
 	}
-	if err := CheckTemplate("{{.RuleName}} on {{.ResourceName}}"); err != nil {
-		t.Errorf("a plain template refused: %v", err)
+	if got, err := renderTemplate(`{{printf "%s on %5s" .Severity "x"}}`, AlertPayload{Severity: "warning"}); err != nil || got != "warning on     x" {
+		t.Errorf("a plain printf = %q, %v", got, err)
 	}
 }
