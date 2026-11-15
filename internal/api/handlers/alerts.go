@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -1625,11 +1626,15 @@ func (h *AlertHandler) TestChannel(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	if err := dispatcher.Send(c.Context(), json.RawMessage(configJSON), payload); err != nil {
-		// Log the full error for debugging; return generic message to client.
+		// The reason goes to the caller and the log alike, with whatever secret
+		// the channel's settings hold cut out of it (FailureReason).
+		reason := notifications.FailureReason(err, json.RawMessage(configJSON))
+		slog.Warn("notification channel test failed",
+			"channel_id", id, "channel_type", ch.ChannelType, "reason", reason)
 		h.eventPub.ClusterEvent(c.Context(), "", events.KindAlertFired, "notification_channel", id.String(), "test_failed")
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
 			"success": false,
-			"message": "Test notification failed. Check server logs for details.",
+			"message": "The test notification was not delivered: " + reason,
 		})
 	}
 

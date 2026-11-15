@@ -1970,7 +1970,7 @@ after the node is back).
 | GET | `/notification-channels/:id` | Get channel |
 | PUT | `/notification-channels/:id` | Update channel |
 | DELETE | `/notification-channels/:id` | Delete channel |
-| POST | `/notification-channels/:id/test` | Send test notification |
+| POST | `/notification-channels/:id/test` | Send test notification. A failure answers 502 with `{"success": false, "message"}`, the message giving the reason with the channel's secrets cut out |
 
 ### Notification Dead-Letter Queue
 

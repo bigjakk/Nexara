@@ -1655,7 +1655,7 @@ A saved rule can be turned off or on from its row, or deleted, which also delete
 | **PagerDuty** | Integration/Routing Key. Its severity mapping can be set only through the API |
 
 4. Click **Create**
-5. Click **Test** on the channel's row to send a test notification. A failed test says only to check the server logs, but the reason is not logged there. To see it, let a real notification fail and read its dead-letter entry
+5. Click **Test** on the channel's row to send a test notification. A failed test says why beside the channel, and the server log has the same reason. Any password, token, webhook URL or header value the channel holds is cut out of it
 
 A Slack, Discord, Teams or Generic Webhook URL that resolves to a private or loopback address is refused when Nexara sends to it, with no override, so a webhook receiver on your LAN cannot be used. An SMTP host that resolves to a private address is refused too: with **Use STARTTLS** on, any private or loopback address, and with it off, anything but loopback. So a mail relay on your LAN cannot send alerts or report email unless it is reached through a loopback address.
 

@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/notifications"
 )
@@ -798,5 +801,41 @@ func TestAlertReads_HideUPSAlertsWithoutViewUps(t *testing.T) {
 				t.Errorf("view:ups %v: %s /alerts/:id%s = %d %s, want %d", canUps, r.method, r.suffix, status, body, wantStatus)
 			}
 		}
+	}
+}
+
+// failingDispatcher fails every send with err.
+type failingDispatcher struct{ err error }
+
+func (failingDispatcher) Type() string { return "webhook" }
+func (d failingDispatcher) Send(context.Context, json.RawMessage, notifications.AlertPayload) error {
+	return d.err
+}
+
+// A failed channel test says why, in its answer, with the channel's secret cut
+// out of the reason (notifications.FailureReason).
+func TestTestChannel_ReturnsTheReason(t *testing.T) {
+	t.Parallel()
+	enc, err := crypto.Encrypt(`{"url":"https://hooks.example.com/PROBE-SECRET"}`, testEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := db.NotificationChannel{ID: uuid.New(), Name: "hook01", ChannelType: "webhook", ConfigEncrypted: enc}
+	dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetNotificationChannel": ch}}
+	reg := notifications.NewRegistry()
+	reg.Register(failingDispatcher{err: errors.New("unexpected status 401 from https://hooks.example.com/PROBE-SECRET")})
+	h := NewAlertHandler(db.New(dbtx), testEncryptionKey, nil, reg)
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Post("/notification-channels/:id/test", withRequestParams(t,
+		apischema.Properties{"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}},
+		[]string{"id"}, h.TestChannel))
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/notification-channels/"+ch.ID.String()+"/test", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body := readBody(t, resp.Body)
+	if resp.StatusCode != http.StatusBadGateway || !strings.Contains(body, "unexpected status 401") || strings.Contains(body, "PROBE-SECRET") {
+		t.Errorf("status %d, body %s: want 502 with the reason and no secret", resp.StatusCode, body)
 	}
 }
