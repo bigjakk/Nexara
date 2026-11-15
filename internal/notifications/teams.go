@@ -26,12 +26,12 @@ func (d *TeamsDispatcher) Send(ctx context.Context, config json.RawMessage, payl
 		return fmt.Errorf("teams config: webhook_url required")
 	}
 
-	text := withMessage(defaultMessage(payload), payload, nil)
-	if cfg.MessageTemplate != "" {
-		if rendered, err := renderTemplate(cfg.MessageTemplate, payload); err == nil {
-			text = rendered
-		}
-	}
+	return postJSON(ctx, cfg.WebhookURL, teamsBody(cfg, payload))
+}
+
+// teamsBody is the Teams webhook request.
+func teamsBody(cfg teamsConfig, payload AlertPayload) map[string]interface{} {
+	text := chatText(cfg.MessageTemplate, payload)
 
 	color := fmt.Sprintf("%06x", severityColor(payload.Severity))
 
@@ -56,5 +56,5 @@ func (d *TeamsDispatcher) Send(ctx context.Context, config json.RawMessage, payl
 		},
 	}
 
-	return postJSON(ctx, cfg.WebhookURL, body)
+	return body
 }

@@ -32,12 +32,12 @@ func (d *SlackDispatcher) Send(ctx context.Context, config json.RawMessage, payl
 		return fmt.Errorf("slack config: webhook_url required")
 	}
 
-	text := withMessage(defaultMessage(payload), payload, nil)
-	if cfg.MessageTemplate != "" {
-		if rendered, err := renderTemplate(cfg.MessageTemplate, payload); err == nil {
-			text = rendered
-		}
-	}
+	return postJSON(ctx, cfg.WebhookURL, slackBody(cfg, payload))
+}
+
+// slackBody is the Slack webhook request.
+func slackBody(cfg slackConfig, payload AlertPayload) map[string]interface{} {
+	text := chatText(cfg.MessageTemplate, payload)
 
 	color := fmt.Sprintf("#%06x", severityColor(payload.Severity))
 
@@ -67,7 +67,7 @@ func (d *SlackDispatcher) Send(ctx context.Context, config json.RawMessage, payl
 		body["icon_emoji"] = cfg.IconEmoji
 	}
 
-	return postJSON(ctx, cfg.WebhookURL, body)
+	return body
 }
 
 // postJSON sends a JSON POST request using a safe HTTP client that blocks

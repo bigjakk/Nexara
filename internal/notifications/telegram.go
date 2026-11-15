@@ -38,25 +38,33 @@ func (d *TelegramDispatcher) Send(ctx context.Context, config json.RawMessage, p
 		cfg.ParseMode = "HTML"
 	}
 
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", cfg.BotToken)
+	return postJSON(ctx, url, telegramBody(cfg, payload))
+}
+
+// telegramBody is the sendMessage request.
+func telegramBody(cfg telegramConfig, payload AlertPayload) map[string]interface{} {
+	return map[string]interface{}{
+		"chat_id":    cfg.ChatID,
+		"text":       telegramText(cfg, payload),
+		"parse_mode": cfg.ParseMode,
+	}
+}
+
+// telegramText is a Telegram message's text: the channel's template, or the
+// built-in text with the notification's message under it, escaped in HTML
+// mode.
+func telegramText(cfg telegramConfig, payload AlertPayload) string {
+	if cfg.MessageTemplate != "" {
+		if rendered, err := renderTemplate(cfg.MessageTemplate, payload); err == nil {
+			return rendered
+		}
+	}
 	var escape func(string) string
 	if cfg.ParseMode == "HTML" {
 		escape = html.EscapeString
 	}
-	text := withMessage(buildTelegramMessage(payload), payload, escape)
-	if cfg.MessageTemplate != "" {
-		if rendered, err := renderTemplate(cfg.MessageTemplate, payload); err == nil {
-			text = rendered
-		}
-	}
-
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", cfg.BotToken)
-	body := map[string]interface{}{
-		"chat_id":    cfg.ChatID,
-		"text":       text,
-		"parse_mode": cfg.ParseMode,
-	}
-
-	return postJSON(ctx, url, body)
+	return withMessage(buildTelegramMessage(payload), payload, escape)
 }
 
 func buildTelegramMessage(p AlertPayload) string {

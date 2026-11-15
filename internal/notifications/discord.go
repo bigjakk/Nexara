@@ -20,6 +20,12 @@ type DiscordDispatcher struct{}
 
 func (d *DiscordDispatcher) Type() string { return "discord" }
 
+// discordDescription is a Discord embed's description, with the
+// notification's message under it.
+func discordDescription(payload AlertPayload) string {
+	return withMessage(fmt.Sprintf("**%s** alert on **%s**", strings.ToUpper(payload.Severity), payload.ResourceName), payload, nil)
+}
+
 func (d *DiscordDispatcher) Send(ctx context.Context, config json.RawMessage, payload AlertPayload) error {
 	var cfg discordConfig
 	if err := json.Unmarshal(config, &cfg); err != nil {
@@ -29,6 +35,11 @@ func (d *DiscordDispatcher) Send(ctx context.Context, config json.RawMessage, pa
 		return fmt.Errorf("discord config: webhook_url required")
 	}
 
+	return postJSON(ctx, cfg.WebhookURL, discordBody(cfg, payload))
+}
+
+// discordBody is the Discord webhook request.
+func discordBody(cfg discordConfig, payload AlertPayload) map[string]interface{} {
 	content := ""
 	if cfg.MessageTemplate != "" {
 		if rendered, err := renderTemplate(cfg.MessageTemplate, payload); err == nil {
@@ -41,7 +52,7 @@ func (d *DiscordDispatcher) Send(ctx context.Context, config json.RawMessage, pa
 		"embeds": []map[string]interface{}{
 			{
 				"title":       fmt.Sprintf("%s %s", severityEmoji(payload.Severity), payload.RuleName),
-				"description": withMessage(fmt.Sprintf("**%s** alert on **%s**", strings.ToUpper(payload.Severity), payload.ResourceName), payload, nil),
+				"description": discordDescription(payload),
 				"color":       severityColor(payload.Severity),
 				"fields": []map[string]interface{}{
 					{"name": "Metric", "value": payload.Metric, "inline": true},
@@ -60,5 +71,5 @@ func (d *DiscordDispatcher) Send(ctx context.Context, config json.RawMessage, pa
 		body["avatar_url"] = cfg.AvatarURL
 	}
 
-	return postJSON(ctx, cfg.WebhookURL, body)
+	return body
 }

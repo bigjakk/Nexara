@@ -91,6 +91,17 @@ func withMessage(text string, p AlertPayload, escape func(string) string) string
 	return strings.TrimRight(text, "\n") + "\n\n" + msg
 }
 
+// chatText is a Slack or Teams message's text: the channel's own template
+// (tmpl), or the built-in text with the notification's message under it.
+func chatText(tmpl string, payload AlertPayload) string {
+	if tmpl != "" {
+		if rendered, err := renderTemplate(tmpl, payload); err == nil {
+			return rendered
+		}
+	}
+	return withMessage(defaultMessage(payload), payload, nil)
+}
+
 // severityColor returns a hex color for the severity level.
 func severityColor(severity string) int {
 	switch severity {
