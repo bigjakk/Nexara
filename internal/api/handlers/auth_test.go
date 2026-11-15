@@ -3,6 +3,8 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -153,5 +155,29 @@ func authLoginMirror() apischema.Properties {
 func authRefreshMirror() apischema.Properties {
 	return apischema.Properties{
 		"refresh_token": {Type: apischema.String, Optional: true},
+	}
+}
+
+// TestLDAPFailureClass: a failed directory sign-in is logged by its class alone. The
+// directory's error can carry the search filter, and with it what was typed, which
+// is sometimes a password.
+func TestLDAPFailureClass(t *testing.T) {
+	t.Parallel()
+	const typed = "Example-Password-1"
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{auth.ErrLDAPConnection, "connection_failed"},
+		{auth.ErrLDAPBindCredentials, "service_bind_failed"},
+		{auth.ErrLDAPSearchFailed, "search_failed"},
+		{auth.ErrLDAPUserNotFound, "user_not_found"},
+		{auth.ErrLDAPUserBindFailed, "wrong_password"},
+		{errors.New("something else"), "other"},
+	} {
+		err := fmt.Errorf("%w: (mail=%s)", tc.err, typed)
+		if got := ldapFailureClass(err); got != tc.want {
+			t.Errorf("ldapFailureClass(%v) = %q, want %q", tc.err, got, tc.want)
+		}
 	}
 }

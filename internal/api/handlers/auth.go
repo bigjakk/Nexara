@@ -853,9 +853,10 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 
 // tryLDAPLogin attempts LDAP authentication. Returns the DB user and true on success.
 //
-// Failure modes are logged at WARN with the email but never the password,
-// so an admin investigating "why is LDAP login broken" gets a signal without
-// the silent-failure mode the original implementation suffered from.
+// Failure modes are logged at WARN with the client address and the class of the
+// failure (ldapFailureClass), never what was typed, so an admin investigating "why
+// is LDAP login broken" gets a signal without the silent-failure mode the original
+// implementation suffered from.
 //
 // Residual race (acknowledged): if a local user with the same email is
 // being created concurrently with a JIT-provisioning LDAP login, the LDAP
@@ -885,7 +886,7 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string) (db.User
 
 	authCfg, err := h.ldapHandler.BuildLDAPConfigFromDB(ldapCfg)
 	if err != nil {
-		slog.Warn("ldap login: invalid stored config", "email", email, "error", err)
+		slog.Warn("ldap login: invalid stored config", "ip", c.IP(), "error", err)
 		return db.User{}, false
 	}
 
@@ -896,11 +897,31 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string) (db.User
 		// errors carry the class. Log so admins can distinguish "wrong
 		// password" from "directory unreachable" without us leaking which
 		// to the client.
-		slog.Warn("ldap login: authentication failed", "email", email, "error", err)
+		slog.Warn("ldap login: authentication failed", "ip", c.IP(), "reason", ldapFailureClass(err))
 		return db.User{}, false
 	}
 
 	return h.provisionLDAPUser(c, ldapCfg, ldapUser, email)
+}
+
+// ldapFailureClass names what went wrong with a directory sign-in, for the log, and
+// nothing else: the directory's error text can carry the search filter, and with it
+// what was typed into the sign-in form, which is sometimes a password.
+func ldapFailureClass(err error) string {
+	switch {
+	case errors.Is(err, auth.ErrLDAPConnection):
+		return "connection_failed"
+	case errors.Is(err, auth.ErrLDAPBindCredentials):
+		return "service_bind_failed"
+	case errors.Is(err, auth.ErrLDAPSearchFailed):
+		return "search_failed"
+	case errors.Is(err, auth.ErrLDAPUserNotFound):
+		return "user_not_found"
+	case errors.Is(err, auth.ErrLDAPUserBindFailed):
+		return "wrong_password"
+	default:
+		return "other"
+	}
 }
 
 // provisionLDAPUser turns a directory user who has just authenticated into the

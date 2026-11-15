@@ -194,7 +194,9 @@ func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*LDAPUser, er
 	}
 
 	if len(result.Entries) == 0 {
-		return nil, fmt.Errorf("%w: no entries matched filter %q in base %q", ErrLDAPUserNotFound, filter, c.cfg.SearchBaseDN)
+		// Not the filter: it holds what was typed into the sign-in form, which is
+		// sometimes a password, and this error reaches logs.
+		return nil, fmt.Errorf("%w: no entries matched in base %q", ErrLDAPUserNotFound, c.cfg.SearchBaseDN)
 	}
 
 	entry := result.Entries[0]

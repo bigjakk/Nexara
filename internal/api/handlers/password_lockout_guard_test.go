@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"go/ast"
+	"go/token"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -159,4 +160,66 @@ func TestGuard_OnlyThePasswordRoutesTouchTheLockout(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestGuard_ADirectorySignInFailureLogsNothingTyped: tryLDAPLogin's log calls pass none
+// of its typed parameters (the identifier is sometimes a password), and none after the
+// bind passes the bind's raw err, whose text can carry the search filter. The lines
+// after a successful bind log the directory's own address, a variable of their own.
+func TestGuard_ADirectorySignInFailureLogsNothingTyped(t *testing.T) {
+	t.Parallel()
+	_, sources := authParsedSources(t)
+	var fn *ast.FuncDecl
+	for _, src := range sources {
+		if src.rel != "internal/api/handlers/auth.go" {
+			continue
+		}
+		for _, d := range src.file.Decls {
+			if f, ok := d.(*ast.FuncDecl); ok && f.Name.Name == "tryLDAPLogin" {
+				fn = f
+			}
+		}
+	}
+	if fn == nil {
+		t.Fatal("tryLDAPLogin not found: this guard has gone stale")
+	}
+	typed := map[string]bool{}
+	for _, field := range fn.Type.Params.List {
+		for _, n := range field.Names {
+			typed[n.Name] = true
+		}
+	}
+	var bind token.Pos
+	logs := 0
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if sel.Sel.Name == "Authenticate" {
+			bind = call.Pos()
+		}
+		if x, ok := sel.X.(*ast.Ident); !ok || (x.Name != "slog" && x.Name != "logger") {
+			return true
+		}
+		logs++
+		for _, arg := range call.Args {
+			id, ok := arg.(*ast.Ident)
+			switch {
+			case !ok:
+			case typed[id.Name]:
+				t.Errorf("tryLDAPLogin logs %s, what the caller typed", id.Name)
+			case id.Name == "err" && bind.IsValid() && call.Pos() > bind:
+				t.Error("tryLDAPLogin logs the bind's raw err, whose text can carry the typed identifier")
+			}
+		}
+		return true
+	})
+	if !bind.IsValid() || logs == 0 {
+		t.Fatalf("found the bind: %t, log calls: %d: this guard has gone stale", bind.IsValid(), logs)
+	}
 }
