@@ -1118,11 +1118,11 @@ func scheduledTask(task db.ScheduledTask, upid, taskType, description string) tr
 // action was invisible until the collector re-ingested it as an external
 // "proxmox" task mis-attributed to the API token user.
 //
-// If the task_history insert fails, the event and audit row are skipped on
-// purpose: an audit row containing the UPID would make the external-task
-// ingest dedup skip it, and the task would then never appear anywhere. With
-// nothing recorded, the next collector tick ingests it as external — a
-// degraded but visible fallback. For a scheduled_tasks run that fallback also
+// If the task_history insert fails, the event and audit row are skipped: with
+// nothing recorded, the next collector tick ingests it as external, row and
+// entry both — a degraded but visible fallback. (An audit row alone would now
+// get its task row from the collector too, within an hour of the task's start,
+// but as Proxmox's and without the entry the ingest would have written.) For a scheduled_tasks run that fallback also
 // settles the schedule: RunScheduledTaskReconcile follows the run's UPID into
 // task_history, and finds the row whichever of the two wrote it.
 func (s *Scheduler) trackTask(ctx context.Context, p trackTaskParams) {
