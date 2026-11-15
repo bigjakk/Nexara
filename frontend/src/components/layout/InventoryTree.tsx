@@ -268,7 +268,8 @@ function ClusterBranch({ cluster, filter }: ClusterBranchProps) {
   const location = useLocation();
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
   const clusterKey = `cluster:${cluster.id}`;
-  const isExpanded = expandedNodes.has(clusterKey);
+  const storedExpanded = expandedNodes.has(clusterKey);
+  const { t } = useTranslation("common");
   // Respect dismissed/muted so the sidebar dot matches the health pill.
   const dismissed = useHealthDismissStore((s) => s.dismissed);
   const mutedTypes = useHealthMuteStore((s) => s.mutedTypes);
@@ -285,9 +286,14 @@ function ClusterBranch({ cluster, filter }: ClusterBranchProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  // Only fetch children when expanded
-  const { data: nodes } = useClusterNodes(isExpanded ? cluster.id : "");
-  const { data: vms } = useClusterVMs(isExpanded ? cluster.id : "");
+  // Children are fetched when expanded, or while the filter box has text, so
+  // a collapsed cluster is searched too. The queries are keyed on the cluster
+  // alone, so typing does not send a request per keystroke.
+  const load = storedExpanded || filter !== "";
+  const nodesQuery = useClusterNodes(load ? cluster.id : "");
+  const vmsQuery = useClusterVMs(load ? cluster.id : "");
+  const nodes = nodesQuery.data;
+  const vms = vmsQuery.data;
 
   // Auto-expand if navigating to a child route
   useEffect(() => {
@@ -301,31 +307,36 @@ function ClusterBranch({ cluster, filter }: ClusterBranchProps) {
     }
   }, [location.pathname, cluster.id, clusterKey, expandNode]);
 
-  // The rows under this cluster, as the filter box sees them. Only what has
-  // loaded: a collapsed cluster has no rows to look through.
+  // The rows under this cluster, as the filter box sees them, once loaded.
   const filtered = useMemo(() => {
-    if (filter === "" || !isExpanded || nodes === undefined) return null;
+    if (filter === "" || nodes === undefined || vms === undefined) return null;
     const model: TreeFilterNode = {
       id: clusterKey,
       label: cluster.name,
       children: nodes.map((node) => ({
         id: nodeKeyOf(cluster.id, node.id),
         label: node.name,
-        children: (vms ?? [])
+        children: vms
           .filter((vm) => vm.node_id === node.id)
           .map((vm) => ({ id: guestKeyOf(vm.id), label: guestLabel(vm) })),
       })),
     };
     return filterTree([model], filter);
-  }, [filter, isExpanded, nodes, vms, cluster.id, cluster.name, clusterKey]);
+  }, [filter, nodes, vms, cluster.id, cluster.name, clusterKey]);
+
+  // The filter holds the branch open over a match, as NodeBranch does; the
+  // stored expansion is what shows again when the box is cleared.
+  const isExpanded =
+    storedExpanded || (filtered?.open.has(clusterKey) ?? false);
 
   if (filtered !== null && !filtered.visible.has(clusterKey)) return null;
-  // A collapsed cluster has loaded nothing to look through. It stays, dimmed,
-  // rather than vanish as if nothing in it matched.
+  // Not searched yet (loading) or not searchable (the read failed): it stays,
+  // dimmed, rather than vanish as if nothing in it matched.
   const unsearched =
     filter !== "" &&
     filtered === null &&
     !cluster.name.toLowerCase().includes(filter);
+  const searchFailed = nodesQuery.isError || vmsQuery.isError;
 
   return (
     <>
@@ -339,7 +350,9 @@ function ClusterBranch({ cluster, filter }: ClusterBranchProps) {
               )}
               style={treeIndent(0)}
               title={
-                unsearched ? "Collapsed: open it to filter inside" : undefined
+                unsearched
+                  ? t(searchFailed ? "treeSearchFailed" : "treeSearching")
+                  : undefined
               }
             >
               <button

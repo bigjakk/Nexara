@@ -3,6 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { makeNode, makeVM } from "@/test/cluster.fixtures";
 import type { ClusterResponse } from "@/types/api";
 import { InventoryTree } from "./InventoryTree";
 
@@ -82,5 +83,27 @@ describe("InventoryTree — heading", () => {
     expect(
       await screen.findByRole("link", { name: "Datacenter" }),
     ).toHaveAttribute("href", "/clusters");
+  });
+});
+
+describe("InventoryTree — name filter", () => {
+  // A collapsed cluster used to stay dimmed and unsearched: the filter loads
+  // its rows, and holds it open over the match.
+  it("finds a guest in a cluster nobody has expanded", async () => {
+    api = stubApi({
+      "/api/v1/clusters": listOf([cluster("c1", "cluster01")]),
+      "/api/v1/clusters/c1/nodes": listOf([
+        makeNode({ id: "n1", name: "pve-01" }),
+      ]),
+      "/api/v1/clusters/c1/vms": listOf([
+        makeVM({ id: "v1", node_id: "n1", vmid: 107, name: "linux07" }),
+      ]),
+    });
+    renderWithProviders(<InventoryTree filter="linux07" />);
+
+    expect(await screen.findByText(/linux07/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Collapse cluster cluster01" }),
+    ).toHaveAttribute("aria-expanded", "true");
   });
 });
