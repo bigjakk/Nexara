@@ -2475,6 +2475,11 @@ The server replies `{"type": "welcome"}` on connect, `{"type": "subscribed",
 (`invalid channel format`) or denied (`forbidden`). A rejected channel is
 skipped — the connection and any other subscriptions stay open.
 
+Subscriptions are re-checked every 5 seconds. One whose permission has been
+removed is dropped, with `{"type": "error", "channel": "...", "message":
+"forbidden"}`; the connection and the other subscriptions stay open. Permission
+changes can take up to the RBAC cache's lifetime (about five minutes) to be seen.
+
 ### Console connections
 
 VNC and node-shell WebSocket connections proxy directly to Proxmox.

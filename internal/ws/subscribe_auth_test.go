@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -432,5 +433,28 @@ func TestClientCanSubscribe_UnclassifiedSystemChannelDenied(t *testing.T) {
 	}
 	if c.canSubscribe("system:something-new") {
 		t.Error("an unclassified non-cluster channel must be denied, not allowed by default")
+	}
+}
+
+// TestRecheckSubscriptions_KeepsThemWhenTheLookupFails: a failing RBAC lookup is
+// not a removed grant. Nothing is dropped and the error goes back to the watcher,
+// which counts it as a failed check (console_credential.go).
+func TestRecheckSubscriptions_KeepsThemWhenTheLookupFails(t *testing.T) {
+	t.Parallel()
+	hub := NewHub(testLogger(), 0)
+	hub.Run()
+	t.Cleanup(hub.Stop)
+	c := NewClient("c1", nil, hub, testLogger(), time.Minute, time.Minute, uuid.New(),
+		func(context.Context, uuid.UUID, string, string, string, uuid.UUID) (bool, error) {
+			return false, errors.New("rbac unavailable")
+		})
+	channel := "cluster:550e8400-e29b-41d4-a716-446655440000:metrics"
+	c.subs[channel] = 1
+
+	if _, err := c.recheckSubscriptions(context.Background()); err == nil {
+		t.Error("recheckSubscriptions returned no error for a failing lookup")
+	}
+	if _, ok := c.subs[channel]; !ok || len(c.send) != 0 {
+		t.Errorf("the subscription was dropped (kept %v, %d messages sent), want it kept", ok, len(c.send))
 	}
 }

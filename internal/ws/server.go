@@ -657,7 +657,7 @@ func (s *Server) handleWS(conn *websocket.Conn) {
 		defer close(watched)
 		ticker := time.NewTicker(s.checkEvery)
 		defer ticker.Stop()
-		watchCredential(watchCtx, ticker.C, live, nil, client.closeWith, credLogger)
+		watchCredential(watchCtx, ticker.C, live, client.recheckSubscriptions, client.closeWith, credLogger)
 	}()
 
 	// readPump blocks until the connection is closed.

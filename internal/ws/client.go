@@ -3,6 +3,8 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -69,6 +71,14 @@ type Client struct {
 	// closed — there is no synthetic-admin fallback (that path was
 	// removed in 5.1 along with the handlers' requireAdmin fallback).
 	checkPermission PermissionChecker
+
+	// subMu guards subs: the channels this client is subscribed to, each with
+	// the generation it was subscribed at, which recheckSubscriptions re-checks.
+	// It is held across each hub Subscribe/Unsubscribe send, so the hub applies
+	// them in the order the records changed.
+	subMu  sync.Mutex
+	subs   map[string]uint64
+	subGen uint64
 }
 
 // closeSend signals the writer to exit. Idempotent.
@@ -135,6 +145,7 @@ func NewClient(
 		pongTimeout:     pongTimeout,
 		userID:          userID,
 		checkPermission: checkPermission,
+		subs:            make(map[string]uint64),
 	}
 }
 
@@ -230,12 +241,19 @@ func (c *Client) handleMessage(msg IncomingMessage) {
 				c.trySend(newErrorMsg("forbidden"))
 				continue
 			}
+			c.subMu.Lock()
+			c.subGen++
+			c.subs[ch] = c.subGen
 			c.hub.Subscribe(c, ch)
+			c.subMu.Unlock()
 		}
 
 	case MsgTypeUnsubscribe:
 		for _, ch := range msg.Channels {
+			c.subMu.Lock()
+			delete(c.subs, ch)
 			c.hub.Unsubscribe(c, ch)
+			c.subMu.Unlock()
 		}
 
 	default:
@@ -243,11 +261,78 @@ func (c *Client) handleMessage(msg IncomingMessage) {
 	}
 }
 
-// hasGlobalPermission resolves a global-scoped grant for the connected user.
-// Fails closed on a missing checker or an engine error, matching the cluster
-// path: a transient RBAC failure must not open a stream.
-func (c *Client) hasGlobalPermission(channel, action, resource string) bool {
-	if c.checkPermission == nil {
+// channelGrant is the permission a subscription to a channel needs.
+type channelGrant struct {
+	action, resource, scopeType string
+	scopeID                     uuid.UUID
+}
+
+// grantFor says what a subscription to channel needs (security review H1): a
+// grant, nothing (open), or refusal outright (ok false).
+//
+// Cluster-scoped channels (`cluster:<uuid>:metrics|alerts|events`) require
+// `view:cluster` on that specific cluster. Without this gate, any
+// authenticated user could subscribe to any cluster whose UUID they can guess
+// and stream live metrics, events and alerts — a cross-tenant disclosure.
+// cluster:<uuid>:audit carries the cluster's audit entries, so it takes
+// view:audit on that cluster — mirroring AuditHandler.List, which filters
+// rows through accessibleClusters(c, "view", "audit").
+//
+// `system:audit` requires global `view:audit`: it carries the audit entries for
+// non-cluster administrative actions, naming the user whose password changed,
+// the setting that was written, the role that was granted.
+//
+// `system:events` stays open to any authenticated session. It carries only
+// operational events with no such subject — task updates, report completion,
+// PBS changes — and gating it would cut the task feed for roles that
+// legitimately cannot read the audit log.
+//
+// Non-cluster channels are an allow-list, never a default-allow: a channel added
+// to channelPattern later must be classified here deliberately. Defaulting to
+// allow is exactly how system:events came to be ungated in the first place.
+func grantFor(channel string) (g channelGrant, open, ok bool) {
+	clusterID, isCluster := ChannelClusterID(channel)
+	if !isCluster {
+		switch channel {
+		case SystemEventsChannel:
+			return channelGrant{}, true, true
+		case SystemAuditChannel:
+			return channelGrant{"view", "audit", "global", uuid.Nil}, false, true
+		}
+		return channelGrant{}, false, false
+	}
+	clusterUUID, err := uuid.Parse(clusterID)
+	if err != nil {
+		// Should be caught by ValidateChannel already, but be defensive.
+		return channelGrant{}, false, false
+	}
+	resource := "cluster"
+	if ChannelKind(channel) == AuditChannelKind {
+		resource = "audit"
+	}
+	return channelGrant{"view", resource, "cluster", clusterUUID}, false, true
+}
+
+// canSubscribe enforces the subscribe-time RBAC check (grantFor).
+//
+// If the RBAC engine is nil (test fixtures only — production main.go always
+// wires it), gated subscribes fail CLOSED. This is the 5.1-aligned behaviour:
+// there is no synthetic-admin fallback in either the HTTP or WS path. A
+// server with a missing engine in production is a misconfiguration that must
+// surface loudly. An engine error fails closed too: a transient RBAC failure
+// must not open a stream.
+func (c *Client) canSubscribe(channel string) bool {
+	g, open, ok := grantFor(channel)
+	switch {
+	case !ok:
+		c.logger.Warn("ws subscribe: unclassified or invalid channel, denying",
+			"client", c.id,
+			"channel", channel,
+		)
+		return false
+	case open:
+		return true
+	case c.checkPermission == nil:
 		c.logger.Warn("ws subscribe: no permission checker, denying channel",
 			"client", c.id,
 			"channel", channel,
@@ -258,7 +343,7 @@ func (c *Client) hasGlobalPermission(channel, action, resource string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), subscribeAuthTimeout)
 	defer cancel()
 
-	ok, err := c.checkPermission(ctx, c.userID, action, resource, "global", uuid.Nil)
+	allowed, err := c.checkPermission(ctx, c.userID, g.action, g.resource, g.scopeType, g.scopeID)
 	if err != nil {
 		c.logger.Warn("ws subscribe: rbac check errored",
 			"client", c.id,
@@ -268,120 +353,69 @@ func (c *Client) hasGlobalPermission(channel, action, resource string) bool {
 		)
 		return false
 	}
-	if !ok {
+	if !allowed {
 		c.logger.Info("ws subscribe: forbidden",
 			"client", c.id,
 			"user_id", c.userID,
 			"channel", channel,
-			"required", action+":"+resource,
+			"required", g.action+":"+g.resource,
 		)
 	}
-	return ok
+	return allowed
 }
 
-// canSubscribe enforces the subscribe-time RBAC check (security review H1).
-//
-// Cluster-scoped channels (`cluster:<uuid>:metrics|alerts|events`) require
-// `view:cluster` on that specific cluster. Without this gate, any
-// authenticated user could subscribe to any cluster whose UUID they can guess
-// and stream live metrics, events and alerts — a cross-tenant disclosure.
-//
-// `system:audit` requires `view:audit`: it carries the audit entries for
-// non-cluster administrative actions, naming the user whose password changed,
-// the setting that was written, the role that was granted.
-//
-// `system:events` stays open to any authenticated session. It carries only
-// operational events with no such subject — task updates, report completion,
-// PBS changes — and gating it would cut the task feed for roles that
-// legitimately cannot read the audit log.
-//
-// If the RBAC engine is nil (test fixtures only — production main.go always
-// wires it), gated subscribes fail CLOSED. This is the 5.1-aligned behaviour:
-// there is no synthetic-admin fallback in either the HTTP or WS path. A
-// server with a missing engine in production is a misconfiguration that must
-// surface loudly.
-func (c *Client) canSubscribe(channel string) bool {
-	clusterID, isCluster := ChannelClusterID(channel)
+// recheckSubscriptions asks again, for every channel this client is subscribed
+// to, whether it may still be, and drops each it may not, telling the client
+// with a "forbidden" error naming the channel. The hub's credential watcher calls
+// it on each tick (Server.handleWS), so a revoked grant stops the stream within
+// a tick of RBAC seeing it. A lookup that fails drops nothing: it is returned,
+// and the watcher counts it as it counts a failed liveness check. It answers
+// true when it could look, as the watcher's permission check.
+func (c *Client) recheckSubscriptions(ctx context.Context) (bool, error) {
+	c.subMu.Lock()
+	snapshot := make(map[string]uint64, len(c.subs))
+	for ch, gen := range c.subs {
+		snapshot[ch] = gen
+	}
+	c.subMu.Unlock()
 
-	if !isCluster {
-		// Allow-list, never a default-allow: a channel added to
-		// channelPattern later must be classified here deliberately.
-		// Defaulting to allow is exactly how system:events came to be
-		// ungated in the first place.
-		switch channel {
-		case SystemEventsChannel:
-			// Task updates, report completion, PBS changes. No subject to
-			// authorize, and gating it would cut the task feed for roles that
-			// legitimately cannot read the audit log. Auth was already
-			// enforced at the WS upgrade step.
-			return true
-		case SystemAuditChannel:
-			// Who did what to which user, setting, role or API key. Same
-			// permission the REST audit endpoints require.
-			return c.hasGlobalPermission(channel, "view", "audit")
-		default:
-			c.logger.Warn("ws subscribe: unclassified non-cluster channel, denying",
-				"client", c.id,
-				"channel", channel,
-			)
-			return false
+	answers := make(map[channelGrant]bool) // channels that need the same grant ask once
+	var drop []string
+	for ch := range snapshot {
+		g, open, ok := grantFor(ch)
+		if open {
+			continue
+		}
+		allowed, asked := answers[g]
+		if ok && !asked {
+			if c.checkPermission == nil {
+				return false, errors.New("no permission checker configured")
+			}
+			var err error
+			if allowed, err = c.checkPermission(ctx, c.userID, g.action, g.resource, g.scopeType, g.scopeID); err != nil {
+				return false, fmt.Errorf("re-checking subscription %s: %w", ch, err)
+			}
+			answers[g] = allowed
+		}
+		if !ok || !allowed {
+			drop = append(drop, ch)
 		}
 	}
 
-	if c.checkPermission == nil {
-		c.logger.Warn("ws subscribe: no permission checker, denying cluster channel",
-			"client", c.id,
-			"channel", channel,
-		)
-		return false
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	for _, ch := range drop {
+		// A channel subscribed again since the snapshot passed a newer check.
+		if c.subs[ch] != snapshot[ch] {
+			continue
+		}
+		delete(c.subs, ch)
+		c.hub.Unsubscribe(c, ch)
+		c.trySend(newForbiddenChannelMsg(ch))
+		c.logger.Info("ws: dropped a subscription its user may no longer hold",
+			"client", c.id, "user_id", c.userID, "channel", ch)
 	}
-
-	clusterUUID, err := uuid.Parse(clusterID)
-	if err != nil {
-		// Should be caught by ValidateChannel already, but be defensive.
-		c.logger.Warn("ws subscribe: invalid cluster uuid in channel",
-			"client", c.id,
-			"channel", channel,
-			"error", err,
-		)
-		return false
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), subscribeAuthTimeout)
-	defer cancel()
-
-	// cluster:<uuid>:audit carries the cluster's audit entries, so it takes
-	// view:audit on that cluster — mirroring AuditHandler.List, which filters
-	// rows through accessibleClusters(c, "view", "audit"). The metrics, alerts
-	// and events rooms take view:cluster.
-	resource := "cluster"
-	if ChannelKind(channel) == AuditChannelKind {
-		resource = "audit"
-	}
-
-	ok, err := c.checkPermission(
-		ctx, c.userID, "view", resource, "cluster", clusterUUID,
-	)
-	if err != nil {
-		// Fail closed on error — don't leak data because the RBAC
-		// engine had a transient failure.
-		c.logger.Warn("ws subscribe: rbac check errored",
-			"client", c.id,
-			"user_id", c.userID,
-			"channel", channel,
-			"error", err,
-		)
-		return false
-	}
-	if !ok {
-		c.logger.Info("ws subscribe: forbidden",
-			"client", c.id,
-			"user_id", c.userID,
-			"channel", channel,
-			"cluster_id", clusterID,
-		)
-	}
-	return ok
+	return true, nil
 }
 
 // trySend performs a non-blocking send to the client's send channel.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +25,8 @@ type testEnv struct {
 	port        int
 	// lookups answers the hub sockets' liveness checks (live, until setEnded).
 	lookups *gateLookupDB
+	// denied makes the permission checker refuse every grant.
+	denied *atomic.Bool
 }
 
 func setupIntegration(t *testing.T) *testEnv {
@@ -36,6 +39,7 @@ func setupIntegration(t *testing.T) *testEnv {
 func setupIntegrationEvery(t *testing.T, checkEvery time.Duration) *testEnv {
 	t.Helper()
 	lookups := &gateLookupDB{}
+	denied := &atomic.Bool{}
 
 	mr := miniredis.RunT(t)
 
@@ -53,7 +57,7 @@ func setupIntegrationEvery(t *testing.T, checkEvery time.Duration) *testEnv {
 	// in subscribe_auth_test.go). Production wires RBACEngine instead.
 	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second, ServerConfig{
 		TestPermissionChecker: func(_ context.Context, _ uuid.UUID, _, _, _ string, _ uuid.UUID) (bool, error) {
-			return true, nil
+			return !denied.Load(), nil
 		},
 		Queries: db.New(lookups),
 	})
@@ -83,6 +87,7 @@ func setupIntegrationEvery(t *testing.T, checkEvery time.Duration) *testEnv {
 		jwtSvc:      jwtSvc,
 		port:        port,
 		lookups:     lookups,
+		denied:      denied,
 	}
 }
 
@@ -361,4 +366,42 @@ func TestIntegrationHubHeldToItsCredential(t *testing.T) {
 			t.Fatalf("got %v, want a Close %d and no welcome", err, gorillaws.CloseInternalServerErr)
 		}
 	})
+}
+
+// TestIntegrationHubDropsASubscriptionWhoseGrantIsRemoved: a cluster channel is
+// re-checked on the watcher's tick and dropped once its grant is gone — the client
+// is told, the hub stops sending it — while the socket and its sign-in stay.
+func TestIntegrationHubDropsASubscriptionWhoseGrantIsRemoved(t *testing.T) {
+	t.Parallel()
+	env := setupIntegrationEvery(t, 10*time.Millisecond)
+	conn := env.dialWS(t, mintHubToken(t, env.jwtSvc))
+	defer conn.Close()
+	readMsg(t, conn, 3*time.Second) // welcome
+
+	revoked, kept := "550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440001"
+	writeMsg(t, conn, IncomingMessage{Type: MsgTypeSubscribe, Channels: []string{"cluster:" + revoked + ":metrics"}})
+	if msg := readMsg(t, conn, 3*time.Second); msg.Type != MsgTypeSubscribed {
+		t.Fatalf("expected subscribed, got %+v", msg)
+	}
+
+	env.denied.Store(true)
+	if msg := readMsg(t, conn, 3*time.Second); msg.Type != MsgTypeError || msg.Channel != "cluster:"+revoked+":metrics" {
+		t.Fatalf("after the grant was removed: %+v, want a forbidden error naming the channel", msg)
+	}
+
+	// Publishes reach the hub in order, so data for kept arriving with none for
+	// revoked before it shows the hub no longer sends revoked.
+	env.denied.Store(false)
+	writeMsg(t, conn, IncomingMessage{Type: MsgTypeSubscribe, Channels: []string{"cluster:" + kept + ":metrics"}})
+	if msg := readMsg(t, conn, 3*time.Second); msg.Type != MsgTypeSubscribed {
+		t.Fatalf("expected subscribed, got %+v", msg)
+	}
+	for _, id := range []string{revoked, kept} {
+		if err := env.redisClient.Publish(context.Background(), "nexara:metrics:"+id, `{"cpu":0.5}`).Err(); err != nil {
+			t.Fatalf("redis publish: %v", err)
+		}
+	}
+	if msg := readMsg(t, conn, 3*time.Second); msg.Type != MsgTypeData || msg.Channel != "cluster:"+kept+":metrics" {
+		t.Fatalf("got %+v, want only the kept channel's data", msg)
+	}
 }

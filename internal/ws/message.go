@@ -176,6 +176,13 @@ func newErrorMsg(msg string) []byte {
 }
 
 // newPongMsg creates a pong message.
+// newForbiddenChannelMsg tells a client that its subscription to channel was
+// dropped because it may no longer hold it (Client.recheckSubscriptions).
+func newForbiddenChannelMsg(channel string) []byte {
+	b, _ := json.Marshal(OutgoingMessage{Type: MsgTypeError, Channel: channel, Message: "forbidden"})
+	return b
+}
+
 func newPongMsg() []byte {
 	b, _ := json.Marshal(OutgoingMessage{Type: MsgTypePong})
 	return b

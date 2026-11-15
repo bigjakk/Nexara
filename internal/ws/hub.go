@@ -14,10 +14,12 @@ type Hub struct {
 	// Channels for the event loop.
 	registerCh   chan *Client
 	unregisterCh chan *Client
-	subscribeCh  chan subscribeReq
-	unsubCh      chan subscribeReq
-	broadcastCh  chan broadcastMsg
-	stopCh       chan struct{}
+	// subscribeCh carries subscribes and unsubscribes both, so the hub applies
+	// them in the order they were sent: a re-check that drops a subscription
+	// must not be overtaken by the subscribe it followed (Client.recheckSubscriptions).
+	subscribeCh chan subscribeReq
+	broadcastCh chan broadcastMsg
+	stopCh      chan struct{}
 
 	logger         *slog.Logger
 	maxConnections int
@@ -29,6 +31,7 @@ type Hub struct {
 type subscribeReq struct {
 	client  *Client
 	channel string
+	unsub   bool
 }
 
 type broadcastMsg struct {
@@ -42,7 +45,6 @@ func NewHub(logger *slog.Logger, maxConnections int) *Hub {
 		registerCh:     make(chan *Client, 64),
 		unregisterCh:   make(chan *Client, 64),
 		subscribeCh:    make(chan subscribeReq, 64),
-		unsubCh:        make(chan subscribeReq, 64),
 		broadcastCh:    make(chan broadcastMsg, 256),
 		stopCh:         make(chan struct{}),
 		logger:         logger,
@@ -79,7 +81,7 @@ func (h *Hub) Subscribe(c *Client, channel string) {
 
 // Unsubscribe removes a client from a room.
 func (h *Hub) Unsubscribe(c *Client, channel string) {
-	h.unsubCh <- subscribeReq{client: c, channel: channel}
+	h.subscribeCh <- subscribeReq{client: c, channel: channel, unsub: true}
 }
 
 // Broadcast sends a message to all clients in a room.
@@ -131,6 +133,10 @@ func (h *Hub) run() {
 
 		case req := <-h.subscribeCh:
 			c, channel := req.client, req.channel
+			if req.unsub {
+				h.unsubscribe(st, c, channel)
+				continue
+			}
 			// Auto-register if not yet registered (handles channel buffering race).
 			if _, ok := st.clients[c]; !ok {
 				st.clients[c] = struct{}{}
@@ -157,19 +163,6 @@ func (h *Hub) run() {
 
 			h.logger.Debug("client subscribed", "client", c.id, "channel", channel)
 
-		case req := <-h.unsubCh:
-			c, channel := req.client, req.channel
-			if members, ok := st.rooms[channel]; ok {
-				delete(members, c)
-				if len(members) == 0 {
-					delete(st.rooms, channel)
-				}
-			}
-			if subs, ok := st.clientRooms[c]; ok {
-				delete(subs, channel)
-			}
-			h.logger.Debug("client unsubscribed", "client", c.id, "channel", channel)
-
 		case msg := <-h.broadcastCh:
 			data := newDataMsg(msg.room, msg.payload)
 			st.lastMsg[msg.room] = data
@@ -183,6 +176,20 @@ func (h *Hub) run() {
 			}
 		}
 	}
+}
+
+// unsubscribe removes c from the room channel.
+func (h *Hub) unsubscribe(st *hubState, c *Client, channel string) {
+	if members, ok := st.rooms[channel]; ok {
+		delete(members, c)
+		if len(members) == 0 {
+			delete(st.rooms, channel)
+		}
+	}
+	if subs, ok := st.clientRooms[c]; ok {
+		delete(subs, channel)
+	}
+	h.logger.Debug("client unsubscribed", "client", c.id, "channel", channel)
 }
 
 // trySendOrEvict performs a non-blocking send to a client. If the client's
