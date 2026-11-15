@@ -323,6 +323,24 @@ func registerRollingUpdateEndpoints(reg *Registry, h *handlers.RollingUpdateHand
 		Parameters:  clusterParams(nil),
 		Handler:     h.GetSSHCredentials,
 	})
+	// Whether a credential exists, for the callers who may run what needs it —
+	// Maintenance (manage:node) and an automated upgrade (manage:rolling_update)
+	// — without the read above, which a built-in Operator does not hold.
+	reg.Register(Endpoint{
+		Method: fiber.MethodGet,
+		Path:   sshCredentialScope + "/configured",
+		Description: "Say whether the cluster has an SSH credential, as {\"configured\": true|false} and " +
+			"nothing more, so a caller who may run node maintenance or an automated upgrade can tell " +
+			"whether those will work without reading the credential itself.",
+		Group: "Rolling Updates",
+		Permissions: Permissions{Alternatives: []Check{
+			{Action: "manage", Resource: "node", Scope: ScopeCluster},
+			{Action: "manage", Resource: rollingUpdateResource, Scope: ScopeCluster},
+			{Action: "manage", Resource: sshCredentialResource, Scope: ScopeCluster},
+		}},
+		Parameters: clusterParams(nil),
+		Handler:    h.SSHCredentialsConfigured,
+	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPut,
 		Path:   sshCredentialScope,

@@ -9,7 +9,7 @@ import type { AptPackage } from "@/types/api";
 const CLUSTER = "cccccccc-0000-0000-0000-000000000001";
 const NODE = "pve-01";
 const PACKAGES_PATH = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/packages`;
-const SSH_PATH = `/api/v1/clusters/${CLUSTER}/ssh-credentials`;
+const SSH_PATH = `/api/v1/clusters/${CLUSTER}/ssh-credentials/configured`;
 
 const listMock = vi.fn();
 const getMock = vi.fn();
@@ -59,7 +59,7 @@ function serveReady() {
   );
   getMock.mockImplementation((path: string) =>
     path === SSH_PATH
-      ? Promise.resolve({ cluster_id: CLUSTER, username: "root", port: 22 })
+      ? Promise.resolve({ configured: true })
       : Promise.resolve(null),
   );
 }
@@ -201,7 +201,7 @@ describe("NodeUpdatePanel", () => {
   // produce a job that fails at the first node.
   it("disables the button when the cluster has no SSH credentials", async () => {
     listMock.mockResolvedValue([pkg("pve-manager")]);
-    getMock.mockResolvedValue(null);
+    getMock.mockResolvedValue({ configured: false });
     renderPanel();
 
     expect(
@@ -211,10 +211,8 @@ describe("NodeUpdatePanel", () => {
   });
 
   /**
-   * Reading the credentials needs manage:ssh_credentials, which an operator
-   * holding only manage:rolling_update lacks. Treating that 403 as "not
-   * configured" would state something false about the cluster and disable the
-   * button over it.
+   * Treating a failed read as "not configured" would state something false
+   * about the cluster and disable the button over it.
    */
   it("does not claim SSH is missing when it could not check", async () => {
     listMock.mockResolvedValue([pkg("pve-manager")]);

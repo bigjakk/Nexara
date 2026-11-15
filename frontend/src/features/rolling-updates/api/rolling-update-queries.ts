@@ -317,6 +317,28 @@ export function useSSHCredentials(clusterId: string) {
   });
 }
 
+/**
+ * Whether the cluster has an SSH credential, answered to whoever may run what
+ * needs it (manage:node, manage:rolling_update or manage:ssh_credentials),
+ * unlike useSSHCredentials, whose read needs manage:ssh_credentials. A failed
+ * read is "could not check", never "none". Under ["ssh-credentials", id], so
+ * a save or delete of the credential refreshes it.
+ */
+export function useSSHConfigured(clusterId: string, enabled = true) {
+  const query = useQuery({
+    queryKey: ["ssh-credentials", clusterId, "configured"],
+    queryFn: () =>
+      apiClient.get<{ configured: boolean }>(
+        apiPath`/api/v1/clusters/${clusterId}/ssh-credentials/configured`,
+      ),
+    enabled: enabled && !!clusterId,
+  });
+  return {
+    configured: query.data?.configured === true,
+    unknown: query.isError,
+  };
+}
+
 export function useUpsertSSHCredentials() {
   const qc = useQueryClient();
   return useMutation({

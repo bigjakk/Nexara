@@ -9,7 +9,7 @@ import { renderWithProviders } from "@/test/test-utils";
 const CLUSTER = "cccccccc-0000-0000-0000-000000000001";
 const PREFLIGHT_PATH = `/api/v1/clusters/${CLUSTER}/rolling-updates/preflight-ha`;
 const CREATE_PATH = `/api/v1/clusters/${CLUSTER}/rolling-updates`;
-const SSH_PATH = `/api/v1/clusters/${CLUSTER}/ssh-credentials`;
+const SSH_PATH = `/api/v1/clusters/${CLUSTER}/ssh-credentials/configured`;
 
 const getMock = vi.fn();
 const postMock = vi.fn();
@@ -84,13 +84,12 @@ describe("CreateRollingUpdateWizard", () => {
   it.each([
     {
       ssh: "configured",
-      read: () =>
-        Promise.resolve({ cluster_id: CLUSTER, username: "root", port: 22 }),
+      read: () => Promise.resolve({ configured: true }),
       automated: true,
     },
     {
       ssh: "not configured",
-      read: () => Promise.resolve(null),
+      read: () => Promise.resolve({ configured: false }),
       automated: false,
     },
     {

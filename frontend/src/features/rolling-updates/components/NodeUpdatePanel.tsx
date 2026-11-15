@@ -19,7 +19,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { PackagePreviewTable } from "./PackagePreviewTable";
 import {
   useNodePackagePreview,
-  useSSHCredentials,
+  useSSHConfigured,
   useStartInPlaceNodeUpdate,
 } from "../api/rolling-update-queries";
 import { securityPackageCount } from "../lib/packages";
@@ -46,9 +46,8 @@ export function NodeUpdatePanel({
   const query = useNodePackagePreview(clusterId, nodeName);
   const { data: packages } = query;
 
-  const sshQuery = useSSHCredentials(clusterId);
-  const { data: sshCreds } = sshQuery;
   const { canManage } = useAuth();
+  const ssh = useSSHConfigured(clusterId, canManage("rolling_update"));
 
   const update = useStartInPlaceNodeUpdate();
 
@@ -58,15 +57,11 @@ export function NodeUpdatePanel({
   // The upgrade runs over SSH, so it needs the cluster's stored credentials —
   // the same ones the rolling update needs, configured in Security settings.
   //
-  // "Could not check" is kept distinct from "not configured". Reading the
-  // credentials needs manage:ssh_credentials, which an operator holding only
-  // manage:rolling_update does not have — telling them the cluster has no SSH
-  // credentials when it does, and disabling the button over it, would be a
-  // confident wrong answer. When the read fails, leave the button enabled and
-  // let the create endpoint speak: it returns a precise message if they really
-  // are missing, and that message is already rendered below.
-  const sshUnknown = sshQuery.isError;
-  const hasSSH = sshCreds != null;
+  // "Could not check" is kept distinct from "not configured": when the read
+  // fails, leave the button enabled and let the create endpoint speak; it
+  // returns a precise message if they really are missing, rendered below.
+  const sshUnknown = ssh.unknown;
+  const hasSSH = ssh.configured;
   const allowed = canManage("rolling_update");
   const busy = update.isPending;
 

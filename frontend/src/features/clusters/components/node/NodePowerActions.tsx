@@ -43,7 +43,8 @@ import {
   useSetNodeMaintenance,
   type EvacuateMigration,
 } from "../../api/cluster-queries";
-import { useSSHCredentials } from "@/features/rolling-updates/api/rolling-update-queries";
+import { useSSHConfigured } from "@/features/rolling-updates/api/rolling-update-queries";
+import { useAuth } from "@/hooks/useAuth";
 import { NodeShutdownConfirm } from "./NodeShutdownConfirm";
 import { useTaskLogStore } from "@/stores/task-log-store";
 
@@ -82,8 +83,12 @@ export function NodePowerActions({
   // Generated on demand, and Proxmox shells out to a long list of commands to
   // build it, so the pending state is held for however long that takes.
   const report = useDownloadNodeReport(clusterId, nodeName);
-  const { data: sshCreds } = useSSHCredentials(clusterId);
-  const hasSSH = sshCreds != null;
+  // Maintenance needs manage:node; without it the check is not sent at all.
+  const { canManage } = useAuth();
+  const canNode = canManage("node");
+  const ssh = useSSHConfigured(clusterId, canNode);
+  // Could not check: offered all the same, and the action says if it fails.
+  const hasSSH = canNode && (ssh.configured || ssh.unknown);
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -217,7 +222,11 @@ export function NodePowerActions({
           size="sm"
           className="gap-1.5"
           disabled
-          title="Configure SSH credentials (Security → Rolling Updates → SSH Credentials) to use node maintenance, or use Evacuate."
+          title={
+            canNode
+              ? "Configure SSH credentials (Security → Rolling Updates → SSH Credentials) to use node maintenance, or use Evacuate."
+              : "Node maintenance needs the manage:node permission."
+          }
         >
           <Wrench className="h-4 w-4" />
           Maintenance

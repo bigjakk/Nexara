@@ -17,10 +17,18 @@ import (
 // that quietly loosened a parameter would show up here.
 
 // rollingRouteCount is how many endpoints registerRollingUpdateEndpoints
-// declares. It is ALL 19 of RollingUpdateHandler's routes; nothing in this
-// domain was left legacy. See vmRouteCount in registry_vms_test.go for why the
-// registry total is a sum of per-domain constants.
-const rollingRouteCount = 19
+// declares: the 19 migrated routes and the credential-exists answer added
+// after them. See vmRouteCount in registry_vms_test.go for why the registry
+// total is a sum of per-domain constants.
+const rollingRouteCount = 20
+
+// rollingRoutesOutsideTheClusterCheckShape is the one route here that is not a
+// single Check; it is also the one rollingLegacyPermissions does not hold.
+var rollingRoutesOutsideTheClusterCheckShape = map[string]string{
+	"GET /api/v1/clusters/:cluster_id/ssh-credentials/configured": "Alternatives: answers a boolean, " +
+		"no part of the credential, to whoever may run what needs it (maintenance, an automated upgrade) " +
+		"as well as to whoever manages it",
+}
 
 const (
 	testRollingJobID  = "7d2f1a55-3c84-4e19-9b60-00000000001a"
@@ -95,9 +103,9 @@ func TestRollingUpdateRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	if len(declared) != rollingRouteCount {
 		t.Fatalf("the registry declares %d rolling-update routes, want %d", len(declared), rollingRouteCount)
 	}
-	if len(rollingLegacyPermissions) != rollingRouteCount {
+	if len(rollingLegacyPermissions) != rollingRouteCount-len(rollingRoutesOutsideTheClusterCheckShape) {
 		t.Fatalf("rollingLegacyPermissions has %d entries, want %d — the table must cover every migrated route",
-			len(rollingLegacyPermissions), rollingRouteCount)
+			len(rollingLegacyPermissions), rollingRouteCount-len(rollingRoutesOutsideTheClusterCheckShape))
 	}
 
 	byPermission := map[string]int{}
@@ -138,7 +146,15 @@ func TestRollingUpdateRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 		t.Errorf("the domain declares %d distinct permissions, want 3: %v", len(byPermission), byPermission)
 	}
 
-	for key := range declared {
+	for key, e := range declared {
+		if _, outside := rollingRoutesOutsideTheClusterCheckShape[key]; outside {
+			// manage:node is here so a built-in Operator can tell; no view grant may be.
+			if got, want := e.Permissions.Describe(),
+				"manage:node | manage:rolling_update | manage:ssh_credentials"; got != want {
+				t.Errorf("%s declares %q, want %q", key, got, want)
+			}
+			continue
+		}
 		if _, listed := rollingLegacyPermissions[key]; !listed {
 			t.Errorf("%s is declared but is not in rollingLegacyPermissions — a new rolling-update route "+
 				"must be added to the tally, or the tally stops being a review surface", key)

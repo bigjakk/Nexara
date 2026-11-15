@@ -41,7 +41,7 @@ import {
   useClusterVMs,
   useSetNodeMaintenance,
 } from "@/features/clusters/api/cluster-queries";
-import { useSSHCredentials } from "@/features/rolling-updates/api/rolling-update-queries";
+import { useSSHConfigured } from "@/features/rolling-updates/api/rolling-update-queries";
 import { useAuth } from "@/hooks/useAuth";
 import {
   AlertDialog,
@@ -115,10 +115,11 @@ function NodeBranch({ node, vms, clusterId, filter }: NodeBranchProps) {
   const isActive =
     location.pathname === `/clusters/${clusterId}/nodes/${node.id}`;
   const { canManage } = useAuth();
-  const { data: sshCreds } = useSSHCredentials(clusterId);
+  const ssh = useSSHConfigured(clusterId, canManage("node"));
   const maintenance = useSetNodeMaintenance(clusterId, node.name);
   const inMaintenance = node.ha_state === "maintenance";
-  const canMaintenance = sshCreds != null && canManage("node");
+  // Could not check: offered all the same, and the action says if it fails.
+  const canMaintenance = (ssh.configured || ssh.unknown) && canManage("node");
   const [maintOpen, setMaintOpen] = useState(false);
 
   // Auto-expand if a child VM is active

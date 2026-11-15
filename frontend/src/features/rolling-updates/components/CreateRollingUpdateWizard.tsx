@@ -34,7 +34,7 @@ import {
   useCreateRollingUpdateJob,
   useStartRollingUpdateJob,
   usePreflightHA,
-  useSSHCredentials,
+  useSSHConfigured,
 } from "../api/rolling-update-queries";
 import { useNotificationChannels } from "@/features/alerts/api/alert-queries";
 import type { HAConflict, HAPreFlightReport } from "@/types/api";
@@ -89,18 +89,16 @@ export function CreateRollingUpdateWizard({
   const [startImmediately, setStartImmediately] = useState(true);
 
   const { data: nodes, isLoading: nodesLoading } = useClusterNodes(clusterId);
-  const sshQuery = useSSHCredentials(clusterId);
-  const { data: sshCreds } = sshQuery;
+  const ssh = useSSHConfigured(clusterId);
   const { data: channels } = useNotificationChannels();
   const createJob = useCreateRollingUpdateJob();
   const startJob = useStartRollingUpdateJob();
   const preflight = usePreflightHA();
 
-  const hasSSH = sshCreds !== null && sshCreds !== undefined;
-  // Reading the credential needs manage:ssh_credentials, which a built-in
-  // Operator lacks, so a failed read is "could not check", not "none" (as in
-  // NodeUpdatePanel): the switch stays usable, and the create says if not.
-  const sshUnknown = sshQuery.isError;
+  const hasSSH = ssh.configured;
+  // A failed read is "could not check", not "none" (as in NodeUpdatePanel):
+  // the switch stays usable, and the create says if not.
+  const sshUnknown = ssh.unknown;
   // On by default, since running the upgrade is what the job is for. Without
   // the cluster's SSH credential the create is refused, so none means manual.
   const effectiveAutoUpgrade = autoUpgrade && (hasSSH || sshUnknown);
