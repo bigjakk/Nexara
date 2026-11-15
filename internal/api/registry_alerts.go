@@ -288,9 +288,9 @@ func registerAlertEndpoints(reg *Registry, h *handlers.AlertHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodDelete,
 		Path:   alertRuleScope + "/:id",
-		Description: "Delete an alert rule. The alerts it already raised are kept — they are history, " +
-			"not state the rule owns. Requires manage:alert on the cluster the rule is scoped to, or the " +
-			"instance-wide manage:alert for a global rule.",
+		Description: "Delete an alert rule and every alert it raised: they go with it. Its dead-letter " +
+			"entries stay, no longer linked to the rule. Requires manage:alert on the cluster the rule is " +
+			"scoped to, or the instance-wide manage:alert for a global rule.",
 		Group:       "Alerts",
 		Permissions: Permissions{Deferred: alertRowClusterReason},
 		Parameters:  apischema.Properties{"id": alertIDParam("Alert rule identifier.")},
