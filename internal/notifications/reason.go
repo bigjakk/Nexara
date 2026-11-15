@@ -20,10 +20,11 @@ import (
 const maxReasonLen = 512
 
 // secretConfigKeys are the channel settings whose values are secrets: a
-// password, a token, a URL whose path or query is the credential. Every header
-// value is one too (a webhook's Authorization).
+// password, a token, a URL whose path or query is the credential, an SMTP
+// username (for SES, the access key id). Every header value is one too (a
+// webhook's Authorization).
 var secretConfigKeys = map[string]bool{
-	"password": true, "url": true, "webhook_url": true, "bot_token": true, "routing_key": true,
+	"password": true, "username": true, "url": true, "webhook_url": true, "bot_token": true, "routing_key": true,
 }
 
 // FailureReason is a failed send's error as a caller and the log may see it:

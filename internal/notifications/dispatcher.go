@@ -29,6 +29,9 @@ type AlertPayload struct {
 	DedupKey string `json:"dedup_key,omitempty"`
 }
 
+// MetricCVEActionRequired is the metric a CVE notice's payload carries.
+const MetricCVEActionRequired = "cve_action_required"
+
 // Dispatcher sends a notification to a configured channel.
 type Dispatcher interface {
 	Send(ctx context.Context, config json.RawMessage, payload AlertPayload) error

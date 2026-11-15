@@ -218,6 +218,12 @@ func TestMergeAlertRuleUpdate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// Ranging over an integer can stall the evaluation tick.
+			name:    "a template with a range rejected",
+			body:    `{"message_template":"{{range 99999999999}}{{end}}"}`,
+			wantErr: true,
+		},
+		{
 			name:    "out-of-range duration rejected",
 			body:    `{"duration_seconds":86401}`,
 			wantErr: true,
@@ -958,6 +964,8 @@ func TestUpdateChannel_PrivateTarget(t *testing.T) {
 	}{
 		{"new private settings, not confirmed", `{"config":{"url":"https://10.0.0.5/hook"}}`, http.StatusUnprocessableEntity, false},
 		{"a rename", `{"name":"hook02"}`, http.StatusOK, true},
+		// The type picks which setting is the target, so the allowance goes.
+		{"a type change without config", `{"channel_type":"slack"}`, http.StatusOK, false},
 	} {
 		dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetNotificationChannel": existing, "UpdateNotificationChannel": existing},
 			execOK: map[string]bool{"InsertAuditLog": true}}
@@ -975,7 +983,8 @@ func TestUpdateChannel_PrivateTarget(t *testing.T) {
 		updates := slices.DeleteFunc(slices.Clone(dbtx.rowCalls), func(q capturedQuery) bool {
 			return !strings.Contains(q.sql, "-- name: UpdateNotificationChannel ")
 		})
-		if resp.StatusCode != tt.status || (len(updates) == 1) != tt.stored || (tt.stored && updates[0].args[5] != true) {
+		wrote := resp.StatusCode == http.StatusOK
+		if resp.StatusCode != tt.status || (len(updates) == 1) != wrote || (wrote && updates[0].args[5] != tt.stored) {
 			t.Errorf("%s: status %d, updates %v; want %d, allowance kept %v", tt.name, resp.StatusCode, updates, tt.status, tt.stored)
 		}
 	}

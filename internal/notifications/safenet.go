@@ -19,8 +19,9 @@ import (
 
 // TargetAddressError refuses a notification target by the address its name
 // resolves to. Overridable is true for a private address (RFC 1918, IPv6
-// unique-local), which a channel the operator confirmed may use; false for a
-// loopback, link-local or unspecified one, which no channel may.
+// unique-local, carrier-grade NAT), which a channel the operator confirmed may
+// use; false for a loopback, link-local, unspecified or cloud metadata one,
+// which no channel may.
 //
 // Unreadable marks an address that does not parse as one IP — an IPv6 zone
 // ("::1%1") is the case that matters — refused like a loopback one.
@@ -48,12 +49,23 @@ func (e *TargetAddressError) Error() string {
 // channel's confirmation (ChannelContext).
 func checkTargetIP(ip net.IP, allowPrivate bool) error {
 	switch {
-	case ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified():
+	case ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
+		ipv6Metadata(ip):
 		return &TargetAddressError{IP: ip.String()}
-	case ip.IsPrivate() && !allowPrivate:
+	case (ip.IsPrivate() || cgnat.Contains(ip)) && !allowPrivate:
 		return &TargetAddressError{IP: ip.String(), Overridable: true}
 	}
 	return nil
+}
+
+// cgnat is RFC 6598 carrier-grade NAT space, 100.64.0.0/10: not public, so it
+// needs a channel's confirmation as a private address does.
+var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
+
+// ipv6Metadata reports the cloud metadata services' IPv6 addresses, AWS's and
+// GCP's, which sit in the unique-local range a confirmation relaxes.
+func ipv6Metadata(ip net.IP) bool {
+	return ip.Equal(net.ParseIP("fd00:ec2::254")) || ip.Equal(net.ParseIP("fd20:ce::254"))
 }
 
 type allowPrivateKey struct{}

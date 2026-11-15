@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -105,5 +106,40 @@ func TestNotificationDLQListTreatsAnEmptyChannelAsNone(t *testing.T) {
 				t.Errorf("channel filter = %+v, want %+v", dbtx.channel, tt.wantChannel)
 			}
 		})
+	}
+}
+
+// A CVE notice's dead letter lists a cluster's CVEs; its payload is shown only
+// to a holder of view:cve_scan, while an alert's dead letter is shown as before.
+func TestNotificationDLQListHidesCVEPayloadWithoutViewCVEScan(t *testing.T) {
+	t.Parallel()
+	cluster := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	cve := db.NotificationDlq{ID: uuid.New(), ClusterID: cluster, Payload: json.RawMessage(`{"metric":"cve_action_required","message":"CVE-2024-1"}`)}
+	alert := db.NotificationDlq{ID: uuid.New(), ClusterID: cluster, RuleID: pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		Payload: json.RawMessage(`{"metric":"cpu_usage"}`)}
+	for _, canCVE := range []bool{false, true} {
+		grants := []string{"view:notification_dlq"}
+		if canCVE {
+			grants = append(grants, "view:cve_scan")
+		}
+		dbtx := &auditRowsDBTX{rowsFor: map[string][]any{"ListNotificationDLQ": {cve, alert}}}
+		h := NewNotificationDLQHandler(db.New(dbtx), nil, nil)
+		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+		app.Use(func(c fiber.Ctx) error {
+			c.Locals("user_id", uuid.New())
+			c.Locals("rbac_engine", newGrantEngine(grants...))
+			return c.Next()
+		})
+		app.Get("/notification-dlq", withRequestParams(t, dlqListMirror(t), nil, h.List))
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/notification-dlq", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "CVE-2024-1") != canCVE ||
+			!strings.Contains(string(body), "cpu_usage") {
+			t.Errorf("view:cve_scan %v: %d %s", canCVE, resp.StatusCode, body)
+		}
 	}
 }

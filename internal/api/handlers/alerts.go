@@ -563,6 +563,9 @@ func validateAlertRuleFields(f alertRuleFields) error {
 	if len(f.MessageTemplate) > maxTemplateLen {
 		return fiber.NewError(fiber.StatusBadRequest, "message_template must be <= 4096 characters")
 	}
+	if err := notifications.CheckTemplate(f.MessageTemplate); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "message_template: "+err.Error())
+	}
 	if len(f.EscalationChain) > 0 {
 		if err := validateEscalationChain(f.EscalationChain); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid escalation_chain: %v", err))
@@ -1603,8 +1606,9 @@ func (h *AlertHandler) UpdateChannel(c fiber.Ctx, p *apischema.Params) error {
 	}
 	configEncrypted := existing.ConfigEncrypted
 	// New settings are checked as a new channel's are, and the allowance is
-	// decided again for them; kept settings keep theirs.
-	allowPrivate := existing.AllowPrivateAddress
+	// decided again for them; kept settings keep theirs — unless the type
+	// changes, which changes which setting is the target: that drops it.
+	allowPrivate := existing.AllowPrivateAddress && channelType == existing.ChannelType
 	if p.Has("config") {
 		config, cErr := channelConfigJSON(p)
 		if cErr != nil {

@@ -158,7 +158,7 @@ func cveNoticePayload(clusterID uuid.UUID, clusterName, signature string, vulns 
 		RuleName:     fmt.Sprintf("CVE: action required on %s", clusterName),
 		Severity:     "critical",
 		State:        "fired",
-		Metric:       "cve_action_required",
+		Metric:       notifications.MetricCVEActionRequired,
 		CurrentValue: float64(len(vulns)),
 		ResourceName: clusterName,
 		ClusterID:    clusterID.String(),

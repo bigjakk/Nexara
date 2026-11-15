@@ -172,6 +172,7 @@ func (h *NotificationDLQHandler) List(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list DLQ entries")
 	}
 
+	cveReadable := cveNoticeReader(c)
 	out := make([]notificationDLQResponse, 0, len(rows))
 	for _, r := range rows {
 		// Cross-cluster view guard, unreachable while the DECLARED gate is
@@ -186,9 +187,53 @@ func (h *NotificationDLQHandler) List(c fiber.Ctx, p *apischema.Params) error {
 		} else if !access.HasGlobal {
 			continue
 		}
-		out = append(out, toNotificationDLQResponse(r))
+		resp := toNotificationDLQResponse(r)
+		if isCVENotice(r) {
+			readable, err := cveReadable(r.ClusterID)
+			if err != nil {
+				return err
+			}
+			if !readable {
+				resp.Payload = nil
+			}
+		}
+		out = append(out, resp)
 	}
 	return RespondItems(c, out)
+}
+
+// isCVENotice reports a dead letter of a CVE notice, whose payload lists a
+// cluster's CVEs with their packages and scores.
+func isCVENotice(r db.NotificationDlq) bool {
+	var p struct {
+		Metric string `json:"metric"`
+	}
+	return !r.RuleID.Valid && json.Unmarshal(r.Payload, &p) == nil && p.Metric == notifications.MetricCVEActionRequired
+}
+
+// cveNoticeReader answers whether the caller may read a CVE notice's payload:
+// view:cve_scan on its cluster, or instance-wide for one with none. The
+// dead-letter view alone shows that the notice failed, not what it listed.
+// Answers are kept per cluster for the one listing.
+func cveNoticeReader(c fiber.Ctx) func(cluster pgtype.UUID) (bool, error) {
+	seen := map[pgtype.UUID]bool{}
+	return func(cluster pgtype.UUID) (bool, error) {
+		if ok, done := seen[cluster]; done {
+			return ok, nil
+		}
+		var ok bool
+		var err error
+		if cluster.Valid {
+			ok, err = hasClusterPerm(c, "view", "cve_scan", uuid.UUID(cluster.Bytes))
+		} else {
+			ok, err = hasGlobalPerm(c, "view", "cve_scan")
+		}
+		if err != nil {
+			return false, err
+		}
+		seen[cluster] = ok
+		return ok, nil
+	}
 }
 
 // Summary returns counts grouped by state for the DLQ widget.

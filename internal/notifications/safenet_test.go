@@ -58,6 +58,9 @@ func TestCheckTargetIP(t *testing.T) {
 		{"fe80::1", true, true, false},
 		{"0.0.0.0", true, true, false},
 		{"::", true, true, false},
+		{"100.64.0.9", true, false, true},
+		{"fd00:ec2::254", true, true, false},
+		{"fd20:ce::254", true, true, false},
 		{"203.0.113.10", false, false, false},
 	} {
 		ip := net.ParseIP(tt.ip)

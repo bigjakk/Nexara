@@ -22,7 +22,7 @@ func TestFailureReason(t *testing.T) {
 		"url":"https://hooks.example.com/T0/PROBE-2?sig=PROBE-3","headers":{"Authorization":"Bearer PROBE-4"},
 		"chat_id":"PROBE-5"}`)
 	for _, tt := range []struct{ err, want string }{
-		{"smtp: auth: 535 bad credentials for alerts/pw-PROBE-1", "smtp: auth: 535 bad credentials for alerts/(redacted)"},
+		{"smtp: auth: 535 bad credentials for alerts/pw-PROBE-1", "smtp: auth: 535 bad credentials for (redacted)/(redacted)"},
 		{"send request: https://hooks.example.com/T0/PROBE-2?sig=PROBE-3", "send request: (redacted)"},
 		{"bad path /T0/PROBE-2 or query sig=PROBE-3", "bad path (redacted) or query (redacted)"},
 		{"upstream said Bearer PROBE-4", "upstream said (redacted)"},

@@ -56,7 +56,7 @@ func TestWithMessage(t *testing.T) {
 // Telegram's HTML mode.
 func TestChatBodiesCarryTheMessage(t *testing.T) {
 	t.Parallel()
-	p := AlertPayload{RuleName: "rule01", Severity: "warning", Message: "disk <full> on linux01"}
+	p := AlertPayload{RuleName: "rule<b>01", Severity: "warning", Message: "disk <full> on linux01"}
 	for _, tt := range []struct {
 		name string
 		body map[string]interface{}
@@ -66,6 +66,7 @@ func TestChatBodiesCarryTheMessage(t *testing.T) {
 		{"teams", teamsBody(teamsConfig{}, p), "disk <full> on linux01"},
 		{"discord", discordBody(discordConfig{}, p), "disk <full> on linux01"},
 		{"telegram", telegramBody(telegramConfig{ParseMode: "HTML"}, p), "disk &lt;full&gt; on linux01"},
+		{"telegram's rule name", telegramBody(telegramConfig{ParseMode: "HTML"}, p), "rule&lt;b&gt;01"},
 	} {
 		raw, err := json.Marshal(tt.body)
 		if err != nil {
@@ -93,5 +94,26 @@ func TestDispatchCarriesTheRuleMessage(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("nothing was sent")
+	}
+}
+
+// A range, which over a large integer can stall the evaluation tick, is
+// refused at save and at render, nested in an if or a define too.
+func TestTemplatesRefuseRange(t *testing.T) {
+	t.Parallel()
+	for _, tmpl := range []string{
+		"{{range 3}}{{end}}",
+		"{{if .Severity}}{{range $i := 5}}x{{end}}{{end}}",
+		`{{define "x"}}{{range 3}}{{end}}{{end}}{{template "x"}}`,
+	} {
+		if err := CheckTemplate(tmpl); err == nil {
+			t.Errorf("CheckTemplate(%q) passed", tmpl)
+		}
+		if _, err := renderTemplate(tmpl, AlertPayload{Severity: "warning"}); err == nil {
+			t.Errorf("renderTemplate(%q) ran", tmpl)
+		}
+	}
+	if err := CheckTemplate("{{.RuleName}} on {{.ResourceName}}"); err != nil {
+		t.Errorf("a plain template refused: %v", err)
 	}
 }
