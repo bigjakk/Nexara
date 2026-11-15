@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, Check, Eye, EyeOff, LogOut } from "lucide-react";
+import { Loader2, Check, Eye, EyeOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { sessionScope } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import {
   useProfile,
@@ -59,7 +58,6 @@ export function ProfilePage() {
   const [showOld, setShowOld] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [passwordError, setPasswordError] = useState("");
-  const [passwordSuccess, setPasswordSuccess] = useState(false);
   const settlePassword = useSaveOutcome(passwordDialogOpen);
 
   const isLocal = profile?.auth_source === "local";
@@ -89,25 +87,21 @@ export function ProfilePage() {
 
   const handleChangePassword = () => {
     setPasswordError("");
-    setPasswordSuccess(false);
 
     if (newPassword !== confirmPassword) {
       setPasswordError("New passwords do not match");
       return;
     }
 
-    // Server revoked all sessions — force local logout after brief delay.
-    // The timer outlives this page, and is not cleared when it is left:
-    // the session is revoked either way. But it is for the session that
-    // changed the password: if that has ended by then — signed out, or
-    // someone else signed in — clearAuth() would end theirs, or turn the
-    // user's own Sign out into an expiry (the login page then carries the
-    // page they left to whoever signs in next).
+    // The server ended every session, this one included, and refuses it from
+    // its next request: signed out here at once, before a poll can meet that
+    // refusal and end it as an expiry, and the other tabs with it (a revoked
+    // sign-out note: they go to the bare login page). The login page says why
+    // here. Only while the session that changed the password goes on
+    // (useSaveOutcome): one that has ended since — signed out, or someone else
+    // signed in — is not this one.
     const signOut = () => {
-      const ended = sessionScope();
-      setTimeout(() => {
-        if (!ended()) clearAuth();
-      }, 2000);
+      clearAuth({ byUser: true, notice: "passwordChanged", announce: true });
     };
     settlePassword(
       changePassword.mutateAsync({
@@ -116,10 +110,7 @@ export function ProfilePage() {
       }),
       {
         action: "Changing your password",
-        onSuccess: () => {
-          setPasswordSuccess(true);
-          signOut();
-        },
+        onSuccess: signOut,
         // The dialog was closed while it was out: the sessions are revoked all
         // the same.
         onLateSuccess: signOut,
@@ -138,7 +129,6 @@ export function ProfilePage() {
     setNewPassword("");
     setConfirmPassword("");
     setPasswordError("");
-    setPasswordSuccess(false);
     setShowOld(false);
     setShowNew(false);
   };
@@ -368,12 +358,6 @@ export function ProfilePage() {
             {passwordError && (
               <p className="text-sm text-destructive">{passwordError}</p>
             )}
-            {passwordSuccess && (
-              <p className="flex items-center gap-1.5 text-sm">
-                <LogOut className="h-4 w-4 text-muted-foreground" />
-                Password changed. Signing you out...
-              </p>
-            )}
           </div>
           <DialogFooter>
             <Button
@@ -391,8 +375,7 @@ export function ProfilePage() {
                 changePassword.isPending ||
                 !oldPassword ||
                 !newPassword ||
-                !confirmPassword ||
-                passwordSuccess
+                !confirmPassword
               }
             >
               {changePassword.isPending ? (

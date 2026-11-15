@@ -55,11 +55,13 @@ interface AuthState {
 }
 
 /**
- * Sign out, or Sign out all devices, that the server did not confirm (a 503, a
- * 429, no answer, or not sent at all): the tab is signed out all the same, and
- * the login page says what may still be signed in. Keys of locales/en/auth.json.
+ * Keys of locales/en/auth.json. Sign out, or Sign out all devices, that the
+ * server did not confirm (a 503, a 429, no answer, or not sent at all): the tab
+ * is signed out all the same, and the login page says what may still be signed
+ * in. Or a password change, which ended every session (ProfilePage).
  */
-export type SignOutNotice = "signOutUnconfirmed" | "signOutAllUnconfirmed";
+export type SignOutNotice =
+  "signOutUnconfirmed" | "signOutAllUnconfirmed" | "passwordChanged";
 
 interface AuthActions {
   login: (req: LoginRequest) => Promise<void>;
@@ -70,8 +72,16 @@ interface AuthActions {
   /**
    * `byUser`: the user asked for this, rather than the session failing.
    * `keepStoredUser`: see clearTokens.
+   * `notice`: what the login page then says (signOutNotice).
+   * `announce`: the server has already ended this session (a password change):
+   * the other tabs are told, as by Sign out, and follow at once.
    */
-  clearAuth: (options?: { byUser?: boolean; keepStoredUser?: boolean }) => void;
+  clearAuth: (options?: {
+    byUser?: boolean;
+    keepStoredUser?: boolean;
+    notice?: SignOutNotice;
+    announce?: boolean;
+  }) => void;
   setAuthFromResponse: (res: AuthResponse) => void;
   verifyTotp: (code: string) => Promise<void>;
   verifyTotpRecovery: (recoveryCode: string) => Promise<void>;
@@ -647,6 +657,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   },
 
   clearAuth: (options) => {
+    if (options?.announce === true) noteSignOut(get().user, true);
     clearTokens({ keepStoredUser: options?.keepStoredUser === true });
     endSession(() => {
       set({
@@ -663,6 +674,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
         // step. It is still theirs: the page has not yet been left for the login
         // URL, and which one it is depends on this.
         signedOutByUser: options?.byUser === true || get().isLoggingOut,
+        signOutNotice: options?.notice ?? null,
       });
     });
   },
