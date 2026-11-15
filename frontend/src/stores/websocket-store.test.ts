@@ -272,6 +272,7 @@ describe("websocket-store", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
     MockWebSocket.instances[1]?.simulateOpen();
+    MockWebSocket.instances[1]?.simulateMessage({ type: "welcome" });
 
     mintSpy.mockRejectedValue(new Error("403"));
     MockWebSocket.instances[1]?.simulateClose(3000);
@@ -281,6 +282,24 @@ describe("websocket-store", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     // 1 s, then 2 s, then 4 s: three mints in ten seconds, not a loop.
     expect(mintSpy.mock.calls.length - minted).toBe(3);
+  });
+
+  // The server can refuse a socket after the upgrade, before its welcome: each
+  // such refusal backs off further instead of retrying every second.
+  it("keeps backing off when the server refuses the socket after opening it", async () => {
+    useWebSocketStore.getState().connect();
+    await flushPromises();
+    for (const delay of [1000, 2000, 4000]) {
+      const ws = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+      ws?.simulateOpen();
+      ws?.simulateClose(1011);
+      const opened = MockWebSocket.instances.length;
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(MockWebSocket.instances).toHaveLength(opened);
+      await vi.advanceTimersByTimeAsync(1);
+      await flushPromises();
+      expect(MockWebSocket.instances).toHaveLength(opened + 1);
+    }
   });
 
   it("does not reconnect after explicit disconnect", async () => {

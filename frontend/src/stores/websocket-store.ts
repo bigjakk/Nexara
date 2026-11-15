@@ -126,7 +126,10 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
             ws.close();
             return;
           }
-          set({ status: "connected", reconnectAttempts: 0 });
+          // The back-off is reset by the server's welcome, not here: the server
+          // can still refuse the socket after the upgrade (its sign-in or
+          // permission check), and a reset at open would retry that every second.
+          set({ status: "connected" });
 
           // Start application-level ping
           const pingTimer = setInterval(() => {
@@ -151,6 +154,7 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
           }
 
           if (msg.type === "welcome") {
+            set({ reconnectAttempts: 0 });
             // Re-subscribe all channels on (re)connect
             const { listeners } = get();
             const channels = Array.from(listeners.keys());
