@@ -408,6 +408,10 @@ func channelTargetAllowance(c fiber.Ctx, channelType string, config json.RawMess
 	private, err := notifications.CheckChannelTarget(c.Context(), channelType, config, confirmed)
 	var refused *notifications.TargetAddressError
 	if errors.As(err, &refused) {
+		if refused.Unreadable {
+			return false, &addressPolicyError{HardReject: true, IP: refused.IP, Reason: "The channel's target " +
+				"has an address with a zone, or one that cannot be read, which a notification channel may never use."}
+		}
 		if !refused.Overridable {
 			return false, &addressPolicyError{HardReject: true, IP: refused.IP, Reason: fmt.Sprintf(
 				"The channel's target resolves to %s, a loopback, link-local or unspecified address, "+

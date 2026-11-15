@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"syscall"
@@ -20,9 +21,13 @@ import (
 // resolves to. Overridable is true for a private address (RFC 1918, IPv6
 // unique-local), which a channel the operator confirmed may use; false for a
 // loopback, link-local or unspecified one, which no channel may.
+//
+// Unreadable marks an address that does not parse as one IP — an IPv6 zone
+// ("::1%1") is the case that matters — refused like a loopback one.
 type TargetAddressError struct {
 	IP          string
 	Overridable bool
+	Unreadable  bool
 }
 
 // Error names the class of address and not the address itself, which a
@@ -30,6 +35,9 @@ type TargetAddressError struct {
 func (e *TargetAddressError) Error() string {
 	if e.Overridable {
 		return "a private address, which this channel is not confirmed for"
+	}
+	if e.Unreadable {
+		return "an address with a zone, or one that cannot be read, which no channel may use"
 	}
 	return "a loopback, link-local or unspecified address, which no channel may use"
 }
@@ -78,6 +86,10 @@ func validateExternalURL(ctx context.Context, rawURL string) error {
 		return fmt.Errorf("URL must include a hostname")
 	}
 	ips, err := resolveTarget(ctx, host)
+	var refused *TargetAddressError
+	if errors.As(err, &refused) {
+		return fmt.Errorf("URL resolves to %w", err)
+	}
 	if err != nil {
 		return err
 	}
@@ -90,9 +102,32 @@ func validateExternalURL(ctx context.Context, rawURL string) error {
 	return nil
 }
 
+// unreadable refuses an address that does not parse as one IP. It fails
+// closed: an address skipped because it could not be read is one the resolver
+// and the dialer may still accept — an IPv6 zone ("::1%1") is.
+func unreadable(s string) error {
+	return &TargetAddressError{IP: s, Unreadable: true}
+}
+
+// targetIP reads one address as the IP it reaches: an IPv6 zone dropped and
+// an IPv4-mapped address unmapped, so ::1%1 is ::1 and ::ffff:127.0.0.1 is
+// 127.0.0.1. Anything that is not an address is refused (unreadable).
+func targetIP(s string) (net.IP, error) {
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return nil, unreadable(s)
+	}
+	return net.IP(addr.WithZone("").Unmap().AsSlice()), nil
+}
+
 // resolveTarget is the addresses host names, or host itself as an IP literal.
+// A host with a zone is refused, and so is a name any of whose addresses
+// cannot be read.
 func resolveTarget(ctx context.Context, host string) ([]net.IP, error) {
-	if ip := net.ParseIP(host); ip != nil {
+	if strings.Contains(host, "%") {
+		return nil, unreadable(host)
+	}
+	if ip, err := targetIP(host); err == nil {
 		return []net.IP{ip}, nil
 	}
 	addrs, err := net.DefaultResolver.LookupHost(ctx, host)
@@ -101,9 +136,11 @@ func resolveTarget(ctx context.Context, host string) ([]net.IP, error) {
 	}
 	ips := make([]net.IP, 0, len(addrs))
 	for _, a := range addrs {
-		if ip := net.ParseIP(a); ip != nil {
-			ips = append(ips, ip)
+		ip, err := targetIP(a)
+		if err != nil {
+			return nil, err
 		}
+		ips = append(ips, ip)
 	}
 	return ips, nil
 }
@@ -139,11 +176,16 @@ func safeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 // address actually dialled, whatever the name resolved to when it was checked.
 func dialControl(allowPrivate bool) func(string, string, syscall.RawConn) error {
 	return func(_ string, address string, _ syscall.RawConn) error {
-		host, _, _ := net.SplitHostPort(address)
-		if ip := net.ParseIP(host); ip != nil {
-			if err := checkTargetIP(ip, allowPrivate); err != nil {
-				return fmt.Errorf("connection blocked: the address is %w", err)
-			}
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return fmt.Errorf("connection blocked: %w", unreadable(address))
+		}
+		ip, err := targetIP(host)
+		if err != nil {
+			return fmt.Errorf("connection blocked: %w", err)
+		}
+		if err := checkTargetIP(ip, allowPrivate); err != nil {
+			return fmt.Errorf("connection blocked: the address is %w", err)
 		}
 		return nil
 	}
@@ -184,6 +226,10 @@ func CheckChannelTarget(ctx context.Context, channelType string, config json.Raw
 		return false, nil
 	}
 	ips, err := resolveTarget(ctx, host)
+	var unread *TargetAddressError
+	if errors.As(err, &unread) {
+		return false, err
+	}
 	if err != nil {
 		return false, nil //nolint:nilerr // unresolvable passes; the send checks again
 	}
