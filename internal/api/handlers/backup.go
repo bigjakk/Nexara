@@ -1918,6 +1918,10 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 		Storage: req.Storage,
 		Force:   req.Force,
 		Unique:  req.Unique,
+		// Proxmox starts the guest itself at the end of the restore task
+		// (qemu-server and pve-container create_vm, "start"), so the start is
+		// part of the task recorded below and needs no watcher of Nexara's.
+		Start: req.StartAfterRestore,
 	}
 
 	var upid string
@@ -1961,47 +1965,6 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 			"archive":             archive,
 		},
 	})
-
-	// If requested, wait for restore to finish then start the VM in the background.
-	if req.StartAfterRestore {
-		go func() { //nolint:gosec // G118: intentionally detached — start-after-restore watcher must outlive the request (Fiber recycles the request context)
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("start-after-restore watcher panicked", "upid", upid, "panic", r)
-				}
-			}()
-			ctx := context.Background() //nolint:gosec // G118: intentionally detached; Fiber recycles request context
-			for i := 0; i < 600; i++ {  // up to 10 minutes
-				time.Sleep(2 * time.Second)
-				ts, tsErr := pveClient.GetTaskStatus(ctx, req.TargetNode, upid)
-				if tsErr != nil {
-					slog.Error("start-after-restore: failed to poll restore task", "upid", upid, "error", tsErr)
-					return
-				}
-				if ts.Status == "stopped" {
-					if ts.ExitStatus != "OK" {
-						slog.Info("start-after-restore: restore task failed, skipping start", "upid", upid, "exit", ts.ExitStatus)
-						return
-					}
-					var startUpid string
-					var startErr error
-					switch req.BackupType {
-					case "vm":
-						startUpid, startErr = pveClient.StartVM(ctx, req.TargetNode, req.VMID)
-					case "ct":
-						startUpid, startErr = pveClient.StartCT(ctx, req.TargetNode, req.VMID)
-					}
-					if startErr != nil {
-						slog.Error("start-after-restore: failed to start VM", "vmid", req.VMID, "error", startErr)
-						return
-					}
-					slog.Info("start-after-restore: VM started", "vmid", req.VMID, "upid", startUpid)
-					return
-				}
-			}
-			slog.Warn("start-after-restore: timed out waiting for restore", "upid", upid)
-		}()
-	}
 
 	return c.JSON(fiber.Map{
 		"upid":   upid,

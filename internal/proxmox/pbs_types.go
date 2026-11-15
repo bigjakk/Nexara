@@ -197,4 +197,7 @@ type RestoreParams struct {
 	Storage string `json:"storage,omitempty"`
 	Unique  bool   `json:"unique,omitempty"`
 	Force   bool   `json:"force,omitempty"`
+	// Start has Proxmox start the guest at the end of the restore task, as
+	// create_vm's "start" does for qemu and lxc alike.
+	Start bool `json:"start,omitempty"`
 }

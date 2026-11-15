@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -59,22 +60,25 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 		calls   []string
 		from    string // the storage the archive is read through; empty when refused
 		by      string // how it was tied to the server
+		start   bool   // start_after_restore, sent as Proxmox's own "start"
 	}{
 		{"the storage of the requested server and datastore, on the node asked for", both, restoreStorages, false, 200,
-			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address"},
+			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address", false},
+		{"start after restore is asked of Proxmox with the restore itself", both, restoreStorages, false, 200,
+			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address", true},
 		{"another Nexara PBS server owns the only pbs storage: nothing is dispatched", both, restoreOtherServerOnly, false, 400,
-			[]string{storageGet}, "", ""},
+			[]string{storageGet}, "", "", false},
 		{"the only candidate is used, and recorded as such", both, restoreAliasOnly, false, 200,
-			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store05", "only_candidate"},
+			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store05", "only_candidate", false},
 		{"over an existing guest: the storage is chosen on the guest's node, then the stop, then the restore", both, restoreStorages, true, 200,
-			[]string{storageGet, stopPost, stopPoll, restore}, "store02", "address"},
+			[]string{storageGet, stopPost, stopPoll, restore}, "store02", "address", false},
 		{"over an existing guest with no such storage: it is not stopped", both, restoreOtherServerOnly, true, 400,
-			[]string{storageGet}, "", ""},
+			[]string{storageGet}, "", "", false},
 		{"a storage list that never answers: refused in time, and the guest is not stopped", both, restoreHangs, true, 502,
-			[]string{storageGet}, "", ""},
+			[]string{storageGet}, "", "", false},
 		// A server the caller may not view is a missing one, and nothing is asked of Proxmox.
-		{"a caller who may manage backups here but not view the PBS server", grantsOf("manage:backup"), restoreStorages, false, 404, nil, "", ""},
-		{"a caller who may view the PBS server but not manage backups here", grantsOf("view:backup"), restoreStorages, false, 403, nil, "", ""},
+		{"a caller who may manage backups here but not view the PBS server", grantsOf("manage:backup"), restoreStorages, false, 404, nil, "", "", false},
+		{"a caller who may view the PBS server but not manage backups here", grantsOf("view:backup"), restoreStorages, false, 403, nil, "", "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -101,7 +105,8 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 			}
 
 			body := `{"pbs_server_id":"` + testPBSServerID + `","backup_type":"vm","backup_id":"101","backup_time":1700000000,` +
-				`"target_node":"pve-01","vmid":101,"datastore":"datastore01","force":` + map[bool]string{true: "true", false: "false"}[tt.force] + `}`
+				`"target_node":"pve-01","vmid":101,"datastore":"datastore01","force":` + strconv.FormatBool(tt.force) +
+				`,"start_after_restore":` + strconv.FormatBool(tt.start) + `}`
 			req := httptest.NewRequest(http.MethodPost, backupRoute(clusterScope+"/restore"), strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("X-Test-User", "yes")
@@ -135,6 +140,9 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 			if tt.force {
 				node = "pve-02"
 				wantTasks = []string{restoreStopUPID, restoreRestoreUPID}
+			}
+			if got, want := pve.restoreForm.Get("start"), map[bool]string{true: "1"}[tt.start]; got != want {
+				t.Errorf("start = %q, want %q", got, want)
 			}
 			if got := pve.restoreForm.Get("archive"); got != wantArchive {
 				t.Errorf("archive = %q, want %q", got, wantArchive)

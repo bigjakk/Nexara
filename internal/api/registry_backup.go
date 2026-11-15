@@ -844,8 +844,8 @@ func restoreBackupParams() apischema.Properties {
 			"once the storage the archive is read through has been found."),
 		"unique": optFlag("Assign fresh MAC addresses to the restored guest's network devices."),
 		"start_after_restore": optFlag(
-			"Start the guest once the restore finishes. Watched in the background; the response returns " +
-				"as soon as the restore task is dispatched."),
+			"Start the guest once the restore finishes. Proxmox starts it at the end of the restore task " +
+				"(its \"start\" option), which then needs VM.PowerMgmt on the guest as well."),
 	}
 }
 

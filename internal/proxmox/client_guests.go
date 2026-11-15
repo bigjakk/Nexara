@@ -543,6 +543,9 @@ func (c *Client) RestoreVM(ctx context.Context, node string, params RestoreParam
 	if params.Force {
 		form.Set("force", "1")
 	}
+	if params.Start {
+		form.Set("start", "1")
+	}
 
 	path := "/nodes/" + url.PathEscape(node) + "/qemu"
 	var upid string
@@ -574,6 +577,9 @@ func (c *Client) RestoreCT(ctx context.Context, node string, params RestoreParam
 	}
 	if params.Force {
 		form.Set("force", "1")
+	}
+	if params.Start {
+		form.Set("start", "1")
 	}
 
 	path := "/nodes/" + url.PathEscape(node) + "/lxc"
