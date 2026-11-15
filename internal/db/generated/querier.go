@@ -1516,8 +1516,8 @@ type Querier interface {
 	// own (srvreload, service "networking"), which the collector ingests as a node
 	// network apply made in Proxmox. They are parts of the apply, not applies. This
 	// annotates them — details.parent_upid names the apply — and leaves the row's key
-	// and action alone; the History renders "part of the SDN apply" from the
-	// annotation.
+	// and action alone. Nothing reads the annotation yet: the History and the lists
+	// still show each reload as a network apply of its own.
 	//
 	// Which reloads. pve-network's apply worker (API2/Network/SDN.pm) walks the node
 	// list in order and, for each node, runs `pvesh set /nodes/<node>/network` and
