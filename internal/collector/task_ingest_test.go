@@ -33,7 +33,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:qmsnapshot:100:run", Type: "qmsnapshot",
 			ID: "100", Status: "", StartTime: start.Unix(),
 		}
-		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 {
@@ -74,7 +74,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:qmigrate:111:run", Type: "qmigrate",
 			ID: "111", Status: "RUNNING", StartTime: start.Unix(), EndTime: 0,
 		}
-		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 {
@@ -100,7 +100,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:vzdump:101:done", Type: "vzdump",
 			ID: "101", Status: "OK", StartTime: start.Unix(), EndTime: end.Unix(),
 		}
-		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 {
@@ -122,7 +122,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:qmigrate:102:fail", Type: "qmigrate",
 			ID: "102", Status: "migration aborted", StartTime: start.Unix(), EndTime: start.Add(time.Second).Unix(),
 		}
-		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 || q.externalTaskCalls[0].Status != "failed" {
@@ -137,7 +137,7 @@ func TestIngestTask_External(t *testing.T) {
 		q := newMockQueries()
 		s := &Syncer{queries: q, logger: testLogger()}
 		task := proxmox.NodeTask{UPID: "UPID:pve1:vncproxy:x", Type: "vncproxy", Status: ""}
-		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 0 {
@@ -145,28 +145,51 @@ func TestIngestTask_External(t *testing.T) {
 		}
 	})
 
-	t.Run("seenTaskUPIDs unions task_history + audit_log existence", func(t *testing.T) {
+	t.Run("seenTaskUPIDs skips task_history rows and sets the audited-only apart", func(t *testing.T) {
 		q := newMockQueries()
 		q.existingTaskUPIDs = map[string]bool{"a": true, "b": true}
 		q.existingAuditUPIDs = map[string]bool{"b": true, "c": true}
 		s := &Syncer{queries: q, logger: testLogger()}
 
-		seen, err := s.seenTaskUPIDs(context.Background(), cluster, []string{"a", "b", "c", "d"})
+		seen, audited, err := s.seenTaskUPIDs(context.Background(), cluster, []string{"a", "b", "c", "d"})
 		if err != nil {
 			t.Fatalf("seenTaskUPIDs: %v", err)
 		}
-		for _, want := range []string{"a", "b", "c"} { // union of {a,b} ∪ {b,c}
-			if !seen[want] {
-				t.Errorf("expected %q in seen set", want)
-			}
+		if !seen["a"] || !seen["b"] || seen["c"] || seen["d"] {
+			t.Errorf("seen = %v, want a and b (the task_history rows)", seen)
 		}
-		if seen["d"] {
-			t.Error("d is in neither set and must not be marked seen")
+		if len(audited) != 1 || !audited["c"] {
+			t.Errorf("audited = %v, want only c (audited, no task row)", audited)
 		}
 
-		empty, err := s.seenTaskUPIDs(context.Background(), cluster, nil)
+		empty, _, err := s.seenTaskUPIDs(context.Background(), cluster, nil)
 		if err != nil || len(empty) != 0 {
 			t.Fatalf("empty input: got len %d, err %v", len(empty), err)
+		}
+	})
+
+	// TrackTask writes the audit entry and the task row apart, and a failed
+	// row insert left the task audited but rowless: skipped as seen, it never
+	// got a row. A recent one gets its row now, and no second audit entry.
+	t.Run("an audited task with no row gets the row and no second entry", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			started time.Time
+			wantRow bool
+		}{
+			{"recent", time.Now(), true},
+			{"older than the window, maybe pruned", time.Now().Add(-2 * auditedTaskAdoptWindow), false},
+		} {
+			q := newMockQueries()
+			s := &Syncer{queries: q, logger: testLogger()}
+			task := proxmox.NodeTask{UPID: "UPID:pve1:qmstart:104", Type: "qmstart", ID: "104", StartTime: tc.started.Unix()}
+			if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, nil, map[string]bool{task.UPID: true}); err != nil {
+				t.Fatalf("%s: ingestTask: %v", tc.name, err)
+			}
+			if got := len(q.externalTaskCalls) == 1; got != tc.wantRow || len(q.auditWithSourceCalls) != 0 {
+				t.Errorf("%s: %d task rows and %d audit entries, want row %v and no entry",
+					tc.name, len(q.externalTaskCalls), len(q.auditWithSourceCalls), tc.wantRow)
+			}
 		}
 	})
 
@@ -175,7 +198,7 @@ func TestIngestTask_External(t *testing.T) {
 		s := &Syncer{queries: q, logger: testLogger()}
 		task := proxmox.NodeTask{UPID: "UPID:pve1:qmstart:103", Type: "qmstart", ID: "103", Status: "OK", StartTime: start.Unix()}
 		seen := map[string]bool{"UPID:pve1:qmstart:103": true}
-		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, seen); err != nil {
+		if _, err := s.ingestTask(context.Background(), cluster, "pve1", task, seen, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 0 {
@@ -233,7 +256,7 @@ func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 				UPID: "UPID:pve-01:" + tc.taskType + ":" + tc.id, Type: tc.taskType, ID: tc.id,
 				Status: "OK", StartTime: time.Now().Add(-time.Minute).Unix(), EndTime: time.Now().Unix(),
 			}
-			if _, err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil); err != nil {
+			if _, err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
 			if len(q.auditWithSourceCalls) != 1 || len(q.externalTaskCalls) != 1 {
@@ -277,7 +300,7 @@ func TestIngestTask_RecordsTheTokenATaskRanUnder(t *testing.T) {
 				UPID: "UPID:pve-01:srvstart:pveproxy", Type: "srvstart", ID: "pveproxy", User: tc.user, TokenID: tc.tokenID,
 				Status: "OK", StartTime: time.Now().Add(-time.Minute).Unix(),
 			}
-			if _, err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil); err != nil {
+			if _, err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
 			var details map[string]any
@@ -321,7 +344,7 @@ func TestIngestTask_FlagsATaskDisagreeingWithItsUPID(t *testing.T) {
 			q := newMockQueries()
 			s := &Syncer{queries: q, logger: testLogger()}
 			tc.task.Status, tc.task.StartTime = "OK", time.Now().Add(-time.Minute).Unix()
-			if _, err := s.ingestTask(context.Background(), cluster, "pve-01", tc.task, nil); err != nil {
+			if _, err := s.ingestTask(context.Background(), cluster, "pve-01", tc.task, nil, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
 			if len(q.auditWithSourceCalls) != 1 || len(q.externalTaskCalls) != 1 {
@@ -380,7 +403,7 @@ func TestIngestTask_AuditRowIdentity(t *testing.T) {
 				UPID: "UPID:pve-01:" + tt.taskType, Type: tt.taskType, ID: tt.id,
 				Status: "OK", StartTime: 1, EndTime: 2,
 			}
-			if _, err := s.ingestTask(context.Background(), db.Cluster{ID: uuid.New()}, "pve-01", task, nil); err != nil {
+			if _, err := s.ingestTask(context.Background(), db.Cluster{ID: uuid.New()}, "pve-01", task, nil, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
 			if len(q.auditWithSourceCalls) != 1 {
@@ -409,7 +432,7 @@ func TestSeenTaskUPIDs_AsksAboutThisClustersAuditEntries(t *testing.T) {
 	q := newMockQueries()
 	s := &Syncer{queries: q, logger: testLogger()}
 	cluster := db.Cluster{ID: uuid.New()}
-	if _, err := s.seenTaskUPIDs(context.Background(), cluster, []string{"UPID:pve-01:00000001:00000001:66000001:qmstart:100:root@pam:"}); err != nil {
+	if _, _, err := s.seenTaskUPIDs(context.Background(), cluster, []string{"UPID:pve-01:00000001:00000001:66000001:qmstart:100:root@pam:"}); err != nil {
 		t.Fatalf("seenTaskUPIDs: %v", err)
 	}
 	if len(q.auditUPIDClusters) != 1 || q.auditUPIDClusters[0] != cluster.ID {

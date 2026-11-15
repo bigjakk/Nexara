@@ -84,7 +84,7 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 				candidates = append(candidates, task.UPID)
 			}
 		}
-		seen, dedupErr := s.seenTaskUPIDs(ctx, cluster, candidates)
+		seen, audited, dedupErr := s.seenTaskUPIDs(ctx, cluster, candidates)
 		if dedupErr != nil {
 			// Can't dedup this node's tasks safely this tick. Skip ingestion and
 			// hold the cluster watermark back (below) so these tasks are retried
@@ -99,7 +99,7 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 			if task.StartTime > maxStartTime {
 				maxStartTime = task.StartTime
 			}
-			ev, err := s.ingestTask(ctx, cluster, node.Node, task, seen)
+			ev, err := s.ingestTask(ctx, cluster, node.Node, task, seen, audited)
 			if err != nil {
 				s.logger.Warn("task sync: failed to ingest task",
 					"cluster_id", cluster.ID,
@@ -142,9 +142,12 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 }
 
 // seenTaskUPIDs returns the subset of the candidate UPIDs ingestTask must skip:
-// those already recorded — in task_history (Nexara-dispatched or a prior
-// external ingest) or in this cluster's audit_log entries (any source) — plus those belonging to a
-// cross-cluster migration, which this collector must never record at all.
+// those already in task_history (Nexara-dispatched or a prior external ingest)
+// plus those belonging to a cross-cluster migration, which this collector must
+// never record at all. Separately, audited: those in this cluster's audit_log
+// entries (any source) but not in task_history, whose task row ingestTask
+// records without a second audit entry — a row TrackTask failed to insert, or
+// one a writer never inserted, would otherwise be missing for good.
 // Three indexed batch lookups replace the old per-task point SELECTs. Returns
 // an error if any lookup fails so the caller can skip ingestion rather than
 // risk duplicate rows, or an unscrubbed credential, from a partial set.
@@ -159,16 +162,17 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 // nothing and ingests the task itself. See queries/proxmox_task_sync.sql for
 // the invariant this shares with ListRunningTaskHistoryByCluster's anti-join,
 // and for why the two are separate guards rather than copies.
-func (s *Syncer) seenTaskUPIDs(ctx context.Context, cluster db.Cluster, upids []string) (map[string]bool, error) {
-	seen := make(map[string]bool, len(upids))
+func (s *Syncer) seenTaskUPIDs(ctx context.Context, cluster db.Cluster, upids []string) (seen, audited map[string]bool, err error) {
+	seen = make(map[string]bool, len(upids))
+	audited = map[string]bool{}
 	if len(upids) == 0 {
-		return seen, nil
+		return seen, audited, nil
 	}
 	thUPIDs, err := s.queries.ListExistingTaskHistoryUPIDs(ctx, upids)
 	if err != nil {
 		s.logger.Warn("task sync: batch task_history UPID check failed",
 			"cluster_id", cluster.ID, "error", err)
-		return seen, err
+		return seen, audited, err
 	}
 	for _, u := range thUPIDs {
 		seen[u] = true
@@ -177,10 +181,12 @@ func (s *Syncer) seenTaskUPIDs(ctx context.Context, cluster db.Cluster, upids []
 	if err != nil {
 		s.logger.Warn("task sync: batch audit_log UPID check failed",
 			"cluster_id", cluster.ID, "error", err)
-		return seen, err
+		return seen, audited, err
 	}
 	for _, u := range alUPIDs {
-		seen[u] = true
+		if !seen[u] {
+			audited[u] = true
+		}
 	}
 	// Returning the error rather than carrying on is load-bearing here in a way
 	// it is not for the two above: a swallowed failure would not merely risk a
@@ -190,13 +196,19 @@ func (s *Syncer) seenTaskUPIDs(ctx context.Context, cluster db.Cluster, upids []
 	if err != nil {
 		s.logger.Warn("task sync: batch cross-cluster migration UPID check failed",
 			"cluster_id", cluster.ID, "error", err)
-		return seen, err
+		return seen, audited, err
 	}
 	for _, u := range mjUPIDs {
 		seen[u] = true
+		delete(audited, u)
 	}
-	return seen, nil
+	return seen, audited, nil
 }
+
+// auditedTaskAdoptWindow is how recent an audited task with no task_history row
+// must be for ingestTask to record the row: a pass lists a new task within
+// seconds of its start, and the window stays short of the task retention.
+const auditedTaskAdoptWindow = time.Hour
 
 // ingestTask records a single external (non-Nexara) Proxmox task: a task_history
 // row (status from the task — running or classified terminal — so the reconciler
@@ -207,21 +219,27 @@ func (s *Syncer) seenTaskUPIDs(ctx context.Context, cluster db.Cluster, upids []
 // The task's events are published here, except those of a task linkRelatedTasks
 // may link to another (mayLink): they are returned for it to publish once it has,
 // so a list draws the row with its marker and does not gain it a moment later.
-func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName string, task proxmox.NodeTask, seen map[string]bool) (held *taskEvents, err error) {
+func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName string, task proxmox.NodeTask, seen, audited map[string]bool) (held *taskEvents, err error) {
 	// Skip noisy task types.
 	if skipTaskTypes[task.Type] {
 		return nil, nil
 	}
 
-	// Skip anything in the seen set, resolved once per node in syncTasks. Two
-	// of its three lookups are dedup — task_history (Nexara-dispatched or a
-	// prior external ingest) and audit_log (any source); once a task_history
-	// row exists, the collector reconciler owns its running→done transition, so
-	// re-ingesting would be redundant. The third is not dedup: a cross-cluster
-	// migration's UPID is withheld even when nothing has recorded it, because
-	// the insert below would persist PVE's die message verbatim and that text
-	// can carry the target cluster's API token. See seenTaskUPIDs.
+	// Skip anything in the seen set, resolved once per node in syncTasks. One
+	// of its lookups is dedup — task_history (Nexara-dispatched or a prior
+	// external ingest); once a task_history row exists, the collector
+	// reconciler owns its running→done transition, so re-ingesting would be
+	// redundant. The other is not dedup: a cross-cluster migration's UPID is
+	// withheld even when nothing has recorded it, because the insert below
+	// would persist PVE's die message verbatim and that text can carry the
+	// target cluster's API token. See seenTaskUPIDs.
 	if seen[task.UPID] {
+		return nil, nil
+	}
+	// An audited task with no row gets one, but only a recent one: an older
+	// row may be missing because the retention sweep pruned it, and a task
+	// list re-read from a held-back watermark must not bring it back.
+	if audited[task.UPID] && time.Since(time.Unix(task.StartTime, 0)) > auditedTaskAdoptWindow {
 		return nil, nil
 	}
 
@@ -315,6 +333,14 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		FinishedAt:  finishedAt,
 	}); err != nil {
 		return nil, fmt.Errorf("insert external task_history: %w", err)
+	}
+	// Audited already, by Nexara or an earlier ingest: the row was owed, the
+	// entry is not.
+	if audited[task.UPID] {
+		if s.eventPub != nil {
+			s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindTaskCreated, "task", task.UPID, task.Type)
+		}
+		return nil, nil
 	}
 
 	// Build details JSON.

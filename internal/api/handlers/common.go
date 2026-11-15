@@ -334,34 +334,41 @@ func TrackTask(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p T
 	}
 	raw, _ := json.Marshal(details)
 
-	// Audit log + audit_entry event + syslog (AuditLog self-guards on user_id).
-	AuditLog(c, queries, eventPub, ClusterUUID(p.ClusterID), p.ResourceType, p.ResourceID, p.Action, raw)
-
 	// Not every request Proxmox accepts becomes a task: a replication job's
 	// "schedule now" only moves its next run up, and answers with nothing. The
 	// audit row is owed; a task_history row that no task will ever finish is
 	// not — it would stay "running" for a day before the reconciler gave up on it.
-	if p.UPID == "" {
-		return
-	}
-
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
+	//
+	// The row goes in before the audit entry: the collector records a row for
+	// an audited task that has none (seenTaskUPIDs), so a failed insert here
+	// still leaves the task a row, and a pass between the two writes must not
+	// find the entry without this row and record it as Proxmox's.
+	uid, hasUser := c.Locals("user_id").(uuid.UUID)
 	taskType := p.TaskType
 	if taskType == "" {
 		taskType = taskTypeFromUPID(p.UPID)
 	}
-	_, _ = queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
-		ClusterID:   p.ClusterID,
-		UserID:      uid,
-		Upid:        p.UPID,
-		Description: redact.URLs(p.Description),
-		Status:      "running",
-		Node:        p.Node,
-		TaskType:    taskType,
-	})
+	if p.UPID != "" && hasUser {
+		if _, err := queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
+			ClusterID:   p.ClusterID,
+			UserID:      uid,
+			Upid:        p.UPID,
+			Description: redact.URLs(p.Description),
+			Status:      "running",
+			Node:        p.Node,
+			TaskType:    taskType,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("task history insert failed; the collector records the task on its next pass",
+				"upid", p.UPID, "error", err)
+		}
+	}
+
+	// Audit log + audit_entry event + syslog (AuditLog self-guards on user_id).
+	AuditLog(c, queries, eventPub, ClusterUUID(p.ClusterID), p.ResourceType, p.ResourceID, p.Action, raw)
+
+	if p.UPID == "" || !hasUser {
+		return
+	}
 	eventPub.ClusterEvent(c.Context(), p.ClusterID.String(), events.KindTaskCreated, "task", p.UPID, taskType)
 }
 
