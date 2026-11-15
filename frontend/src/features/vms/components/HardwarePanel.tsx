@@ -521,6 +521,11 @@ export function HardwarePanel({
 
   // --- Memory ---
   const [memory, setMemory] = useState("2048");
+  // memory is a $memory_fmt property string whose `current` is required, so
+  // qemu-server refuses "" (and the whole Save with it); deleted, it reads as
+  // the format's default of 512 MiB (Memory.pm parse_memory). Neither is what
+  // a cleared field means, so a Save waits until it has a value.
+  const memoryMissing = memory === "";
   const [balloon, setBalloon] = useState("");
   const [shares, setShares] = useState("");
   const [allowKsm, setAllowKsm] = useState(true);
@@ -1049,13 +1054,21 @@ export function HardwarePanel({
   }
 
   function handleSave() {
-    if (!original) return;
+    if (!original || memoryMissing) return;
     const fields: Record<string, string> = {};
     const deleteFields: string[] = [];
 
-    // CPU
-    if (cores !== str(original["cores"] ?? 1)) fields["cores"] = cores;
-    if (sockets !== str(original["sockets"] ?? 1)) fields["sockets"] = sockets;
+    // CPU. Cores and sockets are optional integers (default 1) that
+    // qemu-server's schema refuses empty, and the whole write with it, so one
+    // cleared is deleted and reads back as 1.
+    if (cores !== str(original["cores"] ?? 1)) {
+      if (cores) fields["cores"] = cores;
+      else deleteFields.push("cores");
+    }
+    if (sockets !== str(original["sockets"] ?? 1)) {
+      if (sockets) fields["sockets"] = sockets;
+      else deleteFields.push("sockets");
+    }
     const newCPU = buildCPU({
       model: cpuType,
       flags: cpuFlagStates,
@@ -1916,7 +1929,17 @@ export function HardwarePanel({
                 summary={formatBytes(num(memory) * 1024 * 1024)}
               >
                 <FieldGrid>
-                  <Field label="Memory (MiB)">
+                  <Field
+                    label="Memory (MiB)"
+                    note={
+                      memoryMissing && (
+                        <p className="mt-1 text-[12.5px] text-destructive">
+                          Proxmox cannot take an empty memory, and deleting it
+                          drops the VM to 512 MiB: enter an amount to save.
+                        </p>
+                      )
+                    }
+                  >
                     <Input
                       type="number"
                       min={64}
@@ -3827,7 +3850,7 @@ export function HardwarePanel({
       <SaveBar
         dirty={hasChanges}
         saving={setConfigMutation.isPending}
-        disabled={!hasChanges || setConfigMutation.isPending}
+        disabled={!hasChanges || memoryMissing || setConfigMutation.isPending}
         onSave={handleSave}
         hideIdle={
           setConfigMutation.isError ||
@@ -3854,6 +3877,12 @@ export function HardwarePanel({
         {resizeMutation.isSuccess && (
           <span className="text-muted-foreground">
             Disk resized successfully.
+          </span>
+        )}
+        {/* Said here too: the Memory field may be a screen away from Save. */}
+        {memoryMissing && (
+          <span className="text-destructive">
+            Memory is empty, so Save is held: enter an amount.
           </span>
         )}
       </SaveBar>

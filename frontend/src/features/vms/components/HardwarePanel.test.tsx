@@ -626,6 +626,28 @@ describe("HardwarePanel dirty check", () => {
     ]);
   });
 
+  // qemu-server refuses "" for the integers cores and sockets, and for the
+  // memory property string, and the whole Save with it. Deleted, cores and
+  // sockets read as their default of 1; memory would drop to 512 MiB, so an
+  // empty one holds Save instead.
+  it("deletes cores and sockets cleared, and holds Save while memory is empty", async () => {
+    const save = await renderPanel(nicVM({ sockets: 2 }));
+    const memory = control(document.body, "Memory (MiB)");
+
+    fill(memory, "");
+    expect(save).toBeDisabled();
+    expect(
+      screen.getByText(/Memory is empty, so Save is held/),
+    ).toBeInTheDocument();
+    fill(memory, "2048");
+    fill(control(document.body, "Cores"), "");
+    fill(control(document.body, "Sockets"), "");
+
+    expect(await saveAndGetFields(save)).toEqual([
+      [CONFIG_URL, { fields: { delete: "cores,sockets" } }],
+    ]);
+  });
+
   // The "(current)" option comes from the STORED value, which stands here for
   // one newer than the lists (Proxmox's own enums today). It shows as the
   // value, so the panel opens clean, and picking another does not take it out
