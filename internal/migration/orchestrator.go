@@ -389,15 +389,6 @@ func (o *Orchestrator) startAndPollMigration(ctx context.Context, client *proxmo
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "migrating")
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskCreated, "task", upid, "migrate")
 
-	// Audit log with UPID so the activity panel can track and double-click to reopen.
-	typeLabel := "VM"
-	if job.VmType == VMTypeLXC {
-		typeLabel = "CT"
-	}
-	o.auditLog(ctx, mc, "migrate_running",
-		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"source_node":%q,"target_node":%q,"migration_type":%q}`,
-			upid, job.Vmid, typeLabel, job.SourceNode, job.SourceNode, job.TargetNode, job.MigrationType))
-
 	// Insert task history so the task shows in the Tasks panel.
 	description := fmt.Sprintf("Migrate %s: %s → %s", mc.vmLabel, job.SourceNode, job.TargetNode)
 	_, taskErr := o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
@@ -412,6 +403,17 @@ func (o *Orchestrator) startAndPollMigration(ctx context.Context, client *proxmo
 	if taskErr != nil {
 		o.logger.Warn("failed to insert task history", "job_id", jobID, "error", taskErr)
 	}
+
+	// The task row before the audit entry: a collector pass that found the
+	// entry without the row would record the task as Proxmox's (seenTaskUPIDs).
+	// Audit log with UPID so the activity panel can track and double-click to reopen.
+	typeLabel := "VM"
+	if job.VmType == VMTypeLXC {
+		typeLabel = "CT"
+	}
+	o.auditLog(ctx, mc, "migrate_running",
+		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"source_node":%q,"target_node":%q,"migration_type":%q}`,
+			upid, job.Vmid, typeLabel, job.SourceNode, job.SourceNode, job.TargetNode, job.MigrationType))
 
 	// Poll task status.
 	o.pollTaskStatus(ctx, client, job.SourceNode, upid, jobID, mc)
@@ -556,15 +558,6 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "migrating")
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskCreated, "task", upid, "migrate")
 
-	// Audit log with UPID so the activity panel can track the live phase.
-	typeLabel := "VM"
-	if job.VmType == VMTypeLXC {
-		typeLabel = "CT"
-	}
-	o.auditLog(ctx, mc, "migrate_running",
-		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"source_node":%q,"target_node":%q,"migration_type":"both"}`,
-			upid, job.Vmid, typeLabel, job.SourceNode, job.SourceNode, job.TargetNode))
-
 	description := fmt.Sprintf("Migrate %s: %s → %s (phase 1: live)", mc.vmLabel, job.SourceNode, job.TargetNode)
 	_, _ = o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
 		ClusterID:   job.SourceClusterID,
@@ -575,6 +568,16 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 		Node:        job.SourceNode,
 		TaskType:    "migrate",
 	})
+
+	// The task row before the audit entry, as in startAndPollMigration.
+	// Audit log with UPID so the activity panel can track the live phase.
+	typeLabel := "VM"
+	if job.VmType == VMTypeLXC {
+		typeLabel = "CT"
+	}
+	o.auditLog(ctx, mc, "migrate_running",
+		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"source_node":%q,"target_node":%q,"migration_type":"both"}`,
+			upid, job.Vmid, typeLabel, job.SourceNode, job.SourceNode, job.TargetNode))
 
 	// Wait for live migration to complete.
 	if err := o.waitForTask(ctx, client, job.SourceNode, upid); err != nil {
@@ -1426,10 +1429,6 @@ func (o *Orchestrator) recordDiskMove(ctx context.Context, mc *migrationContext,
 		typeLabel = "CT"
 	}
 
-	o.auditLog(ctx, mc, "disk_move_running",
-		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"disk":%q,"target_storage":%q,"from_storage":%q,"format":%q,"delete_source":%t,"bwlimit_kib":%d,"disk_index":%d,"disk_total":%d}`,
-			upid, mc.job.Vmid, typeLabel, node, spec.Disk, spec.TargetStorage, spec.FromStorage, spec.Format, spec.DeleteSource, spec.BWLimitKiB, index, total))
-
 	description := fmt.Sprintf("Move disk %s (%s, %d/%d)", spec.Summary(), mc.vmLabel, index, total)
 	_, _ = o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
 		ClusterID:   mc.job.SourceClusterID,
@@ -1440,6 +1439,10 @@ func (o *Orchestrator) recordDiskMove(ctx context.Context, mc *migrationContext,
 		Node:        node,
 		TaskType:    "move_disk",
 	})
+	// The task row before the audit entry, as in startAndPollMigration.
+	o.auditLog(ctx, mc, "disk_move_running",
+		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"disk":%q,"target_storage":%q,"from_storage":%q,"format":%q,"delete_source":%t,"bwlimit_kib":%d,"disk_index":%d,"disk_total":%d}`,
+			upid, mc.job.Vmid, typeLabel, node, spec.Disk, spec.TargetStorage, spec.FromStorage, spec.Format, spec.DeleteSource, spec.BWLimitKiB, index, total))
 	o.eventPub.ClusterEvent(ctx, mc.job.SourceClusterID.String(), events.KindTaskCreated, "task", upid, "move_disk")
 }
 

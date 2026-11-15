@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // jobDB is a db.DBTX for the node-membership tests: it holds one migration
@@ -68,7 +69,7 @@ func (d *jobDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	switch name := d.record(sql); name {
 	case "GetMigrationJob":
 		return structRow{t: d.t, v: d.job}
-	case "GetVMByClusterAndVmid":
+	case "GetVMByClusterAndVmid", "InsertTaskHistory":
 		return structRow{err: pgx.ErrNoRows}
 	case "GetNodeByClusterAndName":
 		cluster, _ := args[0].(uuid.UUID)
@@ -230,4 +231,19 @@ func TestJobNodes_ANodeTheClusterDoesNotHoldIsNeverSentToProxmox(t *testing.T) {
 			t.Errorf("asked %v, want %v", d.lookedAt, want)
 		}
 	})
+}
+
+// TestRecordDiskMoveWritesTheTaskRowFirst: a collector pass that finds a UPID's
+// audit entry with no task row records the row itself, as Proxmox's, and the
+// orchestrator's own insert then does nothing; so the row goes in first.
+func TestRecordDiskMoveWritesTheTaskRowFirst(t *testing.T) {
+	t.Parallel()
+	d := &jobDB{t: t}
+	o := NewOrchestrator(db.New(d), "", slog.New(slog.DiscardHandler), nil)
+	mc := &migrationContext{job: db.MigrationJob{ID: uuid.New(), SourceClusterID: uuid.New()}, userID: uuid.New()}
+	o.recordDiskMove(context.Background(), mc, "pve-01", proxmox.DiskMoveSpec{Disk: "scsi0", TargetStorage: "store01"},
+		"UPID:pve-01:00000001:00000001:65000000:qmmove:100:alice@pve:", 1, 1)
+	if want := []string{"InsertTaskHistory", "InsertAuditLog"}; !slices.Equal(d.names, want) {
+		t.Errorf("statements %v, want %v", d.names, want)
+	}
 }
