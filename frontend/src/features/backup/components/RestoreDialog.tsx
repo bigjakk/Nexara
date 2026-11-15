@@ -35,7 +35,11 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
   const [vmid, setVmid] = useState(snapshot.backup_id);
   const [storage, setStorage] = useState("");
   const [force, setForce] = useState(false);
-  const [unique, setUnique] = useState(true);
+  // Unique gives the guest new MAC addresses and a new identity: right for a
+  // copy under a new VMID, wrong for the original guest coming back. So it
+  // follows the VMID until the user sets it.
+  const [uniqueChoice, setUniqueChoice] = useState<boolean | null>(null);
+  const unique = uniqueChoice ?? vmid.trim() !== snapshot.backup_id;
   const [startAfter, setStartAfter] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [restoreUpid, setRestoreUpid] = useState<string | null>(null);
@@ -291,7 +295,7 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                     type="checkbox"
                     checked={unique}
                     onChange={(e) => {
-                      setUnique(e.target.checked);
+                      setUniqueChoice(e.target.checked);
                     }}
                     className="rounded"
                   />
