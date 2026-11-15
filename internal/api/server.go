@@ -466,6 +466,7 @@ func (s *Server) registerSecurity(d *serverDeps) {
 	// silently dropping it against a nil registry.
 	s.cveHandler = handlers.NewCVEHandler(d.pool, d.queries, d.encryptionKey, d.eventPub, d.app.NotifyRegistry, d.app.CVEScanner)
 	s.alertHandler = handlers.NewAlertHandler(d.queries, d.encryptionKey, d.eventPub, d.app.NotifyRegistry)
+	s.alertHandler.SetAlertEngine(d.app.AlertEngine)
 	s.notificationDLQHandler = handlers.NewNotificationDLQHandler(d.queries, d.app.AlertEngine, d.eventPub)
 	s.reportHandler = handlers.NewReportHandler(d.queries, d.encryptionKey, d.eventPub, d.app.ReportGen)
 	s.rollingUpdateHandler = handlers.NewRollingUpdateHandler(d.queries, d.encryptionKey, d.eventPub, d.app.RollingOrch)

@@ -81,3 +81,32 @@ func TestSendNotice(t *testing.T) {
 		t.Errorf("dead letter filed under alert %v rule %v cluster %v, want only the cluster", a, r, c)
 	}
 }
+
+// A manual resolve sends what an automatic one does: "resolved", for an alert
+// that fired, to the step it reached; a pending one sends nothing.
+func TestNotifyResolved(t *testing.T) {
+	t.Parallel()
+	sent := make(chan AlertPayload, 2)
+	e, fake, ch := newDispatchEngine(t, recordingDispatcher{sent: sent})
+	chain, _ := json.Marshal([]escalationStep{{ChannelID: uuid.New()}, {ChannelID: ch.ID}})
+	fake.rows["GetAlertRule"] = db.AlertRule{ID: uuid.New(), Name: "rule01", EscalationChain: chain}
+	alert := db.AlertHistory{ID: uuid.New(), State: "pending", EscalationLevel: 1}
+
+	e.NotifyResolved(context.Background(), alert)
+	if n := len(fake.callsOf("GetNotificationChannelEnabled")); n != 0 {
+		t.Fatalf("a pending alert's resolve looked up %d channels, want none", n)
+	}
+	alert.State = "acknowledged"
+	e.NotifyResolved(context.Background(), alert)
+	select {
+	case p := <-sent:
+		if p.State != "resolved" || p.AlertID != alert.ID.String() || p.EscalationLevel != 1 {
+			t.Errorf("sent %+v, want the alert's resolution at step 1", p)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no resolution was sent")
+	}
+	if got := fake.callsOf("GetNotificationChannelEnabled"); len(got) != 1 || got[0][0] != ch.ID {
+		t.Errorf("channel lookups %v, want step 1's channel only", got)
+	}
+}

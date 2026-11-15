@@ -852,6 +852,22 @@ func resolveNotifies(state string) bool {
 	return state == "firing" || state == "acknowledged"
 }
 
+// NotifyResolved sends, for an alert resolved by hand, the "resolved" an
+// automatic resolve sends, under the same rules: only for an alert that fired,
+// and only to the escalation step it reached. alert is the row as it stood
+// before the resolve. A nil engine sends nothing.
+func (e *Engine) NotifyResolved(ctx context.Context, alert db.AlertHistory) {
+	if e == nil || e.queries == nil || !resolveNotifies(alert.State) {
+		return
+	}
+	rule, err := e.queries.GetAlertRule(ctx, alert.RuleID)
+	if err != nil {
+		e.logger.Warn("resolved alert's rule not found; no resolution sent", "alert_id", alert.ID, "error", err)
+		return
+	}
+	e.dispatchForRule(ctx, rule, alert.ID, alert.CurrentValue, alert.ResourceName, "resolved", int(alert.EscalationLevel))
+}
+
 // checkEscalations looks for firing alerts that need escalation.
 // ruleStandsBehind reports whether a firing alert's rule still raises it: one
 // turned off, or moved to another metric, escalates it no further. Turning a

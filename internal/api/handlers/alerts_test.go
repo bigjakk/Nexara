@@ -839,3 +839,37 @@ func TestTestChannel_ReturnsTheReason(t *testing.T) {
 		t.Errorf("status %d, body %s: want 502 with the reason and no secret", resp.StatusCode, body)
 	}
 }
+
+// resolveRecorder records the alerts a manual resolve notifies about.
+type resolveRecorder struct{ got []db.AlertHistory }
+
+func (r *resolveRecorder) NotifyResolved(_ context.Context, a db.AlertHistory) { r.got = append(r.got, a) }
+
+// A manual Resolve hands the alert, as it stood, to the engine's resolution
+// notice (notifications.Engine.NotifyResolved).
+func TestResolveAlert_Notifies(t *testing.T) {
+	t.Parallel()
+	alert := db.AlertHistory{ID: uuid.New(), State: "firing", Metric: "cpu_usage", EscalationLevel: 1}
+	dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetAlertHistory": alert},
+		execOK: map[string]bool{"ResolveAlert": true, "InsertAuditLog": true}}
+	h := NewAlertHandler(db.New(dbtx), testEncryptionKey, nil, nil)
+	rec := &resolveRecorder{}
+	h.resolved = rec
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", newGrantEngine("acknowledge:alert"))
+		return c.Next()
+	})
+	app.Post("/alerts/:id/resolve", withRequestParams(t,
+		apischema.Properties{"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}},
+		[]string{"id"}, h.ResolveAlert))
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/alerts/"+alert.ID.String()+"/resolve", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(rec.got) != 1 || rec.got[0].ID != alert.ID || rec.got[0].State != "firing" {
+		t.Errorf("status %d, notified %+v: want the firing alert notified once", resp.StatusCode, rec.got)
+	}
+}

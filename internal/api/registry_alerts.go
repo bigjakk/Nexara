@@ -247,7 +247,8 @@ func registerAlertEndpoints(reg *Registry, h *handlers.AlertHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   alertScope + "/:id/resolve",
-		Description: "Resolve a firing or acknowledged alert by hand. Requires acknowledge:alert — not " +
+		Description: "Resolve a firing or acknowledged alert by hand, and send its \"resolved\" notification " +
+			"to the escalation step it reached, as an automatic resolve does. Requires acknowledge:alert — not " +
 			"manage:alert — on the cluster the alert belongs to, or the instance-wide acknowledge:alert " +
 			"when it carries no cluster: closing an alert is the same act as acknowledging it, not a " +
 			"change to the rule that raised it. An alert on a UPS metric answers 404 without the " +

@@ -1661,7 +1661,7 @@ A Slack, Discord, Teams or Generic Webhook URL that resolves to a private or loo
 
 A channel's **Edit** changes its name and **Enabled** only: its settings are stored encrypted and never shown again. To change them, send a new `config` to `PUT /api/v1/notification-channels/:id`, which replaces them all. Deleting a channel and creating it again gives it a new id: every alert rule step that named the old one silently sends nothing, with no dead-letter entry, and the channel drops out of CVE notifications and report schedules.
 
-Each alert is one PagerDuty incident: its firing, escalation and resolution share the alert's id (`alert_id` in a webhook's payload) as the dedup key. The resolution goes only to the escalation step the alert had reached, so the incident closes when that step is the PagerDuty channel; a manual **Resolve** sends no notification, so close the incident in PagerDuty too.
+Each alert is one PagerDuty incident: its firing, escalation and resolution share the alert's id (`alert_id` in a webhook's payload) as the dedup key. The resolution goes only to the escalation step the alert had reached, so the incident closes when that step is the PagerDuty channel. A manual **Resolve** sends the same resolution, to the same step.
 
 ### Escalation Chains
 
@@ -1694,7 +1694,7 @@ Windows do not repeat — create one per outage. Managing them needs `manage:mai
 
 From the **Alert History** tab:
 - **Acknowledge** — mark an alert as seen (stops escalation). While its condition holds the rule raises no new alert, and once the condition clears the alert resolves on its own and sends its resolution notification. A rule keeps one alert at a time (a cluster rule judged node by node, one per node), so acknowledging the alert of a rule that judges every UPS, or a cluster's tasks or Veeam jobs, quiets that rule for all of them: give a UPS a rule of its own to hear about it separately
-- **Resolve** — mark an alert as resolved
+- **Resolve** — mark an alert as resolved. It sends the resolution notification an automatic resolve sends, to the escalation step the alert reached
 - Filter by state and severity. The tab lists the newest 50 alerts; `GET /api/v1/alerts` also takes a cluster, a limit and an offset
 
 ### Failed Notifications (Dead-letter Queue)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,19 @@ type AlertHandler struct {
 	encryptionKey string
 	eventPub      *events.Publisher
 	registry      *notifications.Registry
+	// resolved sends a manual resolve's notification; nil sends none.
+	resolved resolveNotifier
+}
+
+// resolveNotifier is the alert engine's NotifyResolved.
+type resolveNotifier interface {
+	NotifyResolved(ctx context.Context, alert db.AlertHistory)
+}
+
+// SetAlertEngine gives the handler the alert engine a manual resolve notifies
+// through.
+func (h *AlertHandler) SetAlertEngine(e *notifications.Engine) {
+	h.resolved = e
 }
 
 // NewAlertHandler creates a new AlertHandler.
@@ -1384,6 +1398,12 @@ func (h *AlertHandler) ResolveAlert(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	AuditLog(c, h.queries, h.eventPub, alert.ClusterID, "alert", id.String(), "alert_resolved", nil)
+
+	// The "resolved" an automatic resolve sends, so a PagerDuty incident or
+	// chat thread the alert opened is closed too.
+	if h.resolved != nil {
+		h.resolved.NotifyResolved(c.Context(), alert)
+	}
 
 	if h.eventPub != nil {
 		clusterID := ""
