@@ -15,10 +15,16 @@ import (
 
 const countTaskHistoryByStatusInWindow = `-- name: CountTaskHistoryByStatusInWindow :many
 SELECT status, count(*)::bigint AS n
-FROM task_history
-WHERE cluster_id = $1::uuid
-  AND COALESCE(finished_at, started_at) >= $2::timestamptz
-  AND COALESCE(finished_at, started_at) < $3::timestamptz
+FROM task_history t
+WHERE t.cluster_id = $1::uuid
+  AND COALESCE(t.finished_at, t.started_at) >= $2::timestamptz
+  AND COALESCE(t.finished_at, t.started_at) < $3::timestamptz
+  AND CASE WHEN split_part(t.upid, ':', 6) IN ('hastart', 'hastop', 'hamigrate', 'harelocate')
+           THEN NOT EXISTS (SELECT 1 FROM audit_log a
+                            WHERE a.details->>'upid' = t.upid
+                              AND a.cluster_id = t.cluster_id
+                              AND a.details ? 'ha_worker_upid')
+           ELSE true END
 GROUP BY status
 ORDER BY status
 `
@@ -37,6 +43,13 @@ type CountTaskHistoryByStatusInWindowRow struct {
 // CountTaskHistoryByStatusInWindow feeds the cluster digest: how many tasks
 // ended in the period, by terminal status. Same window rule as the listing
 // above.
+//
+// An HA action is one action but two tasks: the request, which only queues it
+// and ends OK whatever becomes of it, and the worker that does it. A request
+// LinkHAWorkerTasks has paired with its worker (ha_worker_upid on its audit
+// row) is left out, so the action is counted once, with the worker's outcome.
+// An unpaired request still counts. The audit probe runs only for HA request
+// UPIDs (the CASE), the few in a window, through idx_audit_log_upid.
 func (q *Queries) CountTaskHistoryByStatusInWindow(ctx context.Context, arg CountTaskHistoryByStatusInWindowParams) ([]CountTaskHistoryByStatusInWindowRow, error) {
 	rows, err := q.db.Query(ctx, countTaskHistoryByStatusInWindow, arg.ClusterID, arg.Since, arg.Until)
 	if err != nil {

@@ -472,6 +472,13 @@ type Querier interface {
 	// CountTaskHistoryByStatusInWindow feeds the cluster digest: how many tasks
 	// ended in the period, by terminal status. Same window rule as the listing
 	// above.
+	//
+	// An HA action is one action but two tasks: the request, which only queues it
+	// and ends OK whatever becomes of it, and the worker that does it. A request
+	// LinkHAWorkerTasks has paired with its worker (ha_worker_upid on its audit
+	// row) is left out, so the action is counted once, with the worker's outcome.
+	// An unpaired request still counts. The audit probe runs only for HA request
+	// UPIDs (the CASE), the few in a window, through idx_audit_log_upid.
 	CountTaskHistoryByStatusInWindow(ctx context.Context, arg CountTaskHistoryByStatusInWindowParams) ([]CountTaskHistoryByStatusInWindowRow, error)
 	// CountTaskHistoryFiltered returns the total matching the same filters, for the
 	// Tasks page pagination. Mirrors CountAuditLogAdvanced. Must stay filter-for-filter in
