@@ -17,7 +17,7 @@ INSERT INTO ldap_configs (
 SELECT * FROM ldap_configs WHERE id = $1;
 
 -- name: GetEnabledLDAPConfig :one
-SELECT * FROM ldap_configs WHERE enabled = true LIMIT 1;
+SELECT * FROM ldap_configs WHERE enabled = true ORDER BY created_at, id LIMIT 1;
 
 -- name: ListLDAPConfigs :many
 SELECT * FROM ldap_configs ORDER BY created_at;

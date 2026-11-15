@@ -128,7 +128,7 @@ func (q *Queries) DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error {
 }
 
 const getEnabledOIDCConfig = `-- name: GetEnabledOIDCConfig :one
-SELECT id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address FROM oidc_configs WHERE enabled = true LIMIT 1
+SELECT id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address FROM oidc_configs WHERE enabled = true ORDER BY created_at, id LIMIT 1
 `
 
 func (q *Queries) GetEnabledOIDCConfig(ctx context.Context) (OidcConfig, error) {

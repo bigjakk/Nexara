@@ -140,7 +140,7 @@ func (q *Queries) DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error {
 }
 
 const getEnabledLDAPConfig = `-- name: GetEnabledLDAPConfig :one
-SELECT id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at FROM ldap_configs WHERE enabled = true LIMIT 1
+SELECT id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at FROM ldap_configs WHERE enabled = true ORDER BY created_at, id LIMIT 1
 `
 
 func (q *Queries) GetEnabledLDAPConfig(ctx context.Context) (LdapConfig, error) {

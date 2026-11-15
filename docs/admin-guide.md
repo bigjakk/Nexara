@@ -670,7 +670,7 @@ Role**); type the subject, group or role named to enable the button.
 
 ### LDAP / Active Directory
 
-Navigate to **Admin > LDAP** to configure LDAP/AD authentication. Only one enabled configuration is used.
+Navigate to **Admin > LDAP** to configure LDAP/AD authentication. Only one enabled configuration is used: with several enabled, sign-in uses the oldest (the first created).
 
 #### Setup
 
@@ -713,7 +713,7 @@ The **Test Connection** panel appears only once the config is saved, and tests t
 
 ### OIDC / SSO
 
-Navigate to **Admin > OIDC / SSO** to configure single sign-on.
+Navigate to **Admin > OIDC / SSO** to configure single sign-on. Only one enabled configuration is used: with several enabled, sign-in uses the oldest (the first created).
 
 #### Setup
 

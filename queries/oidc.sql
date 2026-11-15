@@ -15,7 +15,7 @@ INSERT INTO oidc_configs (
 SELECT * FROM oidc_configs WHERE id = $1;
 
 -- name: GetEnabledOIDCConfig :one
-SELECT * FROM oidc_configs WHERE enabled = true LIMIT 1;
+SELECT * FROM oidc_configs WHERE enabled = true ORDER BY created_at, id LIMIT 1;
 
 -- name: ListOIDCConfigs :many
 SELECT * FROM oidc_configs ORDER BY created_at;
