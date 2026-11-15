@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Monitor, FolderInput } from "lucide-react";
 import { useVMAction } from "../api/vm-queries";
+import { guestState } from "@/lib/guest-state";
 import {
   lifecycleActions,
   managementActions,
@@ -69,7 +70,7 @@ export function VMContextMenu({
   const consoleAllowed = canConsole(target.kind === "ct" ? "container" : "vm");
 
   const visibleLifecycle = lifecycleActions.filter((a) =>
-    a.showWhen(normalizedStatus, target.kind),
+    a.showWhen(guestState(target.status, target.runState), target.kind),
   );
 
   const visibleManagement = managementActions.filter((a) =>

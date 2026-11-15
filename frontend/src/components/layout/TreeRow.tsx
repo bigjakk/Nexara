@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { OSIcon } from "@/components/OSIcon";
 import { StatusIcon } from "@/components/StatusIcon";
+import { guestState } from "@/lib/guest-state";
 import { VMIcon } from "@/components/VMIcon";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { classifyOS } from "@/lib/os-classify";
@@ -125,6 +126,7 @@ export function TreeGuestRow({
         name: vm.name,
         kind: vm.type === "lxc" ? "ct" : "vm",
         status: vm.status,
+        runState: vm.run_state,
         currentNode,
         template: vm.template,
       }}
@@ -137,7 +139,7 @@ export function TreeGuestRow({
         className={treeRowClass({ active })}
         style={treeIndent(depth, true)}
       >
-        <StatusIcon status={vm.status} />
+        <StatusIcon status={guestState(vm.status, vm.run_state)} />
         <VMIcon type={vm.type} template={vm.template} />
         {knownOS && (
           <OSIcon

@@ -32,6 +32,7 @@ import { TaskProgressBanner } from "./TaskProgressBanner";
 import { lifecycleActions, type ActionConfig } from "../lib/vm-action-defs";
 import type { VMAction, ResourceKind } from "../types/vm";
 import { cn } from "@/lib/utils";
+import { guestState } from "@/lib/guest-state";
 
 /** Map a completed lifecycle action to the expected VM status. */
 function expectedStatus(action: VMAction): string | null {
@@ -55,6 +56,8 @@ interface VMActionsProps {
   resourceId: string;
   kind: ResourceKind;
   status: string;
+  /** A running VM's halted QEMU state (VMResponse.run_state). */
+  runState?: string | undefined;
   name: string;
   template?: boolean;
   onSnapshot?: () => void;
@@ -79,6 +82,7 @@ export function VMActions({
   resourceId,
   kind,
   status,
+  runState,
   name,
   template,
   onSnapshot,
@@ -130,7 +134,9 @@ export function VMActions({
           queryKey,
           (old: Record<string, unknown> | undefined) => {
             if (!old) return old;
-            return { ...old, status: newStatus };
+            // A finished power task leaves no halted QEMU state, as the
+            // server's own write after it (UpdateVMStatus) says.
+            return { ...old, status: newStatus, run_state: "" };
           },
         );
       }
@@ -150,11 +156,11 @@ export function VMActions({
   // The actions are ranked rather than laid out ten abreast: the power action
   // that fits the guest's state is a button, its alternatives fold in beside
   // it, and what is rarely wanted or cannot be undone sits behind "More".
+  // A halted VM is offered what Proxmox does for its QEMU state.
   const powerActions = lifecycleActions.filter((a) =>
-    a.showWhen(normalizedStatus, kind),
+    a.showWhen(guestState(status, runState), kind),
   );
-  // A suspended guest can be started cold or resumed; resuming is what was
-  // paused for, so it leads.
+  // Where resuming is offered it leads: it is what the guest waits for.
   const primaryPower =
     powerActions.find((a) => a.action === "resume") ?? powerActions[0];
   const otherPower = powerActions.filter((a) => a !== primaryPower);

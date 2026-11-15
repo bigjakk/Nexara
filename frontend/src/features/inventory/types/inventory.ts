@@ -16,6 +16,8 @@ export interface InventoryRow {
   type: ResourceType;
   name: string;
   status: ResourceStatus;
+  /** A running VM's halted QEMU state, "" otherwise (lib/guest-state.ts). */
+  runState?: string | undefined;
   clusterName: string;
   clusterId: string;
   nodeName: string;

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { OSIcon } from "@/components/OSIcon";
 import { DetailField } from "@/components/DetailField";
-import { DetailHeader, Fact, StatusFact } from "@/components/page/DetailHeader";
+import { DetailHeader, Fact } from "@/components/page/DetailHeader";
 import {
   DefGrid,
   Panel,
@@ -53,6 +53,7 @@ import {
   useSetVMPool,
 } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
+import { GuestStateFact } from "../components/GuestStateFact";
 import { VMConsolePreview } from "../components/VMConsolePreview";
 import { CloneDialog } from "../components/CloneDialog";
 import { CloneToTemplateDialog } from "../components/CloneToTemplateDialog";
@@ -74,12 +75,7 @@ import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
 import type { VmLiveMetric } from "@/types/ws";
-import {
-  formatBytes,
-  formatBytesPerSecond,
-  formatPercent,
-  formatUptime,
-} from "@/lib/format";
+import { formatBytes, formatBytesPerSecond, formatPercent } from "@/lib/format";
 import { DATA_COLOR } from "@/lib/chart-colors";
 
 export function VMDetailPage() {
@@ -222,8 +218,6 @@ export function VMDetailPage() {
   const hasKnownOS =
     classifyOS(vm.ostype) !== "unknown" ||
     classifyOS(vm.config_ostype) !== "unknown";
-  const statusLabel =
-    normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1);
 
   return (
     <div className="space-y-5">
@@ -310,14 +304,10 @@ export function VMDetailPage() {
         }
         facts={
           <>
-            <StatusFact
-              status={normalizedStatus}
-              label={statusLabel}
-              detail={
-                normalizedStatus === "running" && vm.uptime > 0
-                  ? `for ${formatUptime(vm.uptime)}`
-                  : undefined
-              }
+            <GuestStateFact
+              status={vm.status}
+              runState={vm.run_state}
+              uptime={vm.uptime}
             />
             <Fact label={kind === "ct" ? "CT" : "VM"}>{String(vm.vmid)}</Fact>
             {nodeName !== "" && (
@@ -345,6 +335,7 @@ export function VMDetailPage() {
             resourceId={vmId}
             kind={kind}
             status={vm.status}
+            runState={vm.run_state}
             name={vm.name}
             template={vm.template}
             bannerContainer={bannerSlot}

@@ -97,6 +97,22 @@ describe("ResourceTable", () => {
     expect(within(stopped).getByText("Stopped")).toBeInTheDocument();
   });
 
+  it("spells out a halted VM's QEMU state in place of Running", () => {
+    renderWithProviders(
+      <ResourceTable
+        data={[
+          makeRow({ key: "c1:vm:1", name: "web-01", runState: "io-error" }),
+        ]}
+      />,
+    );
+    const halted = screen.getByText("web-01").closest("tr");
+    if (halted === null) throw new Error("no row");
+    expect(
+      within(halted).getByRole("img", { name: "I/O error" }),
+    ).toBeInTheDocument();
+    expect(within(halted).getByText("I/O error")).toBeInTheDocument();
+  });
+
   it("narrows to one power state with the quick filter", async () => {
     const user = userEvent.setup();
     const data = [

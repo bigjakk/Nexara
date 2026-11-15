@@ -49,6 +49,7 @@ function vmToRow(
     type,
     name: vm.name,
     status: normalizeStatus(vm.status),
+    runState: vm.run_state ?? "",
     clusterName: cluster.name,
     clusterId: cluster.id,
     nodeName: nodeMap.get(vm.node_id) ?? "",

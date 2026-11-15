@@ -23,6 +23,7 @@ import {
   type OnChangeFn,
 } from "@tanstack/react-table";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   ArrowDown,
   ArrowUp,
@@ -51,6 +52,7 @@ import { Panel } from "@/components/page/Panel";
 import { StatusIcon } from "@/components/StatusIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { classifyOS } from "@/lib/os-classify";
+import { guestState, isFaultState, isHaltedState } from "@/lib/guest-state";
 import { cn } from "@/lib/utils";
 import { MetricMiniBar } from "./MetricMiniBar";
 import { SearchBar, SearchFilterChips } from "./SearchBar";
@@ -172,19 +174,23 @@ const QUIET_STATES = new Set(["running", "online"]);
 
 /** The state in words, for a row that is not simply running. */
 function StateText({ status }: { status: string }) {
+  const { t } = useTranslation("vms");
   if (QUIET_STATES.has(status)) return null;
+  const halted = isHaltedState(status);
   return (
     <span
       className={cn(
         "shrink-0 text-[12.5px]",
-        status === "stopped" || status === "unknown"
+        status === "stopped" || status === "unknown" || status === "asleep"
           ? "text-muted-foreground"
-          : status === "offline"
+          : status === "offline" || isFaultState(status)
             ? "font-medium text-red-700 dark:text-red-400"
             : "font-medium text-amber-700 dark:text-amber-400",
       )}
     >
-      {status.charAt(0).toUpperCase() + status.slice(1)}
+      {halted
+        ? t(`runState.${status}`)
+        : status.charAt(0).toUpperCase() + status.slice(1)}
     </span>
   );
 }
@@ -239,6 +245,7 @@ function toContextTarget(row: InventoryRow): VMContextTarget | null {
     name: row.name,
     kind: row.type === "ct" ? "ct" : "vm",
     status: row.status,
+    runState: row.runState,
     currentNode: row.nodeName,
     template: row.template,
   };
@@ -283,7 +290,7 @@ function RowContextMenu({
   const consoleAllowed = canConsole(target.kind === "ct" ? "container" : "vm");
 
   const visibleLifecycle = lifecycleActions.filter((a) =>
-    a.showWhen(normalizedStatus, target.kind),
+    a.showWhen(guestState(target.status, target.runState), target.kind),
   );
   const visibleManagement = managementActions.filter((a) =>
     a.showWhen(normalizedStatus, target.kind, target.template),
@@ -530,9 +537,10 @@ function buildColumns(
       header: ({ column }) => <SortHeader column={column}>Name</SortHeader>,
       cell: ({ row, getValue }) => {
         const r = row.original;
+        const state = guestState(r.status, r.runState);
         return (
           <span className="flex min-w-0 items-center gap-2">
-            <StatusIcon status={r.status} />
+            <StatusIcon status={state} />
             {/* One line on a desktop; on a phone the state drops under the
                 name, which needs the whole width. */}
             <span className="flex min-w-0 flex-col md:flex-row md:items-center md:gap-2">
@@ -552,7 +560,7 @@ function buildColumns(
                   {getValue()}
                 </Link>
               )}
-              <StateText status={r.status} />
+              <StateText status={state} />
             </span>
           </span>
         );

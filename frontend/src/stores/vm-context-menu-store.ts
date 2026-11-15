@@ -8,6 +8,8 @@ export interface VMContextTarget {
   name: string;
   kind: ResourceKind;
   status: string;
+  /** A running VM's halted QEMU state (VMResponse.run_state), if any. */
+  runState?: string | undefined;
   currentNode: string;
   template?: boolean;
 }

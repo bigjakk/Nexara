@@ -291,6 +291,15 @@ describe("applyFilter", () => {
     }),
   ];
 
+  it("finds a halted VM by its QEMU state and still under status:running", () => {
+    const halted = [
+      makeRow({ key: "c1:vm:9", name: "linux09", runState: "suspended" }),
+    ];
+    expect(applyFilter(halted, parseQuery("status:asleep"))).toHaveLength(1);
+    expect(applyFilter(halted, parseQuery("status:running"))).toHaveLength(1);
+    expect(applyFilter(rows, parseQuery("status:asleep"))).toHaveLength(0);
+  });
+
   it("returns all rows with empty query", () => {
     const parsed = parseQuery("");
     expect(applyFilter(rows, parsed)).toHaveLength(4);

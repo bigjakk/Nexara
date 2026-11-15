@@ -805,6 +805,12 @@ export interface VMResponse {
   name: string;
   type: string;
   status: string;
+  /**
+   * QEMU's halted state for a VM whose status is "running": io-error,
+   * suspended (S3 sleep), watchdog, guest-panicked, shutdown, internal-error
+   * or debug; "" otherwise. See lib/guest-state.ts.
+   */
+  run_state?: string;
   cpu_count: number;
   mem_total: number;
   disk_total: number;

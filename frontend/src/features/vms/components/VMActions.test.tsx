@@ -33,10 +33,17 @@ describe("VMActions", () => {
       others: ["Reboot", "Stop", "Suspend"],
     },
     {
-      name: "a suspended guest leads with Resume, not a cold Start",
+      // Proxmox refuses Start for a VM whose process runs.
+      name: "a paused VM leads with Resume, not a Start Proxmox refuses",
       props: { status: "suspended" },
       button: "Resume",
-      others: ["Start"],
+      others: ["Stop", "Reset"],
+    },
+    {
+      name: "a VM asleep in S3 leads with Resume, without Shutdown",
+      props: { status: "running", runState: "suspended" },
+      button: "Resume",
+      others: ["Stop", "Reset"],
     },
   ])(
     "$name and folds the rest beside it",

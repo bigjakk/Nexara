@@ -1,3 +1,4 @@
+import { haltedState } from "@/lib/guest-state";
 import type {
   FilterCriteria,
   InventoryRow,
@@ -149,8 +150,12 @@ function getFieldValue(
   switch (field) {
     case "type":
       return row.type;
-    case "status":
-      return normalizeStatus(row.status);
+    case "status": {
+      // A halted VM answers both to "running" and to its own state.
+      const halted = haltedState(row.status, row.runState);
+      const status = normalizeStatus(row.status);
+      return halted ? `${status} ${halted}` : status;
+    }
     case "cluster":
       return row.clusterName.toLowerCase();
     case "node":

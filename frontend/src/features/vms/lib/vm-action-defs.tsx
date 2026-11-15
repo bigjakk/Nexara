@@ -14,6 +14,7 @@ import {
   Rocket,
 } from "lucide-react";
 import type { VMAction, ResourceKind } from "../types/vm";
+import { canResume, isHaltedState } from "@/lib/guest-state";
 
 export interface ActionConfig {
   action: VMAction;
@@ -21,7 +22,19 @@ export interface ActionConfig {
   icon: React.ReactNode;
   variant: "outline" | "destructive";
   needsConfirm: boolean;
-  showWhen: (status: string, kind: ResourceKind) => boolean;
+  /** `state` is guestState(): the halted QEMU state of a running VM, else its status. */
+  showWhen: (state: string, kind: ResourceKind) => boolean;
+}
+
+/**
+ * A VM whose vCPUs are halted, or paused, can still be stopped or reset
+ * (qemu-server's stop and reset check only that the process runs). Shutdown,
+ * reboot and start are not offered: Proxmox refuses shutdown and reboot for a
+ * paused or sleeping VM (vm_is_paused) and start for any running one, and a
+ * halted guest cannot answer the ACPI request anyway.
+ */
+function haltedVM(s: string, k: ResourceKind): boolean {
+  return k === "vm" && (s === "suspended" || isHaltedState(s));
 }
 
 export type ManagementAction =
@@ -48,7 +61,7 @@ export const lifecycleActions: ActionConfig[] = [
     icon: <Play className="h-4 w-4" />,
     variant: "outline",
     needsConfirm: false,
-    showWhen: (s) => s === "stopped" || s === "suspended",
+    showWhen: (s, k) => s === "stopped" || (s === "suspended" && k === "ct"),
   },
   {
     action: "shutdown",
@@ -72,7 +85,7 @@ export const lifecycleActions: ActionConfig[] = [
     icon: <Square className="h-4 w-4" />,
     variant: "outline",
     needsConfirm: true,
-    showWhen: (s) => s === "running",
+    showWhen: (s, k) => s === "running" || haltedVM(s, k),
   },
   {
     action: "reset",
@@ -80,7 +93,7 @@ export const lifecycleActions: ActionConfig[] = [
     icon: <Zap className="h-4 w-4" />,
     variant: "outline",
     needsConfirm: true,
-    showWhen: (s, k) => s === "running" && k === "vm",
+    showWhen: (s, k) => (s === "running" && k === "vm") || haltedVM(s, k),
   },
   {
     action: "suspend",
@@ -96,7 +109,7 @@ export const lifecycleActions: ActionConfig[] = [
     icon: <PlayCircle className="h-4 w-4" />,
     variant: "outline",
     needsConfirm: false,
-    showWhen: (s) => s === "suspended",
+    showWhen: (s) => canResume(s),
   },
 ];
 

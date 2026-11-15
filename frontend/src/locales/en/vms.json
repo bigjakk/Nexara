@@ -8,6 +8,24 @@
   "running": "Running",
   "stopped": "Stopped",
   "suspended": "Suspended",
+  "runState": {
+    "io-error": "I/O error",
+    "internal-error": "Internal error",
+    "guest-panicked": "Panicked",
+    "watchdog": "Watchdog fired",
+    "shutdown": "Shut down",
+    "debug": "In debugger",
+    "asleep": "Asleep"
+  },
+  "runStateHint": {
+    "io-error": "Paused on a storage I/O error. Resume once the storage is back.",
+    "internal-error": "QEMU stopped on an internal error. Reset or stop it.",
+    "guest-panicked": "The guest OS panicked. Reset or stop it.",
+    "watchdog": "Paused by its watchdog. Resume, reset or stop it.",
+    "shutdown": "The guest shut down; its QEMU process is still up. Stop or reset it.",
+    "debug": "Halted by a debugger. Resume to continue.",
+    "asleep": "Asleep (S3). Resume wakes it."
+  },
   "vnc": "VNC",
   "serial": "Serial",
   "attach": "Attach",
