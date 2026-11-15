@@ -241,8 +241,14 @@ export function RolesPage() {
                   <div className="flex items-baseline justify-between gap-3">
                     <Label>Permissions</Label>
                     <span className="text-[12.5px] text-muted-foreground">
-                      {selectedPermIds.length} of {allPermissions.length}{" "}
-                      granted
+                      {/* Only ids still in the catalogue: a role can hold
+                          one for a permission that has since gone. */}
+                      {
+                        selectedPermIds.filter((id) =>
+                          allPermissions.some((p) => p.id === id),
+                        ).length
+                      }{" "}
+                      of {allPermissions.length} granted
                     </span>
                   </div>
                   <PermissionMatrix
