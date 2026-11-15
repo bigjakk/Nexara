@@ -260,3 +260,29 @@ describe("a save that fails", () => {
     },
   );
 });
+
+it("keeps no password once the dialog is closed", async () => {
+  // In the mutation's variables, which TanStack keeps until it is collected.
+  await signInAs(ADMIN);
+  server.routes[CHANGE] = refused;
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ProfilePage />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  await savesThePassword(user);
+  await screen.findByText("Refused for a reason");
+
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await flush();
+
+  expect(
+    JSON.stringify(
+      queryClient
+        .getMutationCache()
+        .getAll()
+        .map((m) => m.state.variables),
+    ),
+  ).not.toContain("old-01");
+});

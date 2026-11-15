@@ -130,7 +130,10 @@ export function ProfilePage() {
     );
   };
 
+  // The passwords are kept only while the dialog is open: here, and in the
+  // mutation's variables, which reset() drops (it has gcTime 0).
   const resetPasswordDialog = () => {
+    changePassword.reset();
     setOldPassword("");
     setNewPassword("");
     setConfirmPassword("");
@@ -376,6 +379,7 @@ export function ProfilePage() {
             <Button
               variant="outline"
               onClick={() => {
+                resetPasswordDialog();
                 setPasswordDialogOpen(false);
               }}
             >

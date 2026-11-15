@@ -55,5 +55,9 @@ export function useChangePassword() {
         apiPath`/api/v1/auth/change-password`,
         params,
       ),
+    // Its variables hold both passwords: gcTime 0 drops the finished mutation
+    // as soon as nothing observes it, and the dialog resets it when it closes
+    // (ProfilePage), so the passwords go when the dialog does.
+    gcTime: 0,
   });
 }
