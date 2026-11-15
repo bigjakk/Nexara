@@ -427,7 +427,7 @@ Common HTTP status codes:
 | 415 | Unsupported media type — the request named a `Content-Encoding` other than `identity`; see Compressed Request Bodies |
 | 429 | Rate limited |
 | 500 | Internal server error |
-| 502 | Bad gateway — Proxmox VE, PBS or Veeam could not be reached, or answered with an error of its own |
+| 502 | Bad gateway — Proxmox VE, PBS or Veeam could not be reached, or answered with an error of its own. Proxmox's own words are passed on cut to their first 2 KiB, with control characters turned into spaces and the cluster's credentials, and any password or token the request sent, replaced by `REDACTED` |
 | 503 | Service unavailable — a background engine the endpoint needs is not running, or no node is online to do the work |
 
 ## Compressed Request Bodies

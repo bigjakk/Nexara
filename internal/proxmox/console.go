@@ -435,11 +435,10 @@ func (c *Client) consoleSecrets(ticket string) *secretSet {
 //
 // The ws handlers log two kinds of error through this. One is what the relay
 // reads from Proxmox once a session is open. The other is a refused ticket
-// request, whose error carries the node's error body: checkStatus
-// (api_client.go) repeats up to maxResponseSize, 50 MB, of it, and a peer that
-// reflects its request puts the API token there. That echo is still
-// checkStatus's for every other caller of this client; only the console's log
-// lines are scrubbed and capped here.
+// request, whose error carries the node's error body. readBody (api_client.go)
+// already cuts that to maxErrorTextKept and scrubs the client's credentials
+// from it; here it is cut again, to maxErrorText, and scrubbed of the ticket
+// as well.
 func (c *Client) RedactConsoleError(err error, ticket string) error {
 	return c.consoleSecrets(ticket).redact(err)
 }

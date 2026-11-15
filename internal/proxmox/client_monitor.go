@@ -113,9 +113,11 @@ func (c *Client) GetBlockJobs(ctx context.Context, node string, vmid int) (Block
 	if err := c.doPost(ctx, path, form, &out); err != nil {
 		return BlockJobs{}, fmt.Errorf("read VM %d block jobs on %s: %w", vmid, node, err)
 	}
+	// The reply is QEMU's text relayed verbatim, so it is held to what an
+	// error answer is held to in readBody: cut, cleaned and scrubbed.
 	if msg, failed := strings.CutPrefix(strings.TrimSpace(out), "ERROR: "); failed {
 		return BlockJobs{}, fmt.Errorf("read VM %d block jobs on %s: %w", vmid, node,
-			&APIError{StatusCode: http.StatusInternalServerError, Message: msg})
+			&APIError{StatusCode: http.StatusInternalServerError, Message: cleanErrorText(msg, c.requestSecrets(form))})
 	}
 	return parseBlockJobs(out), nil
 }

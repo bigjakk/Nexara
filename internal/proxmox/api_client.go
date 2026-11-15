@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // maxResponseSize caps how much data we read from a Proxmox API response (50 MB).
@@ -136,12 +138,8 @@ func (a *apiClient) do(ctx context.Context, path string, dst interface{}) error 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	body, err := a.readBody(resp, nil)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	if err := checkStatus(resp.StatusCode, body); err != nil {
 		return err
 	}
 
@@ -167,12 +165,11 @@ func (a *apiClient) doPostRaw(ctx context.Context, path string, rawBody string, 
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	// A body that does not parse sends nothing to scrub out but the
+	// credentials; ParseQuery returns what it could read alongside the error.
+	sent, _ := url.ParseQuery(rawBody)
+	respBody, err := a.readBody(resp, sent)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	if err := checkStatus(resp.StatusCode, respBody); err != nil {
 		return err
 	}
 
@@ -203,12 +200,8 @@ func (a *apiClient) doPost(ctx context.Context, path string, params url.Values, 
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	respBody, err := a.readBody(resp, params)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	if err := checkStatus(resp.StatusCode, respBody); err != nil {
 		return err
 	}
 
@@ -231,12 +224,8 @@ func (a *apiClient) doDelete(ctx context.Context, path string, dst interface{}) 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	body, err := a.readBody(resp, nil)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	if err := checkStatus(resp.StatusCode, body); err != nil {
 		return err
 	}
 
@@ -267,12 +256,8 @@ func (a *apiClient) doPut(ctx context.Context, path string, params url.Values, d
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	respBody, err := a.readBody(resp, params)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	if err := checkStatus(resp.StatusCode, respBody); err != nil {
 		return err
 	}
 
@@ -347,31 +332,159 @@ func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[str
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	respBody, err := a.readBody(resp, nil)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	if err := checkStatus(resp.StatusCode, respBody); err != nil {
 		return err
 	}
 
 	return unmarshalData(respBody, dst)
 }
 
-// checkStatus maps HTTP status codes to typed errors.
-func checkStatus(statusCode int, body []byte) error {
+// What of a Proxmox error answer is read, and what is kept of it.
+//
+// The answer's text becomes the Go error, and from there an API answer
+// (mapProxmoxError), a log line and, through the handlers that store an
+// error, rows a Viewer reads. A responder that reflects its request — a
+// proxy, a misconfigured endpoint, a debugging echo — would put whatever the
+// request carried there, the API token first, so the text is cut, cleaned of
+// control characters and scrubbed of the request's secrets (cleanErrorText)
+// before anything else sees it.
+//
+// The read cap is wide enough for the JSON envelope a real rejection comes in
+// to parse whole: a parameter-verification map runs to a few hundred bytes a
+// field, and a die() sentence to a line or two of command output. What is kept
+// is enough for every phrase Nexara matches ("is locked", "already exist",
+// "not running", "migrated to rules", "for data too large", the
+// mapMissingObjectError and mapProxmoxDieError phrases), all of which sit at
+// the start of PVE's sentence.
+const (
+	maxErrorBodyRead = 8 << 10
+	maxErrorTextKept = 2 << 10
+)
+
+// readBody reads resp's body, or the error its status maps to. A success is
+// read up to maxResponseSize; an error answer only up to maxErrorBodyRead, and
+// cleaned of what the request carried: the client's credentials and the
+// values of sent's secret-bearing parameters (requestSecrets).
+func (a *apiClient) readBody(resp *http.Response, sent url.Values) ([]byte, error) {
+	limit := int64(maxResponseSize)
+	if resp.StatusCode >= 400 {
+		limit = maxErrorBodyRead
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, checkStatus(resp.StatusCode, body, a.requestSecrets(sent))
+	}
+	return body, nil
+}
+
+// secretFormKeys are the parameters, sent to Proxmox by this package or passed
+// through it by a handler, whose value is a credential: passwords (users,
+// cloud-init, storage, PBS, SMTP), one-time codes, API and notification
+// tokens, SDN DNS keys, TFA keys, storage encryption keys and keyrings, and
+// ACME EAB keys and plugin data. A remote migration's target-endpoint carries
+// the target cluster's token too, and only its secret half is scrubbed
+// (targetEndpointSecret).
+var secretFormKeys = map[string]bool{
+	"password": true, "cipassword": true, "otp": true, "token": true, "tokens": true,
+	"key": true, "keys": true, "secret": true, "encryption-key": true, "keyring": true,
+	"eab-hmac-key": true, "data": true,
+}
+
+// targetEndpointSecret is the secret half of the API token in a target-endpoint
+// value (TargetEndpoint.PropertyString: apitoken=PVEAPIToken=ID=SECRET,host=…),
+// or "" when it names none. The token id and host around it stay readable, so a
+// refused endpoint is still diagnosable.
+func targetEndpointSecret(v string) string {
+	for part := range strings.SplitSeq(v, ",") {
+		if token, ok := strings.CutPrefix(part, "apitoken="); ok {
+			return token[strings.LastIndex(token, "=")+1:]
+		}
+	}
+	return ""
+}
+
+// minScrubbedValue is the shortest parameter value requestSecrets scrubs. A
+// secret shorter than the scrub's window is matched whole wherever it occurs,
+// and a value of a byte or two would take ordinary words apart; no credential
+// Proxmox accepts is that short (a password needs five).
+const minScrubbedValue = 4
+
+// requestSecrets is everything a request of this client can carry that an
+// error text must not repeat: the API token's secret, a bootstrap session's
+// ticket and CSRF token, the values of sent's secretFormKeys, and the token
+// secret in a target-endpoint.
+//
+// The secret, not the Authorization header around it. The scrub matches any
+// eight-byte run of what it is given, and every token header starts
+// "PVEAPIToken=", so scrubbing the header would also eat the token id of a
+// target-endpoint and of the header itself, which are not secret and are what
+// makes a refusal diagnosable. An echoed header still loses its secret.
+func (a *apiClient) requestSecrets(sent url.Values) *secretSet {
+	secrets := []string{a.tokenSecret}
+	if auth, ok := a.auth.(ticketAuth); ok {
+		secrets = append(secrets, auth.ticket, auth.csrf)
+	}
+	for key, values := range sent {
+		for _, v := range values {
+			if key == "target-endpoint" {
+				v = targetEndpointSecret(v)
+			} else if !secretFormKeys[key] {
+				continue
+			}
+			if len(v) >= minScrubbedValue {
+				secrets = append(secrets, v)
+			}
+		}
+	}
+	return newSecretSet(secrets...)
+}
+
+// cleanErrorText is text as an error may carry it: control characters (and the
+// bidirectional overrides that reorder what a reader sees) turned into
+// spaces, the ends trimmed, cut to maxErrorTextKept bytes on a character
+// boundary, and every secret in secrets scrubbed out. It cuts before it
+// scrubs, so the scrub sees exactly what is kept, and trims the start of a
+// secret the cut left at the end, which is too short to recognise; see
+// secretSet.
+func cleanErrorText(text string, secrets *secretSet) string {
+	text = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+			return ' '
+		}
+		return r
+	}, text))
+	cut := len(text) > maxErrorTextKept
+	if cut {
+		n := maxErrorTextKept
+		for n > 0 && !utf8.RuneStart(text[n]) {
+			n--
+		}
+		text = secrets.trimCutTail(text[:n])
+	}
+	text, _ = secrets.scrub(text)
+	if cut {
+		text += " …"
+	}
+	return text
+}
+
+// checkStatus maps HTTP status codes to typed errors, with the body's text
+// cleaned of secrets (see cleanErrorText).
+func checkStatus(statusCode int, body []byte, secrets *secretSet) error {
 	switch {
 	case statusCode == http.StatusNotFound:
 		return ErrNotFound
 	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
-		msg := strings.TrimSpace(string(body))
-		if msg != "" {
+		if msg := cleanErrorText(string(body), secrets); msg != "" {
 			return fmt.Errorf("%w: %s", ErrForbidden, msg)
 		}
 		return ErrForbidden
 	case statusCode >= 400:
-		msg, fields := parseProxmoxError(body)
+		msg, fields := parseProxmoxError(body, secrets)
 		return &APIError{
 			StatusCode: statusCode,
 			Message:    msg,
@@ -383,25 +496,49 @@ func checkStatus(statusCode int, body []byte) error {
 
 // parseProxmoxError extracts a human-readable message from the Proxmox API
 // error JSON envelope, plus the per-field rejection map when the response
-// carried one. Proxmox returns {"errors":{"field":"msg",...},"message":"..."}
-// on validation failures. If parsing fails, the raw body is returned as the
-// message with no fields.
-func parseProxmoxError(body []byte) (message string, fields map[string]string) {
+// carried one, every text in both cleaned (cleanErrorText). Proxmox returns
+// {"errors":{"field":"msg",...},"message":"..."} on validation failures.
+//
+// Without a rejection map the message is the envelope cut down to its
+// sentence, {"message":"..."}, which is what mapProxmoxError reads it for: the
+// sentence is cleaned as decoded, so an escape such as \u001b cannot bring a
+// control character back, and a long one is cut without leaving JSON that no
+// longer parses. A body that is not such an envelope is kept as its cleaned
+// text.
+func parseProxmoxError(body []byte, secrets *secretSet) (message string, fields map[string]string) {
 	var envelope struct {
 		Errors  map[string]string `json:"errors"`
 		Message string            `json:"message"`
 	}
-	if err := json.Unmarshal(body, &envelope); err != nil || len(envelope.Errors) == 0 {
-		return strings.TrimSpace(string(body)), nil
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return cleanErrorText(string(body), secrets), nil
 	}
+	if len(envelope.Errors) == 0 {
+		sentence := cleanErrorText(envelope.Message, secrets)
+		if sentence == "" {
+			return cleanErrorText(string(body), secrets), nil
+		}
+		var b strings.Builder
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(struct {
+			Message string `json:"message"`
+		}{sentence}); err != nil {
+			return sentence, nil
+		}
+		return strings.TrimSuffix(b.String(), "\n"), nil
+	}
+	fields = make(map[string]string, len(envelope.Errors))
 	parts := make([]string, 0, len(envelope.Errors))
 	for field, msg := range envelope.Errors {
+		field, msg = cleanErrorText(field, secrets), cleanErrorText(msg, secrets)
+		fields[field] = msg
 		parts = append(parts, field+": "+msg)
 	}
 	// Map iteration order is randomised, so without this the operator is shown
 	// the same rejected fields in a different order on every request.
 	slices.Sort(parts)
-	return strings.Join(parts, "; "), envelope.Errors
+	return cleanErrorText(strings.Join(parts, "; "), secrets), fields
 }
 
 // unmarshalData unmarshals the standard Proxmox API response envelope.
@@ -465,12 +602,8 @@ func (a *apiClient) doWithTotal(ctx context.Context, path string, dst interface{
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	body, err := a.readBody(resp, nil)
 	if err != nil {
-		return 0, fmt.Errorf("read response body: %w", err)
-	}
-
-	if err := checkStatus(resp.StatusCode, body); err != nil {
 		return 0, err
 	}
 
@@ -493,12 +626,8 @@ func (a *apiClient) doGetTotal(ctx context.Context, path string) (int, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	body, err := a.readBody(resp, nil)
 	if err != nil {
-		return 0, fmt.Errorf("read response body: %w", err)
-	}
-
-	if err := checkStatus(resp.StatusCode, body); err != nil {
 		return 0, err
 	}
 

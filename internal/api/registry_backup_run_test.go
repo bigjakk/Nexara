@@ -609,7 +609,7 @@ func TestRunBackupJobTracksEveryTaskOnItsOwnNode(t *testing.T) {
 	wantBody := `{"tasks":[{"node":"pve-01","upid":"` + backupRunUPID01 + `"},{"node":"pve-04","upid":"` +
 		backupRunUPID04 + `"}],"skipped":["pve-02"],"errors":[` +
 		`{"node":"pve-03","message":"node is not online (Proxmox reports it as offline)"},` +
-		`{"node":"pve-05","message":"storage: fixture: no such\tstorage\n"}],` +
+		`{"node":"pve-05","message":"storage: fixture: no such storage"}],` +
 		`"unconfirmed":[{"node":"pve-06","message":"Failed to connect to Proxmox"},` +
 		`{"node":"pve-07","message":"the answer from Proxmox could not be read"}],` +
 		`"stops_running_backups":false}`
@@ -763,7 +763,7 @@ func TestRunBackupJobWithNoTaskAnswersByWhatHappened(t *testing.T) {
 			wantPosted: []string{"pve-01", "pve-02"},
 			wantInMessage: []string{
 				"Backup job " + backupRunJobID + " started no backup.",
-				"Could not start on pve-02: storage: fixture: no such\tstorage\n; " +
+				"Could not start on pve-02: storage: fixture: no such storage; " +
 					"pve-03: node is not online (Proxmox reports it as offline)",
 			},
 			wantNotInMessage: []string{"check the task list", "stop set"},
