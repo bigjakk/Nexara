@@ -975,7 +975,7 @@ A cluster's **Configure** → **Networks** → **Interfaces**, after picking a n
 A cluster's **Configure** → **Firewall** has **Cluster Rules**, **Templates**, **Aliases**, **IP Sets**, **Security Groups**, **Log**, **Options** and **History**.
 
 - **Add Rule** inserts at the top, live within about 10 seconds. Rules cannot be edited or reordered here; deleting one needs `delete:network`
-- **Options** — **Enable/Disable Firewall** and **Inbound/Outbound Policy** take effect immediately, without asking
+- **Options** — **Disable Firewall** asks first, since it stops every cluster, node and guest rule being enforced at once. **Enable Firewall** and **Inbound/Outbound Policy** take effect immediately, without asking
 - **IP Sets** must be empty to delete. **Security Groups** can be created and deleted, but a group's rules have no page
 
 ### Node Firewall

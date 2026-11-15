@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -10,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/page/Panel";
 import { SettingRow } from "@/components/page/Settings";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   useFirewallOptions,
   useSetFirewallOptions,
@@ -25,6 +28,9 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
   const optionsQuery = useFirewallOptions(clusterId);
   const opts = optionsQuery.data;
   const setOpts = useSetFirewallOptions(clusterId);
+  const { t } = useTranslation("networks");
+  // Open while turning the cluster firewall off waits on its confirmation.
+  const [confirmDisable, setConfirmDisable] = useState<true | null>(null);
 
   // `opts?.enable === 1` is false for a read that failed as readily as for a
   // firewall that is off, and this badge is a statement about the cluster's
@@ -60,8 +66,8 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
           <Badge variant={isEnabled ? "healthy" : "secondary"}>
             {isEnabled ? "Enabled" : "Disabled"}
           </Badge>
-          {/* Turning it off stops every rule being enforced, at once and with
-              no confirmation: the red outline is the warning. */}
+          {/* Turning it off stops every rule being enforced, at once: it asks
+              first. Turning it on does not. */}
           <Button
             variant="outline"
             size="sm"
@@ -71,12 +77,25 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
                 : undefined
             }
             onClick={() => {
-              setOpts.mutate({ enable: isEnabled ? 0 : 1 });
+              if (isEnabled) setConfirmDisable(true);
+              else setOpts.mutate({ enable: 1 });
             }}
             disabled={setOpts.isPending}
           >
-            {isEnabled ? "Disable Firewall" : "Enable Firewall"}
+            {isEnabled ? t("disableFirewall") : "Enable Firewall"}
           </Button>
+          <ConfirmDeleteDialog
+            target={confirmDisable}
+            onClose={() => {
+              setConfirmDisable(null);
+            }}
+            onConfirm={() => {
+              setOpts.mutate({ enable: 0 });
+            }}
+            title={() => t("disableClusterFirewallTitle")}
+            description={() => t("disableClusterFirewallDesc")}
+            confirmLabel={t("disableFirewall")}
+          />
         </SettingRow>
         <SettingRow
           label="Inbound policy"
