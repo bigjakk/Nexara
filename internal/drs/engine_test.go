@@ -352,32 +352,6 @@ func TestRulesPin(t *testing.T) {
 	}
 }
 
-func TestCheckViolations(t *testing.T) {
-	nodeWorkloads := map[string][]Workload{
-		"node1": {{VMID: 100, Type: "qemu", Node: "node1"}},
-		"node2": {{VMID: 101, Type: "qemu", Node: "node2"}},
-	}
-
-	// Affinity rule violated: VMs 100 and 101 should be together.
-	rules := []Rule{
-		{Type: RuleTypeAffinity, VMIDs: []int{100, 101}, Enabled: true},
-	}
-
-	violations := CheckViolations(nodeWorkloads, rules)
-	if len(violations) == 0 {
-		t.Error("expected affinity violation")
-	}
-
-	// Anti-affinity rule satisfied: VMs on different nodes.
-	rules2 := []Rule{
-		{Type: RuleTypeAntiAffinity, VMIDs: []int{100, 101}, Enabled: true},
-	}
-	violations2 := CheckViolations(nodeWorkloads, rules2)
-	if len(violations2) != 0 {
-		t.Errorf("expected no anti-affinity violations, got %v", violations2)
-	}
-}
-
 func TestExtractLRMState(t *testing.T) {
 	tests := []struct {
 		name   string

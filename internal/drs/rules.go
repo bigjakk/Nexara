@@ -143,62 +143,6 @@ func isAntiAffinityAllowed(migration Recommendation, nodeWorkloads map[string][]
 	return true
 }
 
-// CheckViolations returns current rule violations in the cluster.
-func CheckViolations(nodeWorkloads map[string][]Workload, rules []Rule) []string {
-	var violations []string
-
-	for _, rule := range rules {
-		switch rule.Type {
-		case RuleTypeAffinity:
-			// All VMs in the group should be on the same node.
-			var nodes []string
-			for _, vmid := range rule.VMIDs {
-				n := findVMNode(vmid, nodeWorkloads)
-				if n != "" {
-					nodes = append(nodes, n)
-				}
-			}
-			if len(nodes) > 1 {
-				first := nodes[0]
-				for _, n := range nodes[1:] {
-					if n != first {
-						violations = append(violations, "affinity rule violated: VMs are on different nodes")
-						break
-					}
-				}
-			}
-
-		case RuleTypeAntiAffinity:
-			// No two VMs in the group should be on the same node.
-			seen := make(map[string]bool)
-			for _, vmid := range rule.VMIDs {
-				n := findVMNode(vmid, nodeWorkloads)
-				if n == "" {
-					continue
-				}
-				if seen[n] {
-					violations = append(violations, "anti-affinity rule violated: multiple VMs on same node "+n)
-					break
-				}
-				seen[n] = true
-			}
-
-		case RuleTypePin:
-			for _, vmid := range rule.VMIDs {
-				n := findVMNode(vmid, nodeWorkloads)
-				if n == "" {
-					continue
-				}
-				if len(rule.NodeNames) > 0 && !containsString(rule.NodeNames, n) {
-					violations = append(violations, "pin rule violated: VM not on designated node")
-				}
-			}
-		}
-	}
-
-	return violations
-}
-
 // FindVMNodePublic returns the node a VM is on, given a workload map.
 func FindVMNodePublic(vmid int, nodeWorkloads map[string][]Workload) string {
 	return findVMNode(vmid, nodeWorkloads)
