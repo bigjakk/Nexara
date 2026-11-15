@@ -15,6 +15,7 @@ import (
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/nut"
 	"github.com/bigjakk/nexara/internal/veeam"
 )
 
@@ -316,6 +317,30 @@ func (h *VeeamHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	pinRemoved := params.TlsFingerprint == "" && existing.TlsFingerprint != ""
 	wasUnverified := existing.TlsFingerprint == "" && !existing.VerifyTls
 	nowUnverified := params.TlsFingerprint == "" && !params.VerifyTls
+
+	// The redirect gate's sibling, as on a NUT server (nut_servers.go Update):
+	// an acknowledgement alone must not send the stored password over a
+	// connection that is no longer verified, where whoever sits on the path
+	// reads it; nor to a certificate the caller just pinned, which counts as
+	// verified but is whichever one they chose. Re-entering it shows the caller
+	// holds it already. Pinning a server that was unverified is an upgrade and
+	// passes. The pins are compared as the transport reads them, so the stored
+	// one in another case or with other separators is not a new one. A move of
+	// the address is left to the redirect gate below, which answers it, and
+	// audits it, under its own name.
+	pinChanged := params.TlsFingerprint != "" &&
+		nut.NormalizeFingerprint(params.TlsFingerprint) != nut.NormalizeFingerprint(existing.TlsFingerprint)
+	if p.String("password") == "" && params.BaseUrl == existing.BaseUrl && !wasUnverified &&
+		(nowUnverified || pinChanged) {
+		h.audit(c, existing, "veeam_server_credential_downgrade_refused", map[string]any{
+			"verify_tls":      params.VerifyTls,
+			"tls_pin_changed": pinChanged,
+		})
+		return fiber.NewError(fiber.StatusBadRequest,
+			"Changing how the server's certificate is checked requires re-entering the password. "+
+				"The stored one is only ever sent as protected as when it was saved.")
+	}
+
 	if err := requireInsecureTLSAck(nowUnverified && !wasUnverified, p.Bool("acknowledge_insecure_tls")); err != nil {
 		return err
 	}

@@ -1261,7 +1261,7 @@ The **Test** action on an already-registered server re-runs that logon and repor
 
 Registration schedules the first inventory sync rather than blocking on one. Until it finishes the server shows as **syncing** rather than reporting an empty inventory as though it were a finished one.
 
-Changing a server's base URL later requires re-entering the password, for the same reason it does on a cluster.
+Changing a server's base URL later requires re-entering the password, for the same reason it does on a cluster. So does pinning a different certificate, or turning certificate checks off, through the API: the stored password is only ever sent as protected as when it was saved.
 
 ### Mapping Platforms to Clusters
 

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/veeam"
 )
@@ -374,6 +375,60 @@ func TestVeeamUpdate_InsecureTLSAckPredicate(t *testing.T) {
 			err := requireInsecureTLSAck(nowUnverified && !wasUnverified, false)
 			if (err != nil) != tc.wantAckRequired {
 				t.Errorf("ack required = %v, want %v (err: %v)", err != nil, tc.wantAckRequired, err)
+			}
+		})
+	}
+}
+
+// Update asks for the password again before sending the stored one to a newly
+// pinned certificate or over a connection no longer verified, as a NUT server's
+// Update does (98b73cb2). Pinning an unverified server is an upgrade and passes
+// the gate, on to the probe, which fails on the closed port.
+func TestVeeamUpdate_NewPinOrWeakerTLSNeedsThePassword(t *testing.T) {
+	t.Parallel()
+	pw, err := crypto.Encrypt("pw", testEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin, other := strings.Repeat("AA:", 31)+"AA", strings.Repeat("BB:", 31)+"BB"
+	for _, tc := range []struct {
+		name      string
+		pin       string
+		verify    bool
+		body      string
+		wantCode  int
+		wantInMsg string
+	}{
+		{"pinned, a new pin, password kept", pin, true, `{"tls_fingerprint":"` + other + `"}`, http.StatusBadRequest, "re-entering the password"},
+		{"pinned, a new pin, password re-entered", pin, true, `{"tls_fingerprint":"` + other + `","password":"pw"}`, http.StatusBadGateway, ""},
+		{"CA-verified, verification off, password kept", "", true, `{"verify_tls":false,"acknowledge_insecure_tls":true}`, http.StatusBadRequest, "re-entering the password"},
+		{"unverified, given a pin, password kept", "", false, `{"tls_fingerprint":"` + other + `"}`, http.StatusBadGateway, ""},
+		{"pinned, the same pin in another spelling, password kept", pin, true,
+			`{"tls_fingerprint":"` + strings.ToLower(strings.ReplaceAll(pin, ":", "")) + `"}`, http.StatusBadGateway, ""},
+		// A new address with a new pin is the redirect attempt, answered by the redirect gate.
+		{"pinned, a new address and a new pin, password kept", pin, true,
+			`{"base_url":"https://127.0.0.2:1","allow_private_address":true,"tls_fingerprint":"` + other + `"}`,
+			http.StatusBadRequest, "Changing the server address"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stored := db.VeeamServer{ID: uuid.New(), Name: "vbr01", BaseUrl: "https://127.0.0.1:1", Username: "u",
+				PasswordEncrypted: pw, TlsFingerprint: tc.pin, VerifyTls: tc.verify, Enabled: true}
+			dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetVeeamServer": stored},
+				execOK: map[string]bool{"InsertAuditLog": true}}
+			h := NewVeeamHandler(db.New(dbtx), testEncryptionKey, nil)
+			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+			optional := apischema.Property{Type: apischema.String, Optional: true}
+			props := veeamMirror(t, apischema.Properties{
+				"id":   {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+				"name": optional, "base_url": optional, "username": optional, "password": optional,
+				"enabled": {Type: apischema.Boolean, Optional: true},
+			})
+			app.Put("/veeam-servers/:id", veeamHandlerWithParams(t, props, []string{"id"}, h.Update))
+
+			status, body := doVeeamRequest(t, app, http.MethodPut, "/veeam-servers/"+stored.ID.String(), "", tc.body)
+			if status != tc.wantCode || !strings.Contains(body, tc.wantInMsg) {
+				t.Errorf("%d %s, want %d carrying %q", status, body, tc.wantCode, tc.wantInMsg)
 			}
 		})
 	}

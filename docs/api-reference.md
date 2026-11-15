@@ -1776,7 +1776,11 @@ the pinned VMID comes to belong to a different machine.
 
 **Changing a server's base URL requires re-entering the password.** A stored
 credential is only ever sent to the address it was saved for; the refusal is
-audited as `veeam_server_credential_redirect_refused`.
+audited as `veeam_server_credential_redirect_refused`. So does an edit that keeps
+the stored password while pinning a different certificate on a verified or
+pinned server, or turning verification off: a 400, audited as
+`veeam_server_credential_downgrade_refused`. Pinning a server that was not
+verified at all needs no password.
 
 Four inventory-backed alert metrics come with it: `veeam_rpo_hours` (cluster and
 VM scope; cluster reports the worst guest), `veeam_malware_status` (Clean 0,
