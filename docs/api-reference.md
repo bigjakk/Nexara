@@ -572,6 +572,13 @@ endpoints (`/auth/me`, `/auth/logout`,
 `/auth/totp/setup/verify`, `/auth/oidc/token-exchange`, …) and the `/ws`,
 `/ws/console`, `/ws/vnc` upgrades have no request-rate limit at all.
 
+`POST /auth/login` has a guard of its own that is not in the table either: ten
+failed sign-ins with one email address within 15 minutes, from any addresses, lock
+signing in with it for 15 minutes. Every attempt while it lasts, the right password
+included, is answered `429` with the JSON error envelope and a `Retry-After` header
+in seconds, the same whether or not the address names an account. A successful
+sign-in clears the count. When Redis cannot be reached the guard is not enforced.
+
 `POST /auth/change-password` and `POST /auth/totp/setup` share a second guard that
 is not a rate limit and is not in the table: five wrong current passwords within
 60 minutes, on either route, lock both for that session for 30 minutes, whatever
@@ -729,7 +736,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/auth/register` | Register a new user (the first user becomes admin and is signed in; later registrations need an admin caller and sign nobody in) |
-| POST | `/auth/login` | Login with email and password |
+| POST | `/auth/login` | Login with email and password (`429` with `Retry-After` while the email address is locked after repeated failed sign-ins) |
 | GET | `/auth/sessions` | List the caller's own active sessions (`{items,total}`): device, user agent, address and times, never the token hash. `is_current` marks the one whose refresh cookie the request carries, so a caller with no cookie sees none marked |
 | DELETE | `/auth/sessions/:id` | End one of the caller's own sessions (interactive session only: `403` for an API key). Another user's id, an unknown one or one already ended answers `404`; ending the current one clears the refresh cookie. 30 calls a minute per session |
 | POST | `/auth/refresh` | Refresh access token |

@@ -418,6 +418,8 @@ From the Users page, administrators can:
 
 There is no way to reset someone's password from the UI or API. See [Recovering from a Lost Admin Account](#recovering-from-a-lost-admin-account).
 
+**Failed sign-ins lock the address for a while.** Ten failed password sign-ins with one email address within 15 minutes, from any number of client addresses, lock signing in with that email address for 15 minutes: the sign-in page says *Too many failed sign-in attempts* and how long is left, even for the right password, and the lock ends by itself. Local and LDAP accounts count alike, and an email address that matches no account is locked the same way. A successful sign-in clears the count; single sign-on is not affected. The audit log records `login_locked` and, at the first sign-in attempt after the lock ends, `login_lock_released`. Anyone who knows an email address can keep that account from signing in with a password this way, so a lock you did not expect is worth a look at the audit log's addresses. When Nexara cannot reach Redis the lock is not enforced, and its log says so.
+
 ### Auth Sources
 
 Each user has an auth source:

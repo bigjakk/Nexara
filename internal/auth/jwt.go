@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -132,6 +134,20 @@ func NewJWTService(secret string, accessTTL, refreshTTL time.Duration) *JWTServi
 		accessTokenTTL:  accessTTL,
 		refreshTokenTTL: refreshTTL,
 	}
+}
+
+// Digest is a keyed digest of data, under a key derived from the signing secret for
+// purpose alone: what a caller keeps in place of a value nobody should be able to read
+// back or guess offline, such as the identifier typed into the sign-in form, which is
+// sometimes a password.
+func (j *JWTService) Digest(purpose, data string) [32]byte {
+	sub := hmac.New(sha256.New, j.secret)
+	sub.Write([]byte("nexara digest: " + purpose))
+	mac := hmac.New(sha256.New, sub.Sum(nil))
+	mac.Write([]byte(data))
+	var out [32]byte
+	copy(out[:], mac.Sum(nil))
+	return out
 }
 
 // GenerateAccessToken creates a signed JWT access token for the session sessionID.

@@ -48,6 +48,10 @@ var auditClusterExempt = map[string]string{
 	// The lockout of one user's current-password checks (change-password, the 2FA setup).
 	"password_lockout.go.refuseWrongPassword": "credential lockout for one user; install-global",
 
+	// The sign-in lockout of one account: its lock, and the lock's release.
+	"login_lockout.go.recordLoginLock":        "sign-in lockout for one user; install-global",
+	"login_lockout.go.recordLoginLockRelease": "sign-in lockout for one user; install-global",
+
 	"totp.go.VerifyLogin":             "the second factor of a sign-in; refusing a pending token the account has outgrown is an auth event, no cluster in scope",
 	"totp.go.ConfirmSetup":            "MFA enrolment for one user; install-global",
 	"totp.go.Disable":                 "MFA change for one user; install-global",

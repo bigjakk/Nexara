@@ -218,3 +218,24 @@ func TestTokensNameTheirCredential(t *testing.T) {
 		}
 	}
 }
+
+// TestDigest_IsKeyedAndPerPurpose: the digest that stands in for a typed sign-in
+// identifier depends on the secret, so it cannot be guessed offline without it, and on
+// the purpose, so one use's digests are no other's.
+func TestDigest_IsKeyedAndPerPurpose(t *testing.T) {
+	t.Parallel()
+	a, b := newTestJWTService(), NewJWTService("another-secret", time.Minute, time.Hour)
+	base := a.Digest("login lockout", "alice@example.com")
+	if a.Digest("login lockout", "alice@example.com") != base {
+		t.Fatal("the same input gives two digests")
+	}
+	for name, other := range map[string][32]byte{
+		"another secret":  b.Digest("login lockout", "alice@example.com"),
+		"another purpose": a.Digest("something else", "alice@example.com"),
+		"another input":   a.Digest("login lockout", "bob@example.com"),
+	} {
+		if other == base {
+			t.Errorf("%s gives the same digest", name)
+		}
+	}
+}

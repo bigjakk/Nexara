@@ -221,8 +221,9 @@ type passwordLockoutStore interface {
 }
 
 // SetPasswordLockoutStore makes Redis the home of the change-password attempt
-// counts. A nil client changes nothing: a handler that was never given one keeps
-// counting in the memory of the process (lockoutStore).
+// counts, and of the sign-in lockout's (login_lockout.go). A nil client changes
+// nothing: a handler that was never given one keeps counting in memory
+// (lockoutStore, loginLockoutStore).
 //
 // It is a setter, unlike eventPub (see NewAuthHandler), because forgetting it
 // does not silently drop what it is for: an unwired handler still has a lockout,
@@ -233,6 +234,8 @@ func (h *AuthHandler) SetPasswordLockoutStore(rdb *redis.Client) {
 		return
 	}
 	h.passwordLockout = redisPasswordLockout{rdb: rdb, policy: passwordLockoutPolicy}
+	h.loginLockout = redisPasswordLockout{rdb: rdb, policy: loginLockoutPolicy}
+	h.lockoutRedis = rdb
 }
 
 // processPasswordLockout is the counts of every handler without a Redis client:
@@ -810,16 +813,22 @@ func lockedFor(c fiber.Ctx, wait time.Duration, message string) error {
 // else is affected: a user who has just been told to wait is also wondering whether
 // they are still signed in.
 func passwordLockedMessage(wait time.Duration) string {
-	minutes := int((wait + time.Minute - 1) / time.Minute)
+	minutes, unit := minutesLeft(wait)
+	return fmt.Sprintf("Too many incorrect attempts at the current password. Changing the password and setting up two-factor "+
+		"authentication on this sign-in are locked for %d more %s; you stay signed in and nothing else about the account is affected.", minutes, unit)
+}
+
+// minutesLeft is a lock's wait in whole minutes, rounded up and at least one, with
+// the unit to say it in.
+func minutesLeft(wait time.Duration) (minutes int, unit string) {
+	minutes = int((wait + time.Minute - 1) / time.Minute)
 	if minutes < 1 {
 		minutes = 1
 	}
-	unit := "minutes"
 	if minutes == 1 {
-		unit = "minute"
+		return minutes, "minute"
 	}
-	return fmt.Sprintf("Too many incorrect attempts at the current password. Changing the password and setting up two-factor "+
-		"authentication are locked for %d more %s on this sign-in; you stay signed in and nothing else about the account is affected.", minutes, unit)
+	return minutes, "minutes"
 }
 
 // passwordLockoutUnavailable answers an attempt that could not be counted: 503,

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
@@ -219,6 +220,14 @@ type AuthHandler struct {
 	// memory (lockoutStore), which says so once, in memoryLockoutWarning.
 	passwordLockout      passwordLockoutStore
 	memoryLockoutWarning sync.Once
+
+	// loginLockout counts failed sign-ins (login_lockout.go); nil means loginMemory,
+	// this handler's own, made once. lockoutRedis is the client both lockouts were
+	// given, for the sign-in lock's record of its release.
+	loginLockout    passwordLockoutStore
+	loginMemory     *memoryPasswordLockout
+	loginMemoryOnce sync.Once
+	lockoutRedis    *redis.Client
 
 	// passwordChecker stands in for auth.CheckPassword in ChangePassword when a
 	// test sets it, and is nil in production (checkCurrentPassword): it exists so a
@@ -777,7 +786,13 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 	email := p.String("email")
 	password := p.String("password")
 
-	invalidCredentials := fiber.NewError(fiber.StatusUnauthorized, "Invalid email or password")
+	// Counted before anything else is looked at: a locked identifier is answered 429
+	// whether or not it names an account (login_lockout.go). Every failure below goes
+	// through refuseSignIn, every success clears the count.
+	attempt, err := h.admitLoginAttempt(c, email)
+	if err != nil {
+		return err
+	}
 
 	user, err := h.queries.GetUserByEmail(c.Context(), email)
 	if err != nil {
@@ -789,39 +804,42 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		// Otherwise fall through to a dummy bcrypt so timing matches the
 		// "real user, bad password" path.
 		if ldapUser, ok := h.tryLDAPLogin(c, email, password); ok {
+			h.forgetLoginFailures(c, attempt)
 			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login")
 		}
 		auth.RunDummyBcrypt(password)
-		return invalidCredentials
+		return h.refuseSignIn(c, attempt, nil)
 	}
 
 	switch user.AuthSource {
 	case "ldap":
 		if ldapUser, ok := h.tryLDAPLogin(c, email, password); ok {
+			h.forgetLoginFailures(c, attempt)
 			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login")
 		}
 		// Pad failure to keep timing roughly aligned with the local-bcrypt
 		// path. LDAP roundtrip dominates wall-clock anyway, so this is a
 		// best-effort defence-in-depth, not a strict equaliser.
 		auth.RunDummyBcrypt(password)
-		return invalidCredentials
+		return h.refuseSignIn(c, attempt, &user)
 	case "oidc":
 		// OIDC-sourced users cannot log in via password. Burn equivalent
 		// CPU so the response time is indistinguishable from a real
 		// local user with a wrong password.
 		auth.RunDummyBcrypt(password)
-		return invalidCredentials
+		return h.refuseSignIn(c, attempt, &user)
 	}
 
 	// auth_source == "local" from here.
 	if !user.IsActive {
 		auth.RunDummyBcrypt(password)
-		return invalidCredentials
+		return h.refuseSignIn(c, attempt, &user)
 	}
 
 	if err := auth.CheckPassword(user.PasswordHash, password); err != nil {
-		return invalidCredentials
+		return h.refuseSignIn(c, attempt, &user)
 	}
+	h.forgetLoginFailures(c, attempt)
 
 	// user is the row read BEFORE the password was compared, in one statement with
 	// the hash that was compared, so user.AuthEpoch is the generation of exactly the

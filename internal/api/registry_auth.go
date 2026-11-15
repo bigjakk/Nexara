@@ -92,7 +92,9 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 			"(a password change, a sign-out of all devices, a deactivation): it says to sign in again and " +
 			"issues nothing: no token, no cookie and no `login` audit entry (the refusal is recorded as " +
 			"`login_refused_superseded`). A database that could not complete the sign-in is a 503 or a " +
-			"500 and says nothing about the credential.",
+			"500 and says nothing about the credential. Ten failed sign-ins with one e-mail address within " +
+			"15 minutes lock it for 15 minutes: every attempt meanwhile, the right password included, is " +
+			"answered 429 with a Retry-After header (in seconds), whether or not the address names an account.",
 		Group:       "Authentication",
 		Permissions: Permissions{Public: "issues the session"},
 		Parameters: apischema.Properties{
