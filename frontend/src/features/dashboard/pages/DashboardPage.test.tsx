@@ -318,5 +318,32 @@ describe("DashboardPage", () => {
         c.layoutSaved,
       );
     });
+    // A widget removed on purpose and locked away is not announced as new
+    // on the next visit.
+    it("does not offer a default widget the person removed and locked", async () => {
+      settings.set("dashboard.layout", {
+        data: {
+          value: {
+            name: "Mine",
+            widgetIds: ["fleet-board", "top-consumers"],
+            layouts: [
+              { i: "fleet-board", x: 0, y: 0, w: 12, h: 10 },
+              { i: "top-consumers", x: 0, y: 10, w: 12, h: 5 },
+            ],
+          },
+        },
+      });
+      const user = userEvent.setup();
+      const view = renderWithProviders(<DashboardPage />);
+      await user.click(screen.getByRole("button", { name: "Customize" }));
+      await user.click(screen.getByRole("button", { name: "Remove Fleet" }));
+      await user.click(screen.getByRole("button", { name: "Lock" }));
+
+      // Reload on what was written.
+      view.unmount();
+      for (const w of saves().flat()) settings.set(w.key, { data: w });
+      renderWithProviders(<DashboardPage />);
+      expect(screen.queryByText(/does not have Fleet/)).not.toBeInTheDocument();
+    });
   });
 });
