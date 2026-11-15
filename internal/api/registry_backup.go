@@ -723,6 +723,27 @@ func registerBackupEndpoints(reg *Registry, h *handlers.BackupHandler) {
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,
+		Path:   clusterScope + "/pbs-snapshots",
+		Description: "Find a guest's PBS snapshots by its VMID, keeping only those on a datastore one of this " +
+			"cluster's PBS storages reads (its root namespace), so another cluster's guest with the same VMID is " +
+			"left out unless both clusters write to the same datastore, which PBS cannot tell apart. Reads the " +
+			"cluster's storage configuration from Proxmox. Snapshots on a PBS server the caller may not view are " +
+			"left out as on /pbs-snapshots.",
+		Group:       "Backup",
+		Permissions: clusterCheck("view", "backup"),
+		Parameters: clusterParams(apischema.Properties{
+			"backup_id": {
+				Type:        apischema.String,
+				MinLength:   apischema.Ptr(1),
+				MaxLength:   apischema.Ptr(255),
+				Typetext:    "<vmid>",
+				Description: "Backup group id to look up, which for a Proxmox guest is its VMID.",
+			},
+		}),
+		Handler: h.ListClusterSnapshotsByBackupID,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodGet,
 		Path:   pathPrefix + "backup-coverage",
 		Description: "Report which guests are covered by a backup and which are not, across every " +
 			"cluster the caller can see. Filtered rather than gated: view:backup decides which clusters' " +

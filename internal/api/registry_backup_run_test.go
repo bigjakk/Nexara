@@ -25,6 +25,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/api/handlers"
+	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -101,6 +102,9 @@ type backupRunPVE struct {
 	handle func(w http.ResponseWriter, r *http.Request) bool
 	// stopPoll, when set, is how long a force restore waits between looks at its stop.
 	stopPoll time.Duration
+	// listed is the caller's permission list, which a listing filtered by
+	// accessibleClusters reads.
+	listed []auth.ScopedPermission
 
 	srv    *httptest.Server
 	mu     sync.Mutex
@@ -495,7 +499,7 @@ func newPVEAppAs(t *testing.T, pve *backupRunPVE, grants map[string]bool, method
 	// stubAuth sets the user TrackTask and AuditLog need — without one they
 	// record nothing, and every "no rows" assertion below would pass for that
 	// reason alone.
-	authed := stubAuth(grants)
+	authed := stubAuthWith(&stubRBACEngine{grants: grants, listed: pve.listed})
 	auth := func(c fiber.Ctx) error {
 		handlers.SetProxmoxCacheLocal(c, cache)
 		return authed(c)

@@ -27,6 +27,9 @@ import (
 // keyed "action:resource".
 type stubRBACEngine struct {
 	grants map[string]bool
+	// listed is what LoadUserPermissions answers, which accessibleClusters
+	// filters on; none by default.
+	listed []auth.ScopedPermission
 }
 
 func (s *stubRBACEngine) HasPermission(_ context.Context, _ uuid.UUID, action, resource, _ string, _ uuid.UUID) (bool, error) {
@@ -38,7 +41,7 @@ func (s *stubRBACEngine) HasGlobalPermission(_ context.Context, _ uuid.UUID, act
 }
 
 func (s *stubRBACEngine) LoadUserPermissions(_ context.Context, _ uuid.UUID) (*auth.UserPermissions, error) {
-	return &auth.UserPermissions{}, nil
+	return &auth.UserPermissions{Permissions: s.listed}, nil
 }
 
 // stubAuth stands in for Server.authRequired. It is a named function so
@@ -46,12 +49,17 @@ func (s *stubRBACEngine) LoadUserPermissions(_ context.Context, _ uuid.UUID) (*a
 // A request carrying no X-Test-User is rejected exactly as authRequired
 // rejects a request with no bearer token.
 func stubAuth(grants map[string]bool) fiber.Handler {
+	return stubAuthWith(&stubRBACEngine{grants: grants})
+}
+
+// stubAuthWith is stubAuth for a caller whose engine is engine.
+func stubAuthWith(engine *stubRBACEngine) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if c.Get("X-Test-User") == "" {
 			return fiber.NewError(fiber.StatusUnauthorized, "Missing authorization token")
 		}
 		c.Locals("user_id", uuid.MustParse(testUserID))
-		c.Locals("rbac_engine", &stubRBACEngine{grants: grants})
+		c.Locals("rbac_engine", engine)
 		// An interactive session, as authRequired records one (see noAuth).
 		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
 		c.Locals(handlers.LocalsSessionID, uuid.MustParse(callerSessionID))

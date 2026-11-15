@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -147,6 +148,49 @@ func TestRestoreStorage(t *testing.T) {
 				if !strings.Contains(fe.Message, m) {
 					t.Errorf("refusal %q lacks %q", fe.Message, m)
 				}
+			}
+		})
+	}
+}
+
+// Whether a snapshot is this cluster's: the datastore must be read, in its root
+// namespace, by a pbs storage the server is tied to or nothing contradicts.
+// The tie rules themselves are TestRestoreStorage's.
+func TestClusterReadsDatastore(t *testing.T) {
+	t.Parallel()
+	here, there := uuid.New(), uuid.New()
+	server := db.PbsServer{ID: uuid.New(), Name: "pbs01", ApiUrl: "https://pbs01.example.com:8007"}
+	pbs02 := db.PbsServer{ID: uuid.New(), Name: "pbs02", ApiUrl: "https://pbs02.example.com:8007"}
+	cfg := func(srv, datastore, namespace string, port int) proxmox.StorageConfig {
+		return proxmox.StorageConfig{Storage: "store01", Type: "pbs", Server: srv, Datastore: datastore,
+			Namespace: namespace, Port: proxmox.FlexInt(port)}
+	}
+	tests := []struct {
+		name     string
+		cfg      proxmox.StorageConfig
+		want     bool
+		attached uuid.UUID // the server's cluster; zero for a standalone one
+	}{
+		{"tied by address", cfg("pbs01.example.com", "datastore01", "", 0), true, uuid.Nil},
+		{"another datastore", cfg("pbs01.example.com", "datastore02", "", 0), false, uuid.Nil},
+		{"a namespace Nexara does not list", cfg("pbs01.example.com", "datastore01", "tenant", 0), false, uuid.Nil},
+		{"another Nexara server's storage", cfg("pbs02.example.com", "datastore01", "", 0), false, uuid.Nil},
+		{"the same host on another port", cfg("pbs01.example.com", "datastore01", "", 8008), false, uuid.Nil},
+		{"a name nothing ties to any server", cfg("pbs-alias.example.com", "datastore01", "", 0), true, uuid.Nil},
+		{"the same, the server attached to this cluster", cfg("pbs-alias.example.com", "datastore01", "", 0), true, here},
+		// Most likely an unregistered PBS with a datastore of the same name.
+		{"the same, the server attached to another cluster", cfg("pbs-alias.example.com", "datastore01", "", 0), false, there},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := server
+			if tt.attached != uuid.Nil {
+				srv.ClusterID = pgtype.UUID{Bytes: tt.attached, Valid: true}
+			}
+			others := []db.PbsServer{srv, pbs02}
+			if got := clusterReadsDatastore([]proxmox.StorageConfig{tt.cfg}, here, srv, others, "datastore01"); got != tt.want {
+				t.Errorf("clusterReadsDatastore = %v, want %v", got, tt.want)
 			}
 		})
 	}

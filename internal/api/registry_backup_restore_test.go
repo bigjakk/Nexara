@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,8 +15,10 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
+	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -226,4 +229,48 @@ func (p *restorePVE) handle(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// A guest's Backups tab lists a snapshot only when this cluster has a PBS
+// storage reading its server and datastore: the same VMID on a datastore no
+// storage here reads is another cluster's. The tie rules are TestClusterReadsDatastore's.
+func TestClusterSnapshotsAreTheClustersOwn(t *testing.T) {
+	t.Parallel()
+	pve := &restorePVE{storage: restoreStorages}
+	listed := []auth.ScopedPermission{{Action: "view", Resource: "backup", ScopeType: "cluster", ScopeID: testClusterID}}
+	app, dbtx := newBackupAppAs(t, &backupRunPVE{handle: pve.handle, listed: listed}, grantsOf("view:backup"), fiber.MethodGet,
+		clusterScope+"/pbs-snapshots", (*handlers.BackupHandler).ListClusterSnapshotsByBackupID)
+	// Both attached to this cluster, so the caller may view either.
+	bound := pgtype.UUID{Bytes: uuid.MustParse(testClusterID), Valid: true}
+	pbs01 := db.PbsServer{ID: uuid.MustParse(testPBSServerID), Name: "pbs01", ApiUrl: "https://pbs01.example.com:8007", ClusterID: bound}
+	pbs02 := db.PbsServer{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000007"), Name: "pbs02", ApiUrl: "https://pbs02.example.com:8007", ClusterID: bound}
+	snap := func(server uuid.UUID, store string) db.PbsSnapshot {
+		return db.PbsSnapshot{ID: uuid.New(), PbsServerID: server, Datastore: store, BackupType: "vm", BackupID: "101", BackupTime: 1700000000}
+	}
+	dbtx.lists = map[string][]any{
+		"ListPBSServers": {pbs01, pbs02},
+		"ListPBSSnapshotsByBackupID": {snap(pbs01.ID, "datastore01"), snap(pbs02.ID, "datastore01"),
+			snap(pbs01.ID, "datastore09"), snap(pbs02.ID, "datastore02")},
+	}
+	req := httptest.NewRequest(http.MethodGet, backupRoute(clusterScope+"/pbs-snapshots")+"?backup_id=101", nil)
+	req.Header.Set("X-Test-User", "yes")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var got struct {
+		Items []db.PbsSnapshot `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, decode: %v", resp.StatusCode, err)
+	}
+	names := map[uuid.UUID]string{pbs01.ID: "pbs01", pbs02.ID: "pbs02"}
+	where := make([]string, 0, len(got.Items))
+	for _, sn := range got.Items {
+		where = append(where, names[sn.PbsServerID]+"/"+sn.Datastore)
+	}
+	if want := []string{"pbs01/datastore01", "pbs02/datastore01"}; !slices.Equal(where, want) {
+		t.Errorf("listed %q, want %q", where, want)
+	}
 }

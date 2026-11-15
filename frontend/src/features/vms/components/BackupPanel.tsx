@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Table,
   TableBody,
@@ -57,12 +58,13 @@ export function BackupPanel({
   nodeName,
   kind,
 }: BackupPanelProps) {
+  const { t } = useTranslation("backup");
   const backupId = String(vmid);
   const {
     data: snapshots,
     isLoading,
     error,
-  } = usePBSSnapshotsByBackupID(backupId);
+  } = usePBSSnapshotsByBackupID(clusterId, backupId);
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PBSSnapshot | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -159,6 +161,9 @@ export function BackupPanel({
                 />
               </StatStrip>
             )}
+            <p className="px-[18px] pb-3 text-[12.5px] text-muted-foreground">
+              {t("guestSnapshotsSharedDatastore")}
+            </p>
             <div className="border-t">
               <Table>
                 <TableHeader>

@@ -99,14 +99,18 @@ export function usePBSSnapshots(pbsId: string, datastore?: string) {
 
 // --- Snapshot by Backup ID (cross-server, for VM detail pages) ---
 
-export function usePBSSnapshotsByBackupID(backupId: string) {
+/**
+ * A guest's PBS snapshots: PBS groups them by VMID alone, so the server keeps
+ * only those on a datastore one of this cluster's PBS storages reads.
+ */
+export function usePBSSnapshotsByBackupID(clusterId: string, backupId: string) {
   return useQuery({
-    queryKey: ["pbs-snapshots", backupId],
+    queryKey: ["pbs-snapshots", clusterId, backupId],
     queryFn: () =>
       apiClient.list<PBSSnapshot>(
-        apiPath`/api/v1/pbs-snapshots?backup_id=${backupId}`,
+        apiPath`/api/v1/clusters/${clusterId}/pbs-snapshots?backup_id=${backupId}`,
       ),
-    enabled: backupId.length > 0,
+    enabled: clusterId.length > 0 && backupId.length > 0,
   });
 }
 

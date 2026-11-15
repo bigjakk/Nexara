@@ -21,7 +21,7 @@ import (
 // backupRouteCount is how many endpoints registerBackupEndpoints declares.
 // See vmRouteCount in registry_vms_test.go for why the registry total is a
 // sum of per-domain constants rather than one number.
-const backupRouteCount = 29
+const backupRouteCount = 30
 
 const testPBSStore = "datastore01"
 
@@ -125,6 +125,9 @@ var backupLegacyPermissions = map[string]struct {
 
 	"GET /api/v1/pbs-snapshots":   {"view:backup", "Advisory", 1},
 	"GET /api/v1/backup-coverage": {"view:backup", "Advisory", 2},
+
+	// Added after the migration, declared from the start.
+	"GET /api/v1/clusters/:cluster_id/pbs-snapshots": {"view:backup", "Check", 1},
 }
 
 // declaredBackupEndpoints returns every declaration in this domain, keyed
@@ -222,9 +225,10 @@ func TestBackupRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 			t.Fatalf("%s: unknown shape %q in the tally", key, want.shape)
 		}
 	}
-	// 43 at the migration, and the backup group owner route added since keeps two more.
-	if hoisted != 6 || kept != 45 {
-		t.Errorf("the tally moves %d permission call(s) into middleware and keeps %d in handlers, want 6 / 45",
+	// 43 at the migration, and the backup group owner route added since keeps two more; the
+	// cluster's own snapshot listing added since is declared, the seventh.
+	if hoisted != 7 || kept != 45 {
+		t.Errorf("the tally moves %d permission call(s) into middleware and keeps %d in handlers, want 7 / 45",
 			hoisted, kept)
 	}
 

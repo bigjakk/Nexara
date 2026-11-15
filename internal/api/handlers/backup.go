@@ -1009,37 +1009,91 @@ func (h *BackupHandler) ListSnapshotsByBackupID(c fiber.Ctx, p *apischema.Params
 		return err
 	}
 
-	backupID := p.String("backup_id")
-
-	// Build the set of PBS servers the caller can see, mapped to whether
-	// they're cluster-bound (and which cluster).
 	servers, err := h.queries.ListPBSServers(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list PBS servers")
 	}
-	allowedPBS := make(map[uuid.UUID]bool, len(servers))
-	for _, s := range servers {
-		if s.ClusterID.Valid {
-			if access.PermitsCluster(uuid.UUID(s.ClusterID.Bytes)) {
-				allowedPBS[s.ID] = true
-			}
-		} else if access.HasGlobal {
-			allowedPBS[s.ID] = true
-		}
-	}
+	allowedPBS := visiblePBSServers(access, servers)
 
-	snaps, err := h.queries.ListPBSSnapshotsByBackupID(c.Context(), backupID)
+	snaps, err := h.queries.ListPBSSnapshotsByBackupID(c.Context(), p.String("backup_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list snapshots")
 	}
 
 	filtered := snaps[:0]
 	for _, sn := range snaps {
-		if allowedPBS[sn.PbsServerID] {
+		if _, ok := allowedPBS[sn.PbsServerID]; ok {
 			filtered = append(filtered, sn)
 		}
 	}
 
+	return RespondItems(c, filtered)
+}
+
+// visiblePBSServers is the PBS servers the caller may see backups on: a
+// cluster-bound one on its cluster, a standalone one instance-wide.
+func visiblePBSServers(access clusterAccess, servers []db.PbsServer) map[uuid.UUID]db.PbsServer {
+	allowed := make(map[uuid.UUID]db.PbsServer, len(servers))
+	for _, s := range servers {
+		if s.ClusterID.Valid {
+			if access.PermitsCluster(uuid.UUID(s.ClusterID.Bytes)) {
+				allowed[s.ID] = s
+			}
+		} else if access.HasGlobal {
+			allowed[s.ID] = s
+		}
+	}
+	return allowed
+}
+
+// ListClusterSnapshotsByBackupID handles GET /api/v1/clusters/:cluster_id/pbs-snapshots
+//
+// A guest's backups, which PBS groups by VMID alone: a snapshot is this
+// cluster's only when it lies on a datastore one of the cluster's pbs storages
+// reads (clusterReadsDatastore), so another cluster's guest with the same VMID
+// on another datastore is not offered here. Two clusters writing to one
+// datastore and namespace cannot be told apart, and both are listed.
+func (h *BackupHandler) ListClusterSnapshotsByBackupID(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	access, err := accessibleClusters(c, "view", "backup")
+	if err != nil {
+		return err
+	}
+	servers, err := h.queries.ListPBSServers(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list PBS servers")
+	}
+	allowedPBS := visiblePBSServers(access, servers)
+
+	client, err := h.createPVEClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := h.readContext(c)
+	cfgs, err := client.ListStorageConfigs(ctx)
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	cancel()
+	if err != nil {
+		if timedOut {
+			return fiber.NewError(fiber.StatusBadGateway, "Proxmox did not list its storages in time, so this cluster's backups cannot be told from another's. Try again.")
+		}
+		return mapProxmoxError(err)
+	}
+
+	snaps, err := h.queries.ListPBSSnapshotsByBackupID(c.Context(), p.String("backup_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list snapshots")
+	}
+	filtered := snaps[:0]
+	for _, sn := range snaps {
+		server, ok := allowedPBS[sn.PbsServerID]
+		if ok && clusterReadsDatastore(cfgs, clusterID, server, servers, sn.Datastore) {
+			filtered = append(filtered, sn)
+		}
+	}
 	return RespondItems(c, filtered)
 }
 

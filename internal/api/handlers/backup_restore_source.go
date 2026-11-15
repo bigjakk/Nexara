@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -93,6 +94,34 @@ func restoreCandidate(cfg proxmox.StorageConfig, datastore, node string) bool {
 		return false
 	}
 	return cfg.Nodes == "" || slices.Contains(nodeList(cfg.Nodes), node)
+}
+
+// clusterReadsDatastore reports whether any of a cluster's pbs storages reads a
+// PBS server's datastore, in its root namespace — the only one Nexara lists.
+// It takes the ties a restore takes: a storage tied to the server, or one that
+// nothing contradicts and no other Nexara PBS server claims, which is how a PBS
+// reached by an address in Nexara and a name in Proxmox still counts — except
+// for a server attached to another cluster, whose datastore a storage on an
+// unregistered PBS may merely share the name of. A disabled storage or one
+// limited to some nodes counts too: the backups it wrote are this cluster's all
+// the same.
+func clusterReadsDatastore(cfgs []proxmox.StorageConfig, clusterID uuid.UUID, server db.PbsServer, others []db.PbsServer, datastore string) bool {
+	elsewhere := server.ClusterID.Valid && uuid.UUID(server.ClusterID.Bytes) != clusterID
+	for _, cfg := range cfgs {
+		if cfg.Type != "pbs" || cfg.Namespace != "" || cfg.Datastore != datastore {
+			continue
+		}
+		switch storageTie(cfg, server) {
+		case tieFingerprint, tieAddress:
+			return true
+		case tieNone:
+			if !elsewhere && !claimedByAnother(cfg, server, others) {
+				return true
+			}
+		case tieContradicted:
+		}
+	}
+	return false
 }
 
 // claimedByAnother reports whether any Nexara PBS server other than server is
