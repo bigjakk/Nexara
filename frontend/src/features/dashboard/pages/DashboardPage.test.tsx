@@ -266,4 +266,50 @@ describe("DashboardPage", () => {
       ).toBeInTheDocument();
     });
   });
+
+  // A saved layout keeps its arrangement: what the default has and it lacks
+  // is offered, once, and goes in only when asked for.
+  describe("the offer of widgets a saved layout lacks", () => {
+    beforeEach(() => {
+      mockUseDashboardData.mockReturnValue({
+        data: mockDashboardData,
+        isLoading: false,
+        error: null,
+      });
+      settings.set("dashboard.layout", {
+        data: {
+          value: {
+            name: "Mine",
+            widgetIds: ["top-consumers"],
+            layouts: [{ i: "top-consumers", x: 0, y: 0, w: 12, h: 5 }],
+          },
+        },
+      });
+      settings.set("dashboard.offered_widgets", { data: { value: [] } });
+    });
+
+    it.each([
+      { button: "Add to my layout", layoutSaved: true },
+      { button: "Dismiss", layoutSaved: false },
+    ])("$button records the offer and closes it", async (c) => {
+      const user = userEvent.setup();
+      renderWithProviders(<DashboardPage />);
+      expect(screen.getByText(/does not have Fleet/)).toBeInTheDocument();
+      expect(mockMutate).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: c.button }));
+
+      expect(screen.queryByText(/does not have Fleet/)).not.toBeInTheDocument();
+      expect(mockMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: "dashboard.offered_widgets",
+          value: expect.arrayContaining(["fleet-board"]) as unknown,
+        }),
+      );
+      const layoutSaves = mockMutate.mock.calls.filter(
+        ([v]) => (v as { key: string }).key === "dashboard.layout",
+      );
+      expect(layoutSaves.length > 0).toBe(c.layoutSaved);
+    });
+  });
 });

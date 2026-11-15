@@ -12,6 +12,8 @@ import {
   buildDefaultPreset,
   defaultPreset,
   fleetBoardRows,
+  unplacedDefaultWidgets,
+  appendWidgets,
   type ClusterInfo,
 } from "./widget-registry";
 
@@ -285,7 +287,8 @@ describe("widgetAllowed", () => {
   it("needs a template's global grant, and nothing for the rest", () => {
     const ups = widgetTemplates.find((t) => t.type === "ups-status");
     const stats = widgetTemplates.find((t) => t.type === "stats-overview");
-    if (ups === undefined || stats === undefined) throw new Error("missing template");
+    if (ups === undefined || stats === undefined)
+      throw new Error("missing template");
     const grants =
       (...held: string[]) =>
       (action: string, resource: string) =>
@@ -323,5 +326,48 @@ describe("fleetBoardRows", () => {
     const clusters = [cluster(3), cluster(3)];
     const layout = getDefaultLayout(getDefaultWidgetIds(clusters), clusters);
     expect(layout.find((l) => l.i === "fleet-board")?.h).toBe(10);
+  });
+});
+
+// What a saved layout is offered: never what it holds, never twice.
+describe("unplacedDefaultWidgets", () => {
+  const defaults = ["fleet-board", "cpu-chart:c1", "top-consumers"];
+  it.each([
+    {
+      placed: ["top-consumers"],
+      before: [],
+      want: ["fleet-board", "cpu-chart:c1"],
+    },
+    {
+      placed: ["top-consumers"],
+      before: ["fleet-board"],
+      want: ["cpu-chart:c1"],
+    },
+    { placed: defaults, before: [], want: [] },
+  ])("placed $placed, offered before $before", ({ placed, before, want }) => {
+    expect(unplacedDefaultWidgets(placed, defaults, before)).toEqual(want);
+  });
+});
+
+describe("appendWidgets", () => {
+  it("adds below the saved layout and leaves what is there alone", () => {
+    const saved = {
+      name: "Mine",
+      widgetIds: ["top-consumers"],
+      layouts: [{ i: "top-consumers", x: 6, y: 2, w: 6, h: 3 }],
+    };
+    const next = appendWidgets(
+      saved,
+      ["fleet-board", "top-consumers"],
+      testClusters,
+    );
+    expect(next.widgetIds).toEqual(["top-consumers", "fleet-board"]);
+    expect(next.layouts[0]).toEqual(saved.layouts[0]);
+    expect(next.layouts[1]).toMatchObject({
+      i: "fleet-board",
+      x: 0,
+      y: 5,
+      w: 12,
+    });
   });
 });

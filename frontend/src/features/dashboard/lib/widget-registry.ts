@@ -286,6 +286,51 @@ export function getAllAvailableWidgets(clusters: ClusterInfo[]): {
   return result;
 }
 
+/**
+ * The default layout's widgets that a saved layout has not placed and its
+ * owner has not been offered before. The dashboard offers these; it never adds
+ * them to a saved layout itself.
+ */
+export function unplacedDefaultWidgets(
+  placed: readonly string[],
+  defaults: readonly string[],
+  offeredBefore: readonly string[],
+): string[] {
+  return defaults.filter(
+    (id) => !placed.includes(id) && !offeredBefore.includes(id),
+  );
+}
+
+/**
+ * `preset` with `ids` added below everything already in it, each at its
+ * template's default size. What is there keeps its place and size.
+ */
+export function appendWidgets(
+  preset: DashboardPreset,
+  ids: readonly string[],
+  clusters: ClusterInfo[],
+): DashboardPreset {
+  let y = preset.layouts.reduce((max, l) => Math.max(max, l.y + l.h), 0);
+  const added: LayoutItem[] = [];
+  const addedIds: string[] = [];
+  for (const id of ids) {
+    const template = getTemplate(id);
+    if (!template || preset.widgetIds.includes(id)) continue;
+    const dl =
+      template.type === "fleet-board"
+        ? { ...template.defaultLayout, h: fleetBoardRows(clusters) }
+        : template.defaultLayout;
+    added.push(makeLayoutItem(id, 0, y, dl));
+    addedIds.push(id);
+    y += dl.h;
+  }
+  return {
+    ...preset,
+    widgetIds: [...preset.widgetIds, ...addedIds],
+    layouts: [...preset.layouts, ...added],
+  };
+}
+
 export interface DashboardPreset {
   name: string;
   widgetIds: string[];

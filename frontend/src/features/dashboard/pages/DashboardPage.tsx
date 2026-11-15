@@ -35,12 +35,16 @@ import { DashboardGrid } from "../components/DashboardGrid";
 import type { LayoutItem } from "react-grid-layout";
 import { DashboardPresetSelector } from "../components/DashboardPresetSelector";
 import {
+  appendWidgets,
   buildDefaultPreset,
   parseWidgetId,
   getTemplate,
+  getWidgetLabel,
+  unplacedDefaultWidgets,
   type ClusterInfo,
   type DashboardPreset,
 } from "../lib/widget-registry";
+import { ApiClientError } from "@/lib/api-client";
 import {
   useSetting,
   useUpsertSetting,
@@ -54,6 +58,9 @@ import type {
 import { estateCounts } from "../lib/estate-summary";
 import { LIVE_WINDOW_MS, spliceLive } from "@/lib/metric-series";
 import { DATA_COLOR } from "@/lib/chart-colors";
+
+/** The user setting that lists the widgets the dashboard has offered. */
+const OFFERED_WIDGETS_KEY = "dashboard.offered_widgets";
 
 /**
  * Whether the numbers on the page are live: a dot and a word, quiet while
@@ -158,6 +165,9 @@ export function DashboardPage() {
     null,
   );
   const [initializedFromBackend, setInitializedFromBackend] = useState(false);
+  // The widgets of the saved layout the page opened on; null when it opened
+  // on the default. Only a saved layout is offered what it lacks.
+  const [savedWidgetIds, setSavedWidgetIds] = useState<string[] | null>(null);
 
   // Load layout from backend on first load only — not on subsequent query refreshes
   // to avoid infinite update loops when saveLayout triggers query invalidation.
@@ -192,6 +202,7 @@ export function DashboardPage() {
             widgetIds: saved.widgetIds,
             layouts,
           });
+          setSavedWidgetIds(saved.widgetIds);
           setInitializedFromBackend(true);
           return;
         }
@@ -302,6 +313,56 @@ export function DashboardPage() {
     },
     [effectivePreset.name, savedPresets, upsertSetting, handleReset],
   );
+
+  // Widgets the default layout has and a saved one lacks (Fleet, a new
+  // cluster's charts): offered once, never inserted. Add or Dismiss records
+  // them, so the offer does not come back for them on any browser.
+  const offeredQuery = useSetting(OFFERED_WIDGETS_KEY, "user");
+  const [offerClosed, setOfferClosed] = useState(false);
+  const offeredBefore = useMemo<string[] | null>(() => {
+    const value = offeredQuery.data?.value;
+    if (Array.isArray(value)) {
+      return value.filter((v): v is string => typeof v === "string");
+    }
+    const noneYet =
+      offeredQuery.error instanceof ApiClientError &&
+      offeredQuery.error.status === 404;
+    return noneYet ? [] : null;
+  }, [offeredQuery.data?.value, offeredQuery.error]);
+
+  const newWidgetIds = useMemo(() => {
+    if (savedWidgetIds === null || offeredBefore === null) return [];
+    return unplacedDefaultWidgets(
+      [...savedWidgetIds, ...effectivePreset.widgetIds],
+      computedDefaultPreset.widgetIds,
+      offeredBefore,
+    );
+  }, [
+    savedWidgetIds,
+    offeredBefore,
+    effectivePreset.widgetIds,
+    computedDefaultPreset.widgetIds,
+  ]);
+
+  const closeOffer = useCallback(() => {
+    setOfferClosed(true);
+    upsertSetting.mutate({
+      key: OFFERED_WIDGETS_KEY,
+      value: [...(offeredBefore ?? []), ...newWidgetIds],
+      scope: "user",
+    });
+  }, [offeredBefore, newWidgetIds, upsertSetting]);
+
+  const addNewWidgets = useCallback(() => {
+    const updated = appendWidgets(effectivePreset, newWidgetIds, clusters);
+    setActivePreset(updated);
+    upsertSetting.mutate({
+      key: "dashboard.layout",
+      value: updated,
+      scope: "user",
+    });
+    closeOffer();
+  }, [effectivePreset, newWidgetIds, clusters, upsertSetting, closeOffer]);
 
   const toggleEditMode = useCallback(() => {
     if (editMode) {
@@ -447,6 +508,8 @@ export function DashboardPage() {
   );
 
   const hasClusters = data != null && data.clusters.length > 0;
+  const showOffer =
+    hasClusters && !editMode && !offerClosed && newWidgetIds.length > 0;
   const counts = hasClusters
     ? estateCounts(data.clusters, data.vmsByCluster)
     : null;
@@ -542,6 +605,31 @@ export function DashboardPage() {
           )}
 
           <NeedsAttention />
+
+          {showOffer && (
+            <Panel
+              title={t("newWidgetsTitle")}
+              actions={
+                <>
+                  <Button size="sm" variant="ghost" onClick={closeOffer}>
+                    {t("dismissNewWidgets")}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={addNewWidgets}>
+                    <Plus className="h-4 w-4" />
+                    {t("addNewWidgets")}
+                  </Button>
+                </>
+              }
+            >
+              <p className="text-sm text-muted-foreground">
+                {t("newWidgetsBody", {
+                  widgets: newWidgetIds
+                    .map((id) => getWidgetLabel(id, clusterNames))
+                    .join(", "),
+                })}
+              </p>
+            </Panel>
+          )}
 
           {data != null && data.clusters.length > 0 && (
             <DashboardGrid
