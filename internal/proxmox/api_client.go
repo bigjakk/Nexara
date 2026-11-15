@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,13 +14,17 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/bigjakk/nexara/internal/pvefield"
 )
 
 // maxResponseSize caps how much data we read from a Proxmox API response (50 MB).
@@ -141,7 +146,7 @@ func (a *apiClient) do(ctx context.Context, path string, dst interface{}) error 
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+		return a.connectionFailed(err, nil)
 	}
 	defer resp.Body.Close()
 
@@ -166,15 +171,15 @@ func (a *apiClient) doPostRaw(ctx context.Context, path string, rawBody string, 
 	a.applyAuth(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
-	}
-	defer resp.Body.Close()
-
 	// A body that does not parse sends nothing to scrub out but the
 	// credentials; ParseQuery returns what it could read alongside the error.
 	sent, _ := url.ParseQuery(rawBody)
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return a.connectionFailed(err, sent)
+	}
+	defer resp.Body.Close()
+
 	respBody, err := a.readBody(resp, sent)
 	if err != nil {
 		return err
@@ -203,7 +208,7 @@ func (a *apiClient) doPost(ctx context.Context, path string, params url.Values, 
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+		return a.connectionFailed(err, params)
 	}
 	defer resp.Body.Close()
 
@@ -227,7 +232,7 @@ func (a *apiClient) doDelete(ctx context.Context, path string, dst interface{}) 
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+		return a.connectionFailed(err, nil)
 	}
 	defer resp.Body.Close()
 
@@ -259,7 +264,7 @@ func (a *apiClient) doPut(ctx context.Context, path string, params url.Values, d
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+		return a.connectionFailed(err, params)
 	}
 	defer resp.Body.Close()
 
@@ -458,7 +463,7 @@ func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[str
 		if failure := file.failure(); failure != nil {
 			return failure
 		}
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+		return a.connectionFailed(err, nil)
 	}
 	defer resp.Body.Close()
 
@@ -480,15 +485,15 @@ func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[str
 // control characters and scrubbed of the request's secrets (cleanErrorText)
 // before anything else sees it.
 //
-// The read cap is wide enough for the JSON envelope a real rejection comes in
-// to parse whole: a parameter-verification map runs to a few hundred bytes a
-// field, and a die() sentence to a line or two of command output. What is kept
-// is enough for every phrase Nexara matches ("is locked", "already exist",
-// "not running", "migrated to rules", "for data too large", the
-// mapMissingObjectError and mapProxmoxDieError phrases), all of which sit at
-// the start of PVE's sentence.
+// The read cap is wide enough for the JSON envelope of a die() that quotes a
+// page of command output to parse whole; an envelope cut by it anyway still
+// gives up its sentence (recoverMessage). What is kept is enough for every
+// phrase Nexara matches ("is locked", "already exist", "not running",
+// "migrated to rules", "for data too large", the mapMissingObjectError and
+// mapProxmoxDieError phrases), all of which sit at the start of PVE's
+// sentence.
 const (
-	maxErrorBodyRead = 8 << 10
+	maxErrorBodyRead = 64 << 10
 	maxErrorTextKept = 2 << 10
 )
 
@@ -511,18 +516,18 @@ func (a *apiClient) readBody(resp *http.Response, sent url.Values) ([]byte, erro
 	return body, nil
 }
 
-// secretFormKeys are the parameters, sent to Proxmox by this package or passed
-// through it by a handler, whose value is a credential: passwords (users,
-// cloud-init, storage, PBS, SMTP), one-time codes, API and notification
-// tokens, SDN DNS keys, TFA keys, storage encryption keys and keyrings, and
-// ACME EAB keys and plugin data. A remote migration's target-endpoint carries
-// the target cluster's token too, and only its secret half is scrubbed
-// (targetEndpointSecret).
-var secretFormKeys = map[string]bool{
-	"password": true, "cipassword": true, "otp": true, "token": true, "tokens": true,
-	"key": true, "keys": true, "secret": true, "encryption-key": true, "keyring": true,
-	"eab-hmac-key": true, "data": true,
+// connectionFailed is a request that got no answer, as ErrConnectionFailed.
+// net/http's text can carry what the peer chose — the Location of a refused
+// redirect, a malformed status line — so it is cleaned like an answer's.
+func (a *apiClient) connectionFailed(err error, sent url.Values) error {
+	return fmt.Errorf("%w: %s", ErrConnectionFailed, cleanErrorText(err.Error(), a.requestSecrets(sent)))
 }
+
+// extraSecretFormKeys are the credential-bearing parameters this package sends
+// that pvefield.Secret does not name: one-time codes, a token list, TFA keys.
+// A remote migration's target-endpoint carries the target cluster's token too,
+// and only its secret half is scrubbed (targetEndpointSecret).
+var extraSecretFormKeys = map[string]bool{"otp": true, "tokens": true, "keys": true}
 
 // targetEndpointSecret is the secret half of the API token in a target-endpoint
 // value (TargetEndpoint.PropertyString: apitoken=PVEAPIToken=ID=SECRET,host=…),
@@ -537,40 +542,163 @@ func targetEndpointSecret(v string) string {
 	return ""
 }
 
-// minScrubbedValue is the shortest parameter value requestSecrets scrubs. A
-// secret shorter than the scrub's window is matched whole wherever it occurs,
-// and a value of a byte or two would take ordinary words apart; no credential
-// Proxmox accepts is that short (a password needs five).
-const minScrubbedValue = 4
-
 // requestSecrets is everything a request of this client can carry that an
 // error text must not repeat: the API token's secret, a bootstrap session's
-// ticket and CSRF token, the values of sent's secretFormKeys, and the token
-// secret in a target-endpoint.
+// ticket and CSRF token, the values of sent's secret parameters
+// (pvefield.Secret, extraSecretFormKeys) — an ACME plugin's data decoded from
+// base64 as well, which is how client_acme.go sends it — and the token secret
+// in a target-endpoint.
 //
-// The secret, not the Authorization header around it. The scrub matches any
-// eight-byte run of what it is given, and every token header starts
-// "PVEAPIToken=", so scrubbing the header would also eat the token id of a
-// target-endpoint and of the header itself, which are not secret and are what
-// makes a refusal diagnosable. An echoed header still loses its secret.
-func (a *apiClient) requestSecrets(sent url.Values) *secretSet {
+// The secret, not the Authorization header around it: every token header
+// starts "PVEAPIToken=", and the token id after it is not secret and is what
+// makes a refusal diagnosable.
+func (a *apiClient) requestSecrets(sent url.Values) *errorSecrets {
 	secrets := []string{a.tokenSecret}
 	if auth, ok := a.auth.(ticketAuth); ok {
 		secrets = append(secrets, auth.ticket, auth.csrf)
 	}
 	for key, values := range sent {
 		for _, v := range values {
-			if key == "target-endpoint" {
-				v = targetEndpointSecret(v)
-			} else if !secretFormKeys[key] {
-				continue
-			}
-			if len(v) >= minScrubbedValue {
+			switch {
+			case key == "target-endpoint":
+				secrets = append(secrets, targetEndpointSecret(v))
+			case pvefield.Secret(key) || extraSecretFormKeys[key]:
 				secrets = append(secrets, v)
+				switch key {
+				case "env":
+					secrets = append(secrets, secretEntries(v)...)
+				case "data":
+					if decoded, err := base64.StdEncoding.DecodeString(v); err == nil {
+						secrets = append(secrets, string(decoded))
+						secrets = append(secrets, secretEntries(string(decoded))...)
+					}
+				}
 			}
 		}
 	}
-	return newSecretSet(secrets...)
+	return newErrorSecrets(secrets...)
+}
+
+// errorSecrets are the values an error text must not repeat, each in the
+// spellings it can take there: raw, query-escaped, and quoted as JSON or Go
+// quotes it.
+//
+// An error text is not a stream, so a secret is matched whole, never by a run
+// of its bytes: a run match turns a password "backup" into a scrub of "VM 100
+// is locked (backup)", and one containing "password" into a scrub of the word
+// in a rejection message. A value shorter than secretWindow is matched only
+// where it is set off by punctuation or the text's ends — neither neighbour a
+// letter, a digit or a space — as Proxmox quotes a value it repeats ("value
+// 'x'", "x=y"), so that a short password that is also a word ("locked") does
+// not take a phrase Nexara matches apart; the cost is that such a value
+// repeated between spaces is kept.
+type errorSecrets struct {
+	spellings []string // longest first
+}
+
+// secretEntries are the entries of a value that holds several, one to a line
+// or NUL-separated — a container's env, an ACME plugin's decoded data — and
+// each entry's value after its first "=", so that an echo of one entry alone
+// is scrubbed too.
+func secretEntries(v string) []string {
+	var out []string
+	for _, entry := range strings.FieldsFunc(v, func(r rune) bool { return r == 0 || r == '\n' || r == '\r' }) {
+		out = append(out, entry)
+		if _, value, ok := strings.Cut(entry, "="); ok {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+// controlsToSpaces is the control-character mapping cleanErrorText applies to
+// a text, applied to a secret's spellings too, so that a secret holding a
+// separator matches its own echo once the echo has been cleaned.
+func controlsToSpaces(text string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+			return ' '
+		}
+		return r
+	}, text))
+}
+
+func newErrorSecrets(secrets ...string) *errorSecrets {
+	s := &errorSecrets{}
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		quoted := strconv.Quote(secret)
+		for _, sp := range []string{secret, url.QueryEscape(secret), quoted[1 : len(quoted)-1]} {
+			sp = controlsToSpaces(sp)
+			if sp != "" && !slices.Contains(s.spellings, sp) {
+				s.spellings = append(s.spellings, sp)
+			}
+		}
+	}
+	slices.SortStableFunc(s.spellings, func(a, b string) int { return len(b) - len(a) })
+	return s
+}
+
+// scrub replaces every match of a secret in text with redactedSecret.
+func (s *errorSecrets) scrub(text string) string {
+	for _, sp := range s.spellings {
+		if !strings.Contains(text, sp) {
+			continue
+		}
+		if len(sp) >= secretWindow {
+			text = strings.ReplaceAll(text, sp, redactedSecret)
+			continue
+		}
+		var b strings.Builder
+		for rest := text; ; {
+			i := strings.Index(rest, sp)
+			if i < 0 {
+				b.WriteString(rest)
+				break
+			}
+			before, _ := utf8.DecodeLastRuneInString(rest[:i])
+			after, _ := utf8.DecodeRuneInString(rest[i+len(sp):])
+			b.WriteString(rest[:i])
+			if (i > 0 && joinsWord(before)) || (i+len(sp) < len(rest) && joinsWord(after)) {
+				b.WriteString(sp)
+			} else {
+				b.WriteString(redactedSecret)
+			}
+			rest = rest[i+len(sp):]
+		}
+		text = b.String()
+	}
+	return text
+}
+
+// joinsWord reports whether r, next to a short secret, makes it part of the
+// running text rather than a value set off in it.
+func joinsWord(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) }
+
+// minCutSecret is the shortest start of a secret trimCutTail removes from a
+// text cut short: fewer bytes than that give nothing away, and matching them
+// would take ordinary endings apart.
+const minCutSecret = 4
+
+// trimCutTail replaces the longest tail of a text just cut that is the start
+// of a secret, at least minCutSecret bytes of it, with redactedSecret: a secret
+// the cut went through is no longer whole, so scrub cannot see it.
+func (s *errorSecrets) trimCutTail(text string) string {
+	longest := 0
+	for _, sp := range s.spellings {
+		for n := min(len(sp), len(text)); n >= minCutSecret && n > longest; n-- {
+			if strings.HasSuffix(text, sp[:n]) {
+				longest = n
+				break
+			}
+		}
+	}
+	if longest == 0 {
+		return text
+	}
+	return text[:len(text)-longest] + redactedSecret
 }
 
 // cleanErrorText is text as an error may carry it: control characters (and the
@@ -578,15 +706,9 @@ func (a *apiClient) requestSecrets(sent url.Values) *secretSet {
 // spaces, the ends trimmed, cut to maxErrorTextKept bytes on a character
 // boundary, and every secret in secrets scrubbed out. It cuts before it
 // scrubs, so the scrub sees exactly what is kept, and trims the start of a
-// secret the cut left at the end, which is too short to recognise; see
-// secretSet.
-func cleanErrorText(text string, secrets *secretSet) string {
-	text = strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
-			return ' '
-		}
-		return r
-	}, text))
+// secret the cut left at the end.
+func cleanErrorText(text string, secrets *errorSecrets) string {
+	text = controlsToSpaces(text)
 	cut := len(text) > maxErrorTextKept
 	if cut {
 		n := maxErrorTextKept
@@ -595,7 +717,7 @@ func cleanErrorText(text string, secrets *secretSet) string {
 		}
 		text = secrets.trimCutTail(text[:n])
 	}
-	text, _ = secrets.scrub(text)
+	text = secrets.scrub(text)
 	if cut {
 		text += " …"
 	}
@@ -604,7 +726,7 @@ func cleanErrorText(text string, secrets *secretSet) string {
 
 // checkStatus maps HTTP status codes to typed errors, with the body's text
 // cleaned of secrets (see cleanErrorText).
-func checkStatus(statusCode int, body []byte, secrets *secretSet) error {
+func checkStatus(statusCode int, body []byte, secrets *errorSecrets) error {
 	switch {
 	case statusCode == http.StatusNotFound:
 		return ErrNotFound
@@ -633,15 +755,20 @@ func checkStatus(statusCode int, body []byte, secrets *secretSet) error {
 // sentence, {"message":"..."}, which is what mapProxmoxError reads it for: the
 // sentence is cleaned as decoded, so an escape such as \u001b cannot bring a
 // control character back, and a long one is cut without leaving JSON that no
-// longer parses. A body that is not such an envelope is kept as its cleaned
+// longer parses. An envelope the read cap cut gives up as much of its sentence
+// as arrived (recoverMessage). A body that is neither is kept as its cleaned
 // text.
-func parseProxmoxError(body []byte, secrets *secretSet) (message string, fields map[string]string) {
+func parseProxmoxError(body []byte, secrets *errorSecrets) (message string, fields map[string]string) {
 	var envelope struct {
 		Errors  map[string]string `json:"errors"`
 		Message string            `json:"message"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return cleanErrorText(string(body), secrets), nil
+		sentence, ok := recoverMessage(body)
+		if !ok {
+			return cleanErrorText(string(body), secrets), nil
+		}
+		envelope.Message = sentence
 	}
 	if len(envelope.Errors) == 0 {
 		sentence := cleanErrorText(envelope.Message, secrets)
@@ -669,6 +796,42 @@ func parseProxmoxError(body []byte, secrets *secretSet) (message string, fields 
 	// the same rejected fields in a different order on every request.
 	slices.Sort(parts)
 	return cleanErrorText(strings.Join(parts, "; "), secrets), fields
+}
+
+// messageStart finds the opening of a JSON envelope's "message" string.
+var messageStart = regexp.MustCompile(`(?s)^\s*\{.*?"message"\s*:\s*"`)
+
+// recoverMessage is the decoded start of the "message" string of a JSON
+// envelope that was cut short, or false when body is not one. The string is
+// taken up to its closing quote or the end of body, and a cut escape at its
+// end is dropped.
+func recoverMessage(body []byte) (string, bool) {
+	loc := messageStart.FindIndex(body)
+	if loc == nil {
+		return "", false
+	}
+	rest := body[loc[1]:]
+	end := len(rest)
+	for i := 0; i < len(rest); i++ {
+		if rest[i] == '\\' {
+			i++
+			continue
+		}
+		if rest[i] == '"' {
+			end = i
+			break
+		}
+	}
+	raw := rest[:end]
+	// An escape cut by the cap is at most "\uXXX" long: drop up to that many
+	// bytes until what is left decodes.
+	for drop := 0; drop <= 5 && drop <= len(raw); drop++ {
+		var sentence string
+		if json.Unmarshal(append(append([]byte{'"'}, raw[:len(raw)-drop]...), '"'), &sentence) == nil {
+			return sentence, true
+		}
+	}
+	return "", false
 }
 
 // unmarshalData unmarshals the standard Proxmox API response envelope.
@@ -728,7 +891,7 @@ func (a *apiClient) doWithTotal(ctx context.Context, path string, dst interface{
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+		return 0, a.connectionFailed(err, nil)
 	}
 	defer resp.Body.Close()
 
@@ -752,7 +915,7 @@ func (a *apiClient) doGetTotal(ctx context.Context, path string) (int, error) {
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+		return 0, a.connectionFailed(err, nil)
 	}
 	defer resp.Body.Close()
 
