@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Sun, Moon, Monitor, Check } from "lucide-react";
 import { supportedLanguages } from "@/lib/i18n";
@@ -20,10 +20,8 @@ import {
   type ConsoleOpenMode,
   type DateFormat,
 } from "@/stores/preferences-store";
-import {
-  useSetting,
-  useUpsertSetting,
-} from "@/features/settings/api/settings-queries";
+import { useUpsertSetting } from "@/features/settings/api/settings-queries";
+import { USER_PREFERENCES_KEY } from "@/features/settings/components/LoadSavedPreferences";
 import { ACCENT_COLORS, applyAccentColor } from "@/lib/accent";
 import { cn } from "@/lib/utils";
 
@@ -76,26 +74,15 @@ export function AppearancePage() {
   const themeMode = useThemeStore((s) => s.mode);
   const setThemeMode = useThemeStore((s) => s.setMode);
   const { preferences, setPreferences } = usePreferencesStore();
+  // The saved preferences are loaded for the whole app (LoadSavedPreferences).
   const upsertSetting = useUpsertSetting();
-
-  // Load user preferences from backend on mount
-  const prefsQuery = useSetting("user.preferences", "user");
-  const { loadFromJSON } = usePreferencesStore();
-
-  useEffect(() => {
-    if (prefsQuery.data?.value) {
-      loadFromJSON(prefsQuery.data.value);
-      // A browser that has not seen this account's accent yet takes it now.
-      applyAccentColor(usePreferencesStore.getState().preferences.accentColor);
-    }
-  }, [prefsQuery.data?.value, loadFromJSON]);
 
   const savePreferences = useCallback(
     (updated: Partial<typeof preferences>) => {
       const newPrefs = { ...preferences, ...updated };
       setPreferences(updated);
       upsertSetting.mutate({
-        key: "user.preferences",
+        key: USER_PREFERENCES_KEY,
         value: newPrefs,
         scope: "user",
       });

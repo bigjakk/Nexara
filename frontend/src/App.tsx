@@ -5,6 +5,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { RequirePermission } from "@/components/auth/RequirePermission";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppShell } from "@/components/layout/AppShell";
+import { LoadSavedPreferences } from "@/features/settings/components/LoadSavedPreferences";
 import { PageLoader } from "@/components/PageLoader";
 import { CONSOLE_SESSION_PATH } from "@/features/console/lib/console-session";
 import { LoginPage } from "@/features/auth/pages/LoginPage";
@@ -190,7 +191,12 @@ const router = createBrowserRouter([
     element: <ProtectedRoute />,
     children: [
       {
-        element: <AppShell />,
+        element: (
+          <>
+            <LoadSavedPreferences />
+            <AppShell />
+          </>
+        ),
         children: [
           {
             index: true,
