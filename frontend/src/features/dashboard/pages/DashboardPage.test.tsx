@@ -94,6 +94,9 @@ interface SettingState {
 }
 const settings = new Map<string, SettingState>();
 const mockMutate = vi.fn();
+/** The settings each save wrote, one array per mutation. */
+const saves = () =>
+  mockMutate.mock.calls.map(([w]) => w as { key: string; value: unknown }[]);
 
 vi.mock("@/features/settings/api/settings-queries", () => ({
   useSetting: (key: string) => ({
@@ -102,7 +105,7 @@ vi.mock("@/features/settings/api/settings-queries", () => ({
     error: null,
     ...settings.get(key),
   }),
-  useUpsertSetting: () => ({
+  useUpsertSettings: () => ({
     mutate: mockMutate,
     isPending: false,
   }),
@@ -228,8 +231,9 @@ describe("DashboardPage", () => {
     });
 
     // A preset saved from the layout menu was only written as the layout
-    // once Lock was pressed, so a reload went back to the old one.
-    it("saves a new preset as the layout too", async () => {
+    // once Lock was pressed, so a reload went back to the old one. Both
+    // writes go as one save, so a failure is reported once.
+    it("saves a new preset as the layout too, in one save", async () => {
       const user = userEvent.setup();
       renderWithProviders(<DashboardPage />);
       await user.click(screen.getByRole("button", { name: "Layout: Default" }));
@@ -237,12 +241,14 @@ describe("DashboardPage", () => {
       await user.type(screen.getByPlaceholderText("Preset name"), "Mine");
       await user.click(screen.getByRole("button", { name: "Save" }));
 
-      expect(mockMutate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          key: "dashboard.layout",
-          value: expect.objectContaining({ name: "Mine" }) as unknown,
-        }),
-      );
+      expect(saves()).toEqual([
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: "dashboard.layout",
+            value: expect.objectContaining({ name: "Mine" }) as unknown,
+          }),
+        ]),
+      ]);
     });
 
     // The clusters can answer before the saved layout does; the default
@@ -300,16 +306,17 @@ describe("DashboardPage", () => {
       await user.click(screen.getByRole("button", { name: c.button }));
 
       expect(screen.queryByText(/does not have Fleet/)).not.toBeInTheDocument();
-      expect(mockMutate).toHaveBeenCalledWith(
+      const [save, ...more] = saves();
+      expect(more).toEqual([]);
+      expect(save).toContainEqual(
         expect.objectContaining({
           key: "dashboard.offered_widgets",
           value: expect.arrayContaining(["fleet-board"]) as unknown,
         }),
       );
-      const layoutSaves = mockMutate.mock.calls.filter(
-        ([v]) => (v as { key: string }).key === "dashboard.layout",
+      expect(save?.some((w) => w.key === "dashboard.layout")).toBe(
+        c.layoutSaved,
       );
-      expect(layoutSaves.length > 0).toBe(c.layoutSaved);
     });
   });
 });

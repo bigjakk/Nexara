@@ -47,7 +47,7 @@ import {
 import { ApiClientError } from "@/lib/api-client";
 import {
   useSetting,
-  useUpsertSetting,
+  useUpsertSettings,
 } from "@/features/settings/api/settings-queries";
 import type { TimeRange } from "@/types/api";
 import type {
@@ -58,6 +58,11 @@ import type {
 import { estateCounts } from "../lib/estate-summary";
 import { LIVE_WINDOW_MS, spliceLive } from "@/lib/metric-series";
 import { DATA_COLOR } from "@/lib/chart-colors";
+
+/** The write that makes `preset` the layout a reload opens on. */
+function layoutWrite(preset: DashboardPreset) {
+  return { key: "dashboard.layout", value: preset as unknown, scope: "user" };
+}
 
 /** The user setting that lists the widgets the dashboard has offered. */
 const OFFERED_WIDGETS_KEY = "dashboard.offered_widgets";
@@ -115,7 +120,7 @@ export function DashboardPage() {
   }, [isMobile]);
   const { data, isLoading, error } = useDashboardData();
   const { status } = useWebSocket();
-  const upsertSetting = useUpsertSetting();
+  const saveSettings = useUpsertSettings();
 
   const clusterIds = useMemo(
     () => data?.clusters.map((s) => s.cluster.id) ?? [],
@@ -246,33 +251,23 @@ export function DashboardPage() {
     [effectivePreset],
   );
 
+  // Every save below goes out as one mutation, however many settings it
+  // writes, so a failure is reported once.
   const saveLayout = useCallback(() => {
-    upsertSetting.mutate({
-      key: "dashboard.layout",
-      value: effectivePreset,
-      scope: "user",
-    });
-  }, [effectivePreset, upsertSetting]);
+    saveSettings.mutate([layoutWrite(effectivePreset)]);
+  }, [effectivePreset, saveSettings]);
 
   const handleReset = useCallback(() => {
     setActivePreset(computedDefaultPreset);
-    upsertSetting.mutate({
-      key: "dashboard.layout",
-      value: computedDefaultPreset,
-      scope: "user",
-    });
-  }, [computedDefaultPreset, upsertSetting]);
+    saveSettings.mutate([layoutWrite(computedDefaultPreset)]);
+  }, [computedDefaultPreset, saveSettings]);
 
   const handlePresetSelect = useCallback(
     (preset: DashboardPreset) => {
       setActivePreset(preset);
-      upsertSetting.mutate({
-        key: "dashboard.layout",
-        value: preset,
-        scope: "user",
-      });
+      saveSettings.mutate([layoutWrite(preset)]);
     },
-    [upsertSetting],
+    [saveSettings],
   );
 
   const handlePresetSave = useCallback(
@@ -282,36 +277,30 @@ export function DashboardPage() {
         ...savedPresets.filter((p) => p.name !== name),
         newPreset,
       ];
-      upsertSetting.mutate({
-        key: "dashboard.presets",
-        value: updated,
-        scope: "user",
-      });
       // The preset is now the one shown, so it is the layout a reload opens
       // on, as a pick from the list is; not only once the layout is locked.
-      upsertSetting.mutate({
-        key: "dashboard.layout",
-        value: newPreset,
-        scope: "user",
-      });
+      saveSettings.mutate([
+        { key: "dashboard.presets", value: updated, scope: "user" },
+        layoutWrite(newPreset),
+      ]);
       setActivePreset(newPreset);
     },
-    [effectivePreset, savedPresets, upsertSetting],
+    [effectivePreset, savedPresets, saveSettings],
   );
 
   const handlePresetDelete = useCallback(
     (name: string) => {
       const updated = savedPresets.filter((p) => p.name !== name);
-      upsertSetting.mutate({
-        key: "dashboard.presets",
-        value: updated,
-        scope: "user",
-      });
+      const writes = [
+        { key: "dashboard.presets", value: updated as unknown, scope: "user" },
+      ];
       if (effectivePreset.name === name) {
-        handleReset();
+        setActivePreset(computedDefaultPreset);
+        writes.push(layoutWrite(computedDefaultPreset));
       }
+      saveSettings.mutate(writes);
     },
-    [effectivePreset.name, savedPresets, upsertSetting, handleReset],
+    [effectivePreset.name, savedPresets, saveSettings, computedDefaultPreset],
   );
 
   // Widgets the default layout has and a saved one lacks (Fleet, a new
@@ -344,25 +333,26 @@ export function DashboardPage() {
     computedDefaultPreset.widgetIds,
   ]);
 
+  const offeredWrite = useCallback(
+    () => ({
+      key: OFFERED_WIDGETS_KEY,
+      value: [...(offeredBefore ?? []), ...newWidgetIds] as unknown,
+      scope: "user",
+    }),
+    [offeredBefore, newWidgetIds],
+  );
+
   const closeOffer = useCallback(() => {
     setOfferClosed(true);
-    upsertSetting.mutate({
-      key: OFFERED_WIDGETS_KEY,
-      value: [...(offeredBefore ?? []), ...newWidgetIds],
-      scope: "user",
-    });
-  }, [offeredBefore, newWidgetIds, upsertSetting]);
+    saveSettings.mutate([offeredWrite()]);
+  }, [offeredWrite, saveSettings]);
 
   const addNewWidgets = useCallback(() => {
     const updated = appendWidgets(effectivePreset, newWidgetIds, clusters);
     setActivePreset(updated);
-    upsertSetting.mutate({
-      key: "dashboard.layout",
-      value: updated,
-      scope: "user",
-    });
-    closeOffer();
-  }, [effectivePreset, newWidgetIds, clusters, upsertSetting, closeOffer]);
+    setOfferClosed(true);
+    saveSettings.mutate([layoutWrite(updated), offeredWrite()]);
+  }, [effectivePreset, newWidgetIds, clusters, offeredWrite, saveSettings]);
 
   const toggleEditMode = useCallback(() => {
     if (editMode) {

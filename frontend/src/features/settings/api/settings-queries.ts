@@ -66,6 +66,37 @@ export function useUpsertSetting() {
   });
 }
 
+/**
+ * Writes several settings as one save, so a failure is reported once (by the
+ * app's global handler) rather than once per setting.
+ */
+export function useUpsertSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    // Waits for every write before failing, so the refresh below cannot read
+    // a setting whose write is still on its way and cache the old value.
+    mutationFn: async (writes: (UpsertSettingPayload & { key: string })[]) => {
+      const results = await Promise.allSettled(
+        writes.map(({ key, ...payload }) =>
+          apiClient.put<SettingResponse>(
+            apiPath`/api/v1/settings/${key}`,
+            payload,
+          ),
+        ),
+      );
+      const failed = results.find((r) => r.status === "rejected");
+      if (failed) throw failed.reason;
+      return results.map(
+        (r) => (r as PromiseFulfilledResult<SettingResponse>).value,
+      );
+    },
+    // Settled, not success: when one write fails the others may have landed.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: settingsKeys.all });
+    },
+  });
+}
+
 export function useDeleteSetting() {
   const qc = useQueryClient();
   return useMutation({
