@@ -159,7 +159,7 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 		a.AlertEngine.SetUpsPollInterval(cfg.NutPollInterval)
 
 		a.CVEScanner = scanner.NewEngine(a.Queries, cfg.EncryptionKey,
-			logger.With("component", "cve-scanner"), a.NotifyRegistry)
+			logger.With("component", "cve-scanner"), a.AlertEngine)
 
 		a.DRSEngine = drs.NewEngine(a.Queries, cfg.EncryptionKey, logger.With("component", "drs-engine"))
 		a.DRSExecutor = drs.NewExecutor(shutdownCtx, a.Queries, logger.With("component", "drs-executor"), a.EventPub)

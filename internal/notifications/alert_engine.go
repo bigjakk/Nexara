@@ -974,30 +974,6 @@ func (e *Engine) dispatchForRule(ctx context.Context, rule db.AlertRule, alertID
 // tick must not block on a dead Slack endpoint, and the DLQ row is the
 // durable record of the failure.
 func (e *Engine) dispatchToChannel(ctx context.Context, rule db.AlertRule, alertID uuid.UUID, channelID uuid.UUID, value float64, resourceName, state string, escalationLevel int) {
-	if e.registry == nil || channelID == uuid.Nil {
-		return
-	}
-
-	channel, err := e.queries.GetNotificationChannelEnabled(ctx, channelID)
-	if err != nil {
-		e.logger.Warn("channel not found or disabled for dispatch", "channel_id", channelID, "error", err)
-		return
-	}
-
-	configJSON, err := crypto.Decrypt(channel.ConfigEncrypted, e.encryptionKey)
-	if err != nil {
-		e.logger.Error("failed to decrypt channel config", "channel_id", channelID, "error", err)
-		// Persistent failure — surface in DLQ so the operator can rotate the key.
-		e.writeDLQ(ctx, channel, rule, alertID, AlertPayload{}, "decrypt channel config: "+err.Error(), 0, "config_error")
-		return
-	}
-
-	dispatcher, ok := e.registry.Get(channel.ChannelType)
-	if !ok {
-		e.logger.Warn("no dispatcher for channel type", "type", channel.ChannelType)
-		return
-	}
-
 	payload := AlertPayload{
 		AlertID:         alertID.String(),
 		RuleName:        rule.Name,
@@ -1019,21 +995,68 @@ func (e *Engine) dispatchToChannel(ctx context.Context, rule db.AlertRule, alert
 
 	payload.Message = e.ruleMessage(rule, payload, alertMessage(rule, resourceName, value))
 
+	e.deliver(ctx, channelID, payload, dlqRef{alertID: alertID, ruleID: rule.ID, clusterID: rule.ClusterID})
+}
+
+// dlqRef is what a dispatch's dead letter is filed under: its alert and rule,
+// uuid.Nil for none, and the cluster the dead-letter reads are scoped by.
+type dlqRef struct {
+	alertID, ruleID uuid.UUID
+	clusterID       pgtype.UUID
+}
+
+// SendNotice sends a notification no alert raised — a CVE notice — to one
+// channel by the path an alert's takes: the channel's rate limit, the retry
+// schedule and, once every attempt has failed, a dead letter filed under
+// clusterID. It reports whether the notice was handed to the channel; one
+// that was not is logged, and dead-lettered when the channel's settings could
+// not be read or its rate limit refused it.
+func (e *Engine) SendNotice(ctx context.Context, channelID, clusterID uuid.UUID, payload AlertPayload) bool {
+	return e.deliver(ctx, channelID, payload, dlqRef{clusterID: pgtype.UUID{Bytes: clusterID, Valid: clusterID != uuid.Nil}})
+}
+
+// deliver hands payload to a channel. It reports whether the send was started.
+func (e *Engine) deliver(ctx context.Context, channelID uuid.UUID, payload AlertPayload, ref dlqRef) bool {
+	if e.registry == nil || channelID == uuid.Nil {
+		return false
+	}
+
+	channel, err := e.queries.GetNotificationChannelEnabled(ctx, channelID)
+	if err != nil {
+		e.logger.Warn("channel not found or disabled for dispatch", "channel_id", channelID, "error", err)
+		return false
+	}
+
+	configJSON, err := crypto.Decrypt(channel.ConfigEncrypted, e.encryptionKey)
+	if err != nil {
+		e.logger.Error("failed to decrypt channel config", "channel_id", channelID, "error", err)
+		// Persistent failure — surface in DLQ so the operator can rotate the key.
+		e.writeDLQ(ctx, channel, ref, AlertPayload{}, "decrypt channel config: "+err.Error(), 0, "config_error")
+		return false
+	}
+
+	dispatcher, ok := e.registry.Get(channel.ChannelType)
+	if !ok {
+		e.logger.Warn("no dispatcher for channel type", "type", channel.ChannelType)
+		return false
+	}
+
 	// Per-channel rate-limit: a flapping rule shouldn't drown the channel.
 	// Refused dispatches are recorded in the DLQ so the operator sees what
 	// got blocked rather than the throttling being silent.
 	if !e.rateLimiter.Allow(channelID) {
 		e.logger.Warn("notification rate-limited",
-			"channel_id", channelID, "channel_type", channel.ChannelType, "rule", rule.Name)
-		e.writeDLQ(ctx, channel, rule, alertID, payload,
+			"channel_id", channelID, "channel_type", channel.ChannelType, "rule", payload.RuleName)
+		e.writeDLQ(ctx, channel, ref, payload,
 			"channel rate limit exceeded; flapping rule throttled",
 			0, "rate_limited")
-		return
+		return false
 	}
 
 	// Retry/backoff + DLQ on final failure happen in a detached goroutine so
 	// the evaluation tick is never blocked on a dead endpoint.
-	go e.sendWithRetry(channel, rule, alertID, payload, json.RawMessage(configJSON), dispatcher)
+	go e.sendWithRetry(channel, ref, payload, json.RawMessage(configJSON), dispatcher)
+	return true
 }
 
 // sendWithRetry runs the retry schedule for a single dispatch and persists
@@ -1042,8 +1065,7 @@ func (e *Engine) dispatchToChannel(ctx context.Context, rule db.AlertRule, alert
 // is the boundary that makes the goroutine-internal cleanup ctx loadbearing.
 func (e *Engine) sendWithRetry(
 	channel db.NotificationChannel,
-	rule db.AlertRule,
-	alertID uuid.UUID,
+	ref dlqRef,
 	payload AlertPayload,
 	configJSON json.RawMessage,
 	dispatcher Dispatcher,
@@ -1062,8 +1084,8 @@ func (e *Engine) sendWithRetry(
 		e.logger.Info("notification dispatched",
 			"channel_id", channel.ID, "channel_type", channel.ChannelType,
 			"state", payload.State, "attempts", attempts)
-		if alertID != uuid.Nil {
-			_ = e.queries.MarkAlertNotificationSent(sendCtx, alertID)
+		if ref.alertID != uuid.Nil {
+			_ = e.queries.MarkAlertNotificationSent(sendCtx, ref.alertID)
 		}
 		return
 	}
@@ -1071,7 +1093,7 @@ func (e *Engine) sendWithRetry(
 	e.logger.Error("notification dispatch failed",
 		"channel_id", channel.ID, "channel_type", channel.ChannelType,
 		"attempts", attempts, "error", err)
-	e.writeDLQ(sendCtx, channel, rule, alertID, payload, err.Error(), attempts, "send_failed")
+	e.writeDLQ(sendCtx, channel, ref, payload, err.Error(), attempts, "send_failed")
 }
 
 // writeDLQ persists a failure record. Errors during the DLQ write itself are
@@ -1083,8 +1105,7 @@ func (e *Engine) sendWithRetry(
 func (e *Engine) writeDLQ(
 	ctx context.Context,
 	channel db.NotificationChannel,
-	rule db.AlertRule,
-	alertID uuid.UUID,
+	ref dlqRef,
 	payload AlertPayload,
 	lastErr string,
 	attempts int,
@@ -1106,17 +1127,16 @@ func (e *Engine) writeDLQ(
 		channelIDPg = pgtype.UUID{Bytes: channel.ID, Valid: true}
 	}
 	alertIDPg := pgtype.UUID{}
-	if alertID != uuid.Nil {
-		alertIDPg = pgtype.UUID{Bytes: alertID, Valid: true}
+	if ref.alertID != uuid.Nil {
+		alertIDPg = pgtype.UUID{Bytes: ref.alertID, Valid: true}
 	}
 	ruleIDPg := pgtype.UUID{}
-	if rule.ID != uuid.Nil {
-		ruleIDPg = pgtype.UUID{Bytes: rule.ID, Valid: true}
+	if ref.ruleID != uuid.Nil {
+		ruleIDPg = pgtype.UUID{Bytes: ref.ruleID, Valid: true}
 	}
-	// rule.ClusterID is already pgtype.UUID; carry through verbatim so a
-	// global (no-cluster) rule lands as NULL and a cluster-scoped rule
-	// lands with the correct cluster reference.
-	clusterIDPg := rule.ClusterID
+	// A global (no-cluster) rule's lands as NULL, a cluster-scoped one's
+	// under its cluster.
+	clusterIDPg := ref.clusterID
 
 	if _, err := e.queries.InsertNotificationDLQ(ctx, db.InsertNotificationDLQParams{
 		ChannelID:    channelIDPg,

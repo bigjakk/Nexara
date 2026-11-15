@@ -26,10 +26,14 @@ func (d *PagerDutyDispatcher) Type() string { return "pagerduty" }
 // an escalation sends the one stored at creation, so its trigger, escalation
 // and resolve each opened or missed an incident of their own.
 //
-// A notification with no alert (a channel test, a CVE notice, a dead letter
-// stored before alert_id) keeps the older (rule, cluster, resource) key, which
+// A notification no alert sent may name its own key (DedupKey): a CVE notice
+// does. One with neither (a channel test, a dead letter stored before
+// alert_id) keeps the older (rule, cluster, resource) key, which
 // still gives each resource of one rule its own incident.
 func pagerdutyDedupKey(payload AlertPayload) string {
+	if payload.DedupKey != "" {
+		return payload.DedupKey
+	}
 	if payload.AlertID != "" {
 		return "nexara-alert-" + payload.AlertID
 	}

@@ -24,6 +24,9 @@ type AlertPayload struct {
 	Message         string  `json:"message"`
 	FiredAt         string  `json:"fired_at"`
 	EscalationLevel int     `json:"escalation_level"`
+	// DedupKey, when set, is the PagerDuty incident key of a notification no
+	// alert sent: each CVE notice's own.
+	DedupKey string `json:"dedup_key,omitempty"`
 }
 
 // Dispatcher sends a notification to a configured channel.

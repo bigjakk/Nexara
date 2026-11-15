@@ -1,7 +1,11 @@
 package scanner
 
 import (
+	"slices"
+	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -95,4 +99,22 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// Each CVE notice has a PagerDuty key of its own: a new CVE opens an incident
+// rather than joining the last notice's. Its message lists the CVEs.
+func TestCVENoticePayload(t *testing.T) {
+	t.Parallel()
+	c1, c2 := uuid.New(), uuid.New()
+	a := []db.ListVulnsBySSVCInScanRow{{CveID: "CVE-2024-1", PackageName: "pkg-a", RiskScore: 9}}
+	b := append(slices.Clone(a), db.ListVulnsBySSVCInScanRow{CveID: "CVE-2024-2", PackageName: "pkg-b", RiskScore: 7})
+	key := func(c uuid.UUID, v []db.ListVulnsBySSVCInScanRow) string {
+		return cveNoticePayload(c, "cluster01", vulnSetSignature(v), v).DedupKey
+	}
+	if key(c1, a) == "" || key(c1, a) == key(c1, b) || key(c1, a) == key(c2, a) {
+		t.Errorf("keys %q %q %q: want one per cluster and CVE set", key(c1, a), key(c1, b), key(c2, a))
+	}
+	if msg := cveNoticePayload(c1, "cluster01", "s", b).Message; !strings.Contains(msg, "CVE-2024-1") || !strings.Contains(msg, "CVE-2024-2") {
+		t.Errorf("message %q does not list the CVEs", msg)
+	}
 }

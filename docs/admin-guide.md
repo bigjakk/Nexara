@@ -1701,7 +1701,7 @@ From the **Alert History** tab:
 
 An alert rule's notification that cannot be delivered is not lost. Each dispatch goes through three layers — a per-channel rate limiter, three retry attempts with backoff, and finally the dead-letter queue — so a dead Slack endpoint or a flapping rule leaves a durable record instead of silence.
 
-This covers alert rules only. A step whose channel has been disabled or deleted is logged and leaves no entry, and CVE, rolling update and report notifications are sent once: a failure there is in the server log and nowhere else.
+This covers alert rules and CVE notices. A step whose channel has been disabled or deleted is logged and leaves no entry, and rolling update and report notifications are sent once: a failure there is in the server log and nowhere else.
 
 The **Dead-letter queue** tab appears on the Alerts page for anyone holding `view:notification_dlq`, with a badge counting open entries. Each row carries the channel, the alert it belonged to, the failure reason, and a state:
 
@@ -1771,6 +1771,8 @@ The **CVE Notifications** card wires scan results into the same notification cha
 - **Attend** — moderate likelihood (EPSS ≥ 0.1) or critical CVSS
 
 Tick one or more **Channels** — the same set serves whichever bands you enabled — set **Re-notify after** to bound repeats, and click **Save**. Any change that leaves at least one CVE notifies immediately; there is no all-clear message. The cooldown only gates re-notification while the same set is still present.
+
+A notice lists up to 20 of the CVEs, highest risk first, on every channel type. It goes through the same rate limit, retries and dead-letter queue as an alert's notification. On PagerDuty each set of CVEs is its own incident: a new CVE opens a new incident, and a repeat of the same set after the cooldown joins the incident that set opened.
 
 ### Reviewing Vulnerabilities
 

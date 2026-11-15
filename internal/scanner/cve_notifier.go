@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/notifications"
 )
@@ -22,33 +21,26 @@ import (
 // IDs at the configured severity: re-firing only when the set changes
 // since the last notification, OR when the cooldown has elapsed and the
 // set is still non-empty.
-//
-// The encryption key is needed to decrypt notification_channels.config_encrypted;
-// it's set lazily by SetEncryptionKey to avoid leaking it through the
-// notifier's public constructor (the scan engine already owns it).
 type Notifier struct {
-	queries       *db.Queries
-	registry      *notifications.Registry
-	logger        *slog.Logger
-	encryptionKey string
+	queries *db.Queries
+	sender  noticeSender
+	logger  *slog.Logger
 }
 
-// NewNotifier creates a new CVE notifier. The encryption key must be set
-// via SetEncryptionKey before dispatching, otherwise channel configs cannot
-// be decrypted.
-func NewNotifier(queries *db.Queries, registry *notifications.Registry, logger *slog.Logger) *Notifier {
+// noticeSender is the alert engine's channel dispatch (notifications.Engine),
+// which a CVE notice goes through for the rate limit, retries and dead letter
+// an alert's notification gets.
+type noticeSender interface {
+	SendNotice(ctx context.Context, channelID, clusterID uuid.UUID, payload notifications.AlertPayload) bool
+}
+
+// NewNotifier creates a new CVE notifier that sends through sender.
+func NewNotifier(queries *db.Queries, sender noticeSender, logger *slog.Logger) *Notifier {
 	return &Notifier{
-		queries:  queries,
-		registry: registry,
-		logger:   logger,
+		queries: queries,
+		sender:  sender,
+		logger:  logger,
 	}
-}
-
-// SetEncryptionKey sets the AES-256-GCM key used to decrypt notification
-// channel configs. The scanner Engine already holds the key and passes it in
-// before each scan.
-func (n *Notifier) SetEncryptionKey(key string) {
-	n.encryptionKey = key
 }
 
 // MaybeNotify is invoked at the end of a scan. It loads the cluster's CVE
@@ -56,7 +48,7 @@ func (n *Notifier) SetEncryptionKey(key string) {
 // counts and the dedup state, and dispatches via the registry on a hit.
 // All failures are logged but never propagate — notification is best-effort.
 func (n *Notifier) MaybeNotify(ctx context.Context, clusterID uuid.UUID, scanID uuid.UUID) {
-	if n == nil || n.registry == nil {
+	if n == nil || n.sender == nil {
 		return
 	}
 
@@ -125,22 +117,11 @@ func (n *Notifier) MaybeNotify(ctx context.Context, clusterID uuid.UUID, scanID 
 		clusterName = cluster.Name
 	}
 
-	message := formatVulnList(vulns)
-	payload := notifications.AlertPayload{
-		RuleName:     fmt.Sprintf("CVE: action required on %s", clusterName),
-		Severity:     "critical",
-		State:        "fired",
-		Metric:       "cve_action_required",
-		CurrentValue: float64(len(vulns)),
-		ResourceName: clusterName,
-		ClusterID:    clusterID.String(),
-		Message:      message,
-		FiredAt:      time.Now().UTC().Format(time.RFC3339Nano),
-	}
+	payload := cveNoticePayload(clusterID, clusterName, signature, vulns)
 
 	dispatched := 0
 	for _, channelID := range channelIDs {
-		if n.dispatch(ctx, channelID, payload) {
+		if n.sender.SendNotice(ctx, channelID, clusterID, payload) {
 			dispatched++
 		}
 	}
@@ -167,38 +148,24 @@ func (n *Notifier) MaybeNotify(ctx context.Context, clusterID uuid.UUID, scanID 
 	)
 }
 
-func (n *Notifier) dispatch(ctx context.Context, channelID uuid.UUID, payload notifications.AlertPayload) bool {
-	if channelID == uuid.Nil {
-		return false
+// cveNoticePayload is one CVE notice. Its PagerDuty key is its own, the
+// cluster and the CVE set: a new CVE opens an incident of its own rather than
+// joining the last notice's, and a repeat of the same set, after the cooldown,
+// is the same notice again. Its message lists the CVEs, which every channel
+// type carries (the chat ones under their own text).
+func cveNoticePayload(clusterID uuid.UUID, clusterName, signature string, vulns []db.ListVulnsBySSVCInScanRow) notifications.AlertPayload {
+	return notifications.AlertPayload{
+		RuleName:     fmt.Sprintf("CVE: action required on %s", clusterName),
+		Severity:     "critical",
+		State:        "fired",
+		Metric:       "cve_action_required",
+		CurrentValue: float64(len(vulns)),
+		ResourceName: clusterName,
+		ClusterID:    clusterID.String(),
+		Message:      formatVulnList(vulns),
+		FiredAt:      time.Now().UTC().Format(time.RFC3339Nano),
+		DedupKey:     "nexara-cve-" + clusterID.String() + "-" + signature,
 	}
-
-	channel, err := n.queries.GetNotificationChannelEnabled(ctx, channelID)
-	if err != nil {
-		n.logger.Warn("CVE notification: channel not found or disabled",
-			"channel_id", channelID, "error", err)
-		return false
-	}
-
-	configJSON, err := crypto.Decrypt(channel.ConfigEncrypted, n.encryptionKey)
-	if err != nil {
-		n.logger.Error("CVE notification: failed to decrypt channel config",
-			"channel_id", channelID, "error", err)
-		return false
-	}
-
-	dispatcher, ok := n.registry.Get(channel.ChannelType)
-	if !ok {
-		n.logger.Warn("CVE notification: no dispatcher for channel type",
-			"channel_id", channelID, "type", channel.ChannelType)
-		return false
-	}
-
-	if err := dispatcher.Send(ctx, []byte(configJSON), payload); err != nil {
-		n.logger.Warn("CVE notification: dispatch failed",
-			"channel_id", channelID, "type", channel.ChannelType, "error", err)
-		return false
-	}
-	return true
 }
 
 // vulnSetSignature returns a stable hash of the CVE-ID set so we can
@@ -215,7 +182,8 @@ func vulnSetSignature(vulns []db.ListVulnsBySSVCInScanRow) string {
 }
 
 // formatVulnList builds a human-readable message for the notification body.
-// Caps the listing at 20 CVEs to keep payloads sane.
+// Caps the listing at 20 CVEs to keep payloads sane; the highest risk come
+// first, as ListVulnsBySSVCInScan orders them.
 func formatVulnList(vulns []db.ListVulnsBySSVCInScanRow) string {
 	const maxList = 20
 	if len(vulns) == 0 {

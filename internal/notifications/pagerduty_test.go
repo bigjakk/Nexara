@@ -24,6 +24,11 @@ func TestPagerDutyDedupKey(t *testing.T) {
 			want: "nexara-alert-33333333-3333-3333-3333-333333333333",
 		},
 		{
+			name:    "a notice's own key (a CVE notice's) wins",
+			payload: AlertPayload{DedupKey: "nexara-cve-k", ClusterID: "cluster-1", ResourceName: "cluster01"},
+			want:    "nexara-cve-k",
+		},
+		{
 			name: "without an alert id, rule + cluster + resource composes the key",
 			payload: AlertPayload{
 				RuleID:       "rule-A",

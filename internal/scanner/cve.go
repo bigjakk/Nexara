@@ -41,9 +41,10 @@ type Engine struct {
 	epssClient *EPSSClient
 }
 
-// NewEngine creates a new CVE scanner engine. registry may be nil — when it
-// is, the post-scan notification step is a no-op (suitable for tests).
-func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, registry *notifications.Registry) *Engine {
+// NewEngine creates a new CVE scanner engine. alerts, the alert engine whose
+// dispatch CVE notices go through, may be nil — when it is, the post-scan
+// notification step is a no-op (suitable for tests).
+func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, alerts *notifications.Engine) *Engine {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -62,10 +63,8 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, r
 		kevClient:     NewKEVClient(queries, httpClient, logger.With("component", "kev-client")),
 		epssClient:    NewEPSSClient(queries, httpClient, logger.With("component", "epss-client")),
 	}
-	if registry != nil {
-		n := NewNotifier(queries, registry, logger.With("component", "cve-notifier"))
-		n.SetEncryptionKey(encryptionKey)
-		e.notifier = n
+	if alerts != nil {
+		e.notifier = NewNotifier(queries, alerts, logger.With("component", "cve-notifier"))
 	}
 	return e
 }
