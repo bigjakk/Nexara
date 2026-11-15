@@ -28,9 +28,17 @@ export function useProfile() {
   });
 }
 
+/**
+ * Opts a mutation out of the app's global error toast: the profile page shows
+ * the failure itself, and toasts one that settles after it is gone
+ * (useSaveOutcome). Anything that relies on the toast must not use it.
+ */
+const errorsHandledLocally = { onError: () => undefined };
+
 export function useUpdateProfile() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: UpdateProfileParams) =>
       apiClient.put<ProfileResponse>(apiPath`/api/v1/auth/profile`, params),
     onSuccess: () => {
@@ -41,6 +49,7 @@ export function useUpdateProfile() {
 
 export function useChangePassword() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: ChangePasswordParams) =>
       apiClient.post<{ message: string }>(
         apiPath`/api/v1/auth/change-password`,

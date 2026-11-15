@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { clearTokens } from "@/lib/api-client";
 import { queryClient } from "@/lib/query-client";
 import {
@@ -194,5 +195,54 @@ describe("the local sign-out after a password change", () => {
     });
 
     expect(useAuthStore.getState().signedOutByUser).toBe(true);
+  });
+});
+
+describe("a save that fails", () => {
+  // Shown on the page, and not toasted as well: the app's error toast cannot
+  // see an onError given to mutate() (lib/query-client.ts).
+  it.each([
+    [
+      "the display name",
+      "PUT /api/v1/auth/profile",
+      async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.type(await screen.findByLabelText("Display name"), "x");
+        await user.click(screen.getByRole("button", { name: "Save changes" }));
+      },
+    ],
+    [
+      "the password",
+      CHANGE,
+      async (user: ReturnType<typeof userEvent.setup>) => {
+        const [opens] = await screen.findAllByRole("button", {
+          name: "Change password",
+        });
+        await user.click(opens as HTMLElement);
+        await user.type(screen.getByLabelText("Current password"), "old-01");
+        await user.type(screen.getByLabelText("New password"), "new-01");
+        await user.type(
+          screen.getByLabelText("Confirm new password"),
+          "new-01",
+        );
+        await user.click(
+          screen.getByRole("button", { name: "Change password" }),
+        );
+      },
+    ],
+  ])("is reported once, on the page: %s", async (_name, route, save) => {
+    const toastError = vi.spyOn(toast, "error");
+    await signInAs(ADMIN);
+    server.routes[route] = () => json({ message: "Refused for a reason" }, 400);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProfilePage />
+      </QueryClientProvider>,
+    );
+
+    await save(userEvent.setup());
+
+    expect(await screen.findByText("Refused for a reason")).toBeInTheDocument();
+    await flush();
+    expect(toastError).not.toHaveBeenCalled();
   });
 });

@@ -27,6 +27,7 @@ import {
   useChangePassword,
 } from "../api/profile-queries";
 import { useAuthStore } from "@/stores/auth-store";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 const AUTH_SOURCE_LABELS: Record<string, string> = {
   local: "Local",
@@ -40,6 +41,7 @@ export function ProfilePage() {
   const updateProfile = useUpdateProfile();
   const changePassword = useChangePassword();
   const clearAuth = useAuthStore((s) => s.clearAuth);
+  const settleProfile = useSaveOutcome();
 
   const [displayName, setDisplayName] = useState("");
   const [profileSaved, setProfileSaved] = useState(false);
@@ -53,6 +55,7 @@ export function ProfilePage() {
   const [showNew, setShowNew] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const settlePassword = useSaveOutcome(passwordDialogOpen);
 
   const isLocal = profile?.auth_source === "local";
 
@@ -65,24 +68,22 @@ export function ProfilePage() {
   const handleSaveProfile = () => {
     setProfileError("");
     setProfileSaved(false);
-    updateProfile.mutate(
-      { display_name: displayName },
-      {
-        onSuccess: () => {
-          setProfileSaved(true);
-          setTimeout(() => {
-            setProfileSaved(false);
-          }, 3000);
-        },
-        onError: (err) => {
-          setProfileError(
-            err instanceof ApiClientError
-              ? err.message
-              : "Failed to update profile",
-          );
-        },
+    settleProfile(updateProfile.mutateAsync({ display_name: displayName }), {
+      action: "Saving your display name",
+      onSuccess: () => {
+        setProfileSaved(true);
+        setTimeout(() => {
+          setProfileSaved(false);
+        }, 3000);
       },
-    );
+      onError: (err: unknown) => {
+        setProfileError(
+          err instanceof ApiClientError
+            ? err.message
+            : "Failed to update profile",
+        );
+      },
+    });
   };
 
   const handleChangePassword = () => {
@@ -94,24 +95,34 @@ export function ProfilePage() {
       return;
     }
 
-    changePassword.mutate(
-      { old_password: oldPassword, new_password: newPassword },
+    // Server revoked all sessions — force local logout after brief delay.
+    // The timer outlives this page, and is not cleared when it is left:
+    // the session is revoked either way. But it is for the session that
+    // changed the password: if that has ended by then — signed out, or
+    // someone else signed in — clearAuth() would end theirs, or turn the
+    // user's own Sign out into an expiry (the login page then carries the
+    // page they left to whoever signs in next).
+    const signOut = () => {
+      const ended = sessionScope();
+      setTimeout(() => {
+        if (!ended()) clearAuth();
+      }, 2000);
+    };
+    settlePassword(
+      changePassword.mutateAsync({
+        old_password: oldPassword,
+        new_password: newPassword,
+      }),
       {
+        action: "Changing your password",
         onSuccess: () => {
           setPasswordSuccess(true);
-          // Server revoked all sessions — force local logout after brief delay.
-          // The timer outlives this page, and is not cleared when it is left:
-          // the session is revoked either way. But it is for the session that
-          // changed the password: if that has ended by then — signed out, or
-          // someone else signed in — clearAuth() would end theirs, or turn the
-          // user's own Sign out into an expiry (the login page then carries the
-          // page they left to whoever signs in next).
-          const ended = sessionScope();
-          setTimeout(() => {
-            if (!ended()) clearAuth();
-          }, 2000);
+          signOut();
         },
-        onError: (err) => {
+        // The dialog was closed while it was out: the sessions are revoked all
+        // the same.
+        onLateSuccess: signOut,
+        onError: (err: unknown) => {
           setPasswordError(
             err instanceof ApiClientError
               ? err.message
