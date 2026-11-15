@@ -4,6 +4,7 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { makeCluster, makeNode } from "@/test/cluster.fixtures";
 import { useAuthStore } from "@/stores/auth-store";
+import { ApiClientError } from "@/lib/api-client";
 import { ClusterDetailPage } from "./ClusterDetailPage";
 
 vi.mock("react-router-dom", async () => {
@@ -72,6 +73,11 @@ vi.mock("@/features/storage/components/AddStorageDialog", () => ({
   ),
 }));
 
+const mockUseCephStatus = vi.fn();
+vi.mock("@/features/ceph/api/ceph-queries", () => ({
+  useCephStatus: (...args: unknown[]) => mockUseCephStatus(...args) as unknown,
+}));
+
 const mockUseInventoryData = vi.fn();
 
 vi.mock("@/features/inventory/api/inventory-queries", () => ({
@@ -89,6 +95,7 @@ const inventory = (over: object = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mockUseInventoryData.mockReturnValue(inventory());
+  mockUseCephStatus.mockReturnValue({ data: undefined, error: null });
   useAuthStore.setState({ user: null, permissions: [] });
 });
 
@@ -185,6 +192,38 @@ describe("ClusterDetailPage", () => {
       router: { initialEntries: ["/clusters/test-cluster-id?tab=nodes"] },
     });
 
+    expect(
+      screen.getByRole("tab", { name: "Overview", selected: true }),
+    ).toBeInTheDocument();
+  });
+
+  // The tab cannot set Ceph up; it goes only when the cluster says it has none.
+  it("drops the Ceph tab, and a link to it, when the cluster reports no Ceph", () => {
+    useAuthStore.setState({ user: null, permissions: ["view:ceph"] });
+    mockUseCluster.mockReturnValue({
+      data: makeCluster({ id: "test-cluster-id" }),
+      isLoading: false,
+      error: null,
+    });
+    mockUseClusterNodes.mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    });
+    mockUseCephStatus.mockReturnValue({
+      data: undefined,
+      error: new ApiClientError(502, {
+        error: "proxmox_error",
+        message: "binary not installed: /usr/bin/ceph-mon",
+      }),
+    });
+
+    renderWithProviders(<ClusterDetailPage />, {
+      router: { initialEntries: ["/clusters/test-cluster-id?tab=ceph"] },
+    });
+
+    expect(mockUseCephStatus).toHaveBeenCalledWith("test-cluster-id");
+    expect(screen.queryByRole("tab", { name: "Ceph" })).not.toBeInTheDocument();
     expect(
       screen.getByRole("tab", { name: "Overview", selected: true }),
     ).toBeInTheDocument();

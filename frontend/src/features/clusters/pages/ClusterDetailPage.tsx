@@ -33,6 +33,8 @@ import { Button } from "@/components/ui/button";
 import { openConsole } from "@/features/console/lib/open-console";
 import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useCephStatus } from "@/features/ceph/api/ceph-queries";
+import { reportsNoCeph } from "../lib/ceph-absent";
 import {
   useCluster,
   useClusterNodes,
@@ -181,7 +183,14 @@ export function ClusterDetailPage() {
     };
   }, [clusterVmRows]);
 
-  const { canConsole, hasPermission } = usePermissions();
+  const { canConsole, hasPermission, canView } = usePermissions();
+  // The Ceph tab cannot set Ceph up, so it goes when the cluster says it has
+  // none. Loading, a failed read and a refusal keep it. The tab's own read,
+  // shared through the cache; not sent at all to whoever may not view Ceph.
+  const cephStatus = useCephStatus(canView("ceph") ? (clusterId ?? "") : "");
+  const noCeph =
+    cephStatus.data === undefined && reportsNoCeph(cephStatus.error);
+  const shownTab = topTab === "ceph" && noCeph ? "overview" : topTab;
   // History is read from the audit log, and its rows open Proxmox task logs:
   // without both grants the tab would be a table of refusals.
   const canHistory =
@@ -370,7 +379,7 @@ export function ClusterDetailPage() {
           {/* The strip holds what is looked at; what is set up once is under
               Configure. */}
           <Tabs
-            value={topTab}
+            value={shownTab}
             onValueChange={(v) => {
               setTab(v === "configure" ? lastSection : v);
             }}
@@ -382,7 +391,7 @@ export function ClusterDetailPage() {
               </TabsTrigger>
               <TabsTrigger value="storage">Storage</TabsTrigger>
               <TabsTrigger value="backup">Backup</TabsTrigger>
-              <TabsTrigger value="ceph">Ceph</TabsTrigger>
+              {!noCeph && <TabsTrigger value="ceph">Ceph</TabsTrigger>}
               <TabsTrigger value="configure">Configure</TabsTrigger>
               {canHistory && <TabsTrigger value="history">History</TabsTrigger>}
             </TabsList>
