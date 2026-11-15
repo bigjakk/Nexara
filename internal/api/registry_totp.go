@@ -206,6 +206,8 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 		Permissions: Permissions{SelfService: "reports the caller's own enrollment"},
 		Parameters:  apischema.Properties{},
 		Handler:     h.Status,
+
+		InteractiveOnly: "reports whether the account has a second factor and how many recovery codes are left: a leaked key must not learn how strong the owner's login is",
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,

@@ -41,10 +41,8 @@ import (
 // Handler as routeHandlerKey names it, so the set is held by WHAT SERVES a route as well as by
 // method and path (TestGuard_NoRouteServesACredentialHandlerWithoutTheFlag).
 //
-// NOT in it, deliberately: routes that accept an API key today, whose joining is the
-// operator's decision (GET /auth/sessions, PUT /auth/profile, POST /auth/ws-token, GET
-// /auth/me, GET /auth/totp/status, POST /auth/console-token), and DELETE /api-keys[/:id],
-// which REVOKE keys (what revoking is for) and change no credential or factor.
+// NOT in it, deliberately: DELETE /api-keys[/:id], which REVOKE keys (what revoking is
+// for) and change no credential or factor.
 var interactiveOnlyRoutes = []struct {
 	method, path string // as declared
 	handler      string // routeHandlerKey of the declared Handler
@@ -96,6 +94,35 @@ var interactiveOnlyRoutes = []struct {
 		method: fiber.MethodPost, path: "/api/v1/api-keys", handler: "APIKeyHandler.Create", target: "/api/v1/api-keys",
 		body: `{"name":"ci"}`,
 		why:  "mint more keys, so that a leaked key outlives its own revocation",
+	},
+	// The account's own sessions, profile, factor state, hub and consoles (operator's
+	// decision): what the owner is and where they sign in, not what a key may do.
+	{
+		method: fiber.MethodGet, path: "/api/v1/auth/sessions", handler: "AuthHandler.ListSessions", target: "/api/v1/auth/sessions",
+		why: "watch where the owner signs in and collect the session ids that end them",
+	},
+	{
+		method: fiber.MethodPut, path: "/api/v1/auth/profile", handler: "AuthHandler.UpdateProfile", target: "/api/v1/auth/profile",
+		body: `{"display_name":"Alice"}`,
+		why:  "change the name the account shows to everyone else",
+	},
+	{
+		method: fiber.MethodPost, path: "/api/v1/auth/ws-token", handler: "AuthHandler.WSToken", target: "/api/v1/auth/ws-token",
+		body: `{}`,
+		why:  "hold the live event stream open",
+	},
+	{
+		method: fiber.MethodGet, path: "/api/v1/auth/me", handler: "AuthHandler.GetMe", target: "/api/v1/auth/me",
+		why: "read the account's identity, auth source and second-factor state",
+	},
+	{
+		method: fiber.MethodGet, path: "/api/v1/auth/totp/status", handler: "TOTPHandler.Status", target: "/api/v1/auth/totp/status",
+		why: "learn whether the owner has a second factor and how many recovery codes are left",
+	},
+	{
+		method: fiber.MethodPost, path: "/api/v1/auth/console-token", handler: "AuthHandler.ConsoleToken", target: "/api/v1/auth/console-token",
+		body: `{"cluster_id":"3f2504e0-4f89-11d3-9a0c-0305e82c3301","node":"pve-01","type":"node_shell"}`,
+		why:  "type into a node's shell or a guest's console",
 	},
 }
 
@@ -314,9 +341,10 @@ func TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes(t *testing.T) 
 	for _, r := range interactiveOnlyRoutes {
 		want[r.method+" "+r.path] = r.why
 	}
-	if len(want) != 8 {
-		t.Fatalf("interactiveOnlyRoutes lists %d routes, want the 8 this guard was written for: change-password, the four TOTP "+
-			"credential routes, logout-all, the revoking of one session and the creation of an API key", len(want))
+	if len(want) != 14 {
+		t.Fatalf("interactiveOnlyRoutes lists %d routes, want the 14 this guard was written for: change-password, the four TOTP "+
+			"credential routes, logout-all, the revoking of one session, the creation of an API key, and the account's own "+
+			"sessions list, profile, hub token, identity, 2FA status and console token", len(want))
 	}
 
 	for key, why := range want {

@@ -918,7 +918,7 @@ func sessionLimiterSubject(c fiber.Ctx) string {
 // sessionRevokeRateLimit (30) a minute per session (sessionLimiterSubject).
 //
 // Ending one session is sign-out everywhere one device at a time. A caller that can
-// list the account's sessions (GET /auth/sessions, which an API key may call too)
+// list the account's sessions (GET /auth/sessions, an interactive session's route)
 // and end each new one in a loop keeps the owner signed out as surely as a loop of
 // logout-all — keeping its own session meanwhile — and with no limiter of its own it
 // would never meet logoutAllLimiter's cap: the first probe sent two hundred of

@@ -229,6 +229,8 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Permissions: Permissions{SelfService: "lists the caller's own sessions; the query is keyed by the authenticated user id"},
 		Parameters:  apischema.Properties{},
 		Handler:     h.ListSessions,
+
+		InteractiveOnly: "lists every sign-in of the account with its device and address, and the ids that end them: a leaked key must not be able to watch where the owner signs in",
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodDelete,
@@ -260,13 +262,14 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Path:   authScope + "/ws-token",
 		Description: "Mint a 60-second token whose only valid use is upgrading the /ws hub. It exists so " +
 			"the long-lived access token never travels in a WebSocket URL; per-cluster authorization is " +
-			"applied at subscribe time, not here. A session that has ended gets 403, not 401: a browser mints " +
-			"this token in the background, and a 401 would make it refresh, fail and sign out. An access token " +
-			"that names no session gets 401, which a refresh answers.",
+			"applied at subscribe time, not here. Only an interactive session may mint one, and a session " +
+			"that has ended gets 401, as on every other route.",
 		Group:       "Authentication",
 		Permissions: Permissions{SelfService: "mints a hub token for the caller; per-cluster authorization is enforced at subscribe time in internal/ws"},
 		Parameters:  apischema.Properties{},
 		Handler:     h.WSToken,
+
+		InteractiveOnly: "opens the live event stream of everything the account may see: a leaked key must not be able to hold a socket that follows the estate",
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
@@ -276,6 +279,8 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Permissions: Permissions{SelfService: "returns the caller's own profile"},
 		Parameters:  apischema.Properties{},
 		Handler:     h.GetMe,
+
+		InteractiveOnly: "describes the account itself — its identity, auth source and second factor: what the owner is, which a leaked key must not be able to read",
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPut,
@@ -295,6 +300,8 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 			},
 		},
 		Handler: h.UpdateProfile,
+
+		InteractiveOnly: "changes the name the account shows to every other user: a leaked key must not be able to change who the owner appears to be",
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
@@ -375,8 +382,8 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Description: "Mint a 60-second token locked to one console: a single cluster, node, guest and " +
 			"console type. Requires console:node, console:vm or console:container on THAT cluster " +
 			"depending on the type requested — deliberately not view:*, which every built-in Viewer holds. " +
-			"The console stays open only while the caller's session (or API key) does: a session that has " +
-			"ended gets 401, and an open console is closed with code 3000 once it ends.",
+			"Only an interactive session may mint one, and the console stays open only while that session " +
+			"does: a session that has ended gets 401, and an open console is closed with code 3000 once it ends.",
 		Group:       "Authentication",
 		Permissions: Permissions{Deferred: consoleTokenReason},
 		NodesCheckedByHandler: map[string]string{
@@ -384,6 +391,8 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		},
 		Parameters: consoleTokenParams(),
 		Handler:    h.ConsoleToken,
+
+		InteractiveOnly: "opens an interactive shell or screen on a node or guest: a leaked key must not be able to type into the estate's consoles",
 	})
 }
 

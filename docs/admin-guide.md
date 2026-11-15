@@ -223,7 +223,7 @@ A console needs `console:vm`, `console:container` or `console:node`, which the b
 - **The floating window** holds a tab per console, with **New Console**, minimize, maximize and **Open in new tab**. **Close** hides it and disconnects; the tabs remain.
 - **In its own browser tab.** Set **Open consoles in** to **New browser tab** under [Appearance](#appearance), or Ctrl/⌘-click any console button. The tab has **Reconnect** and **Fullscreen**, and a link to a console that Nexara did not open itself asks **Open this console?** first.
 - **The VNC toolbar** has **Power**; **Media** on a VM (**Mount ISO...** and **Eject CD-ROM**, `execute:vm`, which creates `ide2` if the VM has no CD-ROM); **Keys** (Ctrl+Alt+Del, Ctrl+Alt+F1–F12, Alt+Tab, Alt+F4, Print Screen, SysRq); paste, typed on a US layout, which reports any character it cannot type; a PNG screenshot; and **Scale** and **Resize**.
-- **A console ends with its sign-in.** Within about 5 seconds of the session or API key that opened it ending, the server closes the console and it reads **Session ended**.
+- **A console ends with its sign-in.** Within about 5 seconds of the session that opened it ending, the server closes the console and it reads **Session ended**.
 
 A VM's button opens VNC, and a container's **Attach** is its VNC terminal. The `vm_serial` and `ct_attach` console types still exist, but both relay Proxmox's VNC stream rather than a text terminal, and no button opens them. **Shell** is the only text terminal.
 

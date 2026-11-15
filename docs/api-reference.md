@@ -349,8 +349,9 @@ too: a revoked or expired key, or one whose owner is deactivated, is refused wit
 ### Interactive-Only Routes
 
 An API key (`Authorization: Bearer nxra_…`) carries its owner's permissions, but
-a route that changes the owner's own credentials or authentication factors, or
-ends their sessions, is **interactive-only**: only a request authenticated by an
+a route that changes the owner's own credentials or authentication factors, ends
+their sessions, describes the account itself, or opens a live stream or a console,
+is **interactive-only**: only a request authenticated by an
 interactive login session is admitted, and any other — an API key today — is
 refused with `403`, the first thing checked after authentication, ahead of the
 route's rate limit, its permission and its parameters, so the caller has to use
@@ -358,7 +359,9 @@ an interactive login session instead. The routes are
 `POST /auth/change-password`, `POST /auth/totp/setup`,
 `POST /auth/totp/setup/verify`, `DELETE /auth/totp`,
 `POST /auth/totp/recovery-codes/regenerate`, `POST /auth/logout-all`,
-`DELETE /auth/sessions/:id` and `POST /api-keys`. `GET /api/v1/api-docs` gives
+`DELETE /auth/sessions/:id`, `POST /api-keys`, `GET /auth/sessions`,
+`PUT /auth/profile`, `GET /auth/me`, `GET /auth/totp/status`,
+`POST /auth/ws-token` and `POST /auth/console-token`. `GET /api/v1/api-docs` gives
 each of them an `interactive_only` field holding the reason; it is absent for
 every other route.
 
@@ -751,16 +754,16 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 |--------|------|-------------|
 | POST | `/auth/register` | Register a new user (the first user becomes admin and is signed in; later registrations need an admin caller and sign nobody in) |
 | POST | `/auth/login` | Login with email and password (`429` with `Retry-After` while the email address is locked after repeated failed sign-ins) |
-| GET | `/auth/sessions` | List the caller's own active sessions (`{items,total}`): device, user agent, address and times, never the token hash. `is_current` marks the one whose refresh cookie the request carries, so a caller with no cookie sees none marked |
+| GET | `/auth/sessions` | List the caller's own active sessions (`{items,total}`): device, user agent, address and times, never the token hash. `is_current` marks the one whose refresh cookie the request carries, so a caller with no cookie sees none marked (interactive session only: `403` for an API key) |
 | DELETE | `/auth/sessions/:id` | End one of the caller's own sessions (interactive session only: `403` for an API key). Another user's id, an unknown one or one already ended answers `404`; ending the current one clears the refresh cookie. 30 calls a minute per session |
 | POST | `/auth/refresh` | Refresh access token |
 | POST | `/auth/logout` | Logout: end the session the refresh token names; `403`, with the cookie left alone, for a session that belongs to another user than the access token presented |
 | POST | `/auth/logout-all` | Logout all sessions; the refresh cookie is deleted only when it is the caller's own or names no live session |
-| GET | `/auth/me` | Get current user profile |
-| PUT | `/auth/profile` | Update user profile |
+| GET | `/auth/me` | Get current user profile (interactive session only: `403` for an API key) |
+| PUT | `/auth/profile` | Update user profile (interactive session only: `403` for an API key) |
 | POST | `/auth/change-password` | Change password (interactive session only — `403` for an API key, and for a wrong current password; `401` for a deactivated account; `429` with `Retry-After` while locked out after repeated wrong current passwords) |
-| POST | `/auth/ws-token` | Mint a 60 s scope-locked JWT for the `/ws` hub upgrade; `403` for a session that has ended |
-| POST | `/auth/console-token` | Mint a 60 s scope-locked JWT bound to a single console (`/ws/console`, `/ws/vnc`) |
+| POST | `/auth/ws-token` | Mint a 60 s scope-locked JWT for the `/ws` hub upgrade (interactive session only: `403` for an API key) |
+| POST | `/auth/console-token` | Mint a 60 s scope-locked JWT bound to a single console (`/ws/console`, `/ws/vnc`) (interactive session only: `403` for an API key) |
 | GET | `/auth/setup-status` | Check if initial registration is needed |
 | GET | `/auth/sso-status` | Check if OIDC/SSO is configured |
 | GET | `/auth/oidc/authorize` | Start OIDC authorization flow |
@@ -770,7 +773,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | POST | `/auth/totp/setup` | Begin TOTP enrollment. Send `current_password` (`400` without one, `403` when wrong, `429` while locked out with change-password, which shares the limit); an LDAP or SSO account sends none and must have signed in within the last 10 minutes (`403` otherwise) |
 | POST | `/auth/totp/setup/verify` | Confirm TOTP enrollment |
 | DELETE | `/auth/totp` | Disable TOTP (`429` with `Retry-After` while this session's codes are locked — five wrong ones in 10 minutes, counted apart from sign-in's second step; `503` when the attempt cannot be counted, and nothing changes) |
-| GET | `/auth/totp/status` | Get TOTP enrollment status |
+| GET | `/auth/totp/status` | Get TOTP enrollment status (interactive session only: `403` for an API key) |
 | POST | `/auth/totp/recovery-codes/regenerate` | Regenerate recovery codes (`429` and `503` as for `DELETE /auth/totp`) |
 
 ### Clusters
@@ -2404,13 +2407,10 @@ two VNC types (background thumbnail previews) and still enforces RBAC, is writte
 at most once per user and guest every 10 minutes, with `"silent": true` in its
 details.
 
-Either token is minted only for a sign-in that is still live: an API key (which
-authenticating the request has just checked), or a session that has not ended. An
-access token whose session has ended gets `401` ("Session has ended") from the
-console-token mint and `403` from the hub-token mint, which a browser asks for in
-the background, where a `401` would make it refresh and sign out; an access token
-that names no session gets `401` from both. `503` means the session could not be
-checked.
+Either token is minted only for an interactive session that is still live: an API
+key gets `403` (see Interactive-Only Routes), and an access token whose session has
+ended, or that names no session, gets `401` ("Session has ended") from both, as on
+every route. `503` means the session could not be checked.
 
 The token rides in the WebSocket subprotocol so it never appears in URLs,
 proxy logs, or `Referer` headers:
@@ -2490,12 +2490,11 @@ scope tuple doesn't match the one it was minted for.
 After the upgrade the first frame is the text message `{"type":"connected"}`, and on `/ws/vnc` it carries the `password` that RFB authentication needs. On `/ws/console` output is binary, and a node shell's resize is the text message `{"type":"resize","cols":N,"rows":N}`.
 
 A console is held to the sign-in it was opened under: the session whose
-access token minted the console token, or the API key. The console is refused,
-and closed while open (checked every 5 seconds), once that session is signed
-out, revoked or expired, every session of the account is revoked, the account is
-deactivated, or the API key is revoked or expires. An API key outlives a sign-out
-of all devices and a password change, as it does elsewhere, and so does a console
-it opened.
+access token minted the console token. The console is refused, and closed while
+open (checked every 5 seconds), once that session is signed out, revoked or
+expired, every session of the account is revoked, or the account is deactivated.
+An API key cannot open a console, so no console outlives a sign-out of all devices
+or a password change.
 
 - Minting answers `401` ("Session has ended") for a session that has ended, and
   for an access token that names no session (issued before this release: a
