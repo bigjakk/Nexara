@@ -643,10 +643,13 @@ func (h *VMHandler) GetTaskStatus(c fiber.Ctx, p *apischema.Params) error {
 
 	// For a running task, how far it is, as the end of its log says (see
 	// taskLogProgress).
+	logKey := clusterID.String() + " " + upid
 	if status.Status == "running" {
-		if lines, logErr := taskLogTail(c.Context(), pxClient, nodeName, upid); logErr == nil {
+		if lines, logErr := taskLogTail(c.Context(), pxClient, logKey, nodeName, upid); logErr == nil {
 			resp.Progress = taskLogProgress(status.Type, lines)
 		}
+	} else {
+		taskLogEnds.forget(logKey)
 	}
 
 	return c.JSON(resp)

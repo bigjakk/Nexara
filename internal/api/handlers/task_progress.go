@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
@@ -16,31 +18,122 @@ const taskLogTailPages = 20
 // errTaskLogTooLong is taskLogTail giving up before a log's end.
 var errTaskLogTooLong = errors.New("task log longer than the pages read for progress")
 
+// taskLogTailKeep is how many of the lines a poll read the next poll reads
+// again, ahead of the new ones: the newest progress line is among them unless
+// a task printed none for that long. Half a page, so a poll is one request.
+const taskLogTailKeep = proxmox.TaskLogPageLines / 2
+
 // taskLogTail is the end of a task's log: its last page and the one before,
 // which between them hold the newest progress line. Proxmox serves a log a page
 // at a time and says nothing of its length, so a long one is read to its end,
 // as the collector reads a backup job's (backupJobLog.readFrom): a backup over
 // many guests runs past one page, and its first page's last percentage would
 // stand for the rest of the job.
-func taskLogTail(ctx context.Context, client *proxmox.Client, node, upid string) ([]string, error) {
+//
+// A status poll comes every few seconds per open view, so where the log ended
+// is remembered under key (taskLogEnds) and the next poll reads from just
+// before it, one request, instead of the whole log again. A log shorter than
+// remembered is read again from its start.
+func taskLogTail(ctx context.Context, client *proxmox.Client, key, node, upid string) ([]string, error) {
+	if known, ok := taskLogEnds.get(key); ok {
+		lines, end, err := readTaskLogTail(ctx, client, node, upid, max(0, known-taskLogTailKeep))
+		if err != nil {
+			taskLogEnds.forget(key)
+			return nil, err
+		}
+		if end >= known {
+			taskLogEnds.put(key, end)
+			return lines, nil
+		}
+	}
+	lines, end, err := readTaskLogTail(ctx, client, node, upid, 0)
+	if err != nil {
+		taskLogEnds.forget(key)
+		return nil, err
+	}
+	taskLogEnds.put(key, end)
+	return lines, nil
+}
+
+// readTaskLogTail reads a task's log from line start to its end and returns
+// the last page and the one before it, and the line count the log ends at.
+func readTaskLogTail(ctx context.Context, client *proxmox.Client, node, upid string, start int) (lines []string, end int, err error) {
 	var previous, page []proxmox.TaskLogEntry
-	start := 0
 	for range taskLogTailPages {
 		entries, err := client.GetTaskLog(ctx, node, upid, start)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		previous, page = page, entries
+		start += len(entries)
 		if len(entries) < proxmox.TaskLogPageLines {
-			lines := make([]string, 0, len(previous)+len(page))
+			lines = make([]string, 0, len(previous)+len(page))
 			for _, entry := range append(previous, page...) {
 				lines = append(lines, entry.T)
 			}
-			return lines, nil
+			return lines, start, nil
 		}
-		start += len(entries)
 	}
-	return nil, errTaskLogTooLong
+	return nil, 0, errTaskLogTooLong
+}
+
+// taskLogEnds is where each polled task's log ended at its last poll. Bounded
+// in size and age: a poll that stops coming (a closed tab) leaves an entry that
+// expires, and a full map drops its oldest entry first.
+var taskLogEnds = newTaskLogEndCache(1024, 10*time.Minute, time.Now)
+
+type taskLogEnd struct {
+	end  int
+	seen time.Time
+}
+
+type taskLogEndCache struct {
+	mu      sync.Mutex
+	entries map[string]taskLogEnd
+	size    int
+	maxAge  time.Duration
+	now     func() time.Time
+}
+
+func newTaskLogEndCache(size int, maxAge time.Duration, now func() time.Time) *taskLogEndCache {
+	return &taskLogEndCache{entries: map[string]taskLogEnd{}, size: size, maxAge: maxAge, now: now}
+}
+
+func (c *taskLogEndCache) get(key string) (int, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[key]
+	if !ok || c.now().Sub(e.seen) > c.maxAge {
+		delete(c.entries, key)
+		return 0, false
+	}
+	return e.end, true
+}
+
+func (c *taskLogEndCache) put(key string, end int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	if _, ok := c.entries[key]; !ok && len(c.entries) >= c.size {
+		oldest := ""
+		for k, e := range c.entries {
+			if now.Sub(e.seen) > c.maxAge {
+				delete(c.entries, k)
+			} else if oldest == "" || e.seen.Before(c.entries[oldest].seen) {
+				oldest = k
+			}
+		}
+		if len(c.entries) >= c.size {
+			delete(c.entries, oldest)
+		}
+	}
+	c.entries[key] = taskLogEnd{end: end, seen: now}
+}
+
+func (c *taskLogEndCache) forget(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
 }
 
 // taskLogProgress is how far a running task is, read from its log lines, or
