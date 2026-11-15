@@ -2606,7 +2606,7 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx, p *apischema.Params) error {
 		return passwordNotChanged("update the password", userID, err)
 	}
 	if rows == 0 {
-		return passwordChangedMeanwhile(userID)
+		return passwordNotUpdated(ctx, qx, userID)
 	}
 
 	// Revoke all sessions to force re-authentication on all devices, in the same
@@ -2684,6 +2684,21 @@ func passwordChangedMeanwhile(userID uuid.UUID) error {
 	slog.Warn("change password: the password changed, or the account was removed, between the check of the old password and the update; nothing was changed",
 		"user_id", userID)
 	return fiber.NewError(fiber.StatusConflict, passwordChangedMeanwhileMessage)
+}
+
+// passwordNotUpdated answers an update that matched no row. UpdatePassword also
+// refuses an account deactivated since the check, and that one is answered as
+// admitPasswordAttempt answers it, 401 "Account is disabled", rather than as a race
+// the user could retry. The account is read again in the same transaction to tell
+// the two apart; a read that fails is answered as the race: nothing changed either
+// way.
+func passwordNotUpdated(ctx context.Context, qx *db.Queries, userID uuid.UUID) error {
+	if u, err := qx.GetUserByID(ctx, userID); err == nil && !u.IsActive {
+		slog.Warn("change password: the account was deactivated between the check of the old password and the update; nothing was changed",
+			"user_id", userID)
+		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
+	}
+	return passwordChangedMeanwhile(userID)
 }
 
 // changeOutcome is what settleCommit found: the answers a question that can fail

@@ -29,12 +29,14 @@ RETURNING *;
 -- same old password cannot both succeed (the later one matches nothing once the
 -- earlier has committed: under READ COMMITTED it waits for the row lock, then
 -- re-evaluates the WHERE against the new row), and an account deleted since the
--- check matches nothing either. The caller treats 0 rows as "nothing was
--- changed" and rolls back.
+-- check matches nothing either, and so does an account deactivated since the
+-- check: a password set on it would outlive the deactivation. The caller treats
+-- 0 rows as "nothing was changed" and rolls back.
 UPDATE users
 SET password_hash = sqlc.arg(password_hash)
 WHERE id = sqlc.arg(id)
-  AND password_hash = sqlc.arg(expected_hash);
+  AND password_hash = sqlc.arg(expected_hash)
+  AND is_active;
 
 -- name: GetPasswordHashForSettle :one
 -- Reads the stored password hash the way a caller must when it wants to know

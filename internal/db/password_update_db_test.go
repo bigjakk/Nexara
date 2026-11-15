@@ -70,7 +70,7 @@ func storedPasswordHash(t *testing.T, env *migrationTestEnv) string {
 
 func resetPasswordHash(t *testing.T, env *migrationTestEnv) {
 	t.Helper()
-	if _, err := env.Pool.Exec(env.Ctx, `UPDATE users SET password_hash = $2 WHERE id = $1`, passwordCASUser, passwordCASOld); err != nil {
+	if _, err := env.Pool.Exec(env.Ctx, `UPDATE users SET password_hash = $2, is_active = true WHERE id = $1`, passwordCASUser, passwordCASOld); err != nil {
 		t.Fatalf("reset the stored hash: %v", err)
 	}
 }
@@ -90,17 +90,24 @@ func TestUpdatePassword_IsACompareAndSwapAgainstPostgres(t *testing.T) {
 		name     string
 		user     uuid.UUID
 		expected string
+		inactive bool // the account is deactivated
 		wantRows int64
 		wantHash string // what the account holds afterwards
 	}{
-		{"the expected hash is the stored one", passwordCASUser, passwordCASOld, 1, passwordCASNew},
-		{"the expected hash is not the stored one", passwordCASUser, "hash-of-some-other-password", 0, passwordCASOld},
-		{"the expected hash is empty", passwordCASUser, "", 0, passwordCASOld},
-		{"the user does not exist", uuid.New(), passwordCASOld, 0, passwordCASOld},
+		{"the expected hash is the stored one", passwordCASUser, passwordCASOld, false, 1, passwordCASNew},
+		{"the expected hash is not the stored one", passwordCASUser, "hash-of-some-other-password", false, 0, passwordCASOld},
+		{"the expected hash is empty", passwordCASUser, "", false, 0, passwordCASOld},
+		{"the user does not exist", uuid.New(), passwordCASOld, false, 0, passwordCASOld},
+		{"the account is deactivated", passwordCASUser, passwordCASOld, true, 0, passwordCASOld},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resetPasswordHash(t, env)
+			if tt.inactive {
+				if _, err := env.Pool.Exec(env.Ctx, `UPDATE users SET is_active = false WHERE id = $1`, passwordCASUser); err != nil {
+					t.Fatalf("deactivate the account: %v", err)
+				}
+			}
 
 			rows, err := q.UpdatePassword(env.Ctx, gen.UpdatePasswordParams{
 				ID: tt.user, PasswordHash: passwordCASNew, ExpectedHash: tt.expected,

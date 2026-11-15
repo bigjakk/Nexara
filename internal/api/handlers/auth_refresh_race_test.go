@@ -140,10 +140,10 @@ func (s *raceStore) doExec(name string, args []any, remember func(func())) (pgco
 			return pgconn.CommandTag{}, s.updatePwErr
 		}
 		// sqlc's argument order: the new hash, the user's id, then the hash the update is
-		// conditional on. An account that is gone, or whose password is no longer the one the
-		// caller verified, matches no row.
+		// conditional on. An account that is gone, deactivated, or whose password is no longer
+		// the one the caller verified, matches no row.
 		newHash, id, expected := args[0].(string), args[1].(uuid.UUID), args[2].(string)
-		if s.userDeleted || id != s.user.ID || expected != s.user.PasswordHash {
+		if s.userDeleted || id != s.user.ID || expected != s.user.PasswordHash || !s.user.IsActive {
 			return pgconn.NewCommandTag("UPDATE 0"), nil
 		}
 		was := s.user.PasswordHash

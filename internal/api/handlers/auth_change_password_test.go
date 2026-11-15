@@ -725,7 +725,8 @@ func TestChangePassword_ACommitThatNeverWentOutRolledBack(t *testing.T) {
 // matches no row and the request rolls back before revoking anything and answers 409:
 // nothing was changed, the other change stands (and the sessions it created are not
 // revoked), and a deleted account is not told "Password changed successfully" for a change
-// that went nowhere. Every row also pins what the update is sent: the new hash, the user's
+// that went nowhere; a deactivated account is answered 401, as the check before it would
+// have been. Every row also pins what the update is sent: the new hash, the user's
 // id, and the hash that was verified.
 func TestChangePassword_TheUpdateIsConditionalOnTheVerifiedPassword(t *testing.T) {
 	logs := captureProductionLog(t)
@@ -737,21 +738,28 @@ func TestChangePassword_TheUpdateIsConditionalOnTheVerifiedPassword(t *testing.T
 		// between runs as the update is about to execute, with the store locked: what happened
 		// to the account since this request checked the old password.
 		between func(*raceStore)
-		// want409 says whether the update must match nothing; wantStored is then the hash the
-		// account must still hold.
-		want409    bool
+		// refused is the status of an update that must match nothing, and refusal what its
+		// message must say; wantStored is then the hash the account must still hold.
+		refused    int
+		refusal    string
 		wantStored string
 	}{
 		{name: "nothing intervenes: the update is made, to the password that was verified"},
 		{
 			name:    "another request changed the password after this one checked the old one",
 			between: func(s *raceStore) { s.user.PasswordHash = otherHash },
-			want409: true, wantStored: otherHash,
+			refused: http.StatusConflict, refusal: "nothing was changed", wantStored: otherHash,
 		},
 		{
 			name:    "the account was deleted after the old password was checked",
 			between: func(s *raceStore) { s.userDeleted = true },
-			want409: true, wantStored: verified,
+			refused: http.StatusConflict, refusal: "nothing was changed", wantStored: verified,
+		},
+		{
+			// answered as the deactivated account it is, not as a race to retry
+			name:    "the account was deactivated after the old password was checked",
+			between: func(s *raceStore) { s.user.IsActive = false },
+			refused: http.StatusUnauthorized, refusal: "Account is disabled", wantStored: verified,
 		},
 	}
 
@@ -785,7 +793,7 @@ func TestChangePassword_TheUpdateIsConditionalOnTheVerifiedPassword(t *testing.T
 					args[0] != verified, args[1], args[2] == verified)
 			}
 
-			if !tt.want409 {
+			if tt.refused == 0 {
 				if resp.StatusCode != http.StatusOK {
 					t.Fatalf("status = %d, want 200 (body %v)", resp.StatusCode, body)
 				}
@@ -798,11 +806,11 @@ func TestChangePassword_TheUpdateIsConditionalOnTheVerifiedPassword(t *testing.T
 				return
 			}
 
-			if resp.StatusCode != http.StatusConflict {
-				t.Fatalf("status = %d, want 409 (body %v)", resp.StatusCode, body)
+			if resp.StatusCode != tt.refused {
+				t.Fatalf("status = %d, want %d (body %v)", resp.StatusCode, tt.refused, body)
 			}
-			if msg, _ := body["message"].(string); !strings.Contains(msg, "nothing was changed") {
-				t.Errorf("message = %q, want it to say nothing was changed", msg)
+			if msg, _ := body["message"].(string); !strings.Contains(msg, tt.refusal) {
+				t.Errorf("message = %q, want it to say %q", msg, tt.refusal)
 			}
 			if got := a.store.snapshotUser().PasswordHash; got != tt.wantStored {
 				t.Errorf("the account holds %q, want %q: the update must not overwrite what it was not conditional on", got, tt.wantStored)

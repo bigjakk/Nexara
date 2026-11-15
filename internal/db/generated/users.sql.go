@@ -220,6 +220,7 @@ UPDATE users
 SET password_hash = $1
 WHERE id = $2
   AND password_hash = $3
+  AND is_active
 `
 
 type UpdatePasswordParams struct {
@@ -234,8 +235,9 @@ type UpdatePasswordParams struct {
 // same old password cannot both succeed (the later one matches nothing once the
 // earlier has committed: under READ COMMITTED it waits for the row lock, then
 // re-evaluates the WHERE against the new row), and an account deleted since the
-// check matches nothing either. The caller treats 0 rows as "nothing was
-// changed" and rolls back.
+// check matches nothing either, and so does an account deactivated since the
+// check: a password set on it would outlive the deactivation. The caller treats
+// 0 rows as "nothing was changed" and rolls back.
 func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updatePassword, arg.PasswordHash, arg.ID, arg.ExpectedHash)
 	if err != nil {
