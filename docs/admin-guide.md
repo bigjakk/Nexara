@@ -1655,7 +1655,7 @@ A saved rule can be turned off or on from its row, or deleted, which also delete
 | **PagerDuty** | Integration/Routing Key. Its severity mapping can be set only through the API |
 
 4. Click **Create**
-5. Click **Test** on the channel's row to send a test notification. A failed test says why beside the channel, and the server log has the same reason. Any password, token, webhook URL or header value the channel holds is cut out of it
+5. Click **Test** on the channel's row to send a test notification. A failed test says what kind of failure it was beside the channel — could not connect, timed out, TLS failed (certificate not trusted, or not valid for this host), HTTP status or SMTP code — and nothing the target said. The server log has the detail, with any password, token, webhook URL or header value the channel holds cut out
 
 A channel whose Slack, Discord, Teams or Generic Webhook URL, or SMTP host with **Use STARTTLS** on, resolves to a private network address (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, IPv6 `fc00::/7`) asks you to confirm it when you create it: **Continue with private address** stores the confirmation on that channel, and the audit log records it. Every send checks the address again, against what the name resolves to then, so a public name that later resolves to a private address is refused on a channel that was not confirmed. A loopback, link-local (the cloud metadata address `169.254.169.254` among them) or unspecified address is refused for every channel, confirmed or not, and redirects are never followed. With **Use STARTTLS** off, an SMTP host must resolve to loopback, as before. Report email sent through a confirmed email channel and rolling update notifications follow the channel's confirmation too.
 
@@ -1703,7 +1703,7 @@ An alert rule's notification that cannot be delivered is not lost. Each dispatch
 
 This covers alert rules and CVE notices. A step whose channel has been disabled or deleted is logged and leaves no entry, and rolling update and report notifications are sent once: a failure there is in the server log and nowhere else.
 
-The **Dead-letter queue** tab appears on the Alerts page for anyone holding `view:notification_dlq`, with a badge counting open entries. Each row carries the channel, the alert it belonged to, the failure reason, and a state:
+The **Dead-letter queue** tab appears on the Alerts page for anyone holding `view:notification_dlq`, with a badge counting open entries. Each row carries the channel, the alert it belonged to, the failure reason (its kind, as a failed **Test** gives it; the server log has the detail), and a state:
 
 | State | Meaning |
 |-------|---------|

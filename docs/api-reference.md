@@ -1970,7 +1970,7 @@ after the node is back).
 | GET | `/notification-channels/:id` | Get channel |
 | PUT | `/notification-channels/:id` | Update channel. A new `config` is checked as a create's is, and `allow_private_address` is decided again for it; an update without `config` keeps the stored confirmation |
 | DELETE | `/notification-channels/:id` | Delete channel |
-| POST | `/notification-channels/:id/test` | Send test notification. A failure answers 502 with `{"success": false, "message"}`, the message giving the reason with the channel's secrets cut out |
+| POST | `/notification-channels/:id/test` | Send test notification. A failure answers 502 with `{"success": false, "message"}`, the message giving the failure's class (could not connect, timed out, TLS failed, HTTP status N, SMTP code N) and nothing the target said |
 
 ### Notification Dead-Letter Queue
 

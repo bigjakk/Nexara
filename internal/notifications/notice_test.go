@@ -3,7 +3,11 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,6 +175,39 @@ func TestSendsCarryTheChannelsAllowance(t *testing.T) {
 			}
 		case <-time.After(10 * time.Second):
 			t.Fatalf("no %s", path)
+		}
+	}
+}
+
+// A dead letter, which every Viewer reads, and a replay's answer keep the
+// failure's class, not what the target said (FailureClass).
+func TestDeadLettersKeepTheFailureClass(t *testing.T) {
+	t.Parallel()
+	banner := fmt.Errorf("send request: %w", &url.Error{Op: "Post", URL: "http://192.0.2.1:22/",
+		Err: errors.New(`malformed HTTP response "SSH-2.0-OpenSSH_9.6"`)})
+	e, fake, ch := newDispatchEngine(t, funcDispatcher(func(context.Context, AlertPayload) error { return banner }))
+	e.retrySchedule = []time.Duration{}
+	inserted := make(chan struct{}, 1)
+	fake.onCall = func(name string) {
+		if name == "InsertNotificationDLQ" {
+			inserted <- struct{}{}
+		}
+	}
+	fake.rows["GetNotificationDLQ"] = db.NotificationDlq{ChannelID: pgtype.UUID{Bytes: ch.ID, Valid: true},
+		Payload: json.RawMessage(`{}`), State: "pending"}
+
+	e.SendNotice(context.Background(), ch.ID, uuid.New(), AlertPayload{})
+	select {
+	case <-inserted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no dead letter")
+	}
+	replayErr := e.ReplayDLQ(context.Background(), uuid.New())
+	updates := fake.callsOf("UpdateNotificationDLQState")
+	got := []string{fake.callsOf("InsertNotificationDLQ")[0][7].(string), updates[len(updates)-1][2].(string), fmt.Sprint(replayErr)}
+	for _, g := range got {
+		if strings.Contains(g, "SSH") || !strings.Contains(g, "the request failed") {
+			t.Errorf("stored or answered %q, want the class alone", g)
 		}
 	}
 }

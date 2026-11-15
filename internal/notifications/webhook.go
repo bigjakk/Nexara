@@ -80,7 +80,7 @@ func (d *WebhookDispatcher) Send(ctx context.Context, config json.RawMessage, pa
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return &HTTPStatusError{Code: resp.StatusCode}
 	}
 	return nil
 }

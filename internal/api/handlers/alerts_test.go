@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"slices"
 	"strings"
@@ -812,8 +814,8 @@ func (d failingDispatcher) Send(context.Context, json.RawMessage, notifications.
 	return d.err
 }
 
-// A failed channel test says why, in its answer, with the channel's secret cut
-// out of the reason (notifications.FailureReason).
+// A failed channel test says why, as the failure's class: nothing the target
+// said, no secret (notifications.FailureClass).
 func TestTestChannel_ReturnsTheReason(t *testing.T) {
 	t.Parallel()
 	enc, err := crypto.Encrypt(`{"url":"https://hooks.example.com/PROBE-SECRET"}`, testEncryptionKey)
@@ -823,7 +825,8 @@ func TestTestChannel_ReturnsTheReason(t *testing.T) {
 	ch := db.NotificationChannel{ID: uuid.New(), Name: "hook01", ChannelType: "webhook", ConfigEncrypted: enc}
 	dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetNotificationChannel": ch}}
 	reg := notifications.NewRegistry()
-	reg.Register(failingDispatcher{err: errors.New("unexpected status 401 from https://hooks.example.com/PROBE-SECRET")})
+	reg.Register(failingDispatcher{err: fmt.Errorf("send request: %w", &url.Error{Op: "Post",
+		URL: "https://hooks.example.com/PROBE-SECRET", Err: errors.New(`malformed HTTP response "SSH-2.0-OpenSSH_9.6"`)})})
 	h := NewAlertHandler(db.New(dbtx), testEncryptionKey, nil, reg)
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 	app.Post("/notification-channels/:id/test", withRequestParams(t,
@@ -835,8 +838,9 @@ func TestTestChannel_ReturnsTheReason(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body := readBody(t, resp.Body)
-	if resp.StatusCode != http.StatusBadGateway || !strings.Contains(body, "unexpected status 401") || strings.Contains(body, "PROBE-SECRET") {
-		t.Errorf("status %d, body %s: want 502 with the reason and no secret", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusBadGateway || !strings.Contains(body, "the request failed") ||
+		strings.Contains(body, "PROBE-SECRET") || strings.Contains(body, "SSH-2.0") {
+		t.Errorf("status %d, body %s: want 502 with the failure's class, nothing the target said", resp.StatusCode, body)
 	}
 }
 

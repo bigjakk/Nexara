@@ -199,6 +199,15 @@ type Engine struct {
 	shutdownCtx context.Context
 	// upsPollInterval is NUT_POLL_INTERVAL, for judging a UPS reading's age.
 	upsPollInterval time.Duration
+	// retrySchedule overrides RetrySchedule when non-nil (tests).
+	retrySchedule []time.Duration
+}
+
+func (e *Engine) schedule() []time.Duration {
+	if e.retrySchedule != nil {
+		return e.retrySchedule
+	}
+	return RetrySchedule
 }
 
 // NewEngine creates a new alert engine. shutdownCtx is the per-process
@@ -1095,7 +1104,7 @@ func (e *Engine) sendWithRetry(
 
 	attempts, err := retryableSend(sendCtx, func(c context.Context) error {
 		return dispatcher.Send(c, configJSON, payload)
-	}, RetrySchedule)
+	}, e.schedule())
 
 	if err == nil {
 		e.logger.Info("notification dispatched",
@@ -1109,8 +1118,9 @@ func (e *Engine) sendWithRetry(
 
 	e.logger.Error("notification dispatch failed",
 		"channel_id", channel.ID, "channel_type", channel.ChannelType,
-		"attempts", attempts, "error", err)
-	e.writeDLQ(sendCtx, channel, ref, payload, err.Error(), attempts, "send_failed")
+		"attempts", attempts, "error", FailureReason(err, configJSON))
+	// The dead letter, which every Viewer reads, keeps the failure's class.
+	e.writeDLQ(sendCtx, channel, ref, payload, FailureClass(err, configJSON), attempts, "send_failed")
 }
 
 // writeDLQ persists a failure record. Errors during the DLQ write itself are
@@ -1281,17 +1291,21 @@ func (e *Engine) ReplayDLQ(ctx context.Context, dlqID uuid.UUID) error {
 
 	attempts, sendErr := retryableSend(ChannelContext(ctx, channel), func(c context.Context) error {
 		return dispatcher.Send(c, json.RawMessage(configJSON), payload)
-	}, RetrySchedule)
+	}, e.schedule())
 
 	totalAttempts := safeconv.Int32(int(row.AttemptCount) + attempts)
 	if sendErr != nil {
+		// The entry and the caller get the failure's class; the log the detail.
+		class := FailureClass(sendErr, json.RawMessage(configJSON))
+		e.logger.Warn("DLQ replay failed", "dlq_id", dlqID, "attempts", attempts,
+			"error", FailureReason(sendErr, json.RawMessage(configJSON)))
 		_ = e.queries.UpdateNotificationDLQState(done, db.UpdateNotificationDLQStateParams{
 			ID:           dlqID,
 			State:        "pending",
-			LastError:    truncateError(sendErr.Error()),
+			LastError:    truncateError(class),
 			AttemptCount: totalAttempts,
 		})
-		return fmt.Errorf("replay attempts=%d: %w", attempts, sendErr)
+		return fmt.Errorf("replay failed after %d attempts: %s", attempts, class)
 	}
 
 	_ = e.queries.MarkNotificationDLQResolved(done, dlqID)
