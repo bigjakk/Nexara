@@ -8,6 +8,7 @@ import { useConsoleSession, useConsoleStoreApi } from "@/stores/console-store";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import { useIdleTabOnUnmount } from "../hooks/useIdleTabOnUnmount";
 import {
+  ACCESS_REMOVED_CLOSE,
   consoleSessionEnded,
   SESSION_ENDED_CLOSE,
   SESSION_ENDED_CODE,
@@ -294,6 +295,12 @@ export function Terminal({ tab, visible }: TerminalProps) {
         if (closed || sessionOver) return;
         if (event.code === SESSION_ENDED_CLOSE) {
           endSession();
+          return;
+        }
+        if (event.code === ACCESS_REMOVED_CLOSE) {
+          sessionOver = true;
+          term.writeln("\r\n[Your access to this console was removed]");
+          updateTabStatus(tabId, "disconnected");
           return;
         }
         if (tabIsParked()) return; // guest is off \u2014 wait for power-on instead

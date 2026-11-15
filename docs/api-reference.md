@@ -2505,6 +2505,11 @@ or a password change.
 - A console refused at open gets `{"type":"error","code":"session_ended"}`, then
   WebSocket close code `3000` ("session ended"); one closed while open gets the
   close code alone. A client should stop reconnecting then.
-- A console whose sign-in could not be checked for about a minute is closed with
+- On the same check, a console whose user no longer holds the `console:*`
+  permission it was minted under, on that cluster, is closed with close code
+  `3003` ("console access removed"). The sign-in is untouched: a client should
+  stop reconnecting, and not sign out. Permission changes can take up to the
+  RBAC cache's lifetime (about five minutes) to be seen.
+- A console whose sign-in or permission could not be checked for about a minute is closed with
   `1011`; that, and any other error or close code, may be retried, except
   `{"type":"error","code":"guest_not_running"}`, which means the guest is powered off.

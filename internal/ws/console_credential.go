@@ -2,6 +2,8 @@ package ws
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
@@ -25,6 +27,10 @@ import (
 // after, and is closed when the answer is no. Asking, rather than being told,
 // needs no publish in each of the paths that end a sign-in, no event for an
 // expiry, and no message that a replica can miss.
+//
+// On the same tick a console also asks RBAC whether its user still holds the
+// console permission it was opened with (consoleAllowed). RBAC's cache can lag a
+// revoke by its TTL; that is accepted.
 
 // consoleCredentialLocal is the Locals key under which the console gate hands
 // HandleConsole and HandleVNC the credential the console token was minted under.
@@ -49,6 +55,11 @@ const (
 	// checkFailedReason ends a console whose credential could not be checked. Its
 	// code is 1011, as for any other failure, so the browser may try again.
 	checkFailedReason = "could not check the session"
+	// closeAccessRemoved is the Close code a console gets when its user no longer
+	// holds the permission to it: 3003, registered with IANA as "Forbidden". Unlike
+	// closeSessionEnded it says nothing of the sign-in, which stays.
+	closeAccessRemoved  = 3003
+	accessRemovedReason = "console access removed"
 )
 
 // consoleCredential is who a console is held to: the user its token names, and
@@ -80,12 +91,12 @@ func nullableUUID(id uuid.UUID) pgtype.UUID {
 // admitCredential is a console's check at open, before anything is looked up or
 // a Proxmox ticket minted. A credential that is missing, or names both a session
 // and a key or neither, is refused as any failure is; then stillLive. It returns
-// the check to repeat, and the logger to log the credential's events with.
-func admitCredential(conn *fiberWs.Conn, queries *db.Queries, logger *slog.Logger) (liveCheck, *slog.Logger, bool) {
+// the user, the check to repeat, and the logger to log the credential's events with.
+func admitCredential(conn *fiberWs.Conn, queries *db.Queries, logger *slog.Logger) (uuid.UUID, liveCheck, *slog.Logger, bool) {
 	cred, ok := conn.Locals(consoleCredentialLocal).(consoleCredential)
 	if !ok || cred.UserID == uuid.Nil || !cred.Valid() {
 		writeRefusal(conn, "console credential missing")
-		return nil, nil, false
+		return uuid.Nil, nil, nil, false
 	}
 	logger = logger.With("user_id", cred.UserID)
 	if cred.SessionID != uuid.Nil {
@@ -94,7 +105,7 @@ func admitCredential(conn *fiberWs.Conn, queries *db.Queries, logger *slog.Logge
 		logger = logger.With("api_key_id", cred.APIKeyID)
 	}
 	live := credentialLive(queries, cred)
-	return live, logger, stillLive(conn, live, logger)
+	return cred.UserID, live, logger, stillLive(conn, live, logger)
 }
 
 // stillLive asks live once, and refuses the console when its credential could not
@@ -135,10 +146,12 @@ func writeSessionEnded(conn *fiberWs.Conn) {
 		fiberWs.FormatCloseMessage(closeSessionEnded, sessionEndedReason))
 }
 
-// watchCredential asks live at every tick until ctx is done, and calls end — once —
-// when the credential has ended, or could not be checked maxFailedChecks times in a
-// row. It reports whether it called end. A panic in a check ends the console too.
-func watchCredential(ctx context.Context, ticks <-chan time.Time, live liveCheck, end func(code int, reason string), logger *slog.Logger) (ended bool) {
+// watchCredential asks live, then allowed (when it is not nil), at every tick until
+// ctx is done, and calls end — once — when the credential has ended, when allowed
+// says no, or when a check could not be made maxFailedChecks times in a row: a
+// failing permission lookup counts as a failing liveness check, never as a removed
+// permission. It reports whether it called end. A panic in a check ends it too.
+func watchCredential(ctx context.Context, ticks <-chan time.Time, live, allowed liveCheck, end func(code int, reason string), logger *slog.Logger) (ended bool) {
 	finish := func(code int, reason string) {
 		ended = true // first: an end that panics is not called again
 		end(code, reason)
@@ -159,25 +172,66 @@ func watchCredential(ctx context.Context, ticks <-chan time.Time, live liveCheck
 			return false
 		case <-ticks:
 		}
-		cctx, cancel := context.WithTimeout(ctx, credentialCheckTimeout)
-		ok, err := live(cctx)
-		cancel()
+		ok, err := askBounded(ctx, live)
+		code, reason := closeSessionEnded, sessionEndedReason
+		if err == nil && ok && allowed != nil {
+			ok, err = askBounded(ctx, allowed)
+			code, reason = closeAccessRemoved, accessRemovedReason
+		}
 		switch {
 		case err != nil && ctx.Err() != nil:
-			return false // the relay ended while it asked
+			return false // the socket ended while it asked
 		case err != nil:
 			failed++
-			logger.Warn("console: could not check its session", "error", err, "failed_in_a_row", failed)
+			logger.Warn("ws: could not check a socket's session or permission", "error", err, "failed_in_a_row", failed)
 			if failed >= maxFailedChecks {
 				finish(gorillaWs.CloseInternalServerErr, checkFailedReason)
 				return true
 			}
 		case !ok:
-			finish(closeSessionEnded, sessionEndedReason)
+			finish(code, reason)
 			return true
 		default:
 			failed = 0
 		}
+	}
+}
+
+// askBounded asks check once, bounded by credentialCheckTimeout.
+func askBounded(ctx context.Context, check liveCheck) (bool, error) {
+	cctx, cancel := context.WithTimeout(ctx, credentialCheckTimeout)
+	defer cancel()
+	return check(cctx)
+}
+
+// consoleResource is the RBAC resource whose console permission a console of
+// scopeType needs: the mapping AuthHandler.ConsoleToken mints it under.
+func consoleResource(scopeType string) string {
+	switch scopeType {
+	case "node_shell":
+		return "node"
+	case "vm_serial", "vm_vnc":
+		return "vm"
+	case "ct_attach", "ct_vnc":
+		return "container"
+	}
+	return ""
+}
+
+// consoleAllowed asks RBAC whether userID still holds console:<resource> on the
+// scope's cluster: what the console token was minted for. With no checker, or a
+// scope it cannot name, it answers an error, never a yes.
+func consoleAllowed(check PermissionChecker, userID uuid.UUID, scope *auth.ConsoleScope) liveCheck {
+	return func(ctx context.Context) (bool, error) {
+		clusterID, err := uuid.Parse(scope.ClusterID)
+		resource := consoleResource(scope.Type)
+		switch {
+		case check == nil:
+			return false, errors.New("no permission checker configured")
+		case err != nil || resource == "":
+			return false, fmt.Errorf("console scope names no permission: %q on %q", scope.Type, scope.ClusterID)
+		}
+		return check(ctx, userID, "console", resource, "cluster", clusterID)
 	}
 }
 
@@ -194,9 +248,9 @@ type relayWatch struct {
 	done   chan struct{}
 }
 
-// watchRelay starts watching, asking live every `every`. stop must be called once
-// both legs have returned.
-func watchRelay(live liveCheck, every time.Duration, browser *fiberWs.Conn, px *gorillaWs.Conn, logger *slog.Logger) *relayWatch {
+// watchRelay starts watching, asking live and allowed every `every`. stop must be
+// called once both legs have returned.
+func watchRelay(live, allowed liveCheck, every time.Duration, browser *fiberWs.Conn, px *gorillaWs.Conn, logger *slog.Logger) *relayWatch {
 	if every <= 0 {
 		every = credentialCheckEvery
 	}
@@ -215,9 +269,9 @@ func watchRelay(live liveCheck, every time.Duration, browser *fiberWs.Conn, px *
 			if !closeRelayLeg(px, gorillaWs.CloseNormalClosure, "") {
 				_ = px.Close()
 			}
-			logger.Info("console: closed it, as its session has ended or could not be checked", "reason", reason)
+			logger.Info("console: closed it, as its session or access has ended or could not be checked", "reason", reason)
 		}
-		if !watchCredential(ctx, ticker.C, live, end, logger) {
+		if !watchCredential(ctx, ticker.C, live, allowed, end, logger) {
 			return
 		}
 		// A leg stuck writing to a browser that has stopped reading holds the

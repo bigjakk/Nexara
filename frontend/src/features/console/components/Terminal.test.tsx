@@ -395,6 +395,35 @@ describe("Terminal", () => {
     },
   );
 
+  // Final like a session end, but the sign-in is fine: nothing signs out.
+  it("stops without signing out when its console access is removed", async () => {
+    sessionEndedSpy.mockClear();
+    useConsoleStore.setState({
+      tabs: [{ ...tab, status: "connected" }],
+      activeTabId: tab.id,
+      windowMode: "floating",
+    });
+    renderWithProviders(<Terminal tab={tab} visible={true} />);
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    vi.useFakeTimers();
+    act(() => {
+      MockWebSocket.instances[0]?.deliverConnected();
+      MockWebSocket.instances[0]?.deliverClose(3003);
+    });
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+
+    expect(useConsoleStore.getState().tabs[0]).toMatchObject({
+      status: "disconnected",
+      reconnectKey: 0,
+    });
+    expect(sessionEndedSpy).not.toHaveBeenCalled();
+  });
+
   it("leaves no live status behind when the console is torn down", async () => {
     // Nothing survives the unmount, so the tab must not still read
     // "connected" — it goes back to the pre-dial state a reload leaves it in.

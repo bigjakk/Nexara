@@ -260,6 +260,40 @@ describe("VNCViewer", () => {
     },
   );
 
+  // Final like a session end, but the sign-in is fine: nothing signs out.
+  it("stops without signing out when its console access is removed", async () => {
+    sessionEndedSpy.mockClear();
+    seedStore("connected");
+    const { rerender } = renderWithProviders(
+      <VNCViewer tab={tab} visible={true} />,
+    );
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    act(() => {
+      MockWebSocket.instances[0]?.deliverConnected();
+    });
+    await waitFor(() => {
+      expect(rfbInstances).toHaveLength(1);
+    });
+
+    vi.useFakeTimers();
+    act(() => {
+      MockWebSocket.instances[0]?.deliverClose(3003);
+    });
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+
+    expect(tabStatus()).toBe("disconnected");
+    expect(useConsoleStore.getState().tabs[0]?.reconnectKey).toBe(0);
+    expect(sessionEndedSpy).not.toHaveBeenCalled();
+    rerender(
+      <VNCViewer tab={{ ...tab, status: "disconnected" }} visible={true} />,
+    );
+    expect(screen.getByText("Console access removed")).toBeInTheDocument();
+  });
+
   it("ignores frames queued on a superseded socket", async () => {
     // close() is asynchronous, so a frame already in flight still dispatches.
     // Acting on it would build a second RFB into the same container, clobber

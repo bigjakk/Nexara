@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,6 +86,15 @@ var sessionKey = strings.Repeat("ab", 32)
 type sessionDB struct {
 	gateLookupDB
 	cluster db.Cluster
+	// revoked makes checker answer that the console permission is gone.
+	revoked atomic.Bool
+}
+
+// checker stands in for RBAC: every permission is held until revoked is set.
+func (d *sessionDB) checker() PermissionChecker {
+	return func(context.Context, uuid.UUID, string, string, string, uuid.UUID) (bool, error) {
+		return !d.revoked.Load(), nil
+	}
 }
 
 func (d *sessionDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
@@ -166,10 +176,12 @@ func openSessionWith(t *testing.T, kind string, scope auth.ConsoleScope, sdb *se
 	cfg := wsConfigWithSubprotocol(nil)
 	consoleHandler := NewConsoleHandler(queries, sessionKey, jwtSvc, logger)
 	consoleHandler.checkEvery = checkEvery
+	consoleHandler.checkPermission = sdb.checker()
 	handler := fiberws.New(consoleHandler.HandleConsole, cfg)
 	if kind == "vnc" {
 		vncHandler := NewVNCHandler(queries, sessionKey, jwtSvc, logger)
 		vncHandler.checkEvery = checkEvery
+		vncHandler.checkPermission = sdb.checker()
 		handler = fiberws.New(vncHandler.HandleVNC, cfg)
 	}
 	app := fiber.New()
@@ -363,6 +375,29 @@ func TestConsoleRelay_HeldToItsCredential(t *testing.T) {
 			case <-closed:
 			default:
 				t.Error("Proxmox was never sent a Close; its leg must be cut first")
+			}
+		})
+
+		// A revoked console grant closes it with its own code, which the SPA does
+		// not read as a sign-out.
+		t.Run(kind+": closed when its console permission is removed while open", func(t *testing.T) {
+			t.Parallel()
+			pve := newFakeProxmox(t, func(c *gorillaws.Conn) {
+				for {
+					if _, _, err := c.ReadMessage(); err != nil {
+						return
+					}
+				}
+			})
+			sdb := newSessionDB(t, scope, pve.srv.URL)
+			browser := openSessionWith(t, kind, scope, sdb, 10*time.Millisecond, "", testLogger())
+			readConnected(t, browser)
+
+			sdb.revoked.Store(true)
+
+			_ = browser.SetReadDeadline(time.Now().Add(5 * time.Second))
+			if _, _, err := browser.ReadMessage(); !gorillaws.IsCloseError(err, closeAccessRemoved) {
+				t.Fatalf("after the permission was removed: %v, want a Close %d", err, closeAccessRemoved)
 			}
 		})
 	}

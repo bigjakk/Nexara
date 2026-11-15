@@ -84,6 +84,14 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		s.testPermissionChecker = opts[0].TestPermissionChecker
 		s.allowedOrigins = opts[0].AllowedOrigins
 	}
+	// An open console re-checks its console permission with the same checker the
+	// hub's subscribe gate uses (console_credential.go, consoleAllowed).
+	if s.consoleHandler != nil {
+		s.consoleHandler.checkPermission = s.permissionChecker()
+	}
+	if s.vncHandler != nil {
+		s.vncHandler.checkPermission = s.permissionChecker()
+	}
 
 	if s.rbacEngine == nil && s.testPermissionChecker == nil {
 		// Production deploys MUST configure RBACEngine — without it
@@ -574,6 +582,19 @@ func validateConsoleScopeFields(path, clusterID, node, vmidStr, typeStr string, 
 	return nil
 }
 
+// permissionChecker is the RBAC check the hub's subscribe gate and open consoles
+// use. The test override beats the real engine when present; nil leaves callers
+// to deny (post-5.1, no synthetic-admin fall-open).
+func (s *Server) permissionChecker() PermissionChecker {
+	switch {
+	case s.testPermissionChecker != nil:
+		return s.testPermissionChecker
+	case s.rbacEngine != nil:
+		return s.rbacEngine.HasPermission
+	}
+	return nil
+}
+
 // handleWS handles a WebSocket connection after upgrade.
 func (s *Server) handleWS(conn *websocket.Conn) {
 	userID, _ := conn.Locals("userID").(uuid.UUID)
@@ -581,19 +602,10 @@ func (s *Server) handleWS(conn *websocket.Conn) {
 
 	// Pass userID + a permission-check closure into the client so
 	// canSubscribe() can enforce per-cluster view permissions on each
-	// subscribe message (security review H1). Test override beats the
-	// real engine when present; nil leaves canSubscribe to deny cluster
-	// channels (post-5.1, no synthetic-admin fall-open).
-	var checker PermissionChecker
-	switch {
-	case s.testPermissionChecker != nil:
-		checker = s.testPermissionChecker
-	case s.rbacEngine != nil:
-		checker = s.rbacEngine.HasPermission
-	}
+	// subscribe message (security review H1).
 	client := NewClient(
 		clientID, conn, s.hub, s.logger, s.pingInterval, s.pongTimeout,
-		userID, checker,
+		userID, s.permissionChecker(),
 	)
 	s.hub.Register(client)
 

@@ -30,6 +30,9 @@ type VNCHandler struct {
 	// checkEvery is how often an open console re-checks its credential
 	// (console_credential.go); tests shorten it.
 	checkEvery time.Duration
+	// checkPermission re-checks, on the same tick, that the user still holds the
+	// console permission (consoleAllowed). NewServer sets it; nil fails closed.
+	checkPermission PermissionChecker
 }
 
 // NewVNCHandler creates a new VNCHandler.
@@ -110,7 +113,7 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 		return
 	}
 
-	live, credLogger, admitted := admitCredential(conn, h.queries, logger)
+	userID, live, credLogger, admitted := admitCredential(conn, h.queries, logger)
 	if !admitted {
 		return
 	}
@@ -192,7 +195,7 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	connectedMsg := `{"type":"connected","password":` + strconv.Quote(password) + `}`
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(connectedMsg))
 
-	watch := watchRelay(live, h.checkEvery, conn, pxConn, credLogger)
+	watch := watchRelay(live, consoleAllowed(h.checkPermission, userID, scope), h.checkEvery, conn, pxConn, credLogger)
 	defer watch.stop()
 
 	// Bidirectional proxy: browser WebSocket ↔ Proxmox WebSocket.

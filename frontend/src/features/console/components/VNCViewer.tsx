@@ -13,6 +13,7 @@ import { useVMAction } from "@/features/vms/api/vm-queries";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import { useIdleTabOnUnmount } from "../hooks/useIdleTabOnUnmount";
 import {
+  ACCESS_REMOVED_CLOSE,
   consoleSessionEnded,
   SESSION_ENDED_CLOSE,
   SESSION_ENDED_CODE,
@@ -64,8 +65,10 @@ export function VNCViewer({
   // at once on login. An explicit reconnect (reconnectKey > 0) also counts
   // as activation, so the tab-bar reconnect button works on a background tab.
   const [activated, setActivated] = useState(visible || reconnectKey > 0);
-  // The server ended it because its session has ended: the overlay says so.
+  // The server ended it because its session has ended, or because console
+  // access was removed: the overlay says which.
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [accessRemoved, setAccessRemoved] = useState(false);
   useEffect(() => {
     if (visible || reconnectKey > 0) {
       setActivated(true);
@@ -184,8 +187,13 @@ export function VNCViewer({
       // takes it over, and its disconnect event does not carry the code. Added
       // first, so it has run by the time that disconnect asks for a retry.
       localWs.addEventListener("close", (event: CloseEvent) => {
-        if (!closed && !sessionOver && event.code === SESSION_ENDED_CLOSE) {
+        if (closed || sessionOver) return;
+        if (event.code === SESSION_ENDED_CLOSE) {
           endSession();
+        } else if (event.code === ACCESS_REMOVED_CLOSE) {
+          sessionOver = true;
+          setAccessRemoved(true);
+          updateTabStatus(tabId, "disconnected");
         }
       });
 
@@ -356,6 +364,7 @@ export function VNCViewer({
         <ConsoleStateOverlay
           tab={tab}
           sessionEnded={sessionEnded}
+          accessRemoved={accessRemoved}
           onReconnect={handleManualReconnect}
         />
       </div>
@@ -373,10 +382,12 @@ export function VNCViewer({
 function ConsoleStateOverlay({
   tab,
   sessionEnded,
+  accessRemoved,
   onReconnect,
 }: {
   tab: ConsoleTab;
   sessionEnded: boolean;
+  accessRemoved: boolean;
   onReconnect: () => void;
 }) {
   const actionMutation = useVMAction();
@@ -479,14 +490,18 @@ function ConsoleStateOverlay({
           ? "Console connection failed"
           : sessionEnded
             ? "Session ended"
-            : "Console disconnected"
+            : accessRemoved
+              ? "Console access removed"
+              : "Console disconnected"
       }
       description={
         isError
           ? "The console session could not be established."
           : sessionEnded
             ? "Sign in again to use the console."
-            : "Automatic reconnect attempts were exhausted."
+            : accessRemoved
+              ? "Your permission to this console was removed. Ask an administrator if you still need it."
+              : "Automatic reconnect attempts were exhausted."
       }
     >
       <Button

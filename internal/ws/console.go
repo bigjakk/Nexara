@@ -50,6 +50,9 @@ type ConsoleHandler struct {
 	// checkEvery is how often an open console re-checks its credential
 	// (console_credential.go); tests shorten it.
 	checkEvery time.Duration
+	// checkPermission re-checks, on the same tick, that the user still holds the
+	// console permission (consoleAllowed). NewServer sets it; nil fails closed.
+	checkPermission PermissionChecker
 }
 
 // NewConsoleHandler creates a new ConsoleHandler.
@@ -131,7 +134,7 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		return
 	}
 
-	live, credLogger, admitted := admitCredential(conn, h.queries, logger)
+	userID, live, credLogger, admitted := admitCredential(conn, h.queries, logger)
 	if !admitted {
 		return
 	}
@@ -234,7 +237,7 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// Send a connected status to the browser.
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(`{"type":"connected"}`))
 
-	watch := watchRelay(live, h.checkEvery, conn, pxConn, credLogger)
+	watch := watchRelay(live, consoleAllowed(h.checkPermission, userID, scope), h.checkEvery, conn, pxConn, credLogger)
 	defer watch.stop()
 
 	var wg sync.WaitGroup
