@@ -4,7 +4,7 @@ import { QueryClientProvider, useMutation } from "@tanstack/react-query";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { apiClient, clearTokens } from "@/lib/api-client";
+import { apiClient, clearTokens, USER_KEY } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { queryClient } from "@/lib/query-client";
 import {
@@ -288,6 +288,26 @@ describe("the login page a signed-out user is sent to", () => {
 
     expect(await screen.findByText("login page")).toBeInTheDocument();
     expect(router.state.location.search).toBe("?returnTo=%2Fclusters");
+  });
+});
+
+describe("a sign-out in another tab", () => {
+  it("is followed by every signed-in page, not only a console tab's", async () => {
+    await signInForReal(ADMIN);
+    renderApp("/clusters");
+    expect(await screen.findByText("clusters page")).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: USER_KEY,
+          newValue: JSON.stringify(VIEWER),
+          storageArea: localStorage,
+        }),
+      );
+    });
+
+    expect(await screen.findByText("login page")).toBeInTheDocument();
   });
 });
 

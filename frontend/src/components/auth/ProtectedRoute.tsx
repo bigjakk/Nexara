@@ -1,7 +1,18 @@
+import { Fragment } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useSignOutFromOtherTabs } from "@/hooks/useSignOutFromOtherTabs";
 import { useAuthStore } from "@/stores/auth-store";
+
+/**
+ * Every signed-in tab follows a sign-out, or a change of user, made in another
+ * tab, at once — not when its own access token next needs a refresh.
+ */
+function FollowOtherTabs() {
+  useSignOutFromOtherTabs();
+  return null;
+}
 
 export function ProtectedRoute() {
   const { user, isAuthenticated, isInitialized } = useAuth();
@@ -41,6 +52,12 @@ export function ProtectedRoute() {
   // everything below as a sign-out does. What auth-store resets is the cache
   // and the stores; component state, open dialogs and typed forms would stay,
   // and so would a call made as the previous user that is still waiting for its
-  // answer, and the hub socket AppShell opened with their token.
-  return <Outlet key={user?.id} />;
+  // answer, and the hub socket AppShell opened with their token. The follower
+  // of the other tabs goes with them, and looks again at what it missed.
+  return (
+    <Fragment key={user?.id}>
+      <FollowOtherTabs />
+      <Outlet />
+    </Fragment>
+  );
 }
