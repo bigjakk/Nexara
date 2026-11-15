@@ -563,23 +563,23 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     // it, and is signed out here, and only here: nexara_user, which is theirs,
     // is left as it is (clearTokens), so that a reload of their tab still
     // resumes. A request would carry THEIR cookie, and /auth/logout revokes with
-    // the cookie. A token this tab holds that is still valid lets the server see
-    // that its owner is not the session's; an expired one it cannot check
-    // (authOptional names the caller only for a token that validates), and the
-    // cookie would be the one credential: Sign out here would end the other
-    // user's session.
+    // the cookie. A token this tab holds, valid or expired, names its owner, and
+    // the server refuses a session that is not theirs with a 403
+    // (signOutIsSomeoneElses, internal/api/handlers/auth.go). But a tab that
+    // holds no token sends none, and the cookie is then the one credential:
+    // Sign out here would end the other user's session. Not sending is the
+    // answer that does not depend on what this tab holds.
     if (!cookieIsAnotherUsers(held)) {
       // Empty body — the HttpOnly cookie carries the refresh token. Hit
       // /auth/logout so the server can revoke the session and clear the cookie.
       //
       // With the token held and no more: never refreshed first, nor waited for
       // under the cross-tab lock. The cookie is what this endpoint revokes with
-      // (it is authOptional); the token only lets the server check that the
-      // session is the caller's, which it skips for one that has expired. A
-      // request that had to resolve a token first was never sent when the
-      // refresh was failing — the user signed out here, and the session and its
-      // cookie stayed alive on the server until the refresh token's lifetime ran
-      // out.
+      // (it is authOptional); the token, expired or not, lets the server check
+      // that the session is the caller's. A request that had to resolve a token
+      // first was never sent when the refresh was failing — the user signed out
+      // here, and the session and its cookie stayed alive on the server until
+      // the refresh token's lifetime ran out.
       try {
         await signOutRequest();
         revoked = true;

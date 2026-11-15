@@ -36,9 +36,9 @@ import { useAuthStore } from "./auth-store";
 
 /**
  * Sign out has to reach the server. /auth/logout (authOptional, internal/api/
- * router.go) revokes with the refresh cookie; the access token only lets the
- * server check that the session is the caller's, which it skips for an expired
- * one. So logout() sends it with the token held, as it is, and no refresh: sent
+ * router.go) revokes with the refresh cookie; the access token, expired or not,
+ * lets the server check that the session is the caller's. So logout() sends it
+ * with the token held, as it is, and no refresh: sent
  * as a request is, a long-expired token with a failing refresh meant it was never
  * sent and the session stayed alive. Whether it is sent depends on whose cookie
  * is in the jar, and what a sign-out ends is the session it was for.
@@ -99,7 +99,7 @@ describe("Sign out", () => {
       expect(server.times(LOGOUT)).toBe(1);
       expect(server.times(REFRESH)).toBe(0); // none was tried
       // The token held, as it is: an expired one is not authenticated by the
-      // server, which then revokes by the cookie alone.
+      // server, which still reads whose it is before it revokes by the cookie.
       expect(carried).toBe(ADMIN.id);
       const state = useAuthStore.getState();
       expect(state.isAuthenticated).toBe(false);
@@ -227,8 +227,8 @@ describe("signOutRequest", () => {
 describe("Sign out when another tab has signed someone else in", () => {
   // The cookie in the jar is theirs, and nexara_user, which every tab shares,
   // names them. This tab's own session was orphaned when theirs replaced the
-  // cookie. /auth/logout revokes with the cookie, and for a token that has expired
-  // the server cannot check whose it is: a request would end their session. So
+  // cookie. /auth/logout revokes with the cookie, and when this tab holds no
+  // token the server cannot check whose it is: a request would end their session. So
   // none is sent, and this tab is signed out here, and only here: their record,
   // which a reload of their tab resumes off, is left as it is.
   const record = (user: object) => {

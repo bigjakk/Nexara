@@ -1502,8 +1502,8 @@ export const apiClient = {
  * as it is, and no refresh — none started, none waited for under the cross-tab
  * lock, none after a 401. /auth/logout is authOptional (internal/api/router.go):
  * the credential it revokes with is the refresh cookie, and the token only lets
- * the server check that the session is the caller's, which it does for a token
- * that is still valid and skips for one that is not. A token to resolve first —
+ * the server check that the session is the caller's, which it does for any token
+ * it signed, expired or not. A token to resolve first —
  * refreshed, or waited for under the lock — is what kept the request from being
  * sent at all when the refresh was failing, and left the session and its cookie
  * alive on the server.
