@@ -230,7 +230,7 @@ func main() {
 	go runCollector(ctx, cfg, application, veeamTrigger, nutTrigger, logger.With("component", "collector"))
 
 	// ---- Scheduler goroutine ----
-	go runScheduler(ctx, cfg, application, logger.With("component", "scheduler"))
+	go runScheduler(ctx, cfg, application, srv.RunScheduledLDAPSync, logger.With("component", "scheduler"))
 
 	// ---- Start server ----
 	addr := fmt.Sprintf(":%d", cfg.APIPort)
@@ -860,7 +860,7 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 }
 
 // runScheduler runs all scheduler tickers (mirrors cmd/scheduler logic).
-func runScheduler(ctx context.Context, cfg *config.Config, application *app.App, logger *slog.Logger) {
+func runScheduler(ctx context.Context, cfg *config.Config, application *app.App, ldapSync func(context.Context), logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("scheduler panic", "error", r)
@@ -945,6 +945,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			// The reconcile half is frequent: a staged install fires on the
 			// guest's own reboot, which nothing here triggers or observes.
 			{name: "guest_tools_reconcile", every: 60 * time.Second, run: sched.RunGuestToolsReconcile},
+			{name: "ldap_sync", every: 1 * time.Minute, run: ldapSync, note: "the config's Sync Interval, default 60m"},
 		}
 
 		intervals := make([]any, 0, 2*len(engines))

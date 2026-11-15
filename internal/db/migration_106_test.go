@@ -133,7 +133,11 @@ func TestMigration106_AddsTheAuthEpochAndKeepsEveryUserAndSession(t *testing.T) 
 		id     uuid.UUID
 		active bool
 	}{{m106Active, true}, {m106Inactive, false}} {
-		got, err := q.GetUserByID(ctx, u.id)
+		// Read by hand, not with GetUserByID: the generated query names every column
+		// users has at head, and this runs at version 106.
+		var got gen.User
+		err := pool.QueryRow(ctx, `SELECT auth_epoch, is_active, password_hash, role, auth_source FROM users WHERE id = $1`, u.id).
+			Scan(&got.AuthEpoch, &got.IsActive, &got.PasswordHash, &got.Role, &got.AuthSource)
 		if err != nil {
 			t.Fatalf("read the pre-upgrade user %v: %v", u.id, err)
 		}
@@ -221,11 +225,11 @@ func TestMigration106_AddsTheAuthEpochAndKeepsEveryUserAndSession(t *testing.T) 
 	if err := m.Migrate(106); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		t.Fatalf("migrate up again to 106: %v", err)
 	}
-	got, err := q.GetUserByID(ctx, m106Active)
-	if err != nil {
+	var epoch int64
+	if err := pool.QueryRow(ctx, `SELECT auth_epoch FROM users WHERE id = $1`, m106Active).Scan(&epoch); err != nil {
 		t.Fatalf("read after up again: %v", err)
 	}
-	if got.AuthEpoch != 0 {
-		t.Errorf("after down and up the user holds epoch %d, want 0: the counter is not carried across", got.AuthEpoch)
+	if epoch != 0 {
+		t.Errorf("after down and up the user holds epoch %d, want 0: the counter is not carried across", epoch)
 	}
 }

@@ -907,19 +907,20 @@ export function LDAPPage() {
             <SettingsSection title="Sync">
               <SettingRow
                 label="Sync interval"
-                description="Minutes between background syncs of this directory."
+                description="Minutes between background syncs of this directory. 0 turns them off."
                 htmlFor="ldap-sync-interval"
               >
                 <Input
                   id="ldap-sync-interval"
                   className="w-24"
                   type="number"
-                  min={1}
+                  min={0}
                   value={form.sync_interval_minutes}
                   onChange={(e) => {
+                    const minutes = parseInt(e.target.value, 10);
                     setForm({
                       ...form,
-                      sync_interval_minutes: parseInt(e.target.value, 10) || 60,
+                      sync_interval_minutes: Number.isNaN(minutes) ? 60 : minutes,
                     });
                   }}
                 />

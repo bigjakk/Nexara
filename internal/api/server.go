@@ -592,6 +592,14 @@ func (s *Server) SetNodeSyncInterval(d time.Duration) {
 	}
 }
 
+// RunScheduledLDAPSync runs the LDAP sync when its Sync Interval is due; the scheduler
+// ticks it (handlers.LDAPHandler.RunScheduledSync).
+func (s *Server) RunScheduledLDAPSync(ctx context.Context) {
+	if s.ldapHandler != nil {
+		s.ldapHandler.RunScheduledSync(ctx)
+	}
+}
+
 // RBACEngine returns the API server's RBAC engine so other components
 // in the unified binary (e.g. the WebSocket server) can perform their
 // own permission checks against the same engine instance. May be nil

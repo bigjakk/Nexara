@@ -2,10 +2,13 @@ package db
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -54,6 +57,85 @@ func TestEnabledDirectoryConfig_TheOldestIsUsed(t *testing.T) {
 		oidc, err := q.GetEnabledOIDCConfig(ctx)
 		if err != nil || oidc.Name != "older" {
 			t.Errorf("GetEnabledOIDCConfig = %q, %v; want the oldest, older", oidc.Name, err)
+		}
+	})
+}
+
+// TestLDAPSyncState_SQL: the sync's statements against Postgres. A sync deactivates only
+// an active LDAP account and re-enables only one a sync deactivated; an administrator's
+// change of is_active makes the deactivation theirs; the lease admits one sync at a time
+// and lets the next one in once released or run out.
+func TestLDAPSyncState_SQL(t *testing.T) {
+	directoryTx(t, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) {
+		var userID, cfgID uuid.UUID
+		if err := tx.QueryRow(ctx, `INSERT INTO users (email, password_hash, display_name, auth_source) VALUES ('carol@example.com', '', 'Carol', 'ldap') RETURNING id`).Scan(&userID); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO ldap_configs (server_url, search_base_dn) VALUES ('ldap://192.0.2.10', 'dc=example,dc=com') RETURNING id`).Scan(&cfgID); err != nil {
+			t.Fatal(err)
+		}
+		state := func() (active, byDirectory bool) {
+			if err := tx.QueryRow(ctx, `SELECT is_active, deactivated_by_directory FROM users WHERE id = $1`, userID).Scan(&active, &byDirectory); err != nil {
+				t.Fatal(err)
+			}
+			return active, byDirectory
+		}
+		must := func(n int64, err error, want int64, what string) {
+			t.Helper()
+			if err != nil || n != want {
+				t.Errorf("%s: %d rows, %v; want %d", what, n, err, want)
+			}
+		}
+		n, err := q.ReactivateLDAPUserFromDirectory(ctx, userID)
+		must(n, err, 0, "reactivating an active account")
+		n, err = q.DeactivateLDAPUserForDirectory(ctx, userID)
+		must(n, err, 1, "a sync's deactivation")
+		n, err = q.DeactivateLDAPUserForDirectory(ctx, userID)
+		must(n, err, 0, "deactivating an inactive account")
+		if a, d := state(); a || !d {
+			t.Errorf("after a sync's deactivation: active %t, by directory %t", a, d)
+		}
+		if _, err := q.UpdateUserProfile(ctx, gen.UpdateUserProfileParams{ID: userID, IsActive: pgtype.Bool{Bool: false, Valid: true}}); err != nil {
+			t.Fatal(err)
+		}
+		n, err = q.ReactivateLDAPUserFromDirectory(ctx, userID)
+		must(n, err, 0, "reactivating an account an administrator deactivated")
+		if _, err := q.UpdateUserProfile(ctx, gen.UpdateUserProfileParams{ID: userID, IsActive: pgtype.Bool{Bool: true, Valid: true}}); err != nil {
+			t.Fatal(err)
+		}
+		n, err = q.DeactivateLDAPUserForDirectory(ctx, userID)
+		must(n, err, 1, "a sync's deactivation again")
+		n, err = q.ReactivateLDAPUserFromDirectory(ctx, userID)
+		must(n, err, 1, "a sync's re-enable")
+		if a, d := state(); !a || d {
+			t.Errorf("after a sync's re-enable: active %t, by directory %t", a, d)
+		}
+
+		first, second := uuid.New(), uuid.New()
+		claim := func(token uuid.UUID, secs float64) error {
+			_, err := q.ClaimLDAPSyncLease(ctx, gen.ClaimLDAPSyncLeaseParams{ID: cfgID, Token: token, LeaseSeconds: secs})
+			return err
+		}
+		if err := claim(first, 3600); err != nil {
+			t.Fatalf("the first claim: %v", err)
+		}
+		if err := claim(second, 3600); !errors.Is(err, pgx.ErrNoRows) {
+			t.Errorf("a second claim while the first holds the lease: %v, want no row", err)
+		}
+		if err := q.ReleaseLDAPSyncLease(ctx, gen.ReleaseLDAPSyncLeaseParams{ID: cfgID, Token: second}); err != nil {
+			t.Fatal(err)
+		}
+		if err := claim(second, 3600); !errors.Is(err, pgx.ErrNoRows) {
+			t.Error("a release by a sync that does not hold the lease freed it")
+		}
+		if err := q.ReleaseLDAPSyncLease(ctx, gen.ReleaseLDAPSyncLeaseParams{ID: cfgID, Token: first}); err != nil {
+			t.Fatal(err)
+		}
+		if err := claim(second, 0); err != nil {
+			t.Errorf("a claim after the release: %v", err)
+		}
+		if err := claim(first, 3600); err != nil {
+			t.Errorf("a claim after a lease ran out: %v", err)
 		}
 	})
 }

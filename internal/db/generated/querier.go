@@ -76,6 +76,10 @@ type Querier interface {
 	// The claim clears last_error and last_upid, which belong to the previous run:
 	// without that, a run being started would show beside the last run's error.
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
+	// Claims the config's sync lease for lease_seconds, when no sync holds one that is
+	// still running, and returns the config; no row when another sync holds it (or the
+	// config is gone). One sync per config at a time, whichever replica runs it.
+	ClaimLDAPSyncLease(ctx context.Context, arg ClaimLDAPSyncLeaseParams) (LdapConfig, error)
 	// ClassifyClusterObjectChanges decides, once, whether something on record
 	// explains each settled change, and which audit row does (explained_by). A change
 	// is explained only by an audit row whose action does what changed, for each
@@ -589,6 +593,9 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateVMFolder(ctx context.Context, arg CreateVMFolderParams) (VmFolder, error)
 	CreateVeeamServer(ctx context.Context, arg CreateVeeamServerParams) (VeeamServer, error)
+	// A sync did not find the account in the directory. Only an active account: one an
+	// administrator deactivated in the meantime keeps their reason, deactivated by hand.
+	DeactivateLDAPUserForDirectory(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteAlertRule(ctx context.Context, id uuid.UUID) error
 	DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) error
 	DeleteCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) error
@@ -2837,6 +2844,9 @@ type Querier interface {
 	// design rather than the server's full history.
 	PruneVeeamSessions(ctx context.Context, arg PruneVeeamSessionsParams) error
 	PurgeOldNotificationDLQ(ctx context.Context) error
+	// A sync found again an account that a sync had deactivated. One deactivated by hand,
+	// or reactivated by an administrator in the meantime, is not touched.
+	ReactivateLDAPUserFromDirectory(ctx context.Context, id uuid.UUID) (int64, error)
 	// ReconcileDispatchedScheduledTasks settles every dispatched run whose Proxmox
 	// task has finished, from the task_history row the collector keeps for its
 	// UPID. It is the other half of UpdateTaskLastRun: dispatching a run records
@@ -2947,6 +2957,8 @@ type Querier interface {
 	// the server is re-pointed cannot write the old server's version onto the new
 	// one. api_revision is deliberately absent — see its comment in 000087.
 	RefreshVeeamServerInfo(ctx context.Context, arg RefreshVeeamServerInfoParams) (int64, error)
+	// Releases the lease this sync claimed, and only that one.
+	ReleaseLDAPSyncLease(ctx context.Context, arg ReleaseLDAPSyncLeaseParams) error
 	RemoveFavorite(ctx context.Context, arg RemoveFavoriteParams) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)
@@ -3078,7 +3090,6 @@ type Querier interface {
 	SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabledParams) error
 	SetJobDisabledHARules(ctx context.Context, arg SetJobDisabledHARulesParams) error
 	SetJobNativeCRSPaused(ctx context.Context, arg SetJobNativeCRSPausedParams) error
-	SetLDAPUserActive(ctx context.Context, arg SetLDAPUserActiveParams) error
 	// SetLocalLockTimeout bounds every lock wait of the rest of the transaction —
 	// LockClusterFolders' among them — so requests queued behind a long change to
 	// a cluster's tree give their connections back instead of holding the pool.

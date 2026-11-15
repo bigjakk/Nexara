@@ -575,6 +575,8 @@ type LdapConfig struct {
 	LastSyncAt            pgtype.Timestamptz `json:"last_sync_at"`
 	CreatedAt             time.Time          `json:"created_at"`
 	UpdatedAt             time.Time          `json:"updated_at"`
+	SyncLeaseToken        pgtype.UUID        `json:"sync_lease_token"`
+	SyncLeaseExpiresAt    pgtype.Timestamptz `json:"sync_lease_expires_at"`
 }
 
 type LeaderElection struct {
@@ -1388,7 +1390,8 @@ type User struct {
 	Role         string      `json:"role"`
 	AuthSource   string      `json:"auth_source"`
 	// Bumped by every revoke-all of the user's sessions (sign out of all devices, password change, deactivation), in the same transaction as the revoke. A session is created only while this still holds the value the credential check read, so a sign-in whose credential has been replaced since cannot mint one. See queries/sessions.sql CreateSessionAtEpoch
-	AuthEpoch int64 `json:"auth_epoch"`
+	AuthEpoch              int64 `json:"auth_epoch"`
+	DeactivatedByDirectory bool  `json:"deactivated_by_directory"`
 }
 
 // Per-user starred resources, surfaced above the sidebar tree

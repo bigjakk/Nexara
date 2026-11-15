@@ -48,8 +48,10 @@ type epochStore struct {
 
 	// oidcConfig is what GetEnabledOIDCConfig answers; nil is no enabled configuration.
 	oidcConfig *db.OidcConfig
-	// ldapConfig is what GetLDAPConfig answers, for any id; nil is none.
+	// ldapConfig is what GetLDAPConfig answers, for any id, and GetEnabledLDAPConfig
+	// when it is enabled; nil is none. syncLeased says a sync holds its lease.
 	ldapConfig *db.LdapConfig
+	syncLeased bool
 	// grants are the global "action:resource" permissions GetUserScopedPermissions
 	// answers for a user, for a real RBAC engine over this store.
 	grants map[uuid.UUID][]string
@@ -176,15 +178,25 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "RevokeAllUserRoles":
 		return pgconn.NewCommandTag("DELETE 0"), nil
-	case "SetLDAPUserActive":
-		// id, is_active: only for an LDAP account, as the SQL's WHERE.
-		if u, ok := s.users[args[0].(uuid.UUID)]; ok && u.AuthSource == "ldap" {
-			was := u.IsActive
-			remember(func() { u.IsActive = was })
-			u.IsActive = args[1].(bool)
+	case "DeactivateLDAPUserForDirectory", "ReactivateLDAPUserFromDirectory":
+		// id; the SQL's WHERE: an LDAP account, active to deactivate, and inactive by a
+		// sync to reactivate.
+		u, ok := s.users[args[0].(uuid.UUID)]
+		deactivate := name == "DeactivateLDAPUserForDirectory"
+		if !ok || u.AuthSource != "ldap" || u.IsActive != deactivate || (!deactivate && !u.DeactivatedByDirectory) {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
 		}
+		before := *u
+		remember(func() { *u = before })
+		u.IsActive, u.DeactivatedByDirectory = !deactivate, deactivate
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case "ReleaseLDAPSyncLease":
+		s.syncLeased = false
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "UpdateLDAPConfigLastSync":
+		if s.ldapConfig != nil {
+			s.ldapConfig.LastSyncAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		}
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "DeleteRecoveryCode":
 		id := args[0].(uuid.UUID)
@@ -305,7 +317,7 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 			u.DisplayName = v.String
 		}
 		if v := args[1].(pgtype.Bool); v.Valid {
-			u.IsActive = v.Bool
+			u.IsActive, u.DeactivatedByDirectory = v.Bool, false
 		}
 		if v := args[2].(pgtype.Text); v.Valid {
 			u.Role = v.String
@@ -331,6 +343,18 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		if s.ldapConfig == nil {
 			return authFakeRow{err: pgx.ErrNoRows}
 		}
+		return authFakeRow{value: *s.ldapConfig}
+	case "GetEnabledLDAPConfig":
+		if s.ldapConfig == nil || !s.ldapConfig.Enabled {
+			return authFakeRow{err: pgx.ErrNoRows}
+		}
+		return authFakeRow{value: *s.ldapConfig}
+	case "ClaimLDAPSyncLease":
+		// No row while another sync holds the lease, as the SQL's WHERE.
+		if s.ldapConfig == nil || s.syncLeased {
+			return authFakeRow{err: pgx.ErrNoRows}
+		}
+		s.syncLeased = true
 		return authFakeRow{value: *s.ldapConfig}
 	case "GetEnabledOIDCConfig", "GetOIDCConfig":
 		if s.oidcConfig == nil {
@@ -395,7 +419,7 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 		for _, u := range s.users {
 			if u.AuthSource == "ldap" {
 				items = append(items, db.ListLDAPUsersRow{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName,
-					Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource})
+					Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, DeactivatedByDirectory: u.DeactivatedByDirectory})
 			}
 		}
 		return &authFakeRows{items: items}, nil

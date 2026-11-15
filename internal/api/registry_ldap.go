@@ -114,9 +114,10 @@ func registerLDAPEndpoints(reg *Registry, h *handlers.LDAPHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   ldapConfigScope + "/:id/sync",
-		Description: "Re-read every LDAP-sourced account from the directory: disable the ones that are " +
-			"gone, re-enable the ones that are back, refresh display names, and re-apply the group-to-role " +
-			"mapping.",
+		Description: "Re-read every LDAP-sourced account from the directory: disable the ones a search " +
+			"found missing, re-enable the ones a sync had disabled that are back, refresh display names, " +
+			"and re-apply the group-to-role mapping. A failed search changes nothing. 409 while another " +
+			"sync of the config runs; 502 when the directory cannot be reached or bound to.",
 		Group:       "Authentication",
 		Permissions: globalCheck("manage", "user"),
 		Parameters:  apischema.Properties{"id": ldapConfigIDParam},
@@ -148,7 +149,7 @@ func ldapConfigParams(extra apischema.Properties) apischema.Properties {
 			Default:  false,
 			Typetext: "<boolean>",
 			Description: "Whether this directory participates in login. Only ONE config is used at a " +
-				"time; the login path reads the enabled one.",
+				"time; the login path reads the oldest enabled one.",
 		},
 		"server_url": {
 			Type:      apischema.String,
@@ -219,7 +220,7 @@ func ldapConfigParams(extra apischema.Properties) apischema.Properties {
 		"sync_interval_minutes": {
 			Type:     apischema.Integer,
 			Optional: true,
-			Default:  0,
+			Default:  60,
 			Minimum:  apischema.Ptr(0.0),
 			// math.MaxInt32, because the column is int32 and this value is
 			// narrowed to it. The struct field used to be int32, so the JSON
@@ -228,8 +229,8 @@ func ldapConfigParams(extra apischema.Properties) apischema.Properties {
 			// refusal rather than imposing a new policy.
 			Maximum:  apischema.Ptr(2147483647.0),
 			Typetext: "<integer>",
-			Description: "How often the scheduled sync runs, in minutes. 0 or omitted applies the built-in " +
-				"default of 60.",
+			Description: "How often the scheduled sync runs, in minutes; 0 turns it off. Only the config " +
+				"sign-in uses (the oldest enabled one) is synced on a schedule. Defaults to 60.",
 		},
 		"acknowledge_insecure_tls": {
 			Type:     apischema.Boolean,

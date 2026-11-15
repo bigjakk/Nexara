@@ -64,15 +64,39 @@ UPDATE users SET display_name = $2
 WHERE id = $1 AND auth_source = 'ldap'
 RETURNING *;
 
--- name: SetLDAPUserActive :exec
-UPDATE users SET is_active = $2
-WHERE id = $1 AND auth_source = 'ldap';
+-- name: DeactivateLDAPUserForDirectory :execrows
+-- A sync did not find the account in the directory. Only an active account: one an
+-- administrator deactivated in the meantime keeps their reason, deactivated by hand.
+UPDATE users SET is_active = false, deactivated_by_directory = true
+WHERE id = $1 AND auth_source = 'ldap' AND is_active;
+
+-- name: ReactivateLDAPUserFromDirectory :execrows
+-- A sync found again an account that a sync had deactivated. One deactivated by hand,
+-- or reactivated by an administrator in the meantime, is not touched.
+UPDATE users SET is_active = true, deactivated_by_directory = false
+WHERE id = $1 AND auth_source = 'ldap' AND NOT is_active AND deactivated_by_directory;
 
 -- name: ListLDAPUsers :many
-SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source
+SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory
 FROM users
 WHERE auth_source = 'ldap'
 ORDER BY email;
+
+-- name: ClaimLDAPSyncLease :one
+-- Claims the config's sync lease for lease_seconds, when no sync holds one that is
+-- still running, and returns the config; no row when another sync holds it (or the
+-- config is gone). One sync per config at a time, whichever replica runs it.
+UPDATE ldap_configs
+SET sync_lease_token = sqlc.arg(token)::uuid,
+    sync_lease_expires_at = now() + make_interval(secs => sqlc.arg(lease_seconds)::double precision)
+WHERE id = sqlc.arg(id)
+  AND (sync_lease_expires_at IS NULL OR sync_lease_expires_at <= now())
+RETURNING *;
+
+-- name: ReleaseLDAPSyncLease :exec
+-- Releases the lease this sync claimed, and only that one.
+UPDATE ldap_configs SET sync_lease_token = NULL, sync_lease_expires_at = NULL
+WHERE id = sqlc.arg(id) AND sync_lease_token = sqlc.arg(token)::uuid;
 
 -- name: ListDirectoryConfigsUsingRole :many
 -- The LDAP and OIDC configs whose default role is this one. Their default_role_id

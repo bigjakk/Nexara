@@ -67,7 +67,7 @@ func TestSyncUserRoles_AMappingToADeletedRoleAssignsTheDefault(t *testing.T) {
 	h := &LDAPHandler{queries: a.users.queries}
 	gone, user := uuid.New(), uuid.New()
 	a.probe = func(c fiber.Ctx) error {
-		h.syncUserRoles(c, user, []string{"cn=ops"}, map[string]string{"cn=ops": gone.String()}, pgtype.UUID{Bytes: def.ID, Valid: true})
+		h.syncUserRoles(c.Context(), user, []string{"cn=ops"}, map[string]string{"cn=ops": gone.String()}, pgtype.UUID{Bytes: def.ID, Valid: true})
 		return c.SendStatus(fiber.StatusNoContent)
 	}
 	if _, err := a.app.Test(httptest.NewRequest(http.MethodGet, "/probe", nil)); err != nil {

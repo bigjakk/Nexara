@@ -123,6 +123,8 @@ ORDER BY u.created_at DESC;
 UPDATE users
 SET display_name = COALESCE(sqlc.narg(display_name)::text, display_name),
     is_active    = COALESCE(sqlc.narg(is_active)::boolean, is_active),
-    role         = COALESCE(sqlc.narg(role)::text, role)
+    role         = COALESCE(sqlc.narg(role)::text, role),
+    -- An administrator's change of is_active is theirs: an LDAP sync never undoes it.
+    deactivated_by_directory = deactivated_by_directory AND sqlc.narg(is_active)::boolean IS NULL
 WHERE id = sqlc.arg(id)
 RETURNING *;

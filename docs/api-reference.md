@@ -2330,7 +2330,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | PUT | `/ldap/configs/:id` | Update LDAP config |
 | DELETE | `/ldap/configs/:id` | Delete LDAP config |
 | POST | `/ldap/configs/:id/test` | Test LDAP connection |
-| POST | `/ldap/configs/:id/sync` | Sync LDAP users |
+| POST | `/ldap/configs/:id/sync` | Sync LDAP users. Answers `users_synced`, `users_disabled`, `users_re_enabled` and `users_skipped` (a search that failed; such a user is left as they are). Only a search that found nobody disables a user; a user deactivated by hand is never re-enabled. `409` `ldap_sync_running` while another sync of the config runs; `502` when the directory cannot be reached or bound to (nobody is disabled). `sync_interval_minutes` on the config schedules it, `0` is off |
 
 ### OIDC
 

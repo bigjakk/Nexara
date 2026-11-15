@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -44,6 +46,12 @@ type LDAPHandler struct {
 	// directory, when set, replaces auth.NewLDAPClient as Sync's directory; only
 	// tests set it, to answer a search without an LDAP server.
 	directory func(auth.LDAPConfig) ldapDirectory
+
+	// now, when set, is RunScheduledSync's clock (tests); lastScheduled is when it last
+	// started a sync of each config, guarded by scheduleMu.
+	now           func() time.Time
+	scheduleMu    sync.Mutex
+	lastScheduled map[uuid.UUID]time.Time
 }
 
 // ldapDirectory is the part of *auth.LDAPClient that Sync asks.
@@ -275,10 +283,7 @@ func (h *LDAPHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	syncInterval := req.SyncIntervalMinutes
-	if syncInterval <= 0 {
-		syncInterval = 60
-	}
+	syncInterval := req.SyncIntervalMinutes // 0 turns the scheduled sync off
 
 	cfg, err := h.queries.CreateLDAPConfig(c.Context(), db.CreateLDAPConfigParams{
 		Name:                  req.Name,
@@ -398,10 +403,7 @@ func (h *LDAPHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	syncInterval := req.SyncIntervalMinutes
-	if syncInterval <= 0 {
-		syncInterval = 60
-	}
+	syncInterval := req.SyncIntervalMinutes // 0 turns the scheduled sync off
 
 	cfg, err := h.queries.UpdateLDAPConfig(c.Context(), db.UpdateLDAPConfigParams{
 		ID:                    id,
@@ -526,111 +528,250 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	cfg, err := h.queries.GetLDAPConfig(c.Context(), id)
-	if err != nil {
+	if _, err := h.queries.GetLDAPConfig(c.Context(), id); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusNotFound, "LDAP config not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get LDAP config")
 	}
 
-	ldapCfg, err := h.buildLDAPConfig(cfg)
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to build LDAP config: "+err.Error())
+	res, err := h.syncConfig(c.Context(), id)
+	if errors.Is(err, errLDAPSyncRunning) {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":   "ldap_sync_running",
+			"message": "A sync of this directory is already running. Try again when it has finished.",
+		})
+	}
+	if res.ran {
+		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "ldap", id.String(), "ldap_sync", res.auditDetails(err))
+	}
+	switch {
+	case err == nil:
+	case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
+		return fiber.NewError(fiber.StatusBadGateway, "The directory could not be searched, so the sync stopped and nobody was deactivated by it. "+
+			classifyLDAPError(err))
+	default:
+		slog.Error("LDAP sync failed", "config_id", id, "error", err)
+		return fiber.NewError(fiber.StatusInternalServerError, "The sync failed; the server log has the reason.")
 	}
 
+	return c.JSON(fiber.Map{
+		"message":          "Sync complete",
+		"users_synced":     res.synced,
+		"users_disabled":   res.disabled,
+		"users_re_enabled": res.reEnabled,
+		"users_skipped":    res.skipped,
+	})
+}
+
+// ldapSyncLease is the longest one sync may hold its config's lease (ClaimLDAPSyncLease),
+// and the bound on the sync itself: a lease left by a process that died lets the next
+// sync run once it is over.
+const ldapSyncLease = time.Hour
+
+// errLDAPSyncRunning is a sync refused because another sync of the same config holds
+// its lease: the scheduled one, or a Sync Now on this or another replica.
+var errLDAPSyncRunning = errors.New("ldap sync: another sync of this config is running")
+
+// ldapSyncResult is what a sync did. ran is false for a sync that never started.
+type ldapSyncResult struct {
+	ran                                  bool
+	synced, disabled, reEnabled, skipped int
+}
+
+// auditDetails are the ldap_sync row's details: the counts and, for a sync that
+// stopped, the class of the failure (never the directory's own error text).
+func (r ldapSyncResult) auditDetails(err error) json.RawMessage {
+	d := map[string]any{"synced": r.synced, "disabled": r.disabled, "re_enabled": r.reEnabled, "skipped": r.skipped}
+	if err != nil {
+		d["outcome"] = "failed"
+		d["reason"] = ldapFailureClass(err)
+	}
+	details, _ := json.Marshal(d)
+	return details
+}
+
+// syncConfig runs one sync of a config, under its lease, and says what it did.
+//
+// Every LDAP account is searched for by its address. Only a search that succeeded and
+// found nobody deactivates an account, and ends its sessions; a search that failed
+// leaves the account as it is and is counted as skipped, and a directory that cannot be
+// reached or bound to stops the sync. An account a sync deactivated is re-enabled by a
+// sync that finds it again, after its old sessions are ended (an account deactivated by
+// hand stays inactive: deactivated_by_directory). It stops between accounts when ctx
+// ends, which is how it stops with the process.
+func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyncResult, err error) {
+	token := uuid.New()
+	cfg, err := h.queries.ClaimLDAPSyncLease(ctx, db.ClaimLDAPSyncLeaseParams{
+		ID: id, Token: token, LeaseSeconds: ldapSyncLease.Seconds(),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return res, errLDAPSyncRunning
+	}
+	if err != nil {
+		return res, fmt.Errorf("claim the sync lease: %w", err)
+	}
+	defer func() {
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := h.queries.ReleaseLDAPSyncLease(rctx, db.ReleaseLDAPSyncLeaseParams{ID: id, Token: token}); err != nil {
+			slog.Warn("LDAP sync: could not release the sync lease; it runs out on its own", "config_id", id, "error", err)
+		}
+	}()
+	res.ran = true
+	ctx, cancel := context.WithTimeout(ctx, ldapSyncLease)
+	defer cancel()
+
+	ldapCfg, err := h.buildLDAPConfig(cfg)
+	if err != nil {
+		return res, fmt.Errorf("build the LDAP config: %w", err)
+	}
 	var client ldapDirectory = auth.NewLDAPClient(ldapCfg)
 	if h.directory != nil {
 		client = h.directory(ldapCfg)
 	}
 
-	// Get all LDAP users from DB
-	ldapUsers, err := h.queries.ListLDAPUsers(c.Context())
+	ldapUsers, err := h.queries.ListLDAPUsers(ctx)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list LDAP users")
+		return res, fmt.Errorf("list the LDAP users: %w", err)
 	}
 
-	// Parse group-role mapping
 	mapping := make(map[string]string)
 	if len(cfg.GroupRoleMapping) > 0 {
 		_ = json.Unmarshal(cfg.GroupRoleMapping, &mapping)
 	}
 
-	synced := 0
-	disabled := 0
-	reEnabled := 0
 	for _, dbUser := range ldapUsers {
-		// Look up current user info in LDAP
+		if err := ctx.Err(); err != nil {
+			return res, fmt.Errorf("the sync was stopped: %w", err)
+		}
 		ldapUser, err := client.SearchUser(dbUser.Email)
-		if err != nil {
-			// User no longer in directory — disable if still active
-			if dbUser.IsActive {
-				_ = h.queries.SetLDAPUserActive(c.Context(), db.SetLDAPUserActiveParams{
-					ID:       dbUser.ID,
-					IsActive: false,
-				})
-				// And end the sessions, as an admin's deactivation does: flipping
-				// is_active only suspends them, and the re-enable below — which a
-				// directory outage read as "gone" leads to — would revive every one
-				// with no sign-in. After the flip, as separate statements: a sign-in
-				// racing it is refused by CreateSessionAtEpoch's is_active, and every
-				// session older than the flip is listed and revoked here.
-				if _, err := auth.RevokeAllUserSessionsIn(c.Context(), h.queries, dbUser.ID); err != nil {
-					slog.Error("LDAP sync: disabled a user but could not end their sessions; the sync that re-enables them retries it",
-						"user_id", dbUser.ID, "error", err)
-				}
-				disabled++
-				slog.Info("LDAP sync: disabled user removed from directory", "email", dbUser.Email)
+		switch {
+		case errors.Is(err, auth.ErrLDAPUserNotFound):
+			// Gone from the directory. And the sessions are ended, as an admin's
+			// deactivation does: flipping is_active only suspends them, and a later
+			// re-enable would revive every one with no sign-in. After the flip, as
+			// separate statements: a sign-in racing it is refused by
+			// CreateSessionAtEpoch's is_active, and every session older than the
+			// flip is listed and revoked here.
+			if !dbUser.IsActive {
+				continue
 			}
+			n, err := h.queries.DeactivateLDAPUserForDirectory(ctx, dbUser.ID)
+			if err != nil || n == 0 {
+				continue
+			}
+			if _, err := auth.RevokeAllUserSessionsIn(ctx, h.queries, dbUser.ID); err != nil {
+				slog.Error("LDAP sync: disabled a user but could not end their sessions; the sync that re-enables them retries it",
+					"user_id", dbUser.ID, "error", err)
+			}
+			res.disabled++
+			slog.Info("LDAP sync: disabled user removed from directory", "email", dbUser.Email)
+			continue
+		case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
+			return res, fmt.Errorf("search the directory: %w", err)
+		case err != nil:
+			// The search did not answer whether the user is there: nothing changes.
+			res.skipped++
+			slog.Warn("LDAP sync: a user's search failed; the account is left as it is",
+				"user_id", dbUser.ID, "reason", ldapFailureClass(err))
 			continue
 		}
 
-		// User exists in directory — re-enable if previously disabled
-		if !dbUser.IsActive {
+		// In the directory: re-enabled when a sync had disabled them.
+		if !dbUser.IsActive && dbUser.DeactivatedByDirectory {
 			// End any session left from before the deactivation first: the revoke
 			// above may have failed, and nothing else retries it. A no-op when they
 			// are already ended; if it fails, the user stays disabled for the next sync.
-			if _, err := auth.RevokeAllUserSessionsIn(c.Context(), h.queries, dbUser.ID); err != nil {
+			if _, err := auth.RevokeAllUserSessionsIn(ctx, h.queries, dbUser.ID); err != nil {
 				slog.Error("LDAP sync: could not end a disabled user's old sessions; leaving the user disabled",
 					"user_id", dbUser.ID, "error", err)
 				continue
 			}
-			_ = h.queries.SetLDAPUserActive(c.Context(), db.SetLDAPUserActiveParams{
-				ID:       dbUser.ID,
-				IsActive: true,
-			})
-			reEnabled++
-			slog.Info("LDAP sync: re-enabled user found in directory", "email", dbUser.Email)
+			if n, err := h.queries.ReactivateLDAPUserFromDirectory(ctx, dbUser.ID); err == nil && n == 1 {
+				res.reEnabled++
+				slog.Info("LDAP sync: re-enabled user found in directory", "email", dbUser.Email)
+			}
 		}
 
 		// Update display name if changed
 		if ldapUser.DisplayName != "" && ldapUser.DisplayName != dbUser.DisplayName {
-			_, _ = h.queries.UpdateLDAPUserProfile(c.Context(), db.UpdateLDAPUserProfileParams{
+			_, _ = h.queries.UpdateLDAPUserProfile(ctx, db.UpdateLDAPUserProfileParams{
 				ID:          dbUser.ID,
 				DisplayName: ldapUser.DisplayName,
 			})
 		}
 
 		// Sync group-to-role mapping
-		h.syncUserRoles(c, dbUser.ID, ldapUser.Groups, mapping, cfg.DefaultRoleID)
-		synced++
+		h.syncUserRoles(ctx, dbUser.ID, ldapUser.Groups, mapping, cfg.DefaultRoleID)
+		res.synced++
 	}
 
-	_ = h.queries.UpdateLDAPConfigLastSync(c.Context(), id)
+	_ = h.queries.UpdateLDAPConfigLastSync(ctx, id)
+	return res, nil
+}
 
-	details, _ := json.Marshal(map[string]interface{}{
-		"synced":     synced,
-		"disabled":   disabled,
-		"re_enabled": reEnabled,
-	})
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "ldap", id.String(), "ldap_sync", details)
+// RunScheduledSync runs the sync of the config sign-in uses (the oldest enabled one)
+// when its Sync Interval has passed since its last sync, or since the last scheduled
+// attempt, which a sync that stopped does not move last_sync_at past; 0 is off. The
+// scheduler ticks it every minute on the leader replica. It is audited as the system
+// account, the way internal/scheduler writes its own rows.
+func (h *LDAPHandler) RunScheduledSync(ctx context.Context) {
+	cfg, err := h.queries.GetEnabledLDAPConfig(ctx)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("LDAP sync: could not read the enabled config", "error", err)
+		}
+		return
+	}
+	if cfg.SyncIntervalMinutes <= 0 {
+		return
+	}
+	now := time.Now()
+	if h.now != nil {
+		now = h.now()
+	}
+	interval := time.Duration(cfg.SyncIntervalMinutes) * time.Minute
+	h.scheduleMu.Lock()
+	last := h.lastScheduled[cfg.ID]
+	if cfg.LastSyncAt.Valid && cfg.LastSyncAt.Time.After(last) {
+		last = cfg.LastSyncAt.Time
+	}
+	h.scheduleMu.Unlock()
+	if !last.IsZero() && now.Sub(last) < interval {
+		return
+	}
 
-	return c.JSON(fiber.Map{
-		"message":          "Sync complete",
-		"users_synced":     synced,
-		"users_disabled":   disabled,
-		"users_re_enabled": reEnabled,
-	})
+	res, err := h.syncConfig(ctx, cfg.ID)
+	if !res.ran {
+		if !errors.Is(err, errLDAPSyncRunning) {
+			slog.Warn("LDAP sync: the scheduled sync could not start", "config_id", cfg.ID, "error", err)
+		}
+		return // tried again at the next tick
+	}
+	h.scheduleMu.Lock()
+	if h.lastScheduled == nil {
+		h.lastScheduled = map[uuid.UUID]time.Time{}
+	}
+	h.lastScheduled[cfg.ID] = now
+	h.scheduleMu.Unlock()
+	if err != nil {
+		slog.Warn("LDAP sync: the scheduled sync stopped", "config_id", cfg.ID, "reason", ldapFailureClass(err))
+	}
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := h.queries.InsertAuditLog(actx, db.InsertAuditLogParams{
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+		ResourceType: "ldap",
+		ResourceID:   cfg.ID.String(),
+		Action:       "ldap_sync",
+		Details:      res.auditDetails(err),
+	}); err != nil {
+		slog.Warn("LDAP sync: failed to insert the audit row of a scheduled sync", "config_id", cfg.ID, "error", err)
+	}
+	if h.eventPub != nil {
+		h.eventPub.ClusterEvent(actx, "", events.KindAuditEntry, "ldap", cfg.ID.String(), "ldap_sync")
+	}
 }
 
 func (h *LDAPHandler) buildLDAPConfig(cfg db.LdapConfig) (auth.LDAPConfig, error) {
@@ -661,9 +802,9 @@ func (h *LDAPHandler) buildLDAPConfig(cfg db.LdapConfig) (auth.LDAPConfig, error
 }
 
 // syncUserRoles maps LDAP group DNs to RBAC role UUIDs and assigns them.
-func (h *LDAPHandler) syncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
+func (h *LDAPHandler) syncUserRoles(ctx context.Context, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
 	// Clear existing RBAC roles
-	_ = h.queries.RevokeAllUserRoles(c.Context(), userID)
+	_ = h.queries.RevokeAllUserRoles(ctx, userID)
 
 	assigned := false
 	for _, groupDN := range groups {
@@ -675,7 +816,7 @@ func (h *LDAPHandler) syncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []stri
 		if err != nil {
 			continue
 		}
-		if _, err := h.queries.AssignUserRole(c.Context(), db.AssignUserRoleParams{
+		if _, err := h.queries.AssignUserRole(ctx, db.AssignUserRoleParams{
 			UserID:    userID,
 			RoleID:    roleID,
 			ScopeType: "global",
@@ -688,7 +829,7 @@ func (h *LDAPHandler) syncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []stri
 	// If no group matched, assign default role
 	if !assigned && defaultRoleID.Valid {
 		defID, _ := uuid.FromBytes(defaultRoleID.Bytes[:])
-		_, _ = h.queries.AssignUserRole(c.Context(), db.AssignUserRoleParams{
+		_, _ = h.queries.AssignUserRole(ctx, db.AssignUserRoleParams{
 			UserID:    userID,
 			RoleID:    defID,
 			ScopeType: "global",
@@ -697,7 +838,7 @@ func (h *LDAPHandler) syncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []stri
 
 	// Invalidate RBAC cache
 	if h.rbac != nil {
-		h.rbac.InvalidateUser(c.Context(), userID)
+		h.rbac.InvalidateUser(ctx, userID)
 	}
 }
 
@@ -726,7 +867,7 @@ func (h *LDAPHandler) BuildLDAPConfigFromDB(cfg db.LdapConfig) (auth.LDAPConfig,
 
 // SyncUserRoles is exported for use by the auth handler during login.
 func (h *LDAPHandler) SyncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
-	h.syncUserRoles(c, userID, groups, mapping, defaultRoleID)
+	h.syncUserRoles(c.Context(), userID, groups, mapping, defaultRoleID)
 }
 
 // optionalRoleID turns the default_role_id body value into the nullable column

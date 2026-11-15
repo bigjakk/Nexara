@@ -696,7 +696,7 @@ The **Test Connection** panel appears only once the config is saved, and tests t
 
 > **StartTLS and `ldaps://` both check the certificate** against the host in the Server URL, unless **Skip TLS Verify** is on. Use the name the certificate was issued for, not an IP address it does not list.
 >
-> **Sync is manual.** The **Sync Interval (minutes)** field is stored, but nothing runs it: only **Sync Now** syncs. A sync disables a user the search does not find, and ends their sessions, and that includes any search error, such as a directory outage; a later sync re-enables anyone still in the directory, including someone you deactivated by hand.
+> **Sync.** The config sign-in uses (the oldest enabled one) is synced every **Sync interval** minutes, 60 by default; 0 turns the scheduled sync off. **Sync Now** syncs any saved config at once. One sync of a config runs at a time: Sync Now answers that one is already running, and a scheduled sync waits for the next minute. A sync disables a user only when the directory answered the search and did not return them, and ends their sessions; a search that fails leaves the user as they are (counted as skipped), and a directory that cannot be reached or bound to stops the sync with nobody disabled. A later sync re-enables a user a sync disabled once the directory has them again, but never someone you deactivated by hand, which includes every LDAP user that was inactive before the upgrade to this release. Scheduled syncs are audited as `ldap_sync` by the system account.
 
 #### How LDAP Login Works
 

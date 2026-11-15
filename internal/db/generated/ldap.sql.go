@@ -14,6 +14,56 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimLDAPSyncLease = `-- name: ClaimLDAPSyncLease :one
+UPDATE ldap_configs
+SET sync_lease_token = $1::uuid,
+    sync_lease_expires_at = now() + make_interval(secs => $2::double precision)
+WHERE id = $3
+  AND (sync_lease_expires_at IS NULL OR sync_lease_expires_at <= now())
+RETURNING id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at, sync_lease_token, sync_lease_expires_at
+`
+
+type ClaimLDAPSyncLeaseParams struct {
+	Token        uuid.UUID `json:"token"`
+	LeaseSeconds float64   `json:"lease_seconds"`
+	ID           uuid.UUID `json:"id"`
+}
+
+// Claims the config's sync lease for lease_seconds, when no sync holds one that is
+// still running, and returns the config; no row when another sync holds it (or the
+// config is gone). One sync per config at a time, whichever replica runs it.
+func (q *Queries) ClaimLDAPSyncLease(ctx context.Context, arg ClaimLDAPSyncLeaseParams) (LdapConfig, error) {
+	row := q.db.QueryRow(ctx, claimLDAPSyncLease, arg.Token, arg.LeaseSeconds, arg.ID)
+	var i LdapConfig
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Enabled,
+		&i.ServerUrl,
+		&i.StartTls,
+		&i.SkipTlsVerify,
+		&i.BindDn,
+		&i.BindPasswordEncrypted,
+		&i.SearchBaseDn,
+		&i.UserFilter,
+		&i.UsernameAttribute,
+		&i.EmailAttribute,
+		&i.DisplayNameAttribute,
+		&i.GroupSearchBaseDn,
+		&i.GroupFilter,
+		&i.GroupAttribute,
+		&i.GroupRoleMapping,
+		&i.DefaultRoleID,
+		&i.SyncIntervalMinutes,
+		&i.LastSyncAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SyncLeaseToken,
+		&i.SyncLeaseExpiresAt,
+	)
+	return i, err
+}
+
 const createLDAPConfig = `-- name: CreateLDAPConfig :one
 INSERT INTO ldap_configs (
     name, enabled, server_url, start_tls, skip_tls_verify,
@@ -27,7 +77,7 @@ INSERT INTO ldap_configs (
     $9, $10, $11, $12,
     $13, $14, $15,
     $16, $17, $18
-) RETURNING id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at
+) RETURNING id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at, sync_lease_token, sync_lease_expires_at
 `
 
 type CreateLDAPConfigParams struct {
@@ -96,6 +146,8 @@ func (q *Queries) CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigPara
 		&i.LastSyncAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncLeaseToken,
+		&i.SyncLeaseExpiresAt,
 	)
 	return i, err
 }
@@ -103,7 +155,7 @@ func (q *Queries) CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigPara
 const createLDAPUser = `-- name: CreateLDAPUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source)
 VALUES ($1, '', $2, true, 'user', 'ldap')
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
 `
 
 type CreateLDAPUserParams struct {
@@ -126,8 +178,24 @@ func (q *Queries) CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) 
 		&i.Role,
 		&i.AuthSource,
 		&i.AuthEpoch,
+		&i.DeactivatedByDirectory,
 	)
 	return i, err
+}
+
+const deactivateLDAPUserForDirectory = `-- name: DeactivateLDAPUserForDirectory :execrows
+UPDATE users SET is_active = false, deactivated_by_directory = true
+WHERE id = $1 AND auth_source = 'ldap' AND is_active
+`
+
+// A sync did not find the account in the directory. Only an active account: one an
+// administrator deactivated in the meantime keeps their reason, deactivated by hand.
+func (q *Queries) DeactivateLDAPUserForDirectory(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deactivateLDAPUserForDirectory, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteLDAPConfig = `-- name: DeleteLDAPConfig :exec
@@ -140,7 +208,7 @@ func (q *Queries) DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error {
 }
 
 const getEnabledLDAPConfig = `-- name: GetEnabledLDAPConfig :one
-SELECT id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at FROM ldap_configs WHERE enabled = true ORDER BY created_at, id LIMIT 1
+SELECT id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at, sync_lease_token, sync_lease_expires_at FROM ldap_configs WHERE enabled = true ORDER BY created_at, id LIMIT 1
 `
 
 func (q *Queries) GetEnabledLDAPConfig(ctx context.Context) (LdapConfig, error) {
@@ -169,12 +237,14 @@ func (q *Queries) GetEnabledLDAPConfig(ctx context.Context) (LdapConfig, error) 
 		&i.LastSyncAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncLeaseToken,
+		&i.SyncLeaseExpiresAt,
 	)
 	return i, err
 }
 
 const getLDAPConfig = `-- name: GetLDAPConfig :one
-SELECT id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at FROM ldap_configs WHERE id = $1
+SELECT id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at, sync_lease_token, sync_lease_expires_at FROM ldap_configs WHERE id = $1
 `
 
 func (q *Queries) GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, error) {
@@ -203,12 +273,14 @@ func (q *Queries) GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, 
 		&i.LastSyncAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncLeaseToken,
+		&i.SyncLeaseExpiresAt,
 	)
 	return i, err
 }
 
 const getUserByEmailAndSource = `-- name: GetUserByEmailAndSource :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch FROM users WHERE email = $1 AND auth_source = $2
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory FROM users WHERE email = $1 AND auth_source = $2
 `
 
 type GetUserByEmailAndSourceParams struct {
@@ -231,6 +303,7 @@ func (q *Queries) GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmai
 		&i.Role,
 		&i.AuthSource,
 		&i.AuthEpoch,
+		&i.DeactivatedByDirectory,
 	)
 	return i, err
 }
@@ -271,7 +344,7 @@ func (q *Queries) ListDirectoryConfigsUsingRole(ctx context.Context, roleID uuid
 }
 
 const listLDAPConfigs = `-- name: ListLDAPConfigs :many
-SELECT id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at FROM ldap_configs ORDER BY created_at
+SELECT id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at, sync_lease_token, sync_lease_expires_at FROM ldap_configs ORDER BY created_at
 `
 
 func (q *Queries) ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error) {
@@ -306,6 +379,8 @@ func (q *Queries) ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error) {
 			&i.LastSyncAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SyncLeaseToken,
+			&i.SyncLeaseExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -318,21 +393,22 @@ func (q *Queries) ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error) {
 }
 
 const listLDAPUsers = `-- name: ListLDAPUsers :many
-SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source
+SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory
 FROM users
 WHERE auth_source = 'ldap'
 ORDER BY email
 `
 
 type ListLDAPUsersRow struct {
-	ID          uuid.UUID `json:"id"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name"`
-	Role        string    `json:"role"`
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	AuthSource  string    `json:"auth_source"`
+	ID                     uuid.UUID `json:"id"`
+	Email                  string    `json:"email"`
+	DisplayName            string    `json:"display_name"`
+	Role                   string    `json:"role"`
+	IsActive               bool      `json:"is_active"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
+	AuthSource             string    `json:"auth_source"`
+	DeactivatedByDirectory bool      `json:"deactivated_by_directory"`
 }
 
 func (q *Queries) ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error) {
@@ -353,6 +429,7 @@ func (q *Queries) ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AuthSource,
+			&i.DeactivatedByDirectory,
 		); err != nil {
 			return nil, err
 		}
@@ -364,18 +441,34 @@ func (q *Queries) ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
 	return items, nil
 }
 
-const setLDAPUserActive = `-- name: SetLDAPUserActive :exec
-UPDATE users SET is_active = $2
-WHERE id = $1 AND auth_source = 'ldap'
+const reactivateLDAPUserFromDirectory = `-- name: ReactivateLDAPUserFromDirectory :execrows
+UPDATE users SET is_active = true, deactivated_by_directory = false
+WHERE id = $1 AND auth_source = 'ldap' AND NOT is_active AND deactivated_by_directory
 `
 
-type SetLDAPUserActiveParams struct {
-	ID       uuid.UUID `json:"id"`
-	IsActive bool      `json:"is_active"`
+// A sync found again an account that a sync had deactivated. One deactivated by hand,
+// or reactivated by an administrator in the meantime, is not touched.
+func (q *Queries) ReactivateLDAPUserFromDirectory(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, reactivateLDAPUserFromDirectory, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-func (q *Queries) SetLDAPUserActive(ctx context.Context, arg SetLDAPUserActiveParams) error {
-	_, err := q.db.Exec(ctx, setLDAPUserActive, arg.ID, arg.IsActive)
+const releaseLDAPSyncLease = `-- name: ReleaseLDAPSyncLease :exec
+UPDATE ldap_configs SET sync_lease_token = NULL, sync_lease_expires_at = NULL
+WHERE id = $1 AND sync_lease_token = $2::uuid
+`
+
+type ReleaseLDAPSyncLeaseParams struct {
+	ID    uuid.UUID `json:"id"`
+	Token uuid.UUID `json:"token"`
+}
+
+// Releases the lease this sync claimed, and only that one.
+func (q *Queries) ReleaseLDAPSyncLease(ctx context.Context, arg ReleaseLDAPSyncLeaseParams) error {
+	_, err := q.db.Exec(ctx, releaseLDAPSyncLease, arg.ID, arg.Token)
 	return err
 }
 
@@ -400,7 +493,7 @@ UPDATE ldap_configs SET
     default_role_id = $18,
     sync_interval_minutes = $19
 WHERE id = $1
-RETURNING id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at
+RETURNING id, name, enabled, server_url, start_tls, skip_tls_verify, bind_dn, bind_password_encrypted, search_base_dn, user_filter, username_attribute, email_attribute, display_name_attribute, group_search_base_dn, group_filter, group_attribute, group_role_mapping, default_role_id, sync_interval_minutes, last_sync_at, created_at, updated_at, sync_lease_token, sync_lease_expires_at
 `
 
 type UpdateLDAPConfigParams struct {
@@ -471,6 +564,8 @@ func (q *Queries) UpdateLDAPConfig(ctx context.Context, arg UpdateLDAPConfigPara
 		&i.LastSyncAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncLeaseToken,
+		&i.SyncLeaseExpiresAt,
 	)
 	return i, err
 }
@@ -487,7 +582,7 @@ func (q *Queries) UpdateLDAPConfigLastSync(ctx context.Context, id uuid.UUID) er
 const updateLDAPUserProfile = `-- name: UpdateLDAPUserProfile :one
 UPDATE users SET display_name = $2
 WHERE id = $1 AND auth_source = 'ldap'
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
 `
 
 type UpdateLDAPUserProfileParams struct {
@@ -510,6 +605,7 @@ func (q *Queries) UpdateLDAPUserProfile(ctx context.Context, arg UpdateLDAPUserP
 		&i.Role,
 		&i.AuthSource,
 		&i.AuthEpoch,
+		&i.DeactivatedByDirectory,
 	)
 	return i, err
 }

@@ -74,7 +74,7 @@ func ldapCreateMirror(t *testing.T) apischema.Properties {
 		"group_attribute":          {Type: apischema.String, Optional: true},
 		"group_role_mapping":       {Type: apischema.Object, Optional: true},
 		"default_role_id":          {Type: apischema.String, Optional: true},
-		"sync_interval_minutes":    {Type: apischema.Integer, Optional: true, Default: 0},
+		"sync_interval_minutes":    {Type: apischema.Integer, Optional: true, Default: 60},
 		"acknowledge_insecure_tls": {Type: apischema.Boolean, Optional: true, Default: false},
 	}
 }

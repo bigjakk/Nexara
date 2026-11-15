@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,35 +11,50 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
+// ldapSyncApp is a harness app whose LDAPHandler searches dir, and sync runs Sync Now
+// against the store's config, answering its status.
+func ldapSyncApp(t *testing.T, store *epochStore, dir *fakeDirectory) (*epochApp, *LDAPHandler, func() int) {
+	t.Helper()
+	if store.ldapConfig == nil {
+		store.ldapConfig = &db.LdapConfig{ID: uuid.New()}
+	}
+	a := newEpochApp(t, store, epochOptions{})
+	h := &LDAPHandler{queries: a.users.queries, directory: func(auth.LDAPConfig) ldapDirectory { return *dir }}
+	params, err := apischema.Properties{"id": {Type: apischema.String}}.Validate(map[string]any{"id": store.ldapConfig.ID.String()})
+	if err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	a.probe = func(c fiber.Ctx) error { return h.Sync(c, params) }
+	return a, h, func() int {
+		t.Helper()
+		resp, err := a.app.Test(httptest.NewRequest(http.MethodGet, "/probe", nil), fiber.TestConfig{Timeout: 30 * time.Second})
+		if err != nil {
+			t.Fatalf("sync: %v", err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+}
+
 // TestLDAPSync_ADisabledUserHasNoSessionToReviveWhenReEnabled: a sync that cannot
-// find a user (here: a directory that refuses the connection, which reads as "gone")
-// deactivates them, and must END their sessions as an admin's deactivation does —
-// flipping is_active alone only suspends them, and the next sync's re-enable would
+// find a user deactivates them, and must END their sessions as an admin's deactivation
+// does — flipping is_active alone only suspends them, and the next sync's re-enable would
 // bring every one back with no sign-in.
 func TestLDAPSync_ADisabledUserHasNoSessionToReviveWhenReEnabled(t *testing.T) {
 	t.Parallel()
 	user := db.User{ID: uuid.New(), Email: "alice@example.com", IsActive: true, Role: "user", AuthSource: "ldap"}
 	store := newEpochStore(user)
 	store.sessions = []db.Session{{ID: uuid.New(), UserID: user.ID, ExpiresAt: time.Now().Add(time.Hour)}}
-	configID := uuid.New()
-	store.ldapConfig = &db.LdapConfig{ID: configID, ServerUrl: "ldap://127.0.0.1:1"}
-	a := newEpochApp(t, store, epochOptions{})
-	h := &LDAPHandler{queries: a.users.queries}
-	params, err := apischema.Properties{"id": {Type: apischema.String}}.Validate(map[string]any{"id": configID.String()})
-	if err != nil {
-		t.Fatalf("params: %v", err)
-	}
-	a.probe = func(c fiber.Ctx) error { return h.Sync(c, params) }
-
-	resp, err := a.app.Test(httptest.NewRequest(http.MethodGet, "/probe", nil), fiber.TestConfig{Timeout: 30 * time.Second})
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("sync: %v, status %v", err, resp)
+	_, _, sync := ldapSyncApp(t, store, &fakeDirectory{})
+	if status := sync(); status != http.StatusOK {
+		t.Fatalf("sync: status %d", status)
 	}
 	if store.user(user.ID).IsActive {
 		t.Fatal("precondition: the sync did not deactivate the user")
@@ -48,14 +65,21 @@ func TestLDAPSync_ADisabledUserHasNoSessionToReviveWhenReEnabled(t *testing.T) {
 	}
 }
 
-// fakeDirectory answers every search with found, or with an error when found is nil.
-type fakeDirectory struct{ found *auth.LDAPUser }
+// fakeDirectory answers every search with found, or when found is nil with err, or
+// with "not in the directory" when err is nil too.
+type fakeDirectory struct {
+	found *auth.LDAPUser
+	err   error
+}
 
 func (d fakeDirectory) SearchUser(string) (*auth.LDAPUser, error) {
-	if d.found == nil {
-		return nil, errors.New("not in the directory")
+	switch {
+	case d.found != nil:
+		return d.found, nil
+	case d.err != nil:
+		return nil, d.err
 	}
-	return d.found, nil
+	return nil, fmt.Errorf("%w: no entries matched", auth.ErrLDAPUserNotFound)
 }
 
 // TestLDAPSync_AFailedRevokeIsRetriedBeforeTheReEnable: when ending the sessions
@@ -66,21 +90,12 @@ func TestLDAPSync_AFailedRevokeIsRetriedBeforeTheReEnable(t *testing.T) {
 	user := db.User{ID: uuid.New(), Email: "alice@example.com", IsActive: true, Role: "user", AuthSource: "ldap"}
 	store := newEpochStore(user)
 	store.sessions = []db.Session{{ID: uuid.New(), UserID: user.ID, ExpiresAt: time.Now().Add(time.Hour)}}
-	configID := uuid.New()
-	store.ldapConfig = &db.LdapConfig{ID: configID}
-	a := newEpochApp(t, store, epochOptions{})
 	dir := &fakeDirectory{}
-	h := &LDAPHandler{queries: a.users.queries, directory: func(auth.LDAPConfig) ldapDirectory { return *dir }}
-	params, err := apischema.Properties{"id": {Type: apischema.String}}.Validate(map[string]any{"id": configID.String()})
-	if err != nil {
-		t.Fatalf("params: %v", err)
-	}
-	a.probe = func(c fiber.Ctx) error { return h.Sync(c, params) }
+	_, _, syncStatus := ldapSyncApp(t, store, dir)
 	sync := func() {
 		t.Helper()
-		resp, err := a.app.Test(httptest.NewRequest(http.MethodGet, "/probe", nil), fiber.TestConfig{Timeout: 30 * time.Second})
-		if err != nil || resp.StatusCode != http.StatusOK {
-			t.Fatalf("sync: %v, status %v", err, resp)
+		if status := syncStatus(); status != http.StatusOK {
+			t.Fatalf("sync: status %d", status)
 		}
 	}
 
@@ -102,5 +117,76 @@ func TestLDAPSync_AFailedRevokeIsRetriedBeforeTheReEnable(t *testing.T) {
 	}
 	if live := store.liveSessionsOf(user.ID); len(live) != 0 {
 		t.Errorf("re-enabled, the user has %d session(s) from before the deactivation still live", len(live))
+	}
+}
+
+// TestLDAPSync_OnlyASearchThatFoundNobodyDeactivates: a search that failed says nothing
+// about whether the user is in the directory, so it deactivates nobody; a directory that
+// cannot be reached stops the sync and answers 502.
+func TestLDAPSync_OnlyASearchThatFoundNobodyDeactivates(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err    error
+		status int
+	}{
+		{fmt.Errorf("%w: size limit exceeded", auth.ErrLDAPSearchFailed), http.StatusOK},
+		{fmt.Errorf("%w: connection refused", auth.ErrLDAPConnection), http.StatusBadGateway},
+	} {
+		user := db.User{ID: uuid.New(), Email: "alice@example.com", IsActive: true, Role: "user", AuthSource: "ldap"}
+		store := newEpochStore(user)
+		_, _, sync := ldapSyncApp(t, store, &fakeDirectory{err: tc.err})
+		if status := sync(); status != tc.status || !store.user(user.ID).IsActive {
+			t.Errorf("%v: status %d, active %t; want %d and still active", tc.err, status, store.user(user.ID).IsActive, tc.status)
+		}
+	}
+}
+
+// TestLDAPSync_AHandDeactivatedUserIsNotReEnabled: an account an administrator
+// deactivated (every account inactive before the upgrade reads so) stays inactive when
+// the directory still has it; only one a sync deactivated is re-enabled.
+func TestLDAPSync_AHandDeactivatedUserIsNotReEnabled(t *testing.T) {
+	t.Parallel()
+	user := db.User{ID: uuid.New(), Email: "alice@example.com", IsActive: false, Role: "user", AuthSource: "ldap"}
+	store := newEpochStore(user)
+	_, _, sync := ldapSyncApp(t, store, &fakeDirectory{found: &auth.LDAPUser{Email: user.Email}})
+	if status := sync(); status != http.StatusOK || store.user(user.ID).IsActive {
+		t.Errorf("status %d, active %t: a sync re-enabled an account deactivated by hand", status, store.user(user.ID).IsActive)
+	}
+}
+
+// TestLDAPSync_TheScheduleRunsWhenDueOneSyncAtATime: the scheduled sync runs once its
+// interval has passed since the last sync, never with an interval of 0, is audited as
+// the system account, and neither it nor Sync Now runs while another sync holds the lease.
+func TestLDAPSync_TheScheduleRunsWhenDueOneSyncAtATime(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	store := newEpochStore(db.User{ID: uuid.New(), Email: "alice@example.com", IsActive: true, AuthSource: "ldap"})
+	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true, SyncIntervalMinutes: 60,
+		LastSyncAt: pgtype.Timestamptz{Time: now.Add(-30 * time.Minute), Valid: true}}
+	a, h, syncNow := ldapSyncApp(t, store, &fakeDirectory{found: &auth.LDAPUser{}})
+	h.now = func() time.Time { return now }
+	runs := func() int { return len(store.named("ListLDAPUsers")) }
+
+	h.RunScheduledSync(context.Background())
+	if runs() != 0 {
+		t.Fatal("a sync ran 30 minutes into a 60-minute interval")
+	}
+	now = now.Add(31 * time.Minute)
+	store.syncLeased = true
+	h.RunScheduledSync(context.Background())
+	if status := syncNow(); runs() != 0 || status != http.StatusConflict {
+		t.Fatalf("with another sync running: %d syncs, Sync Now %d; want none, and 409", runs(), status)
+	}
+	store.syncLeased = false
+	h.RunScheduledSync(context.Background())
+	rows, _ := auditOf(a, "ldap_sync")
+	if runs() != 1 || len(rows) != 1 || rows[0].actor != auth.SystemUserID {
+		t.Errorf("once due: %d syncs, audit rows %v; want one, by the system account", runs(), rows)
+	}
+	store.ldapConfig.SyncIntervalMinutes = 0
+	now = now.Add(24 * time.Hour)
+	h.RunScheduledSync(context.Background())
+	if runs() != 1 {
+		t.Error("a sync ran with the interval at 0 (off)")
 	}
 }
