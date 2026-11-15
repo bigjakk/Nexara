@@ -33,6 +33,29 @@ func DefaultWeights() Weights {
 	return Weights{CPU: 0.3, Memory: 0.7}
 }
 
+// MaxWeight is the largest weight DRS accepts. The imbalance is a ratio, so a
+// common scale changes nothing and 100 leaves room for percentages; far larger
+// values overflow the variance (1e200 squares to +Inf) and every node reads as
+// infinitely imbalanced.
+const MaxWeight = 100
+
+// ValidWeight reports whether w can weight a node score: a number from 0 to
+// MaxWeight. NaN and the infinities fail.
+func ValidWeight(w float64) bool {
+	return w >= 0 && w <= MaxWeight
+}
+
+// ParseWeights reads stored weights, and reports false for JSON it cannot read
+// or a cpu or memory weight ValidWeight refuses. The API refuses those on
+// write; this covers a value stored before it did.
+func ParseWeights(raw []byte) (Weights, bool) {
+	var w Weights
+	if err := json.Unmarshal(raw, &w); err != nil || !ValidWeight(w.CPU) || !ValidWeight(w.Memory) {
+		return DefaultWeights(), false
+	}
+	return w, true
+}
+
 // NodeScore holds the computed load score for a node.
 type NodeScore struct {
 	Node    string
@@ -181,9 +204,10 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 		return nil, nil
 	}
 
-	var weights Weights
-	if err := json.Unmarshal(cfg.Weights, &weights); err != nil {
-		weights = DefaultWeights()
+	weights, ok := ParseWeights(cfg.Weights)
+	if !ok {
+		e.logger.Warn("DRS: stored weights are unreadable or out of range; using the defaults",
+			"cluster_id", clusterID, "weights", string(cfg.Weights))
 	}
 
 	client, err := e.createClient(ctx, clusterID)

@@ -788,7 +788,7 @@ The Distributed Resource Scheduler automatically balances VM workloads across cl
    - **Automatic — migrate VMs** — DRS executes the migrations itself
    - **Disabled — do nothing** — turns evaluation off
 4. Configure:
-   - **Resource Weights** — how heavily CPU vs. memory pressure counts toward a node's load score
+   - **Resource Weights** — how heavily CPU vs. memory pressure counts toward a node's load score. Through the API each weight must be a number from 0 to 100; anything else is refused with a 400 that names the weight
    - **Imbalance Threshold** — the cluster imbalance percentage that triggers migration planning (5–100%, in 5% steps)
    - **Evaluation Interval** — how often DRS evaluates balance, in seconds, at least 60
    - **Hold-off after a node boots** — for this many minutes after a node boots, DRS moves no guest onto it or off it (10 by default, up to 1440; 0 turns it off). See [Guests DRS Leaves in Place](#guests-drs-leaves-in-place)

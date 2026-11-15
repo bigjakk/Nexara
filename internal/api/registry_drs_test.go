@@ -322,6 +322,28 @@ func TestDRSConfigBody(t *testing.T) {
 		})
 	}
 
+	// The schema can only call weights "an object", so UpdateConfig refuses a
+	// weight outside 0..drs.MaxWeight before anything is stored: 1e200 made
+	// every imbalance +Inf. The real handler runs, with no database behind it.
+	t.Run("a weight out of range is refused", func(t *testing.T) {
+		e := declaredEndpoint(t, fiber.MethodPut, path)
+		e.Handler = handlers.NewDRSHandler(nil, "", nil, nil).UpdateConfig
+		e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
+		app := newRegistryApp(t, noAuth(), e)
+		for _, weights := range []string{
+			`{"cpu":1e200,"memory":1e200}`,
+			`{"cpu":1e400,"memory":0.7}`,
+			`{"cpu":-0.1,"memory":0.7}`,
+			`{"cpu":0.3,"memory":"0.7"}`,
+		} {
+			body := `{"mode":"advisory","weights":` + weights + `,"imbalance_threshold":0.25,"eval_interval_seconds":300}`
+			status, env := send(t, app, jsonRequest(http.MethodPut, target, body))
+			if status != fiber.StatusBadRequest || !strings.HasPrefix(env.Message, "weights.") {
+				t.Errorf("%s: status = %d (%q), want 400 naming the weight", weights, status, env.Message)
+			}
+		}
+	})
+
 	// A threshold of exactly 0 passes the SCHEMA — the bound is inclusive —
 	// and has to be refused by the handler instead. This drives the real
 	// declaration with the real handler attached, so it is the endpoint

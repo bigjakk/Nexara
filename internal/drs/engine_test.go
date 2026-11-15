@@ -352,6 +352,27 @@ func TestRulesPin(t *testing.T) {
 	}
 }
 
+// ParseWeights is what the planner and the config card fall back through for a
+// weight stored before the API refused it.
+func TestParseWeights(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		raw  string
+		want Weights
+		ok   bool
+	}{
+		{`{"cpu":0.4,"memory":0.6}`, Weights{CPU: 0.4, Memory: 0.6}, true},
+		{`{"cpu":30,"memory":70,"network":0.1}`, Weights{CPU: 30, Memory: 70}, true},
+		{`{"cpu":1e200,"memory":1e200}`, DefaultWeights(), false},
+		{`{"cpu":-0.1,"memory":0.7}`, DefaultWeights(), false},
+		{`{"cpu":"x"}`, DefaultWeights(), false},
+	} {
+		if got, ok := ParseWeights([]byte(tc.raw)); got != tc.want || ok != tc.ok {
+			t.Errorf("ParseWeights(%s) = %+v, %v; want %+v, %v", tc.raw, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 func TestExtractLRMState(t *testing.T) {
 	tests := []struct {
 		name   string

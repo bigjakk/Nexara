@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -117,7 +119,7 @@ func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 		ClusterID:           c.ClusterID,
 		Mode:                c.Mode,
 		Enabled:             c.Enabled,
-		Weights:             c.Weights,
+		Weights:             effectiveDRSWeights(c.Weights),
 		ImbalanceThreshold:  c.ImbalanceThreshold,
 		EvalIntervalSeconds: c.EvalIntervalSeconds,
 		IncludeContainers:   c.IncludeContainers,
@@ -127,6 +129,42 @@ func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 		UpdatedAt:           c.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
+
+// effectiveDRSWeights is the stored weights, or the defaults the engine plans
+// with when they are unreadable or out of range (drs.ParseWeights), so the card
+// shows what DRS uses. Only a value stored before UpdateConfig refused it lands
+// here.
+func effectiveDRSWeights(raw json.RawMessage) json.RawMessage {
+	if _, ok := drs.ParseWeights(raw); ok {
+		return raw
+	}
+	return json.RawMessage(`{"cpu":0.3,"memory":0.7}`)
+}
+
+// checkDRSWeights refuses a weight that is not a number from 0 to
+// drs.MaxWeight. The schema can only say "an object", and a weight of 1e200
+// makes every imbalance infinite.
+func checkDRSWeights(weights map[string]any) error {
+	for name, v := range weights {
+		var w float64
+		var err error
+		switch n := v.(type) {
+		case json.Number:
+			w, err = n.Float64()
+		case float64:
+			w = n
+		default:
+			err = errNotANumber
+		}
+		if err != nil || !drs.ValidWeight(w) {
+			return fiber.NewError(fiber.StatusBadRequest,
+				fmt.Sprintf("weights.%s must be a number from 0 to %d", name, drs.MaxWeight))
+		}
+	}
+	return nil
+}
+
+var errNotANumber = errors.New("not a number")
 
 type drsRuleResponse struct {
 	ID         uuid.UUID       `json:"id"`
@@ -304,6 +342,9 @@ func (h *DRSHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error {
 	// and is classified the way parseParamUUID classifies the same kind of
 	// mistake — a 500, not a 400 that would blame whoever happened to be
 	// calling.
+	if err := checkDRSWeights(p.Object("weights")); err != nil {
+		return err
+	}
 	weights, err := json.Marshal(p.Object("weights"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Request validation failed")

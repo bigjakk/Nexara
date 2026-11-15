@@ -120,8 +120,10 @@ func registerDRSEndpoints(reg *Registry, h *handlers.DRSHandler) {
 				Default:  map[string]any{"cpu": 0.3, "memory": 0.7},
 				Optional: true,
 				Typetext: "<object>",
+				// Each weight's range is checked in UpdateConfig (checkDRSWeights):
+				// apischema cannot declare an object's members.
 				Description: "Relative weight of each resource when scoring a node, as an object of " +
-					"factor to weight. Omitted uses cpu 0.3 / memory 0.7.",
+					"factor to weight, each a number from 0 to 100. Omitted uses cpu 0.3 / memory 0.7.",
 			},
 			"imbalance_threshold": {
 				Type: apischema.Number,

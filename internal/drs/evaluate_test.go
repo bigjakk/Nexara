@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -394,5 +395,20 @@ func TestEvaluate_ScoresGuestCPUFromResourcesWhenTheListReadsZero(t *testing.T) 
 	// (0.5 of VM 101's 4 CPUs + 0.5 of CT 151's 2) over pve-01's 8.
 	if got := result.NodeScores["pve-01"].CPULoad; got != 0.375 {
 		t.Errorf("pve-01 CPULoad = %v, want 0.375 from /cluster/resources", got)
+	}
+}
+
+// A weight of 1e200 stored before the API refused it made every imbalance +Inf,
+// which the evaluate response cannot encode. Evaluate plans with the defaults.
+func TestEvaluate_PlansWithDefaultWeightsWhenTheStoredOnesAreOutOfRange(t *testing.T) {
+	t.Parallel()
+	e, q, _ := newEvaluateEngine(t, evaluateHandlers())
+	q.cfg.Weights = json.RawMessage(`{"cpu":1e200,"memory":1e200}`)
+	result, err := e.Evaluate(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if result.Weights != DefaultWeights() || math.IsInf(result.Imbalance, 0) || math.IsNaN(result.Imbalance) {
+		t.Errorf("weights %+v, imbalance %v; want the defaults and a finite imbalance", result.Weights, result.Imbalance)
 	}
 }

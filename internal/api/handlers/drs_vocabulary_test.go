@@ -3,6 +3,8 @@ package handlers
 import (
 	"slices"
 	"testing"
+
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // The two DRS vocabularies are declared once, in drs.go, and the endpoint
@@ -63,5 +65,20 @@ func TestDRSRuleTypesAllMapToAProxmoxRule(t *testing.T) {
 	}
 	if len(want) != len(DRSRuleTypes) {
 		t.Errorf("this test names %d mappings but DRSRuleTypes has %d entries", len(want), len(DRSRuleTypes))
+	}
+}
+
+// The config card reads the weights the engine plans with, so a weight stored
+// before UpdateConfig refused it comes back as the defaults rather than as a
+// value the card's normalisation turns into NaN.
+func TestDRSConfigResponseShowsTheWeightsDRSUses(t *testing.T) {
+	t.Parallel()
+	for raw, want := range map[string]string{
+		`{"cpu":0.4,"memory":0.6}`:     `{"cpu":0.4,"memory":0.6}`,
+		`{"cpu":1e308,"memory":1e308}`: `{"cpu":0.3,"memory":0.7}`,
+	} {
+		if got := toDRSConfigResponse(db.DrsConfig{Weights: []byte(raw)}).Weights; string(got) != want {
+			t.Errorf("stored %s: response weights = %s, want %s", raw, got, want)
+		}
 	}
 }
