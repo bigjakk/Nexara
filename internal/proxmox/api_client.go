@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -14,6 +15,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -36,6 +39,10 @@ type apiClient struct {
 	// peer echoes back even when the peer echoes it without the header around
 	// it.
 	tokenSecret string
+
+	// uploadStall replaces UploadStallTimeout for this client's streamed
+	// uploads when it is not zero; tests shorten it.
+	uploadStall time.Duration
 
 	// auth injects credentials into each outbound request. Set once at
 	// construction and never mutated for cached clients; BootstrapClient
@@ -264,10 +271,120 @@ func (a *apiClient) doPut(ctx context.Context, path string, params url.Values, d
 	return unmarshalData(respBody, dst)
 }
 
+// UploadStallTimeout is how long a streamed upload may go without a byte of the
+// file moving before it is abandoned. It sits beside the server's own bounds
+// (internal/api/body_framing.go: 60 s for a request head, five minutes for any
+// other body, three minutes idle): an upload has no overall limit, since an
+// ISO takes as long as it takes, but a stall this long means a peer has gone.
+// doMultipart holds Proxmox's side to it, and the storage upload handler the
+// browser's.
+const UploadStallTimeout = 2 * time.Minute
+
+var (
+	// ErrUploadStalled is a streamed upload abandoned after UploadStallTimeout
+	// with no byte of the file moving.
+	ErrUploadStalled = errors.New("upload stalled")
+
+	// ErrUploadBodyRead is a streamed upload whose file could not be read to
+	// its end: the source, not Proxmox, failed. It rides alongside the read
+	// error.
+	ErrUploadBodyRead = errors.New("upload body read failed")
+
+	// errUploadBodyReleased is what a read of an upload's file gets once
+	// doMultipart has returned.
+	errUploadBodyReleased = errors.New("upload body read after the upload returned")
+)
+
+// uploadBody is the file of a streamed upload as the transport reads it.
+//
+// net/http may go on reading a request body after Do has returned — when
+// Proxmox answers before the body is all sent, say (RoundTrip "may do so in a
+// separate goroutine even after RoundTrip returns"). The storage upload's file
+// is fasthttp's request body stream, which fasthttp recycles once the handler
+// returns, so a read after that reads another request's memory. release, which
+// doMultipart runs before it returns, is what stops that: it waits for a read
+// in progress to finish and refuses every read after it. A read is only ever
+// waited for as long as UploadStallTimeout, which the handler arms on each read
+// of the browser's connection.
+//
+// It also holds the watchdog: a timer, reset each time bytes move, that cancels
+// the request when none have for the stall timeout — Proxmox has stopped
+// taking them, or the file has stopped giving them. It is stopped at the end of
+// the file, so waiting for Proxmox's answer is not a stall.
+//
+// It has a Read method and nothing else, so no io.Copy can read past it
+// through a WriteTo or ReadFrom of its own.
+type uploadBody struct {
+	mu       sync.Mutex // held for each read of r, and by release
+	r        io.Reader
+	released bool
+
+	stall   time.Duration
+	timer   *time.Timer
+	stalled atomic.Bool
+
+	errMu   sync.Mutex
+	readErr error
+}
+
+func newUploadBody(r io.Reader, stall time.Duration, abort context.CancelFunc) *uploadBody {
+	b := &uploadBody{r: r, stall: stall}
+	b.timer = time.AfterFunc(stall, func() {
+		b.stalled.Store(true)
+		abort()
+	})
+	return b
+}
+
+func (b *uploadBody) Read(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.released {
+		return 0, errUploadBodyReleased
+	}
+	n, err := b.r.Read(p)
+	switch {
+	case err == io.EOF:
+		b.timer.Stop()
+	case err != nil:
+		b.errMu.Lock()
+		if b.readErr == nil {
+			b.readErr = err
+		}
+		b.errMu.Unlock()
+	case n > 0:
+		b.timer.Reset(b.stall)
+	}
+	return n, err
+}
+
+// release waits for a read in progress and refuses every read after it.
+func (b *uploadBody) release() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.released = true
+	b.timer.Stop()
+}
+
+// failure is why the upload's request failed, when it was the file's doing.
+func (b *uploadBody) failure() error {
+	if b.stalled.Load() {
+		return fmt.Errorf("%w: no data moved for %s", ErrUploadStalled, b.stall)
+	}
+	b.errMu.Lock()
+	defer b.errMu.Unlock()
+	if b.readErr != nil {
+		return fmt.Errorf("%w: %w", ErrUploadBodyRead, b.readErr)
+	}
+	return nil
+}
+
 // doMultipart performs an authenticated POST request with multipart form data.
 // It streams the file directly to Proxmox without buffering the entire file in
 // memory or on disk. Content-Length is pre-computed from the multipart framing
 // overhead + the known file size (Proxmox rejects chunked transfer encoding).
+//
+// Once it returns, nothing reads fileReader again (see uploadBody).
 func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[string]string, fileField, fileName string, fileReader io.Reader, fileSize int64, dst interface{}) error {
 	apiURL := a.baseURL + "/api2/json" + path
 
@@ -301,9 +418,17 @@ func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[str
 	suffix := prefix.Bytes()[len(prefixBytes):]
 
 	totalSize := int64(len(prefixBytes)) + fileSize + int64(len(suffix))
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stall := a.uploadStall
+	if stall == 0 {
+		stall = UploadStallTimeout
+	}
+	file := newUploadBody(fileReader, stall, cancel)
+	defer file.release()
 	body := io.MultiReader(
 		bytes.NewReader(prefixBytes),
-		fileReader,
+		file,
 		bytes.NewReader(suffix),
 	)
 
@@ -328,6 +453,11 @@ func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[str
 
 	resp, err := uploadClient.Do(req)
 	if err != nil {
+		// After the read in progress, so its error is the last one.
+		file.release()
+		if failure := file.failure(); failure != nil {
+			return failure
+		}
 		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
 	}
 	defer resp.Body.Close()

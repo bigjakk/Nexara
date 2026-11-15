@@ -529,10 +529,13 @@ first request on it. One that takes longer is answered `408` with the
 `request_timeout` envelope, and the connection is closed. The rest of the body
 then has five minutes to arrive, timed from when the server starts handling
 the request — every body but a multipart upload, which streams for as long as
-it takes. A body still arriving after that is cut off: the endpoint answers as
+it takes while data keeps moving. A body still arriving after
+that is cut off: the endpoint answers as
 it answers a malformed body, and the connection is closed. Any answer that
 comes more than five minutes after the server started handling the request
-closes the connection too. A kept-alive connection that carries no new request
+closes the connection too. A multipart upload that receives nothing from the
+client for two minutes is answered `408`, and one that Proxmox stops taking for
+two minutes `502`; the connection is closed after either. A kept-alive connection that carries no new request
 for three minutes is closed without an answer.
 
 ## Rate Limits

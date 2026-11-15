@@ -274,6 +274,10 @@ var bodyGuardAllowed = map[string]string{
 		"closeConnectionsLeftMidBody installing itself; New calls it once, on the server fiber.New made",
 	"internal/api/body_framing.go:closeConnectionsLeftMidBody:refers to (*fasthttp.RequestCtx).Conn": "this is " +
 		"where the body deadline is armed, on the connection, before the handler runs",
+	"internal/api/handlers/storage.go:StorageHandler.UploadFile:refers to (*fasthttp.RequestCtx).Conn": "the " +
+		"upload's stall bound (stallBoundedBody): a read deadline on each read of the streamed body, which no " +
+		"other deadline covers. A read it cuts leaves the stream attached, so the connection is closed after the " +
+		"answer (bodyMayBeLeftUnread)",
 	"internal/api/errors.go:redactServerErrorBodies:assigns fasthttp.Server.ErrorHandler": "this is " +
 		"redactServerErrorBodies installing itself around Fiber's handler; New calls it once, right after " +
 		"closeConnectionsLeftMidBody",

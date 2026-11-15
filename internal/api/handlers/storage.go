@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -263,6 +265,8 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 	bodyStream := c.RequestCtx().RequestBodyStream()
 	if bodyStream == nil {
 		bodyStream = bytes.NewReader(c.Body())
+	} else if conn := c.RequestCtx().Conn(); conn != nil {
+		bodyStream = stallBoundedBody{r: bodyStream, conn: conn, stall: proxmox.UploadStallTimeout}
 	}
 
 	mr := multipart.NewReader(bodyStream, boundary)
@@ -276,6 +280,9 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 			break
 		}
 		if err != nil {
+			if isReadTimeout(err) {
+				return uploadStalledInBrowser()
+			}
 			return fiber.NewError(fiber.StatusBadRequest, "Failed to parse multipart form")
 		}
 
@@ -319,7 +326,7 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 			// Stream the file part directly to Proxmox without buffering.
 			upid, uploadErr := pxClient.UploadToStorage(c.Context(), node.Name, pool.Storage, uploadContent, filename, bufferedPart, fileSize)
 			if uploadErr != nil {
-				return mapProxmoxError(uploadErr)
+				return mapUploadError(uploadErr)
 			}
 
 			TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
@@ -346,6 +353,54 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	return fiber.NewError(fiber.StatusBadRequest, "No file provided in upload")
+}
+
+// stallBoundedBody is the upload's body stream with each read bounded at stall
+// from when it starts. closeConnectionsLeftMidBody (internal/api) arms no read
+// deadline for a streamed upload, since an ISO streams for as long as it takes;
+// this bounds a browser that stops sending instead, so a read of the stream
+// cannot be held open for ever: proxmox.Client's upload waits for its read in
+// progress before it returns, and the handler must return for fasthttp to
+// recycle the stream. A read the deadline cuts leaves the stream attached, so
+// the connection is closed after the answer.
+type stallBoundedBody struct {
+	r     io.Reader
+	conn  net.Conn
+	stall time.Duration
+}
+
+func (b stallBoundedBody) Read(p []byte) (int, error) {
+	_ = b.conn.SetReadDeadline(time.Now().Add(b.stall))
+	return b.r.Read(p)
+}
+
+func isReadTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func uploadStalledInBrowser() error {
+	return fiber.NewError(fiber.StatusRequestTimeout, fmt.Sprintf(
+		"Upload stopped: no data arrived from the browser for %d minutes. Upload the file again.",
+		int(proxmox.UploadStallTimeout/time.Minute)))
+}
+
+// mapUploadError answers a failed streamed upload. A stall or a broken read of
+// the browser's body is not Proxmox failing, so it does not get
+// mapProxmoxError's "Failed to connect to Proxmox".
+func mapUploadError(err error) error {
+	switch {
+	case errors.Is(err, proxmox.ErrUploadStalled):
+		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf(
+			"Upload stopped: no data moved for %d minutes. Check the network between the browser, Nexara and "+
+				"Proxmox, then upload the file again.", int(proxmox.UploadStallTimeout/time.Minute)))
+	case errors.Is(err, proxmox.ErrUploadBodyRead) && isReadTimeout(err):
+		return uploadStalledInBrowser()
+	case errors.Is(err, proxmox.ErrUploadBodyRead):
+		return fiber.NewError(fiber.StatusBadRequest,
+			"Upload stopped before the whole file arrived. Upload the file again.")
+	}
+	return mapProxmoxError(err)
 }
 
 // DeleteContent handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/:volume.

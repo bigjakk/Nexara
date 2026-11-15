@@ -89,6 +89,9 @@ var statusNamesTheAPISends = map[string]int{
 	// named there so that it is told apart from the other 501s pveproxy sends.
 	"StatusRequestEntityTooLarge": fiber.StatusRequestEntityTooLarge,
 	"StatusNotImplemented":        fiber.StatusNotImplemented,
+
+	// mapUploadError (handlers/storage.go): a streamed upload the browser stopped sending.
+	"StatusRequestTimeout": fiber.StatusRequestTimeout,
 }
 
 // statusesFiberSendsThroughErrorHandler are the error statuses Fiber hands errorHandler on its own,
