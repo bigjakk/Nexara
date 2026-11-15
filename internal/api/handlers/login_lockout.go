@@ -106,6 +106,21 @@ func (h *AuthHandler) loginSubject(identifier string) uuid.UUID {
 	return uuid.UUID(d[:16])
 }
 
+// loginEntrySubject is the second budget of a directory sign-in, counted on the entry
+// the typed name found (its DN, ignoring case): a directory answers to uid, mail,
+// sAMAccountName and the UPN for one entry, and each typed name has a budget of its
+// own, so without this one entry had ten attempts for every name it answers to.
+func (h *AuthHandler) loginEntrySubject(dn string) uuid.UUID {
+	folded := strings.ToLower(dn)
+	var d [32]byte
+	if h.jwtService != nil {
+		d = h.jwtService.Digest("login lockout dn", folded)
+	} else {
+		d = sha256.Sum256([]byte("login lockout dn: " + folded))
+	}
+	return uuid.UUID(d[:16])
+}
+
 // loginLockoutStore is where sign-in attempts are counted: Redis when wired
 // (SetPasswordLockoutStore), else this handler's own memory, which says so once.
 // The memory is the handler's and not the process's, unlike the current-password
@@ -122,12 +137,14 @@ func (h *AuthHandler) loginLockoutStore() passwordLockoutStore {
 	return h.loginMemory
 }
 
-// admitLoginAttempt counts this sign-in against the identifier it names, before the
-// account is looked up. A locked identifier is answered 429 here, and nothing else
-// about the request is looked at. A counter that cannot be reached admits the
-// attempt uncounted (see the note at the top of this file).
-func (h *AuthHandler) admitLoginAttempt(c fiber.Ctx, identifier string) (loginAttempt, error) {
-	a := loginAttempt{subject: h.loginSubject(identifier)}
+// admitLoginAttempt counts this sign-in against a subject: the identifier it names
+// (loginSubject), before the account is looked up, or the directory entry the
+// identifier found (loginEntrySubject), before the bind. A locked subject is answered
+// 429 here, the same answer for both, and nothing else about the request is looked at.
+// A counter that cannot be reached admits the attempt uncounted (see the note at the
+// top of this file).
+func (h *AuthHandler) admitLoginAttempt(c fiber.Ctx, subject uuid.UUID) (loginAttempt, error) {
+	a := loginAttempt{subject: subject}
 	ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)
 	defer cancel()
 	res, err := h.loginLockoutStore().reserve(ctx, a.subject)
@@ -149,15 +166,23 @@ func (h *AuthHandler) admitLoginAttempt(c fiber.Ctx, identifier string) (loginAt
 }
 
 // refuseSignIn answers a sign-in whose credential was not accepted: 401, or — for
-// the attempt that used up the budget — the 429 of the lock that is in place from now
-// on. account is the account the identifier names, nil when it names none, and
-// reason the class of the failure; they decide only what is recorded (see
-// recordFailedSignIn), never the answer.
-func (h *AuthHandler) refuseSignIn(c fiber.Ctx, a loginAttempt, account *db.User, reason string) error {
+// the attempt that used up a budget, the identifier's (a) or a directory entry's
+// (entry) — the 429 of the lock that is in place from now on. account is the account
+// the attempt names, nil when it names none, and reason the class of the failure;
+// they decide only what is recorded (see recordFailedSignIn), never the answer.
+func (h *AuthHandler) refuseSignIn(c fiber.Ctx, a loginAttempt, account *db.User, reason string, entry ...loginAttempt) error {
 	h.recordFailedSignIn(c, a, account, reason)
-	if a.counted && a.res.admission == lockoutAdmittedLast {
-		h.recordLoginLock(c, a, account)
-		return lockedFor(c, a.res.retryAfter, loginLockedMessage(a.res.retryAfter))
+	var locked error
+	for _, at := range append([]loginAttempt{a}, entry...) {
+		if at.counted && at.res.admission == lockoutAdmittedLast {
+			h.recordLoginLock(c, at, account)
+			if locked == nil {
+				locked = lockedFor(c, at.res.retryAfter, loginLockedMessage(at.res.retryAfter))
+			}
+		}
+	}
+	if locked != nil {
+		return locked
 	}
 	return fiber.NewError(fiber.StatusUnauthorized, "Invalid email or password")
 }

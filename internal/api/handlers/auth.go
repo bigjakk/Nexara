@@ -832,7 +832,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 	// Counted before anything else is looked at: a locked identifier is answered 429
 	// whether or not it names an account (login_lockout.go). Every failure below goes
 	// through refuseSignIn, every success clears the count.
-	attempt, err := h.admitLoginAttempt(c, email)
+	attempt, err := h.admitLoginAttempt(c, h.loginSubject(email))
 	if err != nil {
 		return err
 	}
@@ -846,25 +846,39 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		// the LDAP path handles JIT-provisioning of new directory users.
 		// Otherwise fall through to a dummy bcrypt so timing matches the
 		// "real user, bad password" path.
-		if ldapUser, ok := h.tryLDAPLogin(c, email, password); ok {
+		var dir directorySignIn
+		if ldapUser, ok := h.tryLDAPLogin(c, email, password, &dir); ok {
 			h.forgetLoginFailures(c, attempt)
+			h.forgetLoginFailures(c, dir.entry)
 			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login")
 		}
+		if dir.locked != nil {
+			return dir.locked
+		}
 		auth.RunDummyBcrypt(password)
-		return h.refuseSignIn(c, attempt, nil, "unknown_account")
+		if dir.account != nil {
+			// A name the directory answers to other than the account's address.
+			return h.refuseSignIn(c, attempt, dir.account, "directory_rejected", dir.entry)
+		}
+		return h.refuseSignIn(c, attempt, nil, "unknown_account", dir.entry)
 	}
 
 	switch user.AuthSource {
 	case "ldap":
-		if ldapUser, ok := h.tryLDAPLogin(c, email, password); ok {
+		var dir directorySignIn
+		if ldapUser, ok := h.tryLDAPLogin(c, email, password, &dir); ok {
 			h.forgetLoginFailures(c, attempt)
+			h.forgetLoginFailures(c, dir.entry)
 			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login")
+		}
+		if dir.locked != nil {
+			return dir.locked
 		}
 		// Pad failure to keep timing roughly aligned with the local-bcrypt
 		// path. LDAP roundtrip dominates wall-clock anyway, so this is a
 		// best-effort defence-in-depth, not a strict equaliser.
 		auth.RunDummyBcrypt(password)
-		return h.refuseSignIn(c, attempt, &user, "directory_rejected")
+		return h.refuseSignIn(c, attempt, &user, "directory_rejected", dir.entry)
 	case "oidc":
 		// OIDC-sourced users cannot log in via password. Burn equivalent
 		// CPU so the response time is indistinguishable from a real
@@ -911,7 +925,11 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 // the epoch the session will be conditional on, the active check, the role sync — is
 // provisionLDAPUser, which is what the tests drive: the bind itself needs a
 // directory.
-func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string) (db.User, bool) {
+// The directory entry has a budget of its own (loginEntrySubject), counted after the
+// search found it and before the bind: one entry answers to several names, and each
+// typed name has a budget. Its lock is the same 429 (out.locked), and a failed bind
+// is audited under the entry's account when it has one (out.account).
+func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string, out *directorySignIn) (db.User, bool) {
 	if h.ldapHandler == nil {
 		return db.User{}, false
 	}
@@ -932,18 +950,54 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string) (db.User
 		return db.User{}, false
 	}
 
-	client := auth.NewLDAPClient(authCfg)
-	ldapUser, err := client.Authenticate(email, password)
+	// Typed errors carry the class: logged so admins can tell "wrong password" from
+	// "directory unreachable" without the client learning which.
+	dir, err := h.ldapHandler.openSignIn(authCfg)
 	if err != nil {
-		// LDAP rejection / connection failure / search failure — typed
-		// errors carry the class. Log so admins can distinguish "wrong
-		// password" from "directory unreachable" without us leaking which
-		// to the client.
+		slog.Warn("ldap login: authentication failed", "ip", c.IP(), "reason", ldapFailureClass(err))
+		return db.User{}, false
+	}
+	defer dir.Close()
+	ldapUser, err := dir.Search(email)
+	if err != nil {
 		slog.Warn("ldap login: authentication failed", "ip", c.IP(), "reason", ldapFailureClass(err))
 		return db.User{}, false
 	}
 
+	out.entry, out.locked = h.admitLoginAttempt(c, h.loginEntrySubject(ldapUser.DN))
+	if out.locked != nil {
+		return db.User{}, false
+	}
+	if err := dir.Authenticate(ldapUser, password); err != nil {
+		slog.Warn("ldap login: authentication failed", "ip", c.IP(), "reason", ldapFailureClass(err))
+		out.account = h.directoryAccount(c, ldapUser, email)
+		return db.User{}, false
+	}
+
 	return h.provisionLDAPUser(c, ldapCfg, ldapUser, email)
+}
+
+// directorySignIn is what a directory sign-in learned beyond its answer: the entry's
+// budget (not counted when no entry was found), its lock's 429 when that budget is
+// spent, and the account a failed bind is audited under.
+type directorySignIn struct {
+	entry   loginAttempt
+	locked  error
+	account *db.User
+}
+
+// directoryAccount is the directory account of an entry the search found, looked up
+// as provisionLDAPUser does (the entry's address, else what was typed), or nil.
+func (h *AuthHandler) directoryAccount(c fiber.Ctx, entry *auth.LDAPUser, typed string) *db.User {
+	address := entry.Email
+	if address == "" {
+		address = typed
+	}
+	u, err := h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{Email: address, AuthSource: "ldap"})
+	if err != nil {
+		return nil
+	}
+	return &u
 }
 
 // ldapFailureClass names what went wrong with a directory sign-in, for the log, and

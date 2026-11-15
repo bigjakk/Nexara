@@ -126,41 +126,52 @@ func (c *LDAPClient) TestConnection() error {
 	return nil
 }
 
-// Authenticate verifies user credentials against LDAP.
-// Returns the user info on success, or an error if auth fails.
-func (c *LDAPClient) Authenticate(username, password string) (*LDAPUser, error) {
-	if password == "" {
-		return nil, fmt.Errorf("empty password not allowed")
-	}
+// LDAPSession is one connection to the directory, bound as the service account. A
+// sign-in is two steps on it, so that the caller can act between them: Search finds
+// the entry the typed name names, and Authenticate binds as that entry with the
+// password. The caller closes it.
+type LDAPSession struct {
+	client *LDAPClient
+	conn   *ldap.Conn
+}
 
+// Open dials the directory and binds as the service account.
+func (c *LDAPClient) Open() (*LDAPSession, error) {
 	conn, err := c.dial()
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-
-	// Bind with service account to search
 	if err := c.serviceBind(conn); err != nil {
+		conn.Close()
 		return nil, err
 	}
+	return &LDAPSession{client: c, conn: conn}, nil
+}
 
-	// Search for the user
-	user, err := c.searchUser(conn, username)
-	if err != nil {
-		return nil, err
+// Close closes the connection.
+func (s *LDAPSession) Close() { s.conn.Close() }
+
+// Search finds the entry username names (the user filter decides which attributes it
+// may be: uid, mail, sAMAccountName, the UPN), without its groups.
+func (s *LDAPSession) Search(username string) (*LDAPUser, error) {
+	return s.client.searchUser(s.conn, username)
+}
+
+// Authenticate binds as user's entry with password, and on success fills in its
+// groups. An empty password is refused before the bind: to a directory it is an
+// unauthenticated bind, which succeeds.
+func (s *LDAPSession) Authenticate(user *LDAPUser, password string) error {
+	if password == "" {
+		return fmt.Errorf("%w: empty password not allowed", ErrLDAPUserBindFailed)
 	}
-
-	// Re-bind as the found user to verify their password
-	if err := conn.Bind(user.DN, password); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrLDAPUserBindFailed, err)
+	if err := s.conn.Bind(user.DN, password); err != nil {
+		return fmt.Errorf("%w: %v", ErrLDAPUserBindFailed, err)
 	}
-
 	// Fetch groups (re-bind as service account first)
-	if err := c.serviceBind(conn); err == nil {
-		user.Groups = c.getUserGroups(conn, user.DN)
+	if err := s.client.serviceBind(s.conn); err == nil {
+		user.Groups = s.client.getUserGroups(s.conn, user.DN)
 	}
-
-	return user, nil
+	return nil
 }
 
 // SearchUser looks up a user without authenticating them.

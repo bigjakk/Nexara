@@ -605,6 +605,10 @@ signing in with it for 15 minutes. Every attempt while it lasts, the right passw
 included, is answered `429` with the JSON error envelope and a `Retry-After` header
 in seconds, the same whether or not the address names an account. A successful
 sign-in clears the count. When Redis cannot be reached the guard is not enforced.
+A directory (LDAP) entry has a second count of its own, whatever name found it (a
+uid, a mail address, a `sAMAccountName`, a UPN): ten failed binds of one entry lock
+it the same way, with the same `429`, and a failure after the search found the entry
+is audited under that entry's account.
 A failed sign-in is audited as `login_failed` under the account, or, when the address
 names none, as `login_failed_unknown_account` with no account and nothing that was
 typed, at most once a minute per client address.

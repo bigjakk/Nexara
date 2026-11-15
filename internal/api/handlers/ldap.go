@@ -46,6 +46,8 @@ type LDAPHandler struct {
 	// directory, when set, replaces auth.NewLDAPClient as Sync's directory; only
 	// tests set it, to answer a search without an LDAP server.
 	directory func(auth.LDAPConfig) ldapDirectory
+	// signIn, when set, replaces the directory a sign-in opens (openSignIn); tests only.
+	signIn func(auth.LDAPConfig) (ldapSignInSession, error)
 
 	// now, when set, is RunScheduledSync's clock (tests); lastScheduled is when it last
 	// started a sync of each config, guarded by scheduleMu.
@@ -57,6 +59,27 @@ type LDAPHandler struct {
 // ldapDirectory is the part of *auth.LDAPClient that Sync asks.
 type ldapDirectory interface {
 	SearchUser(username string) (*auth.LDAPUser, error)
+}
+
+// ldapSignInSession is the part of *auth.LDAPSession a sign-in asks: the search for
+// the entry, then the bind as it.
+type ldapSignInSession interface {
+	Search(username string) (*auth.LDAPUser, error)
+	Authenticate(user *auth.LDAPUser, password string) error
+	Close()
+}
+
+// openSignIn opens the directory for a sign-in: signIn when a test set it, else a
+// connection bound as the service account.
+func (h *LDAPHandler) openSignIn(cfg auth.LDAPConfig) (ldapSignInSession, error) {
+	if h.signIn != nil {
+		return h.signIn(cfg)
+	}
+	s, err := auth.NewLDAPClient(cfg).Open()
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // NewLDAPHandler creates a new LDAP handler.
