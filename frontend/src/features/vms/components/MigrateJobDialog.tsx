@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { ViewMigrationsLink } from "@/features/migrations/components/ViewMigrationsLink";
 import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import {
@@ -1134,7 +1135,8 @@ function MigrationProgress({
       {/* Task Log (only for real Proxmox UPIDs) */}
       {hasUpid && <TaskLogSection lines={logLines} isLoading={logLoading} />}
 
-      <DialogFooter>
+      <DialogFooter className="gap-2 sm:gap-0">
+        <ViewMigrationsLink onNavigate={onClose} />
         <Button variant="outline" onClick={onClose}>
           Close
         </Button>

@@ -10,6 +10,7 @@ vi.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({
     canManage: (resource: string) =>
       resource === "vm_import" && held.manageImport,
+    canView: () => false,
   }),
 }));
 vi.mock("@/features/dashboard/api/dashboard-queries", () => ({

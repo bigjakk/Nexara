@@ -87,6 +87,7 @@
   "closeTaskBackground": "Close (task continues in background)",
   "datacenter": "Datacenter",
   "allClusters": "All clusters",
+  "viewMigrations": "View migrations",
   "treeSearching": "Searching inside this cluster",
   "treeSearchFailed": "Could not load this cluster to search inside it",
   "favorites": "Favorites",

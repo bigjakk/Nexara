@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { ViewMigrationsLink } from "@/features/migrations/components/ViewMigrationsLink";
 import {
   Dialog,
   DialogContent,
@@ -633,15 +634,23 @@ export function BulkMigrateDialog({
                 ))}
             </div>
 
-            <Button
-              variant="outline"
-              onClick={() => {
-                handleClose();
-                onComplete();
-              }}
-            >
-              Close
-            </Button>
+            <div className="flex gap-2">
+              <ViewMigrationsLink
+                onNavigate={() => {
+                  handleClose();
+                  onComplete();
+                }}
+              />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  handleClose();
+                  onComplete();
+                }}
+              >
+                Close
+              </Button>
+            </div>
           </div>
         )}
       </DialogContent>

@@ -17,6 +17,7 @@ import { useImportJobs, useImportSources } from "../api/import-queries";
 import { ImportHistoryTable } from "../components/ImportHistoryTable";
 import { ImportSourcesManager } from "../components/ImportSourcesManager";
 import { jobSummary, plural } from "@/features/migrations/lib/job-summary";
+import { ViewMigrationsLink } from "@/features/migrations/components/ViewMigrationsLink";
 
 /** More clusters than this and the picker is a menu, not a row of segments. */
 const SEGMENTED_CLUSTER_LIMIT = 4;
@@ -97,6 +98,7 @@ export function ImportsPage() {
                   </SelectContent>
                 </Select>
               ))}
+            <ViewMigrationsLink />
             {importButton}
           </>
         }

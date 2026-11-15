@@ -124,6 +124,11 @@ const AppearancePage = lazy(() =>
     default: m.AppearancePage,
   })),
 );
+const MigrationsPage = lazy(() =>
+  import("@/features/migrations/pages/MigrationsPage").then((m) => ({
+    default: m.MigrationsPage,
+  })),
+);
 const ImportsPage = lazy(() =>
   import("@/features/vms/pages/ImportsPage").then((m) => ({
     default: m.ImportsPage,
@@ -408,6 +413,16 @@ const router = createBrowserRouter([
               <RequirePermission action="view" resource="cve_scan">
                 <LazyPage>
                   <SecurityDashboardPage />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "migrations",
+            element: (
+              <RequirePermission action="view" resource="migration">
+                <LazyPage>
+                  <MigrationsPage />
                 </LazyPage>
               </RequirePermission>
             ),
