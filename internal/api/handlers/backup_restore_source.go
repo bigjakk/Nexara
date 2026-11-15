@@ -131,8 +131,12 @@ const (
 // storageTie compares a pbs storage with a Nexara PBS server. Two fingerprints
 // decide on their own: equal is the same server, different is not, whatever the
 // addresses say. Otherwise the host (case-insensitive) and the port must both
-// agree; both default to 8007 when they name none. Proxmox keeps an IPv6 server
-// bare in its config and adds the brackets itself, while a URL has them.
+// agree, the storage's port being 8007 when it names none. A URL that names a
+// port must match it exactly. A URL that names none is dialed by Nexara on its
+// scheme's port (443 for https), while a storage made from it carries no port
+// and Proxmox connects to 8007 (pbsConnectionSettings), so either port ties it.
+// Proxmox keeps an IPv6 server bare in its config and adds the brackets itself,
+// while a URL has them.
 func storageTie(cfg proxmox.StorageConfig, server db.PbsServer) tie {
 	if fs, fp := normalizeFingerprint(cfg.FingerprintPBS), normalizeFingerprint(server.TlsFingerprint); fs != "" && fp != "" {
 		if fs == fp {
@@ -140,24 +144,41 @@ func storageTie(cfg proxmox.StorageConfig, server db.PbsServer) tie {
 		}
 		return tieContradicted
 	}
-	u, err := url.Parse(server.ApiUrl)
-	if err != nil || u.Hostname() == "" || !strings.EqualFold(cfg.Server, u.Hostname()) {
+	host, port, named, ok := pbsDialAddress(server.ApiUrl)
+	if !ok || !strings.EqualFold(cfg.Server, host) {
 		return tieNone
-	}
-	port := defaultPBSPort
-	if p := u.Port(); p != "" {
-		if port, err = strconv.Atoi(p); err != nil {
-			return tieNone
-		}
 	}
 	storagePort := int(cfg.Port)
 	if storagePort == 0 {
 		storagePort = defaultPBSPort
 	}
-	if port != storagePort {
-		return tieContradicted
+	if storagePort == port || (!named && storagePort == defaultPBSPort) {
+		return tieAddress
 	}
-	return tieAddress
+	return tieContradicted
+}
+
+// pbsDialAddress is the host and port Nexara's own PBS client connects to for a
+// registered API URL, and whether the URL names that port: the client dials the
+// URL as it stands, so one naming no port goes to its scheme's default, 443 for
+// https (80 for http). Not ok for a URL with no host, another scheme, or a bad
+// port.
+func pbsDialAddress(apiURL string) (host string, port int, named, ok bool) {
+	u, err := url.Parse(apiURL)
+	if err != nil || u.Hostname() == "" {
+		return "", 0, false, false
+	}
+	if p := u.Port(); p != "" {
+		port, err = strconv.Atoi(p)
+		return u.Hostname(), port, true, err == nil && port > 0 && port <= 65535
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return u.Hostname(), 443, false, true
+	case "http":
+		return u.Hostname(), 80, false, true
+	}
+	return "", 0, false, false
 }
 
 func normalizeFingerprint(fp string) string {

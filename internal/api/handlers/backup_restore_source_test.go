@@ -55,9 +55,15 @@ func TestRestoreStorage(t *testing.T) {
 		{name: "a port written out on both sides, not the default",
 			server: db.PbsServer{Name: "pbs01", ApiUrl: "https://" + host + ":8443"},
 			cfgs:   []proxmox.StorageConfig{pbs("store02", host, "datastore01", with(func(c *proxmox.StorageConfig) { c.Port = 8443 }))}, want: "store02", by: "address"},
-		{name: "a URL with no port is the default port, like a storage with none",
+		{name: "a URL with no port ties a storage with none, which Proxmox connects to on 8007",
 			server: db.PbsServer{Name: "pbs01", ApiUrl: "https://" + host},
 			cfgs:   []proxmox.StorageConfig{pbs("store02", host, "datastore01")}, want: "store02", by: "address"},
+		{name: "a URL with no port ties a storage on 443, where Nexara dials it",
+			server: db.PbsServer{Name: "pbs01", ApiUrl: "https://" + host},
+			cfgs:   []proxmox.StorageConfig{pbs("store02", host, "datastore01", with(func(c *proxmox.StorageConfig) { c.Port = 443 }))}, want: "store02", by: "address"},
+		{name: "a URL with no port contradicts a storage on some other port",
+			server: db.PbsServer{Name: "pbs01", ApiUrl: "https://" + host},
+			cfgs:   []proxmox.StorageConfig{pbs("store02", host, "datastore01", with(func(c *proxmox.StorageConfig) { c.Port = 8443 }))}, status: fiber.StatusBadRequest},
 		{name: "fingerprint finds a server the storage reaches by another address, however it is written",
 			cfgs: []proxmox.StorageConfig{pbs("store02", "192.0.2.10", "datastore01", with(func(c *proxmox.StorageConfig) {
 				c.FingerprintPBS = strings.ToLower(strings.ReplaceAll(fp, ":", ""))

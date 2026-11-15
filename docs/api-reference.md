@@ -1629,7 +1629,9 @@ A restore reads the snapshot through the cluster's Proxmox storage for the
 requested PBS server and `datastore` (required): an enabled `pbs` storage, with
 no namespace, usable on the target node and naming that datastore. It is tied to
 the server by certificate fingerprint when both carry one (different
-fingerprints rule it out), otherwise by host and port, 8007 where none is set.
+fingerprints rule it out), otherwise by host and port, 8007 where the storage
+sets none: the port the server's API URL names, or, for a URL naming none,
+either 8007 or 443 (where Nexara dials an `https` URL).
 With no tie at all, a single remaining candidate that no other Nexara PBS server
 is tied to is used, and the restore's audit entry records `matched_by` as
 `only_candidate` (`fingerprint` and `address` otherwise). The answer is `400`
