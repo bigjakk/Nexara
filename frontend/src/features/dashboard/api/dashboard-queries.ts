@@ -201,6 +201,8 @@ export function useCreateCluster() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["clusters"] });
     },
+    // AddClusterDialog shows its failures, and toasts a late one (useSaveOutcome).
+    onError: () => undefined,
   });
 }
 

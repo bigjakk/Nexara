@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +23,7 @@ import {
   type PrivateAddressWarning as PrivateAddressDetails,
 } from "@/lib/private-address";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type {
   BootstrapSummary,
   ConnectivityResult,
@@ -84,6 +86,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
   // (and with it the cached password) as soon as the summary is shown.
   const [summaryConnectivity, setSummaryConnectivity] =
     useState<ConnectivityResult | null>(null);
+  // A pasted token's cluster was added but did not answer: why, held open so
+  // the operator reads it instead of the dialog closing over it.
+  const [unreachable, setUnreachable] = useState<string | null>(null);
 
   // Fingerprint step
   const [fingerprint, setFingerprint] = useState<FingerprintResponse | null>(
@@ -99,6 +104,8 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
   const [allowPrivate, setAllowPrivate] = useState(false);
 
   const createCluster = useCreateCluster();
+  const settle = useSaveOutcome(open);
+  const { t } = useTranslation("clusters");
 
   const secure = isSecureContext();
 
@@ -118,6 +125,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
     setBootstrapError(null);
     setSummary(null);
     setSummaryConnectivity(null);
+    setUnreachable(null);
     setFingerprint(null);
     setFingerprintAccepted(false);
     setFetchingFingerprint(false);
@@ -201,7 +209,8 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
       req.allow_private_address = true;
     }
 
-    createCluster.mutate(req, {
+    settle(createCluster.mutateAsync(req), {
+      action: `Adding cluster ${name}`,
       onSuccess: (data) => {
         // A bootstrap run has something to show for itself; hold the dialog
         // open on the summary rather than closing over it.
@@ -213,6 +222,12 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
           // Clearing component state is not enough — without this the
           // plaintext lives on in the query cache until the dialog is closed.
           setSummaryConnectivity(data.connectivity);
+          createCluster.reset();
+          return;
+        }
+        if (!data.connectivity.reachable) {
+          setUnreachable(data.connectivity.message);
+          setTokenSecret("");
           createCluster.reset();
           return;
         }
@@ -290,15 +305,32 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
         <DialogHeader>
           <DialogTitle>Add Proxmox Cluster</DialogTitle>
           <DialogDescription>
-            {summary
-              ? "Nexara created its own credential on the cluster."
-              : showFingerprint
-                ? "Verify the TLS certificate fingerprint before connecting."
-                : "Connect a Proxmox VE cluster. Nexara can create its own API token, or you can paste one you made yourself."}
+            {unreachable != null
+              ? t("clusterAddedDesc")
+              : summary
+                ? "Nexara created its own credential on the cluster."
+                : showFingerprint
+                  ? "Verify the TLS certificate fingerprint before connecting."
+                  : "Connect a Proxmox VE cluster. Nexara can create its own API token, or you can paste one you made yourself."}
           </DialogDescription>
         </DialogHeader>
 
-        {summary ? (
+        {unreachable != null ? (
+          <div className="space-y-4">
+            <p className="text-sm text-amber-600 dark:text-amber-500">
+              {t("clusterAddedUnreachable", { message: unreachable })}
+            </p>
+            <DialogFooter>
+              <Button
+                onClick={() => {
+                  handleOpenChange(false);
+                }}
+              >
+                {t("done")}
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : summary ? (
           <div className="space-y-4">
             <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 p-4 space-y-3">
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-500">
@@ -634,14 +666,6 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                   : "Failed to create cluster"}
               </p>
             )}
-
-            {createCluster.data?.connectivity != null &&
-              !createCluster.data.connectivity.reachable && (
-                <p className="text-sm text-amber-600">
-                  Cluster created but connectivity check failed:{" "}
-                  {createCluster.data.connectivity.message}
-                </p>
-              )}
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={handleBack}>

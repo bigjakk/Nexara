@@ -1,6 +1,9 @@
 {
   "clusters": "Clusters",
   "addCluster": "Add Cluster",
+  "clusterAddedDesc": "The cluster was added.",
+  "clusterAddedUnreachable": "Nexara could not reach the cluster: {{message}}. Check the API URL and the token; you can change both with Edit on the cluster's page.",
+  "done": "Done",
   "failedLoadClusters": "Failed to load clusters.",
   "noClustersConfigured": "No clusters configured. Add one to get started.",
   "apiUrl": "API URL",

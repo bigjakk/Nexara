@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { renderWithProviders } from "@/test/test-utils";
+import { createAppQueryClient } from "@/test/app-query-client";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { AddClusterDialog } from "./AddClusterDialog";
 import type { ApiError } from "@/types/api";
@@ -12,6 +14,7 @@ import type { ApiError } from "@/types/api";
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
 );
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedPost = vi.mocked(apiClient.post);
 
@@ -284,5 +287,56 @@ describe("AddClusterDialog", () => {
         screen.queryByText(/rejected that username or password/i),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it("stays open on a pasted token's cluster that did not answer, and says why", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AddClusterDialog />);
+    await openToCredentialStep(user);
+    mockedPost.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.endsWith("/fetch-fingerprint")
+          ? TRUSTED_CERT
+          : {
+              connectivity: { reachable: false, message: "connection refused" },
+            },
+      ),
+    );
+
+    await user.click(screen.getByRole("tab", { name: /i have a token/i }));
+    await user.type(screen.getByLabelText(/api token id/i), "nexara@pve!t");
+    await user.type(screen.getByLabelText(/api token secret/i), "s3cret");
+    await user.click(screen.getByRole("button", { name: /^add cluster$/i }));
+
+    expect(
+      await screen.findByText(
+        /could not reach the cluster: connection refused/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("reports a failed add in the dialog only, with no toast as well", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AddClusterDialog />, {
+      client: createAppQueryClient(),
+    });
+    await openToCredentialStep(user);
+    mockedPost.mockImplementation((path: string) =>
+      path.endsWith("/fetch-fingerprint")
+        ? Promise.resolve(TRUSTED_CERT)
+        : Promise.reject(
+            apiError(422, {
+              error: "bootstrap_auth_failed",
+              message: "Wrong password.",
+            }),
+          ),
+    );
+
+    await user.type(screen.getByLabelText(/proxmox password/i), "wrong");
+    await user.click(screen.getByRole("button", { name: /create token/i }));
+
+    expect(await screen.findByText("Wrong password.")).toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });
