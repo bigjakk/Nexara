@@ -18,10 +18,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { useTaskLogStore } from "@/stores/task-log-store";
-import {
-  resolveVolidToCTVolumeKey,
-  resolveVolidToDiskKey,
-} from "../lib/resolve-disk";
+import { resolveVolume } from "../lib/resolve-disk";
 import type { VMActionResponse } from "@/features/vms/types/vm";
 
 export interface MigrateBatchJob {
@@ -32,6 +29,8 @@ export interface MigrateBatchJob {
   guestKind: "vm" | "ct";
   vmid: number;
   volid: string;
+  /** Whether the guest is running, which decides what may move now. */
+  running: boolean;
 }
 
 type JobStatus = "pending" | "running" | "completed" | "failed";
@@ -104,19 +103,17 @@ export function MigrateBatchDialog({
       setStates([...working]);
 
       try {
-        const configKey =
-          job.guestKind === "ct"
-            ? await resolveVolidToCTVolumeKey(clusterId, job.guestId, job.volid)
-            : await resolveVolidToDiskKey(clusterId, job.guestId, job.volid);
+        const resolved = await resolveVolume(
+          clusterId,
+          { id: job.guestId, kind: job.guestKind, running: job.running },
+          job.volid,
+        );
 
         if (ended()) break;
 
-        if (!configKey) {
-          working[i] = {
-            ...job,
-            status: "failed",
-            error: "Volume not found in guest config (detached?)",
-          };
+        const configKey = resolved.key;
+        if (configKey === null) {
+          working[i] = { ...job, status: "failed", error: resolved.reason };
           setStates([...working]);
           continue;
         }

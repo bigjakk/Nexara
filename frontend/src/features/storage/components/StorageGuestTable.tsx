@@ -149,6 +149,7 @@ export function StorageGuestTable({
           guestKind: row.guestKind,
           vmid: row.vmid,
           volid: v.volid,
+          running: row.status === "running",
         });
       }
     }

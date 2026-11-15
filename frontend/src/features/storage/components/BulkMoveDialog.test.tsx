@@ -251,4 +251,23 @@ describe("BulkMoveDialog", () => {
       [...laterConfigCallers, ...laterMoveCallers].every((c) => c === ADMIN.id),
     ).toBe(true);
   });
+
+  // Evacuate once resolved only bus disks, so an EFI disk failed the move
+  // with "could not resolve"; move_disk takes it by its key.
+  it("moves an EFI disk by its key", async () => {
+    server.routes[config("02")] = () =>
+      json({ efidisk0: `${STORAGE}:vm-102-disk-0,efitype=4m,size=4M` });
+    const bodies: unknown[] = [];
+    server.routes[move("02")] = (init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return json({ upid: FIRST_MOVE.upid });
+    };
+    await signInAs(ADMIN);
+    await startTheEvacuation();
+    heldMove.resolve(json(FIRST_MOVE));
+
+    await waitFor(() => {
+      expect(bodies).toEqual([expect.objectContaining({ disk: "efidisk0" })]);
+    });
+  });
 });

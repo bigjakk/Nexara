@@ -20,10 +20,7 @@ import { apiPath } from "@/lib/api-path";
 import { useStorageContent } from "../api/storage-queries";
 import type { StorageContentItem } from "../types/storage";
 import type { VMActionResponse } from "@/features/vms/types/vm";
-
-interface VMConfig {
-  [key: string]: unknown;
-}
+import { resolveVolume } from "../lib/resolve-disk";
 
 interface DiskMoveJob {
   vmid: number;
@@ -37,33 +34,7 @@ interface DiskMoveJob {
 interface VMListEntry {
   id: string;
   vmid: number;
-}
-
-const DISK_KEY_RE = /^(scsi|ide|sata|virtio)\d+$/;
-
-/** Resolve volid → disk config key by fetching VM config and scanning disk keys. */
-async function resolveVolidToDiskKey(
-  clusterId: string,
-  vmUuid: string,
-  volid: string,
-): Promise<string | null> {
-  try {
-    const config = await apiClient.get<VMConfig>(
-      apiPath`/api/v1/clusters/${clusterId}/vms/${vmUuid}/config`,
-    );
-    for (const [key, val] of Object.entries(config)) {
-      if (
-        DISK_KEY_RE.test(key) &&
-        typeof val === "string" &&
-        val.includes(volid)
-      ) {
-        return key;
-      }
-    }
-  } catch {
-    // VM might not be accessible
-  }
-  return null;
+  status: string;
 }
 
 interface BulkMoveDialogProps {
@@ -136,6 +107,9 @@ export function BulkMoveDialog({
       return;
     }
     const vmidToUuid = new Map(vmList.map((v) => [v.vmid, v.id]));
+    const runningVmids = new Set(
+      vmList.filter((v) => v.status === "running").map((v) => v.vmid),
+    );
 
     // Build job list by resolving each volid to a disk key
     const newJobs: DiskMoveJob[] = [];
@@ -153,25 +127,25 @@ export function BulkMoveDialog({
         });
         continue;
       }
-      const diskKey = await resolveVolidToDiskKey(
+      const resolved = await resolveVolume(
         clusterId,
-        vmUuid,
+        { id: vmUuid, kind: "vm", running: runningVmids.has(item.vmid) },
         item.volid,
       );
-      if (diskKey) {
+      if (resolved.key !== null) {
         newJobs.push({
           vmid: item.vmid,
-          diskKey,
+          diskKey: resolved.key,
           volid: item.volid,
           status: "pending",
         });
       } else {
         newJobs.push({
           vmid: item.vmid,
-          diskKey: "unknown",
+          diskKey: resolved.slot ?? "unknown",
           volid: item.volid,
           status: "failed",
-          error: "Could not resolve disk key from VM config",
+          error: resolved.reason,
         });
       }
     }

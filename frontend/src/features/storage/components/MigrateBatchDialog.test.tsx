@@ -34,6 +34,7 @@ const JOBS: MigrateBatchJob[] = ["01", "02", "03"].map((n) => ({
   guestKind: "vm",
   vmid: Number(`1${n}`),
   volid: `store01:vm-1${n}-disk-0`,
+  running: false,
 }));
 
 const config = (n: string) =>
