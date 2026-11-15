@@ -72,6 +72,13 @@ func corsAllowOrigins(raw string) []string {
 	return out
 }
 
+// isAPIPath reports whether path is under /api/v1, as the router matches it:
+// case-insensitively.
+func isAPIPath(path string) bool {
+	p := strings.ToLower(path)
+	return p == "/api/v1" || strings.HasPrefix(p, "/api/v1/")
+}
+
 func (s *Server) setupMiddleware() {
 	// Recover from panics.
 	s.app.Use(recover.New())
@@ -87,6 +94,13 @@ func (s *Server) setupMiddleware() {
 		// and storage, and SSO returns by a full-page redirect, so neither needs an
 		// opener across origins.
 		c.Set("Cross-Origin-Opener-Policy", "same-origin")
+		// Nothing the API answers is for a cache to keep: a sign-in's or a
+		// refresh's tokens, and every authenticated read. Set ahead of the handler,
+		// so a refusal carries it too; the SPA's own files are not under /api/v1
+		// and keep the caching frontend.go gives them.
+		if isAPIPath(c.Path()) {
+			c.Set(fiber.HeaderCacheControl, "no-store")
+		}
 		c.Set("Content-Security-Policy", contentSecurityPolicy)
 		// HSTS is opt-in (HSTS_MAX_AGE > 0) — pinning HTTPS over a self-signed or
 		// plain-HTTP origin would make cert errors unbypassable.

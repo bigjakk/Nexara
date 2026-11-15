@@ -22,6 +22,9 @@ In production behind a reverse proxy with TLS:
 https://nexara.example.com/api/v1
 ```
 
+Every answer under `/api/v1`, a refusal included, carries `Cache-Control: no-store`,
+so no browser or proxy cache keeps a token or a read.
+
 ## Authentication
 
 ### JWT Flow

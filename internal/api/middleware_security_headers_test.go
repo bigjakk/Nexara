@@ -35,3 +35,25 @@ func TestSecurityHeaders_CrossOriginOpenerPolicy(t *testing.T) {
 		}
 	}
 }
+
+// TestSecurityHeaders_TheAPIIsNeverStored: every answer under /api/v1 — a refusal
+// included, and in any case the router accepts — is Cache-Control: no-store, so no
+// browser or proxy cache keeps a token or a read. A page outside the API is left to
+// its own caching.
+func TestSecurityHeaders_TheAPIIsNeverStored(t *testing.T) {
+	t.Parallel()
+	app := newHeadersProbe(t)
+	for _, tc := range []struct {
+		target, want string
+	}{
+		{"/api/v1/probe", "no-store"},
+		{"/API/V1/probe", "no-store"},
+		{"/api/v1/no-such-route", "no-store"},
+		{"/dashboard", ""},
+	} {
+		_, header, _ := sendFull(t, app, authedRequest(http.MethodGet, tc.target))
+		if got := header.Get(fiber.HeaderCacheControl); got != tc.want {
+			t.Errorf("GET %s: Cache-Control = %q, want %q", tc.target, got, tc.want)
+		}
+	}
+}
