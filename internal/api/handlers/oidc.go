@@ -626,15 +626,10 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(failure))
 	}
 
+	// Through the shared path, so the row is published and forwarded to syslog like
+	// every other: c.Locals has no user on a callback, hence AuditLogAs.
 	details, _ := json.Marshal(map[string]string{"email": userInfo.Email, "ip": c.IP()})
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{},
-		UserID:       UserUUID(user.ID),
-		ResourceType: "auth",
-		ResourceID:   user.ID.String(),
-		Action:       "oidc_callback",
-		Details:      details,
-	})
+	AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), "oidc_callback", details)
 
 	return c.Redirect().Status(fiber.StatusFound).To("/oidc-callback?oidc_token=" + exchangeCode)
 }

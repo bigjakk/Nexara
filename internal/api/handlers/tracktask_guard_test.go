@@ -255,6 +255,14 @@ func TestGuard_NoHandlerAuditLogWrappers(t *testing.T) {
 			if sanctionedAuditEntryPoints[fn.Name.Name] {
 				continue
 			}
+			// Nor may a handler write the row itself, wrapper or not (OIDC's callback did).
+			ast.Inspect(fn, func(n ast.Node) bool {
+				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "InsertAuditLog" {
+					t.Errorf("%s: %s inserts an audit row directly — call handlers.AuditLog or AuditLogAs, "+
+						"which publish and forward it", fset.Position(sel.Pos()), fn.Name.Name)
+				}
+				return true
+			})
 			if !strings.Contains(strings.ToLower(fn.Name.Name), "auditlog") {
 				continue
 			}
