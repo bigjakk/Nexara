@@ -843,7 +843,9 @@ func TestTestChannel_ReturnsTheReason(t *testing.T) {
 // resolveRecorder records the alerts a manual resolve notifies about.
 type resolveRecorder struct{ got []db.AlertHistory }
 
-func (r *resolveRecorder) NotifyResolved(_ context.Context, a db.AlertHistory) { r.got = append(r.got, a) }
+func (r *resolveRecorder) NotifyResolved(_ context.Context, a db.AlertHistory) {
+	r.got = append(r.got, a)
+}
 
 // A manual Resolve hands the alert, as it stood, to the engine's resolution
 // notice (notifications.Engine.NotifyResolved).

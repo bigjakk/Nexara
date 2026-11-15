@@ -114,7 +114,7 @@ func TestNotifyResolved(t *testing.T) {
 // funcDispatcher sends by calling itself.
 type funcDispatcher func(AlertPayload) error
 
-func (funcDispatcher) Type() string { return "webhook" }
+func (funcDispatcher) Type() string                                                      { return "webhook" }
 func (f funcDispatcher) Send(_ context.Context, _ json.RawMessage, p AlertPayload) error { return f(p) }
 
 // A dead letter reads "retrying" while its replay is in flight, and its
