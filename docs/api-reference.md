@@ -2106,10 +2106,11 @@ Every schedule carries `run_as`: the user whose grants its runs read under, stam
 | GET | `/clusters/:id/history/drs` | What happened to its DRS configuration and rules and Proxmox's HA rules (`view:drs`) |
 | GET | `/clusters/:id/history/options` | What happened to its datacenter options, notes and tags (`view:cluster`) |
 
-Both audit routes share one filter set: `resource_type`, `user_id`, `action`,
-`source`, `start_time`/`end_time` (RFC 3339), and `vmids` — a comma-separated
-list of guest VMIDs, matching the same filter on `/tasks`. `/audit-log` also
-takes `cluster_id`. `/clusters/:id/audit-log` does not: the path already names
+Both audit routes and `/audit-log/export` share one filter set: `resource_type`, `user_id`, `action`,
+`source`, `severity` (`info`, `warning` or `error`, as the audit page marks a row), `start_time`/`end_time`
+(RFC 3339), and `vmids` — a comma-separated
+list of guest VMIDs, matching the same filter on `/tasks`. `/audit-log` and the export also
+take `cluster_id`. `/clusters/:id/audit-log` does not: the path already names
 the cluster, so a `?cluster_id=` there is refused with a 400
 (`cluster_id: must be sent in the request path, not as a query parameter`)
 rather than being overridden.

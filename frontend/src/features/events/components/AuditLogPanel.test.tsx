@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import {
   haStartEntries,
@@ -11,6 +12,7 @@ import {
   useEvents,
   useAuditActions,
   useAuditUsers,
+  buildExportUrl,
 } from "../api/events-queries";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -21,6 +23,13 @@ vi.mock("../api/events-queries", () => ({
   useAuditUsers: vi.fn(),
   buildExportUrl: vi.fn(),
 }));
+// The download never settles, so the test reads only which filters it was asked for.
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(
+    {},
+    { apiFetch: vi.fn(() => new Promise<Response>(() => {})) },
+  ),
+);
 vi.mock("@/features/dashboard/api/dashboard-queries", () => ({
   useClusters: vi.fn(),
 }));
@@ -110,6 +119,25 @@ describe("AuditLogPanel", () => {
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.queryByText("Completed")).not.toBeInTheDocument();
+  });
+
+  it("exports under the source and severity filters the list is read with", async () => {
+    const user = userEvent.setup();
+    renderFor(["view:audit"]);
+
+    await user.selectOptions(screen.getByLabelText("Source"), "proxmox");
+    await user.click(screen.getByRole("button", { name: "Error" }));
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(await screen.findByRole("menuitem", { name: "CSV" }));
+
+    const filters = { source: "proxmox", severity: "error" };
+    expect(useEvents).toHaveBeenLastCalledWith(
+      expect.objectContaining(filters),
+    );
+    expect(buildExportUrl).toHaveBeenCalledWith(
+      "csv",
+      expect.objectContaining(filters),
+    );
   });
 
   it("leaves the syslog card out for a Viewer, whose every read of it would 403", () => {

@@ -3,6 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { createTestQueryClient, createWrapper } from "@/test/test-utils";
 
 import {
+  buildExportUrl,
   useSyslogConfig,
   useSaveSyslogConfig,
   type SyslogConfig,
@@ -98,4 +99,32 @@ describe("useSaveSyslogConfig", () => {
       ReturnType<typeof useSaveSyslogConfig>["data"]
     >().toEqualTypeOf<SyslogConfig | SyslogSaveWarning | undefined>();
   });
+});
+
+describe("buildExportUrl", () => {
+  // The export must carry every filter the list is read with.
+  it.each([
+    [
+      { source: "proxmox", severity: "error" },
+      "source=proxmox",
+      "severity=error",
+    ],
+    [{}, null, null],
+  ])(
+    "sends source and severity only when set: %o",
+    (filters, source, severity) => {
+      const query = new URLSearchParams(
+        buildExportUrl("csv", filters).split("?")[1],
+      );
+      expect(query.get("format")).toBe("csv");
+      expect(
+        query.has("source") ? `source=${query.get("source") ?? ""}` : null,
+      ).toBe(source);
+      expect(
+        query.has("severity")
+          ? `severity=${query.get("severity") ?? ""}`
+          : null,
+      ).toBe(severity);
+    },
+  );
 });

@@ -66,6 +66,15 @@ func auditFilterParams(extra apischema.Properties) apischema.Properties {
 			"lists them. Empty or omitted returns every action."),
 		"source": optString(32, "<string>", "Narrow to one entry source, e.g. nexara or proxmox. Empty or omitted "+
 			"returns every source."),
+		"severity": {
+			Type:     apischema.String,
+			Optional: true,
+			Enum:     []string{"", "info", "warning", "error"},
+			Typetext: "<info|warning|error>",
+			Description: "Narrow to the entries the audit page marks with this severity: error for a recorded error " +
+				"or failed status, or an action naming an error or failure; warning for a delete, destroy, disable, " +
+				"revoke, reset, stop, shutdown, suspend or cancel; info for the rest. Empty or omitted returns every severity.",
+		},
 		"start_time": {
 			Type:        apischema.String,
 			Optional:    true,

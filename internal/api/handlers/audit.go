@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -98,6 +99,21 @@ func reservedSettingVisibility(c fiber.Ctx) (map[string]bool, error) {
 		visible[key] = allowed
 	}
 	return visible, nil
+}
+
+// hiddenSettingKeys lists the reserved setting keys whose details visible
+// withholds, for the severity filter in SQL: it must not read details the
+// caller is shown only redacted, or the filter would tell what they hold.
+// Sorted, so one caller's requests send the same argument.
+func hiddenSettingKeys(visible map[string]bool) []string {
+	hidden := make([]string, 0, len(visible))
+	for key, ok := range visible {
+		if !ok {
+			hidden = append(hidden, key)
+		}
+	}
+	slices.Sort(hidden)
+	return hidden
 }
 
 // auditDetailsFor returns the details a caller may see for one audit row.
@@ -241,6 +257,13 @@ func (h *AuditHandler) parseAuditFilters(p *apischema.Params, access clusterAcce
 		countP.Source = v
 	}
 
+	// The same three severities the SPA's rows are marked with; empty is no filter.
+	if sev := p.String("severity"); sev != "" {
+		v := pgtype.Text{String: sev, Valid: true}
+		listP.Severity = v
+		countP.Severity = v
+	}
+
 	if st := p.String("start_time"); st != "" {
 		t, parseErr := time.Parse(time.RFC3339, st)
 		if parseErr != nil {
@@ -341,6 +364,13 @@ func (h *AuditHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	}
 	listP.ClusterID, countP.ClusterID = filter, filter
 
+	visible, err := reservedSettingVisibility(c)
+	if err != nil {
+		return err
+	}
+	hidden := hiddenSettingKeys(visible)
+	listP.HiddenSettingKeys, countP.HiddenSettingKeys = hidden, hidden
+
 	if !query {
 		return RespondList(c, []auditLogResponse{}, 0)
 	}
@@ -353,11 +383,6 @@ func (h *AuditHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	total, err := h.queries.CountAuditLogAdvanced(c.Context(), countP)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to count audit log")
-	}
-
-	visible, err := reservedSettingVisibility(c)
-	if err != nil {
-		return err
 	}
 
 	resp := make([]auditLogResponse, 0, len(items))
@@ -497,6 +522,17 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
 	cid := pgtype.UUID{Bytes: clusterID, Valid: true}
 	listP.ClusterID, countP.ClusterID = cid, cid
 
+	// A reserved setting key is global, so its entries carry no cluster_id and
+	// this cluster-filtered query cannot return one. Applied anyway, so that
+	// every path over these rows answers to one rule rather than to a property
+	// of the current WHERE clause.
+	visible, err := reservedSettingVisibility(c)
+	if err != nil {
+		return err
+	}
+	hidden := hiddenSettingKeys(visible)
+	listP.HiddenSettingKeys, countP.HiddenSettingKeys = hidden, hidden
+
 	var items []db.ListAuditLogAdvancedRow
 	var total int64
 	if query {
@@ -511,15 +547,6 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log")
 		}
-	}
-
-	// A reserved setting key is global, so its entries carry no cluster_id and
-	// this cluster-filtered query cannot return one. Applied anyway, so that
-	// every path over these rows answers to one rule rather than to a property
-	// of the current WHERE clause.
-	visible, err := reservedSettingVisibility(c)
-	if err != nil {
-		return err
 	}
 
 	resp := make([]auditLogResponse, 0, len(items))
@@ -628,6 +655,15 @@ func (h *AuditHandler) Export(c fiber.Ctx, p *apischema.Params) error {
 	listP.Limit = exportRowCap
 	listP.Offset = 0
 
+	// An export is the same disclosure as a listing, in a file. Resolved here
+	// so the severity filter and all three formats share one answer.
+	visible, err := reservedSettingVisibility(c)
+	if err != nil {
+		return err
+	}
+	hidden := hiddenSettingKeys(visible)
+	listP.HiddenSettingKeys, countP.HiddenSettingKeys = hidden, hidden
+
 	var rawItems []db.ListAuditLogAdvancedRow
 	var total int64
 	if query {
@@ -656,13 +692,6 @@ func (h *AuditHandler) Export(c fiber.Ctx, p *apischema.Params) error {
 			continue
 		}
 		items = append(items, a)
-	}
-
-	// An export is the same disclosure as a listing, in a file. Resolved here
-	// so all three formats share one answer.
-	visible, err := reservedSettingVisibility(c)
-	if err != nil {
-		return err
 	}
 
 	timestamp := time.Now().Format("20060102-150405")

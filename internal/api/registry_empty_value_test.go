@@ -127,11 +127,11 @@ func TestEmptyFilterListingsDeclareWhatTheHandlerTestsCover(t *testing.T) {
 	}{
 		{taskHistoryScope, []string{"filter_cluster_id", "limit", "offset", "order", "sort", "status", "vmids"}},
 		{auditScope, []string{"action", "end_time", "filter_cluster_id", "limit", "offset", "resource_type",
-			"source", "start_time", "user_id", "vmids"}},
+			"severity", "source", "start_time", "user_id", "vmids"}},
 		{auditScope + "/export", []string{"action", "end_time", "filter_cluster_id", "format", "limit", "offset",
-			"resource_type", "source", "start_time", "user_id", "vmids"}},
+			"resource_type", "severity", "source", "start_time", "user_id", "vmids"}},
 		{clusterScope + "/audit-log", []string{"action", "cluster_id", "end_time", "limit", "offset",
-			"resource_type", "source", "start_time", "user_id", "vmids"}},
+			"resource_type", "severity", "source", "start_time", "user_id", "vmids"}},
 		{cveScanScope + "/:scan_id/vulnerabilities", []string{"cluster_id", "kev", "node_id", "scan_id", "severity"}},
 	} {
 		got := slices.Sorted(maps.Keys(declaredEndpoint(t, fiber.MethodGet, tt.path).Parameters))

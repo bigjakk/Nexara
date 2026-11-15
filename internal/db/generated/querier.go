@@ -1630,6 +1630,11 @@ type Querier interface {
 	// not the vms join: the column is the guest identity frozen at insert, so the
 	// filter keeps working for destroyed guests and across the collector's vms.id
 	// churn — which is the whole reason the column exists.
+	//
+	// severity is the SPA's deriveSeverity (frontend/src/components/layout/
+	// activity-columns.ts) transcribed: keep the two in step. hidden_setting_keys
+	// are the reserved setting keys whose details the caller may not read; their
+	// details do not count, as the SPA only ever sees them redacted.
 	ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error)
 	// ListAuditTaskOutcomes is the task outcome of each entry on an audit page that
 	// carries a UPID: its task row's status, or the archive's once the row has been

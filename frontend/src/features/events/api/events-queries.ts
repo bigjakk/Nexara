@@ -26,6 +26,7 @@ interface EventsParams {
   userId?: string | undefined;
   action?: string | undefined;
   source?: string | undefined;
+  severity?: string | undefined;
   startTime?: string | undefined;
   endTime?: string | undefined;
 }
@@ -38,6 +39,7 @@ export function useEvents({
   userId,
   action,
   source,
+  severity,
   startTime,
   endTime,
 }: EventsParams) {
@@ -49,6 +51,7 @@ export function useEvents({
   if (userId) params.set("user_id", userId);
   if (action) params.set("action", action);
   if (source) params.set("source", source);
+  if (severity) params.set("severity", severity);
   if (startTime) params.set("start_time", startTime);
   if (endTime) params.set("end_time", endTime);
 
@@ -62,6 +65,7 @@ export function useEvents({
       userId,
       action,
       source,
+      severity,
       startTime,
       endTime,
     ],
@@ -150,16 +154,10 @@ export function useTestSyslog() {
   });
 }
 
+/** The export URL for the filters the list was read with: every one of them. */
 export function buildExportUrl(
   format: "json" | "csv" | "syslog",
-  filters: {
-    clusterId?: string | undefined;
-    resourceType?: string | undefined;
-    userId?: string | undefined;
-    action?: string | undefined;
-    startTime?: string | undefined;
-    endTime?: string | undefined;
-  },
+  filters: Omit<EventsParams, "limit" | "offset">,
 ): ApiPath {
   const params = new URLSearchParams();
   params.set("format", format);
@@ -167,6 +165,8 @@ export function buildExportUrl(
   if (filters.resourceType) params.set("resource_type", filters.resourceType);
   if (filters.userId) params.set("user_id", filters.userId);
   if (filters.action) params.set("action", filters.action);
+  if (filters.source) params.set("source", filters.source);
+  if (filters.severity) params.set("severity", filters.severity);
   if (filters.startTime) params.set("start_time", filters.startTime);
   if (filters.endTime) params.set("end_time", filters.endTime);
   return apiPath`/api/v1/audit-log/export?${params}`;

@@ -158,6 +158,11 @@ ORDER BY a.created_at DESC;
 -- not the vms join: the column is the guest identity frozen at insert, so the
 -- filter keeps working for destroyed guests and across the collector's vms.id
 -- churn — which is the whole reason the column exists.
+--
+-- severity is the SPA's deriveSeverity (frontend/src/components/layout/
+-- activity-columns.ts) transcribed: keep the two in step. hidden_setting_keys
+-- are the reserved setting keys whose details the caller may not read; their
+-- details do not count, as the SPA only ever sees them redacted.
 -- name: ListAuditLogAdvanced :many
 SELECT
   a.id,
@@ -188,6 +193,16 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluste
   AND (sqlc.narg('start_time')::timestamptz IS NULL OR a.created_at >= sqlc.narg('start_time'))
   AND (sqlc.narg('end_time')::timestamptz IS NULL OR a.created_at <= sqlc.narg('end_time'))
   AND (sqlc.narg('vmids')::int[] IS NULL OR a.vmid = ANY(sqlc.narg('vmids')::int[]))
+  AND (sqlc.narg('severity')::text IS NULL OR sqlc.narg('severity')::text = CASE
+         WHEN NOT (a.resource_type = 'setting'
+                   AND a.resource_id = ANY(COALESCE(sqlc.narg('hidden_setting_keys')::text[], '{}')))
+              AND ((jsonb_typeof(a.details->'error') = 'string' AND a.details->>'error' <> '')
+                   OR (jsonb_typeof(a.details->'status') = 'string' AND a.details->>'status' IN ('failed', 'error')))
+           THEN 'error'
+         WHEN lower(a.action) LIKE '%error%' OR lower(a.action) LIKE '%fail%' THEN 'error'
+         WHEN lower(a.action) ~ '(delete|destroy|disable|revoke|reset|stop|shutdown|suspend|cancel)' THEN 'warning'
+         ELSE 'info'
+       END)
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
        OR a.cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL OR c.id IS NOT NULL)
@@ -226,6 +241,16 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_
   AND (sqlc.narg('start_time')::timestamptz IS NULL OR created_at >= sqlc.narg('start_time'))
   AND (sqlc.narg('end_time')::timestamptz IS NULL OR created_at <= sqlc.narg('end_time'))
   AND (sqlc.narg('vmids')::int[] IS NULL OR vmid = ANY(sqlc.narg('vmids')::int[]))
+  AND (sqlc.narg('severity')::text IS NULL OR sqlc.narg('severity')::text = CASE
+         WHEN NOT (audit_log.resource_type = 'setting'
+                   AND audit_log.resource_id = ANY(COALESCE(sqlc.narg('hidden_setting_keys')::text[], '{}')))
+              AND ((jsonb_typeof(audit_log.details->'error') = 'string' AND audit_log.details->>'error' <> '')
+                   OR (jsonb_typeof(audit_log.details->'status') = 'string' AND audit_log.details->>'status' IN ('failed', 'error')))
+           THEN 'error'
+         WHEN lower(audit_log.action) LIKE '%error%' OR lower(audit_log.action) LIKE '%fail%' THEN 'error'
+         WHEN lower(audit_log.action) ~ '(delete|destroy|disable|revoke|reset|stop|shutdown|suspend|cancel)' THEN 'warning'
+         ELSE 'info'
+       END)
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
        OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL

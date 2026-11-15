@@ -193,6 +193,7 @@ func auditListMirror(t *testing.T) apischema.Properties {
 		"user_id":           {Type: apischema.String, Optional: true, Pattern: apischema.Rule("uuid-or-empty"), MaxLength: apischema.Ptr(36)},
 		"action":            {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
 		"source":            {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(32)},
+		"severity":          {Type: apischema.String, Optional: true, Enum: []string{"", "info", "warning", "error"}},
 		"start_time":        {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(64)},
 		"end_time":          {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(64)},
 		"vmids":             {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(6000)},

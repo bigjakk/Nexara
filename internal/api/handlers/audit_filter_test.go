@@ -274,8 +274,8 @@ func timeArg(t *testing.T, s string) pgtype.Timestamptz {
 // argument: no filter, and the caller's own scope on the page and on the
 // count, which is what `if x != ""` meant before the registry. The instance-
 // wide listing and export take ?cluster_id= as well as the filters all three
-// share (user_id, resource_type, action, source, start_time, end_time and
-// vmids).
+// share (user_id, resource_type, action, source, severity, start_time,
+// end_time and vmids).
 //
 // The empty cluster filter is the one with a permission side, and the caller
 // that exposes it is one holding view:audit on a single cluster: had "" been
@@ -295,6 +295,9 @@ func TestAuditReadsTreatAnEmptyFilterAsNone(t *testing.T) {
 		auditCount = db.CountAuditLogAdvancedParams
 	)
 	startTime, endTime := "2026-01-02T03:04:05Z", "2026-01-03T03:04:05Z"
+	// Neither caller holds a reserved setting's owning permission, so the
+	// severity filter may read none of those keys' details.
+	hidden := slices.Sorted(maps.Keys(reservedGlobalSettings))
 
 	// Every filter the three reads share, and the cluster filter only the
 	// two instance-wide ones declare — each with the column it belongs in.
@@ -310,6 +313,9 @@ func TestAuditReadsTreatAnEmptyFilterAsNone(t *testing.T) {
 		}},
 		{"source", "source", "nexara", func(l *auditList, c *auditCount) {
 			l.Source, c.Source = textArg("nexara"), textArg("nexara")
+		}},
+		{"severity", "severity", "error", func(l *auditList, c *auditCount) {
+			l.Severity, c.Severity = textArg("error"), textArg("error")
 		}},
 		{"start_time", "start_time", startTime, func(l *auditList, c *auditCount) {
 			l.StartTime, c.StartTime = timeArg(t, startTime), timeArg(t, startTime)
@@ -347,21 +353,23 @@ func TestAuditReadsTreatAnEmptyFilterAsNone(t *testing.T) {
 			func(h *AuditHandler) func(fiber.Ctx, *apischema.Params) error { return h.List },
 			wide, []string{"limit", "offset"},
 			func(scope []uuid.UUID) (auditList, auditCount) {
-				return auditList{Limit: 50, AccessibleClusterIds: scope}, auditCount{AccessibleClusterIds: scope}
+				return auditList{Limit: 50, AccessibleClusterIds: scope, HiddenSettingKeys: hidden},
+					auditCount{AccessibleClusterIds: scope, HiddenSettingKeys: hidden}
 			}, true},
 		{"export", "/audit-log/export", "/audit-log/export", auditExportMirror(t), nil,
 			func(h *AuditHandler) func(fiber.Ctx, *apischema.Params) error { return h.Export },
 			wide, []string{"limit", "offset", "format"},
 			func(scope []uuid.UUID) (auditList, auditCount) {
-				return auditList{Limit: exportRowCap, AccessibleClusterIds: scope}, auditCount{AccessibleClusterIds: scope}
+				return auditList{Limit: exportRowCap, AccessibleClusterIds: scope, HiddenSettingKeys: hidden},
+					auditCount{AccessibleClusterIds: scope, HiddenSettingKeys: hidden}
 			}, true},
 		{"per-cluster listing", "/clusters/:cluster_id/audit-log", "/clusters/" + clusterA.String() + "/audit-log",
 			perCluster, []string{"cluster_id"},
 			func(h *AuditHandler) func(fiber.Ctx, *apischema.Params) error { return h.ListByCluster },
 			shared, []string{"limit", "offset", "cluster_id"},
 			func(scope []uuid.UUID) (auditList, auditCount) {
-				return auditList{Limit: 50, ClusterID: uuidArg(clusterA), AccessibleClusterIds: scope},
-					auditCount{ClusterID: uuidArg(clusterA), AccessibleClusterIds: scope}
+				return auditList{Limit: 50, ClusterID: uuidArg(clusterA), AccessibleClusterIds: scope, HiddenSettingKeys: hidden},
+					auditCount{ClusterID: uuidArg(clusterA), AccessibleClusterIds: scope, HiddenSettingKeys: hidden}
 			}, false},
 	}
 	callers := []struct {

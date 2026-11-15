@@ -24,9 +24,19 @@ WHERE ($1::uuid IS NULL OR cluster_id = $1)
   AND ($6::timestamptz IS NULL OR created_at >= $6)
   AND ($7::timestamptz IS NULL OR created_at <= $7)
   AND ($8::int[] IS NULL OR vmid = ANY($8::int[]))
-  AND ($9::uuid[] IS NULL
-       OR cluster_id = ANY($9::uuid[]))
-  AND ($9::uuid[] IS NULL
+  AND ($9::text IS NULL OR $9::text = CASE
+         WHEN NOT (audit_log.resource_type = 'setting'
+                   AND audit_log.resource_id = ANY(COALESCE($10::text[], '{}')))
+              AND ((jsonb_typeof(audit_log.details->'error') = 'string' AND audit_log.details->>'error' <> '')
+                   OR (jsonb_typeof(audit_log.details->'status') = 'string' AND audit_log.details->>'status' IN ('failed', 'error')))
+           THEN 'error'
+         WHEN lower(audit_log.action) LIKE '%error%' OR lower(audit_log.action) LIKE '%fail%' THEN 'error'
+         WHEN lower(audit_log.action) ~ '(delete|destroy|disable|revoke|reset|stop|shutdown|suspend|cancel)' THEN 'warning'
+         ELSE 'info'
+       END)
+  AND ($11::uuid[] IS NULL
+       OR cluster_id = ANY($11::uuid[]))
+  AND ($11::uuid[] IS NULL
        OR EXISTS (SELECT 1 FROM clusters c WHERE c.id = audit_log.cluster_id))
 `
 
@@ -39,6 +49,8 @@ type CountAuditLogAdvancedParams struct {
 	StartTime            pgtype.Timestamptz `json:"start_time"`
 	EndTime              pgtype.Timestamptz `json:"end_time"`
 	Vmids                []int32            `json:"vmids"`
+	Severity             pgtype.Text        `json:"severity"`
+	HiddenSettingKeys    []string           `json:"hidden_setting_keys"`
 	AccessibleClusterIds []uuid.UUID        `json:"accessible_cluster_ids"`
 }
 
@@ -57,6 +69,8 @@ func (q *Queries) CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAd
 		arg.StartTime,
 		arg.EndTime,
 		arg.Vmids,
+		arg.Severity,
+		arg.HiddenSettingKeys,
 		arg.AccessibleClusterIds,
 	)
 	var count int64
@@ -196,9 +210,19 @@ WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
   AND ($8::timestamptz IS NULL OR a.created_at >= $8)
   AND ($9::timestamptz IS NULL OR a.created_at <= $9)
   AND ($10::int[] IS NULL OR a.vmid = ANY($10::int[]))
-  AND ($11::uuid[] IS NULL
-       OR a.cluster_id = ANY($11::uuid[]))
-  AND ($11::uuid[] IS NULL OR c.id IS NOT NULL)
+  AND ($11::text IS NULL OR $11::text = CASE
+         WHEN NOT (a.resource_type = 'setting'
+                   AND a.resource_id = ANY(COALESCE($12::text[], '{}')))
+              AND ((jsonb_typeof(a.details->'error') = 'string' AND a.details->>'error' <> '')
+                   OR (jsonb_typeof(a.details->'status') = 'string' AND a.details->>'status' IN ('failed', 'error')))
+           THEN 'error'
+         WHEN lower(a.action) LIKE '%error%' OR lower(a.action) LIKE '%fail%' THEN 'error'
+         WHEN lower(a.action) ~ '(delete|destroy|disable|revoke|reset|stop|shutdown|suspend|cancel)' THEN 'warning'
+         ELSE 'info'
+       END)
+  AND ($13::uuid[] IS NULL
+       OR a.cluster_id = ANY($13::uuid[]))
+  AND ($13::uuid[] IS NULL OR c.id IS NOT NULL)
 ORDER BY a.created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -214,6 +238,8 @@ type ListAuditLogAdvancedParams struct {
 	StartTime            pgtype.Timestamptz `json:"start_time"`
 	EndTime              pgtype.Timestamptz `json:"end_time"`
 	Vmids                []int32            `json:"vmids"`
+	Severity             pgtype.Text        `json:"severity"`
+	HiddenSettingKeys    []string           `json:"hidden_setting_keys"`
 	AccessibleClusterIds []uuid.UUID        `json:"accessible_cluster_ids"`
 }
 
@@ -270,6 +296,11 @@ type ListAuditLogAdvancedRow struct {
 // not the vms join: the column is the guest identity frozen at insert, so the
 // filter keeps working for destroyed guests and across the collector's vms.id
 // churn — which is the whole reason the column exists.
+//
+// severity is the SPA's deriveSeverity (frontend/src/components/layout/
+// activity-columns.ts) transcribed: keep the two in step. hidden_setting_keys
+// are the reserved setting keys whose details the caller may not read; their
+// details do not count, as the SPA only ever sees them redacted.
 func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error) {
 	rows, err := q.db.Query(ctx, listAuditLogAdvanced,
 		arg.Limit,
@@ -282,6 +313,8 @@ func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdva
 		arg.StartTime,
 		arg.EndTime,
 		arg.Vmids,
+		arg.Severity,
+		arg.HiddenSettingKeys,
 		arg.AccessibleClusterIds,
 	)
 	if err != nil {

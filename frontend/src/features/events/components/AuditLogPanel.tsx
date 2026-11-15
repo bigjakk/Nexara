@@ -422,18 +422,12 @@ export function AuditLogPanel() {
     userId: userFilter || undefined,
     action: actionFilter || undefined,
     source: sourceFilter || undefined,
+    severity: severityFilter === "all" ? undefined : severityFilter,
     startTime,
     endTime,
   });
 
-  // Client-side severity filter (derived from action/details, not stored in DB)
-  const filteredItems =
-    severityFilter === "all"
-      ? data?.items
-      : data?.items.filter((e) => entrySeverity(e) === severityFilter);
-
   // Who made each task on the page: an HA manager's task names its request's.
-  // From the whole page, not what the severity filter leaves of it.
   const actorByUpid = useMemo(() => {
     const actors = new Map<string, string>();
     for (const entry of data?.items ?? []) {
@@ -453,6 +447,8 @@ export function AuditLogPanel() {
         resourceType: resourceFilter || undefined,
         userId: userFilter || undefined,
         action: actionFilter || undefined,
+        source: sourceFilter || undefined,
+        severity: severityFilter === "all" ? undefined : severityFilter,
         startTime,
         endTime,
       };
@@ -465,6 +461,8 @@ export function AuditLogPanel() {
       resourceFilter,
       userFilter,
       actionFilter,
+      sourceFilter,
+      severityFilter,
       startTime,
       endTime,
     ],
@@ -482,18 +480,16 @@ export function AuditLogPanel() {
     setPage(0);
   }, []);
 
-  // The filters the server applies, which narrow the total it reports. The
-  // severity filter is applied here, to the page already fetched, and leaves
-  // that total alone.
-  const hasServerFilters =
+  // Every filter is applied by the server and narrows the total it reports.
+  const hasFilters =
     clusterFilter !== "" ||
     resourceFilter !== "" ||
     userFilter !== "" ||
     actionFilter !== "" ||
     sourceFilter !== "" ||
+    severityFilter !== "all" ||
     startDate !== "" ||
     endDate !== "";
-  const hasFilters = hasServerFilters || severityFilter !== "all";
 
   return (
     <div className="space-y-4">
@@ -502,7 +498,7 @@ export function AuditLogPanel() {
         title="Audit log"
         aside={
           data
-            ? `${data.total.toLocaleString()} ${data.total === 1 ? "event" : "events"}${hasServerFilters ? " match" : ""}`
+            ? `${data.total.toLocaleString()} ${data.total === 1 ? "event" : "events"}${hasFilters ? " match" : ""}`
             : undefined
         }
         actions={
@@ -705,7 +701,7 @@ export function AuditLogPanel() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredItems?.map((entry) => (
+                {data?.items.map((entry) => (
                   <EventRow
                     key={entry.id}
                     entry={entry}
@@ -719,7 +715,7 @@ export function AuditLogPanel() {
                     }}
                   />
                 ))}
-                {(!filteredItems || filteredItems.length === 0) && (
+                {(!data || data.items.length === 0) && (
                   <TableRow className="hover:bg-transparent">
                     <TableCell
                       colSpan={COLUMN_COUNT}
