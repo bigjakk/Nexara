@@ -342,7 +342,7 @@ func (h *TOTPHandler) Disable(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusBadRequest, "TOTP is not enabled")
 	}
 
-	attempt, err := h.admitTOTPAttempt(c, userID)
+	attempt, err := h.admitTOTPAttempt(c, totpManageLockoutPolicy, passwordLockoutSubject(c, userID), userID)
 	if err != nil {
 		return err
 	}
@@ -364,7 +364,7 @@ func (h *TOTPHandler) Disable(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to disable TOTP")
 	}
 	_ = h.queries.DeleteAllRecoveryCodes(c.Context(), userID)
-	h.forgetTOTPFailures(c, userID)
+	h.forgetTOTPFailures(c, totpManageLockoutPolicy, passwordLockoutSubject(c, userID), userID)
 
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "auth", userID.String(), "totp_disabled", nil)
 
@@ -411,7 +411,7 @@ func (h *TOTPHandler) RegenerateRecoveryCodes(c fiber.Ctx, p *apischema.Params) 
 		return fiber.NewError(fiber.StatusBadRequest, "TOTP is not enabled")
 	}
 
-	attempt, err := h.admitTOTPAttempt(c, userID)
+	attempt, err := h.admitTOTPAttempt(c, totpManageLockoutPolicy, passwordLockoutSubject(c, userID), userID)
 	if err != nil {
 		return err
 	}
@@ -425,7 +425,7 @@ func (h *TOTPHandler) RegenerateRecoveryCodes(c fiber.Ctx, p *apischema.Params) 
 		}
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid TOTP code")
 	}
-	h.forgetTOTPFailures(c, userID)
+	h.forgetTOTPFailures(c, totpManageLockoutPolicy, passwordLockoutSubject(c, userID), userID)
 
 	_ = h.queries.DeleteAllRecoveryCodes(c.Context(), userID)
 
@@ -557,7 +557,7 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 
 	// Counted here, after every refusal above that spends no code, and before the
 	// code is checked: a locked account's code is not looked at.
-	attempt, err := h.admitTOTPAttempt(c, userID)
+	attempt, err := h.admitTOTPAttempt(c, totpLockoutPolicy, userID, userID)
 	if err != nil {
 		return err
 	}
@@ -585,7 +585,7 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 	// edge-case ergonomic. Race-detection via Del-result is deliberately not
 	// done because a recovery code might already be burned at this point.
 	_ = h.rdb.Del(c.Context(), pendingKey, attemptKey).Err()
-	h.forgetTOTPFailures(c, userID)
+	h.forgetTOTPFailures(c, totpLockoutPolicy, userID, userID)
 
 	if h.issueTokens == nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Token issuer not configured")
@@ -697,6 +697,21 @@ var totpLockoutPolicy = lockoutPolicy{
 	lockKey:   totpUserLockKey,
 }
 
+// totpManageLockoutPolicy is the same rule for the two routes that check a code from
+// a signed-in session — Disable and RegenerateRecoveryCodes — counted per SESSION
+// (passwordLockoutSubject) and under keys of its own. Counted in the user's keys,
+// the holder of one stolen session could send wrong codes there and lock the owner's
+// second step of sign-in, recovery codes included; this way he spends his own
+// session's budget only. The sign-in step, which has no session yet, keeps the
+// per-user keys.
+var totpManageLockoutPolicy = lockoutPolicy{
+	threshold: totpLockoutThreshold,
+	window:    totpLockoutWindow,
+	duration:  totpLockoutDuration,
+	failKey:   func(subject uuid.UUID) string { return "totp:session:fail:" + subject.String() },
+	lockKey:   func(subject uuid.UUID) string { return "totp:session:lock:" + subject.String() },
+}
+
 const (
 	totpLockedMessage = "Too many failed 2FA attempts — try again in a few minutes"
 	// totpLockoutUnavailableMessage is the 503 of a code that could not be counted,
@@ -705,8 +720,8 @@ const (
 		"nothing was changed. Try again shortly."
 )
 
-func (h *TOTPHandler) totpLockout() passwordLockoutStore {
-	return redisPasswordLockout{rdb: h.rdb, policy: totpLockoutPolicy}
+func (h *TOTPHandler) totpLockout(policy lockoutPolicy) passwordLockoutStore {
+	return redisPasswordLockout{rdb: h.rdb, policy: policy}
 }
 
 // admitTOTPAttempt counts one attempt at the account's second factor before its code
@@ -716,10 +731,14 @@ func (h *TOTPHandler) totpLockout() passwordLockoutStore {
 // checked either: it fails closed, as the current-password lockout does, because a
 // code checked without being counted is a guess with no limit. The count is bounded by
 // the follow-up deadline, not by what the Redis client would wait (boundedByContext).
-func (h *TOTPHandler) admitTOTPAttempt(c fiber.Ctx, userID uuid.UUID) (lockoutReservation, error) {
+//
+// policy and subject say whose budget: the user's for the sign-in step
+// (totpLockoutPolicy), the session's for Disable and Regenerate
+// (totpManageLockoutPolicy).
+func (h *TOTPHandler) admitTOTPAttempt(c fiber.Ctx, policy lockoutPolicy, subject, userID uuid.UUID) (lockoutReservation, error) {
 	ctx, cancel := context.WithTimeout(c.Context(), h.followUpDuration())
 	defer cancel()
-	res, err := h.totpLockout().reserve(ctx, userID)
+	res, err := h.totpLockout(policy).reserve(ctx, subject)
 	if err != nil {
 		slog.Warn("two-factor: the failed-attempt counter could not be reached; the code was not checked and nothing was changed",
 			"user_id", userID, "error", err)
@@ -736,10 +755,10 @@ func (h *TOTPHandler) admitTOTPAttempt(c fiber.Ctx, userID uuid.UUID) (lockoutRe
 // forgetTOTPFailures clears the account's count and any lock once a code verified,
 // so a near miss followed by a success does not carry over. Best effort, on a
 // follow-up deadline: a count left behind runs out with its window.
-func (h *TOTPHandler) forgetTOTPFailures(c fiber.Ctx, userID uuid.UUID) {
+func (h *TOTPHandler) forgetTOTPFailures(c fiber.Ctx, policy lockoutPolicy, subject, userID uuid.UUID) {
 	ctx, cancel := context.WithTimeout(c.Context(), h.followUpDuration())
 	defer cancel()
-	if err := h.totpLockout().clear(ctx, userID); err != nil {
+	if err := h.totpLockout(policy).clear(ctx, subject); err != nil {
 		slog.Warn("two-factor: could not clear the failed-attempt count after a code verified; it stays until it runs out",
 			"user_id", userID, "error", err)
 	}

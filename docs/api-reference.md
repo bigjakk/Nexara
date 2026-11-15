@@ -758,7 +758,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | POST | `/auth/totp/verify-login` | Complete TOTP challenge (`429` with `Retry-After` while the account's codes are locked; `503` when the attempt cannot be counted, and the code is not checked) |
 | POST | `/auth/totp/setup` | Begin TOTP enrollment. Send `current_password` (`400` without one, `403` when wrong, `429` while locked out with change-password, which shares the limit); an LDAP or SSO account sends none and must have signed in within the last 10 minutes (`403` otherwise) |
 | POST | `/auth/totp/setup/verify` | Confirm TOTP enrollment |
-| DELETE | `/auth/totp` | Disable TOTP (`429` with `Retry-After` while the account's codes are locked; `503` when the attempt cannot be counted, and nothing changes) |
+| DELETE | `/auth/totp` | Disable TOTP (`429` with `Retry-After` while this session's codes are locked — five wrong ones in 10 minutes, counted apart from sign-in's second step; `503` when the attempt cannot be counted, and nothing changes) |
 | GET | `/auth/totp/status` | Get TOTP enrollment status |
 | POST | `/auth/totp/recovery-codes/regenerate` | Regenerate recovery codes (`429` and `503` as for `DELETE /auth/totp`) |
 

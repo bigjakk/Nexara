@@ -420,7 +420,7 @@ func TestTOTP_AWrongCodeGivesItsCounterAnExpiry(t *testing.T) {
 	t.Parallel()
 	user, _ := epochTOTPUser(t, epochLoginEmail, 0)
 	a := newEpochApp(t, newEpochStore(user), epochOptions{totp: true})
-	if err := a.redis.Set(totpUserFailKey(user.ID), "2"); err != nil {
+	if err := a.redis.Set(totpManageLockoutPolicy.failKey(user.ID), "2"); err != nil {
 		t.Fatalf("seed the counter: %v", err)
 	}
 	resp := a.send(t, http.MethodPost, "/auth/totp/recovery-codes/regenerate", `{"code":"000000"}`,
@@ -428,7 +428,60 @@ func TestTOTP_AWrongCodeGivesItsCounterAnExpiry(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 for a wrong code", resp.StatusCode)
 	}
-	if ttl := a.redis.TTL(totpUserFailKey(user.ID)); ttl != totpLockoutWindow {
+	if ttl := a.redis.TTL(totpManageLockoutPolicy.failKey(user.ID)); ttl != totpLockoutWindow {
 		t.Errorf("the counter expires in %v, want its window, %v", ttl, totpLockoutWindow)
+	}
+}
+
+// TestTOTP_ASessionsWrongCodesDoNotLockTheSignInStep: wrong codes sent to Disable from
+// one session use up that session's budget, and the owner's second step of sign-in is
+// not locked by them: a stolen session must not lock the owner out of signing in.
+func TestTOTP_ASessionsWrongCodesDoNotLockTheSignInStep(t *testing.T) {
+	t.Parallel()
+	user, plain := epochTOTPUser(t, epochLoginEmail, 0)
+	a := newEpochApp(t, newEpochStore(user), epochOptions{totp: true})
+	thief := map[string]string{"X-Test-Acting-User": user.ID.String(), "X-Test-Session": uuid.NewString()}
+	var last int
+	for range totpLockoutThreshold {
+		last = a.send(t, http.MethodDelete, "/auth/totp", `{"code":"000000"}`, thief, 20*time.Second).StatusCode
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("the session's last wrong code = %d, want 429: this test proved nothing", last)
+	}
+	token := epochFirstStep(t, a, epochLoginEmail)
+	if resp := a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, plain)); resp.StatusCode != http.StatusOK {
+		t.Errorf("the owner's second step = %d, want 200: one session's wrong codes locked the sign-in", resp.StatusCode)
+	}
+}
+
+// TestTOTP_VerifyLogin_ARightCodeClearsAndTheLastWrongOneLocks: four wrong codes and a
+// right one leave nothing counted; five wrong ones after that lock, the fifth itself
+// answering 429 and destroying its pending token.
+func TestTOTP_VerifyLogin_ARightCodeClearsAndTheLastWrongOneLocks(t *testing.T) {
+	t.Parallel()
+	user, plain := epochTOTPUser(t, epochLoginEmail, 0)
+	a := newEpochApp(t, newEpochStore(user), epochOptions{totp: true})
+	wrong := func(token string) int {
+		t.Helper()
+		return a.post(t, "/auth/totp/verify-login", `{"totp_pending_token":"`+token+`","code":"000000"}`).StatusCode
+	}
+	token := epochFirstStep(t, a, epochLoginEmail)
+	for range totpLockoutThreshold - 1 {
+		wrong(token)
+	}
+	if resp := a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, plain)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("the right code = %d, want 200", resp.StatusCode)
+	}
+	token = epochFirstStep(t, a, epochLoginEmail)
+	for i := 1; i < totpLockoutThreshold; i++ {
+		if status := wrong(token); status != http.StatusUnauthorized {
+			t.Fatalf("wrong code %d after the right one = %d, want 401: the right code must clear the count", i, status)
+		}
+	}
+	if status := wrong(token); status != http.StatusTooManyRequests {
+		t.Errorf("the fifth wrong code = %d, want the 429 of the lock it arms", status)
+	}
+	if a.redis.Exists("totp:pending:" + token) {
+		t.Error("the pending token survived the lock")
 	}
 }
