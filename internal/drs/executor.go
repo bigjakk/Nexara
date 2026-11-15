@@ -9,7 +9,6 @@ import (
 	"maps"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -219,7 +218,7 @@ func (e *Executor) migrate(ctx context.Context, client *proxmox.Client, clusterI
 	// The history and the audit log record the migration, not the task that
 	// asked for it, so an HA request is followed to the task that does it.
 	migrationUPID := upid
-	if since, isHA := haRequestStart(upid); isHA && status == "completed" {
+	if since, isHA := proxmox.HAMigrationRequestStart(upid); isHA && status == "completed" {
 		migrationUPID, status, exitStatus = e.followHAMigration(client, rec, since)
 	}
 
@@ -389,19 +388,6 @@ func taskLogErrors(ctx context.Context, client *proxmox.Client, node, upid strin
 	}
 }
 
-// haRequestStart returns the start time of a task that only asks the HA manager
-// for a migration, and whether upid is one. For an HA-managed guest Proxmox answers
-// the migrate call with an hamigrate task, which queues the request and ends OK
-// within a second, whatever becomes of the migration.
-func haRequestStart(upid string) (int64, bool) {
-	parts := strings.Split(upid, ":")
-	if len(parts) < 7 || parts[5] != "hamigrate" {
-		return 0, false
-	}
-	start, err := strconv.ParseInt(parts[4], 16, 64)
-	return start, err == nil
-}
-
 // followHAMigration waits for the migration the HA manager starts after an
 // hamigrate task and returns that task and how it ended. Taking the hamigrate's OK
 // instead records a migration that fails as completed, so the guest is retried on
@@ -410,37 +396,22 @@ func haRequestStart(upid string) (int64, bool) {
 // The HA manager runs it on the guest's node, usually within 20 s, though it shuts
 // a container down first, for up to a minute. If none starts within the grace the
 // outcome is unknown, reported as "timeout" like a task DRS stops waiting for. The
-// task list is read from since, the hamigrate's start, so an earlier attempt's task
-// cannot be taken for this one's.
+// task list is read from since, the hamigrate's start (proxmox.AwaitHAMigration).
 func (e *Executor) followHAMigration(client *proxmox.Client, rec Recommendation, since int64) (upid, status, detail string) {
 	ctx, cancel := context.WithTimeout(e.shutdownCtx, e.haStartGrace)
 	defer cancel()
 
-	ticker := time.NewTicker(e.taskPollInterval)
-	defer ticker.Stop()
-
-	vmid := strconv.Itoa(rec.VMID)
-	for {
-		select {
-		case <-ctx.Done():
-			if e.shutdownCtx.Err() != nil {
-				return "", statusInterrupted, interruptedNote
-			}
-			return "", "timeout", fmt.Sprintf("the HA manager started no migration within %s", e.haStartGrace)
-		case <-ticker.C:
-			tasks, err := client.GetNodeTasks(ctx, rec.SourceNode, since, 0)
-			if err != nil {
-				e.logger.Warn("failed to list tasks for an HA migration", "vmid", rec.VMID, "error", err)
-				continue
-			}
-			for _, t := range tasks {
-				if t.ID == vmid && (t.Type == "qmigrate" || t.Type == "vzmigrate") {
-					status, detail = e.waitForTask(ctx, client, rec.SourceNode, t.UPID)
-					return t.UPID, status, detail
-				}
-			}
+	upid, _, err := proxmox.AwaitHAMigration(ctx, client, rec.SourceNode, rec.VMID, since, e.taskPollInterval, func(err error) {
+		e.logger.Warn("failed to list tasks for an HA migration", "vmid", rec.VMID, "error", err)
+	})
+	if err != nil {
+		if e.shutdownCtx.Err() != nil {
+			return "", statusInterrupted, interruptedNote
 		}
+		return "", "timeout", fmt.Sprintf("the HA manager started no migration within %s", e.haStartGrace)
 	}
+	status, detail = e.waitForTask(ctx, client, rec.SourceNode, upid)
+	return upid, status, detail
 }
 
 func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) (status string, detail string) {
