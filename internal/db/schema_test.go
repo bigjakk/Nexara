@@ -66,6 +66,22 @@ func TestToPgx5URL(t *testing.T) {
 			want: "",
 		},
 		{
+			// pgxpool reads these and golang-migrate would send them to the server.
+			name: "pool_only_keys_dropped_others_kept_in_order",
+			in:   "postgres://u@h/db?pool_max_conns=20&sslmode=disable&pool_min_conns=2&application_name=x&pool_max_conn_lifetime=1h",
+			want: "pgx5://u@h/db?sslmode=disable&application_name=x",
+		},
+		{
+			name: "only_pool_keys_leave_no_query",
+			in:   "postgresql://u@h/db?pool_health_check_period=1m&pool_min_idle_conns=1&pool_max_conn_idle_time=5m&pool_max_conn_lifetime_jitter=1s",
+			want: "pgx5://u@h/db",
+		},
+		{
+			name: "keyword_value_dsn_untouched",
+			in:   "host=h dbname=db pool_max_conns=20",
+			want: "host=h dbname=db pool_max_conns=20",
+		},
+		{
 			name: "scheme_only_substring_inside_path_left_alone",
 			in:   "weird://postgres.example.com/db",
 			want: "weird://postgres.example.com/db",

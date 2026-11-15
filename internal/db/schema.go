@@ -93,16 +93,59 @@ func LatestMigrationVersion() (uint64, error) {
 }
 
 // toPgx5URL rewrites a libpq-style postgres URL to the pgx5 scheme used by the
-// golang-migrate pgx/v5 driver.
+// golang-migrate pgx/v5 driver, and drops the query keys only pgxpool reads
+// (poolOnlyKeys): golang-migrate opens a plain connection, which would send them
+// to the server as runtime parameters and be refused at startup ("unrecognized
+// configuration parameter"). Every other key is kept, in order, byte for byte.
 func toPgx5URL(databaseURL string) string {
+	var rest string
 	switch {
 	case strings.HasPrefix(databaseURL, "postgres://"):
-		return "pgx5://" + strings.TrimPrefix(databaseURL, "postgres://")
+		rest = strings.TrimPrefix(databaseURL, "postgres://")
 	case strings.HasPrefix(databaseURL, "postgresql://"):
-		return "pgx5://" + strings.TrimPrefix(databaseURL, "postgresql://")
+		rest = strings.TrimPrefix(databaseURL, "postgresql://")
 	default:
 		return databaseURL
 	}
+	return "pgx5://" + withoutPoolKeys(rest)
+}
+
+// poolOnlyKeys are the connection-string keys pgxpool.ParseConfig consumes and
+// removes before connecting (pgxpool/pool.go, pgx v5.10.0).
+var poolOnlyKeys = map[string]bool{
+	"pool_max_conns":                true,
+	"pool_min_conns":                true,
+	"pool_min_idle_conns":           true,
+	"pool_max_conn_lifetime":        true,
+	"pool_max_conn_idle_time":       true,
+	"pool_health_check_period":      true,
+	"pool_max_conn_lifetime_jitter": true,
+}
+
+// withoutPoolKeys removes poolOnlyKeys from the query of a URL (past its scheme),
+// leaving any fragment and every other pair untouched.
+func withoutPoolKeys(u string) string {
+	base, query, ok := strings.Cut(u, "?")
+	if !ok {
+		return u
+	}
+	query, fragment, hasFragment := strings.Cut(query, "#")
+	var kept []string
+	for _, pair := range strings.Split(query, "&") {
+		key, _, _ := strings.Cut(pair, "=")
+		if name, err := url.QueryUnescape(key); err == nil && poolOnlyKeys[name] {
+			continue
+		}
+		kept = append(kept, pair)
+	}
+	out := base
+	if len(kept) > 0 {
+		out += "?" + strings.Join(kept, "&")
+	}
+	if hasFragment {
+		out += "#" + fragment
+	}
+	return out
 }
 
 // seedFromLegacyTable seeds schema_migrations.version from the legacy
