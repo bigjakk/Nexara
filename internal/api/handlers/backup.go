@@ -1089,6 +1089,28 @@ func (h *BackupHandler) TriggerBackup(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
+	// vzdump answers "OK", not a task id, when it starts nothing — for a single
+	// guest, one that is not on the node (PVE/API2/VZDump.pm). Only a reply
+	// carrying the "UPID:" prefix is a task, as RunBackupJob reads one; anything
+	// else is audited as the request it was and never recorded as a task.
+	if !strings.HasPrefix(upid, "UPID:") {
+		outcome := "unconfirmed"
+		if upid == "OK" {
+			outcome = "nothing_to_back_up"
+		}
+		// Marshalling a string map cannot fail.
+		details, _ := json.Marshal(map[string]string{
+			"vmid": req.VMID, "node": req.Node, "storage": req.Storage, "mode": req.Mode, "outcome": outcome,
+		})
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "backup", req.VMID, "backup_triggered", details)
+		if upid == "OK" {
+			return fiber.NewError(fiber.StatusConflict,
+				"No backup started: vzdump found no guest "+req.VMID+" on node "+req.Node+". The guest may have moved; reload and try again.")
+		}
+		return fiber.NewError(fiber.StatusBadGateway,
+			"Proxmox answered the backup of VMID "+req.VMID+" on "+req.Node+" without a task id, so whether it started cannot be told. Check the node's task list before backing up again.")
+	}
+
 	description := "Backup VMID " + req.VMID + " on " + req.Node
 	if req.Storage != "" {
 		description += " → " + req.Storage

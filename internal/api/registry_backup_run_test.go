@@ -1005,3 +1005,50 @@ func TestRunBackupJobWithNoTaskAnswersByWhatHappened(t *testing.T) {
 		})
 	}
 }
+
+// A one-off backup records a task only for a reply that is one: vzdump's "OK"
+// (the guest is not on that node) or any other non-UPID reply is audited and
+// answered as an error, and never stored as a task id.
+func TestTriggerBackupTracksOnlyATaskID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, reply, outcome string
+		status               int
+	}{
+		{"a task id is tracked", `"` + backupRunUPID01 + `"`, "", fiber.StatusOK},
+		{"OK started nothing", `"OK"`, "nothing_to_back_up", fiber.StatusConflict},
+		{"any other reply is unconfirmed", `"done"`, "unconfirmed", fiber.StatusBadGateway},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pve := &backupRunPVE{replies: map[string]string{"pve-01": tt.reply}}
+			app, dbtx := newBackupJobApp(t, pve, fiber.MethodPost, clusterScope+"/backup", (*handlers.BackupHandler).TriggerBackup)
+			req := httptest.NewRequest(http.MethodPost, backupRoute(clusterScope+"/backup"),
+				strings.NewReader(`{"vmid":"101","node":"pve-01","storage":"store01"}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Test-User", "yes")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("app.Test: %v", err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != tt.status {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.status)
+			}
+			tasks, audits := dbtx.decodedTasks(t), dbtx.decodedAudits(t)
+			if len(audits) != 1 || audits[0].action != "backup_triggered" {
+				t.Fatalf("audit rows = %+v, want one backup_triggered", audits)
+			}
+			if tt.outcome == "" {
+				if len(tasks) != 1 || tasks[0].upid != backupRunUPID01 {
+					t.Errorf("tasks = %+v, want the one task", tasks)
+				}
+				return
+			}
+			if len(tasks) != 0 || audits[0].details["upid"] != nil || audits[0].details["outcome"] != tt.outcome {
+				t.Errorf("tasks = %+v, audit = %s; want no task and outcome %s", tasks, audits[0].raw, tt.outcome)
+			}
+		})
+	}
+}
