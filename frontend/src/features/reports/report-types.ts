@@ -29,7 +29,7 @@ export const REPORT_TYPES: readonly ReportTypeInfo[] = [
     blurb:
       "One page across availability, load, backups, alerts, tasks, snapshots and patching.",
     sections: [
-      "Findings from every other report",
+      "Findings from the uptime, resource utilisation, backup compliance, snapshot inventory and patch status reports",
       "Cluster load per day and node status",
       "Backup coverage",
       "Alerts and tasks in the period",
