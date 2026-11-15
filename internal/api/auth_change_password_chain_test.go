@@ -136,6 +136,9 @@ type chainDB struct {
 	// one is live — and liveErr, when set, is its answer to every question instead.
 	ended   map[uuid.UUID]bool
 	liveErr error
+	// keyStalls makes GetAPIKeyByHash a lookup that never answers: it waits for its
+	// context to end and fails with that.
+	keyStalls bool
 
 	// stamped is closed by the first UpdateAPIKeyLastUsed, which authenticateAPIKey
 	// sends from a goroutine of its own: waitForKeyStamp waits on it, and nothing
@@ -183,11 +186,15 @@ func (f *chainDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, erro
 	return nil, fmt.Errorf("unexpected Query %s", name)
 }
 
-func (f *chainDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+func (f *chainDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	name := stmtName(sql)
 	f.record(name)
 	switch name {
 	case "GetAPIKeyByHash":
+		if f.keyStalls {
+			<-ctx.Done()
+			return failedRow{ctx.Err()}
+		}
 		if args[0] == f.keyHash {
 			return structRow{f.key}
 		}

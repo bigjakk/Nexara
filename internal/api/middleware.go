@@ -1270,6 +1270,9 @@ func extractBearerToken(c fiber.Ctx) string {
 	return auth.BearerToken(c.Get("Authorization"))
 }
 
+// defaultAPIKeyLookupTimeout bounds authenticateAPIKey's lookup: handlers' authDBTimeout.
+const defaultAPIKeyLookupTimeout = 15 * time.Second
+
 // authenticateAPIKey validates an nxra_ prefixed API key token and sets
 // the user identity in Fiber locals. Returns an error on failure.
 func (s *Server) authenticateAPIKey(c fiber.Ctx, token string) error {
@@ -1277,8 +1280,18 @@ func (s *Server) authenticateAPIKey(c fiber.Ctx, token string) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Database not configured")
 	}
 
+	// Bounded, as every other authentication lookup is (handlers' authDBTimeout):
+	// anyone can send a string that starts nxra_, the /auth/ paths skip the general
+	// limiter, and a lookup left to wait on a starved pool would hold the request —
+	// and the liveness check every other request needs — for as long as it likes.
+	timeout := s.apiKeyLookupTimeout
+	if timeout <= 0 {
+		timeout = defaultAPIKeyLookupTimeout
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), timeout)
 	keyHash := auth.HashToken(token)
-	row, err := s.queries.GetAPIKeyByHash(c.Context(), keyHash)
+	row, err := s.queries.GetAPIKeyByHash(ctx, keyHash)
+	cancel()
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired API key")
 	}

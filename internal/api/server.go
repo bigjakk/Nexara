@@ -43,6 +43,10 @@ type Server struct {
 	// from queries, like nodeLookup and for the same reason.
 	credentialLiveness handlers.CredentialLiveness
 
+	// apiKeyLookupTimeout, when set, replaces the bound on authenticateAPIKey's
+	// lookup (defaultAPIKeyLookupTimeout); only tests set it.
+	apiKeyLookupTimeout time.Duration
+
 	config                 *config.Config
 	db                     *pgxpool.Pool
 	queries                *db.Queries
