@@ -438,17 +438,18 @@ func execute(ctx context.Context, cfg Config, command string, setupTimeout time.
 	}
 }
 
-// TestConnection verifies SSH connectivity and auth to a host.
+// TestConnection verifies SSH connectivity and auth to a host, and reports
+// whether the account is root, which the automated upgrade needs and sensor
+// readings do not: a login that is not root still passes, and the caller warns.
+// A session that prints no uid (a forced command, a restricted shell) is
+// reported as not root, as RequireRoot would refuse it.
 // The caller must populate cfg.KnownHostKey with the pinned key.
-func TestConnection(ctx context.Context, cfg Config) error {
-	result, err := Execute(ctx, cfg, "echo ok")
+func TestConnection(ctx context.Context, cfg Config) (root bool, err error) {
+	uid, err := loginUID(ctx, cfg)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("test command exited with code %d: %s", result.ExitCode, result.Stderr)
-	}
-	return nil
+	return uid == "0", nil
 }
 
 // uidMarker opens the line RequireRoot reads its uid from, so text the
@@ -461,12 +462,29 @@ const uidMarker = "nexara-uid="
 // changed host key, an sshd that does not answer or a non-root account here,
 // before it acts. The error names the uid, digits only, and not the account.
 func RequireRoot(ctx context.Context, cfg Config) error {
+	uid, err := loginUID(ctx, cfg)
+	switch {
+	case err != nil:
+		return err
+	case uid == "":
+		// A forced command or a restricted shell ran instead of the check,
+		// and would run instead of an upgrade too.
+		return errors.New("ssh: the uid check printed no uid, so the session does not run the commands it is sent")
+	case uid != "0":
+		return fmt.Errorf("%w (uid %s)", ErrNotRoot, uid)
+	}
+	return nil
+}
+
+// loginUID logs in and returns the uid the session runs as, digits only, or ""
+// when the session printed none.
+func loginUID(ctx context.Context, cfg Config) (string, error) {
 	result, err := Execute(ctx, cfg, `echo "`+uidMarker+`$(id -u)"`)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if result.ExitCode != 0 {
-		return fmt.Errorf("the uid check exited with code %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+		return "", fmt.Errorf("the uid check exited with code %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
 	}
 	// The last marker is the command's own: the shell's login output comes
 	// first, and output with no newline (a terminal title) shares its line.
@@ -476,15 +494,10 @@ func RequireRoot(ctx context.Context, cfg Config) error {
 			uid = strings.TrimSpace(line[i+len(uidMarker):])
 		}
 	}
-	switch {
-	case uid == "" || strings.Trim(uid, "0123456789") != "":
-		// A forced command or a restricted shell ran instead of the check,
-		// and would run instead of an upgrade too.
-		return errors.New("ssh: the uid check printed no uid, so the session does not run the commands it is sent")
-	case uid != "0":
-		return fmt.Errorf("%w (uid %s)", ErrNotRoot, uid)
+	if strings.Trim(uid, "0123456789") != "" {
+		return "", nil
 	}
-	return nil
+	return uid, nil
 }
 
 func buildAuth(cfg Config) ([]ssh.AuthMethod, error) {

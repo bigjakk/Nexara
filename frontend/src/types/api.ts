@@ -997,6 +997,8 @@ export interface SSHTestResponse {
   success: boolean;
   message: string;
   fingerprint?: string;
+  /** On a login that works: whether the account is root, which automated upgrades need. */
+  root?: boolean;
   host_key_pending?: SSHHostKeyPending;
   host_key_mismatch?: SSHHostKeyMismatch;
 }

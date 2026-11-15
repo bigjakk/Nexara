@@ -3,6 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { makeNode } from "@/test/cluster.fixtures";
 import type { SSHCredential, SSHKnownHost } from "@/types/api";
 import { SSHCredentialsForm } from "./SSHCredentialsForm";
 
@@ -160,5 +161,39 @@ describe("SSHCredentialsForm — unpin host key", () => {
     // Once: a second request arriving after the first would land here.
     await new Promise((r) => setTimeout(r, 100));
     expect(api.writes()).toEqual([`DELETE ${BASE}/ssh-known-hosts/kh-2`]);
+  });
+});
+
+describe("SSHCredentialsForm — test connection", () => {
+  // A login that is not root passes, with a warning: sensor readings work
+  // without root, automated upgrades do not.
+  it.each([
+    [false, true],
+    [true, false],
+  ])("root %s warns %s", async (root, warns) => {
+    api = stubApi(
+      {
+        [`${BASE}/ssh-credentials`]: creds,
+        [`${BASE}/nodes`]: listOf([
+          makeNode({ name: "pve-01", address: "192.0.2.11" }),
+        ]),
+        [`${BASE}/ssh-known-hosts`]: listOf(hosts),
+      },
+      {
+        [`POST ${BASE}/ssh-credentials/test`]: {
+          success: true,
+          message: "SSH connection successful",
+          fingerprint: "SHA256:AAAABBBBCCCCDDDD1111",
+          root,
+        },
+      },
+    );
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    await user.click(screen.getByRole("button", { name: "Test connection" }));
+
+    await screen.findByText(/SSH connection successful/);
+    expect(screen.queryByText(/This account is not root/) !== null).toBe(warns);
   });
 });

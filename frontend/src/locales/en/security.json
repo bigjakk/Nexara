@@ -36,6 +36,7 @@
   "cancelJobActive": "No further node is started, and a cancelled job cannot be resumed. A node in the middle of a step is left where it stopped: a drain or a restore stops after the guest it is moving, and guests already moved stay where they are; an upgrade already running finishes, but the node is not rebooted; a node already rebooting comes back without a health check; a node waiting for Confirm Upgrade stays as it is. Nodes already updated stay updated. Nexara then turns back on the DRS, rebalancing and HA rules the job turned off, and starts again any guest the drain shut down.",
   "cancelJob": "Cancel job",
   "keepJob": "Keep job",
+  "sshTestNotRoot": "This account is not root. Sensor readings work, but automated upgrades need root and stop at each node before it is drained.",
   "parallelism": "Parallelism",
   "reboot": "Reboot",
   "completed": "Completed",

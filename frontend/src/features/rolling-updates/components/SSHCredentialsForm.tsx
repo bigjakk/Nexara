@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SettingRow, SettingsFooter } from "@/components/page/Settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +31,7 @@ interface SSHCredentialsFormProps {
 
 type TestUiState =
   | { kind: "idle" }
-  | { kind: "success"; fingerprint?: string }
+  | { kind: "success"; fingerprint?: string; notRoot: boolean }
   | { kind: "error"; message: string }
   | {
       kind: "pending";
@@ -44,6 +45,7 @@ type TestUiState =
     };
 
 export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
+  const { t } = useTranslation("security");
   const { data: creds, isLoading } = useSSHCredentials(clusterId);
   const { data: nodes } = useClusterNodes(clusterId);
   const { data: knownHosts } = useSSHKnownHosts(clusterId);
@@ -135,10 +137,12 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
       {
         onSuccess: (result) => {
           if (result.success) {
+            // A warning, never a refusal: only an explicit false warns.
+            const notRoot = result.root === false;
             setTestState(
               result.fingerprint !== undefined
-                ? { kind: "success", fingerprint: result.fingerprint }
-                : { kind: "success" },
+                ? { kind: "success", fingerprint: result.fingerprint, notRoot }
+                : { kind: "success", notRoot },
             );
             return;
           }
@@ -347,6 +351,16 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
                   </span>
                 )}
               </span>
+            </p>
+          )}
+
+          {testState.kind === "success" && testState.notRoot && (
+            <p className="flex basis-full items-baseline gap-[7px] text-[12.5px] text-amber-700 sm:justify-end dark:text-amber-400">
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 shrink-0 -translate-y-px rounded-full bg-amber-500"
+              />
+              <span className="min-w-0">{t("sshTestNotRoot")}</span>
             </p>
           )}
 

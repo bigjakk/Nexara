@@ -1012,7 +1012,8 @@ func (h *RollingUpdateHandler) TestSSHConnection(c fiber.Ctx, p *apischema.Param
 	// bound on the test command.
 	testCtx, cancel := context.WithTimeout(c.Context(), 45*time.Second)
 	defer cancel()
-	if err := sshpkg.TestConnection(testCtx, sshCfg); err != nil {
+	root, err := sshpkg.TestConnection(testCtx, sshCfg)
+	if err != nil {
 		var mismatch *sshpkg.HostKeyMismatchError
 		if errors.As(err, &mismatch) {
 			return c.JSON(fiber.Map{
@@ -1039,6 +1040,8 @@ func (h *RollingUpdateHandler) TestSSHConnection(c fiber.Ctx, p *apischema.Param
 		"success":     true,
 		"message":     "SSH connection successful",
 		"fingerprint": pinned.Fingerprint,
+		// A warning, never a refusal: sensor readings work without root.
+		"root": root,
 	})
 }
 

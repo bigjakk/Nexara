@@ -350,7 +350,9 @@ func registerRollingUpdateEndpoints(reg *Registry, h *handlers.RollingUpdateHand
 		Description: "Test the stored credential against one node, running the trust-on-first-use flow. " +
 			"With no pinned host key it SCANS and returns the fingerprint to confirm, without attempting " +
 			"authentication; with one, it connects and reports a mismatch as a mismatch rather than as a " +
-			"generic failure. Answers 200 with success=false for every outcome the operator has to act on.",
+			"generic failure. Answers 200 with success=false for every outcome the operator has to act on. " +
+			"A login that works answers success=true with root saying whether the account is root, which " +
+			"automated upgrades need and sensor readings do not.",
 		Group:       "Rolling Updates",
 		Permissions: sshManage(),
 		Parameters: clusterParams(apischema.Properties{

@@ -231,15 +231,17 @@ func TestExecute_succeedsWithMatchingKey(t *testing.T) {
 // it must fail for each reason the upgrade would (a refused login, an account
 // that is not root, since the upgrade runs apt-get with no sudo, a session that
 // runs something else) and for none it would not: a shell that prints at login.
+// TestConnection reads the same uid and passes every login, reporting root.
 func TestRequireRoot(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
 		name, reply, password string
 		wantErr               bool
 		wantNotRoot           bool
+		testRoot              bool // what TestConnection reports
 	}{
-		{name: "root", reply: "nexara-uid=0\n", password: "test-pass"},
-		{name: "root, with a shell that prints at login", reply: "Welcome to the lab\n\x1b]0;title\x07nexara-uid=0\r\n", password: "test-pass"},
+		{name: "root", reply: "nexara-uid=0\n", password: "test-pass", testRoot: true},
+		{name: "root, with a shell that prints at login", reply: "Welcome to the lab\n\x1b]0;title\x07nexara-uid=0\r\n", password: "test-pass", testRoot: true},
 		{name: "not root", reply: "nexara-uid=1000\n", password: "test-pass", wantErr: true, wantNotRoot: true},
 		{name: "a session that runs something else", reply: "ok\n", password: "test-pass", wantErr: true},
 		{name: "wrong password", reply: "nexara-uid=0\n", password: "nope", wantErr: true},
@@ -251,11 +253,15 @@ func TestRequireRoot(t *testing.T) {
 			host, port := splitHostPort(t, addr)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
+			cfg := Config{Host: host, Port: port, Username: "test-user", Password: tt.password, KnownHostKey: hostKey}
 
-			err := RequireRoot(ctx, Config{Host: host, Port: port, Username: "test-user",
-				Password: tt.password, KnownHostKey: hostKey})
+			err := RequireRoot(ctx, cfg)
 			if (err != nil) != tt.wantErr || errors.Is(err, ErrNotRoot) != tt.wantNotRoot {
 				t.Errorf("RequireRoot = %v, want an error %v, ErrNotRoot %v", err, tt.wantErr, tt.wantNotRoot)
+			}
+			root, err := TestConnection(ctx, cfg)
+			if (err != nil) != (tt.password != "test-pass") || root != tt.testRoot {
+				t.Errorf("TestConnection = %v, %v; want root %v, an error only for a refused login", root, err, tt.testRoot)
 			}
 		})
 	}

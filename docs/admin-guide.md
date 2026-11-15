@@ -1801,7 +1801,7 @@ Navigate to **Security > Rolling Updates** tab.
    - Click **Configure SSH** and enter the username, port and **Auth Type**: **Password** (the default) or **SSH Key**
    - Saving opens **Pin SSH host keys**, which pins each node's host key; **Pin all node host keys** opens it again, for a node added since. An automated job is refused at creation while a node it names has no pinned host key or no known IP address. When a node's turn comes, the job checks those again and then logs in to the node as the upgrade will, before it drains it. A wrong password or key, a changed host key, an sshd that does not answer, or an SSH user that is not root fails the node with nothing moved
    - The SSH user must be root: the automated upgrade runs `apt-get` without `sudo`
-   - **Test Connection** tests one node you choose, with **Trust & Pin** for its key
+   - **Test Connection** tests one node you choose, with **Trust & Pin** for its key. A login that works but is not root passes with a warning: sensor readings work without root, automated upgrades do not
    - When a node refuses the SSH login, Nexara stops trying it for 10 minutes for everything that reads a node over SSH (hardware temperatures, the memory layout, maintenance mode), so an open page does not add a failed login to the node's auth log every minute and trip its lockout. Those reads say the node refused the login. Saving new credentials, or a **Test Connection** that logs in to that node, ends the pause at once
 
 ### Creating an Update Job
