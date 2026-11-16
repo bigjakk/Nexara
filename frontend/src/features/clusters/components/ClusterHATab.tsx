@@ -277,6 +277,12 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
     }, 5000);
   };
 
+  const clearGroupForm = () => {
+    setGrpName("");
+    setGrpNodes("");
+    setGrpComment("");
+  };
+
   const handleCreateGroup = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setGrpError(null);
@@ -290,9 +296,13 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         action: `Creating HA group ${grpName}`,
         onSuccess: () => {
           setGrpCreateOpen(false);
-          setGrpName("");
-          setGrpNodes("");
-          setGrpComment("");
+          clearGroupForm();
+        },
+        // The form is not reset on opening: one that landed after the dialog
+        // closed would otherwise offer the created group's name again. Only the
+        // name: nodes and comment are the edit dialog's too, which may be open.
+        onLateSuccess: (_result, now) => {
+          if (!now.open) setGrpName("");
         },
         onError: showGroupError,
       },

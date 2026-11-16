@@ -48,13 +48,22 @@ export function CreateUserDialog({
       payload.display_name = displayName;
     }
 
+    // The dialog stays mounted while closed and is not reset on opening, so a
+    // create that lands after it was closed clears the form too: reopened, it
+    // would offer the new user's email and password again.
+    const clear = () => {
+      setEmail("");
+      setPassword("");
+      setDisplayName("");
+    };
     settle(createUser.mutateAsync(payload), {
       action: `Creating user ${email}`,
       onSuccess: () => {
-        setEmail("");
-        setPassword("");
-        setDisplayName("");
+        clear();
         onOpenChange(false);
+      },
+      onLateSuccess: (_result, now) => {
+        if (!now.open) clear();
       },
       onError: (err: unknown) => {
         const msg =

@@ -355,3 +355,44 @@ describe("a failed save", () => {
     );
   });
 });
+
+// A dialog that stays mounted while closed and is not reset on opening: a save
+// that lands after it closed puts the form away as onSuccess would have.
+it("clears Create user's form for a create that lands after it closed", async () => {
+  let answer: (v: unknown) => void = () => undefined;
+  vi.mocked(apiClient.post).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+  );
+  function Host() {
+    const [open, setOpen] = useState(true);
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(true);
+          }}
+        >
+          Reopen
+        </button>
+        <CreateUserDialog open={open} onOpenChange={setOpen} />
+      </>
+    );
+  }
+  renderWithProviders(<Host />, { client: createAppQueryClient() });
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText("Email"), "alice@example.com");
+  await user.type(screen.getByLabelText("Password"), "secret-01");
+  await user.click(screen.getByRole("button", { name: "Create user" }));
+  await user.keyboard("{Escape}");
+
+  answer({});
+  await settle();
+  await user.click(screen.getByRole("button", { name: "Reopen" }));
+
+  expect(screen.getByLabelText("Email")).toHaveValue("");
+  expect(screen.getByLabelText("Password")).toHaveValue("");
+});
