@@ -737,6 +737,16 @@ func (h *ClusterHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 const clusterDeleteConfirmRefusal = "confirm: must be the cluster's current name; " +
 	"send confirm=<the cluster's name> to delete a cluster"
 
+// auditDeleteRefused records a cluster delete the handler refused, by reason
+// alone (confirm_mismatch, rolling_update_active): never the confirm sent,
+// which is the caller's text, and the same row for a right and a wrong guess
+// where the name was not yet checked. A refusal made before the handler (no
+// confirm at all, a missing permission) is not recorded here.
+func (h *ClusterHandler) auditDeleteRefused(c fiber.Ctx, id uuid.UUID, reason string) {
+	details, _ := json.Marshal(map[string]string{"reason": reason})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_delete_refused", details)
+}
+
 // Delete handles DELETE /api/v1/clusters/:id.
 func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 	id, err := parseParamUUID(p.String("id"))
@@ -761,6 +771,7 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check for active rolling update jobs")
 	}
 	if busy {
+		h.auditDeleteRefused(c, id, "rolling_update_active")
 		return fiber.NewError(fiber.StatusConflict,
 			"Cluster has an active rolling update job. Cancel it before deleting the cluster.")
 	}
@@ -805,8 +816,9 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 	// revocation's permission (403) — so neither tells a caller who has
 	// guessed a name whether the guess was right: each answers a right and a
 	// wrong one alike. And it precedes everything below that writes — the
-	// delete, the revocation — so a refusal changes nothing.
+	// delete, the revocation — so a refusal changes nothing but the audit log.
 	if p.String("confirm") != cluster.Name {
+		h.auditDeleteRefused(c, id, "confirm_mismatch")
 		return fiber.NewError(fiber.StatusBadRequest, clusterDeleteConfirmRefusal)
 	}
 

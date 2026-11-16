@@ -272,9 +272,20 @@ func TestClusterDeleteRequiresTheClusterName(t *testing.T) {
 			if status != fiber.StatusBadRequest || env.Error != "bad_request" || env.Message != tt.wantMessage {
 				t.Errorf("DELETE %s answered %d %+v, want 400 %q", tt.query, status, env, tt.wantMessage)
 			}
-			if deleted || audits != 0 {
-				t.Errorf("DELETE %s was refused, but the cluster was deleted (%v) or audited (%d rows)",
-					tt.query, deleted, audits)
+			// The handler's refusal is audited, by its reason alone; the schema's
+			// (no confirm) comes before the handler and is not.
+			wantAudits := 0
+			if tt.wantMessage == clusterDeleteWrong {
+				wantAudits = 1
+			}
+			if deleted || audits != wantAudits {
+				t.Errorf("DELETE %s was refused, but the cluster was deleted (%v) or audited (%d rows, want %d)",
+					tt.query, deleted, audits, wantAudits)
+			}
+			if wantAudits == 1 {
+				if got := store.auditDetails(t); len(got) != 1 || got["reason"] != "confirm_mismatch" {
+					t.Errorf("the refusal's audit row carries %v, want only reason confirm_mismatch", got)
+				}
 			}
 			if got := pve.lines(); len(got) != 0 {
 				t.Errorf("DELETE %s was refused, but Proxmox received %q — the revocation ran", tt.query, got)
@@ -333,6 +344,7 @@ func TestClusterDeleteDoesNotTellAGuessRightFromWrong(t *testing.T) {
 		fixture clusterDeleteFixture
 		revoke  bool
 		want    int
+		audits  int // the refusal's row, the same for either guess
 	}{
 		{
 			name:    "revoking without the global manage:cluster",
@@ -344,6 +356,7 @@ func TestClusterDeleteDoesNotTellAGuessRightFromWrong(t *testing.T) {
 			name:    "during an active rolling update",
 			fixture: clusterDeleteFixture{name: "cluster01", busy: true},
 			want:    fiber.StatusConflict,
+			audits:  1,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -358,11 +371,14 @@ func TestClusterDeleteDoesNotTellAGuessRightFromWrong(t *testing.T) {
 				}
 				status, env := send(t, app, authedRequest(http.MethodDelete, base+query))
 				deleted, audits := store.state()
-				if status != tt.want || deleted || audits != 0 || len(pve.lines()) != 0 {
+				if status != tt.want || deleted || audits != tt.audits || len(pve.lines()) != 0 {
 					t.Errorf("confirm=%s answered %d %+v (deleted: %v, audit rows: %d, Proxmox: %q), want %d "+
 						"and nothing changed", guess, status, env, deleted, audits, pve.lines(), tt.want)
 				}
 				answers[i] = fmt.Sprintf("%d %s %s %v", status, env.Error, env.Message, env.Details)
+				if tt.audits > 0 {
+					answers[i] += fmt.Sprint(store.auditDetails(t))
+				}
 			}
 			if answers[0] != answers[1] {
 				t.Errorf("a wrong guess answered %q and the right name %q; they must not differ", answers[0], answers[1])
