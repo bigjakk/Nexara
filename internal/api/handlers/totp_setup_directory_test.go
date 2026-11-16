@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -14,15 +16,24 @@ import (
 
 // directorySetupApp is the epoch harness with a directory account, carol, who signs in
 // as "carol" with racePassword, and the directory's entry for her.
-func directorySetupApp(t *testing.T, entryEmail string) (*epochApp, db.User, *atomic.Int32) {
+// tweak, when set, changes carol and the directory before the app is built; carol's
+// binding, when set there, is under the store's config.
+func directorySetupApp(t *testing.T, entryEmail string, tweak ...func(*db.User, *fakeSignInDirectory)) (*epochApp, db.User, *atomic.Int32) {
 	t.Helper()
+	cfg := uuid.New()
 	carol := db.User{ID: uuid.New(), Email: "carol@example.com", IsActive: true, Role: "user", AuthSource: "ldap", LdapLoginName: "carol"}
-	store := newEpochStore(carol)
-	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true}
-	a := newEpochApp(t, store, epochOptions{totp: true})
 	binds := &atomic.Int32{}
 	dir := fakeSignInDirectory{names: map[string]bool{"carol": true},
 		entry: auth.LDAPUser{DN: "uid=carol,ou=people,dc=example,dc=com", Email: entryEmail}, password: racePassword, binds: binds}
+	for _, fn := range tweak {
+		fn(&carol, &dir)
+	}
+	if carol.LdapEntryID != "" {
+		carol.LdapConfigID = pgtype.UUID{Bytes: cfg, Valid: true}
+	}
+	store := newEpochStore(carol)
+	store.ldapConfig = &db.LdapConfig{ID: cfg, Enabled: true}
+	a := newEpochApp(t, store, epochOptions{totp: true})
 	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries,
 		signIn: func(auth.LDAPConfig) (ldapSignInSession, error) { return dir, nil }})
 	return a, carol, binds
@@ -45,16 +56,28 @@ func TestTOTPSetup_ADirectoryAccountProvesItsDirectoryPassword(t *testing.T) {
 		redisDown                  bool
 		status                     int
 		binds                      int32
+		tweak                      func(*db.User, *fakeSignInDirectory)
 	}{
-		{"the right password", "carol@example.com", racePassword, false, http.StatusOK, 1},
-		{"a wrong password", "carol@example.com", "wrong", false, http.StatusForbidden, 1},
-		{"no password", "carol@example.com", "", false, http.StatusBadRequest, 0},
-		{"the name finds another account's entry", "dave@example.com", racePassword, false, http.StatusForbidden, 0},
-		{"the attempt cannot be counted", "carol@example.com", racePassword, true, http.StatusServiceUnavailable, 0},
+		{"the right password", "carol@example.com", racePassword, false, http.StatusOK, 1, nil},
+		{"a wrong password", "carol@example.com", "wrong", false, http.StatusForbidden, 1, nil},
+		{"no password", "carol@example.com", "", false, http.StatusBadRequest, 0, nil},
+		{"the name finds another account's entry", "dave@example.com", racePassword, false, http.StatusForbidden, 0, nil},
+		{"the attempt cannot be counted", "carol@example.com", racePassword, true, http.StatusServiceUnavailable, 0, nil},
+		// A bound account is its entry: another entry with its uid and mail is refused unbound.
+		{"the name finds another entry with its address", "carol@example.com", racePassword, false, http.StatusForbidden, 0,
+			func(u *db.User, d *fakeSignInDirectory) { u.LdapEntryID, d.entry.EntryID = entryOfCarol, entryOfDave }},
+		{"the bind is not answered", "carol@example.com", racePassword, false, http.StatusServiceUnavailable, 1,
+			func(_ *db.User, d *fakeSignInDirectory) {
+				d.bindErr = fmt.Errorf("%w: user bind: ldap: connection timed out", auth.ErrLDAPUnavailable)
+			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			a, carol, binds := directorySetupApp(t, tc.entryEmail)
+			var tweaks []func(*db.User, *fakeSignInDirectory)
+			if tc.tweak != nil {
+				tweaks = append(tweaks, tc.tweak)
+			}
+			a, carol, binds := directorySetupApp(t, tc.entryEmail, tweaks...)
 			if tc.redisDown {
 				a.auth.SetPasswordLockoutStore(a.rdb)
 				a.redis.Close()

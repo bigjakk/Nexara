@@ -1578,12 +1578,12 @@ type Querier interface {
 	//
 	// The worker's UPDATE is the statement's own, so the count returned is pairs.
 	LinkHAWorkerTasks(ctx context.Context, arg LinkHAWorkerTasksParams) (int64, error)
-	// Binds a directory account to this entry under this configuration, and only one not
-	// bound under it already: no row when it is of another source or bound under this
-	// configuration (to this entry or another), so two first sign-ins or a sign-in and a
-	// sync that race cannot both write, and a stored binding is never overwritten. An
-	// account bound under another configuration, or one since deleted, is bound again.
-	// users_ldap_entry_key refuses an entry another account holds.
+	// Binds a directory account that is bound under no configuration to this entry under
+	// this one, and only such an account: no row when it is of another source or bound
+	// (here or under another configuration that still exists), so two first sign-ins or a
+	// sign-in and a sync that race cannot both write, and a stored binding is never
+	// overwritten. A deleted configuration's accounts read NULL (ON DELETE SET NULL) and
+	// are bound again. users_ldap_entry_key refuses an entry another account holds.
 	LinkLDAPEntry(ctx context.Context, arg LinkLDAPEntryParams) (User, error)
 	// Proxmox runs some actions as more than one task, each with a UPID of its own:
 	// its task log lists them all, and so do Nexara's lists, which is where one action
@@ -1675,6 +1675,9 @@ type Querier interface {
 	// (Syncer.pruneRemovedNodes), read before the delete nulls their node_id.
 	ListActiveAlertsForNodes(ctx context.Context, nodeIds []uuid.UUID) ([]AlertHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
+	// The active accounts that hold this permission globally through a role, the system
+	// account aside: a sync never deactivates the last of them for manage:user.
+	ListActiveGlobalPermissionHolders(ctx context.Context, arg ListActiveGlobalPermissionHoldersParams) ([]uuid.UUID, error)
 	ListActiveGuestToolsConfigs(ctx context.Context) ([]GuestToolsConfig, error)
 	ListActiveMaintenanceWindows(ctx context.Context) ([]MaintenanceWindow, error)
 	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
@@ -2343,7 +2346,10 @@ type Querier interface {
 	ListInactiveStorage(ctx context.Context) ([]ListInactiveStorageRow, error)
 	ListKEVCVEIDs(ctx context.Context) ([]string, error)
 	ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error)
-	ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
+	// The directory accounts a sync of this configuration answers for: those bound under
+	// it, and those bound under none. An account bound under another configuration is
+	// that configuration's.
+	ListLDAPUsers(ctx context.Context, configID uuid.UUID) ([]ListLDAPUsersRow, error)
 	ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error)
 	// ListMigrationJobs backs the Migrations page. accessible_cluster_ids carries
 	// the caller's view:migration RBAC scope: NULL means global access (no

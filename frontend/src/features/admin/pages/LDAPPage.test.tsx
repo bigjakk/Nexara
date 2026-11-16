@@ -454,8 +454,9 @@ describe("a Sync Now the mass-miss rule stopped", () => {
     mockedPost.mockResolvedValueOnce({
       message: "Sync complete",
       users_synced: 0,
-      users_disabled: 4,
+      users_disabled: 3,
       users_re_enabled: 0,
+      users_kept_active: 1,
     });
     await user.click(
       within(prompt).getByRole("button", { name: "Deactivate 4 accounts" }),
@@ -464,7 +465,7 @@ describe("a Sync Now the mass-miss rule stopped", () => {
       expect(mockedPost).toHaveBeenCalledTimes(2);
     });
     expect(mockedPost.mock.calls[1]?.[1]).toEqual({ acknowledge_missing: 4 });
-    expect(await screen.findByText(/4 disabled/)).toBeVisible();
+    expect(await screen.findByText(/3 disabled, 1 kept active/)).toBeVisible();
     expect(mockedToastError).not.toHaveBeenCalled();
   });
 });

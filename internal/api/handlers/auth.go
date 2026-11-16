@@ -854,7 +854,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		if ldapUser, ok := h.tryLDAPLogin(c, email, password, &dir); ok {
 			h.forgetLoginFailures(c, attempt)
 			h.forgetLoginFailures(c, dir.entry)
-			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login", nil, "")
+			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login", nil, "", dir.pending)
 		}
 		if dir.locked != nil {
 			return dir.locked
@@ -876,7 +876,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		if ldapUser, ok := h.tryLDAPLogin(c, email, password, &dir); ok {
 			h.forgetLoginFailures(c, attempt)
 			h.forgetLoginFailures(c, dir.entry)
-			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login", nil, "")
+			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login", nil, "", dir.pending)
 		}
 		if dir.locked != nil {
 			return dir.locked
@@ -914,7 +914,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 	// new epoch together, and a change that lands during the comparison (bcrypt takes
 	// the better part of a hundred milliseconds) leaves the session below to be
 	// refused, not minted on the password that has just been replaced.
-	return h.issueOrTOTP(c, user, user.AuthEpoch, "login", nil, "")
+	return h.issueOrTOTP(c, user, user.AuthEpoch, "login", nil, "", nil)
 }
 
 // tryLDAPLogin attempts LDAP authentication. Returns the DB user and true on success.
@@ -989,6 +989,7 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string, out *dir
 			return db.User{}, false
 		}
 		out.account = h.directoryAccount(c, ldapCfg.ID, ldapUser, email)
+		out.refused = errors.Is(err, auth.ErrLDAPUserRefused)
 		return db.User{}, false
 	}
 
@@ -998,14 +999,18 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string, out *dir
 // directorySignIn is what a directory sign-in learned beyond its answer: the entry's
 // budget (not counted when no entry was found), its lock's 429 when that budget is
 // spent, and the account a failed bind is audited under. unavailable: the directory did
-// not check the password (directoryUnavailableMessage). mismatch: the password was
+// not check the password (directoryUnavailableMessage). refused: the directory refused
+// the entry itself (locked or inactivated by its policy). mismatch: the password was
 // right, but the entry's address names an account bound to another entry (account).
+// pending: what an account with a second factor writes once its code has passed.
 type directorySignIn struct {
 	entry       loginAttempt
 	locked      error
 	account     *db.User
 	unavailable bool
+	refused     bool
 	mismatch    bool
+	pending     *pendingDirectoryEntry
 }
 
 // The answers of a directory sign-in that is neither a success nor a wrong password.
@@ -1020,17 +1025,23 @@ const (
 
 // directorySignInNotChecked answers a directory sign-in that ended without a wrong
 // password, and gives back the attempts it took (the typed name's, a, and the entry's):
-// 503 when the directory did not answer, 403 for an entry that is not the account's,
-// audited as a failed sign-in under that account with the fixed reason identity_mismatch.
-// nil for every other failure, which the caller refuses as before.
+// 503 when the directory did not answer; the 401 of any refused sign-in when the
+// directory refused the entry itself, which its own policy limits (audited once, reason
+// directory_refused); 403 for an entry that is not the account's, audited as a failed
+// sign-in under that account with the fixed reason identity_mismatch. nil for every
+// other failure, which the caller refuses as before.
 func (h *AuthHandler) directorySignInNotChecked(c fiber.Ctx, a loginAttempt, dir *directorySignIn) error {
-	if !dir.unavailable && !dir.mismatch {
+	if !dir.unavailable && !dir.mismatch && !dir.refused {
 		return nil
 	}
 	h.handBackLoginAttempt(c, a)
 	h.handBackLoginAttempt(c, dir.entry)
 	if dir.unavailable {
 		return fiber.NewError(fiber.StatusServiceUnavailable, directoryUnavailableMessage)
+	}
+	if dir.refused {
+		h.recordFailedSignIn(c, a, dir.account, "directory_refused")
+		return fiber.NewError(fiber.StatusUnauthorized, "Invalid email or password")
 	}
 	slog.Warn("ldap login: refused a sign-in whose directory entry is not the one the account is bound to", "user_id", dir.account.ID)
 	h.recordFailedSignIn(c, a, dir.account, "identity_mismatch")
@@ -1113,7 +1124,9 @@ func (h *AuthHandler) ProveDirectoryPassword(c fiber.Ctx, userID uuid.UUID, pass
 	case err != nil:
 		slog.Warn("two-factor setup: the directory search failed", "user_id", userID, "reason", ldapFailureClass(err))
 		return fiber.NewError(fiber.StatusServiceUnavailable, totpDirectoryUnavailableMessage)
-	case entry.Email == "" || !sameAddress(entry.Email, user.Email):
+	case boundUnder(user.LdapConfigID, ldapCfg.ID) && entry.EntryID != user.LdapEntryID,
+		entry.Email == "" || !sameAddress(entry.Email, user.Email):
+		// A bound account is its entry, whatever another entry's address says.
 		slog.Warn("two-factor setup: the name the account signs in with finds another directory entry", "user_id", userID)
 		return fiber.NewError(fiber.StatusForbidden, totpDirectoryEntryMissingMessage)
 	}
@@ -1136,11 +1149,14 @@ func (h *AuthHandler) ProveDirectoryPassword(c fiber.Ctx, userID uuid.UUID, pass
 		attempts = append(attempts, a)
 	}
 	if err := dir.Authenticate(entry, password); err != nil {
-		if errors.Is(err, auth.ErrLDAPUnavailable) {
-			// Not checked, so not a wrong password: nothing is spent.
-			slog.Warn("two-factor setup: the directory did not answer the bind", "user_id", userID, "reason", ldapFailureClass(err))
+		if errors.Is(err, auth.ErrLDAPUnavailable) || errors.Is(err, auth.ErrLDAPUserRefused) {
+			// Not checked, or refused by the directory's own policy: nothing is spent.
+			slog.Warn("two-factor setup: the directory did not check the password", "user_id", userID, "reason", ldapFailureClass(err))
 			for _, a := range attempts {
 				h.handBackLoginAttempt(c, a)
+			}
+			if errors.Is(err, auth.ErrLDAPUserRefused) {
+				return fiber.NewError(fiber.StatusForbidden, "The directory refused your account (it may be locked or disabled there), so your password could not be checked.")
 			}
 			return fiber.NewError(fiber.StatusServiceUnavailable, totpDirectoryUnavailableMessage)
 		}
@@ -1188,6 +1204,8 @@ func ldapFailureClass(err error) string {
 		return "service_bind_failed"
 	case errors.Is(err, auth.ErrLDAPUnavailable):
 		return "directory_unavailable"
+	case errors.Is(err, auth.ErrLDAPUserRefused):
+		return "directory_refused"
 	case errors.Is(err, auth.ErrLDAPSearchFailed):
 		return "search_failed"
 	case errors.Is(err, auth.ErrLDAPFilterInvalid):
@@ -1255,35 +1273,25 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 		}
 	}
 
-	if !acct.Bound && ldapUser.EntryID != "" && user.IsActive && !user.TotpSecret.Valid {
-		linked, err := h.queries.LinkLDAPEntry(c.Context(), db.LinkLDAPEntryParams{ConfigID: ldapCfg.ID, EntryID: ldapUser.EntryID, ID: user.ID})
+	// What the sign-in learned about the account's directory identity is written only
+	// once nothing can refuse the sign-in: now for an active account with no second
+	// factor, after its code for one with (out.pending, carried server-side in the
+	// pending token), and never for a deactivated one.
+	learned := pendingDirectoryEntry{ConfigID: ldapCfg.ID.String(), EntryID: ldapUser.EntryID, Email: ldapUser.Email, LoginName: email}
+	switch {
+	case !user.IsActive:
+	case user.TotpSecret.Valid:
+		out.pending = &learned
+	default:
+		written, other, err := h.writeDirectoryIdentity(c, ldapCfg.ID, user, acct.Bound, learned)
+		if errors.Is(err, errLDAPEntryMismatch) {
+			return refuseMismatch(*other)
+		}
 		if err != nil {
-			// Another sign-in or the sync bound it first: what is stored now decides.
-			again, aerr := ldapAccountForEntry(c.Context(), h.queries, ldapCfg.ID, ldapUser, email)
-			switch {
-			case errors.Is(aerr, errLDAPEntryMismatch):
-				return refuseMismatch(again.User)
-			case aerr != nil || !again.Bound:
-				slog.Warn("ldap login: could not bind the account to its directory entry", "user_id", user.ID, "reason", ldapLinkFailureClass(err))
-				return db.User{}, false
-			case again.User.ID != user.ID:
-				return refuseMismatch(user)
-			}
-			linked = again.User
-		} else {
-			details, _ := json.Marshal(map[string]string{"ip": c.IP(), "method": "ldap"})
-			AuditLogAs(c, h.queries, h.eventPub, linked.ID, pgtype.UUID{}, "auth", linked.ID.String(), "ldap_entry_linked", details)
+			slog.Warn("ldap login: could not bind the account to its directory entry", "user_id", user.ID, "reason", ldapLinkFailureClass(err))
+			return db.User{}, false
 		}
-		user, acct.Bound = linked, true
-	}
-
-	if acct.Bound {
-		if f, ok := h.ldapHandler.followEntryAddress(c.Context(), ldapCfg.ID, user.ID, user.Email, ldapUser.Email); ok {
-			AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "user", user.ID.String(), ldapAddressFollowedAction, f.details())
-			if f.keptOwnBecause == "" {
-				user.Email = f.to
-			}
-		}
+		user = written
 	}
 	if ldapUser.DisplayName != "" && ldapUser.DisplayName != user.DisplayName {
 		// Update display name if changed
@@ -1293,14 +1301,6 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 		}); err == nil {
 			user = updated
 		}
-	}
-
-	// The name that found the entry, for the sync's search (SetLDAPLoginName), kept
-	// before the refusal of an inactive account: the bind has succeeded, and an account
-	// a sync deactivated wrongly is found, and re-enabled, by the next sync only with it.
-	// Best effort: without it the sync searches by the address, where the filter allows.
-	if err := h.queries.SetLDAPLoginName(c.Context(), db.SetLDAPLoginNameParams{ID: user.ID, LoginName: email}); err != nil {
-		slog.Warn("ldap login: could not keep the sign-in name for the sync", "user_id", user.ID, "error", err)
 	}
 
 	if !user.IsActive {
@@ -1373,6 +1373,94 @@ func (h *AuthHandler) createLDAPUser(c fiber.Ctx, cfgID uuid.UUID, ldapUser *aut
 		return db.User{}, acct, err
 	}
 	return acct.User, acct, nil
+}
+
+// pendingDirectoryEntry is what a directory sign-in writes about the account once it is
+// complete (writeDirectoryIdentity): the entry the bind proved, under which config, its
+// address, and the name typed to find it. Server-side only: it travels in the TOTP
+// pending token in Redis, and nothing of it comes from or goes to the client.
+type pendingDirectoryEntry struct {
+	ConfigID  string `json:"config_id"`
+	EntryID   string `json:"entry_id"`
+	Email     string `json:"email"`
+	LoginName string `json:"login_name"`
+}
+
+// writeDirectoryIdentity writes what a completed directory sign-in learned: an account
+// bound under no config is bound to the entry (LinkLDAPEntry; audited
+// ldap_entry_linked), a bound one takes the entry's address (followEntryAddress), and
+// the name that found the entry is kept for the sync (SetLDAPLoginName, best effort).
+// A binding another sign-in or the sync wrote first decides: an entry that is not the
+// account's is errLDAPEntryMismatch, with the account to audit it under.
+func (h *AuthHandler) writeDirectoryIdentity(c fiber.Ctx, cfgID uuid.UUID, user db.User, bound bool, e pendingDirectoryEntry) (written db.User, mismatched *db.User, err error) {
+	if !bound && e.EntryID != "" && !user.LdapConfigID.Valid {
+		linked, err := h.queries.LinkLDAPEntry(c.Context(), db.LinkLDAPEntryParams{ConfigID: cfgID, EntryID: e.EntryID, ID: user.ID})
+		if err != nil {
+			again, aerr := ldapAccountForEntry(c.Context(), h.queries, cfgID, &auth.LDAPUser{Email: e.Email, EntryID: e.EntryID}, e.LoginName)
+			switch {
+			case errors.Is(aerr, errLDAPEntryMismatch):
+				return db.User{}, &again.User, aerr
+			case aerr != nil || !again.Bound:
+				return db.User{}, nil, err
+			case again.User.ID != user.ID:
+				return db.User{}, &user, errLDAPEntryMismatch
+			}
+			linked = again.User
+		} else {
+			details, _ := json.Marshal(map[string]string{"ip": c.IP(), "method": "ldap"})
+			AuditLogAs(c, h.queries, h.eventPub, linked.ID, pgtype.UUID{}, "auth", linked.ID.String(), "ldap_entry_linked", details)
+		}
+		user, bound = linked, true
+	}
+	if bound {
+		if f, ok := h.ldapHandler.followEntryAddress(c.Context(), cfgID, user.ID, user.Email, e.Email); ok {
+			if claimAddressKeptAudit(c.Context(), h.rdb, f) {
+				AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "user", user.ID.String(), ldapAddressFollowedAction, f.details())
+			}
+			if f.keptOwnBecause == "" {
+				user.Email = f.to
+			}
+		}
+	}
+	if err := h.queries.SetLDAPLoginName(c.Context(), db.SetLDAPLoginNameParams{ID: user.ID, LoginName: e.LoginName}); err != nil {
+		slog.Warn("ldap login: could not keep the sign-in name for the sync", "user_id", user.ID, "error", err)
+	}
+	return user, nil, nil
+}
+
+// FinishDirectorySignInAfterSecondFactor writes, once its second factor has passed
+// (TOTPHandler.VerifyLogin), what the directory sign-in of userID learned (e): the
+// binding, the address and the sign-in name, as a sign-in with no second factor writes
+// them at once. The account is read again. A config changed since the password step
+// writes nothing (the next sign-in will). An account bound meanwhile to another entry,
+// or whose entry another account took, is refused 403, audited as identity_mismatch,
+// with nothing issued. It returns the account as last written.
+func (h *AuthHandler) FinishDirectorySignInAfterSecondFactor(c fiber.Ctx, userID uuid.UUID, e *pendingDirectoryEntry) (db.User, error) {
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to complete the sign-in")
+	}
+	cfg, err := h.queries.GetEnabledLDAPConfig(c.Context())
+	if err != nil || cfg.ID.String() != e.ConfigID {
+		slog.Warn("ldap sign-in after the second factor: the configuration changed since the password step; nothing about the directory entry was written", "user_id", userID)
+		return user, nil
+	}
+	bound := boundUnder(user.LdapConfigID, cfg.ID)
+	if bound && (e.EntryID == "" || user.LdapEntryID != e.EntryID) {
+		err = errLDAPEntryMismatch
+	} else {
+		user, _, err = h.writeDirectoryIdentity(c, cfg.ID, user, bound, *e)
+	}
+	if errors.Is(err, errLDAPEntryMismatch) {
+		slog.Warn("ldap sign-in after the second factor: refused, the account is bound to another directory entry", "user_id", userID)
+		h.recordFailedSignIn(c, loginAttempt{}, &user, "identity_mismatch")
+		return db.User{}, fiber.NewError(fiber.StatusForbidden, ldapEntryMismatchMessage)
+	}
+	if err != nil {
+		slog.Error("ldap sign-in after the second factor: could not bind the account", "user_id", userID, "reason", ldapLinkFailureClass(err))
+		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to complete the sign-in")
+	}
+	return user, nil
 }
 
 // errEmailTakenInAnotherCase is a directory account not provisioned because another
@@ -2816,7 +2904,7 @@ func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error 
 		return fiber.NewError(fiber.StatusForbidden, "Account is disabled")
 	}
 
-	return h.issueOrTOTP(c, user, epoch, "oidc_login", deferred, exchangeData[oidcExchangeCallbackEmailKey])
+	return h.issueOrTOTP(c, user, epoch, "oidc_login", deferred, exchangeData[oidcExchangeCallbackEmailKey], nil)
 }
 
 // exchangeBindingDigest is the browser binding's digest an exchange code was stored
@@ -2843,13 +2931,18 @@ func exchangeBindingDigest(stored string) string {
 // second step is wired, it is refused and the next sign-in finishes at the callback.
 // callbackEmail, when not "", is an SSO callback's oidc_callback row that waits for the
 // session: it rides in the pending token, or is written here once tokens are issued.
-func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, epoch int64, auditAction string, sso *pendingSSOIdentity, callbackEmail string) error {
+//
+// directory, when not nil, is what a directory sign-in of an account with a second
+// factor writes once its code has passed (FinishDirectorySignInAfterSecondFactor): it
+// rides in the pending token, or is written here when no second step is wired.
+func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, epoch int64, auditAction string, sso *pendingSSOIdentity, callbackEmail string,
+	directory *pendingDirectoryEntry) error {
 	if sso != nil && (!user.TotpSecret.Valid || h.totpHandler == nil) {
 		slog.Warn("oidc token exchange: a sign-in left for its second factor has none to pass; refusing it", "user_id", user.ID)
 		return fiber.NewError(fiber.StatusUnauthorized, oidcCouldNotCompleteMessage)
 	}
 	if user.TotpSecret.Valid && h.totpHandler != nil {
-		token, err := h.totpHandler.CreateTOTPPendingToken(c.Context(), user.ID, epoch, auditAction, sso, callbackEmail)
+		token, err := h.totpHandler.CreateTOTPPendingToken(c.Context(), user.ID, epoch, auditAction, sso, callbackEmail, directory)
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to create TOTP challenge")
 		}
@@ -2857,6 +2950,13 @@ func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, epoch int64, auditA
 			TOTPRequired:     true,
 			TOTPPendingToken: token,
 		})
+	}
+	if directory != nil {
+		finished, err := h.FinishDirectorySignInAfterSecondFactor(c, user.ID, directory)
+		if err != nil {
+			return err
+		}
+		user = finished
 	}
 	if err := h.issueTokens(c, user, epoch, auditAction); err != nil {
 		return err

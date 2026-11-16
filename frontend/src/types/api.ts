@@ -133,6 +133,8 @@ export interface LDAPSyncResponse {
   users_synced: number;
   users_disabled: number;
   users_re_enabled: number;
+  /** Missing accounts left active: the caller's own, or the last user manager. */
+  users_kept_active?: number;
 }
 
 export interface OIDCConfig {

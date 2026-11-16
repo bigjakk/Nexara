@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/audit"
@@ -43,6 +44,9 @@ type LDAPHandler struct {
 	encryptionKey string
 	rbac          *auth.RBACEngine
 	eventPub      *events.Publisher
+	// rdb bounds how often an unchanged audit row is written again (claimAddressAudit);
+	// nil writes it every time. Set by SetRedis.
+	rdb *redis.Client
 
 	// directory, when set, replaces auth.NewLDAPClient as Sync's directory; only
 	// tests set it, to answer a search without an LDAP server.
@@ -93,6 +97,9 @@ func NewLDAPHandler(queries *db.Queries, encryptionKey string, rbac *auth.RBACEn
 		eventPub:      eventPub,
 	}
 }
+
+// SetRedis gives the handler the Redis client its audit-row claims use (server setup).
+func (h *LDAPHandler) SetRedis(rdb *redis.Client) { h.rdb = rdb }
 
 // ldapConfigRequest is the validated body of both LDAP writes, read once out of
 // the registry's parameters so the two handlers cannot drift on how they read
@@ -568,7 +575,8 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 	// The count a confirm named, to pass the mass-miss rule on purpose (0: not given).
 	// Bounded by the schema at math.MaxInt32 (registry_ldap.go).
 	ack, _ := p.OptInt("acknowledge_missing")
-	res, err := h.syncConfig(c.Context(), id, int(ack))
+	caller, _ := c.Locals("user_id").(uuid.UUID)
+	res, err := h.syncConfig(c.Context(), id, int(ack), caller)
 	if errors.Is(err, errLDAPSyncRunning) {
 		// When the lease ends: a sync that stopped without releasing it holds it until then.
 		answer := fiber.Map{
@@ -586,7 +594,9 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 	if res.ran {
 		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "ldap", id.String(), "ldap_sync", res.auditDetails(err))
 		for _, f := range res.followed {
-			AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "user", f.userID.String(), ldapAddressFollowedAction, f.details())
+			if h.claimAddressAudit(c.Context(), f) {
+				AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "user", f.userID.String(), ldapAddressFollowedAction, f.details())
+			}
 		}
 	}
 	switch {
@@ -601,7 +611,7 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 			"error": "ldap_sync_too_many_missing",
 			"message": fmt.Sprintf("The directory found no entry for %d of the %d accounts it answered for, so the sync changed nothing. "+
 				"Check the user filter, the search base DN and the bind account's read access. If these people have left, "+
-				"repeat the sync with acknowledge_missing set to %d to deactivate them.", res.missing, res.answered, res.missing),
+				"repeat the sync with acknowledge_missing set to exactly %d to deactivate them.", res.missing, res.answered, res.missing),
 			"details": fiber.Map{"users_missing": res.missing, "users_skipped": res.skipped, "acknowledge_field": "acknowledge_missing"},
 		})
 	case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
@@ -621,6 +631,9 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 		"users_disabled":   res.disabled,
 		"users_re_enabled": res.reEnabled,
 		"users_skipped":    res.skipped,
+		// Missing accounts left active because they are the caller's own or the last
+		// active holders of global manage:user; counted in users_skipped too.
+		"users_kept_active": res.keptActive,
 		// Accounts no sign-in has named yet, with a filter that does not match the
 		// address: left as they are until they sign in once.
 		"users_not_signed_in_since_upgrade": res.notSignedIn,
@@ -652,8 +665,11 @@ type ldapSyncResult struct {
 	answered                                      int // searches that answered: found or missing
 	notSignedIn                                   int // no stored sign-in name, and a filter that does not match the address
 	// acknowledged is the count a Sync Now confirmed to pass the mass-miss rule, when
-	// the rule would have stopped this sync and the count covered it; 0 otherwise.
+	// the rule would have stopped this sync and the count was this run's; 0 otherwise.
 	acknowledged int
+	// keptActive are missing accounts not deactivated: the caller's own, or the last
+	// active holder of global manage:user (also counted in skipped).
+	keptActive int
 	// followed are the accounts whose address moved with their entry's (or could not),
 	// one audit row each.
 	followed []addressFollowed
@@ -671,13 +687,39 @@ type addressFollowed struct {
 	keptOwnBecause string // "" when the account moved to the new address
 }
 
+// details is the row's: for an account that kept its own address, not the new one,
+// which another account holds (audit details are readable by every Viewer).
 func (f addressFollowed) details() json.RawMessage {
 	d := map[string]string{"previous_email": f.from, "email": f.to, "outcome": "updated"}
 	if f.keptOwnBecause != "" {
-		d["outcome"], d["reason"] = "kept", f.keptOwnBecause
+		d = map[string]string{"email": f.from, "outcome": "kept", "reason": f.keptOwnBecause}
 	}
 	raw, _ := json.Marshal(d)
 	return raw
+}
+
+// addressKeptAuditEvery is how often an account that keeps its own address is audited
+// again: every sign-in and every sync would otherwise write the same row.
+const addressKeptAuditEvery = 24 * time.Hour
+
+// claimAddressKeptAudit says whether f's row is to be written: always for an account
+// that moved, and for one that kept its address once a day (a Redis claim, as
+// audit.ConsoleOpenRefusal), or every time without Redis or when it cannot answer.
+func claimAddressKeptAudit(ctx context.Context, rdb *redis.Client, f addressFollowed) bool {
+	if f.keptOwnBecause == "" || rdb == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	first, err := boundedByContext(ctx, func(ctx context.Context) (bool, error) {
+		return rdb.SetNX(ctx, "ldap:address-kept-audit:"+f.userID.String(), "1", addressKeptAuditEvery).Result()
+	})
+	return err != nil || first
+}
+
+// claimAddressAudit is claimAddressKeptAudit with this handler's Redis.
+func (h *LDAPHandler) claimAddressAudit(ctx context.Context, f addressFollowed) bool {
+	return claimAddressKeptAudit(ctx, h.rdb, f)
 }
 
 // sameAddress says whether an entry's address is the account's: the same spelling, or,
@@ -742,6 +784,9 @@ func tooManyMissing(missing, searched int) bool {
 func (r ldapSyncResult) auditDetails(err error) json.RawMessage {
 	d := map[string]any{"synced": r.synced, "disabled": r.disabled, "re_enabled": r.reEnabled, "skipped": r.skipped, "missing": r.missing,
 		"not_signed_in_since_upgrade": r.notSignedIn}
+	if r.keptActive > 0 {
+		d["kept_active"] = r.keptActive
+	}
 	if r.acknowledged > 0 {
 		d["mass_miss_acknowledged"] = true
 		d["acknowledged_missing"] = r.acknowledged
@@ -768,9 +813,10 @@ func (r ldapSyncResult) auditDetails(err error) json.RawMessage {
 // stops between accounts when ctx ends, which is how it stops with the process.
 //
 // ackMissing is the count a Sync Now's confirm named: when the mass-miss rule would
-// stop the sync and no more accounts are missing than that, the sync goes on. The
-// scheduled sync passes 0 and never does.
-func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID, ackMissing int) (res ldapSyncResult, err error) {
+// stop the sync and exactly that many accounts are missing, the sync goes on. The
+// scheduled sync passes 0 and never does. No sync deactivates caller (uuid.Nil for the
+// scheduled one) or the last active holder of global manage:user.
+func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID, ackMissing int, caller uuid.UUID) (res ldapSyncResult, err error) {
 	token := uuid.New()
 	cfg, err := h.queries.ClaimLDAPSyncLease(ctx, db.ClaimLDAPSyncLeaseParams{
 		ID: id, Token: token, LeaseSeconds: ldapSyncLease.Seconds(),
@@ -816,7 +862,7 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID, ackMissing i
 		client = h.directory(ldapCfg)
 	}
 
-	ldapUsers, err := h.queries.ListLDAPUsers(ctx)
+	ldapUsers, err := h.queries.ListLDAPUsers(ctx, cfg.ID)
 	if err != nil {
 		return res, fmt.Errorf("list the LDAP users: %w", err)
 	}
@@ -878,10 +924,31 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID, ackMissing i
 	}
 	res.missing, res.answered = missing, len(results)
 	if tooManyMissing(missing, len(results)) {
-		if ackMissing <= 0 || missing > ackMissing {
+		if ackMissing <= 0 || missing != ackMissing {
 			return res, errLDAPSyncTooManyMissing
 		}
 		res.acknowledged = ackMissing
+	}
+
+	// The accounts a deactivation must leave: the caller's own, and the last active
+	// holder of global manage:user, without whom nobody could manage the install's
+	// users (read once, before the first deactivation, and kept up to date).
+	var managers map[uuid.UUID]bool
+	keepActive := func(userID uuid.UUID) (bool, error) {
+		if userID == caller {
+			return true, nil
+		}
+		if managers == nil {
+			ids, err := h.queries.ListActiveGlobalPermissionHolders(ctx, db.ListActiveGlobalPermissionHoldersParams{Action: "manage", Resource: "user"})
+			if err != nil {
+				return false, err
+			}
+			managers = make(map[uuid.UUID]bool, len(ids))
+			for _, id := range ids {
+				managers[id] = true
+			}
+		}
+		return managers[userID] && len(managers) <= 1, nil
 	}
 
 	for _, r := range results {
@@ -899,6 +966,15 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID, ackMissing i
 			if !dbUser.IsActive {
 				continue
 			}
+			if keep, err := keepActive(dbUser.ID); err != nil || keep {
+				if err != nil {
+					slog.Warn("LDAP sync: could not tell whether a missing account is the last user manager; it is left active",
+						"user_id", dbUser.ID, "error", err)
+				}
+				res.skipped++
+				res.keptActive++
+				continue
+			}
 			n, err := h.queries.DeactivateLDAPUserForDirectory(ctx, dbUser.ID)
 			if err != nil || n == 0 {
 				continue
@@ -908,6 +984,7 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID, ackMissing i
 					"user_id", dbUser.ID, "error", err)
 			}
 			res.disabled++
+			delete(managers, dbUser.ID)
 			slog.Info("LDAP sync: disabled user removed from directory", "email", dbUser.Email)
 			continue
 		}
@@ -974,8 +1051,10 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID, ackMissing i
 }
 
 // boundUnder says whether an account's directory binding (users.ldap_config_id) is
-// under this config. An account bound under another config, or one since deleted, is
-// not: it binds again, by today's rule, under the config it signs in or syncs through.
+// under this config. An account of a config since deleted reads NULL and binds again;
+// one bound under another config that exists keeps that binding: a sync of this config
+// does not list it, and a sign-in through this one signs it in by its address, as
+// before bindings, and writes no binding.
 func boundUnder(configID pgtype.UUID, cfgID uuid.UUID) bool {
 	return configID.Valid && uuid.UUID(configID.Bytes) == cfgID
 }
@@ -996,7 +1075,8 @@ type ldapAccount struct {
 	// Found: a directory account answers to this entry.
 	Found bool
 	// Bound: it answers by the identifier stored on it. Found but not Bound: by its
-	// address, an account not bound under this config yet.
+	// address, an account not bound under this config (bound under none, or under
+	// another config, which the caller does not overwrite).
 	Bound bool
 }
 
@@ -1036,6 +1116,8 @@ func ldapAccountForEntry(ctx context.Context, q *db.Queries, cfgID uuid.UUID, en
 	if boundUnder(u.LdapConfigID, cfgID) {
 		return ldapAccount{User: u}, errLDAPEntryMismatch
 	}
+	// Bound under another configuration that still exists: that configuration's
+	// binding, which this one neither checks nor overwrites (LinkLDAPEntry).
 	return ldapAccount{User: u, Found: true}, nil
 }
 
@@ -1191,7 +1273,7 @@ func (h *LDAPHandler) RunScheduledSync(ctx context.Context) {
 		return
 	}
 
-	res, err := h.syncConfig(ctx, cfg.ID, 0) // the schedule never passes the mass-miss rule
+	res, err := h.syncConfig(ctx, cfg.ID, 0, uuid.Nil) // the schedule never passes the mass-miss rule
 	if !res.ran {
 		if !errors.Is(err, errLDAPSyncRunning) {
 			slog.Warn("LDAP sync: the scheduled sync could not start", "config_id", cfg.ID, "error", err)
@@ -1219,6 +1301,9 @@ func (h *LDAPHandler) RunScheduledSync(ctx context.Context) {
 		slog.Warn("LDAP sync: failed to insert the audit row of a scheduled sync", "config_id", cfg.ID, "error", err)
 	}
 	for _, f := range res.followed {
+		if !h.claimAddressAudit(actx, f) {
+			continue
+		}
 		if err := audit.Write(actx, h.queries, h.eventPub, db.InsertAuditLogParams{
 			UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 			ResourceType: "user",

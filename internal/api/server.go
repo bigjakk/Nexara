@@ -390,6 +390,7 @@ func (s *Server) registerAuth(d *serverDeps) {
 	}
 	if d.hasRBAC() && d.encryptionKey != "" {
 		s.ldapHandler = handlers.NewLDAPHandler(d.queries, d.encryptionKey, d.rbacEngine, d.eventPub)
+		s.ldapHandler.SetRedis(d.rdb)
 	}
 	if d.hasFullSecure() && d.rbacEngine != nil {
 		s.oidcHandler = handlers.NewOIDCHandler(d.queries, d.encryptionKey, d.rbacEngine, d.eventPub, d.rdb)
@@ -516,6 +517,8 @@ func (s *Server) wireAuthCompositions() {
 		s.totpHandler.SetCurrentPasswordCheck(s.authHandler.ProveCurrentPassword)
 		// And a directory account's password by a bind, in the sign-in's budgets.
 		s.totpHandler.SetDirectoryPasswordCheck(s.authHandler.ProveDirectoryPassword)
+		// And a directory sign-in's binding is written once its second factor passes.
+		s.totpHandler.SetDirectorySignInFinish(s.authHandler.FinishDirectorySignInAfterSecondFactor)
 	}
 	if s.totpHandler != nil && s.oidcHandler != nil {
 		// A single sign-on account's setup proves a fresh sign-in at its provider.

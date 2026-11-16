@@ -289,7 +289,9 @@ func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 		{4, 3, 0, http.StatusOK, 1},
 		{1, 0, 0, http.StatusUnprocessableEntity, 0}, // the last account it can see
 		{4, 0, 4, http.StatusOK, 4},
-		{4, 0, 3, http.StatusUnprocessableEntity, 0}, // more are missing than were confirmed
+		{4, 0, 3, http.StatusUnprocessableEntity, 0},          // more are missing than were confirmed
+		{4, 0, 5, http.StatusUnprocessableEntity, 0},          // a stale confirm: fewer are missing now
+		{4, 0, 2147483647, http.StatusUnprocessableEntity, 0}, // a count no confirm named
 	} {
 		entries := map[string]auth.LDAPUser{}
 		users := make([]db.User, 0, tc.users)
@@ -320,6 +322,31 @@ func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 		if acked := tc.ack > 0 && tc.status == http.StatusOK; len(details) == 1 && strings.Contains(details[0], `"mass_miss_acknowledged":true`) != acked {
 			t.Errorf("ack %d: audit %v; want mass_miss_acknowledged %t", tc.ack, details, acked)
 		}
+	}
+}
+
+// TestLDAPSync_AnAcknowledgedSyncKeepsTheCallerAndTheLastUserManager: a sync that
+// deactivates most of a directory never deactivates the administrator running it, or
+// the last active holder of global manage:user, who could not be replaced: both are
+// left active, counted as kept and skipped, in the answer and the audit row.
+func TestLDAPSync_AnAcknowledgedSyncKeepsTheCallerAndTheLastUserManager(t *testing.T) {
+	t.Parallel()
+	users := make([]db.User, 0, 4)
+	for i := range 4 {
+		users = append(users, db.User{ID: uuid.New(), Email: fmt.Sprintf("user%d@example.com", i), IsActive: true, AuthSource: "ldap"})
+	}
+	caller, manager := users[0], users[1]
+	store := newEpochStore(users...)
+	store.grants = map[uuid.UUID][]string{manager.ID: {"manage:user"}}
+	a, _, _ := ldapSyncApp(t, store, &fakeDirectory{entries: map[string]auth.LDAPUser{}})
+	resp := a.send(t, http.MethodGet, "/probe?ack=4", "", map[string]string{"X-Test-Acting-User": caller.ID.String()}, 30*time.Second)
+	body := decodeObject(t, resp)
+	_, details := auditOf(a, "ldap_sync")
+	if resp.StatusCode != http.StatusOK || !store.user(caller.ID).IsActive || !store.user(manager.ID).IsActive ||
+		store.user(users[2].ID).IsActive || body["users_kept_active"] != float64(2) ||
+		len(details) != 1 || !strings.Contains(details[0], `"kept_active":2`) {
+		t.Errorf("status %d %v, caller active %t, manager active %t, audit %v; want 200, both kept, the others deactivated",
+			resp.StatusCode, body, store.user(caller.ID).IsActive, store.user(manager.ID).IsActive, details)
 	}
 }
 
@@ -461,21 +488,24 @@ func TestLDAPSync_AnAccountNotSignedInSinceIsLeftAloneByAFilterOnAccountNames(t 
 	}
 }
 
-// TestLDAPSync_ADirectoryDeactivatedAccountRecoversThroughASignIn: an account a sync
-// deactivated wrongly keeps its sign-in name at a refused sign-in (the bind succeeded),
-// so the next sync finds it by that name and re-enables it.
-func TestLDAPSync_ADirectoryDeactivatedAccountRecoversThroughASignIn(t *testing.T) {
+// TestLDAPSync_ADirectoryDeactivatedAccountRecoversByItsEntry: a refused sign-in of a
+// deactivated account writes nothing (no sign-in name: whoever bound may not be its
+// owner), and the next sync finds a bound account by its entry's identifier and
+// re-enables it.
+func TestLDAPSync_ADirectoryDeactivatedAccountRecoversByItsEntry(t *testing.T) {
 	t.Parallel()
-	user := db.User{ID: uuid.New(), Email: epochLoginEmail, AuthSource: "ldap", DeactivatedByDirectory: true}
+	cfg := uuid.New()
+	user := db.User{ID: uuid.New(), Email: epochLoginEmail, AuthSource: "ldap", DeactivatedByDirectory: true,
+		LdapConfigID: pgtype.UUID{Bytes: cfg, Valid: true}, LdapEntryID: entryOfCarol}
 	store := newEpochStore(user)
-	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true, UserFilter: "(sAMAccountName={{username}})", EmailAttribute: "mail"}
-	entry := auth.LDAPUser{DN: "uid=alice,dc=example,dc=com", Email: user.Email}
+	store.ldapConfig = &db.LdapConfig{ID: cfg, Enabled: true, UserFilter: "(sAMAccountName={{username}})", EmailAttribute: "mail"}
+	entry := auth.LDAPUser{DN: "uid=alice,dc=example,dc=com", Username: "alice", Email: user.Email, EntryID: entryOfCarol}
 	a, _, sync := ldapSyncApp(t, store, &fakeDirectory{entries: map[string]auth.LDAPUser{"alice": entry}})
 	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
 		return fakeSignInDirectory{names: map[string]bool{"alice": true}, entry: entry, password: racePassword}, nil
 	}})
-	if resp, _ := a.loginAs(t, "alice", true); resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("an inactive account's sign-in = %d, want 401", resp.StatusCode)
+	if resp, _ := a.loginAs(t, "alice", true); resp.StatusCode != http.StatusUnauthorized || store.user(user.ID).LdapLoginName != "" {
+		t.Fatalf("an inactive account's sign-in = %d, name %q; want 401 and nothing written", resp.StatusCode, store.user(user.ID).LdapLoginName)
 	}
 	if status := sync(); status != http.StatusOK || !store.user(user.ID).IsActive {
 		t.Errorf("sync: status %d, active %t; want the account re-enabled", status, store.user(user.ID).IsActive)

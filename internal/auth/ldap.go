@@ -24,6 +24,10 @@ var (
 	// user's bind (a timeout, a connection lost), or answered the bind with anything
 	// but invalidCredentials: the password was not checked, so it is not a wrong one.
 	ErrLDAPUnavailable = errors.New("ldap: the directory did not answer")
+	// ErrLDAPUserRefused is a user bind the directory refused for the entry's state
+	// (constraintViolation 19, unwillingToPerform 53: an entry its password policy has
+	// locked, or one inactivated): not a wrong password, and not an outage either.
+	ErrLDAPUserRefused = errors.New("ldap: the directory refused the account")
 	// ErrLDAPFilterInvalid is a user or group filter that go-ldap cannot compile,
 	// which no directory is ever asked: go-ldap v3.4.15 compiles more strictly than
 	// v3.4.14 did (a set or a nested filter must end in ")"), so a filter stored
@@ -229,11 +233,15 @@ func (s *LDAPSession) Authenticate(user *LDAPUser, password string) error {
 }
 
 // classifyUserBind names a failed user bind: only the directory's own
-// invalidCredentials (49) is a wrong password; no answer, or any other answer, is
-// ErrLDAPUnavailable, which spends no sign-in budget.
+// invalidCredentials (49) is a wrong password; a locked or inactivated entry (19, 53)
+// is ErrLDAPUserRefused; no answer, or any other answer, is ErrLDAPUnavailable. Only
+// the first spends a sign-in budget.
 func classifyUserBind(err error) error {
 	if ldap.IsErrorWithCode(err, ldap.LDAPResultInvalidCredentials) {
 		return fmt.Errorf("%w: %v", ErrLDAPUserBindFailed, err)
+	}
+	if ldap.IsErrorAnyOf(err, ldap.LDAPResultConstraintViolation, ldap.LDAPResultUnwillingToPerform) {
+		return fmt.Errorf("%w: %v", ErrLDAPUserRefused, err)
 	}
 	return fmt.Errorf("%w: user bind: %v", ErrLDAPUnavailable, err)
 }
@@ -351,11 +359,16 @@ func (c *LDAPClient) searchOne(conn ldap.Client, filter string) (*LDAPUser, erro
 }
 
 // entryIDOf is an entry's stable identifier in ONE canonical text form, so that it is
-// only ever compared as text: "objectGUID:" and the GUID as Active Directory prints it
-// (the first three fields little-endian), read from the attribute's 16 raw bytes, or
-// "entryUUID:" and the UUID in lower case. "" when the entry carries neither in a form
-// that parses: the directory then works as before, by name and address.
+// only ever compared as text: "entryUUID:" and the UUID in lower case, or else
+// "objectGUID:" and the GUID as Active Directory prints it (the first three fields
+// little-endian), read from the attribute's 16 raw bytes. entryUUID first: no user can
+// write it on OpenLDAP or 389, while an objectGUID outside Active Directory (which has
+// no entryUUID) comes from a schema a user may be able to write. "" when the entry
+// carries neither in a form that parses: the directory then works as before.
 func entryIDOf(entry *ldap.Entry) string {
+	if u, err := uuid.Parse(strings.TrimSpace(entry.GetAttributeValue("entryUUID"))); err == nil {
+		return "entryUUID:" + u.String()
+	}
 	if raw := entry.GetRawAttributeValue("objectGUID"); len(raw) == 16 {
 		var b [16]byte
 		copy(b[:], raw)
@@ -363,9 +376,6 @@ func entryIDOf(entry *ldap.Entry) string {
 		b[4], b[5] = b[5], b[4]
 		b[6], b[7] = b[7], b[6]
 		return "objectGUID:" + uuid.UUID(b).String()
-	}
-	if u, err := uuid.Parse(strings.TrimSpace(entry.GetAttributeValue("entryUUID"))); err == nil {
-		return "entryUUID:" + u.String()
 	}
 	return ""
 }

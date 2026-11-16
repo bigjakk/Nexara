@@ -94,6 +94,10 @@ type TOTPHandler struct {
 	// of an SSO sign-in the callback left for the second factor. Wired by
 	// SetSSOSignInFinish; nil refuses every such sign-in.
 	finishSSOSignIn func(c fiber.Ctx, userID uuid.UUID, identity *pendingSSOIdentity) (db.User, error)
+	// finishDirectorySignIn is AuthHandler.FinishDirectorySignInAfterSecondFactor: what a
+	// directory sign-in writes about the account once its code has passed. Wired by
+	// SetDirectorySignInFinish; nil refuses every such sign-in.
+	finishDirectorySignIn func(c fiber.Ctx, userID uuid.UUID, entry *pendingDirectoryEntry) (db.User, error)
 
 	// pool and sessions are what AdminReset ends the account's sessions with, in the
 	// reset's own transaction. Wired by SetSessionEnding; a nil pool refuses every reset.
@@ -130,6 +134,9 @@ type totpPendingLogin struct {
 	// OIDCCallbackEmail is the address of an SSO callback's oidc_callback row, written
 	// once the session exists; "" for none.
 	OIDCCallbackEmail string `json:"oidc_callback_email,omitempty"`
+	// Directory is what a directory sign-in writes once the code has passed
+	// (pendingDirectoryEntry); nil for every other sign-in.
+	Directory *pendingDirectoryEntry `json:"directory,omitempty"`
 }
 
 // NewTOTPHandler creates a new TOTP handler.
@@ -192,6 +199,12 @@ func (h *TOTPHandler) SetSSOStepUp(fn func(c fiber.Ctx, userID, sessionID uuid.U
 // factor (OIDCHandler.FinishSignInAfterSecondFactor; called from server setup).
 func (h *TOTPHandler) SetSSOSignInFinish(fn func(c fiber.Ctx, userID uuid.UUID, identity *pendingSSOIdentity) (db.User, error)) {
 	h.finishSSOSignIn = fn
+}
+
+// SetDirectorySignInFinish sets how VerifyLogin finishes a directory sign-in after its
+// second factor (AuthHandler.FinishDirectorySignInAfterSecondFactor; server setup).
+func (h *TOTPHandler) SetDirectorySignInFinish(fn func(c fiber.Ctx, userID uuid.UUID, entry *pendingDirectoryEntry) (db.User, error)) {
+	h.finishDirectorySignIn = fn
 }
 
 // BeginSSOStepUp handles POST /api/v1/auth/totp/setup/sso-step-up: it starts the round
@@ -766,6 +779,18 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 		}
 		user = finished
 	}
+	// A directory sign-in's binding, address and sign-in name, written only now.
+	if pending.Directory != nil {
+		if h.finishDirectorySignIn == nil {
+			slog.Error("totp verify-login: no directory finish is wired, so no directory sign-in can pass its second factor", "user_id", userID)
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to complete the sign-in")
+		}
+		finished, err := h.finishDirectorySignIn(c, userID, pending.Directory)
+		if err != nil {
+			return err
+		}
+		user = finished
+	}
 
 	// The session is created against the epoch the pending token carries — the one
 	// the PASSWORD step read. At this point it equals user.AuthEpoch, because the
@@ -897,7 +922,9 @@ func totpResetNotDone(err error) error {
 // this challenge read it. VerifyLogin creates the session against that value.
 // sso, when not nil, is the identity of an SSO sign-in VerifyLogin is to finish, and
 // callbackEmail the address of the oidc_callback row it writes once a session exists.
-func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UUID, epoch int64, auditAction string, sso *pendingSSOIdentity, callbackEmail string) (string, error) {
+// directory, when not nil, is what a directory sign-in writes once the code has passed.
+func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UUID, epoch int64, auditAction string, sso *pendingSSOIdentity, callbackEmail string,
+	directory *pendingDirectoryEntry) (string, error) {
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", fmt.Errorf("generate pending token: %w", err)
@@ -911,6 +938,7 @@ func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UU
 		SSO:         sso,
 
 		OIDCCallbackEmail: callbackEmail,
+		Directory:         directory,
 	})
 
 	key := fmt.Sprintf("totp:pending:%s", token)

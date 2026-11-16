@@ -50,6 +50,7 @@ func TestResetSSOLink_ClearsTheLinkAndEndsTheSessionsInOneTransaction(t *testing
 		}},
 		{name: "an account with no link", want: http.StatusBadRequest},
 		{name: "the caller's own", tweak: linked, self: true, want: http.StatusForbidden},
+		{name: "the caller's own directory link", tweak: bound, directory: true, self: true, want: http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -74,7 +75,7 @@ func TestResetSSOLink_ClearsTheLinkAndEndsTheSessionsInOneTransaction(t *testing
 
 			u, live := f.a.store.user(f.target.ID), f.a.store.liveSessionsOf(f.target.ID)
 			if tc.want != http.StatusOK {
-				if u.OidcSubject != before.OidcSubject || len(live) != 2 || len(f.a.store.auditActions()) != 0 {
+				if u.OidcSubject != before.OidcSubject || u.LdapEntryID != before.LdapEntryID || len(live) != 2 || len(f.a.store.auditActions()) != 0 {
 					t.Errorf("subject %q, %d live sessions, audits %v; want all as before", u.OidcSubject, len(live), f.a.store.auditActions())
 				}
 				return

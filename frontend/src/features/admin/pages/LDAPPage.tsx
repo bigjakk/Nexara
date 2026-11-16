@@ -397,6 +397,11 @@ export function LDAPPage() {
           if (result.users_re_enabled > 0) {
             parts.push(`${String(result.users_re_enabled)} re-enabled`);
           }
+          if ((result.users_kept_active ?? 0) > 0) {
+            parts.push(
+              `${String(result.users_kept_active)} kept active (you, or the last user manager)`,
+            );
+          }
           setSyncResult(`${result.message} (${parts.join(", ")})`);
           setSyncWarning(null);
         },
@@ -997,7 +1002,7 @@ export function LDAPPage() {
                 <div className="pb-3.5">
                   <ConfirmRequiredWarning
                     title={`Deactivate ${accountsLabel(missingCount(syncWarning))}?`}
-                    message={`The directory found no entry for ${accountsLabel(missingCount(syncWarning))}, so the sync changed nothing. This usually means the user filter, the search base DN or the bind account's access is wrong. Deactivate them only if these people have left; their sessions end.`}
+                    message={`The directory found no entry for ${accountsLabel(missingCount(syncWarning))}, so the sync changed nothing. This usually means the user filter, the search base DN or the bind account's access is wrong. Deactivate them only if these people have left: the accounts named will no longer be able to sign in, and their sessions end. Your own account and the last user manager stay active.`}
                     confirmLabel={`Deactivate ${accountsLabel(missingCount(syncWarning))}`}
                     onConfirm={() => {
                       handleSync(missingCount(syncWarning));

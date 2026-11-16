@@ -158,6 +158,8 @@ func TestEntryIDOf_OneCanonicalTextForm(t *testing.T) {
 	}{
 		{"objectGUID", []*ldap.EntryAttribute{attr("objectGUID", guid)}, "objectGUID:00010203-0405-0607-0809-0a0b0c0d0e0f"},
 		{"entryUUID", []*ldap.EntryAttribute{attr("entryUUID", []byte("6C0A1F6E-0000-4000-8000-0000000000A1"))}, "entryUUID:6c0a1f6e-0000-4000-8000-0000000000a1"},
+		{"both: entryUUID, which no user can write", []*ldap.EntryAttribute{attr("objectGUID", guid),
+			attr("entryUUID", []byte("6c0a1f6e-0000-4000-8000-0000000000a1"))}, "entryUUID:6c0a1f6e-0000-4000-8000-0000000000a1"},
 		{"neither", nil, ""},
 		{"an objectGUID of the wrong length", []*ldap.EntryAttribute{attr("objectGUID", guid[:15])}, ""},
 	} {
@@ -183,6 +185,8 @@ func TestClassifyUserBind_OnlyInvalidCredentialsIsAWrongPassword(t *testing.T) {
 		{ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New("invalid credentials")), ErrLDAPUserBindFailed},
 		{ldap.NewError(ldap.ErrorNetwork, errors.New("ldap: connection timed out")), ErrLDAPUnavailable},
 		{ldap.NewError(ldap.LDAPResultBusy, errors.New("busy")), ErrLDAPUnavailable},
+		{ldap.NewError(ldap.LDAPResultConstraintViolation, errors.New("account locked")), ErrLDAPUserRefused},
+		{ldap.NewError(ldap.LDAPResultUnwillingToPerform, errors.New("account inactivated")), ErrLDAPUserRefused},
 	} {
 		if got := classifyUserBind(tc.err); !errors.Is(got, tc.want) {
 			t.Errorf("%v: %v, want %v", tc.err, got, tc.want)

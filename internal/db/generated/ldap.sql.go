@@ -438,8 +438,7 @@ func (q *Queries) GetUserByLDAPEntry(ctx context.Context, arg GetUserByLDAPEntry
 
 const linkLDAPEntry = `-- name: LinkLDAPEntry :one
 UPDATE users SET ldap_config_id = $1::uuid, ldap_entry_id = $2
-WHERE id = $3 AND auth_source = 'ldap'
-  AND ldap_config_id IS DISTINCT FROM $1::uuid
+WHERE id = $3 AND auth_source = 'ldap' AND ldap_config_id IS NULL
   AND $2::text <> ''
 RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id
 `
@@ -450,12 +449,12 @@ type LinkLDAPEntryParams struct {
 	ID       uuid.UUID `json:"id"`
 }
 
-// Binds a directory account to this entry under this configuration, and only one not
-// bound under it already: no row when it is of another source or bound under this
-// configuration (to this entry or another), so two first sign-ins or a sign-in and a
-// sync that race cannot both write, and a stored binding is never overwritten. An
-// account bound under another configuration, or one since deleted, is bound again.
-// users_ldap_entry_key refuses an entry another account holds.
+// Binds a directory account that is bound under no configuration to this entry under
+// this one, and only such an account: no row when it is of another source or bound
+// (here or under another configuration that still exists), so two first sign-ins or a
+// sign-in and a sync that race cannot both write, and a stored binding is never
+// overwritten. A deleted configuration's accounts read NULL (ON DELETE SET NULL) and
+// are bound again. users_ldap_entry_key refuses an entry another account holds.
 func (q *Queries) LinkLDAPEntry(ctx context.Context, arg LinkLDAPEntryParams) (User, error) {
 	row := q.db.QueryRow(ctx, linkLDAPEntry, arg.ConfigID, arg.EntryID, arg.ID)
 	var i User
@@ -479,6 +478,42 @@ func (q *Queries) LinkLDAPEntry(ctx context.Context, arg LinkLDAPEntryParams) (U
 		&i.LdapEntryID,
 	)
 	return i, err
+}
+
+const listActiveGlobalPermissionHolders = `-- name: ListActiveGlobalPermissionHolders :many
+SELECT DISTINCT u.id FROM users u
+JOIN user_roles ur ON ur.user_id = u.id AND ur.scope_type = 'global'
+JOIN role_permissions rp ON rp.role_id = ur.role_id
+JOIN permissions p ON p.id = rp.permission_id
+WHERE u.is_active AND p.action = $1 AND p.resource = $2
+  AND u.id <> '00000000-0000-0000-0000-000000000001'
+`
+
+type ListActiveGlobalPermissionHoldersParams struct {
+	Action   string `json:"action"`
+	Resource string `json:"resource"`
+}
+
+// The active accounts that hold this permission globally through a role, the system
+// account aside: a sync never deactivates the last of them for manage:user.
+func (q *Queries) ListActiveGlobalPermissionHolders(ctx context.Context, arg ListActiveGlobalPermissionHoldersParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveGlobalPermissionHolders, arg.Action, arg.Resource)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDirectoryConfigsUsingRole = `-- name: ListDirectoryConfigsUsingRole :many
@@ -569,7 +604,7 @@ const listLDAPUsers = `-- name: ListLDAPUsers :many
 SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory, ldap_login_name,
        ldap_config_id, ldap_entry_id
 FROM users
-WHERE auth_source = 'ldap'
+WHERE auth_source = 'ldap' AND (ldap_config_id IS NULL OR ldap_config_id = $1::uuid)
 ORDER BY email
 `
 
@@ -588,8 +623,11 @@ type ListLDAPUsersRow struct {
 	LdapEntryID            string      `json:"ldap_entry_id"`
 }
 
-func (q *Queries) ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error) {
-	rows, err := q.db.Query(ctx, listLDAPUsers)
+// The directory accounts a sync of this configuration answers for: those bound under
+// it, and those bound under none. An account bound under another configuration is
+// that configuration's.
+func (q *Queries) ListLDAPUsers(ctx context.Context, configID uuid.UUID) ([]ListLDAPUsersRow, error) {
+	rows, err := q.db.Query(ctx, listLDAPUsers, configID)
 	if err != nil {
 		return nil, err
 	}

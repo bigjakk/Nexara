@@ -123,15 +123,19 @@ func TestLDAP_AnAccountFollowsItsEntrysNewAddress(t *testing.T) {
 // TestLDAPLogin_ADirectoryThatDidNotAnswerSpendsNoBudget: a user bind that timed out,
 // or a directory that could not be reached, has not checked the password: 503, and no
 // budget is spent, so the right password signs in once the directory answers again
-// after more such failures than the lockout allows.
+// after more such failures than the lockout allows. An entry the directory locked or
+// inactivated is a refused sign-in (401, audited directory_refused), which spends no
+// budget either: the directory's own policy limits it.
 func TestLDAPLogin_ADirectoryThatDidNotAnswerSpendsNoBudget(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		open, bind error
+		want       int
 	}{
-		{"the user bind timed out", nil, fmt.Errorf("%w: user bind: ldap: connection timed out", auth.ErrLDAPUnavailable)},
-		{"the directory cannot be reached", fmt.Errorf("%w: dial: connection refused", auth.ErrLDAPConnection), nil},
+		{"the user bind timed out", nil, fmt.Errorf("%w: user bind: ldap: connection timed out", auth.ErrLDAPUnavailable), http.StatusServiceUnavailable},
+		{"the directory cannot be reached", fmt.Errorf("%w: dial: connection refused", auth.ErrLDAPConnection), nil, http.StatusServiceUnavailable},
+		{"the directory refused the entry", nil, fmt.Errorf("%w: account locked", auth.ErrLDAPUserRefused), http.StatusUnauthorized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -150,17 +154,137 @@ func TestLDAPLogin_ADirectoryThatDidNotAnswerSpendsNoBudget(t *testing.T) {
 				return dir, nil
 			}})
 			for i := 0; i <= loginLockoutThreshold; i++ {
-				if resp, body := a.loginAs(t, "carol", true); resp.StatusCode != http.StatusServiceUnavailable {
-					t.Fatalf("attempt %d against a directory that does not answer = %d %v, want 503", i+1, resp.StatusCode, body)
+				if resp, body := a.loginAs(t, "carol", true); resp.StatusCode != tc.want {
+					t.Fatalf("attempt %d = %d %v, want %d", i+1, resp.StatusCode, body, tc.want)
 				}
 			}
 			healthy.Store(true)
 			if resp, body := a.loginAs(t, "carol", true); resp.StatusCode != http.StatusOK {
 				t.Errorf("the right password once the directory answers = %d %v, want 200", resp.StatusCode, body)
 			}
-			if rows, _ := auditOf(a, "login_failed"); len(rows) != 0 {
-				t.Errorf("login_failed rows %v for attempts the directory never checked", rows)
+			rows, details := auditOf(a, "login_failed")
+			if refused := tc.want == http.StatusUnauthorized; refused != (len(rows) == loginLockoutThreshold+1) ||
+				refused && !strings.Contains(details[0], `"reason":"directory_refused"`) {
+				t.Errorf("login_failed rows %v %v; want one per attempt, reason directory_refused, only for a refusal", rows, details)
 			}
 		})
+	}
+}
+
+// TestLDAPLogin_ASecondFactorAccountIsBoundOnlyAfterItsCode: the password step of an
+// account with a second factor writes nothing about its directory identity, so another
+// entry with its address (signing in as "evil") neither binds it nor leaves a name the
+// sync would bind it through; the owner's sign-in binds it once the code has passed.
+func TestLDAPLogin_ASecondFactorAccountIsBoundOnlyAfterItsCode(t *testing.T) {
+	t.Parallel()
+	encrypted, _, plain, err := auth.NewTOTPService(totpTestKey).GenerateSecret("carol@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := uuid.New()
+	carol := db.User{ID: uuid.New(), Email: "carol@example.com", IsActive: true, Role: "user", AuthSource: "ldap",
+		LdapLoginName: "carol", TotpSecret: pgtype.Text{String: encrypted, Valid: true}}
+	store := newEpochStore(carol)
+	store.ldapConfig = &db.LdapConfig{ID: cfg, Enabled: true, UserFilter: mailFilter, EmailAttribute: "mail"}
+	a := newEpochApp(t, store, epochOptions{totp: true})
+	own := auth.LDAPUser{DN: "uid=carol,ou=people,dc=example,dc=com", Username: "carol", Email: carol.Email, EntryID: entryOfCarol}
+	other := auth.LDAPUser{DN: "uid=evil,ou=people,dc=example,dc=com", Username: "evil", Email: carol.Email, EntryID: entryOfDave}
+	directory := func(name string, entry auth.LDAPUser) {
+		a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
+			return fakeSignInDirectory{names: map[string]bool{name: true}, entry: entry, password: racePassword}, nil
+		}})
+	}
+
+	directory("evil", other)
+	epochFirstStep(t, a, "evil")
+	if u := store.user(carol.ID); u.LdapConfigID.Valid || u.LdapLoginName != "carol" {
+		t.Fatalf("after another entry's password step: bound %t to %q, name %q; want nothing written", u.LdapConfigID.Valid, u.LdapEntryID, u.LdapLoginName)
+	}
+	_, _, sync := ldapSyncApp(t, store, &fakeDirectory{entries: map[string]auth.LDAPUser{"carol": own, "evil": other}})
+	if status := sync(); status != http.StatusOK || store.user(carol.ID).LdapEntryID == entryOfDave {
+		t.Fatalf("sync = %d, carol bound to %q; want 200, never to the other entry", status, store.user(carol.ID).LdapEntryID)
+	}
+
+	store.mutate(carol.ID, func(u *db.User) { u.LdapConfigID, u.LdapEntryID = pgtype.UUID{}, "" })
+	directory("carol", own)
+	token := epochFirstStep(t, a, "carol")
+	if store.user(carol.ID).LdapConfigID.Valid {
+		t.Fatal("the owner's password step bound the account before its code")
+	}
+	if resp := a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, plain)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("verify-login = %d", resp.StatusCode)
+	}
+	if u := store.user(carol.ID); u.LdapEntryID != entryOfCarol || !boundUnder(u.LdapConfigID, cfg) {
+		t.Errorf("after the code: bound to %q under %v; want carol's entry under the config", u.LdapEntryID, u.LdapConfigID)
+	}
+}
+
+// TestLDAP_ABindingBelongsToItsConfiguration: an account bound under another
+// configuration that still exists is that configuration's: a sync of this one neither
+// lists nor rebinds it, and a sign-in through this one signs it in by its address, as
+// before bindings, and writes no binding over it.
+func TestLDAP_ABindingBelongsToItsConfiguration(t *testing.T) {
+	t.Parallel()
+	a, carol := directoryAccountFixture(t, entryOfCarol)
+	other := uuid.New() // the config the store answers for, not carol's
+	a.store.mu.Lock()
+	a.store.ldapConfig.ID = other
+	a.store.mu.Unlock()
+	entry := auth.LDAPUser{DN: "uid=carol,ou=people,dc=example,dc=com", Username: "carol", Email: carol.Email, EntryID: entryOfDave}
+	_, _, sync := ldapSyncApp(t, a.store, &fakeDirectory{entries: map[string]auth.LDAPUser{carol.Email: entry}})
+	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
+		return fakeSignInDirectory{names: map[string]bool{"carol": true}, entry: entry, password: racePassword}, nil
+	}})
+	status := sync()
+	resp, body := a.loginAs(t, "carol", true)
+	if u := a.store.user(carol.ID); status != http.StatusOK || resp.StatusCode != http.StatusOK ||
+		u.LdapEntryID != entryOfCarol || boundUnder(u.LdapConfigID, other) || len(a.store.named("ListLDAPUsers")) != 1 {
+		t.Errorf("sync %d, sign-in %d %v, bound to %q under %v; want both 200 and the first binding kept", status, resp.StatusCode, body, u.LdapEntryID, u.LdapConfigID)
+	}
+}
+
+// TestLDAP_AnAddressAnotherAccountHoldsIsKeptQuietly: when a bound entry's new address
+// is another account's, the account keeps its own, and the audit row says so once a
+// day without the other account's address (a Viewer reads audit details).
+func TestLDAP_AnAddressAnotherAccountHoldsIsKeptQuietly(t *testing.T) {
+	t.Parallel()
+	a, carol := directoryAccountFixture(t, entryOfCarol)
+	const taken = "dave@example.com"
+	a.store.mu.Lock()
+	dave := db.User{ID: uuid.New(), Email: taken, IsActive: true, AuthSource: "local"}
+	a.store.users[dave.ID] = &dave
+	a.store.mu.Unlock()
+	a.auth.SetPasswordLockoutStore(a.rdb)
+	entry := auth.LDAPUser{DN: "uid=carol,ou=people,dc=example,dc=com", Email: taken, EntryID: entryOfCarol}
+	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
+		return fakeSignInDirectory{names: map[string]bool{"carol": true}, entry: entry, password: racePassword}, nil
+	}})
+	for range 2 {
+		if resp, body := a.loginAs(t, "carol", true); resp.StatusCode != http.StatusOK {
+			t.Fatalf("sign-in = %d %v", resp.StatusCode, body)
+		}
+	}
+	_, details := auditOf(a, ldapAddressFollowedAction)
+	if a.store.user(carol.ID).Email != carol.Email || len(details) != 1 ||
+		!strings.Contains(details[0], `"outcome":"kept"`) || strings.Contains(details[0], taken) {
+		t.Errorf("address %q, audit %v; want carol's own kept, one row without the other account's address", a.store.user(carol.ID).Email, details)
+	}
+}
+
+// TestLDAPSync_ABoundEntryThatNoLongerShowsAnIdentifierIsSkipped: a directory that
+// stops showing an identifier (an ACL change) says nothing about whether the account's
+// entry is there, so the sync leaves the account as it is.
+func TestLDAPSync_ABoundEntryThatNoLongerShowsAnIdentifierIsSkipped(t *testing.T) {
+	t.Parallel()
+	a, carol := directoryAccountFixture(t, entryOfCarol)
+	a.store.mutate(carol.ID, func(u *db.User) { u.LdapLoginName = "carol" })
+	_, _, syncNow := ldapSyncApp(t, a.store, &fakeDirectory{entries: map[string]auth.LDAPUser{
+		"carol": {DN: "uid=carol,ou=people,dc=example,dc=com", Email: carol.Email}, bystander.Email: {Email: bystander.Email}}})
+	a.store.mu.Lock()
+	b := bystander
+	a.store.users[b.ID] = &b
+	a.store.mu.Unlock()
+	if status := syncNow(); status != http.StatusOK || !a.store.user(carol.ID).IsActive {
+		t.Errorf("sync = %d, carol active %t; want 200 and left as she is", status, a.store.user(carol.ID).IsActive)
 	}
 }

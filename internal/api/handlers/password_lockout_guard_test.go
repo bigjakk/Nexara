@@ -166,11 +166,16 @@ func TestGuard_OnlyThePasswordRoutesTouchTheLockout(t *testing.T) {
 // (tryLDAPLogin's, and the two-factor setup's ProveDirectoryPassword) pass none of what
 // was typed (the identifier is sometimes a password), and none from the search on passes
 // a raw err: the search's and the bind's error text can carry the search filter, and
-// with it what was typed. typed nil means every parameter.
+// with it what was typed. typed nil means every parameter. The functions that answer or
+// finish a directory sign-in without a search of their own (directorySignInNotChecked,
+// FinishDirectorySignInAfterSecondFactor, whose entry carries the typed name) pass no
+// raw err at all.
 func TestGuard_ADirectorySignInFailureLogsNothingTyped(t *testing.T) {
 	t.Parallel()
 	_, sources := authParsedSources(t)
-	for name, only := range map[string][]string{"tryLDAPLogin": nil, "ProveDirectoryPassword": {"password"}} {
+	noSearch := map[string]bool{"directorySignInNotChecked": true, "FinishDirectorySignInAfterSecondFactor": true}
+	for name, only := range map[string][]string{"tryLDAPLogin": nil, "ProveDirectoryPassword": {"password"},
+		"directorySignInNotChecked": {}, "FinishDirectorySignInAfterSecondFactor": {"e"}} {
 		var fn *ast.FuncDecl
 		for _, src := range sources {
 			if src.rel != "internal/api/handlers/auth.go" {
@@ -220,13 +225,13 @@ func TestGuard_ADirectorySignInFailureLogsNothingTyped(t *testing.T) {
 				case !ok:
 				case typed[id.Name]:
 					t.Errorf("%s logs %s, what the caller typed", name, id.Name)
-				case id.Name == "err" && search.IsValid() && call.Pos() > search:
+				case id.Name == "err" && (noSearch[name] || search.IsValid() && call.Pos() > search):
 					t.Errorf("%s logs a raw err from the search on, whose text can carry the typed identifier", name)
 				}
 			}
 			return true
 		})
-		if !bind.IsValid() || !search.IsValid() || logs == 0 {
+		if !noSearch[name] && (!bind.IsValid() || !search.IsValid()) || logs == 0 {
 			t.Fatalf("%s: found the search: %t, the bind: %t, log calls: %d: this guard has gone stale", name, search.IsValid(), bind.IsValid(), logs)
 		}
 	}

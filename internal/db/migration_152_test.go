@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -25,7 +26,8 @@ var (
 
 // TestMigration152_UsersLDAPEntry: an LDAP account from before 000152 reads as not
 // bound; a binding is written once, only on an LDAP account, one entry per account and
-// configuration (the same entry under another configuration is another binding); an
+// configuration (the same entry under another configuration is another binding, and a
+// binding is never moved to another configuration nor listed by its sync); an
 // address follows the entry unless another account has it in another case; a reset
 // clears it; deleting the configuration unbinds its accounts. The down step is
 // reversible. Not parallel: it migrates the shared schema.
@@ -74,8 +76,13 @@ func TestMigration152_UsersLDAPEntry(t *testing.T) {
 	if err := link(m152Carol, m152Config); err != nil {
 		t.Fatalf("binding carol: %v", err)
 	}
-	if err := link(m152Carol, m152Config); !errors.Is(err, pgx.ErrNoRows) {
-		t.Errorf("binding a bound account again = %v, want no row", err)
+	for _, cfg := range []uuid.UUID{m152Config, m152Other} {
+		if err := link(m152Carol, cfg); !errors.Is(err, pgx.ErrNoRows) {
+			t.Errorf("binding a bound account again (config %v) = %v, want no row", cfg, err)
+		}
+	}
+	if rows, err := q.ListLDAPUsers(ctx, m152Other); err != nil || slices.ContainsFunc(rows, func(r gen.ListLDAPUsersRow) bool { return r.ID == m152Carol }) {
+		t.Errorf("another configuration's sync lists carol, bound under the first: %v", err)
 	}
 	var pgErr *pgconn.PgError
 	if err := link(m152Dave, m152Config); !errors.As(err, &pgErr) || pgErr.ConstraintName != "users_ldap_entry_key" {

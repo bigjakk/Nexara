@@ -485,11 +485,11 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		}
 		return authFakeRow{err: pgx.ErrNoRows}
 	case "LinkLDAPEntry":
-		// config_id, entry_id, id; the SQL's WHERE: a directory account not bound under
-		// this config, and users_ldap_entry_key.
+		// config_id, entry_id, id; the SQL's WHERE: a directory account bound under no
+		// config, and users_ldap_entry_key.
 		cfg, entry := args[0].(uuid.UUID), args[1].(string)
 		u, ok := s.users[args[2].(uuid.UUID)]
-		if !ok || u.AuthSource != "ldap" || boundUnder(u.LdapConfigID, cfg) || entry == "" {
+		if !ok || u.AuthSource != "ldap" || u.LdapConfigID.Valid || entry == "" {
 			return authFakeRow{err: pgx.ErrNoRows}
 		}
 		if s.byLDAPEntry(cfg, entry) != nil {
@@ -643,12 +643,22 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 		}
 		return &authFakeRows{items: items}, nil
 	case "ListLDAPUsers":
+		// config_id; the SQL's WHERE: bound under it or under none.
 		var items []any
 		for _, u := range s.users {
-			if u.AuthSource == "ldap" {
+			if u.AuthSource == "ldap" && (!u.LdapConfigID.Valid || boundUnder(u.LdapConfigID, args[0].(uuid.UUID))) {
 				items = append(items, db.ListLDAPUsersRow{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName,
 					Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, DeactivatedByDirectory: u.DeactivatedByDirectory, LdapLoginName: u.LdapLoginName,
 					LdapConfigID: u.LdapConfigID, LdapEntryID: u.LdapEntryID})
+			}
+		}
+		return &authFakeRows{items: items}, nil
+	case "ListActiveGlobalPermissionHolders":
+		// action, resource: active accounts granted it globally (grants).
+		var items []any
+		for id, gs := range s.grants {
+			if u, ok := s.users[id]; ok && u.IsActive && slices.Contains(gs, args[0].(string)+":"+args[1].(string)) {
+				items = append(items, struct{ ID uuid.UUID }{id})
 			}
 		}
 		return &authFakeRows{items: items}, nil
@@ -803,6 +813,7 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 		a.totp.SetCurrentPasswordCheck(ah.ProveCurrentPassword)
 		a.totp.SetDirectoryPasswordCheck(ah.ProveDirectoryPassword)
 		a.totp.SetSSOSignInFinish(a.oidc.FinishSignInAfterSecondFactor)
+		a.totp.SetDirectorySignInFinish(ah.FinishDirectorySignInAfterSecondFactor)
 	}
 
 	uh := &UserHandler{

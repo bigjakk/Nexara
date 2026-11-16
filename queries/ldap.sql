@@ -79,15 +79,14 @@ WHERE ldap_config_id = sqlc.arg(config_id)::uuid AND ldap_entry_id = sqlc.arg(en
   AND ldap_entry_id <> '' AND auth_source = 'ldap';
 
 -- name: LinkLDAPEntry :one
--- Binds a directory account to this entry under this configuration, and only one not
--- bound under it already: no row when it is of another source or bound under this
--- configuration (to this entry or another), so two first sign-ins or a sign-in and a
--- sync that race cannot both write, and a stored binding is never overwritten. An
--- account bound under another configuration, or one since deleted, is bound again.
--- users_ldap_entry_key refuses an entry another account holds.
+-- Binds a directory account that is bound under no configuration to this entry under
+-- this one, and only such an account: no row when it is of another source or bound
+-- (here or under another configuration that still exists), so two first sign-ins or a
+-- sign-in and a sync that race cannot both write, and a stored binding is never
+-- overwritten. A deleted configuration's accounts read NULL (ON DELETE SET NULL) and
+-- are bound again. users_ldap_entry_key refuses an entry another account holds.
 UPDATE users SET ldap_config_id = sqlc.arg(config_id)::uuid, ldap_entry_id = sqlc.arg(entry_id)
-WHERE id = sqlc.arg(id) AND auth_source = 'ldap'
-  AND ldap_config_id IS DISTINCT FROM sqlc.arg(config_id)::uuid
+WHERE id = sqlc.arg(id) AND auth_source = 'ldap' AND ldap_config_id IS NULL
   AND sqlc.arg(entry_id)::text <> ''
 RETURNING *;
 
@@ -135,11 +134,24 @@ UPDATE users SET ldap_login_name = sqlc.arg(login_name)
 WHERE id = sqlc.arg(id) AND auth_source = 'ldap' AND ldap_login_name <> sqlc.arg(login_name);
 
 -- name: ListLDAPUsers :many
+-- The directory accounts a sync of this configuration answers for: those bound under
+-- it, and those bound under none. An account bound under another configuration is
+-- that configuration's.
 SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory, ldap_login_name,
        ldap_config_id, ldap_entry_id
 FROM users
-WHERE auth_source = 'ldap'
+WHERE auth_source = 'ldap' AND (ldap_config_id IS NULL OR ldap_config_id = sqlc.arg(config_id)::uuid)
 ORDER BY email;
+
+-- name: ListActiveGlobalPermissionHolders :many
+-- The active accounts that hold this permission globally through a role, the system
+-- account aside: a sync never deactivates the last of them for manage:user.
+SELECT DISTINCT u.id FROM users u
+JOIN user_roles ur ON ur.user_id = u.id AND ur.scope_type = 'global'
+JOIN role_permissions rp ON rp.role_id = ur.role_id
+JOIN permissions p ON p.id = rp.permission_id
+WHERE u.is_active AND p.action = sqlc.arg(action) AND p.resource = sqlc.arg(resource)
+  AND u.id <> '00000000-0000-0000-0000-000000000001';
 
 -- name: ClaimLDAPSyncLease :one
 -- Claims the config's sync lease for lease_seconds, when no sync holds one that is
