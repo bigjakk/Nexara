@@ -1106,15 +1106,17 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 		}
 	}
 
+	// The name that found the entry, for the sync's search (SetLDAPLoginName), kept
+	// before the refusal of an inactive account: the bind has succeeded, and an account
+	// a sync deactivated wrongly is found, and re-enabled, by the next sync only with it.
+	// Best effort: without it the sync searches by the address, where the filter allows.
+	if err := h.queries.SetLDAPLoginName(c.Context(), db.SetLDAPLoginNameParams{ID: user.ID, LoginName: email}); err != nil {
+		slog.Warn("ldap login: could not keep the sign-in name for the sync", "user_id", user.ID, "error", err)
+	}
+
 	if !user.IsActive {
 		slog.Warn("ldap login: account disabled", "email", userEmail, "user_id", user.ID)
 		return db.User{}, false
-	}
-
-	// The name that found the entry, for the sync's search (SetLDAPLoginName). Best
-	// effort: without it the sync searches by the address.
-	if err := h.queries.SetLDAPLoginName(c.Context(), db.SetLDAPLoginNameParams{ID: user.ID, LoginName: email}); err != nil {
-		slog.Warn("ldap login: could not keep the sign-in name for the sync", "user_id", user.ID, "error", err)
 	}
 
 	// Sync RBAC roles from LDAP group mapping, unless the group search failed: then the

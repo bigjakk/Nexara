@@ -395,3 +395,24 @@ func TestLDAPSync_AnAccountNotSignedInSinceIsLeftAloneByAFilterOnAccountNames(t 
 		}
 	}
 }
+
+// TestLDAPSync_ADirectoryDeactivatedAccountRecoversThroughASignIn: an account a sync
+// deactivated wrongly keeps its sign-in name at a refused sign-in (the bind succeeded),
+// so the next sync finds it by that name and re-enables it.
+func TestLDAPSync_ADirectoryDeactivatedAccountRecoversThroughASignIn(t *testing.T) {
+	t.Parallel()
+	user := db.User{ID: uuid.New(), Email: epochLoginEmail, AuthSource: "ldap", DeactivatedByDirectory: true}
+	store := newEpochStore(user)
+	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true, UserFilter: "(sAMAccountName={{username}})", EmailAttribute: "mail"}
+	entry := auth.LDAPUser{DN: "uid=alice,dc=example,dc=com", Email: user.Email}
+	a, _, sync := ldapSyncApp(t, store, &fakeDirectory{entries: map[string]auth.LDAPUser{"alice": entry}})
+	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
+		return fakeSignInDirectory{names: map[string]bool{"alice": true}, entry: entry, password: racePassword}, nil
+	}})
+	if resp, _ := a.loginAs(t, "alice", true); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("an inactive account's sign-in = %d, want 401", resp.StatusCode)
+	}
+	if status := sync(); status != http.StatusOK || !store.user(user.ID).IsActive {
+		t.Errorf("sync: status %d, active %t; want the account re-enabled", status, store.user(user.ID).IsActive)
+	}
+}
