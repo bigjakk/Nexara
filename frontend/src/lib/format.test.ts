@@ -166,9 +166,9 @@ describe("dates under the Date format preference", () => {
     ["iso", formatExactDateTime, past, `${isoDate(past)}T${isoTime(past)}${offset(past)}`],
     ["relative", formatExactDate, at(-DAY), at(-DAY).toLocaleDateString()],
     // A chart tick is never relative; iso writes the day month-day.
-    ["relative", formatTimestampLong, past.getTime(), `${pad2(past.getMonth() + 1)}/${pad2(past.getDate())} ${pad2(past.getHours())}:${pad2(past.getMinutes())}`],
-    ["iso", formatTimestampLong, past.getTime(), `${pad2(past.getMonth() + 1)}-${pad2(past.getDate())} ${pad2(past.getHours())}:${pad2(past.getMinutes())}`],
-    ["iso", formatAxisDay, past.getTime(), `${pad2(past.getMonth() + 1)}-${pad2(past.getDate())}`],
+    ["relative", (v) => formatTimestampLong(Number(v)), past.getTime(), `${pad2(past.getMonth() + 1)}/${pad2(past.getDate())} ${pad2(past.getHours())}:${pad2(past.getMinutes())}`],
+    ["iso", (v) => formatTimestampLong(Number(v)), past.getTime(), `${pad2(past.getMonth() + 1)}-${pad2(past.getDate())} ${pad2(past.getHours())}:${pad2(past.getMinutes())}`],
+    ["iso", (v) => formatAxisDay(Number(v)), past.getTime(), `${pad2(past.getMonth() + 1)}-${pad2(past.getDate())}`],
   ])("under %s, %o of %s is %s", (dateFormat, fn, value, want) => {
     usePreferencesStore.getState().setPreferences({ dateFormat });
     expect(fn(value)).toBe(want);

@@ -37,6 +37,18 @@ function subscribe(onChange: () => void): () => void {
   };
 }
 
+type DateTextOptions = Parameters<typeof formatDateValue>[1];
+
+/**
+ * The text a DateTime would show, for a date that has to sit inside a string
+ * (a translated sentence) in a component that stays on screen, such as the
+ * shell's: it follows a change of preference at once and moves on by itself.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- the hook belongs beside the component it mirrors
+export function useDateText(value: DateInput, options?: DateTextOptions): string {
+  return useSyncExternalStore(subscribe, () => formatDateValue(value, options));
+}
+
 /**
  * A date or time as the Date format preference writes it (lib/format.ts),
  * kept current: under relative it moves on by itself and the exact time is
@@ -52,10 +64,10 @@ export function DateTime({
   locale,
 }: {
   value: DateInput;
-  kind?: DateKind;
-  fallback?: string;
-  exact?: boolean;
-  locale?: Intl.DateTimeFormatOptions;
+  kind?: DateKind | undefined;
+  fallback?: string | undefined;
+  exact?: boolean | undefined;
+  locale?: Intl.DateTimeFormatOptions | undefined;
 }) {
   const read = () => formatDateValue(value, { kind, fallback, exact, locale });
   // Switching to or from relative always changes the text, so the title,

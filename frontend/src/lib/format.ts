@@ -203,11 +203,11 @@ export function formatDateValue(
     exact = false,
     locale,
   }: {
-    kind?: DateKind;
-    fallback?: string;
+    kind?: DateKind | undefined;
+    fallback?: string | undefined;
     /** Never relative: for a tooltip, or a date inside a sentence ("as of …"). */
-    exact?: boolean;
-    locale?: Intl.DateTimeFormatOptions;
+    exact?: boolean | undefined;
+    locale?: Intl.DateTimeFormatOptions | undefined;
   } = {},
 ): string {
   const d = toDate(value);
@@ -291,11 +291,13 @@ const AXIS_DAY_CLOCK = new Intl.DateTimeFormat(undefined, {
 
 /** An axis tick's clock reading in the locale ("14:30", "02:30 PM"); iso "14:30". */
 export function formatAxisClock(ts: number): string {
+  if (!Number.isFinite(ts)) return "";
   return dateFormat() === "iso" ? formatTimestampShort(ts) : AXIS_CLOCK.format(ts);
 }
 
 /** An axis tick's day in the locale ("Mar 8"); iso "03-08". */
 export function formatAxisDay(ts: number): string {
+  if (!Number.isFinite(ts)) return "";
   if (dateFormat() !== "iso") return AXIS_DAY.format(ts);
   const d = new Date(ts);
   return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -303,6 +305,7 @@ export function formatAxisDay(ts: number): string {
 
 /** An axis tick's day and clock in the locale ("Mar 8, 14:30"); iso "03-08 14:30". */
 export function formatAxisDayClock(ts: number): string {
+  if (!Number.isFinite(ts)) return "";
   if (dateFormat() !== "iso") return AXIS_DAY_CLOCK.format(ts);
   return `${formatAxisDay(ts)} ${formatTimestampShort(ts)}`;
 }
