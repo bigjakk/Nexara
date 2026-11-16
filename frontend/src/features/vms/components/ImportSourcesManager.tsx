@@ -67,10 +67,7 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
     if (!deleteTarget) return;
     // A failure keeps the dialog open, which shows it.
     settle(deleteMutation.mutateAsync({ clusterId, storage: deleteTarget }), {
-      action: t(
-        "importSourcesManagerActions.action",
-        { deleteTarget },
-      ),
+      action: t("importSourcesManagerActions.action", { deleteTarget }),
       onSuccess: () => {
         setDeleteTarget(null);
       },

@@ -108,7 +108,10 @@ function UpsRow({ device }: { device: UpsDevice }) {
           )}
         </div>
         <div className="truncate pl-4 text-[12.5px] text-muted-foreground">
-          {t("upsList.modelViaServerName", { model, serverName: device.server_name })}
+          {t("upsList.modelViaServerName", {
+            model,
+            serverName: device.server_name,
+          })}
         </div>
       </div>
 
@@ -130,7 +133,11 @@ function UpsRow({ device }: { device: UpsDevice }) {
           value={formatRuntime(device.battery_runtime)}
           tone={battery}
         >
-          <Sub>{onBattery ? t("upsList.fallingOnBattery") : t("upsList.atTheCurrentLoad")}</Sub>
+          <Sub>
+            {onBattery
+              ? t("upsList.fallingOnBattery")
+              : t("upsList.atTheCurrentLoad")}
+          </Sub>
         </Reading>
         <Reading
           label={t("upsList.load")}
@@ -163,7 +170,11 @@ function UpsRow({ device }: { device: UpsDevice }) {
           tone={battery}
         >
           {device.input_frequency != null && (
-            <Sub>{t("upsList.inputFrequencyHz", { inputFrequency: device.input_frequency.toFixed(1) })}</Sub>
+            <Sub>
+              {t("upsList.inputFrequencyHz", {
+                inputFrequency: device.input_frequency.toFixed(1),
+              })}
+            </Sub>
           )}
         </Reading>
       </div>
@@ -181,7 +192,13 @@ function UpsRow({ device }: { device: UpsDevice }) {
           >
             {device.last_reading_at === null
               ? t("upsList.neverRead")
-              : t("upsList.readLastReadingAt", { lastReadingAt: formatDateTime(device.last_reading_at, "—", "relative") })}
+              : t("upsList.readLastReadingAt", {
+                  lastReadingAt: formatDateTime(
+                    device.last_reading_at,
+                    "—",
+                    "relative",
+                  ),
+                })}
           </div>
         </div>
         <ChevronRight
@@ -192,7 +209,9 @@ function UpsRow({ device }: { device: UpsDevice }) {
 
       {device.feeds.length > 0 && (
         <div className="order-4 flex basis-full flex-wrap items-center gap-x-1.5 gap-y-1 pl-4 text-[12.5px] text-muted-foreground @4xl:order-none @4xl:col-span-full">
-          <span className="text-muted-foreground/75">{t("upsList.powers")}</span>
+          <span className="text-muted-foreground/75">
+            {t("upsList.powers")}
+          </span>
           {device.feeds.slice(0, FEED_LIMIT).map((f, i, shown) => {
             const name = f.kind === "node" ? f.node_name : f.label;
             const unprotected =
@@ -211,7 +230,11 @@ function UpsRow({ device }: { device: UpsDevice }) {
             );
           })}
           {device.feeds.length > FEED_LIMIT && (
-            <span>{t("upsList.andLengthMore", { length: device.feeds.length - FEED_LIMIT })}</span>
+            <span>
+              {t("upsList.andLengthMore", {
+                length: device.feeds.length - FEED_LIMIT,
+              })}
+            </span>
           )}
         </div>
       )}

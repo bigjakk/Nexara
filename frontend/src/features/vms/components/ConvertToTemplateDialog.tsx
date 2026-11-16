@@ -45,10 +45,7 @@ export function ConvertToTemplateDialog({
   function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
     settle(convertMutation.mutateAsync({ clusterId, resourceId, kind }), {
-      action: t(
-        "convertToTemplateDialogActions.action",
-        { resourceName },
-      ),
+      action: t("convertToTemplateDialogActions.action", { resourceName }),
       onSuccess: (data) => {
         setUpid(data.upid);
       },
