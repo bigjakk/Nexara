@@ -275,6 +275,19 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 		remember(func() { *u = before })
 		u.OidcIssuer, u.OidcSubject = "", ""
 		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case "ClearTOTPSecret":
+		if u, ok := s.users[args[0].(uuid.UUID)]; ok {
+			was := u.TotpSecret
+			remember(func() { u.TotpSecret = was })
+			u.TotpSecret = pgtype.Text{}
+		}
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case "DeleteAllRecoveryCodes":
+		id := args[0].(uuid.UUID)
+		was := s.recoveryCodes[id]
+		remember(func() { s.recoveryCodes[id] = was })
+		delete(s.recoveryCodes, id)
+		return pgconn.NewCommandTag("DELETE 1"), nil
 	case "DeleteRecoveryCode":
 		id := args[0].(uuid.UUID)
 		for uid, codes := range s.recoveryCodes {
@@ -712,7 +725,7 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 
 	if opts.totp {
 		a.totp = &TOTPHandler{queries: queries, totpService: auth.NewTOTPService(totpTestKey), rdb: rdb,
-			followUpTimeout: opts.followUpTimeout}
+			followUpTimeout: opts.followUpTimeout, pool: pool, sessions: sessions}
 		ah.SetTOTPHandler(a.totp)
 		a.totp.SetIssueTokensFn(ah.IssueTokens)
 		a.totp.SetCurrentPasswordCheck(ah.ProveCurrentPassword)
@@ -781,6 +794,8 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 			"current_password": {Type: apischema.String, Optional: true},
 		}, nil, a.totp.BeginSetup))
 		app.Delete("/auth/totp", withRequestParams(t, totpDisableMirror(), nil, a.totp.Disable))
+		app.Delete("/users/:id/totp", withRequestParams(t, apischema.Properties{
+			"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}}, []string{"id"}, a.totp.AdminReset))
 		app.Post("/auth/totp/recovery-codes/regenerate", withRequestParams(t, totpConfirmSetupMirror(), nil, a.totp.RegenerateRecoveryCodes))
 	}
 	app.Put("/users/:id", withRequestParams(t, epochUserUpdateMirror(), []string{"id"}, uh.Update))

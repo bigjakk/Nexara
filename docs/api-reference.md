@@ -2399,7 +2399,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | GET | `/users/:id` | Get user, with `roles` (its global RBAC role names) as the list answers them; `PUT` answers the same shape |
 | PUT | `/users/:id` | Update user. Deactivating the account (`is_active: false`) changes it and ends every one of its sessions in one transaction: if the sessions cannot be ended, the account stays active and the answer (`503` or `500`) says it was **not** changed. An answer that says the change **could not be confirmed** means the deactivation may have taken effect; repeating it is safe |
 | DELETE | `/users/:id` | Delete user |
-| DELETE | `/users/:id/totp` | Admin reset user's TOTP |
+| DELETE | `/users/:id/totp` | Admin reset user's TOTP. Ends every session of the user in the same transaction (`503`/`500` when it cannot, and nothing is changed); a sign-in waiting at its second step is then refused `401` at `POST /auth/totp/verify-login` |
 | DELETE | `/users/:id/sso-link` | Reset an SSO account's link to its provider identity (`manage:user`): its next SSO sign-in links again by address, and every session of the account ends. `400` when the account has no link, `403` for your own. The reset and the end of the sessions are one transaction: an answer that says the link was **not** reset changed nothing; one that says it **could not be confirmed** may have taken effect, and repeating it is safe. Audited as `user_sso_link_reset` |
 | DELETE | `/oidc/links` | Reset the link of every SSO account at once (`manage:user`), for after an issuer change; ends every session of each, the caller's own included. Answers `{ "reset": <accounts> }`. Audited as `oidc_links_reset` |
 

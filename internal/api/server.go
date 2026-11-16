@@ -396,6 +396,8 @@ func (s *Server) registerAuth(d *serverDeps) {
 	}
 	if d.hasFullSecure() {
 		s.totpHandler = handlers.NewTOTPHandler(d.queries, d.encryptionKey, d.rdb, d.eventPub)
+		// An administrator's reset ends the account's sessions in its own transaction.
+		s.totpHandler.SetSessionEnding(d.pool, d.sessionMgr)
 	}
 }
 

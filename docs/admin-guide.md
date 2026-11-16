@@ -421,7 +421,7 @@ From the Users page, administrators can:
 - **View** all registered users with their roles, auth source, and 2FA status. The Roles column lists global roles only, so a user who holds only cluster-scoped roles reads "No roles"
 - **Active** — a switch that deactivates the account, without asking: it ends the user's sessions and refuses their API keys at once, and a browser they are signed in on is signed out at its next request. You cannot switch off your own, but nothing stops the last administrator being deactivated by another
 - **Manage roles** — the shield icon
-- **Reset 2FA** — remove a user's TOTP enrollment if they lose access to their authenticator
+- **Reset 2FA** — remove a user's TOTP enrollment if they lose access to their authenticator. It also signs the user out everywhere: every session ends, and a sign-in waiting for its code has to start again
 - **Delete user** — answers *Failed to delete user* for anyone who has created an alert rule, channel, maintenance window, report, rolling update or import, or acknowledged or resolved an alert, since those records name them. Deactivate such an account instead
 
 There is no way to reset someone's password from the UI or API. See [Recovering from a Lost Admin Account](#recovering-from-a-lost-admin-account).

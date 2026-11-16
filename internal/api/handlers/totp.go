@@ -13,7 +13,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -93,6 +95,11 @@ type TOTPHandler struct {
 	// SetSSOSignInFinish; nil refuses every such sign-in.
 	finishSSOSignIn func(c fiber.Ctx, userID uuid.UUID, identity *pendingSSOIdentity) (db.User, error)
 
+	// pool and sessions are what AdminReset ends the account's sessions with, in the
+	// reset's own transaction. Wired by SetSessionEnding; a nil pool refuses every reset.
+	pool     txOptionsBeginner
+	sessions *auth.SessionManager
+
 	// followUpTimeout bounds each follow-up of a decision that has been made — the
 	// audit row of a second step that was refused — and is authFollowUpTimeout when
 	// zero. A field rather than a constant so that a test can make a stalled insert
@@ -145,6 +152,16 @@ func (h *TOTPHandler) followUpDuration() time.Duration {
 // event it publishes — under a follow-up deadline (see runFollowUp).
 func (h *TOTPHandler) withFollowUp(c fiber.Ctx, fn func()) {
 	runFollowUp(c, h.followUpDuration(), fn)
+}
+
+// SetSessionEnding gives AdminReset the pool its transaction begins on and the session
+// manager whose Redis rows it clears (called from server setup).
+func (h *TOTPHandler) SetSessionEnding(pool *pgxpool.Pool, sessions *auth.SessionManager) {
+	// Assigned only when there is a pool, for the reason NewUserHandler gives.
+	if pool != nil {
+		h.pool = pool
+	}
+	h.sessions = sessions
 }
 
 // SetIssueTokensFn sets the token-issuing function (called from server setup).
@@ -645,7 +662,11 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusForbidden, "Account is disabled")
 	}
 	if !user.TotpSecret.Valid {
-		return fiber.NewError(fiber.StatusInternalServerError, "TOTP not configured for user")
+		// The second factor was reset or disabled since the password step: the
+		// challenge this token stands for is gone, so the token is refused as an
+		// expired one and destroyed, before any code is looked at.
+		_ = h.rdb.Del(c.Context(), pendingKey, attemptKey).Err()
+		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired pending token")
 	}
 
 	// The account's epoch against the one the password step read. They differ when a
@@ -767,6 +788,11 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 }
 
 // AdminReset handles DELETE /api/v1/users/:id/totp — admin resets user's TOTP.
+//
+// The reset ends every session of the account, as the SSO link reset does, in ONE
+// transaction with the clear of the secret and the recovery codes: the second factor
+// that protected those sessions is gone, and whoever holds one may be why. The auth
+// epoch the revoke bumps also refuses a sign-in that is waiting at its second step.
 func (h *TOTPHandler) AdminReset(c fiber.Ctx, p *apischema.Params) error {
 	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
@@ -787,15 +813,83 @@ func (h *TOTPHandler) AdminReset(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusBadRequest, "TOTP is not enabled for this user")
 	}
 
-	if err := h.queries.ClearTOTPSecret(c.Context(), id); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to reset TOTP")
+	revoked, unconfirmed, err := h.resetSecondFactor(c, id)
+	if err != nil && !unconfirmed {
+		return err
 	}
-	_ = h.queries.DeleteAllRecoveryCodes(c.Context(), id)
+	details := map[string]string{"target_user_id": id.String()}
+	if unconfirmed {
+		details["outcome"] = "unconfirmed"
+	}
+	raw, _ := json.Marshal(details)
+	h.withFollowUp(c, func() {
+		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "auth", id.String(), "totp_admin_reset", raw)
+	})
+	if err != nil {
+		return err
+	}
+	if h.sessions != nil && len(revoked) > 0 {
+		fctx, cancel := context.WithTimeout(c.Context(), h.followUpDuration())
+		h.sessions.ForgetSessions(fctx, revoked)
+		cancel()
+	}
+	return c.JSON(fiber.Map{"message": "TOTP reset for user; the account's sessions have ended"})
+}
 
-	details, _ := json.Marshal(map[string]string{"target_user_id": id.String()})
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "auth", id.String(), "totp_admin_reset", details)
+// resetSecondFactor clears the account's secret and recovery codes and ends every
+// session of it in one transaction, as resetSSOLinks does for a link, with its
+// answers: not done (503 or 500, rolled back), or unconfirmed when a COMMIT's answer
+// was lost. It returns the revoked sessions, for their Redis rows.
+func (h *TOTPHandler) resetSecondFactor(c fiber.Ctx, id uuid.UUID) (revoked []uuid.UUID, unconfirmed bool, err error) {
+	if h.pool == nil {
+		return nil, false, fiber.NewError(fiber.StatusInternalServerError, totpResetNotDoneMessage)
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), authDBTimeout)
+	defer cancel()
 
-	return c.JSON(fiber.Map{"message": "TOTP reset for user"})
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, false, totpResetNotDone(err)
+	}
+	defer releaseTx(tx, "admin totp reset")()
+	qx := h.queries.WithTx(tx)
+
+	if err := qx.ClearTOTPSecret(ctx, id); err != nil {
+		return nil, false, totpResetNotDone(err)
+	}
+	if err := qx.DeleteAllRecoveryCodes(ctx, id); err != nil {
+		return nil, false, totpResetNotDone(err)
+	}
+	if revoked, err = auth.RevokeAllUserSessionsIn(ctx, qx, id); err != nil {
+		return nil, false, totpResetNotDone(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if !commitOutcomeUnknown(err) {
+			return nil, false, totpResetNotDone(err)
+		}
+		slog.Error("admin totp reset: the commit's outcome is UNCONFIRMED", "user_id", id, "error", err)
+		if isTransientDBError(err) {
+			return nil, true, fiber.NewError(fiber.StatusServiceUnavailable, totpResetUnconfirmedMessage)
+		}
+		return nil, true, fiber.NewError(fiber.StatusInternalServerError, totpResetUnconfirmedMessage)
+	}
+	return revoked, false, nil
+}
+
+const (
+	totpResetNotDoneMessage     = "Two-factor authentication was NOT reset; the account and its sessions are as they were."
+	totpResetUnconfirmedMessage = "The reset could not be confirmed: two-factor authentication may be cleared and the sessions ended, " +
+		"or not. Check the account; repeating the reset is safe."
+)
+
+// totpResetNotDone answers a reset that rolled back: 503 when the database was away,
+// else 500.
+func totpResetNotDone(err error) error {
+	slog.Warn("admin totp reset: not done; nothing was changed", "error", err)
+	if isTransientDBError(err) {
+		return fiber.NewError(fiber.StatusServiceUnavailable, totpResetNotDoneMessage)
+	}
+	return fiber.NewError(fiber.StatusInternalServerError, totpResetNotDoneMessage)
 }
 
 // CreateTOTPPendingToken generates a random token and stores it in Redis with user
