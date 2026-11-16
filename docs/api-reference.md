@@ -650,7 +650,6 @@ envelope documented above, with a `Retry-After` header. Requests that pass carry
 | End one session | 30/min per session | `DELETE /auth/sessions/:id` — keyed on the caller's session like sign out everywhere, with a budget of its own: ending one session is signing out everywhere one device at a time, so it is capped too, but a person ends several devices in a sitting, which is why the cap is larger. A refused API key spends none of it, and a call over the cap revokes nothing and leaves the refresh cookie in place |
 | Refresh | 30/min | `/auth/refresh` |
 | WS token | 60/min | `/auth/ws-token` |
-| Sign out | 60/min | `POST /auth/logout` — a budget of its own, not the Auth one, so an address that has spent that on logins can still sign out |
 | Snapshot resync | 30/min | `/clusters/:id/guest-snapshots/resync` |
 | Cluster create | 10/min | `POST /clusters` — in bootstrap mode each call spends a Proxmox login attempt |
 | Certificate fetch | 30/min, one budget per route | `POST /clusters/fetch-fingerprint`, which the cluster, PBS and Veeam add flows share, and `POST /clusters/:id/verify-certificate` |

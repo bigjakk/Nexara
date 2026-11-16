@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -72,30 +73,35 @@ func TestAuthLimiterCannotBeSpelledAround(t *testing.T) {
 	}
 }
 
-// TestLogout_HasABudgetOfItsOwn: sign-out had no cap at all (the general limiter
-// skips the auth subtree). It gets one per address, and it is NOT the Auth bucket:
-// an address that has spent that on logins must still be able to sign out.
-func TestLogout_HasABudgetOfItsOwn(t *testing.T) {
+// TestLogout_HasNoPerAddressLimit: sign-out is unauthenticated, so a per-address cap
+// on it lets anyone behind the same NAT or proxy loop it and turn every honest
+// sign-out from there into a 429 that leaves the session alive (see the Auth limiter
+// in setupMiddleware). Far more sign-outs than any cap here allows, from one address,
+// and the owner's still reaches the handler.
+func TestLogout_HasNoPerAddressLimit(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t)
-	post := func(path string) int {
+	s.app.Post("/api/v1/auth/logout", func(c fiber.Ctx) error {
+		if c.Cookies("nexara_refresh") != "the-owners-cookie" {
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+		return c.SendStatus(fiber.StatusOK)
+	})
+	post := func(cookie string) int {
 		t.Helper()
-		resp, err := s.app.Test(httptest.NewRequest(http.MethodPost, path, nil))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+		req.Header.Set("Cookie", "nexara_refresh="+cookie)
+		resp, err := s.app.Test(req)
 		if err != nil {
 			t.Fatalf("Test: %v", err)
 		}
 		_ = resp.Body.Close()
 		return resp.StatusCode
 	}
-	for range 20 {
-		post("/api/v1/auth/login")
+	for i := range 300 {
+		post(fmt.Sprintf("random-%d", i))
 	}
-	for i := 1; i <= logoutRateLimit; i++ {
-		if code := post("/api/v1/auth/logout"); code == fiber.StatusTooManyRequests {
-			t.Fatalf("sign-out %d of %d answered 429 after the Auth bucket was spent", i, logoutRateLimit)
-		}
-	}
-	if code := post("/api/v1/auth/logout"); code != fiber.StatusTooManyRequests {
-		t.Errorf("sign-out %d = %d, want 429: the cap does not hold", logoutRateLimit+1, code)
+	if code := post("the-owners-cookie"); code != fiber.StatusOK {
+		t.Errorf("the owner's sign-out after 300 others from the same address = %d, want 200", code)
 	}
 }

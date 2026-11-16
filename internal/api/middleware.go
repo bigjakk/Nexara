@@ -259,6 +259,15 @@ func (s *Server) setupMiddleware() {
 	// token, the one request an owner must not be refused because a stranger sent
 	// fifteen logins.
 	//
+	// POST /auth/logout is left with no per-address limit at all, in this bucket or one
+	// of its own, for the same reason. It is unauthenticated (the refresh cookie is its
+	// credential), so anyone sharing an address — a NAT, a VPN, a proxy while
+	// TRUSTED_PROXIES is unset — could loop it and have every honest sign-out from that
+	// address answer 429; the SPA then clears the tab while the cookie and the server
+	// session stay alive, and on a shared machine the next person resumes them. Keying
+	// on the cookie does not help: an attacker sends a fresh random one each time.
+	// TestLogout_HasNoPerAddressLimit holds it so.
+	//
 	// ONE bucket serves every path in the set, on purpose: login, change-password
 	// and the 2FA setup are three oracles for the same password, so an address gets
 	// 15 guesses a minute across all of them, not 15 at each. Because it runs before
@@ -307,25 +316,6 @@ func (s *Server) setupMiddleware() {
 		},
 		Next: func(c fiber.Ctx) bool {
 			return limiterPath(c) != wsTokenLimitedPath
-		},
-	}))
-
-	// Sign-out limiter — 60/min/IP, a bucket of its own. Logout is public (the
-	// refresh cookie is its credential), reads a body and makes a session lookup
-	// before anything is authenticated, and the general limiter skips the auth
-	// subtree, so it had no cap at all. It is not in the Auth bucket on purpose:
-	// that one is shared with login and anyone can drain it, and a sign-out must
-	// not be refused because a stranger sent fifteen logins. An honest client
-	// signs out once per session, far under the cap even for a few dozen people
-	// behind one address.
-	s.app.Use(limiter.New(limiter.Config{
-		Max:        logoutRateLimit,
-		Expiration: 1 * time.Minute,
-		KeyGenerator: func(c fiber.Ctx) string {
-			return c.IP() + ":logout"
-		},
-		Next: func(c fiber.Ctx) bool {
-			return limiterPath(c) != logoutLimitedPath
 		},
 	}))
 
@@ -1170,10 +1160,6 @@ const (
 
 	// wsTokenLimitedPath is capped separately, at 60/min/IP.
 	wsTokenLimitedPath = "/api/v1/auth/ws-token"
-
-	// logoutLimitedPath is capped separately, at logoutRateLimit a minute per IP.
-	logoutLimitedPath = "/api/v1/auth/logout"
-	logoutRateLimit   = 60
 )
 
 // routerFold lower-cases path the way Fiber's router does for its detection path

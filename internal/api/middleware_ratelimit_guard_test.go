@@ -18,11 +18,11 @@ import (
 
 // rateLimitedPaths is every path the three limiters select on, flattened.
 func rateLimitedPaths() []string {
-	out := make([]string, 0, len(authLimitedPaths)+3)
+	out := make([]string, 0, len(authLimitedPaths)+2)
 	for path := range authLimitedPaths {
 		out = append(out, path)
 	}
-	out = append(out, refreshLimitedPath, wsTokenLimitedPath, logoutLimitedPath)
+	out = append(out, refreshLimitedPath, wsTokenLimitedPath)
 	sort.Strings(out)
 	return out
 }
@@ -69,8 +69,9 @@ func TestGuard_RateLimitedPathsAreRegisteredRoutes(t *testing.T) {
 // (password brute force, a TOTP code, refresh replay, an OIDC flow pinning the server on outbound HTTP);
 // dropping one from the path set is a one-line edit with no other symptom. The list is restated, not
 // derived: a guard reading the map it checks passes whatever it says. NOT in the list (the general
-// limiter skips /api/v1/auth/, so absence means NO per-IP cap): logout (a bucket of its own,
-// logoutLimitedPath, never this shared one: see TestLogout_HasABudgetOfItsOwn); logout-all and DELETE sessions/:id (capped per USER on their own routes, held OUT of this set on
+// limiter skips /api/v1/auth/, so absence means NO per-IP cap): logout (deliberately unlimited per address, see
+// TestLogout_HasNoPerAddressLimit);
+// logout-all and DELETE sessions/:id (capped per USER on their own routes, held OUT of this set on
 // purpose, see below); setup-status and sso-status (one boolean from an indexed read); oidc/token-exchange
 // (a 5-second single-use GETDEL key); and the two worth revisiting, totp/setup/verify (its own 5-attempt
 // Redis budget) and console-token (Deferred, so its body decodes before the permission check).
