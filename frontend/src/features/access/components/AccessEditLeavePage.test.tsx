@@ -12,7 +12,7 @@ import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { deferred } from "@/test/fake-server";
-import { flushInAct, renderOnAppClient } from "@/test/save-outcome-kit";
+import { DENIED, flushInAct, renderOnAppClient } from "@/test/save-outcome-kit";
 import type { AccessCapabilities } from "../api/access-queries";
 import { AccessUsersSection } from "./AccessUsersSection";
 
@@ -80,7 +80,6 @@ const USERS_URL = `/api/v1/clusters/${CLUSTER}/access/users`;
 // The account Nexara authenticates as, by its documented default name.
 const OWN = "nexara@pve";
 const OWN_URL = `${USERS_URL}/nexara%40pve`;
-const DENIED = "Proxmox API permission denied";
 
 const capabilities: AccessCapabilities = {
   loading: false,

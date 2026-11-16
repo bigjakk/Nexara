@@ -11,11 +11,11 @@ import {
 } from "@/test/fake-server";
 import {
   SESSION_ENDS,
-  settle,
   signInAsAdmin,
   signOutForGood,
   toastsRaised,
 } from "@/test/late-toast-sessions";
+import { DENIED, flushInAct } from "@/test/save-outcome-kit";
 import { createWrapper } from "@/test/test-utils";
 import { useDeleteNodeFirewallRule } from "@/features/clusters/api/cluster-queries";
 import { onRuleWriteError } from "./firewall-rule-digest";
@@ -43,7 +43,6 @@ vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const CLUSTER = "cluster01";
 const DIGEST = "0123456789abcdef0123456789abcdef01234567";
-const DENIED = "Proxmox API permission denied";
 
 interface Case {
   hook: string;
@@ -181,7 +180,7 @@ describe.each(CASES)("$hook, answered after its session ended", (c) => {
 
     held.resolve(json({ error: "forbidden", message: DENIED }, 403));
     expect(await outcome).toBe("failed");
-    await settle();
+    await flushInAct();
 
     expect(toastsRaised()).toEqual([`error: ${DENIED}`]);
     // Not a stale list: nothing is reloaded for it.
@@ -196,7 +195,7 @@ describe.each(CASES)("$hook, answered after its session ended", (c) => {
       end();
       held.resolve(json({ error: "forbidden", message: DENIED }, 403));
       expect(await outcome).toBe("failed");
-      await settle();
+      await flushInAct();
 
       expect(toastsRaised()).toEqual([]);
     },
@@ -207,7 +206,7 @@ describe.each(CASES)("$hook, answered after its session ended", (c) => {
 
     held.resolve(json({ error: "conflict", message: "the list changed" }, 409));
     expect(await outcome).toBe("failed");
-    await settle();
+    await flushInAct();
 
     expect(toastsRaised()).toEqual([`error: ${STALE(c)}`]);
     expect(reloads).toHaveBeenCalledTimes(1);
@@ -223,7 +222,7 @@ describe.each(CASES)("$hook, answered after its session ended", (c) => {
         json({ error: "conflict", message: "the list changed" }, 409),
       );
       expect(await outcome).toBe("failed");
-      await settle();
+      await flushInAct();
 
       expect(toastsRaised()).toEqual([]);
       expect(reloads).not.toHaveBeenCalled();

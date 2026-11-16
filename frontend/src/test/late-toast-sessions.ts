@@ -1,5 +1,4 @@
 import { vi } from "vitest";
-import { act } from "@testing-library/react";
 import { toast } from "sonner";
 import { clearTokens, storeTokens } from "@/lib/api-client";
 import { ADMIN, VIEWER, authResponse } from "@/test/fake-server";
@@ -55,18 +54,6 @@ export const SESSION_ENDS: [name: string, end: () => void][] = [
     },
   ],
 ];
-
-/**
- * Lets whatever is already queued run, timers included, and React draw what it
- * set: for looking at what did NOT happen once a request has settled.
- */
-export async function settle(): Promise<void> {
-  await act(async () => {
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-  });
-}
 
 /**
  * Every toast raised so far on a sonner the test has mocked, of any kind the mock

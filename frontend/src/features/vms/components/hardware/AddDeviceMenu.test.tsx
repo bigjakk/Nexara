@@ -3,11 +3,8 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { renderWithProviders } from "@/test/test-utils";
-import {
-  settle,
-  signInAsAdmin,
-  signOutForGood,
-} from "@/test/late-toast-sessions";
+import { signInAsAdmin, signOutForGood } from "@/test/late-toast-sessions";
+import { flushInAct } from "@/test/save-outcome-kit";
 import { deferred } from "@/test/fake-server";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import {
@@ -598,7 +595,7 @@ describe.each([USB, PCI])("Add $kind device dialog", (k) => {
     post.reject(
       new ApiClientError(400, { error: "bad_request", message: "Refused" }),
     );
-    await settle();
+    await flushInAct();
 
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith(

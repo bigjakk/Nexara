@@ -12,11 +12,8 @@ import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { toast } from "sonner";
 import { deferred } from "@/test/fake-server";
-import {
-  settle,
-  signInAsAdmin,
-  signOutForGood,
-} from "@/test/late-toast-sessions";
+import { signInAsAdmin, signOutForGood } from "@/test/late-toast-sessions";
+import { flushInAct } from "@/test/save-outcome-kit";
 import type { NodeUSBDevice } from "@/features/vms/api/vm-queries";
 import type {
   ClusterUSBMapping,
@@ -460,7 +457,7 @@ it("toasts a New mapping create that fails after the dialog has gone, once", asy
   post.reject(
     new ApiClientError(400, { error: "bad_request", message: "Refused" }),
   );
-  await settle();
+  await flushInAct();
 
   expect(toast.error).toHaveBeenCalledTimes(1);
   expect(vi.mocked(toast.error).mock.calls[0]?.[0]).toMatch(

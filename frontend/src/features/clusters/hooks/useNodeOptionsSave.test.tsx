@@ -12,10 +12,10 @@ import { createAppQueryClient } from "@/test/app-query-client";
 import { deferred } from "@/test/fake-server";
 import {
   SESSION_ENDS,
-  settle,
   signInAsAdmin,
   signOutForGood,
 } from "@/test/late-toast-sessions";
+import { DENIED, denied, flushInAct } from "@/test/save-outcome-kit";
 import { createWrapper } from "@/test/test-utils";
 import { nodeOptionsKey, type NodeOptions } from "../api/node-options-queries";
 import { useNodeOptionsSave } from "./useNodeOptionsSave";
@@ -347,7 +347,7 @@ describe("useNodeOptionsSave", () => {
 
     release({ digest: "d2" });
     // Let the re-read land, and React draw whatever it set.
-    await settle();
+    await flushInAct();
 
     // It belonged to the first save: no note for it over the second's.
     expect(result.current.conflict).toBeNull();
@@ -361,12 +361,7 @@ describe("useNodeOptionsSave", () => {
 // server's words in it, and a re-read would be a request nobody who is here asked
 // for. Each case is paired with the same answer in a session that goes on.
 describe("a save that settles after its session ended", () => {
-  const DENIED = "Proxmox API permission denied";
   const FAILED = `Saving the options of ${NODE} failed: ${DENIED}`;
-
-  function forbidden(): ApiClientError {
-    return new ApiClientError(403, { error: "forbidden", message: DENIED });
-  }
 
   beforeEach(() => {
     mockedToastError.mockReset();
@@ -404,8 +399,8 @@ describe("a save that settles after its session ended", () => {
     const { held, unmount, onSaved } = await savingHeld();
 
     unmount();
-    held.reject(forbidden());
-    await settle();
+    held.reject(denied());
+    await flushInAct();
 
     expect(mockedToastError).toHaveBeenCalledTimes(1);
     expect(mockedToastError).toHaveBeenCalledWith(FAILED);
@@ -419,8 +414,8 @@ describe("a save that settles after its session ended", () => {
 
       unmount();
       end();
-      held.reject(forbidden());
-      await settle();
+      held.reject(denied());
+      await flushInAct();
 
       expect(mockedToastError).not.toHaveBeenCalled();
       expect(onSaved).not.toHaveBeenCalled();
@@ -430,7 +425,7 @@ describe("a save that settles after its session ended", () => {
   it("control: shows a failure in the dialog while the session goes on", async () => {
     const { held, result } = await savingHeld();
 
-    held.reject(forbidden());
+    held.reject(denied());
     await waitFor(() => {
       expect(result.current.error).toBe(DENIED);
     });
@@ -444,13 +439,13 @@ describe("a save that settles after its session ended", () => {
       const { held, result } = await savingHeld();
 
       end();
-      held.reject(forbidden());
+      held.reject(denied());
       // The save has settled, and so has what answers it: TanStack tells the
       // hook so after the continuations of the promise have run.
       await waitFor(() => {
         expect(result.current.pending).toBe(false);
       });
-      await settle();
+      await flushInAct();
 
       // `live` is true here, and the session still wins.
       expect(result.current.error).toBe("");
@@ -467,7 +462,7 @@ describe("a save that settles after its session ended", () => {
     [
       "a failure",
       (held) => {
-        held.reject(forbidden());
+        held.reject(denied());
       },
     ],
     [
@@ -485,7 +480,7 @@ describe("a save that settles after its session ended", () => {
 
       signOutForGood();
       answer(held);
-      await settle();
+      await flushInAct();
       signInAsAdmin();
       mockedPut.mockResolvedValueOnce({ status: "ok" });
       act(() => {
@@ -518,7 +513,7 @@ describe("a save that settles after its session ended", () => {
 
       end();
       held.reject(stale());
-      await settle();
+      await flushInAct();
 
       expect(reading.reread).not.toHaveBeenCalled();
       expect(result.current.conflict).toBeNull();
@@ -542,7 +537,7 @@ describe("a save that settles after its session ended", () => {
 
       end();
       held.resolve({ status: "ok" });
-      await settle();
+      await flushInAct();
 
       expect(onSaved).not.toHaveBeenCalled();
     },
@@ -584,7 +579,7 @@ describe("a save that settles after its session ended", () => {
         isSuccess: true,
         data: { digest: "d2" },
       } as QueryObserverResult<NodeOptions>);
-      await settle();
+      await flushInAct();
 
       expect(result.current.conflict).toBe("rereading");
       expect(result.current.latest).toBeNull();
@@ -618,7 +613,7 @@ describe("a save that settles after its session ended", () => {
 
       end();
       reading.reject(new Error("the re-read threw"));
-      await settle();
+      await flushInAct();
 
       expect(result.current.conflict).toBe("rereading");
     },

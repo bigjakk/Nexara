@@ -9,7 +9,7 @@ import { ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
 import { makeNode } from "@/test/cluster.fixtures";
 import { deferred } from "@/test/fake-server";
-import { flushInAct } from "@/test/save-outcome-kit";
+import { DENIED, flushInAct } from "@/test/save-outcome-kit";
 import { useAuthStore } from "@/stores/auth-store";
 import type { NodeACMEConfig } from "@/features/acme/api/acme-queries";
 import type { ClusterResponse } from "@/types/api";
@@ -78,7 +78,6 @@ function toastsRaised(): string[] {
 
 const CLUSTER_A = "cccccccc-0000-0000-0000-0000000000a1";
 const CLUSTER_B = "cccccccc-0000-0000-0000-0000000000b2";
-const DENIED = "Proxmox API permission denied";
 
 function cluster(id: string, name: string): ClusterResponse {
   return {

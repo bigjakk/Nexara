@@ -12,7 +12,7 @@ import { toast } from "sonner";
 
 import { ApiClientError } from "@/lib/api-client";
 import { deferred } from "@/test/fake-server";
-import { flushInAct, renderOnAppClient } from "@/test/save-outcome-kit";
+import { DENIED, flushInAct, renderOnAppClient } from "@/test/save-outcome-kit";
 import { ClusterACMETab } from "./ClusterACMETab";
 
 /**
@@ -124,7 +124,6 @@ const CLUSTER = "cccccccc-0000-0000-0000-000000000003";
 const NODE = "pve-01";
 const NODES_PATH = `/api/v1/clusters/${CLUSTER}/nodes`;
 const CONFIG_PATH = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/acme-config`;
-const DENIED = "Proxmox API permission denied";
 
 /**
  * What replaces the page once it has been left. It reports the two moments of

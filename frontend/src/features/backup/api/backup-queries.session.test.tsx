@@ -13,11 +13,11 @@ import {
 } from "@/test/fake-server";
 import {
   SESSION_ENDS,
-  settle,
   signInAsAdmin,
   signOutForGood,
   toastsRaised,
 } from "@/test/late-toast-sessions";
+import { flushInAct } from "@/test/save-outcome-kit";
 import { useRunBackupJob } from "./backup-queries";
 
 /**
@@ -106,7 +106,7 @@ describe("a backup job run that is answered after its session ended", () => {
 
     held.resolve(runStarted());
     expect(await outcome).toBe("succeeded");
-    await settle();
+    await flushInAct();
 
     expect(toastsRaised()).toEqual([`success: ${STARTED}`]);
   });
@@ -118,7 +118,7 @@ describe("a backup job run that is answered after its session ended", () => {
     held.resolve(runStarted());
     // The run did start and was answered: only the telling is dropped.
     expect(await outcome).toBe("succeeded");
-    await settle();
+    await flushInAct();
 
     expect(toastsRaised()).toEqual([]);
   });
@@ -133,7 +133,7 @@ describe("a backup job run that is answered after its session ended", () => {
       ),
     );
     expect(await outcome).toBe("failed");
-    await settle();
+    await flushInAct();
 
     expect(toastsRaised()).toEqual([`error: pve-01: could not start ${JOB}`]);
   });
@@ -151,7 +151,7 @@ describe("a backup job run that is answered after its session ended", () => {
         ),
       );
       expect(await outcome).toBe("failed");
-      await settle();
+      await flushInAct();
 
       expect(toastsRaised()).toEqual([]);
     },

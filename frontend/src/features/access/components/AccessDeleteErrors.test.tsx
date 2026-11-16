@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
-import { renderOnAppClient } from "@/test/save-outcome-kit";
+import { DENIED, renderOnAppClient } from "@/test/save-outcome-kit";
 import type { AccessCapabilities } from "../api/access-queries";
 import { AccessGroupsSection } from "./AccessGroupsSection";
 import { AccessRolesSection } from "./AccessRolesSection";
@@ -41,7 +41,6 @@ const CLUSTER = "cccccccc-0000-0000-0000-000000000006";
 const ACCESS = `/api/v1/clusters/${CLUSTER}/access`;
 const GROUP = "operators";
 const ROLE = "Operator";
-const DENIED = "Proxmox API permission denied";
 
 const capabilities: AccessCapabilities = {
   loading: false,

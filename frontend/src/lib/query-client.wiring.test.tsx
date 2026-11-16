@@ -8,11 +8,8 @@ import { describeError } from "@/lib/api-error";
 import { useAuthStore } from "@/stores/auth-store";
 import { createAppQueryClient } from "@/test/app-query-client";
 import { ADMIN } from "@/test/fake-server";
-import {
-  settle,
-  signInAsAdmin,
-  signOutForGood,
-} from "@/test/late-toast-sessions";
+import { signInAsAdmin, signOutForGood } from "@/test/late-toast-sessions";
+import { flushInAct } from "@/test/save-outcome-kit";
 import { renderWithProviders } from "@/test/test-utils";
 import { CreateUserDialog } from "@/features/admin/components/CreateUserDialog";
 import { ChannelsTable } from "@/features/alerts/components/ChannelsTable";
@@ -282,7 +279,7 @@ describe("a failed save", () => {
     await act(userEvent.setup());
 
     expect(await screen.findByText(new RegExp(REFUSED))).toBeInTheDocument();
-    await settle();
+    await flushInAct();
     expect(toast.error).not.toHaveBeenCalled();
   });
 
@@ -306,7 +303,7 @@ describe("a failed save", () => {
 
     const dialog = screen.getByRole("dialog");
     expect(await within(dialog).findByText(REFUSED)).toBeInTheDocument();
-    await settle();
+    await flushInAct();
     expect(toast.error).not.toHaveBeenCalled();
   });
 
@@ -325,7 +322,7 @@ describe("a failed save", () => {
     await vi.waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(REFUSED);
     });
-    await settle();
+    await flushInAct();
     expect(toast.error).toHaveBeenCalledTimes(1);
   });
 
@@ -358,7 +355,7 @@ describe("a failed save", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
 
     refuse(new ApiClientError(400, { error: "bad_request", message: REFUSED }));
-    await settle();
+    await flushInAct();
 
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith(
@@ -401,7 +398,7 @@ it("clears Create user's form for a create that lands after it closed", async ()
   await user.keyboard("{Escape}");
 
   answer({});
-  await settle();
+  await flushInAct();
   await user.click(screen.getByRole("button", { name: "Reopen" }));
 
   expect(screen.getByLabelText("Email")).toHaveValue("");
