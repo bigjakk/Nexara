@@ -17,6 +17,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/pkg/redisutil"
 )
 
 // The per-user lockout of the routes that check the caller's CURRENT password:
@@ -367,7 +368,8 @@ return 1
 // boundedByContext runs call and stops WAITING for it when ctx ends, answering the
 // context's error, whatever the client does.
 //
-// It exists because the bound cannot be left to the Redis client. The one production
+// The mechanism is redisutil.BoundedByContext, shared with the audit writer's
+// publish. It exists because the bound cannot be left to the Redis client. The one production
 // builds (pkg/redisutil) comes from redis.ParseURL with its defaults: a context's
 // deadline does not reach the socket (ContextTimeoutEnabled is off), so a read waits
 // for ReadTimeout — five seconds — and a failed one is tried again (MaxRetries is
@@ -397,27 +399,7 @@ return 1
 // A panic in the call is recovered into an error: a goroutine nothing is waiting on
 // must not take the process down.
 func boundedByContext[T any](ctx context.Context, call func(context.Context) (T, error)) (T, error) {
-	type outcome struct {
-		value T
-		err   error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				done <- outcome{err: fmt.Errorf("the Redis call panicked: %v", r)}
-			}
-		}()
-		value, err := call(ctx)
-		done <- outcome{value: value, err: err}
-	}()
-	select {
-	case o := <-done:
-		return o.value, o.err
-	case <-ctx.Done():
-		var zero T
-		return zero, fmt.Errorf("the Redis call did not answer in time: %w", ctx.Err())
-	}
+	return redisutil.BoundedByContext(ctx, call)
 }
 
 // redisPasswordLockout is a lockout kept in Redis, under policy's rule and keys.

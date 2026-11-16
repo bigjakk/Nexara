@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/audit/audittest"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -101,5 +105,56 @@ func TestWrite(t *testing.T) {
 				t.Errorf("syslog record carries the secret: %q", line)
 			}
 		})
+	}
+}
+
+// TestWriteDoesNotWaitOnAStalledRedis: against a Redis that accepts and never
+// answers, the syslog copy is handed over before the publish and Write returns
+// near publishTimeout, not after the client's 30 s read timeout.
+func TestWriteDoesNotWaitOnAStalledRedis(t *testing.T) {
+	t.Parallel()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	var conns []net.Conn
+	var mu sync.Mutex
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+
+	collector, next := audittest.Collector(t)
+	rdb := redis.NewClient(&redis.Options{Addr: ln.Addr().String(), ReadTimeout: 30 * time.Second, MaxRetries: -1})
+	t.Cleanup(func() { _ = rdb.Close() })
+	pub := events.NewPublisher(rdb, slog.New(slog.DiscardHandler))
+	pub.SetSyslogForwarder(collector.SyslogForwarder())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- Write(context.Background(), &fakeInserter{}, pub, db.InsertAuditLogParams{ResourceType: "vm", ResourceID: "100", Action: "vm_start"})
+	}()
+	if line := next(publishTimeout / 2); !strings.Contains(line, `action="vm_start"`) {
+		t.Errorf("collector received %q while the publish stalled, want the vm_start record", line)
+	}
+	select {
+	case <-done:
+	case <-time.After(10 * publishTimeout):
+		t.Fatalf("Write still waiting on Redis after %v; the publish bound is not applied", 10*publishTimeout)
 	}
 }

@@ -10,8 +10,10 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"math"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +23,7 @@ import (
 	"github.com/bigjakk/nexara/internal/pvefield"
 	"github.com/bigjakk/nexara/internal/redact"
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
+	"github.com/bigjakk/nexara/pkg/redisutil"
 )
 
 // Inserter is the query Write records the row with; *db.Queries and the
@@ -40,16 +43,22 @@ type forwarderSource interface {
 	SyslogForwarder() *proxsyslog.Forwarder
 }
 
-// publishTimeout bounds the wait for Redis when it is unreachable: the event is
-// a notice, and the action it records has already happened.
+// publishTimeout is how long a writer waits for the audit_entry publish. The
+// Redis client does not honour a context deadline on the socket, so the wait is
+// cut by redisutil.BoundedByContext: past it the event is dropped (counted in
+// publishTimeouts, logged first and every 100th), never retried, and the
+// abandoned call ends on the client's own timeout. The event is a notice; the
+// row and the syslog copy do not depend on it.
 const publishTimeout = time.Second
+
+var publishTimeouts atomic.Uint64
 
 // Write records one audit entry made by background code: it inserts the row,
 // publishes the audit_entry event and hands the entry to the syslog forwarder.
 // A nil Details is recorded as {}; a zero UserID as no user. pub may be nil.
 // Only the insert can fail, and its error is returned for the caller to handle
-// as it did before; the event and the forward never block on the network and
-// never fail the write.
+// as it did before. The forward never blocks; the publish waits at most
+// publishTimeout; neither fails the write.
 func Write(ctx context.Context, q Inserter, pub Publisher, p db.InsertAuditLogParams) error {
 	return write(ctx, q, pub, p, uuid.Nil)
 }
@@ -98,32 +107,51 @@ func write(ctx context.Context, q Inserter, pub Publisher, p db.InsertAuditLogPa
 
 	err := q.InsertAuditLog(ctx, p)
 
+	// The syslog copy is handed over before the publish, so it never waits
+	// behind Redis. vmid and resource_name are promoted to first-class fields
+	// so a SIEM decoder can key a rule on the guest without re-parsing the
+	// details JSON. A row with no user is sent as the nil UUID.
+	forward(pub, proxsyslog.Message{
+		Timestamp:    time.Now().UTC(),
+		UserID:       uuid.UUID(p.UserID.Bytes).String(),
+		ClusterID:    cidStr,
+		ResourceType: p.ResourceType,
+		ResourceID:   p.ResourceID,
+		Action:       p.Action,
+		Details:      string(p.Details),
+	}, m)
+
 	if pub != nil {
 		pctx, cancel := context.WithTimeout(ctx, publishTimeout)
-		pub.ClusterEvent(pctx, cidStr, events.KindAuditEntry, p.ResourceType, p.ResourceID, p.Action)
+		if _, perr := redisutil.BoundedByContext(pctx, func(c context.Context) (struct{}, error) {
+			pub.ClusterEvent(c, cidStr, events.KindAuditEntry, p.ResourceType, p.ResourceID, p.Action)
+			return struct{}{}, nil
+		}); perr != nil {
+			if n := publishTimeouts.Add(1); n == 1 || n%100 == 0 {
+				slog.Warn("audit: the audit_entry event was dropped, Redis did not answer in time",
+					"dropped_total", n, "bound", publishTimeout)
+			}
+		}
 		cancel()
 	}
-
-	// Forward runs off the caller's goroutine and drops rather than waits when
-	// its queue is full. vmid and resource_name are promoted to first-class
-	// fields so a SIEM decoder can key a rule on the guest without re-parsing
-	// the details JSON. A row with no user is sent as the nil UUID.
-	if src, ok := pub.(forwarderSource); ok {
-		if fwd := src.SyslogForwarder(); fwd != nil {
-			fwd.Forward(proxsyslog.Message{
-				Timestamp:    time.Now().UTC(),
-				UserID:       uuid.UUID(p.UserID.Bytes).String(),
-				ClusterID:    cidStr,
-				ResourceType: p.ResourceType,
-				ResourceID:   p.ResourceID,
-				Action:       p.Action,
-				VMID:         detailString(m, "vmid"),
-				ResourceName: detailString(m, "resource_name"),
-				Details:      string(p.Details),
-			})
-		}
-	}
 	return err
+}
+
+// forward hands msg, with the guest identity lifted out of the decoded
+// details, to pub's syslog forwarder when it has one. Forward runs off the
+// caller's goroutine and drops rather than waits when its queue is full.
+func forward(pub Publisher, msg proxsyslog.Message, m map[string]any) {
+	src, ok := pub.(forwarderSource)
+	if !ok {
+		return
+	}
+	fwd := src.SyslogForwarder()
+	if fwd == nil {
+		return
+	}
+	msg.VMID = detailString(m, "vmid")
+	msg.ResourceName = detailString(m, "resource_name")
+	fwd.Forward(msg)
 }
 
 // redactSecrets replaces, in decoded audit details, the secrets a request
