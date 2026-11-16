@@ -52,6 +52,8 @@ export function useDRSRules(clusterId: string) {
 export function useCreateDRSRule(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    // CreateRuleDialog shows the failure, and settles a late one.
+    ...errorsHandledLocally,
     mutationFn: (rule: CreateRuleRequest) =>
       apiClient.post<DRSRule>(
         apiPath`/api/v1/clusters/${clusterId}/drs/rules`,
@@ -98,6 +100,8 @@ export function useHARules(clusterId: string) {
 export function useCreateHARule(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    // CreateRuleDialog shows the failure, and settles a late one.
+    ...errorsHandledLocally,
     mutationFn: (rule: CreateHARuleRequest) =>
       apiClient.post<{ status: string; rule_name: string }>(
         apiPath`/api/v1/clusters/${clusterId}/drs/ha-rules`,

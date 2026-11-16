@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCreateDRSRule, useCreateHARule } from "../api/drs-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   useCluster,
   useClusterNodes,
@@ -58,6 +59,9 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
 
   const createManualRule = useCreateDRSRule(clusterId);
   const createHARule = useCreateHARule(clusterId);
+  // The hooks opt out of the app's toast: the open dialog shows a failure, and
+  // one that lands after it closed is toasted, once (useSaveOutcome).
+  const settle = useSaveOutcome(open);
 
   const filteredVMs = useMemo(() => {
     if (!vms) return [];
@@ -103,26 +107,37 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
   };
 
   const handleSubmit = () => {
+    const on = cluster?.name ? ` on ${cluster.name}` : "";
+    const outcome = {
+      onSuccess: resetForm,
+      // Shown by the dialog, from the mutation's state.
+      onError: () => undefined,
+      // Put away a draft whose rule now exists, unless the dialog is open
+      // again and showing it as its own.
+      onLateSuccess: (_: unknown, now: { open: boolean }) => {
+        if (!now.open) resetForm();
+      },
+    };
     if (target === "ha") {
-      createHARule.mutate(
-        {
+      settle(
+        createHARule.mutateAsync({
           rule_name: ruleName,
           rule_type: ruleType,
           vm_ids: selectedVmIds,
           node_names: selectedNodes,
           enabled,
-        },
-        { onSuccess: resetForm },
+        }),
+        { action: `Creating HA rule ${ruleName}${on}`, ...outcome },
       );
     } else {
-      createManualRule.mutate(
-        {
+      settle(
+        createManualRule.mutateAsync({
           rule_type: ruleType,
           vm_ids: selectedVmIds,
           node_names: selectedNodes,
           enabled,
-        },
-        { onSuccess: resetForm },
+        }),
+        { action: `Creating a DRS rule${on}`, ...outcome },
       );
     }
   };

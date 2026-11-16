@@ -342,10 +342,7 @@ function scan() {
  * purpose or until its owner fixes it: "<file>#<hook>" -> why. An entry the
  * scan no longer finds fails the test, so the list only shrinks.
  */
-const SHOWN_AND_TOASTED: Record<string, string> = {
-  "/src/features/drs/components/CreateRuleDialog.tsx#useCreateHARule":
-    "its create hooks (drs-queries useCreateHARule, useCreateDRSRule) have no onError; the dialog is another lane's in this run",
-};
+const SHOWN_AND_TOASTED: Record<string, string> = {};
 
 /** One scan for both tests: it parses every source file. */
 let once: ReturnType<typeof scan> | undefined;
