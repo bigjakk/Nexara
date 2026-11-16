@@ -377,4 +377,11 @@ func TestCloseDrainsQueuedRecords(t *testing.T) {
 				"\tClose must drain what Forward already accepted.", i+1, sends, err)
 		}
 	}
+
+	// An entry written while the process stops is counted and logged, not
+	// skipped as if forwarding were off.
+	f.Forward(Message{Action: "vm_start"})
+	if got := f.Dropped(); got != 1 {
+		t.Errorf("Dropped() = %d after a Forward past Close, want 1", got)
+	}
 }

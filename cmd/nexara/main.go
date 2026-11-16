@@ -256,6 +256,16 @@ func main() {
 	if executor := application.DRSExecutor; executor != nil && !executor.Drain(8*time.Second) {
 		logger.Warn("stopping before DRS recorded how a migration it was following ended")
 	}
+	// Last, after the writers above: send what the syslog forwarder has queued,
+	// within the 1 s left of docker stop's 10. An entry written after this is
+	// counted as dropped and logged; audit_log holds it either way.
+	if fwd := application.EventPub.SyslogForwarder(); fwd != nil {
+		fwdCtx, fwdCancel := context.WithTimeout(context.Background(), time.Second)
+		if !fwd.Shutdown(fwdCtx) {
+			logger.Warn("stopping before every queued audit record reached the syslog collector; audit_log has them")
+		}
+		fwdCancel()
+	}
 	logger.Info("Nexara stopped")
 }
 

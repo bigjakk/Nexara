@@ -51,8 +51,12 @@ type Forwarder struct {
 	// queue decouples Forward from the network. Everything past this point runs
 	// on the single sender goroutine, which is the only thing that touches conn
 	// for writing.
-	queue     chan queueItem
-	stop      chan struct{}
+	queue chan queueItem
+	stop  chan struct{}
+	// stopMu orders Forward's enqueue against Close's close(stop): Forward holds
+	// it shared, so once Close holds it the sender's drain sees every record
+	// that will ever be queued, and none is left behind in the channel.
+	stopMu    sync.RWMutex
 	wg        sync.WaitGroup
 	closeOnce sync.Once
 	dropped   atomic.Uint64
@@ -150,7 +154,7 @@ func (f *Forwarder) Configure(cfg Config) error {
 }
 
 // Flush blocks until every record already queued has been written, or until ctx
-// is done. It is a barrier, not a lock: records enqueued after the call may or
+// is done, and reports whether it got that far. It is a barrier, not a lock: records enqueued after the call may or
 // may not be included.
 //
 // Callers that need a record to go out over the *current* connection must Flush
@@ -158,22 +162,43 @@ func (f *Forwarder) Configure(cfg Config) error {
 // forwarding is being switched off has to reach the collector being switched
 // off, and that is the one moment it can still be told anything. Without the
 // barrier the send would race the reconfigure and usually lose.
-func (f *Forwarder) Flush(ctx context.Context) {
+func (f *Forwarder) Flush(ctx context.Context) bool {
 	done := make(chan struct{})
 	// Blocking send, unlike Forward: a caller asking for a barrier is willing
 	// to wait for a slot, bounded by ctx.
 	select {
 	case f.queue <- queueItem{done: done}:
 	case <-ctx.Done():
-		return
+		return false
 	case <-f.stop:
-		return
+		return false
 	}
 
 	select {
 	case <-done:
+		return true
 	case <-ctx.Done():
 	case <-f.stop:
+	}
+	return false
+}
+
+// Shutdown is Close bounded by ctx, for process exit: the sender keeps writing
+// what is queued until ctx ends, and every Forward from the call on is counted
+// as dropped and logged rather than queued. It reports whether everything
+// queued was written; on false the rest is lost with the process, and is in
+// audit_log.
+func (f *Forwarder) Shutdown(ctx context.Context) bool {
+	done := make(chan struct{})
+	go func() {
+		f.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -202,22 +227,31 @@ func (f *Forwarder) Forward(msg Message) {
 		return
 	}
 
+	f.stopMu.RLock()
+	defer f.stopMu.RUnlock()
 	select {
 	case <-f.stop:
-		return // shutting down; the sender is on its way out
+		// Stopping: the sender has drained what it will send. Counted and
+		// logged like a full queue, so a record written while the process
+		// stops is not lost without a trace; its row is in audit_log.
+		f.drop("syslog: forwarder stopped, audit record not forwarded")
+		return
 	default:
 	}
 
 	select {
 	case f.queue <- queueItem{msg: msg}:
 	default:
-		// Log the first drop and then sparsely: the condition persists for as
-		// long as the collector is down, and a line per dropped record would
-		// itself become the flood.
-		if n := f.dropped.Add(1); n == 1 || n%100 == 0 {
-			f.logger.Warn("syslog: forward queue full, dropping audit records",
-				"dropped_total", n, "queue_depth", cap(f.queue))
-		}
+		f.drop("syslog: forward queue full, dropping audit records")
+	}
+}
+
+// drop counts a record not forwarded and logs the first drop and then
+// sparsely: the condition persists for as long as the collector is down, and a
+// line per dropped record would itself become the flood.
+func (f *Forwarder) drop(why string) {
+	if n := f.dropped.Add(1); n == 1 || n%100 == 0 {
+		f.logger.Warn(why, "dropped_total", n, "queue_depth", cap(f.queue))
 	}
 }
 
@@ -290,12 +324,15 @@ func (f *Forwarder) Test(cfg Config) error {
 // discard records Forward had accepted. Safe to call more than once.
 func (f *Forwarder) Close() {
 	f.closeOnce.Do(func() {
+		f.stopMu.Lock()
 		close(f.stop)
+		f.stopMu.Unlock()
 		f.wg.Wait()
 
+		// enabled is left as it was, so a Forward after Close is counted as
+		// dropped rather than skipped as if forwarding were off.
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		f.enabled.Store(false)
 		if f.conn != nil {
 			_ = f.conn.Close()
 			f.conn = nil
