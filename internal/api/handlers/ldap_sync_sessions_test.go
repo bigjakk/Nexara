@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/audit/audittest"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -186,7 +187,8 @@ func TestLDAPSync_AHandDeactivatedUserIsNotReEnabled(t *testing.T) {
 
 // TestLDAPSync_TheScheduleRunsWhenDueOneSyncAtATime: the scheduled sync runs once its
 // interval has passed since the last sync, never with an interval of 0, is audited as
-// the system account, and neither it nor Sync Now runs while another sync holds the lease.
+// the system account (row and syslog record), and neither it nor Sync Now runs while
+// another sync holds the lease.
 func TestLDAPSync_TheScheduleRunsWhenDueOneSyncAtATime(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
@@ -195,6 +197,8 @@ func TestLDAPSync_TheScheduleRunsWhenDueOneSyncAtATime(t *testing.T) {
 		LastSyncAt: pgtype.Timestamptz{Time: now.Add(-30 * time.Minute), Valid: true}}
 	a, h, syncNow := ldapSyncApp(t, store, &fakeDirectory{found: &auth.LDAPUser{}})
 	h.now = func() time.Time { return now }
+	pub, next := audittest.Collector(t)
+	h.eventPub = pub
 	runs := func() int { return len(store.named("ListLDAPUsers")) }
 
 	h.RunScheduledSync(context.Background())
@@ -212,6 +216,9 @@ func TestLDAPSync_TheScheduleRunsWhenDueOneSyncAtATime(t *testing.T) {
 	rows, _ := auditOf(a, "ldap_sync")
 	if runs() != 1 || len(rows) != 1 || rows[0].actor != auth.SystemUserID {
 		t.Errorf("once due: %d syncs, audit rows %v; want one, by the system account", runs(), rows)
+	}
+	if line := next(5 * time.Second); !strings.Contains(line, `action="ldap_sync"`) || !strings.Contains(line, `user="`+auth.SystemUserID.String()+`"`) {
+		t.Errorf("collector received %q, want the scheduled ldap_sync entry", line)
 	}
 	store.ldapConfig.SyncIntervalMinutes = 0
 	now = now.Add(24 * time.Hour)

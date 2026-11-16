@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -950,7 +951,7 @@ func (h *LDAPHandler) RunScheduledSync(ctx context.Context) {
 	}
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := h.queries.InsertAuditLog(actx, db.InsertAuditLogParams{
+	if err := audit.Write(actx, h.queries, h.eventPub, db.InsertAuditLogParams{
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "ldap",
 		ResourceID:   cfg.ID.String(),
@@ -958,9 +959,6 @@ func (h *LDAPHandler) RunScheduledSync(ctx context.Context) {
 		Details:      res.auditDetails(err),
 	}); err != nil {
 		slog.Warn("LDAP sync: failed to insert the audit row of a scheduled sync", "config_id", cfg.ID, "error", err)
-	}
-	if h.eventPub != nil {
-		h.eventPub.ClusterEvent(actx, "", events.KindAuditEntry, "ldap", cfg.ID.String(), "ldap_sync")
 	}
 }
 
