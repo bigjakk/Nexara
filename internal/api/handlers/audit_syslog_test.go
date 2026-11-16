@@ -750,7 +750,7 @@ func TestGuard_SyslogAuditFieldsClassified(t *testing.T) {
 //
 // It recurses into nested structs and refuses embedded ones, because the guard
 // above compares names and both shapes would defeat that. A nested
-// `TLS TLSOptions `json:"tls"“ presents as the single name "tls" — adding a
+// field TLS TLSOptions `json:"tls"` presents as the single name "tls" — adding a
 // field of the same name to syslogAuditConfig would satisfy the guard while
 // inlining every field underneath, a client key included. An embedded struct is
 // worse: its name is the type's, which never appears in the JSON at all, so two

@@ -367,10 +367,9 @@ func (s *Server) registerInfra(d *serverDeps) {
 
 	// Syslog forwarding is attached here rather than in app.New because
 	// loading the destination needs the settings tables. It mutates the
-	// process-wide publisher, so scheduler- and collector-written audit rows
-	// are forwarded too — they previously held forwarder-less publishers of
-	// their own and never reached a configured SIEM. Best-effort: a config
-	// load failure doesn't block the server.
+	// process-wide publisher, so the rows background code writes through
+	// audit.Write are forwarded too. Best-effort: a config load failure
+	// doesn't block the server.
 	if s.eventPub != nil {
 		fwd := proxsyslog.NewForwarder(slog.Default().With("component", "syslog"))
 		s.eventPub.SetSyslogForwarder(fwd)
