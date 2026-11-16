@@ -264,8 +264,8 @@ func TestStreamedUploadBodyIsNotCutByTheBodyDeadline(t *testing.T) {
 // for the wrapper and the middleware: closeConnectionsLeftMidBody asks it before Fiber has a Ctx
 // (isStreamedUploadAsRouted), isStreamedUploadRequest from inside the chain, and on every request here
 // the two answer alike, of the path the router matches — normalized since Fiber v3.6, so "uplo%61d" and a
-// ".." segment are the upload to both. Each request is parsed from its head as the server parses it, two
-// Content-Type lines included. The content-type rows give the answers the predicate must: a body
+// ".." segment are the upload to both. Each request is parsed from its head as the server parses it: a
+// repeated identical Content-Type line is one, two different ones are refused by fasthttp. The content-type rows give the answers the predicate must: a body
 // UploadFile streams (handlers.ParseMultipartContentType), and that bodyValues does not read first, as it
 // does a +json type.
 func TestStreamedUploadPredicateSeesThePathTheRouterSees(t *testing.T) {
@@ -334,8 +334,7 @@ func TestStreamedUploadPredicateSeesThePathTheRouterSees(t *testing.T) {
 		{[]string{"Content-Type: multipart/"}, false},
 		{[]string{"Content-Type: multipart/form-data; boundary"}, false},
 		{[]string{"Content-Type: application/json; boundary=multipart/form-data"}, false},
-		{[]string{"Content-Type: application/json", multipart}, true},
-		{[]string{multipart, "Content-Type: application/json"}, false},
+		{[]string{multipart, multipart}, true},
 		// Multipart to UploadFile and JSON to bodyValues, which reads it before
 		// any grant is checked: never exempt.
 		{[]string{"Content-Type: multipart/form-data+json; boundary=x"}, false},
@@ -346,6 +345,15 @@ func TestStreamedUploadPredicateSeesThePathTheRouterSees(t *testing.T) {
 	} {
 		if got := ask(t, requestHead(fiber.MethodPost, uploadTarget, tt.lines...)+"\r\n"); got != tt.exempt {
 			t.Errorf("POST %s with %q: exempt %v, want %v", uploadTarget, tt.lines, got, tt.exempt)
+		}
+	}
+	// Since fasthttp 1.79 two different Content-Type lines end the request at
+	// the parser, before either predicate or any handler sees it.
+	for _, lines := range [][]string{{"Content-Type: application/json", multipart}, {multipart, "Content-Type: application/json"}} {
+		var h fasthttp.RequestHeader
+		raw := requestHead(fiber.MethodPost, uploadTarget, lines...) + "\r\n"
+		if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err == nil {
+			t.Errorf("POST %s with %q parsed, want the parser to refuse conflicting Content-Type lines", uploadTarget, lines)
 		}
 	}
 }

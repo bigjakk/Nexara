@@ -36,13 +36,15 @@ func (s *Server) RegisterFrontend(distFS fs.FS) {
 	// the fallback yields to Fiber's native 404 rather than serving an empty body.
 	indexHTML, indexErr := fs.ReadFile(distFS, "index.html")
 
-	// The embedded FS has zero modtimes, which the static middleware still sends
-	// as `Last-Modified: Mon, 01 Jan 0001` and answers ANY If-Modified-Since with
-	// 304, since no date is earlier. Every unhashed file would then stay
-	// "unchanged" across upgrades: a cached shell kept loading the previous
-	// release's bundle against the new API. So nothing but /assets/* is ever
-	// answered conditionally (applyFrontendCacheHeaders drops the date from the
-	// answer too).
+	// Nothing but /assets/* is ever answered conditionally
+	// (applyFrontendCacheHeaders drops the date from the answer too): a cached
+	// shell answered 304 kept loading the previous release's bundle against the
+	// new API. Up to v1.78 fasthttp sent the embedded FS's zero modtimes as
+	// `Last-Modified: Mon, 01 Jan 0001` and answered ANY If-Modified-Since with
+	// 304. Since v1.79 (fs.go, fsModTimeKnown) it sends no date for a zero
+	// modtime and ignores If-Modified-Since, so with the embedded FS even an
+	// asset is answered 200; this holds the shell to that if a bundle ever
+	// carries modtimes.
 	s.app.Use("/", func(c fiber.Ctx) error {
 		if !isHashedAsset(c) {
 			c.Request().Header.Del(fiber.HeaderIfModifiedSince)

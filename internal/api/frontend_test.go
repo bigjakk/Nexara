@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 // spaTestFS is a minimal in-memory frontend bundle: an index.html shell plus
@@ -161,41 +162,58 @@ func TestRegisterFrontend_CacheHeaders(t *testing.T) {
 // zero modtimes went out as `Last-Modified: Mon, 01 Jan 0001`, and the static
 // middleware answered any If-Modified-Since with 304, since no date is earlier.
 // A browser that cached the shell kept it forever, so after an upgrade it ran the
-// old bundle against the new API. Hashed assets keep their 304: they never change.
+// old bundle against the new API. Since fasthttp 1.79 a file with no modtime has
+// no validator at all; the "modtime" bundle holds the strip to the job it keeps.
 func TestRegisterFrontend_StaleRevalidationGetsTheNewShell(t *testing.T) {
-	s := newTestServer(t)
-	s.RegisterFrontend(spaTestFS())
-	t.Parallel() // after New, which writes a package-level cookie mode
-
-	cases := []struct {
-		path string
-		want int
-	}{
-		{"/", http.StatusOK},
-		{"/manifest.webmanifest", http.StatusOK}, // unhashed, like theme-init.js
-		{"/assets/app-123.js", http.StatusNotModified},
-		// The shell under asset-looking spellings: the raw path vs the one the
-		// file server resolves, a double encoding it decodes again, and a "\"
-		// it turns into "/".
-		{"/assets/../index.html", http.StatusOK},
-		{"/assets/..%252findex.html", http.StatusOK},
-		{"/assets/x%5c..%5c..%5cindex.html", http.StatusOK},
+	t.Parallel()
+	modTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withModTime := spaTestFS()
+	for _, f := range withModTime {
+		f.ModTime = modTime
 	}
-	for _, tc := range cases {
-		t.Run(tc.path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
-			req.Header.Set("If-Modified-Since", "Mon, 01 Jan 0001 00:00:00 GMT")
-			resp, err := s.App().Test(req)
-			if err != nil {
-				t.Fatalf("request failed: %v", err)
-			}
-			defer resp.Body.Close()
+	for _, bundle := range []struct {
+		name  string
+		fs    fstest.MapFS
+		asset int // what a revalidation of a hashed asset answers
+	}{
+		{"embedded", spaTestFS(), http.StatusOK},
+		{"modtime", withModTime, http.StatusNotModified},
+	} {
+		t.Run(bundle.name, func(t *testing.T) {
+			s := newTestServer(t)
+			s.RegisterFrontend(bundle.fs)
+			t.Parallel() // after New, which writes a package-level cookie mode
 
-			if resp.StatusCode != tc.want {
-				t.Errorf("status = %d, want %d", resp.StatusCode, tc.want)
+			cases := []struct {
+				path string
+				want int
+			}{
+				{"/", http.StatusOK},
+				{"/manifest.webmanifest", http.StatusOK}, // unhashed, like theme-init.js
+				{"/assets/app-123.js", bundle.asset},
+				// The shell under asset-looking spellings: the raw path vs the one the
+				// file server resolves, a double encoding it decodes again, and a "\"
+				// it turns into "/".
+				{"/assets/../index.html", http.StatusOK},
+				{"/assets/..%252findex.html", http.StatusOK},
+				{"/assets/x%5c..%5c..%5cindex.html", http.StatusOK},
 			}
-			if tc.want == http.StatusOK && resp.Header.Get("Last-Modified") != "" {
-				t.Errorf("Last-Modified = %q, want none: it is the date browsers revalidate with", resp.Header.Get("Last-Modified"))
+			for _, tc := range cases {
+				req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+				req.Header.Set("If-Modified-Since", modTime.AddDate(1, 0, 0).Format(http.TimeFormat))
+				resp, err := s.App().Test(req)
+				if err != nil {
+					t.Fatalf("%s: request failed: %v", tc.path, err)
+				}
+				resp.Body.Close()
+
+				if resp.StatusCode != tc.want {
+					t.Errorf("%s: status = %d, want %d", tc.path, resp.StatusCode, tc.want)
+				}
+				if tc.want == http.StatusOK && resp.Header.Get("Last-Modified") != "" {
+					t.Errorf("%s: Last-Modified = %q, want none: it is the date browsers revalidate with", tc.path,
+						resp.Header.Get("Last-Modified"))
+				}
 			}
 		})
 	}

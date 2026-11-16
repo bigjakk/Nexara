@@ -170,8 +170,8 @@ var headerMethodsKept = []string{
 	"DelCookie", "DelCookieBytes", "DisableNormalizing", "EnableNormalizing", "EnableSpecialHeader",
 	"HasAcceptEncoding", "HasAcceptEncodingBytes", "Header", "Host", "IsConnect", "IsDelete", "IsGet", "IsHTTP11",
 	"IsHead", "IsOptions", "IsPatch", "IsPost", "IsPut", "IsQuery", "IsTrace", "Len", "Method", "MultipartFormBoundary",
-	"Peek", "PeekAll", "PeekBytes", "PeekCanonical", "PeekKeys", "PeekTrailerKeys", "Protocol", "RawHeaders",
-	"Referer", "RequestURI",
+	"Peek", "PeekAll", "PeekAllTrailer", "PeekBytes", "PeekCanonical", "PeekKeys", "PeekTrailer", "PeekTrailerKeys",
+	"Protocol", "RawHeaders", "Referer", "RequestURI",
 	"ResetConnectionClose", "SetByteRange", "SetConnectionClose", "SetContentEncoding", "SetContentEncodingBytes",
 	"SetCookie", "SetCookieBytesK", "SetCookieBytesKV", "SetHost", "SetHostBytes", "SetNoDefaultContentType",
 	"SetProtocol", "SetProtocolBytes", "SetReferer", "SetRefererBytes", "SetTrailer", "SetTrailerBytes",
@@ -185,13 +185,14 @@ var headerMethodsKept = []string{
 // of them, so unlike the header's methods (calledOn) they cannot be narrowed. A URI a handler
 // builds and rewrites for itself, for a redirect say, needs a bodyGuardAllowed entry; none does.
 var uriMethodsRefused = map[string]string{
-	"CopyTo":       "writes this URI's path over another's",
-	"Parse":        "parses a whole URI, path included, over this one",
-	"Reset":        "clears the URI, path included",
-	"SetPath":      "rewrites the path the request is routed by",
-	"SetPathBytes": "rewrites the path the request is routed by",
-	"Update":       "rewrites the path, relative to the one it had",
-	"UpdateBytes":  "rewrites the path, relative to the one it had",
+	"CopyTo":         "writes this URI's path over another's",
+	"Parse":          "parses a whole URI, path included, over this one",
+	"Reset":          "clears the URI, path included",
+	"SetPath":        "rewrites the path the request is routed by",
+	"SetPathBytes":   "rewrites the path the request is routed by",
+	"Update":         "rewrites the path, relative to the one it had",
+	"UpdateBytes":    "rewrites the path, relative to the one it had",
+	"UpdateBytesErr": "rewrites the path, relative to the one it had",
 }
 
 // uriMethodsKept are the rest of *fasthttp.URI's methods: none of them writes
@@ -1104,7 +1105,7 @@ func TestGuard_NothingDetachesAnUnreadRequestBody_ClassifiesEveryMethod(t *testi
 			t.Errorf("(*fasthttp.RequestHeader).%s is not refused; it rewrites the framing, the path or the method", name)
 		}
 	}
-	for _, name := range []string{"SetPath", "SetPathBytes", "Update", "UpdateBytes"} {
+	for _, name := range []string{"SetPath", "SetPathBytes", "Update", "UpdateBytes", "UpdateBytesErr"} {
 		if _, ok := uriMethodsRefused[name]; !ok {
 			t.Errorf("(*fasthttp.URI).%s is not refused; it rewrites the path", name)
 		}
