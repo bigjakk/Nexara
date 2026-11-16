@@ -490,12 +490,13 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 		},
 		{
 			name: "and an update", method: fiber.MethodPut, path: clusterScope + "/nodes/:node_name/firewall/rules/:pos",
-			target: "/nodes/pve-01/firewall/rules/3", body: `{"action":"DROP"}`,
+			target: "/nodes/pve-01/firewall/rules/3", body: `{"action":"DROP","comment":"web"}`,
 			bind: func(q *db.Queries) Handler {
 				return handlers.NewNodeHandler(q, haCreateEncKey, nil).UpdateNodeFirewallRule
 			},
 			wantType: "firewall_rule", wantID: "node/pve-01", wantAction: "firewall_rule_updated",
-			wantDetails: map[string]any{"position": json.Number("3"), "action": "DROP"},
+			wantDetails: map[string]any{"position": json.Number("3"), "action": "DROP", "comment_set": true},
+			wantAbsent:  []string{"comment"},
 		},
 		{
 			name: "and a delete", method: fiber.MethodDelete, path: clusterScope + "/nodes/:node_name/firewall/rules/:pos",

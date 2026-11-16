@@ -1617,6 +1617,9 @@ request set the comment (`""` clears it) — never the comment's text.
 | DELETE | `/clusters/:id/firewall/groups/:group/rules/:pos` | Delete group rule |
 | GET | `/clusters/:id/firewall/log` | Get firewall log |
 
+A firewall rule create's or update's audit row records the rule it sent, with
+`comment_set` (whether the rule has a comment) in place of the comment's text.
+
 Rules are addressed by position, so every rule listing returns a `digest` on each rule — one value for the whole list. Send it back as `digest` — in a rule `PUT`'s body, or in a rule `DELETE`'s query string — and the write is refused with `409 conflict` if the list has changed since it was read, instead of changing whichever rule now sits at that position. Omitted or empty, the write is unconditional.
 
 ### Firewall Templates

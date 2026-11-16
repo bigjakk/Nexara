@@ -120,19 +120,20 @@ func firewallRuleFromParams(p *apischema.Params) proxmox.FirewallRuleParams {
 // beside the rule, where it reads as of that moment.
 func firewallRuleAudit(rule proxmox.FirewallRuleParams, pos *int) []byte {
 	fields := map[string]any{
-		"type":    rule.Type,
-		"action":  rule.Action,
-		"source":  rule.Source,
-		"dest":    rule.Dest,
-		"sport":   rule.Sport,
-		"dport":   rule.Dport,
-		"proto":   rule.Proto,
-		"enable":  rule.Enable,
-		"comment": rule.Comment,
-		"macro":   rule.Macro,
-		"log":     rule.Log,
-		"iface":   rule.Iface,
+		"type":   rule.Type,
+		"action": rule.Action,
+		"source": rule.Source,
+		"dest":   rule.Dest,
+		"sport":  rule.Sport,
+		"dport":  rule.Dport,
+		"proto":  rule.Proto,
+		"enable": rule.Enable,
+		"macro":  rule.Macro,
+		"log":    rule.Log,
+		"iface":  rule.Iface,
 	}
+	// Whether the rule has a comment, never its text: a Viewer reads this row.
+	fields["comment_set"] = rule.Comment != ""
 	if pos != nil {
 		fields["position"] = *pos
 	}
