@@ -317,7 +317,7 @@ func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UU
 }
 
 const listVMStatusesByCluster = `-- name: ListVMStatusesByCluster :many
-SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags, lock_state, run_state
+SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags, lock_state, run_state, type
 FROM vms WHERE cluster_id = $1
 `
 
@@ -333,6 +333,7 @@ type ListVMStatusesByClusterRow struct {
 	Tags      string    `json:"tags"`
 	LockState string    `json:"lock_state"`
 	RunState  string    `json:"run_state"`
+	Type      string    `json:"type"`
 }
 
 // ListVMStatusesByCluster feeds the collector's pre/post-sync inventory diff.
@@ -360,6 +361,7 @@ func (q *Queries) ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UU
 			&i.Tags,
 			&i.LockState,
 			&i.RunState,
+			&i.Type,
 		); err != nil {
 			return nil, err
 		}

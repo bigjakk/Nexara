@@ -69,6 +69,24 @@ func TestSyncClusterResources(t *testing.T) {
 		}
 	})
 
+	// A VMID recreated as the other kind, everything else the same, is written
+	// on the tick, not left to the slow pass.
+	t.Run("a kind-only change is written", func(t *testing.T) {
+		recreated := guestRunning
+		recreated.Type = "lxc"
+		srv := newResourceServer(t, []proxmox.ClusterResource{nodeOnline, recreated})
+		defer srv.Close()
+		mq := newMockQueries()
+		cluster := makeCluster(t, srv.URL)
+		seedFastSync(mq, cluster, "online", "running", "web-server")
+		if err := newTestSyncer(mq).syncClusterResources(context.Background(), cluster); err != nil {
+			t.Fatalf("syncClusterResources: %v", err)
+		}
+		if got := mq.vms[fmt.Sprintf("%s:%d", cluster.ID, 100)].Type; len(mq.upsertVMCalls) != 1 || got != "lxc" {
+			t.Errorf("%d writes left the row's kind %q, want one write and lxc", len(mq.upsertVMCalls), got)
+		}
+	})
+
 	// The slow pass reads the node's live guest list; /cluster/resources is
 	// pvestatd's, up to 10s behind. A tick must not write that stale status
 	// back over the newer one — it would also record a status change that

@@ -333,6 +333,7 @@ func (m *mockQueries) ListVMStatusesByCluster(_ context.Context, clusterID uuid.
 			Tags:      vm.Tags,
 			LockState: vm.LockState,
 			RunState:  vm.RunState,
+			Type:      vm.Type,
 		})
 	}
 	return rows, nil

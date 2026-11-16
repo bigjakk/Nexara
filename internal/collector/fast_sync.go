@@ -230,6 +230,7 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 			old.NodeID == nodeID &&
 			old.Name == name &&
 			old.Template == isTemplate &&
+			old.Type == r.Type && // a VMID recreated as the other kind
 			old.Pool == r.Pool &&
 			old.HaState == r.HAState &&
 			old.Tags == r.Tags &&

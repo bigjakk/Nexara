@@ -86,7 +86,7 @@ UPDATE vms SET config_ostype = $2, updated_at = now() WHERE id = $1;
 -- publish an inventory_change event, so external edits (Proxmox UI, qm/pct)
 -- become visible to the frontend within one tick.
 -- name: ListVMStatusesByCluster :many
-SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags, lock_state, run_state
+SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags, lock_state, run_state, type
 FROM vms WHERE cluster_id = $1;
 
 -- name: ListAllVMs :many
