@@ -8,6 +8,7 @@ import authEN from "@/locales/en/auth.json";
 import dashboardEN from "@/locales/en/dashboard.json";
 import settingsEN from "@/locales/en/settings.json";
 import adminEN from "@/locales/en/admin.json";
+import accessEN from "@/locales/en/access.json";
 import clustersEN from "@/locales/en/clusters.json";
 import inventoryEN from "@/locales/en/inventory.json";
 import vmsEN from "@/locales/en/vms.json";
@@ -48,6 +49,7 @@ export const resources = {
     dashboard: dashboardEN,
     settings: settingsEN,
     admin: adminEN,
+    access: accessEN,
     clusters: clustersEN,
     inventory: inventoryEN,
     vms: vmsEN,

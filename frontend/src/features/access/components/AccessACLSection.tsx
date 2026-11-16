@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
@@ -71,6 +72,7 @@ function entryKey(entry: AccessACLEntry): string {
 }
 
 export function AccessACLSection({ clusterId, capabilities }: Props) {
+  const { t } = useTranslation("access");
   const { canManage } = useAuth();
   const aclQuery = useAccessACL(clusterId);
   const rolesQuery = useAccessRoles(clusterId);
@@ -158,7 +160,11 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
   const sendGrant = (input: UpdateACLInput, to: string, force: boolean) => {
     setError("");
     const action = inCluster(
-      `Granting ${input.roles} on ${input.path} to ${to}`,
+      t("acl.grantingAction", {
+        role: input.roles,
+        path: input.path,
+        subject: to,
+      }),
     );
     const sent = grantOnce({ ...input, force });
     if (sent === null) return;
@@ -191,9 +197,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
           return;
         }
         setError(
-          err instanceof ApiClientError
-            ? err.message
-            : "Failed to grant access",
+          err instanceof ApiClientError ? err.message : t("acl.grantFailed"),
         );
       },
     });
@@ -202,7 +206,11 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
   const handleRevoke = (entry: AccessACLEntry, force: boolean) => {
     setRevokeError("");
     const action = inCluster(
-      `Revoking ${entry.roleid} on ${entry.path} from ${entry.ugid}`,
+      t("acl.revokingAction", {
+        role: entry.roleid,
+        path: entry.path,
+        subject: entry.ugid,
+      }),
     );
     const kind =
       entry.type === "group"
@@ -240,9 +248,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
           return;
         }
         setRevokeError(
-          err instanceof ApiClientError
-            ? err.message
-            : "Failed to revoke access",
+          err instanceof ApiClientError ? err.message : t("acl.revokeFailed"),
         );
         setRevokeTarget(null);
       },
@@ -254,11 +260,9 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
   return (
     <Panel
       flush
-      title="Permissions"
+      title={t("acl.title")}
       aside={
-        entryCount === 0
-          ? undefined
-          : `${String(entryCount)} ${entryCount === 1 ? "entry" : "entries"}: a role held by a user, group or token on a path`
+        entryCount === 0 ? undefined : t("acl.aside", { count: entryCount })
       }
       actions={
         manageable ? (
@@ -275,19 +279,19 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
             <DialogTrigger asChild>
               <Button size="sm">
                 <Plus className="h-4 w-4" />
-                Grant Access
+                {t("acl.grantAccess")}
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-md">
               <DialogHeader>
-                <DialogTitle>Grant Access</DialogTitle>
+                <DialogTitle>{t("acl.grantAccess")}</DialogTitle>
                 <DialogDescription>
-                  Assigns a role to a user, group or token on an ACL path.
+                  {t("acl.grantDescription")}
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleGrant} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="acl-path">Path</Label>
+                  <Label htmlFor="acl-path">{t("acl.path")}</Label>
                   <Input
                     id="acl-path"
                     value={path}
@@ -298,18 +302,19 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                     required
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
-                    <code className="font-mono">/</code> covers the whole
-                    cluster. Others: <code className="font-mono">/vms/100</code>
-                    , <code className="font-mono">/storage/local</code>,{" "}
-                    <code className="font-mono">/nodes/pve1</code>.
+                    <Trans
+                      t={t}
+                      i18nKey="acl.pathHint"
+                      components={{ code: <code className="font-mono" /> }}
+                    />
                   </p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="acl-role">Role</Label>
+                  <Label htmlFor="acl-role">{t("acl.role")}</Label>
                   <Select value={role} onValueChange={setRole}>
                     <SelectTrigger id="acl-role">
-                      <SelectValue placeholder="Select a role" />
+                      <SelectValue placeholder={t("acl.selectRole")} />
                     </SelectTrigger>
                     <SelectContent>
                       {(rolesQuery.data ?? []).map((r) => (
@@ -322,7 +327,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="acl-kind">Subject type</Label>
+                  <Label htmlFor="acl-kind">{t("acl.subjectType")}</Label>
                   <Select
                     value={subjectKind}
                     onValueChange={(v) => {
@@ -334,9 +339,13 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="user">User</SelectItem>
-                      <SelectItem value="group">Group</SelectItem>
-                      <SelectItem value="token">API token</SelectItem>
+                      <SelectItem value="user">{t("acl.kindUser")}</SelectItem>
+                      <SelectItem value="group">
+                        {t("acl.kindGroup")}
+                      </SelectItem>
+                      <SelectItem value="token">
+                        {t("acl.kindToken")}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -344,10 +353,10 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                 <div className="space-y-2">
                   <Label htmlFor="acl-subject">
                     {subjectKind === "user"
-                      ? "User"
+                      ? t("acl.user")
                       : subjectKind === "group"
-                        ? "Group"
-                        : "Token"}
+                        ? t("acl.group")
+                        : t("acl.token")}
                   </Label>
                   {subjectKind === "token" ? (
                     <>
@@ -361,14 +370,21 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                         required
                       />
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Full token id, including the{" "}
-                        <code className="font-mono">!</code>.
+                        <Trans
+                          t={t}
+                          i18nKey="acl.tokenHint"
+                          components={{ code: <code className="font-mono" /> }}
+                        />
                       </p>
                     </>
                   ) : (
                     <Select value={subject} onValueChange={setSubject}>
                       <SelectTrigger id="acl-subject">
-                        <SelectValue placeholder={`Select a ${subjectKind}`} />
+                        <SelectValue
+                          placeholder={t("acl.selectSubject", {
+                            context: subjectKind,
+                          })}
+                        />
                       </SelectTrigger>
                       <SelectContent>
                         {subjectKind === "user"
@@ -395,17 +411,17 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                       setPropagate(e.target.checked);
                     }}
                   />
-                  Propagate to child paths
+                  {t("acl.propagateToChildren")}
                 </label>
 
                 {error && <p className="text-sm text-destructive">{error}</p>}
 
                 {grantConflict && (
                   <SelfCredentialConfirm
-                    title="Granting this can cut off Nexara's access"
+                    title={t("acl.grantConflictTitle")}
                     message={grantConflict.message}
                     confirmValue={grantConflict.subject}
-                    actionLabel="Grant Anyway"
+                    actionLabel={t("acl.grantAnyway")}
                     pending={updateACL.isPending}
                     onCancel={() => {
                       setGrantConflict(null);
@@ -430,7 +446,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                       updateACL.isPending
                     }
                   >
-                    {updateACL.isPending ? "Granting..." : "Grant"}
+                    {updateACL.isPending ? t("acl.granting") : t("acl.grant")}
                   </Button>
                 </DialogFooter>
               </form>
@@ -442,8 +458,11 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
       <>
         {!capabilities.loading && !capabilities.canModifyACL && (
           <p className="max-w-[75ch] px-[18px] pb-3 text-[12.5px] text-muted-foreground">
-            Read-only: Nexara&apos;s token lacks{" "}
-            <code className="font-mono">Permissions.Modify</code>.
+            <Trans
+              t={t}
+              i18nKey="acl.readOnly"
+              components={{ code: <code className="font-mono" /> }}
+            />
           </p>
         )}
         {revokeError && (
@@ -459,7 +478,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                 setRevokeError("");
               }}
             >
-              Dismiss
+              {t("acl.dismiss")}
             </Button>
           </div>
         )}
@@ -470,20 +489,20 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
           </div>
         ) : !aclQuery.data || aclQuery.data.length === 0 ? (
           <p className="px-[18px] pb-1 text-sm text-muted-foreground">
-            No access control entries.
+            {t("acl.none")}
           </p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Path</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Subject</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Propagate</TableHead>
+                <TableHead>{t("acl.path")}</TableHead>
+                <TableHead>{t("common:type")}</TableHead>
+                <TableHead>{t("acl.subject")}</TableHead>
+                <TableHead>{t("acl.role")}</TableHead>
+                <TableHead>{t("acl.propagate")}</TableHead>
                 {manageable && (
                   <TableHead className="w-0">
-                    <span className="sr-only">Actions</span>
+                    <span className="sr-only">{t("common:actions")}</span>
                   </TableHead>
                 )}
               </TableRow>
@@ -502,7 +521,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                   </TableCell>
                   <TableCell>{entry.roleid}</TableCell>
                   <TableCell className="text-muted-foreground">
-                    {entry.propagate ? "Yes" : "No"}
+                    {entry.propagate ? t("common:yes") : t("common:no")}
                   </TableCell>
                   {manageable && (
                     <TableCell className="py-1 text-right">
@@ -510,7 +529,10 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        aria-label={`Revoke ${entry.roleid} on ${entry.path}`}
+                        aria-label={t("acl.revokeLabel", {
+                          role: entry.roleid,
+                          path: entry.path,
+                        })}
                         onClick={() => {
                           setRevokeTarget(entry);
                         }}
@@ -533,20 +555,27 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Revoke access?</AlertDialogTitle>
+              <AlertDialogTitle>{t("acl.revokeTitle")}</AlertDialogTitle>
               <AlertDialogDescription>
                 {revokeTarget && (
-                  <>
-                    <code className="font-mono">{revokeTarget.ugid}</code> loses
-                    the <strong>{revokeTarget.roleid}</strong> role on{" "}
-                    <code className="font-mono">{revokeTarget.path}</code>,
-                    immediately.
-                  </>
+                  <Trans
+                    t={t}
+                    i18nKey="acl.revokeDescription"
+                    values={{
+                      subject: revokeTarget.ugid,
+                      role: revokeTarget.roleid,
+                      path: revokeTarget.path,
+                    }}
+                    components={{
+                      code: <code className="font-mono" />,
+                      strong: <strong />,
+                    }}
+                  />
                 )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 disabled={updateACL.isPending}
@@ -555,7 +584,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                   if (revokeTarget) handleRevoke(revokeTarget, false);
                 }}
               >
-                {updateACL.isPending ? "Revoking..." : "Revoke"}
+                {updateACL.isPending ? t("acl.revoking") : t("acl.revoke")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -564,10 +593,10 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
         {revokeConflict && (
           <SelfCredentialConfirm
             key={entryKey(revokeConflict.entry)}
-            title="Revoking this can cut off Nexara's access"
+            title={t("acl.revokeConflictTitle")}
             message={revokeConflict.message}
             confirmValue={revokeConflict.entry.ugid}
-            actionLabel="Revoke"
+            actionLabel={t("acl.revoke")}
             pending={updateACL.isPending}
             onCancel={() => {
               setRevokeConflict(null);

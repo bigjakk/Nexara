@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
@@ -58,6 +59,7 @@ interface Props {
 }
 
 export function AccessGroupsSection({ clusterId, capabilities }: Props) {
+  const { t } = useTranslation("access");
   const { canManage } = useAuth();
   const groupsQuery = useAccessGroups(clusterId);
   const createGroup = useCreateAccessGroup(clusterId);
@@ -104,7 +106,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
   );
 
   const handleDelete = (target: string, force: boolean) => {
-    const action = inCluster(`Deleting group ${target}`);
+    const action = inCluster(t("groups.deletingAction", { name: target }));
     const sent = deleteGroupOnce({ groupid: target, force });
     if (sent === null) return;
     settleDelete(sent, {
@@ -126,11 +128,13 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
         }
         // The section has nowhere to show it, so it is toasted.
         toast.error(
-          `${action} failed: ${
-            err instanceof ApiClientError
-              ? err.message
-              : "Failed to delete group"
-          }`,
+          t("actionFailed", {
+            action,
+            reason:
+              err instanceof ApiClientError
+                ? err.message
+                : t("groups.deleteFailed"),
+          }),
         );
       },
     });
@@ -146,7 +150,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
     });
     if (sent === null) return;
     settleCreate(sent, {
-      action: inCluster(`Creating group ${id}`),
+      action: inCluster(t("groups.creatingAction", { name: id })),
       // Not once the dialog has been dismissed: this would close, and clear,
       // whichever one has been opened in its place.
       onSuccess: () => {
@@ -168,7 +172,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
         setError(
           err instanceof ApiClientError
             ? err.message
-            : "Failed to create group",
+            : t("groups.createFailed"),
         );
       },
     });
@@ -179,11 +183,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
   return (
     <Panel
       flush
-      title="Groups"
+      title={t("groups.title")}
       aside={
-        groupCount === 0
-          ? undefined
-          : `${String(groupCount)} ${groupCount === 1 ? "group" : "groups"}. Open a group to see its members.`
+        groupCount === 0 ? undefined : t("groups.aside", { count: groupCount })
       }
       actions={
         manageable ? (
@@ -197,16 +199,16 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
             <DialogTrigger asChild>
               <Button size="sm">
                 <Plus className="h-4 w-4" />
-                Create Group
+                {t("groups.createGroup")}
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-sm">
               <DialogHeader>
-                <DialogTitle>Create Group</DialogTitle>
+                <DialogTitle>{t("groups.createGroup")}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleCreate} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="group-id">Group ID</Label>
+                  <Label htmlFor="group-id">{t("groups.groupId")}</Label>
                   <Input
                     id="group-id"
                     value={groupid}
@@ -217,7 +219,7 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="group-comment">Comment</Label>
+                  <Label htmlFor="group-comment">{t("groups.comment")}</Label>
                   <Input
                     id="group-comment"
                     value={comment}
@@ -232,7 +234,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                     type="submit"
                     disabled={!groupid.trim() || createGroup.isPending}
                   >
-                    {createGroup.isPending ? "Creating..." : "Create"}
+                    {createGroup.isPending
+                      ? t("common:creating")
+                      : t("common:create")}
                   </Button>
                 </DialogFooter>
               </form>
@@ -248,18 +252,18 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
           </div>
         ) : !groupsQuery.data || groupsQuery.data.length === 0 ? (
           <p className="px-[18px] pb-1 text-sm text-muted-foreground">
-            No groups configured.
+            {t("groups.none")}
           </p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8" />
-                <TableHead>Group</TableHead>
-                <TableHead>Comment</TableHead>
+                <TableHead>{t("groups.group")}</TableHead>
+                <TableHead>{t("groups.comment")}</TableHead>
                 {manageable && (
                   <TableHead className="w-0">
-                    <span className="sr-only">Actions</span>
+                    <span className="sr-only">{t("common:actions")}</span>
                   </TableHead>
                 )}
               </TableRow>
@@ -312,7 +316,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-muted-foreground"
-                                aria-label={`Edit ${group.groupid}`}
+                                aria-label={t("editLabel", {
+                                  name: group.groupid,
+                                })}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setEditTarget({
@@ -327,7 +333,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                aria-label={`Delete ${group.groupid}`}
+                                aria-label={t("deleteLabel", {
+                                  name: group.groupid,
+                                })}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setDeleteTarget(group.groupid);
@@ -385,14 +393,15 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete group {deleteTarget}?</AlertDialogTitle>
+              <AlertDialogTitle>
+                {t("groups.deleteTitle", { name: deleteTarget ?? "" })}
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                Members keep their accounts, but lose any permissions granted
-                through this group. This cannot be undone.
+                {t("groups.deleteDescription")}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 disabled={deleteGroup.isPending}
@@ -401,7 +410,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                   if (deleteTarget) handleDelete(deleteTarget, false);
                 }}
               >
-                {deleteGroup.isPending ? "Deleting..." : "Delete Group"}
+                {deleteGroup.isPending
+                  ? t("common:deleting")
+                  : t("groups.deleteGroup")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -410,10 +421,10 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
         {deleteConflict && (
           <SelfCredentialConfirm
             key={deleteConflict.groupid}
-            title="Deleting this group can cut off Nexara's access"
+            title={t("groups.deleteConflictTitle")}
             message={deleteConflict.message}
             confirmValue={deleteConflict.groupid}
-            actionLabel="Delete Group"
+            actionLabel={t("groups.deleteGroup")}
             pending={deleteGroup.isPending}
             onCancel={() => {
               setDeleteConflict(null);
@@ -448,18 +459,21 @@ function AddressableGroupMembers({
   clusterId: string;
   groupid: string;
 }) {
+  const { t } = useTranslation("access");
   const groupQuery = useAccessGroup(clusterId, groupid);
 
   if (groupQuery.isLoading) return <Skeleton className="h-10 w-full" />;
 
   const members = groupQuery.data?.members ?? [];
   if (members.length === 0) {
-    return <p className="text-sm text-muted-foreground">No members.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">{t("groups.noMembers")}</p>
+    );
   }
 
   return (
     <div>
-      <p className="mb-2 text-sm font-semibold">Members</p>
+      <p className="mb-2 text-sm font-semibold">{t("groups.members")}</p>
       <div className="flex flex-wrap gap-1.5">
         {members.map((m) => (
           <code
@@ -492,6 +506,7 @@ function EditGroupDialog({
   initialComment: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("access");
   const updateGroup = useUpdateAccessGroup(clusterId);
   const updateGroupOnce = useSingleFlight(updateGroup.mutateAsync);
   const inCluster = useInCluster(clusterId);
@@ -513,7 +528,7 @@ function EditGroupDialog({
     settle(sent, {
       // Named: it can land on another page, or over another group's open Edit
       // dialog.
-      action: inCluster(`Saving group ${groupid}`),
+      action: inCluster(t("groups.savingAction", { name: groupid })),
       // Not once dismissed: onClose would close whichever dialog has been
       // opened in this one's place.
       onSuccess: onClose,
@@ -521,7 +536,7 @@ function EditGroupDialog({
         setError(
           err instanceof ApiClientError
             ? err.message
-            : "Failed to update group",
+            : t("groups.updateFailed"),
         );
       },
     });
@@ -536,11 +551,11 @@ function EditGroupDialog({
     >
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Edit {groupid}</DialogTitle>
+          <DialogTitle>{t("editTitle", { name: groupid })}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSave} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="edit-group-comment">Comment</Label>
+            <Label htmlFor="edit-group-comment">{t("groups.comment")}</Label>
             <Input
               id="edit-group-comment"
               value={comment}
@@ -552,10 +567,10 @@ function EditGroupDialog({
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
+              {t("common:cancel")}
             </Button>
             <Button type="submit" disabled={updateGroup.isPending}>
-              {updateGroup.isPending ? "Saving..." : "Save"}
+              {updateGroup.isPending ? t("common:saving") : t("common:save")}
             </Button>
           </DialogFooter>
         </form>

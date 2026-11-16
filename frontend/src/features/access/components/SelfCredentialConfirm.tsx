@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -67,6 +68,7 @@ export function SelfCredentialConfirm({
   onCancel,
   onConfirm,
 }: SelfCredentialConfirmProps) {
+  const { t } = useTranslation("access");
   const [typed, setTyped] = useState("");
 
   return (
@@ -88,17 +90,16 @@ export function SelfCredentialConfirm({
         <div className="space-y-4 py-2">
           <div className="flex items-start gap-2.5 rounded-[8px] bg-amber-500/10 px-3.5 py-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
-            <p className="min-w-0 text-sm">
-              Nexara can lose access to this cluster, or some of what it may do
-              there. If it does, the cluster shows as unreachable or actions
-              fail until you update its credentials in Nexara or undo the change
-              in Proxmox.
-            </p>
+            <p className="min-w-0 text-sm">{t("selfCredential.warning")}</p>
           </div>
 
           <div>
             <p className="mb-2 text-sm">
-              Type <CopyableName name={confirmValue} /> to confirm.
+              <Trans
+                t={t}
+                i18nKey="selfCredential.typeToConfirm"
+                components={{ name: <CopyableName name={confirmValue} /> }}
+              />
             </p>
             <Input
               value={typed}
@@ -106,14 +107,14 @@ export function SelfCredentialConfirm({
                 setTyped(e.target.value);
               }}
               placeholder={confirmValue}
-              aria-label="Confirmation text"
+              aria-label={t("selfCredential.confirmationText")}
             />
           </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" disabled={pending} onClick={onCancel}>
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             variant="destructive"
@@ -123,7 +124,7 @@ export function SelfCredentialConfirm({
               holdFocusInDialog(e);
             }}
           >
-            {pending ? "Working..." : actionLabel}
+            {pending ? t("selfCredential.working") : actionLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

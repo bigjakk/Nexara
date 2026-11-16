@@ -1,4 +1,5 @@
 import { ApiClientError } from "@/lib/api-client";
+import i18n from "@/lib/i18n";
 
 /**
  * The error slug of the self-credential guards' 409 (handlers.CredentialGuardCode).
@@ -31,5 +32,5 @@ export function isOverridable(err: unknown): err is ApiClientError {
  * to do to go ahead.
  */
 export function refusedBeyondOverride(action: string): string {
-  return `${action} was refused, and nothing was changed, because it could cut Nexara off from the cluster. To go ahead anyway, do it again and confirm the override that is then offered.`;
+  return i18n.t("access:refusedBeyondOverride", { action });
 }

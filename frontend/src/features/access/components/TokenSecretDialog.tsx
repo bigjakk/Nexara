@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Copy } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +38,7 @@ export function TokenSecretDialog({
   secret,
   onClose,
 }: TokenSecretDialogProps) {
+  const { t } = useTranslation("access");
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
 
@@ -67,21 +69,21 @@ export function TokenSecretDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>API Token Created</DialogTitle>
+          <DialogTitle>{t("tokenSecret.title")}</DialogTitle>
           <DialogDescription>
-            <code className="font-mono text-xs">{fullTokenId}</code> is ready to
-            use.
+            <Trans
+              t={t}
+              i18nKey="tokenSecret.ready"
+              values={{ tokenId: fullTokenId }}
+              components={{ code: <code className="font-mono text-xs" /> }}
+            />
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div className="flex items-start gap-2.5 rounded-[8px] bg-amber-500/10 px-3.5 py-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
-            <p className="min-w-0 text-sm">
-              Copy this secret now. Proxmox shows it only once — there is no way
-              to retrieve it later, and recovering from a lost secret means
-              regenerating the token.
-            </p>
+            <p className="min-w-0 text-sm">{t("tokenSecret.copyNow")}</p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -93,7 +95,7 @@ export function TokenSecretDialog({
               size="icon"
               className="shrink-0"
               onClick={handleCopy}
-              aria-label="Copy token secret"
+              aria-label={t("tokenSecret.copy")}
             >
               {copied ? (
                 <Check className="h-4 w-4 text-emerald-600" />
@@ -105,14 +107,13 @@ export function TokenSecretDialog({
 
           {copyFailed && (
             <p className="text-sm text-destructive">
-              Copy failed. Select the secret above and copy it manually
-              (Ctrl+C).
+              {t("tokenSecret.copyFailed")}
             </p>
           )}
         </div>
 
         <DialogFooter>
-          <Button onClick={onClose}>Done</Button>
+          <Button onClick={onClose}>{t("tokenSecret.done")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

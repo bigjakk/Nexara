@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Lock, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Trans, useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
@@ -90,6 +91,7 @@ function isEditorFor(
 function usePrivilegeCatalogue(
   roles: AccessRole[] | undefined,
 ): Record<string, string[]> {
+  const { t } = useTranslation("access");
   return useMemo(() => {
     if (!roles || roles.length === 0) return {};
     const admin = roles.find((r) => r.roleid === "Administrator");
@@ -103,13 +105,14 @@ function usePrivilegeCatalogue(
       // dot is grouped under Other rather than dropped, so a privilege from a
       // future Proxmox release still reaches the picker.
       const [category] = priv.split(".");
-      (grouped[category || "Other"] ??= []).push(priv);
+      (grouped[category || t("roles.otherCategory")] ??= []).push(priv);
     }
     return grouped;
-  }, [roles]);
+  }, [roles, t]);
 }
 
 export function AccessRolesSection({ clusterId, capabilities }: Props) {
+  const { t } = useTranslation("access");
   const { canManage } = useAuth();
   const rolesQuery = useAccessRoles(clusterId);
   const createRole = useCreateAccessRole(clusterId);
@@ -188,7 +191,8 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
     const roleid = editing.isNew ? editing.roleid.trim() : editing.roleid;
     if (editing.isNew) {
       const sent = createRoleOnce({ roleid, privs });
-      if (sent !== null) save(sent, inCluster(`Creating role ${roleid}`));
+      if (sent !== null)
+        save(sent, inCluster(t("roles.creatingAction", { name: roleid })));
       return;
     }
     saveEdit(editing.openingId, roleid, privs, false);
@@ -200,7 +204,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
     privs: string,
     force: boolean,
   ) => {
-    const action = inCluster(`Saving role ${roleid}`);
+    const action = inCluster(t("roles.savingAction", { name: roleid }));
     const sent = updateRoleOnce({ roleid, privs, force });
     if (sent === null) return;
     save(sent, action, (err) => {
@@ -234,7 +238,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
         setSaveConflict(null);
         if (overridden?.(err)) return;
         setError(
-          err instanceof ApiClientError ? err.message : "Failed to save role",
+          err instanceof ApiClientError ? err.message : t("roles.saveFailed"),
         );
       },
     });
@@ -251,7 +255,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
   );
 
   const handleDelete = (target: string, force: boolean) => {
-    const action = inCluster(`Deleting role ${target}`);
+    const action = inCluster(t("roles.deletingAction", { name: target }));
     const sent = deleteRoleOnce({ roleid: target, force });
     if (sent === null) return;
     settleDelete(sent, {
@@ -273,11 +277,13 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
         }
         // The section has nowhere to show it, so it is toasted.
         toast.error(
-          `${action} failed: ${
-            err instanceof ApiClientError
-              ? err.message
-              : "Failed to delete role"
-          }`,
+          t("actionFailed", {
+            action,
+            reason:
+              err instanceof ApiClientError
+                ? err.message
+                : t("roles.deleteFailed"),
+          }),
         );
       },
     });
@@ -289,11 +295,11 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
   return (
     <Panel
       flush
-      title="Roles"
+      title={t("roles.title")}
       aside={
         roleCount === 0
           ? undefined
-          : `${String(roleCount)} ${roleCount === 1 ? "role" : "roles"}, ${String(builtInCount)} built in`
+          : t("roles.aside", { count: roleCount, builtIn: builtInCount })
       }
       actions={
         manageable ? (
@@ -304,7 +310,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
             }}
           >
             <Plus className="h-4 w-4" />
-            Create Role
+            {t("roles.createRole")}
           </Button>
         ) : undefined
       }
@@ -312,10 +318,11 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
       <>
         {!capabilities.loading && !capabilities.canModifyRoles && (
           <p className="max-w-[75ch] px-[18px] pb-3 text-[12.5px] text-muted-foreground">
-            Read-only: Nexara&apos;s token lacks{" "}
-            <code className="font-mono">Sys.Modify</code> on{" "}
-            <code className="font-mono">/access</code>, which Proxmox requires
-            to manage roles.
+            <Trans
+              t={t}
+              i18nKey="roles.readOnly"
+              components={{ code: <code className="font-mono" /> }}
+            />
           </p>
         )}
         {rolesQuery.isLoading ? (
@@ -324,17 +331,17 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
           </div>
         ) : !rolesQuery.data || rolesQuery.data.length === 0 ? (
           <p className="px-[18px] pb-1 text-sm text-muted-foreground">
-            No roles found.
+            {t("roles.none")}
           </p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Role</TableHead>
-                <TableHead>Privileges</TableHead>
+                <TableHead>{t("roles.role")}</TableHead>
+                <TableHead>{t("roles.privileges")}</TableHead>
                 {manageable && (
                   <TableHead className="w-0">
-                    <span className="sr-only">Actions</span>
+                    <span className="sr-only">{t("common:actions")}</span>
                   </TableHead>
                 )}
               </TableRow>
@@ -359,13 +366,13 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                         {role.special && (
                           <span className="flex items-center gap-1 whitespace-nowrap text-[12.5px] font-normal text-muted-foreground">
                             <Lock className="h-3 w-3" />
-                            Built in
+                            {t("roles.builtIn")}
                           </span>
                         )}
                       </span>
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {count} {count === 1 ? "privilege" : "privileges"}
+                      {t("roles.privilegeCount", { count })}
                     </TableCell>
                     {manageable && (
                       <TableCell className="whitespace-nowrap py-1 text-right">
@@ -376,7 +383,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                             row shows why in the same place, as text. */}
                         {role.special ? (
                           <span className="text-xs text-muted-foreground">
-                            Immutable
+                            {t("roles.immutable")}
                           </span>
                         ) : unaddressableHint(role.roleid) !== null ? (
                           <span className="text-xs text-muted-foreground">
@@ -397,13 +404,15 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                                 });
                               }}
                             >
-                              Edit
+                              {t("common:edit")}
                             </Button>
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              aria-label={`Delete ${role.roleid}`}
+                              aria-label={t("deleteLabel", {
+                                name: role.roleid,
+                              })}
                               onClick={() => {
                                 setDeleteTarget(role.roleid);
                               }}
@@ -434,18 +443,19 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
             <DialogContent className="max-w-2xl">
               <DialogHeader>
                 <DialogTitle>
-                  {editing.isNew ? "Create Role" : `Edit ${editing.roleid}`}
+                  {editing.isNew
+                    ? t("roles.createRole")
+                    : t("editTitle", { name: editing.roleid })}
                 </DialogTitle>
                 <DialogDescription>
-                  Privileges are read from this cluster, so the list matches its
-                  Proxmox version.
+                  {t("roles.editorDescription")}
                 </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-4">
                 {editing.isNew && (
                   <div className="space-y-2">
-                    <Label htmlFor="role-id">Role ID</Label>
+                    <Label htmlFor="role-id">{t("roles.roleId")}</Label>
                     <Input
                       id="role-id"
                       value={editing.roleid}
@@ -490,13 +500,17 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                  {editing.privs.length} selected
-                  {editing.privs.length === 0 && !editing.isNew && (
-                    <span className="text-destructive">
-                      {" "}
-                      — saving with none selected removes every privilege from
-                      this role.
-                    </span>
+                  {editing.privs.length === 0 && !editing.isNew ? (
+                    <Trans
+                      t={t}
+                      i18nKey="roles.selectedNoneWarning"
+                      values={{ n: editing.privs.length }}
+                      components={{
+                        warn: <span className="text-destructive" />,
+                      }}
+                    />
+                  ) : (
+                    t("roles.selected", { n: editing.privs.length })
                   )}
                 </p>
 
@@ -504,10 +518,10 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
               </div>
               {saveConflict?.openingId === editing.openingId && (
                 <SelfCredentialConfirm
-                  title="Saving this role can cut off Nexara's access"
+                  title={t("roles.saveConflictTitle")}
                   message={saveConflict.message}
                   confirmValue={saveConflict.roleid}
-                  actionLabel="Save Anyway"
+                  actionLabel={t("roles.saveAnyway")}
                   pending={updateRole.isPending}
                   onCancel={() => {
                     setSaveConflict(null);
@@ -530,7 +544,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                     setError("");
                   }}
                 >
-                  Cancel
+                  {t("common:cancel")}
                 </Button>
                 <Button
                   onClick={handleSave}
@@ -541,8 +555,8 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                   }
                 >
                   {createRole.isPending || updateRole.isPending
-                    ? "Saving..."
-                    : "Save"}
+                    ? t("common:saving")
+                    : t("common:save")}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -557,14 +571,15 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete role {deleteTarget}?</AlertDialogTitle>
+              <AlertDialogTitle>
+                {t("roles.deleteTitle", { name: deleteTarget ?? "" })}
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                Any user or token holding this role loses the permissions it
-                grants, immediately. This cannot be undone.
+                {t("roles.deleteDescription")}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 disabled={deleteRole.isPending}
@@ -573,7 +588,9 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                   if (deleteTarget) handleDelete(deleteTarget, false);
                 }}
               >
-                {deleteRole.isPending ? "Deleting..." : "Delete Role"}
+                {deleteRole.isPending
+                  ? t("common:deleting")
+                  : t("roles.deleteRole")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -582,10 +599,10 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
         {deleteConflict && (
           <SelfCredentialConfirm
             key={deleteConflict.roleid}
-            title="Deleting this role can cut off Nexara's access"
+            title={t("roles.deleteConflictTitle")}
             message={deleteConflict.message}
             confirmValue={deleteConflict.roleid}
-            actionLabel="Delete Role"
+            actionLabel={t("roles.deleteRole")}
             pending={deleteRole.isPending}
             onCancel={() => {
               setDeleteConflict(null);

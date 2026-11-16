@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { Panel } from "@/components/page/Panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -21,24 +22,25 @@ import { useAccessDomains } from "../api/access-queries";
  * and points at the Proxmox UI for changes rather than half-implementing it.
  */
 export function AccessRealmsSection({ clusterId }: { clusterId: string }) {
+  const { t } = useTranslation("access");
   const domainsQuery = useAccessDomains(clusterId);
   const count = domainsQuery.data?.length ?? 0;
 
   return (
     <Panel
       flush
-      title="Authentication realms"
-      aside={
-        count === 0
-          ? undefined
-          : `${String(count)} ${count === 1 ? "realm" : "realms"}, read-only here`
-      }
+      title={t("realms.title")}
+      aside={count === 0 ? undefined : t("realms.aside", { count })}
     >
       <p className="max-w-[75ch] px-[18px] pb-3 text-sm text-muted-foreground">
-        Editing a realm needs the{" "}
-        <code className="font-mono text-[12.5px]">Realm.Allocate</code>{" "}
-        privilege, which only the Administrator role carries. Manage realms in
-        the Proxmox UI under <em>Datacenter → Permissions → Realms</em>.
+        <Trans
+          t={t}
+          i18nKey="realms.intro"
+          components={{
+            code: <code className="font-mono text-[12.5px]" />,
+            em: <em />,
+          }}
+        />
       </p>
 
       {domainsQuery.isLoading ? (
@@ -47,16 +49,16 @@ export function AccessRealmsSection({ clusterId }: { clusterId: string }) {
         </div>
       ) : !domainsQuery.data || domainsQuery.data.length === 0 ? (
         <p className="px-[18px] pb-1 text-sm text-muted-foreground">
-          No realms found.
+          {t("realms.none")}
         </p>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Realm</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Two-factor</TableHead>
-              <TableHead>Comment</TableHead>
+              <TableHead>{t("realms.realm")}</TableHead>
+              <TableHead>{t("realms.type")}</TableHead>
+              <TableHead>{t("realms.twoFactor")}</TableHead>
+              <TableHead>{t("realms.comment")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -67,7 +69,7 @@ export function AccessRealmsSection({ clusterId }: { clusterId: string }) {
                     {domain.realm}
                     {domain.default && (
                       <span className="text-[12.5px] font-normal text-muted-foreground">
-                        Default
+                        {t("realms.default")}
                       </span>
                     )}
                   </span>

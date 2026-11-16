@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { ClusterResponse } from "@/types/api";
@@ -12,6 +13,7 @@ import type { ClusterResponse } from "@/types/api";
  * (useCluster's entry, never fetched from here); the bare text without it.
  */
 export function useInCluster(clusterId: string): (text: string) => string {
+  const { t } = useTranslation("access");
   const name = useQuery({
     queryKey: ["clusters", clusterId],
     queryFn: () =>
@@ -19,8 +21,8 @@ export function useInCluster(clusterId: string): (text: string) => string {
     enabled: false,
   }).data?.name;
   return useCallback(
-    (text: string) => (name ? `${text} in ${name}` : text),
-    [name],
+    (text: string) => (name ? t("inCluster", { text, name }) : text),
+    [name, t],
   );
 }
 
