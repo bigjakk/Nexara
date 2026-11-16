@@ -561,12 +561,12 @@ func (h *UserHandler) ResetAllSSOLinks(c fiber.Ctx, _ *apischema.Params) error {
 	return c.JSON(fiber.Map{"reset": cleared})
 }
 
-// resetSSOLinks runs clear — which clears links and returns the accounts it cleared —
+// resetSSOLinks runs clearLinks — which clears links and returns the accounts it cleared —
 // and ends every session of each of those accounts, in ONE transaction, for the reason
 // deactivate gives: a reset whose sessions could not be ended is not done. It returns
 // the revoked sessions, for their Redis rows. unconfirmed is a COMMIT whose answer was
 // lost: the reset may have taken effect, and repeating it is safe.
-func (h *UserHandler) resetSSOLinks(c fiber.Ctx, clear func(context.Context, *db.Queries) ([]uuid.UUID, error)) (revoked []uuid.UUID, unconfirmed bool, err error) {
+func (h *UserHandler) resetSSOLinks(c fiber.Ctx, clearLinks func(context.Context, *db.Queries) ([]uuid.UUID, error)) (revoked []uuid.UUID, unconfirmed bool, err error) {
 	if h.pool == nil {
 		return nil, false, fiber.NewError(fiber.StatusInternalServerError, ssoLinkNotResetMessage)
 	}
@@ -585,7 +585,7 @@ func (h *UserHandler) resetSSOLinks(c fiber.Ctx, clear func(context.Context, *db
 	defer releaseTx(tx, "reset sso link")()
 	qx := h.queries.WithTx(tx)
 
-	accounts, err := clear(ctx, qx)
+	accounts, err := clearLinks(ctx, qx)
 	if err != nil {
 		if errors.Is(err, errNotSSOLinked) {
 			return nil, false, err
