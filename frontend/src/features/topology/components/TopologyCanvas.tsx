@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { RotateCcw } from "lucide-react";
 import {
   ReactFlow,
   Background,
+  ControlButton,
   Controls,
   MiniMap,
   getNodesBounds,
@@ -10,7 +13,7 @@ import {
   useStore,
   BackgroundVariant,
 } from "@xyflow/react";
-import type { Node, Edge } from "@xyflow/react";
+import type { Node, Edge, NodeChange, XYPosition } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useNavigate } from "react-router-dom";
 import type { AggregatedMetrics } from "@/types/ws";
@@ -34,6 +37,11 @@ import {
   withStackEdges,
 } from "../lib/topology-layout";
 import { buildPowerOverlay, withPower } from "../lib/topology-power";
+import {
+  arranged,
+  noteDrags,
+  type Arrangement,
+} from "../lib/topology-arrangement";
 
 const nodeTypes = {
   clusterNode: ClusterNode,
@@ -70,11 +78,14 @@ const FIT_OPTIONS = {
 function FitOnChange({
   shape,
   layout,
+  arrangement,
   count,
 }: {
   /** What the graph is made of; a new value asks for a new fit. */
   shape: string;
   layout: Node[];
+  /** Where the person has dragged nodes: those are held there, not laid out. */
+  arrangement: ReadonlyMap<string, XYPosition>;
   /** How many nodes the canvas holds once the overlay is on it too. */
   count: number;
 }) {
@@ -88,7 +99,8 @@ function FitOnChange({
       s.nodes.every((n) => n.measured?.width !== undefined) &&
       layout.every((n) => {
         const held = s.nodeLookup.get(n.id)?.position;
-        return held?.x === n.position.x && held.y === n.position.y;
+        const want = arrangement.get(n.id) ?? n.position;
+        return held?.x === want.x && held.y === want.y;
       }),
   );
   useEffect(() => {
@@ -164,6 +176,7 @@ export function TopologyCanvas({
   power,
 }: TopologyCanvasProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation("topology");
 
   // The layout leaves room for the UPS lanes only while the overlay is on,
   // so turning it on or off re-lays the map out; a UPS poll does not.
@@ -231,6 +244,23 @@ export function TopologyCanvas({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
 
+  // What the person arranged by hand, held over every re-layout (a refetch
+  // lays the graph out again) until they reset it or pick another direction
+  // or overlay, which lay it out anew. A ref: a drag notes a position on
+  // every move, and nothing renders from it but what setNodes is given.
+  const arrangement = useRef<Arrangement>(new Map());
+  const [isArranged, setIsArranged] = useState(false);
+  const [resets, setResets] = useState(0);
+  const basis = `${direction}|${String(reserveLane)}|${String(resets)}`;
+  const arrangedFor = useRef(basis);
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      if (noteDrags(arrangement.current, changes)) setIsArranged(true);
+      onNodesChange(changes);
+    },
+    [onNodesChange],
+  );
+
   // Edges are fully derived (layout + in-flight migrations + power) — no
   // edit state.
   const flowEdges = useMemo(
@@ -239,11 +269,17 @@ export function TopologyCanvas({
   );
 
   // Sync with new data when the graph actually changes, carrying over any
-  // already-injected live metrics so rings don't flash back to empty.
+  // already-injected live metrics so rings don't flash back to empty, and the
+  // places the person dragged nodes to.
   useEffect(() => {
+    if (arrangedFor.current !== basis) {
+      arrangedFor.current = basis;
+      arrangement.current.clear();
+      setIsArranged(false);
+    }
     setNodes((current) => {
       const prevById = new Map(current.map((n) => [n.id, n]));
-      return layoutNodes.map((node) => {
+      const synced = layoutNodes.map((node) => {
         if (node.type !== "hostNode") return node;
         const prev = prevById.get(node.id);
         if (!prev) return node;
@@ -259,14 +295,17 @@ export function TopologyCanvas({
           },
         };
       });
+      return arranged(synced, arrangement.current);
     });
-  }, [layoutNodes, setNodes]);
+  }, [layoutNodes, setNodes, basis]);
 
   // After the sync above, which drops the overlay with every re-layout (the
   // overlay follows layoutNodes, so this runs again): applied to the nodes as
   // live metrics are, so a UPS poll never moves a dragged node.
   useEffect(() => {
-    setNodes((current) => withPower(current, overlay, direction));
+    setNodes((current) =>
+      arranged(withPower(current, overlay, direction), arrangement.current),
+    );
   }, [overlay, direction, setNodes]);
 
   // Inject live CPU/memory, and each running guest's CPU for its cell, into
@@ -351,7 +390,7 @@ export function TopologyCanvas({
         edges={flowEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         onNodeClick={handleNodeClick}
         nodesConnectable={false}
         fitView
@@ -363,6 +402,7 @@ export function TopologyCanvas({
         <FitOnChange
           shape={shape}
           layout={layoutNodes}
+          arrangement={arrangement.current}
           count={layoutNodes.length + (overlay?.ups.length ?? 0)}
         />
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
@@ -371,7 +411,19 @@ export function TopologyCanvas({
           fitViewOptions={FIT_OPTIONS}
           position="top-right"
           className="m-3! shadow-none! ring-1 ring-border"
-        />
+        >
+          {isArranged && (
+            <ControlButton
+              onClick={() => {
+                setResets((n) => n + 1);
+              }}
+              title={t("resetLayout")}
+              aria-label={t("resetLayout")}
+            >
+              <RotateCcw />
+            </ControlButton>
+          )}
+        </Controls>
         <MiniMapWhenOutOfView />
       </ReactFlow>
     </div>
