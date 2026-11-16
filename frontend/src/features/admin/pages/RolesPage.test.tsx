@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import type { RBACPermission, RBACRole } from "@/types/api";
@@ -40,5 +40,20 @@ describe("RolesPage", () => {
     renderWithProviders(<RolesPage />);
     await user.click(screen.getByRole("button", { name: "Edit Operators" }));
     expect(screen.getByText("1 of 2 granted")).toBeInTheDocument();
+  });
+
+  // Delete asks in the app's own dialog (it used window.confirm).
+  it("deletes a role only from the confirm dialog", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RolesPage />);
+    await user.click(screen.getByRole("button", { name: "Delete Operators" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent('Delete role "Operators"?');
+    expect(mutation.mutate).not.toHaveBeenCalled();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete role" }),
+    );
+    expect(mutation.mutate).toHaveBeenCalledWith("r1");
   });
 });

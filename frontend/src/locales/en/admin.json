@@ -23,6 +23,8 @@
   "builtIn": "Built-in",
   "custom": "Custom",
   "deleteRoleConfirm": "Delete role \"{{name}}\"?",
+  "deleteRoleDescription": "Every assignment of this role is removed with it, and the users who held it lose its permissions. This cannot be undone.",
+  "deleteRole": "Delete role",
   "editRole": "Edit Role: {{name}}",
   "roleName": "Name",
   "roleNamePlaceholder": "e.g. Network Admin",

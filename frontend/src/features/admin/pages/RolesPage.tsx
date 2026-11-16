@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Table,
   TableBody,
@@ -18,6 +19,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { Label } from "@/components/ui/label";
 import { Plus, Trash2 } from "lucide-react";
 import {
@@ -33,6 +35,7 @@ import { AdminNav } from "../components/AdminNav";
 import type { RBACRole } from "@/types/api";
 
 export function RolesPage() {
+  const { t } = useTranslation("admin");
   const { data: roles, isLoading } = useRoles();
   const createRole = useCreateRole();
   const updateRole = useUpdateRole();
@@ -40,6 +43,7 @@ export function RolesPage() {
   const { data: allPermissions } = usePermissionCatalog();
 
   const [editRole, setEditRole] = useState<RBACRole | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<RBACRole | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
@@ -178,9 +182,7 @@ export function RolesPage() {
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-destructive"
                           onClick={() => {
-                            if (confirm(`Delete role "${role.name}"?`)) {
-                              deleteRole.mutate(role.id);
-                            }
+                            setPendingDelete(role);
                           }}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -193,6 +195,20 @@ export function RolesPage() {
             </TableBody>
           </Table>
         </Panel>
+
+        <ConfirmDeleteDialog
+          target={pendingDelete}
+          onClose={() => {
+            setPendingDelete(null);
+          }}
+          onConfirm={(r) => {
+            deleteRole.mutate(r.id);
+          }}
+          title={(r) => t("deleteRoleConfirm", { name: r.name })}
+          description={() => t("deleteRoleDescription")}
+          confirmLabel={t("deleteRole")}
+          cancelLabel={t("cancel", { ns: "common" })}
+        />
 
         <Dialog
           open={dialogOpen}
