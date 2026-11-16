@@ -86,6 +86,7 @@ import {
 } from "@/features/mappings/components/MappingCheckList";
 import type { VMConfig } from "../../types/vm";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
 
 const selectClass =
@@ -580,6 +581,7 @@ function AddUSBDialog({
   const canCreateMapping = canManage("cluster");
   const mappingsQuery = useNodeUSBMappings(clusterId, nodeName);
   const createMapping = useCreateUSBMapping(clusterId);
+  const settle = useSaveOutcome();
   const busy = createMapping.isPending;
 
   const [mode, setMode] = useState<USBMode>("device");
@@ -652,35 +654,43 @@ function AddUSBDialog({
     if (!createMapping.isPending) createMapping.reset();
   }
 
-  async function handleAdd() {
+  function handleAdd() {
     if (!canAdd) return;
-    let value: string;
+    const add = (value: string) => {
+      onAdd(`usb${String(idx)}`, value);
+      onClose();
+    };
     if (mode === "spice") {
-      value = buildUSB({ host: "", mapping: "", usb3, spice: true });
+      add(buildUSB({ host: "", mapping: "", usb3, spice: true }));
     } else if (mode === "mapped") {
-      value = buildUSB({ host: "", mapping: mappingId, usb3, spice: false });
+      add(buildUSB({ host: "", mapping: mappingId, usb3, spice: false }));
     } else {
       if (!picked) return;
-      let id = reusable?.id;
-      if (id === undefined) {
-        try {
-          await createMapping.mutateAsync({
-            mapping_id: newName,
-            node: nodeName,
-            device_id: picked.deviceId,
-            ...(picked.path ? { path: picked.path } : {}),
-            // Already cleaned: the label is deviceLabel's.
-            description: picked.label,
-          });
-        } catch {
-          return; // rendered below from createMapping.error
-        }
-        id = newName;
+      const reused = reusable?.id;
+      if (reused !== undefined) {
+        add(buildUSB({ host: "", mapping: reused, usb3, spice: false }));
+        return;
       }
-      value = buildUSB({ host: "", mapping: id, usb3, spice: false });
+      // A create that lands after the dialog has gone stages nothing, and a
+      // failure then is toasted.
+      settle(
+        createMapping.mutateAsync({
+          mapping_id: newName,
+          node: nodeName,
+          device_id: picked.deviceId,
+          ...(picked.path ? { path: picked.path } : {}),
+          // Already cleaned: the label is deviceLabel's.
+          description: picked.label,
+        }),
+        {
+          action: `Creating USB mapping ${newName}`,
+          onSuccess: () => {
+            add(buildUSB({ host: "", mapping: newName, usb3, spice: false }));
+          },
+          onError: () => undefined, // rendered below from createMapping.error
+        },
+      );
     }
-    onAdd(`usb${String(idx)}`, value);
-    onClose();
   }
 
   const listingFailure = mappingsQuery.isError
@@ -916,7 +926,7 @@ function AddUSBDialog({
           </Button>
           <Button
             onClick={() => {
-              void handleAdd();
+              handleAdd();
             }}
             disabled={!canAdd}
           >
@@ -999,6 +1009,7 @@ function AddPCIDialog({
   const canCreateMapping = canManage("cluster");
   const mappingsQuery = useNodePCIMappings(clusterId, nodeName);
   const createMapping = useCreatePCIMapping(clusterId);
+  const settle = useSaveOutcome();
   const busy = createMapping.isPending;
 
   // "q35" anywhere in the machine type — pc-q35-9.0, q35 — as Proxmox's
@@ -1096,27 +1107,35 @@ function AddPCIDialog({
     if (!createMapping.isPending) createMapping.reset();
   }
 
-  async function handleAdd() {
+  function handleAdd() {
     if (!canAdd) return;
-    let id: string;
     if (mode === "mapped") {
-      id = mappingId;
+      add(mappingId);
     } else if (reusable) {
-      id = reusable.id;
+      add(reusable.id);
     } else {
-      try {
-        await createMapping.mutateAsync({
+      // A create that lands after the dialog has gone stages nothing, and a
+      // failure then is toasted.
+      settle(
+        createMapping.mutateAsync({
           mapping_id: newName,
           node: nodeName,
           path: pickedPath,
           // Already cleaned: pciDeviceLabel's.
           ...(label ? { description: label } : {}),
-        });
-      } catch {
-        return; // rendered below from createMapping.error
-      }
-      id = newName;
+        }),
+        {
+          action: `Creating PCI mapping ${newName}`,
+          onSuccess: () => {
+            add(newName);
+          },
+          onError: () => undefined, // rendered below from createMapping.error
+        },
+      );
     }
+  }
+
+  function add(id: string) {
     onAdd(
       `hostpci${String(idx)}`,
       buildPCI({
@@ -1370,7 +1389,7 @@ function AddPCIDialog({
           </Button>
           <Button
             onClick={() => {
-              void handleAdd();
+              handleAdd();
             }}
             disabled={!canAdd}
           >

@@ -787,6 +787,8 @@ function NewMappingDialog({
   fallbackFocus: () => HTMLElement | null;
 }) {
   const create = useCreateUSBMapping(clusterId);
+  // A create that fails after the dialog has gone is toasted instead.
+  const settle = useSaveOutcome();
   const busy = create.isPending;
   const [node, setNode] = useState("");
   const [mode, setMode] = useState<USBPickMode>("device");
@@ -832,8 +834,8 @@ function NewMappingDialog({
 
   function handleCreate() {
     if (!canCreate) return;
-    create.mutate(
-      {
+    settle(
+      create.mutateAsync({
         mapping_id: name,
         node,
         device_id: picked.deviceId,
@@ -841,8 +843,12 @@ function NewMappingDialog({
         ...(description.trim() !== ""
           ? { description: description.trim() }
           : {}),
+      }),
+      {
+        action: `Creating USB mapping ${name}`,
+        onSuccess: onClose,
+        onError: () => undefined, // rendered below from create.error
       },
-      { onSuccess: onClose },
     );
   }
 
