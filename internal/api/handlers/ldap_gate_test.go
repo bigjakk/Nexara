@@ -252,3 +252,15 @@ func TestRequireLDAPTransportAck(t *testing.T) {
 		})
 	}
 }
+
+// TestLDAPCreate_AFilterThatDoesNotCompileIsRefusedNamingIt: Create (and Update, through the same
+// validateLDAPFilters) refuses a filter go-ldap cannot compile with a 400 that names the field.
+func TestLDAPCreate_AFilterThatDoesNotCompileIsRefusedNamingIt(t *testing.T) {
+	app := newLDAPTestApp(t)
+	body := strings.Replace(ldapCreateBody("ldaps://dc.example.com", false, false), `"sync_interval_minutes"`,
+		`"user_filter":"(|(uid={{username}})(mail={{username}})x","sync_interval_minutes"`, 1)
+	status, raw := doLDAPRequest(t, app, http.MethodPost, "/ldap/configs", "admin", body)
+	if status != http.StatusBadRequest || !strings.Contains(raw, "user_filter") {
+		t.Errorf("status %d, body %s; want 400 naming user_filter", status, raw)
+	}
+}

@@ -296,6 +296,25 @@ func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 	}
 }
 
+// TestLDAPSync_AStoredFilterThatDoesNotCompileStopsTheSync: a user filter saved before go-ldap
+// 3.4.15 that it no longer compiles stops the sync with a 422, audited as filter_invalid, before
+// any search: the missing user here would otherwise be deactivated by the fake directory.
+func TestLDAPSync_AStoredFilterThatDoesNotCompileStopsTheSync(t *testing.T) {
+	t.Parallel()
+	user := db.User{ID: uuid.New(), Email: epochLoginEmail, IsActive: true, AuthSource: "ldap"}
+	store := newEpochStore(user, bystander)
+	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), UserFilter: "(|(uid={{username}})(mail={{username}})x", EmailAttribute: "mail"}
+	a, _, sync := ldapSyncApp(t, store, &fakeDirectory{entries: bystanderEntry()})
+	status := sync()
+	_, details := auditOf(a, "ldap_sync")
+	roles := len(store.named("RevokeAllUserRoles")) + len(store.named("AssignUserRole"))
+	if status != http.StatusUnprocessableEntity || !store.user(user.ID).IsActive || roles != 0 ||
+		len(details) != 1 || !strings.Contains(details[0], `"reason":"filter_invalid"`) {
+		t.Errorf("status %d, active %t, roles touched %d, audit %v; want 422, active, none, filter_invalid",
+			status, store.user(user.ID).IsActive, roles, details)
+	}
+}
+
 // TestLDAP_AFailedGroupSearchChangesNoRole: a group search that did not answer says
 // nothing about the user's groups, so neither a sync nor a sign-in revokes or assigns a
 // role (a revoke there strips hand-assigned and cluster-scoped roles too).
