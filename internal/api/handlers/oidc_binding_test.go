@@ -266,17 +266,19 @@ func TestOIDCCallbackCookiePath_IsTheRedirectURIs(t *testing.T) {
 }
 
 // TestOIDCCallback_AnUnverifiedEmailIsAFailedSignIn: the login page is told to verify
-// the address with the provider, and the refusal is audited as a failed sign-in, under
-// the SSO account the address names or under none.
+// the address with the provider, and the refusal is audited as a failed sign-in: under
+// the SSO account the address names, each time; or under none, with no address (audit
+// details are Viewer-readable), once a minute per client address, as the password path.
 func TestOIDCCallback_AnUnverifiedEmailIsAFailedSignIn(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		account bool
 		action  string
+		rows    int
 	}{
-		{"an existing account", true, "login_failed"},
-		{"no account yet", false, "login_failed_unknown_account"},
+		{"an existing account", true, "login_failed", 2},
+		{"no account yet", false, "login_failed_unknown_account", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -293,16 +295,18 @@ func TestOIDCCallback_AnUnverifiedEmailIsAFailedSignIn(t *testing.T) {
 				return c.SendStatus(http.StatusNoContent)
 			}
 			a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)
+			a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)
 
 			if message != oidcEmailNotVerifiedMessage {
 				t.Errorf("message %q, want the unverified-email one", message)
 			}
 			rows := store.auditRowsWritten()
-			if len(rows) != 1 || rows[0].action != tc.action || (rows[0].actor == u.ID) != tc.account {
-				t.Fatalf("audit rows %v, want one %s (under the account: %v)", rows, tc.action, tc.account)
+			if len(rows) != tc.rows || rows[0].action != tc.action || (rows[0].actor == u.ID) != tc.account {
+				t.Fatalf("audit rows %v, want %d %s (under the account: %v)", rows, tc.rows, tc.action, tc.account)
 			}
-			if d := store.auditDetailsWritten()[0]; !strings.Contains(d, `"reason":"email_not_verified"`) {
-				t.Errorf("audit details %s, want the reason email_not_verified", d)
+			d := store.auditDetailsWritten()[0]
+			if !strings.Contains(d, `"reason":"email_not_verified"`) || strings.Contains(d, `"email"`) == !tc.account {
+				t.Errorf("audit details %s, want the reason, and the address only under the account", d)
 			}
 		})
 	}

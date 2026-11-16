@@ -290,26 +290,41 @@ func (h *AuthHandler) recordFailedSignIn(c fiber.Ctx, a loginAttempt, account *d
 	if h.rdb == nil || !a.counted {
 		return
 	}
+	details, audit := unknownSignInDetails(c, h.rdb, signInMethod, "unknown_account")
+	if !audit {
+		return
+	}
+	h.withFollowUp(c, func() {
+		AuditLogAs(c, h.queries, h.eventPub, uuid.Nil, pgtype.UUID{}, "auth", "", "login_failed_unknown_account", details)
+	})
+}
+
+// unknownSignInDetails counts a failed sign-in that names no account against its
+// source address (the bound the note above describes, one for every sign-in method)
+// and, when it is the one this minute audits, returns the details of its
+// login_failed_unknown_account row: no identifier, the number of such failures in
+// the address's previous window. audit is false otherwise, or when it could not be
+// counted.
+func unknownSignInDetails(c fiber.Ctx, rdb *redis.Client, method, reason string) (details json.RawMessage, audit bool) {
+	ip := c.IP()
 	ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)
 	vals, err := boundedByContext(ctx, func(ctx context.Context) ([]int64, error) {
-		return countUnknownSignIn.Run(ctx, h.rdb, []string{unknownSignInKey(ip), unknownSignInCarryKey(ip)},
+		return countUnknownSignIn.Run(ctx, rdb, []string{unknownSignInKey(ip), unknownSignInCarryKey(ip)},
 			unknownSignInWindow.Milliseconds(), unknownSignInCarry.Milliseconds()).Int64Slice()
 	})
 	cancel()
 	if err != nil || len(vals) != 2 {
 		slog.Warn("sign-in: could not count a failed sign-in that named no account; it is not audited", "ip", ip, "error", err)
-		return
+		return nil, false
 	}
 	if vals[0] != 1 {
-		return
+		return nil, false
 	}
-	details, _ := json.Marshal(map[string]any{
-		"ip": ip, "method": signInMethod, "reason": "unknown_account",
+	details, _ = json.Marshal(map[string]any{
+		"ip": ip, "method": method, "reason": reason,
 		"window_seconds": int(unknownSignInWindow / time.Second), "failures_in_last_window": vals[1],
 	})
-	h.withFollowUp(c, func() {
-		AuditLogAs(c, h.queries, h.eventPub, uuid.Nil, pgtype.UUID{}, "auth", "", "login_failed_unknown_account", details)
-	})
+	return details, true
 }
 
 // loginLockedMessage is the locked sign-in's answer, the same whether or not the
