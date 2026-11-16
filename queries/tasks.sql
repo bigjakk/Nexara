@@ -59,17 +59,19 @@ SET user_id = EXCLUDED.user_id, source = EXCLUDED.source, description = EXCLUDED
     progress = EXCLUDED.progress
 WHERE task_history.source = 'filed' AND task_history.cluster_id = EXCLUDED.cluster_id;
 
--- UpdateTaskHistory backs PUT /api/v1/tasks/:upid. It writes only a task
--- Nexara recorded that is still running: a finished task's verdict, and every
--- row the collector ingested from Proxmox, are the collector's
--- (ReconcileTaskHistory, InsertExternalTaskHistory). A guest's History decides
--- where it starts on them (ListGuestLifecycleEvents), so manage:task cannot
--- rewrite one after the fact. :execrows: 0 is a task that finished, or is
--- Proxmox's, in between the handler's read and this write.
+-- UpdateTaskHistory backs PUT /api/v1/tasks/:upid. It writes only a running
+-- task the caller filed: a finished task's verdict, every row the collector
+-- ingested from Proxmox and every task Nexara dispatched are not the caller's
+-- word (ReconcileTaskHistory, InsertExternalTaskHistory, InsertTaskHistory). A
+-- guest's History decides where it starts on them (ListGuestLifecycleEvents),
+-- so manage:task cannot rewrite one after the fact. The ownership is in the
+-- statement, not only in the handler's read: a take-over between the two leaves
+-- no filed row to write. :execrows: 0 is a task that finished, or was taken
+-- over, in between.
 -- name: UpdateTaskHistory :execrows
 UPDATE task_history
 SET status = $2, exit_status = $3, progress = $4, finished_at = $5
-WHERE upid = $1 AND status = 'running' AND source <> 'proxmox';
+WHERE upid = $1 AND status = 'running' AND source = 'filed' AND user_id = sqlc.arg('user_id');
 
 -- name: GetTaskByUpid :one
 SELECT * FROM task_history

@@ -436,6 +436,10 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	return c.Status(fiber.StatusCreated).JSON(mapTaskHistory(task))
 }
 
+// errNotYourFiledTask is PUT /tasks/:upid's refusal of any row but a task the
+// caller filed.
+var errNotYourFiledTask = fiber.NewError(fiber.StatusForbidden, "Only a task you filed can be updated")
+
 // filedTaskStart is when a filed task started: Proxmox's start time, held no
 // later than now, as the node's clock is not ours. Now when Proxmox gives none.
 func filedTaskStart(reported int64, now time.Time) time.Time {
@@ -471,8 +475,9 @@ func (h *TaskHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	}
 	// Only what the caller filed is the caller's to report on: a task Nexara
 	// dispatched, or another user's filing, takes no exit text or progress from them.
-	if uid, _ := c.Locals("user_id").(uuid.UUID); task.Source != "filed" || task.UserID != uid {
-		return fiber.NewError(fiber.StatusForbidden, "Only a task you filed can be updated")
+	uid, _ := c.Locals("user_id").(uuid.UUID)
+	if task.Source != "filed" || task.UserID != uid {
+		return errNotYourFiledTask
 	}
 	// A finished task's verdict, and a task the collector recorded from
 	// Proxmox, are the collector's: see UpdateTaskHistory.
@@ -492,6 +497,7 @@ func (h *TaskHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		Upid:       upid,
 		Status:     status,
 		ExitStatus: p.String("exit_status"),
+		UserID:     uid,
 	}
 	if progress, supplied := p.OptFloat("progress"); supplied {
 		params.Progress = pgtype.Float8{Float64: progress, Valid: true}
@@ -502,6 +508,11 @@ func (h *TaskHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update task")
 	}
 	if updated == 0 {
+		// The statement holds the ownership too: taken over in between, the row
+		// is no longer the caller's filing and gets the same refusal.
+		if now, err := h.queries.GetTaskByUpid(c.Context(), upid); err != nil || now.Source != "filed" || now.UserID != uid {
+			return errNotYourFiledTask
+		}
 		return fiber.NewError(fiber.StatusConflict, "The task finished before it could be updated")
 	}
 	h.eventPub.SystemEvent(c.Context(), events.KindTaskUpdate, status)

@@ -597,15 +597,20 @@ func TestGuestHistory(t *testing.T) {
 
 		// ── Where the timeline starts, which a finished task's outcome decides:
 		// that is the collector's, and PUT /api/v1/tasks/:upid (UpdateTaskHistory)
-		// writes only a running task Nexara recorded.
+		// writes only a running task the caller filed, whatever its read said.
 		for i, tt := range []struct {
 			status, source string
+			by             uuid.UUID
 			want           int64
-		}{{"completed", "nexara", 0}, {"running", "proxmox", 0}, {"running", "nexara", 1}} {
+		}{
+			{"completed", "filed", historyUserID, 0}, {"running", "proxmox", historyUserID, 0},
+			{"running", "nexara", historyUserID, 0}, {"running", "filed", uuid.New(), 0},
+			{"running", "filed", historyUserID, 1},
+		} {
 			upid := historyUPID(40+i, "qmcreate", "190")
 			exec("rewritable "+upid, `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, source)
 			VALUES ($1, $2, $3, $4, 'pve-01', 'qmcreate', $5)`, historyClusterID, historyUserID, upid, tt.status, tt.source)
-			if n, err := q.UpdateTaskHistory(ctx, gen.UpdateTaskHistoryParams{Upid: upid, Status: "failed"}); err != nil || n != tt.want {
+			if n, err := q.UpdateTaskHistory(ctx, gen.UpdateTaskHistoryParams{Upid: upid, Status: "failed", UserID: tt.by}); err != nil || n != tt.want {
 				t.Errorf("rewriting a %s %s task: %d rows (%v), want %d", tt.status, tt.source, n, err, tt.want)
 			}
 		}

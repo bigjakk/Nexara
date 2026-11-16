@@ -77,7 +77,7 @@ func TestFiledTaskGivesWayToWhoeverRanIt(t *testing.T) {
 		if err := file(filedCluster, u); err != nil {
 			return err
 		}
-		_, err := q.UpdateTaskHistory(ctx, gen.UpdateTaskHistoryParams{Upid: u, Status: "completed", ExitStatus: "OK",
+		_, err := q.UpdateTaskHistory(ctx, gen.UpdateTaskHistoryParams{Upid: u, UserID: filedFiler, Status: "completed", ExitStatus: "OK",
 			FinishedAt: pgtype.Timestamptz{Time: proxmoxStart.Add(time.Hour), Valid: true}})
 		return err
 	}

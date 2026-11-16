@@ -520,19 +520,11 @@ func (s *schedFixtures) task(cluster uuid.UUID, upid, status, exitStatus string)
 	}
 }
 
-// handMadeTask records upid and then rewrites it through UpdateTaskHistory,
-// the query behind PUT /api/v1/tasks/:upid.
+// handMadeTask records upid ended as status and exitStatus, a verdict only a
+// hand-made write (PUT /api/v1/tasks/:upid before it was held to running) left.
 func (s *schedFixtures) handMadeTask(upid, status, exitStatus string) {
 	s.t.Helper()
-	s.task(schedReconcileCluster, upid, "running", "")
-	if n, err := s.q.UpdateTaskHistory(s.ctx, gen.UpdateTaskHistoryParams{
-		Upid:       upid,
-		Status:     status,
-		ExitStatus: exitStatus,
-		FinishedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-	}); err != nil || n != 1 {
-		s.t.Fatalf("UpdateTaskHistory %s: %d rows, err %v", upid, n, err)
-	}
+	s.task(schedReconcileCluster, upid, status, exitStatus)
 }
 
 // execFunc is pgxpool.Pool.Exec's shape, so the helpers below take the pool's

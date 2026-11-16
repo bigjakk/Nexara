@@ -3452,13 +3452,15 @@ type Querier interface {
 	// flag changed). NULL keeps the stored value rather than a copy of it from the
 	// handler's read, which the scheduler may have moved since.
 	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) (int64, error)
-	// UpdateTaskHistory backs PUT /api/v1/tasks/:upid. It writes only a task
-	// Nexara recorded that is still running: a finished task's verdict, and every
-	// row the collector ingested from Proxmox, are the collector's
-	// (ReconcileTaskHistory, InsertExternalTaskHistory). A guest's History decides
-	// where it starts on them (ListGuestLifecycleEvents), so manage:task cannot
-	// rewrite one after the fact. :execrows: 0 is a task that finished, or is
-	// Proxmox's, in between the handler's read and this write.
+	// UpdateTaskHistory backs PUT /api/v1/tasks/:upid. It writes only a running
+	// task the caller filed: a finished task's verdict, every row the collector
+	// ingested from Proxmox and every task Nexara dispatched are not the caller's
+	// word (ReconcileTaskHistory, InsertExternalTaskHistory, InsertTaskHistory). A
+	// guest's History decides where it starts on them (ListGuestLifecycleEvents),
+	// so manage:task cannot rewrite one after the fact. The ownership is in the
+	// statement, not only in the handler's read: a take-over between the two leaves
+	// no filed row to write. :execrows: 0 is a task that finished, or was taken
+	// over, in between.
 	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) (int64, error)
 	// UpdateTaskLastRun records how a run left the scheduler: 'dispatched' with the
 	// UPID in last_upid, or 'failed' with the reason in last_error and no UPID.
