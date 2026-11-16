@@ -2,9 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"io"
-	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,9 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit/audittest"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
-	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
 // authEventActor is the user an authentication event is recorded against. Auth
@@ -25,29 +22,11 @@ import (
 // c.Locals("user_id").
 var authEventActor = uuid.MustParse("5e5e5e5e-5e5e-45e5-8e5e-5e5e5e5e5e5e")
 
-// newCollector starts a UDP listener and a Forwarder pointed at it, returning
-// a read function that fails the test if nothing arrives.
+// newCollector is audittest.Collector with this file's failure message: read
+// fails the test if wantRecord and nothing arrives.
 func newCollector(t *testing.T) (*events.Publisher, func(wantRecord bool) string) {
 	t.Helper()
-
-	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen for the collector: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-
-	port := conn.LocalAddr().(*net.UDPAddr).Port
-
-	fwd := proxsyslog.NewForwarder(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	t.Cleanup(fwd.Close)
-	if err := fwd.Configure(proxsyslog.Config{
-		Enabled: true, Host: "127.0.0.1", Port: port, Protocol: "udp", Facility: 16,
-	}); err != nil {
-		t.Fatalf("configure forwarder: %v", err)
-	}
-
-	pub := events.NewPublisher(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	pub.SetSyslogForwarder(fwd)
+	pub, next := audittest.Collector(t)
 
 	read := func(wantRecord bool) string {
 		t.Helper()
@@ -57,20 +36,13 @@ func newCollector(t *testing.T) (*events.Publisher, func(wantRecord bool) string
 		if !wantRecord {
 			d = 700 * time.Millisecond
 		}
-		if err := conn.SetReadDeadline(time.Now().Add(d)); err != nil {
-			t.Fatalf("set read deadline: %v", err)
+		line := next(d)
+		if line == "" && wantRecord {
+			t.Fatalf("the collector received nothing.\n" +
+				"\tAuthentication events must reach the syslog forwarder — login, logout and " +
+				"password_changed are the records a SIEM is deployed to collect.")
 		}
-		buf := make([]byte, 8192)
-		n, _, err := conn.ReadFrom(buf)
-		if err != nil {
-			if wantRecord {
-				t.Fatalf("the collector received nothing: %v\n"+
-					"\tAuthentication events must reach the syslog forwarder — login, logout and "+
-					"password_changed are the records a SIEM is deployed to collect.", err)
-			}
-			return ""
-		}
-		return string(buf[:n])
+		return line
 	}
 
 	return pub, read

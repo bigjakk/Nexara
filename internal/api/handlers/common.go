@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -16,13 +15,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
-	"github.com/bigjakk/nexara/internal/pvefield"
 	"github.com/bigjakk/nexara/internal/redact"
-	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
 // AuditLog writes an audit log entry and publishes an audit_entry WS event.
@@ -86,43 +84,10 @@ func AuditLog(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clus
 // received. TestGuard_NoHandlerAuditLogWrappers enforces this.
 func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, actor uuid.UUID, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {
 	uid := actor
-	if details == nil {
-		details = json.RawMessage(`{}`)
-	}
-
-	// One decode serves three purposes: redacting secrets, injecting
-	// api_key_id, and lifting the guest identity out for the syslog
-	// forwarder. Re-marshalled only when something was actually changed, so
-	// an untouched details blob reaches the row byte-for-byte as the handler
-	// wrote it.
-	var m map[string]any
-	if err := json.Unmarshal(details, &m); err != nil {
-		m = nil
-	}
-	rewrite := redactAuditSecrets(m)
-
-	// Inject api_key_id into details for API-key-authed requests so audit
-	// rows can be attributed to the specific key, not just the user.
-	if apiKeyID, ok := c.Locals(LocalsAPIKeyID).(uuid.UUID); ok {
-		if m == nil {
-			m = map[string]any{}
-		}
-		m["api_key_id"] = apiKeyID.String()
-		rewrite = true
-	}
-	if rewrite {
-		enriched, err := json.Marshal(m)
-		if err != nil {
-			enriched = json.RawMessage(`{}`) // never the bytes a redaction was to change
-		}
-		details = enriched
-	}
-
-	var cidStr string
-	if clusterID.Valid {
-		cid, _ := uuid.FromBytes(clusterID.Bytes[:])
-		cidStr = cid.String()
-	}
+	// Redaction, the api_key_id enrichment, the row, the audit_entry event and
+	// the syslog forward are audit.WriteForKey's, the path background writers
+	// take through audit.Write, so the two cannot drift apart.
+	apiKeyID, _ := c.Locals(LocalsAPIKeyID).(uuid.UUID)
 
 	// The action has already happened by the time this runs, so a failed insert
 	// cannot fail the request — but it must not be silent either. Without this
@@ -148,14 +113,18 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 	if uid == uuid.Nil {
 		actorID = pgtype.UUID{}
 	}
-	if err := queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+	if err := audit.WriteForKey(c.Context(), queries, eventPub, db.InsertAuditLogParams{
 		ClusterID:    clusterID,
 		UserID:       actorID,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		Action:       action,
 		Details:      details,
-	}); err != nil {
+	}, apiKeyID); err != nil {
+		var cidStr string
+		if clusterID.Valid {
+			cidStr = uuid.UUID(clusterID.Bytes).String()
+		}
 		slog.Error("audit log insert failed; action performed but not recorded",
 			"user_id", uid,
 			"cluster_id", cidStr,
@@ -163,104 +132,6 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 			"resource_id", resourceID,
 			"action", action,
 			"error", err)
-	}
-
-	eventPub.ClusterEvent(c.Context(), cidStr, events.KindAuditEntry, resourceType, resourceID, action)
-
-	// Forward to syslog if configured. vmid and resource_name are promoted to
-	// first-class fields so a SIEM decoder can key a rule on the guest without
-	// re-parsing the details JSON — the blind spot that made ~73% of forwarded
-	// entries unmatchable by any guest-scoped rule.
-	if fwd := eventPub.SyslogForwarder(); fwd != nil {
-		fwd.Forward(proxsyslog.Message{
-			Timestamp:    time.Now().UTC(),
-			UserID:       uid.String(),
-			ClusterID:    cidStr,
-			ResourceType: resourceType,
-			ResourceID:   resourceID,
-			Action:       action,
-			VMID:         auditDetailString(m, "vmid"),
-			ResourceName: auditDetailString(m, "resource_name"),
-			Details:      string(details),
-		})
-	}
-}
-
-// redactAuditSecrets replaces, in decoded audit details, the secrets a request
-// carried, and reports whether it changed anything. It runs where the row, the
-// syslog copy and (through the row) the History all read details, so no caller
-// has to remember it. A fields object is how a row records the values it sent
-// Proxmox, by parameter (the guest config writes): each secret one
-// (pvefield.Secret) keeps its key, so the row still says the request set it, and
-// is recorded as "(set)", or "(cleared)" when sent empty. A URL in any string of
-// the details keeps no userinfo, query or fragment (redact.URLs).
-func redactAuditSecrets(m map[string]any) bool {
-	changed := false
-	if fields, ok := m["fields"].(map[string]any); ok {
-		for k, v := range fields {
-			if !pvefield.Secret(k) {
-				continue
-			}
-			r := redact.Set
-			if s, isString := v.(string); v == nil || isString && s == "" {
-				r = redact.Cleared
-			}
-			if v != r {
-				fields[k], changed = r, true
-			}
-		}
-	}
-	var walk func(v any) (any, bool)
-	walk = func(v any) (any, bool) {
-		moved := false
-		switch t := v.(type) {
-		case string:
-			r := redact.URLs(t)
-			return r, r != t
-		case map[string]any:
-			for k, e := range t {
-				if r, ok := walk(e); ok {
-					t[k], moved = r, true
-				}
-			}
-		case []any:
-			for i, e := range t {
-				if r, ok := walk(e); ok {
-					t[i], moved = r, true
-				}
-			}
-		}
-		return v, moved
-	}
-	if _, ok := walk(m); ok {
-		changed = true
-	}
-	return changed
-}
-
-// auditDetailString reads one detail field as a string for the syslog message.
-//
-// json.Unmarshal into map[string]any decodes every JSON number as float64, so
-// a vmid written as 121 arrives as 121.0 and would render "121.000000" under
-// %v. Integral floats are formatted without a fractional part; anything else
-// falls back to its natural rendering.
-func auditDetailString(m map[string]any, key string) string {
-	v, ok := m[key]
-	if !ok || v == nil {
-		return ""
-	}
-	switch t := v.(type) {
-	case string:
-		return t
-	case float64:
-		if t == math.Trunc(t) && math.Abs(t) < 1e15 {
-			return strconv.FormatInt(int64(t), 10)
-		}
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	case bool:
-		return strconv.FormatBool(t)
-	default:
-		return ""
 	}
 }
 
