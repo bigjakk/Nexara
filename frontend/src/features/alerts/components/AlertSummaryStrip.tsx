@@ -1,18 +1,32 @@
 import { Panel } from "@/components/page/Panel";
 import { Stat, StatStrip } from "@/components/page/StatStrip";
 import type { AlertSummary } from "@/types/api";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 /** "1 critical, 2 warning": the severities among what is firing. */
 function severities(summary: AlertSummary): string | undefined {
   const parts: string[] = [];
   if (summary.critical_firing > 0) {
-    parts.push(`${String(summary.critical_firing)} critical`);
+    parts.push(
+      i18n.t("alerts:alertSummaryStrip.criticalFiring", {
+        number: String(summary.critical_firing),
+      }),
+    );
   }
   if (summary.warning_firing > 0) {
-    parts.push(`${String(summary.warning_firing)} warning`);
+    parts.push(
+      i18n.t("alerts:alertSummaryStrip.warningFiring", {
+        number: String(summary.warning_firing),
+      }),
+    );
   }
   if (summary.info_firing > 0) {
-    parts.push(`${String(summary.info_firing)} info`);
+    parts.push(
+      i18n.t("alerts:alertSummaryStrip.infoFiring", {
+        number: String(summary.info_firing),
+      }),
+    );
   }
   return parts.length > 0 ? parts.join(", ") : undefined;
 }
@@ -26,6 +40,7 @@ export function AlertSummaryStrip({
 }: {
   summary: AlertSummary | undefined;
 }) {
+  const { t } = useTranslation("alerts");
   const firing = summary?.firing_count ?? 0;
   const pending = summary?.pending_count ?? 0;
   const acknowledged = summary?.acknowledged_count ?? 0;
@@ -33,26 +48,30 @@ export function AlertSummaryStrip({
   const count = (n: number) => (summary === undefined ? "—" : String(n));
 
   return (
-    <Panel flush bodyClassName="py-4" aria-label="Alert summary">
+    <Panel
+      flush
+      bodyClassName="py-4"
+      aria-label={t("alertSummaryStrip.alertSummary")}
+    >
       <StatStrip>
         <Stat
-          label="Firing"
+          label={t("alertSummaryStrip.firing")}
           value={count(firing)}
           sub={summary === undefined ? undefined : severities(summary)}
           tone={firing > 0 ? "bad" : "quiet"}
         />
         <Stat
-          label="Pending"
+          label={t("alertSummaryStrip.pending")}
           value={count(pending)}
           tone={pending > 0 ? "warn" : "quiet"}
         />
         <Stat
-          label="Acknowledged"
+          label={t("alertSummaryStrip.acknowledged")}
           value={count(acknowledged)}
           tone={acknowledged > 0 ? "default" : "quiet"}
         />
         <Stat
-          label="Total active"
+          label={t("alertSummaryStrip.totalActive")}
           value={count(active)}
           tone={active > 0 ? "default" : "quiet"}
         />

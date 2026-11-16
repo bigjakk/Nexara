@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,15 +32,16 @@ import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { privateAddressWarningFromError } from "@/lib/private-address";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { Field, FormSection } from "./FormParts";
+import i18n from "@/lib/i18n";
 
 const CHANNEL_TYPES: { value: ChannelType; label: string }[] = [
-  { value: "email", label: "Email (SMTP)" },
-  { value: "slack", label: "Slack" },
-  { value: "discord", label: "Discord" },
-  { value: "teams", label: "Microsoft Teams" },
-  { value: "telegram", label: "Telegram" },
-  { value: "webhook", label: "Generic webhook" },
-  { value: "pagerduty", label: "PagerDuty" },
+  { value: "email", get label() { return i18n.t("alerts:channelForm.emailSMTP"); } },
+  { value: "slack", get label() { return i18n.t("alerts:channelForm.slack"); } },
+  { value: "discord", get label() { return i18n.t("alerts:channelForm.discord"); } },
+  { value: "teams", get label() { return i18n.t("alerts:channelForm.microsoftTeams"); } },
+  { value: "telegram", get label() { return i18n.t("alerts:channelForm.telegram"); } },
+  { value: "webhook", get label() { return i18n.t("alerts:channelForm.genericWebhook"); } },
+  { value: "pagerduty", get label() { return i18n.t("alerts:channelForm.pagerDuty"); } },
 ];
 
 interface ChannelFormProps {
@@ -211,7 +212,7 @@ export function ChannelForm({
       }),
       {
         // Named: a late failure is toasted, perhaps over another page.
-        action: `Adding notification channel ${name}`,
+        action: t("channelForm.addingNotificationChannelName", { name }),
         onSuccess: () => {
           setOpen(false);
         },
@@ -228,30 +229,30 @@ export function ChannelForm({
     <DialogContent className="max-w-lg">
       <DialogHeader>
         <DialogTitle>
-          {isEdit ? "Edit channel" : "Add notification channel"}
+          {isEdit ? t("channelForm.editChannel") : t("channelForm.addNotificationChannel")}
         </DialogTitle>
         <DialogDescription>
           {isEdit
-            ? "Rename the channel or turn it off. Its stored settings stay as they are."
-            : "Where alert notifications are sent. Its settings are stored encrypted and never shown again."}
+            ? t("channelForm.renameTheChannelOrTurn")
+            : t("channelForm.whereAlertNotificationsAreSent")}
         </DialogDescription>
       </DialogHeader>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="ch-name">Name</Label>
+          <Label htmlFor="ch-name">{t("channelForm.name")}</Label>
           <Input
             id="ch-name"
             value={name}
             onChange={(e) => {
               setName(e.target.value);
             }}
-            placeholder="Production alerts"
+            placeholder={t("channelForm.productionAlerts")}
             required
           />
         </div>
 
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
-          <Field label="Channel type">
+          <Field label={t("channelForm.channelType")}>
             {(id) => (
               <Select
                 value={channelType}
@@ -280,7 +281,7 @@ export function ChannelForm({
               checked={enabled}
               onCheckedChange={setEnabled}
             />
-            <Label htmlFor={enabledId}>Enabled</Label>
+            <Label htmlFor={enabledId}>{t("channelForm.enabled")}</Label>
           </div>
         </div>
 
@@ -389,10 +390,10 @@ export function ChannelForm({
               onClose?.();
             }}
           >
-            Cancel
+            {t("channelForm.cancel")}
           </Button>
           <Button type="submit" disabled={isPending || headersError !== null}>
-            {isPending ? "Saving..." : isEdit ? "Update" : "Create"}
+            {isPending ? t("channelForm.saving") : isEdit ? t("channelForm.update") : t("channelForm.create")}
           </Button>
         </DialogFooter>
       </form>
@@ -410,7 +411,7 @@ export function ChannelForm({
       >
         <DialogTrigger asChild>
           <Button variant="outline" size="sm">
-            Edit
+            {t("channelForm.edit")}
           </Button>
         </DialogTrigger>
         {dialogContent}
@@ -429,7 +430,7 @@ export function ChannelForm({
       <DialogTrigger asChild>
         <Button variant="outline" className="gap-1.5">
           <Plus className="h-4 w-4" />
-          Add channel
+          {t("channelForm.addChannel")}
         </Button>
       </DialogTrigger>
       {dialogContent}
@@ -474,11 +475,12 @@ function EmailFields({
   subjectTemplate: string;
   setSubjectTemplate: (v: string) => void;
 }) {
+  const { t } = useTranslation("alerts");
   const tlsId = useId();
   return (
-    <FormSection title="SMTP settings">
+    <FormSection title={t("channelForm.smtpSettings")}>
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Host" className="col-span-2">
+        <Field label={t("channelForm.host")} className="col-span-2">
           {(id) => (
             <Input
               id={id}
@@ -491,7 +493,7 @@ function EmailFields({
             />
           )}
         </Field>
-        <Field label="Port">
+        <Field label={t("channelForm.port")}>
           {(id) => (
             <Input
               id={id}
@@ -505,7 +507,7 @@ function EmailFields({
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Username">
+        <Field label={t("channelForm.username")}>
           {(id) => (
             <Input
               id={id}
@@ -516,7 +518,7 @@ function EmailFields({
             />
           )}
         </Field>
-        <Field label="Password">
+        <Field label={t("channelForm.password")}>
           {(id) => (
             <Input
               id={id}
@@ -529,7 +531,7 @@ function EmailFields({
           )}
         </Field>
       </div>
-      <Field label="From">
+      <Field label={t("channelForm.from")}>
         {(id) => (
           <Input
             id={id}
@@ -542,7 +544,7 @@ function EmailFields({
           />
         )}
       </Field>
-      <Field label="To (comma-separated)">
+      <Field label={t("channelForm.toCommaSeparated")}>
         {(id) => (
           <Input
             id={id}
@@ -550,7 +552,7 @@ function EmailFields({
             onChange={(e) => {
               setTo(e.target.value);
             }}
-            placeholder="admin@example.com, ops@example.com"
+            placeholder={t("channelForm.adminExampleComOpsExample")}
             required
           />
         )}
@@ -558,27 +560,27 @@ function EmailFields({
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <Switch id={tlsId} checked={tls} onCheckedChange={setTls} />
-          <Label htmlFor={tlsId}>Use STARTTLS</Label>
+          <Label htmlFor={tlsId}>{t("channelForm.useSTARTTLS")}</Label>
         </div>
         {!tls && (
           <div className="flex items-start gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="space-y-1">
               <p className="font-medium">
-                Cleartext SMTP: local development only
+                {t("channelForm.cleartextSMTPLocalDevelopmentOnly")}
               </p>
               <p>
-                With STARTTLS off, credentials and message bodies are sent
-                unencrypted. The server will refuse cleartext sends to any host
-                that does not resolve to a loopback address (e.g.{" "}
-                <code>127.0.0.1</code>, <code>localhost</code>). Leave this on
-                for any production relay.
+                <Trans
+                  t={t}
+                  i18nKey="channelForm.withSTARTTLSOff"
+                  components={{ code: <code />, code2: <code /> }}
+                />
               </p>
             </div>
           </div>
         )}
       </div>
-      <Field label="Subject template (optional)">
+      <Field label={t("channelForm.subjectTemplateOptional")}>
         {(id) => (
           <Input
             id={id}
@@ -609,9 +611,10 @@ function SlackFields({
   username: string;
   setUsername: (v: string) => void;
 }) {
+  const { t } = useTranslation("alerts");
   return (
-    <FormSection title="Slack settings">
-      <Field label="Webhook URL">
+    <FormSection title={t("channelForm.slackSettings")}>
+      <Field label={t("channelForm.webhookURL")}>
         {(id) => (
           <Input
             id={id}
@@ -619,13 +622,13 @@ function SlackFields({
             onChange={(e) => {
               setWebhookUrl(e.target.value);
             }}
-            placeholder="https://hooks.slack.com/services/..."
+            placeholder={t("channelForm.httpsHooksSlackComServices")}
             required
           />
         )}
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Channel (optional)">
+        <Field label={t("channelForm.channelOptional")}>
           {(id) => (
             <Input
               id={id}
@@ -637,7 +640,7 @@ function SlackFields({
             />
           )}
         </Field>
-        <Field label="Username (optional)">
+        <Field label={t("channelForm.usernameOptional")}>
           {(id) => (
             <Input
               id={id}
@@ -664,9 +667,10 @@ function DiscordFields({
   username: string;
   setUsername: (v: string) => void;
 }) {
+  const { t } = useTranslation("alerts");
   return (
-    <FormSection title="Discord settings">
-      <Field label="Webhook URL">
+    <FormSection title={t("channelForm.discordSettings")}>
+      <Field label={t("channelForm.webhookURL")}>
         {(id) => (
           <Input
             id={id}
@@ -674,12 +678,12 @@ function DiscordFields({
             onChange={(e) => {
               setWebhookUrl(e.target.value);
             }}
-            placeholder="https://discord.com/api/webhooks/..."
+            placeholder={t("channelForm.httpsDiscordComApiWebhooks")}
             required
           />
         )}
       </Field>
-      <Field label="Username (optional)">
+      <Field label={t("channelForm.usernameOptional")}>
         {(id) => (
           <Input
             id={id}
@@ -701,9 +705,10 @@ function TeamsFields({
   webhookUrl: string;
   setWebhookUrl: (v: string) => void;
 }) {
+  const { t } = useTranslation("alerts");
   return (
-    <FormSection title="Microsoft Teams settings">
-      <Field label="Webhook URL">
+    <FormSection title={t("channelForm.microsoftTeamsSettings")}>
+      <Field label={t("channelForm.webhookURL")}>
         {(id) => (
           <Input
             id={id}
@@ -711,7 +716,7 @@ function TeamsFields({
             onChange={(e) => {
               setWebhookUrl(e.target.value);
             }}
-            placeholder="https://outlook.office.com/webhook/..."
+            placeholder={t("channelForm.httpsOutlookOfficeComWebhook")}
             required
           />
         )}
@@ -731,9 +736,10 @@ function TelegramFields({
   chatId: string;
   setChatId: (v: string) => void;
 }) {
+  const { t } = useTranslation("alerts");
   return (
-    <FormSection title="Telegram settings">
-      <Field label="Bot token">
+    <FormSection title={t("channelForm.telegramSettings")}>
+      <Field label={t("channelForm.botToken")}>
         {(id) => (
           <Input
             id={id}
@@ -741,12 +747,12 @@ function TelegramFields({
             onChange={(e) => {
               setBotToken(e.target.value);
             }}
-            placeholder="123456:ABC-DEF..."
+            placeholder={t("channelForm.n123456ABCDEF")}
             required
           />
         )}
       </Field>
-      <Field label="Chat ID">
+      <Field label={t("channelForm.chatID")}>
         {(id) => (
           <Input
             id={id}
@@ -784,8 +790,9 @@ function WebhookFields({
   bodyTemplate: string;
   setBodyTemplate: (v: string) => void;
 }) {
+  const { t } = useTranslation("alerts");
   return (
-    <FormSection title="Webhook settings">
+    <FormSection title={t("channelForm.webhookSettings")}>
       <div className="grid grid-cols-3 gap-3">
         <Field label="URL" className="col-span-2">
           {(id) => (
@@ -800,7 +807,7 @@ function WebhookFields({
             />
           )}
         </Field>
-        <Field label="Method">
+        <Field label={t("channelForm.method")}>
           {(id) => (
             <Select value={method} onValueChange={setMethod}>
               <SelectTrigger id={id}>
@@ -808,15 +815,15 @@ function WebhookFields({
               </SelectTrigger>
               {/* No GET: a send refuses it (webhook.go). */}
               <SelectContent>
-                <SelectItem value="POST">POST</SelectItem>
-                <SelectItem value="PUT">PUT</SelectItem>
-                <SelectItem value="PATCH">PATCH</SelectItem>
+                <SelectItem value="POST">{t("channelForm.post")}</SelectItem>
+                <SelectItem value="PUT">{t("channelForm.put")}</SelectItem>
+                <SelectItem value="PATCH">{t("channelForm.patch")}</SelectItem>
               </SelectContent>
             </Select>
           )}
         </Field>
       </div>
-      <Field label="Headers (JSON, optional)" error={headersError}>
+      <Field label={t("channelForm.headersJSONOptional")} error={headersError}>
         {(id) => (
           <Textarea
             id={id}
@@ -824,15 +831,15 @@ function WebhookFields({
             onChange={(e) => {
               setHeaders(e.target.value);
             }}
-            placeholder='{"Authorization": "Bearer xxx"}'
+            placeholder={t("channelForm.authorizationBearerXxx")}
             rows={2}
             aria-invalid={headersError !== null}
           />
         )}
       </Field>
       <Field
-        label="Body template (optional)"
-        hint="Leave empty to send full alert payload as JSON"
+        label={t("channelForm.bodyTemplateOptional")}
+        hint={t("channelForm.leaveEmptyToSendFull")}
       >
         {(id) => (
           <Textarea
@@ -857,9 +864,10 @@ function PagerDutyFields({
   routingKey: string;
   setRoutingKey: (v: string) => void;
 }) {
+  const { t } = useTranslation("alerts");
   return (
-    <FormSection title="PagerDuty settings">
-      <Field label="Integration or routing key">
+    <FormSection title={t("channelForm.pagerDutySettings")}>
+      <Field label={t("channelForm.integrationOrRoutingKey")}>
         {(id) => (
           <Input
             id={id}

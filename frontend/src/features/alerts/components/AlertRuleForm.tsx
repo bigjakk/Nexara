@@ -31,30 +31,32 @@ import { EscalationChainEditor } from "./EscalationChainEditor";
 import { UPS_METRICS } from "../lib/ups-metrics";
 import { FormSection } from "./FormParts";
 import { TemplateEditor } from "./TemplateEditor";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 /** The line of help under a field. */
 const HINT = "text-[12.5px] text-muted-foreground";
 
 const METRICS = [
-  { value: "cpu_usage", label: "CPU usage (%)" },
-  { value: "mem_percent", label: "Memory usage (%)" },
-  { value: "disk_read", label: "Disk read (bytes/s)" },
-  { value: "disk_write", label: "Disk write (bytes/s)" },
-  { value: "net_in", label: "Network in (bytes/s)" },
-  { value: "net_out", label: "Network out (bytes/s)" },
-  { value: "snapshot_age_days", label: "Snapshot age (days)" },
-  { value: "veeam_rpo_hours", label: "Veeam recovery point age (hours)" },
-  { value: "veeam_malware_status", label: "Veeam malware verdict (0-3)" },
-  { value: "veeam_repo_used_percent", label: "Veeam repository usage (%)" },
-  { value: "veeam_job_failed", label: "Veeam failed jobs (count)" },
-  { value: "pve_backup_failed", label: "Proxmox failed backups (count)" },
-  { value: "pve_task_failed", label: "Proxmox failed tasks (count)" },
-  { value: "ups_on_battery", label: "UPS on battery (count)" },
-  { value: "ups_battery_charge", label: "UPS lowest battery charge (%)" },
-  { value: "ups_runtime", label: "UPS shortest runtime (minutes)" },
-  { value: "ups_load", label: "UPS highest load (%)" },
-  { value: "ups_unreachable", label: "UPS unreachable (count)" },
-  { value: "ups_replace_battery", label: "UPS battery needs replacing (count)" },
+  { value: "cpu_usage", get label() { return i18n.t("alerts:alertRuleForm.cpuUsage"); } },
+  { value: "mem_percent", get label() { return i18n.t("alerts:alertRuleForm.memoryUsage"); } },
+  { value: "disk_read", get label() { return i18n.t("alerts:alertRuleForm.diskReadBytesS"); } },
+  { value: "disk_write", get label() { return i18n.t("alerts:alertRuleForm.diskWriteBytesS"); } },
+  { value: "net_in", get label() { return i18n.t("alerts:alertRuleForm.networkInBytesS"); } },
+  { value: "net_out", get label() { return i18n.t("alerts:alertRuleForm.networkOutBytesS"); } },
+  { value: "snapshot_age_days", get label() { return i18n.t("alerts:alertRuleForm.snapshotAgeDays"); } },
+  { value: "veeam_rpo_hours", get label() { return i18n.t("alerts:alertRuleForm.veeamRecoveryPointAgeHours"); } },
+  { value: "veeam_malware_status", get label() { return i18n.t("alerts:alertRuleForm.veeamMalwareVerdict03"); } },
+  { value: "veeam_repo_used_percent", get label() { return i18n.t("alerts:alertRuleForm.veeamRepositoryUsage"); } },
+  { value: "veeam_job_failed", get label() { return i18n.t("alerts:alertRuleForm.veeamFailedJobsCount"); } },
+  { value: "pve_backup_failed", get label() { return i18n.t("alerts:alertRuleForm.proxmoxFailedBackupsCount"); } },
+  { value: "pve_task_failed", get label() { return i18n.t("alerts:alertRuleForm.proxmoxFailedTasksCount"); } },
+  { value: "ups_on_battery", get label() { return i18n.t("alerts:alertRuleForm.upsOnBatteryCount"); } },
+  { value: "ups_battery_charge", get label() { return i18n.t("alerts:alertRuleForm.upsLowestBatteryCharge"); } },
+  { value: "ups_runtime", get label() { return i18n.t("alerts:alertRuleForm.upsShortestRuntimeMinutes"); } },
+  { value: "ups_load", get label() { return i18n.t("alerts:alertRuleForm.upsHighestLoad"); } },
+  { value: "ups_unreachable", get label() { return i18n.t("alerts:alertRuleForm.upsUnreachableCount"); } },
+  { value: "ups_replace_battery", get label() { return i18n.t("alerts:alertRuleForm.upsBatteryNeedsReplacingCount"); } },
 ];
 
 /**
@@ -199,15 +201,25 @@ function maxDurationFor(metric: string): number {
 }
 
 const SCOPE_LABELS: Record<string, string> = {
-  cluster: "Cluster",
-  node: "Node",
-  vm: "VM",
-  global: "Global (all Veeam servers)",
-  ups: "One UPS",
+  get cluster() {
+    return i18n.t("alerts:alertRuleForm.scopeCluster");
+  },
+  get node() {
+    return i18n.t("alerts:alertRuleForm.scopeNode");
+  },
+  get vm() {
+    return i18n.t("alerts:alertRuleForm.scopeVm");
+  },
+  get global() {
+    return i18n.t("alerts:alertRuleForm.scopeGlobalVeeam");
+  },
+  get ups() {
+    return i18n.t("alerts:alertRuleForm.scopeOneUps");
+  },
 };
 
 function scopeLabel(scope: string, metric: string): string {
-  if (scope === "global" && UPS_METRICS.has(metric)) return "Global (all UPS)";
+  if (scope === "global" && UPS_METRICS.has(metric)) return i18n.t("alerts:alertRuleForm.globalAllUPS");
   return SCOPE_LABELS[scope] ?? scope;
 }
 
@@ -221,6 +233,7 @@ const OPERATORS = [
 ];
 
 export function AlertRuleForm() {
+  const { t } = useTranslation("alerts");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -330,45 +343,45 @@ export function AlertRuleForm() {
       <DialogTrigger asChild>
         <Button className="gap-1.5">
           <Plus className="h-4 w-4" />
-          Create rule
+          {t("alertRuleForm.createRule")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Create alert rule</DialogTitle>
+          <DialogTitle>{t("alertRuleForm.createAlertRule")}</DialogTitle>
           <DialogDescription>
-            Raises an alert when a metric crosses its threshold and stays there.
+            {t("alertRuleForm.raisesAnAlertWhenA")}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
+            <Label htmlFor="name">{t("alertRuleForm.name")}</Label>
             <Input
               id="name"
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
               }}
-              placeholder="High CPU usage"
+              placeholder={t("alertRuleForm.highCPUUsage")}
               required
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
+            <Label htmlFor="description">{t("alertRuleForm.description")}</Label>
             <Input
               id="description"
               value={description}
               onChange={(e) => {
                 setDescription(e.target.value);
               }}
-              placeholder="Alert when CPU exceeds threshold"
+              placeholder={t("alertRuleForm.alertWhenCPUExceedsThreshold")}
             />
           </div>
 
-          <FormSection title="Condition">
+          <FormSection title={t("alertRuleForm.condition")}>
             <div className="space-y-2">
-              <Label htmlFor="metric">Metric</Label>
+              <Label htmlFor="metric">{t("alertRuleForm.metric")}</Label>
               <Select
                 value={metric}
                 onValueChange={(v) => {
@@ -429,7 +442,7 @@ export function AlertRuleForm() {
 
             <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-4">
               <div className="space-y-2">
-                <Label htmlFor="operator">Operator</Label>
+                <Label htmlFor="operator">{t("alertRuleForm.operator")}</Label>
                 <Select value={operator} onValueChange={setOperator}>
                   <SelectTrigger id="operator">
                     <SelectValue />
@@ -445,7 +458,7 @@ export function AlertRuleForm() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="threshold">Threshold</Label>
+                <Label htmlFor="threshold">{t("alertRuleForm.threshold")}</Label>
                 <Input
                   id="threshold"
                   type="number"
@@ -460,10 +473,10 @@ export function AlertRuleForm() {
             </div>
           </FormSection>
 
-          <FormSection title="Applies to">
+          <FormSection title={t("alertRuleForm.appliesTo")}>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="scope">Scope</Label>
+                <Label htmlFor="scope">{t("alertRuleForm.scope")}</Label>
                 <Select value={scopeType} onValueChange={setScopeType}>
                   <SelectTrigger id="scope">
                     <SelectValue />
@@ -480,10 +493,10 @@ export function AlertRuleForm() {
 
               {scopeType === "ups" && (
                 <div className="space-y-2">
-                  <Label htmlFor="ups">UPS</Label>
+                  <Label htmlFor="ups">{t("alertRuleForm.ups")}</Label>
                   <Select value={upsId} onValueChange={setUpsId}>
                     <SelectTrigger id="ups">
-                      <SelectValue placeholder={upsDevices.isLoading ? "Loading UPS..." : "Select UPS"} />
+                      <SelectValue placeholder={upsDevices.isLoading ? t("alertRuleForm.loadingUPS") : t("alertRuleForm.selectUPS")} />
                     </SelectTrigger>
                     <SelectContent>
                       {upsDevices.data?.map((d) => (
@@ -498,7 +511,7 @@ export function AlertRuleForm() {
 
               {!namesNoCluster && (
                 <div className="space-y-2">
-                  <Label htmlFor="cluster">Cluster</Label>
+                  <Label htmlFor="cluster">{t("alertRuleForm.cluster")}</Label>
                   <Select
                     value={clusterId}
                     onValueChange={(v) => {
@@ -509,7 +522,7 @@ export function AlertRuleForm() {
                     }}
                   >
                     <SelectTrigger id="cluster">
-                      <SelectValue placeholder="Select cluster" />
+                      <SelectValue placeholder={t("alertRuleForm.selectCluster")} />
                     </SelectTrigger>
                     <SelectContent>
                       {clusters?.map((c) => (
@@ -525,7 +538,7 @@ export function AlertRuleForm() {
 
             {scopeType === "node" && (
               <div className="space-y-2">
-                <Label htmlFor="node">Node</Label>
+                <Label htmlFor="node">{t("alertRuleForm.node")}</Label>
                 <Select
                   value={nodeId}
                   onValueChange={setNodeId}
@@ -535,10 +548,10 @@ export function AlertRuleForm() {
                     <SelectValue
                       placeholder={
                         !clusterId
-                          ? "Select a cluster first"
+                          ? t("alertRuleForm.selectAClusterFirst")
                           : nodesLoading
-                            ? "Loading nodes..."
-                            : "Select node"
+                            ? t("alertRuleForm.loadingNodes")
+                            : t("alertRuleForm.selectNode")
                       }
                     />
                   </SelectTrigger>
@@ -552,21 +565,21 @@ export function AlertRuleForm() {
                 </Select>
                 {nodesError && (
                   <p className="text-xs text-destructive">
-                    Could not load this cluster&apos;s nodes.
+                    {t("alertRuleForm.couldNotLoadThisCluster")}
                   </p>
                 )}
                 {!nodesError &&
                   !nodesLoading &&
                   clusterId &&
                   nodes?.length === 0 && (
-                    <p className={HINT}>This cluster has no nodes.</p>
+                    <p className={HINT}>{t("alertRuleForm.thisClusterHasNoNodes")}</p>
                   )}
               </div>
             )}
 
             {scopeType === "vm" && (
               <div className="space-y-2">
-                <Label htmlFor="vm-vmid">VMID</Label>
+                <Label htmlFor="vm-vmid">{t("alertRuleForm.vmid")}</Label>
                 <Input
                   id="vm-vmid"
                   type="number"
@@ -577,22 +590,20 @@ export function AlertRuleForm() {
                   }}
                   placeholder="100"
                 />
-                <p className={HINT}>Proxmox VMID of the guest to watch</p>
+                <p className={HINT}>{t("alertRuleForm.proxmoxVMIDOfTheGuest")}</p>
                 {metric === "mem_percent" && (
                   <p className={HINT}>
-                    Memory is judged on the guest&apos;s own figure: a
-                    container&apos;s always, a VM&apos;s only while its balloon
-                    driver reports it. A VM without one never fires on memory.
+                    {t("alertRuleForm.memoryIsJudgedOnThe")}
                   </p>
                 )}
               </div>
             )}
           </FormSection>
 
-          <FormSection title="Timing">
+          <FormSection title={t("alertRuleForm.timing")}>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="duration">Duration (seconds)</Label>
+                <Label htmlFor="duration">{t("alertRuleForm.durationSeconds")}</Label>
                 <Input
                   id="duration"
                   type="number"
@@ -605,13 +616,13 @@ export function AlertRuleForm() {
                 />
                 <p className={HINT}>
                   {WINDOWED_METRICS.has(metric)
-                    ? "How far back to count: 86400 covers a nightly run, up to 2592000 (30 days)"
-                    : "How long the condition must hold before the alert fires"}
+                    ? t("alertRuleForm.howFarBackToCount")
+                    : t("alertRuleForm.howLongTheConditionMust")}
                 </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="cooldown">Cooldown (seconds)</Label>
+                <Label htmlFor="cooldown">{t("alertRuleForm.cooldownSeconds")}</Label>
                 <Input
                   id="cooldown"
                   type="number"
@@ -621,23 +632,23 @@ export function AlertRuleForm() {
                   }}
                 />
                 <p className={HINT}>
-                  No new alert for this long after the last one resolved
+                  {t("alertRuleForm.noNewAlertForThis")}
                 </p>
               </div>
             </div>
           </FormSection>
 
-          <FormSection title="Notification">
+          <FormSection title={t("alertRuleForm.notification")}>
             <div className="space-y-2 sm:max-w-[calc(50%-0.5rem)]">
-              <Label htmlFor="severity">Severity</Label>
+              <Label htmlFor="severity">{t("alertRuleForm.severity")}</Label>
               <Select value={severity} onValueChange={setSeverity}>
                 <SelectTrigger id="severity">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="critical">Critical</SelectItem>
-                  <SelectItem value="warning">Warning</SelectItem>
-                  <SelectItem value="info">Info</SelectItem>
+                  <SelectItem value="critical">{t("alertRuleForm.critical")}</SelectItem>
+                  <SelectItem value="warning">{t("alertRuleForm.warning")}</SelectItem>
+                  <SelectItem value="info">{t("alertRuleForm.info")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -661,13 +672,13 @@ export function AlertRuleForm() {
                 setOpen(false);
               }}
             >
-              Cancel
+              {t("alertRuleForm.cancel")}
             </Button>
             <Button
               type="submit"
               disabled={createMutation.isPending || !scopeReady}
             >
-              {createMutation.isPending ? "Creating..." : "Create rule"}
+              {createMutation.isPending ? t("alertRuleForm.creating") : t("alertRuleForm.createRule")}
             </Button>
           </DialogFooter>
         </form>

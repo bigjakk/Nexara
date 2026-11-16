@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -45,14 +46,25 @@ const STATE_VARIANTS: Record<DLQState, BadgeVariant> = {
 };
 
 const STATE_LABELS: Record<DLQState, string> = {
-  pending: "Failed",
-  rate_limited: "Rate-limited",
-  retrying: "Retrying",
-  resolved: "Resolved",
-  dismissed: "Dismissed",
+  get pending() {
+    return i18n.t("alerts:notificationDLQTable.statePending");
+  },
+  get rate_limited() {
+    return i18n.t("alerts:notificationDLQTable.stateRateLimited");
+  },
+  get retrying() {
+    return i18n.t("alerts:notificationDLQTable.stateRetrying");
+  },
+  get resolved() {
+    return i18n.t("alerts:notificationDLQTable.stateResolved");
+  },
+  get dismissed() {
+    return i18n.t("alerts:notificationDLQTable.stateDismissed");
+  },
 };
 
 export function NotificationDLQTable() {
+  const { t } = useTranslation("alerts");
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "notification_dlq");
   const [stateFilter, setStateFilter] = useState<DLQState | "">("");
@@ -79,7 +91,9 @@ export function NotificationDLQTable() {
   const handleRetry = (entry: NotificationDLQEntry) => {
     setRetryFeedback((prev) => ({ ...prev, [entry.id]: undefined }));
     settle(retry.mutateAsync(entry.id), {
-      action: `Retrying the notification to ${entry.channel_name}`,
+      action: t("notificationDLQTable.retryingTheNotificationToChannelName", {
+        channelName: entry.channel_name,
+      }),
       onSuccess: (resp) => {
         setRetryFeedback((prev) => ({
           ...prev,
@@ -91,7 +105,10 @@ export function NotificationDLQTable() {
           ...prev,
           [entry.id]: {
             success: false,
-            message: err instanceof Error ? err.message : "Retry failed",
+            message:
+              err instanceof Error
+                ? err.message
+                : t("notificationDLQTable.retryFailed"),
           },
         }));
       },
@@ -124,31 +141,31 @@ export function NotificationDLQTable() {
       {/* The counts are the filter: the one pressed is what the table lists. */}
       <StatStrip>
         <Stat
-          label="Failed"
+          label={t("notificationDLQTable.failed")}
           value={count(counts.pending)}
           tone={counts.pending > 0 ? "bad" : "quiet"}
           {...pick("pending")}
         />
         <Stat
-          label="Rate-limited"
+          label={t("notificationDLQTable.rateLimited")}
           value={count(counts.rate_limited)}
           tone={counts.rate_limited > 0 ? "warn" : "quiet"}
           {...pick("rate_limited")}
         />
         <Stat
-          label="Retrying"
+          label={t("notificationDLQTable.retrying")}
           value={count(counts.retrying)}
           tone={counts.retrying > 0 ? "default" : "quiet"}
           {...pick("retrying")}
         />
         <Stat
-          label="Resolved"
+          label={t("notificationDLQTable.resolved")}
           value={count(counts.resolved)}
           tone={counts.resolved > 0 ? "default" : "quiet"}
           {...pick("resolved")}
         />
         <Stat
-          label="All"
+          label={t("notificationDLQTable.all")}
           value={count(all)}
           tone={all > 0 ? "default" : "quiet"}
           {...pick("")}
@@ -162,21 +179,26 @@ export function NotificationDLQTable() {
           </div>
         ) : !entries?.length ? (
           <p className="px-[18px] py-10 text-center text-sm text-muted-foreground">
-            No dead-letter entries
-            {stateFilter ? ` in state "${STATE_LABELS[stateFilter]}"` : ""}.
+            {stateFilter
+              ? t("notificationDLQTable.noDeadLetterEntriesInState", {
+                  state: STATE_LABELS[stateFilter],
+                })
+              : t("notificationDLQTable.noDeadLetterEntries")}
           </p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8" />
-                <TableHead>Channel</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>Attempts</TableHead>
-                <TableHead>Last error</TableHead>
-                <TableHead>Age</TableHead>
+                <TableHead>{t("notificationDLQTable.channel")}</TableHead>
+                <TableHead>{t("notificationDLQTable.state")}</TableHead>
+                <TableHead>{t("notificationDLQTable.attempts")}</TableHead>
+                <TableHead>{t("notificationDLQTable.lastError")}</TableHead>
+                <TableHead>{t("notificationDLQTable.age")}</TableHead>
                 {canManage && (
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-right">
+                    {t("notificationDLQTable.actions")}
+                  </TableHead>
                 )}
               </TableRow>
             </TableHeader>
@@ -216,11 +238,12 @@ export function NotificationDLQTable() {
           del.mutate(entry.id);
         }}
         title={(entry) =>
-          `Delete the failed notification to ${entry.channel_name} from ${formatExactDateTime(entry.created_at, "—", "relative")}?`
+          t("notificationDLQTable.deleteTheFailedNotificationTo", {
+            channelName: entry.channel_name,
+            createdAt: formatExactDateTime(entry.created_at, "—", "relative"),
+          })
         }
-        description={() =>
-          "The entry, its stored payload and its last error are deleted, so this notification can no longer be retried or inspected. This cannot be undone."
-        }
+        description={() => t("notificationDLQTable.theEntryItsStoredPayload")}
       />
     </Panel>
   );
@@ -308,15 +331,25 @@ function DLQRow({
                     disabled={retryPending}
                   >
                     <RefreshCw className="h-3 w-3" />
-                    Retry
+                    {t("notificationDLQTable.retry")}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={onDismiss}>
-                    Dismiss
+                    {t("notificationDLQTable.dismiss")}
                   </Button>
                 </>
               )}
               <Button
-                aria-label={`Delete failed notification to ${entry.channel_name} from ${formatExactDateTime(entry.created_at, "—", "relative")}`}
+                aria-label={t(
+                  "notificationDLQTable.deleteFailedNotificationToChannelName",
+                  {
+                    channelName: entry.channel_name,
+                    createdAt: formatExactDateTime(
+                      entry.created_at,
+                      "—",
+                      "relative",
+                    ),
+                  },
+                )}
                 variant="ghost"
                 size="sm"
                 className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
@@ -331,34 +364,53 @@ function DLQRow({
       {expanded && (
         <ExpandedDetailRow colSpan={canManage ? 7 : 6}>
           <DefGrid className="grid-cols-[repeat(auto-fit,minmax(min(14rem,100%),1fr))]">
-            <DetailField label="Failure kind" variant="mono">
+            <DetailField
+              label={t("notificationDLQTable.failureKind")}
+              variant="mono"
+            >
               {entry.failure_kind}
             </DetailField>
-            <DetailField label="Created" variant="mono">
+            <DetailField
+              label={t("notificationDLQTable.created")}
+              variant="mono"
+            >
               <DateTime value={entry.created_at} exact auto="as-sent" />
             </DetailField>
-            <DetailField label="Last update" variant="mono">
+            <DetailField
+              label={t("notificationDLQTable.lastUpdate")}
+              variant="mono"
+            >
               <DateTime value={entry.updated_at} exact auto="as-sent" />
             </DetailField>
             {entry.alert_id && (
-              <DetailField label="Alert ID" variant="mono">
+              <DetailField
+                label={t("notificationDLQTable.alertID")}
+                variant="mono"
+              >
                 {entry.alert_id}
               </DetailField>
             )}
             {entry.rule_id && (
-              <DetailField label="Rule ID" variant="mono">
+              <DetailField
+                label={t("notificationDLQTable.ruleID")}
+                variant="mono"
+              >
                 {entry.rule_id}
               </DetailField>
             )}
           </DefGrid>
           <div className="text-xs">
-            <div className="mb-1 text-muted-foreground">Last error</div>
+            <div className="mb-1 text-muted-foreground">
+              {t("notificationDLQTable.lastError")}
+            </div>
             <pre className="whitespace-pre-wrap rounded-md bg-background p-2.5">
-              {entry.last_error || "(empty)"}
+              {entry.last_error || t("notificationDLQTable.empty")}
             </pre>
           </div>
           <div className="text-xs">
-            <div className="mb-1 text-muted-foreground">Stored payload</div>
+            <div className="mb-1 text-muted-foreground">
+              {t("notificationDLQTable.storedPayload")}
+            </div>
             {entry.payload === null ? (
               <p className="text-muted-foreground">{t("dlqPayloadHidden")}</p>
             ) : (

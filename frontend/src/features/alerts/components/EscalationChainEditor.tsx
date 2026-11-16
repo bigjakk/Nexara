@@ -11,6 +11,7 @@ import {
 import { Plus, Trash2 } from "lucide-react";
 import { useNotificationChannels } from "../api/alert-queries";
 import type { EscalationStep } from "@/types/api";
+import { useTranslation } from "react-i18next";
 
 interface EscalationChainEditorProps {
   steps: EscalationStep[];
@@ -21,6 +22,7 @@ export function EscalationChainEditor({
   steps,
   onChange,
 }: EscalationChainEditorProps) {
+  const { t } = useTranslation("alerts");
   const { data: channels } = useNotificationChannels();
   const labelId = useId();
 
@@ -47,11 +49,11 @@ export function EscalationChainEditor({
   return (
     <div role="group" aria-labelledby={labelId} className="space-y-2.5">
       <div id={labelId} className="text-sm font-medium leading-none">
-        Escalation chain
+        {t("escalationChainEditor.escalationChain")}
       </div>
       {steps.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          No escalation steps. Add one to send notifications when alerts fire.
+          {t("escalationChainEditor.noEscalationStepsAddOne")}
         </p>
       )}
       {steps.map((step, index) => (
@@ -67,9 +69,13 @@ export function EscalationChainEditor({
           >
             <SelectTrigger
               className="min-w-0 flex-[1_1_10rem]"
-              aria-label={`Channel for step ${String(index + 1)}`}
+              aria-label={t("escalationChainEditor.channelForStepIndex", {
+                index: String(index + 1),
+              })}
             >
-              <SelectValue placeholder="Select channel" />
+              <SelectValue
+                placeholder={t("escalationChainEditor.selectChannel")}
+              />
             </SelectTrigger>
             <SelectContent>
               {channels?.map((ch) => (
@@ -84,18 +90,22 @@ export function EscalationChainEditor({
               type="number"
               min="0"
               className="w-20"
-              aria-label={`Delay in minutes for step ${String(index + 1)}`}
+              aria-label={t("escalationChainEditor.delayInMinutesForStep", {
+                index: String(index + 1),
+              })}
               value={step.delay_minutes}
               onChange={(e) => {
                 updateStep(index, "delay_minutes", Number(e.target.value));
               }}
             />
             <span className="whitespace-nowrap text-[12.5px] text-muted-foreground">
-              min delay
+              {t("escalationChainEditor.minDelay")}
             </span>
           </div>
           <Button
-            aria-label={`Remove escalation step ${String(index + 1)}`}
+            aria-label={t("escalationChainEditor.removeEscalationStepIndex", {
+              index: String(index + 1),
+            })}
             type="button"
             variant="ghost"
             size="sm"
@@ -116,7 +126,7 @@ export function EscalationChainEditor({
         onClick={addStep}
       >
         <Plus className="h-3 w-3" />
-        Add step
+        {t("escalationChainEditor.addStep")}
       </Button>
     </div>
   );

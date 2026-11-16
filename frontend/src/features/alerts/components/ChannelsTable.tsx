@@ -25,18 +25,35 @@ import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { cn } from "@/lib/utils";
 import type { ChannelType, NotificationChannel } from "@/types/api";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 const CHANNEL_TYPE_LABELS: Record<ChannelType, string> = {
-  email: "Email",
-  slack: "Slack",
-  discord: "Discord",
-  teams: "Teams",
-  telegram: "Telegram",
-  webhook: "Webhook",
-  pagerduty: "PagerDuty",
+  get email() {
+    return i18n.t("alerts:channelsTable.typeEmail");
+  },
+  get slack() {
+    return i18n.t("alerts:channelsTable.typeSlack");
+  },
+  get discord() {
+    return i18n.t("alerts:channelsTable.typeDiscord");
+  },
+  get teams() {
+    return i18n.t("alerts:channelsTable.typeTeams");
+  },
+  get telegram() {
+    return i18n.t("alerts:channelsTable.typeTelegram");
+  },
+  get webhook() {
+    return i18n.t("alerts:channelsTable.typeWebhook");
+  },
+  get pagerduty() {
+    return i18n.t("alerts:channelsTable.typePagerduty");
+  },
 };
 
 export function ChannelsTable() {
+  const { t } = useTranslation("alerts");
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "notification_channel");
   const channelsQuery = useNotificationChannels();
@@ -56,7 +73,7 @@ export function ChannelsTable() {
     setTestResults((prev) => ({ ...prev, [id]: undefined }));
     const name = channels?.find((ch) => ch.id === id)?.name ?? id;
     settle(testMutation.mutateAsync(id), {
-      action: `Testing the channel "${name}"`,
+      action: t("channelsTable.testingTheChannelName", { name }),
       onSuccess: (data) => {
         setTestResults((prev) => ({
           ...prev,
@@ -68,7 +85,10 @@ export function ChannelsTable() {
           ...prev,
           [id]: {
             success: false,
-            message: err instanceof Error ? err.message : "Test failed",
+            message:
+              err instanceof Error
+                ? err.message
+                : t("channelsTable.testFailed"),
           },
         }));
       },
@@ -93,8 +113,8 @@ export function ChannelsTable() {
         <Panel>
           <QueryStateNotice
             query={channelsQuery}
-            subject="notification channels"
-            empty="No notification channels."
+            subject={t("channelsTable.notificationChannels")}
+            empty={t("channelsTable.noNotificationChannels")}
           />
         </Panel>
       );
@@ -102,8 +122,12 @@ export function ChannelsTable() {
     return (
       <EmptyState
         icon={Send}
-        title="No notification channels"
-        description={`Alerts are raised but sent nowhere.${canManage ? " Add a channel to be notified by email, chat or webhook." : ""}`}
+        title={t("channelsTable.noNotificationChannels2")}
+        description={
+          canManage
+            ? t("channelsTable.alertsSentNowhereAdd")
+            : t("channelsTable.alertsSentNowhere")
+        }
       />
     );
   }
@@ -113,16 +137,23 @@ export function ChannelsTable() {
   return (
     <Panel
       flush
-      aside={`${String(channels.length)} ${channels.length === 1 ? "channel" : "channels"}, ${String(enabledCount)} enabled`}
+      aside={t("channelsTable.channelsEnabled", {
+        count: channels.length,
+        enabled: String(enabledCount),
+      })}
     >
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Created</TableHead>
-            {canManage && <TableHead className="text-right">Actions</TableHead>}
+            <TableHead>{t("channelsTable.name")}</TableHead>
+            <TableHead>{t("channelsTable.type")}</TableHead>
+            <TableHead>{t("channelsTable.status")}</TableHead>
+            <TableHead>{t("channelsTable.created")}</TableHead>
+            {canManage && (
+              <TableHead className="text-right">
+                {t("channelsTable.actions")}
+              </TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -132,7 +163,9 @@ export function ChannelsTable() {
               <TableCell>{CHANNEL_TYPE_LABELS[ch.channel_type]}</TableCell>
               <TableCell>
                 <Badge variant={ch.enabled ? "healthy" : "secondary"}>
-                  {ch.enabled ? "Enabled" : "Disabled"}
+                  {ch.enabled
+                    ? t("channelsTable.enabled")
+                    : t("channelsTable.disabled")}
                 </Badge>
                 {testResults[ch.id] != null && (
                   <span
@@ -163,7 +196,7 @@ export function ChannelsTable() {
                       disabled={testMutation.isPending}
                     >
                       <Play className="h-3 w-3" />
-                      Test
+                      {t("channelsTable.test")}
                     </Button>
                     <ChannelForm
                       editId={ch.id}
@@ -172,7 +205,9 @@ export function ChannelsTable() {
                       editEnabled={ch.enabled}
                     />
                     <Button
-                      aria-label={`Delete ${ch.name}`}
+                      aria-label={t("channelsTable.deleteName", {
+                        name: ch.name,
+                      })}
                       variant="ghost"
                       size="sm"
                       className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
@@ -198,7 +233,9 @@ export function ChannelsTable() {
         onConfirm={(ch) => {
           deleteMutation.mutate(ch.id);
         }}
-        title={(ch) => `Delete notification channel ${ch.name}?`}
+        title={(ch) =>
+          t("channelsTable.deleteNotificationChannelName", { name: ch.name })
+        }
         // What references a channel (migrations): alert rules only through
         // their escalation_chain JSONB, which has no foreign key, so the step
         // stays and notifications.Engine.dispatchToChannel logs "channel not
@@ -208,9 +245,7 @@ export function ChannelsTable() {
         // rolling_update_jobs.notify_channel_id (000031) are SET NULL; so is
         // notification_dlq.channel_id (000053), and ReplayDLQ then refuses
         // with "channel deleted; cannot replay".
-        description={() =>
-          "Its stored settings are deleted and cannot be recovered. Alert rules whose escalation chain uses this channel keep that step, but nothing is sent through it any more. It is removed from CVE notification settings, report schedules and rolling-update jobs that notify through it are left with no channel, and its failed notifications can no longer be retried."
-        }
+        description={() => t("channelsTable.itsStoredSettingsAreDeleted")}
       />
     </Panel>
   );

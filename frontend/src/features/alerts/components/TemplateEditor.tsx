@@ -1,6 +1,7 @@
 import { useId, useRef } from "react";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useTranslation } from "react-i18next";
 
 const TEMPLATE_VARS = [
   "{{.RuleName}}",
@@ -27,8 +28,10 @@ interface TemplateEditorProps {
 export function TemplateEditor({
   value,
   onChange,
-  label = "Message template (optional)",
+  label,
 }: TemplateEditorProps) {
+  const { t } = useTranslation("alerts");
+  const shownLabel = label ?? t("templateEditor.messageTemplateOptional");
   const id = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -54,7 +57,7 @@ export function TemplateEditor({
 
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}>{shownLabel}</Label>
       <Textarea
         id={id}
         ref={textareaRef}
@@ -62,12 +65,12 @@ export function TemplateEditor({
         onChange={(e) => {
           onChange(e.target.value);
         }}
-        placeholder="Custom notification message. Pick a variable below to insert it."
+        placeholder={t("templateEditor.customNotificationMessagePickA")}
         rows={3}
       />
       <div
         role="group"
-        aria-label="Insert a variable"
+        aria-label={t("templateEditor.insertAVariable")}
         className="flex flex-wrap gap-1"
       >
         {TEMPLATE_VARS.map((v) => (
@@ -84,7 +87,7 @@ export function TemplateEditor({
         ))}
       </div>
       <p className="text-[12.5px] text-muted-foreground">
-        Uses Go template syntax. Leave empty for the default message.
+        {t("templateEditor.usesGoTemplateSyntaxLeave")}
       </p>
     </div>
   );

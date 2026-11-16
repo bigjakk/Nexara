@@ -29,8 +29,10 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import type { AlertInstance } from "@/types/api";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
 
 export function AlertsTable() {
+  const { t } = useTranslation("alerts");
   const [stateFilter, setStateFilter] = useState<string>("");
   const [severityFilter, setSeverityFilter] = useState<string>("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -59,32 +61,52 @@ export function AlertsTable() {
       aside={
         alerts === undefined || alerts.length === 0
           ? undefined
-          : `${String(alerts.length)} ${alerts.length === 1 ? "alert" : "alerts"}${filtered ? " match" : ""}`
+          : filtered
+            ? t("alertsTable.alertsMatch", { count: alerts.length })
+            : t("alertsTable.alertsCount", { count: alerts.length })
       }
       actions={
         <>
           <Select value={stateFilter} onValueChange={setStateFilter}>
-            <SelectTrigger className="h-8 w-40" aria-label="Filter by state">
-              <SelectValue placeholder="All states" />
+            <SelectTrigger
+              className="h-8 w-40"
+              aria-label={t("alertsTable.filterByState")}
+            >
+              <SelectValue placeholder={t("alertsTable.allStates")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All states</SelectItem>
-              <SelectItem value="firing">Firing</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="acknowledged">Acknowledged</SelectItem>
-              <SelectItem value="resolved">Resolved</SelectItem>
+              <SelectItem value="all">{t("alertsTable.allStates")}</SelectItem>
+              <SelectItem value="firing">{t("alertsTable.firing")}</SelectItem>
+              <SelectItem value="pending">
+                {t("alertsTable.pending")}
+              </SelectItem>
+              <SelectItem value="acknowledged">
+                {t("alertsTable.acknowledged")}
+              </SelectItem>
+              <SelectItem value="resolved">
+                {t("alertsTable.resolved")}
+              </SelectItem>
             </SelectContent>
           </Select>
 
           <Select value={severityFilter} onValueChange={setSeverityFilter}>
-            <SelectTrigger className="h-8 w-40" aria-label="Filter by severity">
-              <SelectValue placeholder="All severities" />
+            <SelectTrigger
+              className="h-8 w-40"
+              aria-label={t("alertsTable.filterBySeverity")}
+            >
+              <SelectValue placeholder={t("alertsTable.allSeverities")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All severities</SelectItem>
-              <SelectItem value="critical">Critical</SelectItem>
-              <SelectItem value="warning">Warning</SelectItem>
-              <SelectItem value="info">Info</SelectItem>
+              <SelectItem value="all">
+                {t("alertsTable.allSeverities")}
+              </SelectItem>
+              <SelectItem value="critical">
+                {t("alertsTable.critical")}
+              </SelectItem>
+              <SelectItem value="warning">
+                {t("alertsTable.warning")}
+              </SelectItem>
+              <SelectItem value="info">{t("alertsTable.info")}</SelectItem>
             </SelectContent>
           </Select>
         </>
@@ -94,13 +116,15 @@ export function AlertsTable() {
         <TableHeader>
           <TableRow>
             <TableHead className="w-8" />
-            <TableHead>State</TableHead>
-            <TableHead>Severity</TableHead>
-            <TableHead>Resource</TableHead>
-            <TableHead>Metric</TableHead>
-            <TableHead>Message</TableHead>
-            <TableHead>Time</TableHead>
-            {canAcknowledge && <TableHead>Actions</TableHead>}
+            <TableHead>{t("alertsTable.state")}</TableHead>
+            <TableHead>{t("alertsTable.severity")}</TableHead>
+            <TableHead>{t("alertsTable.resource")}</TableHead>
+            <TableHead>{t("alertsTable.metric")}</TableHead>
+            <TableHead>{t("alertsTable.message")}</TableHead>
+            <TableHead>{t("alertsTable.time")}</TableHead>
+            {canAcknowledge && (
+              <TableHead>{t("alertsTable.actions")}</TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -110,7 +134,7 @@ export function AlertsTable() {
                 colSpan={canAcknowledge ? 8 : 7}
                 className="py-8 text-center text-muted-foreground"
               >
-                Loading...
+                {t("alertsTable.loading")}
               </TableCell>
             </TableRow>
           )}
@@ -120,7 +144,7 @@ export function AlertsTable() {
                 colSpan={canAcknowledge ? 8 : 7}
                 className="py-8 text-center text-muted-foreground"
               >
-                No alerts found
+                {t("alertsTable.noAlertsFound")}
               </TableCell>
             </TableRow>
           )}
@@ -165,6 +189,7 @@ export function AlertRow({
   onResolve: () => void;
   formatDate: (s?: string) => ReactNode;
 }) {
+  const { t } = useTranslation("alerts");
   return (
     <>
       <TableRow className="cursor-pointer" onClick={onToggle}>
@@ -200,12 +225,12 @@ export function AlertRow({
             <div className="flex gap-1">
               {alert.state === "firing" && (
                 <Button variant="outline" size="sm" onClick={onAcknowledge}>
-                  Acknowledge
+                  {t("alertsTable.acknowledge")}
                 </Button>
               )}
               {(alert.state === "firing" || alert.state === "acknowledged") && (
                 <Button variant="ghost" size="sm" onClick={onResolve}>
-                  Resolve
+                  {t("alertsTable.resolve")}
                 </Button>
               )}
             </div>
@@ -216,37 +241,37 @@ export function AlertRow({
       {expanded && (
         <ExpandedDetailRow colSpan={canAcknowledge ? 8 : 7}>
           <DefGrid>
-            <DetailField label="Current value">
+            <DetailField label={t("alertsTable.currentValue")}>
               {alert.current_value.toFixed(2)}
             </DetailField>
-            <DetailField label="Threshold">
+            <DetailField label={t("alertsTable.threshold")}>
               {alert.threshold.toFixed(2)}
             </DetailField>
-            <DetailField label="Escalation level">
+            <DetailField label={t("alertsTable.escalationLevel")}>
               {alert.escalation_level}
             </DetailField>
-            <DetailField label="Pending at">
+            <DetailField label={t("alertsTable.pendingAt")}>
               {formatDate(alert.pending_at)}
             </DetailField>
-            <DetailField label="Fired at">
+            <DetailField label={t("alertsTable.firedAt")}>
               {formatDate(alert.fired_at)}
             </DetailField>
-            <DetailField label="Acknowledged at">
+            <DetailField label={t("alertsTable.acknowledgedAt")}>
               {formatDate(alert.acknowledged_at)}
             </DetailField>
-            <DetailField label="Resolved at">
+            <DetailField label={t("alertsTable.resolvedAt")}>
               {formatDate(alert.resolved_at)}
             </DetailField>
           </DefGrid>
           <DefGrid className="grid-cols-[repeat(auto-fit,minmax(min(19rem,100%),1fr))]">
-            <DetailField label="Alert ID" variant="mono">
+            <DetailField label={t("alertsTable.alertID")} variant="mono">
               <span className="text-xs">{alert.id}</span>
             </DetailField>
-            <DetailField label="Rule ID" variant="mono">
+            <DetailField label={t("alertsTable.ruleID")} variant="mono">
               <span className="text-xs">{alert.rule_id}</span>
             </DetailField>
             {alert.cluster_id && (
-              <DetailField label="Cluster" variant="mono">
+              <DetailField label={t("alertsTable.cluster")} variant="mono">
                 <span className="text-xs">{alert.cluster_id}</span>
               </DetailField>
             )}

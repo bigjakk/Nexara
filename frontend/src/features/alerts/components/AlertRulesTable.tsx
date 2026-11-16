@@ -22,8 +22,10 @@ import type { AlertRule } from "@/types/api";
 import { useUpsDevices } from "@/features/power/api/ups-queries";
 import { usePermissions } from "@/hooks/usePermissions";
 import { UPS_METRICS } from "../lib/ups-metrics";
+import { useTranslation, Trans } from "react-i18next";
 
 export function AlertRulesTable() {
+  const { t } = useTranslation("alerts");
   const { data: rules, isLoading } = useAlertRules();
   const updateMutation = useUpdateAlertRule();
   const deleteMutation = useDeleteAlertRule();
@@ -57,22 +59,25 @@ export function AlertRulesTable() {
       aside={
         rules === undefined || rules.length === 0
           ? undefined
-          : `${String(rules.length)} ${rules.length === 1 ? "rule" : "rules"}, ${String(enabledCount)} enabled`
+          : t("alertRulesTable.rulesEnabled", {
+              count: rules.length,
+              enabled: String(enabledCount),
+            })
       }
     >
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Severity</TableHead>
-            <TableHead>Metric</TableHead>
-            <TableHead>Condition</TableHead>
-            <TableHead>Scope</TableHead>
-            <TableHead>Duration</TableHead>
-            <TableHead>Enabled</TableHead>
+            <TableHead>{t("alertRulesTable.name")}</TableHead>
+            <TableHead>{t("alertRulesTable.severity")}</TableHead>
+            <TableHead>{t("alertRulesTable.metric")}</TableHead>
+            <TableHead>{t("alertRulesTable.condition")}</TableHead>
+            <TableHead>{t("alertRulesTable.scope")}</TableHead>
+            <TableHead>{t("alertRulesTable.duration")}</TableHead>
+            <TableHead>{t("alertRulesTable.enabled")}</TableHead>
             {canManage && (
               <TableHead className="w-12">
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t("alertRulesTable.actions")}</span>
               </TableHead>
             )}
           </TableRow>
@@ -84,7 +89,7 @@ export function AlertRulesTable() {
                 colSpan={canManage ? 8 : 7}
                 className="py-8 text-center text-muted-foreground"
               >
-                Loading...
+                {t("alertRulesTable.loading")}
               </TableCell>
             </TableRow>
           )}
@@ -94,7 +99,7 @@ export function AlertRulesTable() {
                 colSpan={canManage ? 8 : 7}
                 className="py-8 text-center text-muted-foreground"
               >
-                No alert rules configured
+                {t("alertRulesTable.noAlertRulesConfigured")}
               </TableCell>
             </TableRow>
           )}
@@ -122,7 +127,12 @@ export function AlertRulesTable() {
               </TableCell>
               {rule.scope_type === "ups" ? (
                 <TableCell>
-                  UPS <span className="font-mono">{upsName(rule.ups_id)}</span>
+                  <Trans
+                    t={t}
+                    i18nKey="alertRulesTable.upsSpanUpsIdSpan"
+                    values={{ upsId: upsName(rule.ups_id) }}
+                    components={{ span: <span className="font-mono" /> }}
+                  />
                 </TableCell>
               ) : (
                 <TableCell className="capitalize">{rule.scope_type}</TableCell>
@@ -135,9 +145,9 @@ export function AlertRulesTable() {
               <TableCell>
                 {canManage && enableRefused(rule) ? (
                   <div>
-                    <span>No</span>
+                    <span>{t("alertRulesTable.no")}</span>
                     <div className="text-[12.5px] text-muted-foreground">
-                      Enabling it takes view:ups
+                      {t("alertRulesTable.enablingItTakesViewUps")}
                     </div>
                   </div>
                 ) : canManage ? (
@@ -145,7 +155,11 @@ export function AlertRulesTable() {
                     variant="ghost"
                     size="sm"
                     className="h-8 px-2"
-                    aria-label={rule.enabled ? "Disable rule" : "Enable rule"}
+                    aria-label={
+                      rule.enabled
+                        ? t("alertRulesTable.disableRule")
+                        : t("alertRulesTable.enableRule")
+                    }
                     onClick={() => {
                       toggleEnabled(rule.id, rule.enabled);
                     }}
@@ -158,7 +172,11 @@ export function AlertRulesTable() {
                     )}
                   </Button>
                 ) : (
-                  <span>{rule.enabled ? "Yes" : "No"}</span>
+                  <span>
+                    {rule.enabled
+                      ? t("alertRulesTable.yes")
+                      : t("alertRulesTable.no")}
+                  </span>
                 )}
               </TableCell>
               {canManage && (
@@ -167,7 +185,7 @@ export function AlertRulesTable() {
                     variant="ghost"
                     size="sm"
                     className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
-                    aria-label="Delete rule"
+                    aria-label={t("alertRulesTable.deleteRule")}
                     onClick={() => {
                       setPendingDelete(rule);
                     }}
@@ -189,12 +207,12 @@ export function AlertRulesTable() {
         onConfirm={(rule) => {
           deleteMutation.mutate(rule.id);
         }}
-        title={(rule) => `Delete alert rule ${rule.name}?`}
+        title={(rule) =>
+          t("alertRulesTable.deleteAlertRuleName", { name: rule.name })
+        }
         // alert_history.rule_id is ON DELETE CASCADE (migration 000022), so
         // the rule's alert history goes with it.
-        description={() =>
-          "The rule is no longer evaluated, and every alert it has raised — firing, acknowledged and resolved — is deleted with it. This cannot be undone."
-        }
+        description={() => t("alertRulesTable.theRuleIsNoLonger")}
       />
     </Panel>
   );
