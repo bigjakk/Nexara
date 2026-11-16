@@ -189,7 +189,7 @@ func TestClusterReadsDatastore(t *testing.T) {
 				srv.ClusterID = pgtype.UUID{Bytes: tt.attached, Valid: true}
 			}
 			others := []db.PbsServer{srv, pbs02}
-			if got := clusterReadsDatastore([]proxmox.StorageConfig{tt.cfg}, here, srv, others, "datastore01"); got != tt.want {
+			if got := clusterReadsDatastore(pbsStoragesOf([]proxmox.StorageConfig{tt.cfg}), here, srv, others, "datastore01"); got != tt.want {
 				t.Errorf("clusterReadsDatastore = %v, want %v", got, tt.want)
 			}
 		})

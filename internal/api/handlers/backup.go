@@ -1082,14 +1082,16 @@ func (h *BackupHandler) ListClusterSnapshotsByBackupID(c fiber.Ctx, p *apischema
 	// remembered data, so the response says so and the panel offers no delete
 	// or restore on them.
 	ctx, cancel := h.readContext(c)
-	cfgs, err := client.ListStorageConfigs(ctx)
+	live, err := client.ListStorageConfigs(ctx)
 	cancel()
 	storageUnread := err != nil
+	var cfgs []pbsStorage
 	if storageUnread {
 		slog.Warn("guest backups: could not read the cluster's storages; filtering by the last reading",
 			"cluster_id", clusterID, "error", err)
 		cfgs = h.lastStorages.get(clusterID)
 	} else {
+		cfgs = pbsStoragesOf(live)
 		h.lastStorages.put(clusterID, cfgs)
 	}
 
@@ -1120,25 +1122,26 @@ type guestSnapshotList struct {
 // install has far fewer clusters than this.
 const maxRememberedStorages = 256
 
-// storageMemory is the last storage list read from each cluster, for the
-// guest Backups tab to filter by when a live read fails. In memory only: a
-// restart forgets it, and the tab then lists nothing until a read succeeds.
+// storageMemory is the last storage list read from each cluster, as the tie
+// rules read it (pbsStorage: no credential), for the guest Backups tab to
+// filter by when a live read fails. In memory only: a restart forgets it, and
+// the tab then lists nothing until a read succeeds.
 type storageMemory struct {
 	mu   sync.Mutex
-	byID map[uuid.UUID][]proxmox.StorageConfig
+	byID map[uuid.UUID][]pbsStorage
 }
 
-func (m *storageMemory) get(clusterID uuid.UUID) []proxmox.StorageConfig {
+func (m *storageMemory) get(clusterID uuid.UUID) []pbsStorage {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.byID[clusterID]
 }
 
-func (m *storageMemory) put(clusterID uuid.UUID, cfgs []proxmox.StorageConfig) {
+func (m *storageMemory) put(clusterID uuid.UUID, cfgs []pbsStorage) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.byID == nil {
-		m.byID = map[uuid.UUID][]proxmox.StorageConfig{}
+		m.byID = map[uuid.UUID][]pbsStorage{}
 	}
 	if _, known := m.byID[clusterID]; !known && len(m.byID) >= maxRememberedStorages {
 		for id := range m.byID { // drop any one: a cluster past the bound is rare

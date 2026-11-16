@@ -54,7 +54,7 @@ func restoreStorage(cfgs []proxmox.StorageConfig, server db.PbsServer, others []
 		if !restoreCandidate(cfg, datastore, node) {
 			continue
 		}
-		switch storageTie(cfg, server) {
+		switch storageTie(pbsStorageOf(cfg), server) {
 		case tieFingerprint:
 			matches = append(matches, cfg.Storage)
 			matchedWith[cfg.Storage] = matchedByFingerprint
@@ -78,7 +78,7 @@ func restoreStorage(cfgs []proxmox.StorageConfig, server db.PbsServer, others []
 			strings.Join(matches, ", ")+". A restore cannot tell which to read through; remove the duplicate, or restrict one of them to other nodes.")
 	case len(matches) == 1:
 		return matches[0], matchedWith[matches[0]], nil
-	case len(open) == 1 && !claimedByAnother(open[0], server, others):
+	case len(open) == 1 && !claimedByAnother(pbsStorageOf(open[0]), server, others):
 		return open[0].Storage, matchedByOnlyCandidate, nil
 	}
 	return "", "", fiber.NewError(fiber.StatusBadRequest, "No enabled Proxmox storage on node "+node+" reads "+what+
@@ -96,6 +96,31 @@ func restoreCandidate(cfg proxmox.StorageConfig, datastore, node string) bool {
 	return cfg.Nodes == "" || slices.Contains(nodeList(cfg.Nodes), node)
 }
 
+// pbsStorage is what the tie rules read of a storage: its type, the PBS server
+// it names (host, port and certificate fingerprint), its datastore and
+// namespace. Nothing else, and no credential, so a reading can be kept
+// (storageMemory) without keeping the storage's password or encryption key.
+type pbsStorage struct {
+	Type, Namespace, Datastore string
+	Server, Fingerprint        string
+	Port                       int
+}
+
+func pbsStorageOf(cfg proxmox.StorageConfig) pbsStorage {
+	return pbsStorage{
+		Type: cfg.Type, Namespace: cfg.Namespace, Datastore: cfg.Datastore,
+		Server: cfg.Server, Fingerprint: cfg.FingerprintPBS, Port: int(cfg.Port),
+	}
+}
+
+func pbsStoragesOf(cfgs []proxmox.StorageConfig) []pbsStorage {
+	out := make([]pbsStorage, 0, len(cfgs))
+	for _, cfg := range cfgs {
+		out = append(out, pbsStorageOf(cfg))
+	}
+	return out
+}
+
 // clusterReadsDatastore reports whether any of a cluster's pbs storages reads a
 // PBS server's datastore, in its root namespace — the only one Nexara lists.
 // It takes the ties a restore takes: a storage tied to the server, or one that
@@ -105,7 +130,7 @@ func restoreCandidate(cfg proxmox.StorageConfig, datastore, node string) bool {
 // unregistered PBS may merely share the name of. A disabled storage or one
 // limited to some nodes counts too: the backups it wrote are this cluster's all
 // the same.
-func clusterReadsDatastore(cfgs []proxmox.StorageConfig, clusterID uuid.UUID, server db.PbsServer, others []db.PbsServer, datastore string) bool {
+func clusterReadsDatastore(cfgs []pbsStorage, clusterID uuid.UUID, server db.PbsServer, others []db.PbsServer, datastore string) bool {
 	elsewhere := server.ClusterID.Valid && uuid.UUID(server.ClusterID.Bytes) != clusterID
 	for _, cfg := range cfgs {
 		if cfg.Type != "pbs" || cfg.Namespace != "" || cfg.Datastore != datastore {
@@ -126,7 +151,7 @@ func clusterReadsDatastore(cfgs []proxmox.StorageConfig, clusterID uuid.UUID, se
 
 // claimedByAnother reports whether any Nexara PBS server other than server is
 // tied to the storage.
-func claimedByAnother(cfg proxmox.StorageConfig, server db.PbsServer, others []db.PbsServer) bool {
+func claimedByAnother(cfg pbsStorage, server db.PbsServer, others []db.PbsServer) bool {
 	return slices.ContainsFunc(others, func(o db.PbsServer) bool {
 		if o.ID == server.ID {
 			return false
@@ -166,8 +191,8 @@ const (
 // and Proxmox connects to 8007 (pbsConnectionSettings), so either port ties it.
 // Proxmox keeps an IPv6 server bare in its config and adds the brackets itself,
 // while a URL has them.
-func storageTie(cfg proxmox.StorageConfig, server db.PbsServer) tie {
-	if fs, fp := normalizeFingerprint(cfg.FingerprintPBS), normalizeFingerprint(server.TlsFingerprint); fs != "" && fp != "" {
+func storageTie(cfg pbsStorage, server db.PbsServer) tie {
+	if fs, fp := normalizeFingerprint(cfg.Fingerprint), normalizeFingerprint(server.TlsFingerprint); fs != "" && fp != "" {
 		if fs == fp {
 			return tieFingerprint
 		}
@@ -177,7 +202,7 @@ func storageTie(cfg proxmox.StorageConfig, server db.PbsServer) tie {
 	if !ok || !strings.EqualFold(cfg.Server, host) {
 		return tieNone
 	}
-	storagePort := int(cfg.Port)
+	storagePort := cfg.Port
 	if storagePort == 0 {
 		storagePort = defaultPBSPort
 	}
