@@ -45,6 +45,7 @@ import {
   useClusterNodes,
 } from "@/features/clusters/api/cluster-queries";
 import { DateTime } from "@/components/DateTime";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface ClusterReplicationTabProps {
   clusterId: string;
@@ -280,6 +281,7 @@ function CreateJobForm({
   const nodesQuery = useClusterNodes(clusterId);
   const jobsQuery = useReplicationJobs(clusterId);
   const createJob = useCreateReplicationJob(clusterId);
+  const settle = useSaveOutcome();
 
   const [selectedGuest, setSelectedGuest] = useState("");
   const [target, setTarget] = useState("");
@@ -300,16 +302,20 @@ function CreateJobForm({
     e.preventDefault();
     if (!selectedGuest || !target) return;
     const jobId = `${selectedGuest}-${String(nextJobNum)}`;
-    createJob.mutate(
-      {
+    settle(
+      createJob.mutateAsync({
         id: jobId,
         type: "local",
         target,
         schedule: schedule || "*/15",
         ...(rate ? { rate } : {}),
         ...(comment ? { comment } : {}),
+      }),
+      {
+        action: `Creating replication job ${jobId}`,
+        onSuccess,
+        onError: () => undefined, // shown below from the mutation's state
       },
-      { onSuccess },
     );
   };
 
@@ -418,6 +424,7 @@ function EditJobDialog({
   onClose: () => void;
 }) {
   const updateJob = useUpdateReplicationJob(clusterId);
+  const settle = useSaveOutcome(job.id);
 
   const [schedule, setSchedule] = useState(job.schedule ?? "*/15");
   const [rate, setRate] = useState(job.rate ?? "");
@@ -426,15 +433,19 @@ function EditJobDialog({
 
   const handleSave = (e: React.SyntheticEvent) => {
     e.preventDefault();
-    updateJob.mutate(
-      {
+    settle(
+      updateJob.mutateAsync({
         id: job.id,
         schedule,
         ...(rate ? { rate } : {}),
         comment,
         disable: Number(disable),
+      }),
+      {
+        action: `Saving replication job ${job.id}`,
+        onSuccess: onClose,
+        onError: () => undefined, // shown below from the mutation's state
       },
-      { onSuccess: onClose },
     );
   };
 

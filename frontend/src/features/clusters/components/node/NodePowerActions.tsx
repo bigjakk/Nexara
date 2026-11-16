@@ -157,13 +157,6 @@ export function NodePowerActions({
     setEvacuateError(null);
   };
 
-  const reportError =
-    report.error == null
-      ? null
-      : report.error instanceof Error
-        ? report.error.message
-        : "Failed to download the report.";
-
   const banner = (
     <>
       {actionError && (
@@ -173,15 +166,6 @@ export function NodePowerActions({
           }}
         >
           {actionError}
-        </Notice>
-      )}
-      {reportError !== null && (
-        <Notice
-          onDismiss={() => {
-            report.reset();
-          }}
-        >
-          {reportError}
         </Notice>
       )}
       {report.isPending && (

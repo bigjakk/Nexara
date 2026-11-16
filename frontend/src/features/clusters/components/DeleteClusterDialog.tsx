@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { CopyableName } from "@/components/CopyableName";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { ClusterResponse } from "@/types/api";
 
 interface DeleteClusterDialogProps {
@@ -33,6 +34,7 @@ export function DeleteClusterDialog({
   const [confirmName, setConfirmName] = useState("");
   const [revokeCredentials, setRevokeCredentials] = useState(false);
   const deleteMutation = useDeleteCluster();
+  const settle = useSaveOutcome();
   const { hasPermission } = usePermissions();
 
   // Two conditions, both required.
@@ -51,19 +53,21 @@ export function DeleteClusterDialog({
     hasPermission("manage", "cluster");
 
   function handleDelete() {
-    deleteMutation.mutate(
-      {
+    settle(
+      deleteMutation.mutateAsync({
         id: cluster.id,
         // What the operator typed, which the button's disabled check has
         // held equal to the cluster's name; the server checks it again.
         confirm: confirmName,
         revokePveCredentials: canRevoke && revokeCredentials,
-      },
+      }),
       {
+        action: `Deleting cluster ${cluster.name}`,
         onSuccess: () => {
           onOpenChange(false);
           onDeleted?.();
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

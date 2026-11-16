@@ -283,6 +283,7 @@ export interface DeleteClusterRequest {
 export function useDeleteCluster() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ id, confirm, revokePveCredentials }: DeleteClusterRequest) =>
       apiClient.delete<{ status: string }>(
         apiPath`/api/v1/clusters/${id}?${queryParams({ confirm, revoke_pve_credentials: revokePveCredentials === true ? "1" : undefined })}`,

@@ -194,7 +194,7 @@ describe("a cluster delete whose dialog is replaced by another cluster's from th
     expect(mockedDelete.mock.calls).toEqual([[FIRST_DELETE], [SECOND_DELETE]]);
   });
 
-  it("reports the first delete's failure once, in a toast, and puts nothing of it in the second cluster's dialog, whose own delete then revokes nothing", async () => {
+  it("reports the first delete's failure once, in a toast naming it, and puts nothing of it in the second cluster's dialog, whose own delete then revokes nothing", async () => {
     const user = userEvent.setup();
     const held = deferred<unknown>();
     mockedDelete
@@ -205,7 +205,7 @@ describe("a cluster delete whose dialog is replaced by another cluster's from th
     const second = await replaceWithSecond(user);
     held.reject(denied());
 
-    await expectOneToast(DENIED);
+    await expectOneToast(`Deleting cluster cluster01 failed: ${DENIED}`);
     expect(second).toBeInTheDocument();
     expect(second).toHaveAttribute("data-state", "open");
     expect(within(second).queryByText(DENIED)).toBeNull();

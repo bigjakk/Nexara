@@ -285,6 +285,7 @@ export function useCreateZFSPool(clusterId: string, nodeName: string) {
 export function useDeleteZFSPool(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: {
       poolName: string;
       cleanupDisks?: boolean;
@@ -339,6 +340,7 @@ export function useCreateLVM(clusterId: string, nodeName: string) {
 export function useDeleteLVM(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: {
       name: string;
       cleanupDisks?: boolean;
@@ -400,6 +402,7 @@ export function useCreateLVMThin(clusterId: string, nodeName: string) {
 export function useDeleteLVMThin(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: {
       lv: string;
       vg: string;

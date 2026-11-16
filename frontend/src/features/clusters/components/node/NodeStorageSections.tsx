@@ -26,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatBytes } from "@/lib/format";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   useNodeZFSPools,
   useNodeLVM,
@@ -246,6 +247,10 @@ export function ZFSPoolsSection({
   const [zfsCompression, setZfsCompression] = useState("on");
   const createZFS = useCreateZFSPool(clusterId, nodeName);
   const deleteZFS = useDeleteZFSPool(clusterId, nodeName);
+  // Which row's Destroy dialog is open: each row has its own, over one
+  // mutation, so a failure that lands after it closed is toasted instead.
+  const [destroying, setDestroying] = useState<string | null>(null);
+  const settle = useSaveOutcome(destroying);
   const deleteError =
     deleteZFS.error instanceof Error ? deleteZFS.error.message : "";
   const [cleanupDisks, setCleanupDisks] = useState(true);
@@ -426,7 +431,11 @@ export function ZFSPoolsSection({
                   </StateText>
                 </TableCell>
                 <TableCell className="text-right">
-                  <AlertDialog>
+                  <AlertDialog
+                    onOpenChange={(open) => {
+                      setDestroying(open ? p.name : null);
+                    }}
+                  >
                     <DestroyTrigger label={`Destroy pool ${p.name}`} />
                     <AlertDialogContent>
                       <AlertDialogHeader>
@@ -458,11 +467,17 @@ export function ZFSPoolsSection({
                           disabled={deleteZFS.isPending}
                           onClick={(e) => {
                             e.preventDefault();
-                            deleteZFS.mutate({
-                              poolName: p.name,
-                              cleanupDisks,
-                              cleanupConfig,
-                            });
+                            settle(
+                              deleteZFS.mutateAsync({
+                                poolName: p.name,
+                                cleanupDisks,
+                                cleanupConfig,
+                              }),
+                              {
+                                action: `Destroying ZFS pool ${p.name}`,
+                                onError: () => undefined, // shown above from the mutation's state
+                              },
+                            );
                           }}
                         >
                           {deleteZFS.isPending ? "Destroying…" : "Destroy"}
@@ -585,6 +600,10 @@ export function LVMSection({
   const [lvmAddStorage, setLvmAddStorage] = useState(true);
   const createLVM = useCreateLVM(clusterId, nodeName);
   const deleteLVM = useDeleteLVM(clusterId, nodeName);
+  // Which row's Destroy dialog is open: each row has its own, over one
+  // mutation, so a failure that lands after it closed is toasted instead.
+  const [destroying, setDestroying] = useState<string | null>(null);
+  const settle = useSaveOutcome(destroying);
   const deleteError =
     deleteLVM.error instanceof Error ? deleteLVM.error.message : "";
   const [lvmCleanupDisks, setLvmCleanupDisks] = useState(true);
@@ -675,7 +694,11 @@ export function LVMSection({
                 <TableCell className="tabular-nums">{vg.pv_count}</TableCell>
                 <TableCell className="tabular-nums">{vg.lv_count}</TableCell>
                 <TableCell className="text-right">
-                  <AlertDialog>
+                  <AlertDialog
+                    onOpenChange={(open) => {
+                      setDestroying(open ? vg.name : null);
+                    }}
+                  >
                     <DestroyTrigger label={`Destroy volume group ${vg.name}`} />
                     <AlertDialogContent>
                       <AlertDialogHeader>
@@ -709,11 +732,17 @@ export function LVMSection({
                           disabled={deleteLVM.isPending}
                           onClick={(e) => {
                             e.preventDefault();
-                            deleteLVM.mutate({
-                              name: vg.name,
-                              cleanupDisks: lvmCleanupDisks,
-                              cleanupConfig: lvmCleanupConfig,
-                            });
+                            settle(
+                              deleteLVM.mutateAsync({
+                                name: vg.name,
+                                cleanupDisks: lvmCleanupDisks,
+                                cleanupConfig: lvmCleanupConfig,
+                              }),
+                              {
+                                action: `Destroying volume group ${vg.name}`,
+                                onError: () => undefined, // shown above from the mutation's state
+                              },
+                            );
                           }}
                         >
                           {deleteLVM.isPending ? "Destroying…" : "Destroy"}
@@ -748,6 +777,10 @@ export function LVMThinSection({
   const [thinAddStorage, setThinAddStorage] = useState(true);
   const createThin = useCreateLVMThin(clusterId, nodeName);
   const deleteThin = useDeleteLVMThin(clusterId, nodeName);
+  // Which row's Destroy dialog is open: each row has its own, over one
+  // mutation, so a failure that lands after it closed is toasted instead.
+  const [destroying, setDestroying] = useState<string | null>(null);
+  const settle = useSaveOutcome(destroying);
   const thinDeleteError =
     deleteThin.error instanceof Error ? deleteThin.error.message : "";
   const [thinCleanupDisks, setThinCleanupDisks] = useState(true);
@@ -838,7 +871,11 @@ export function LVMThinSection({
                   {p.data_percent.toFixed(1)}%
                 </TableCell>
                 <TableCell className="text-right">
-                  <AlertDialog>
+                  <AlertDialog
+                    onOpenChange={(open) => {
+                      setDestroying(open ? `${p.vg}/${p.lv}` : null);
+                    }}
+                  >
                     <DestroyTrigger
                       label={`Destroy thin pool ${p.vg}/${p.lv}`}
                     />
@@ -874,12 +911,18 @@ export function LVMThinSection({
                           disabled={deleteThin.isPending}
                           onClick={(e) => {
                             e.preventDefault();
-                            deleteThin.mutate({
-                              lv: p.lv,
-                              vg: p.vg,
-                              cleanupDisks: thinCleanupDisks,
-                              cleanupConfig: thinCleanupConfig,
-                            });
+                            settle(
+                              deleteThin.mutateAsync({
+                                lv: p.lv,
+                                vg: p.vg,
+                                cleanupDisks: thinCleanupDisks,
+                                cleanupConfig: thinCleanupConfig,
+                              }),
+                              {
+                                action: `Destroying thin pool ${p.vg}/${p.lv}`,
+                                onError: () => undefined, // shown above from the mutation's state
+                              },
+                            );
                           }}
                         >
                           {deleteThin.isPending ? "Destroying…" : "Destroy"}

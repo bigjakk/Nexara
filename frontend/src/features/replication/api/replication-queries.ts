@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 
 export interface ReplicationJob {
   id: string;
@@ -35,6 +36,7 @@ export function useReplicationJobs(clusterId: string) {
 export function useCreateReplicationJob(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (data: {
       id: string;
       type: string;
@@ -55,6 +57,7 @@ export function useCreateReplicationJob(clusterId: string) {
 export function useUpdateReplicationJob(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       id,
       ...data

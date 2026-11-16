@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { ApiClientError, sessionScope } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { Textarea } from "@/components/ui/textarea";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
@@ -377,6 +378,7 @@ function CreatePluginForm({
   onSuccess: () => void;
 }) {
   const createPlugin = useCreateACMEPlugin(clusterId);
+  const settle = useSaveOutcome();
   const schemaQuery = useACMEChallengeSchema(clusterId);
 
   const [id, setId] = useState("");
@@ -412,8 +414,8 @@ function CreatePluginForm({
     if (!id || !type) return;
     const dataStr = buildDataString();
     const delay = parseInt(validationDelay, 10);
-    createPlugin.mutate(
-      {
+    settle(
+      createPlugin.mutateAsync({
         id,
         type,
         ...(api ? { api } : {}),
@@ -421,8 +423,12 @@ function CreatePluginForm({
         ...(type === "dns" && !isNaN(delay) && delay !== 30
           ? { "validation-delay": delay }
           : {}),
+      }),
+      {
+        action: `Creating ACME plugin ${id}`,
+        onSuccess,
+        onError: () => undefined, // shown below from the mutation's state
       },
-      { onSuccess },
     );
   };
 
@@ -1074,12 +1080,6 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
           ) : undefined
         }
       >
-        {(orderCert.isError || renewCert.isError) && (
-          <p className="mb-4 text-sm text-destructive">
-            {orderCert.error?.message ?? renewCert.error?.message}
-          </p>
-        )}
-
         {nodesUnread ? (
           <p role="status" className="text-sm text-muted-foreground">
             {NODES_UNREAD}

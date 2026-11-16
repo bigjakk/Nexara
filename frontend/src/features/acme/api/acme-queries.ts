@@ -140,6 +140,7 @@ export function useACMEPlugins(clusterId: string) {
 export function useCreateACMEPlugin(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (data: {
       id: string;
       type: string;

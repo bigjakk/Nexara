@@ -60,9 +60,7 @@ export function NodeAptRepositories({ clusterId, nodeName }: Props) {
   const unconfiguredStandard = standardRepos.filter((r) => r.status === 0);
   const repositories = files.flatMap((f) => f.repositories);
   const enabledCount = repositories.filter((r) => r.Enabled === 1).length;
-  const mutationError = toggleMutation.error ?? addMutation.error;
-  const hasNotices =
-    errors.length > 0 || warnings.length > 0 || mutationError != null;
+  const hasNotices = errors.length > 0 || warnings.length > 0;
 
   return (
     <>
@@ -87,11 +85,6 @@ export function NodeAptRepositories({ clusterId, nodeName }: Props) {
                 {w.message}
               </Notice>
             ))}
-            {mutationError != null && (
-              <Notice tone="bad">
-                {mutationError.message || "Operation failed"}
-              </Notice>
-            )}
           </div>
         )}
 
