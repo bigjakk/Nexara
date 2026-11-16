@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle, ShieldAlert, type LucideIcon } from "lucide-react";
+import { toast } from "sonner";
 import { WarningCallout } from "@/components/WarningCallout";
 import {
   confirmRequiredFromError,
@@ -12,6 +13,7 @@ import {
   type ConfirmRequired,
 } from "@/lib/confirm-gate";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   useVirtioWinMirror,
   useUpdateVirtioWinMirror,
@@ -113,6 +115,7 @@ function MirrorWarning({ warning, pending, onConfirm }: MirrorWarningProps) {
 export function VirtioWinSourceCard() {
   const { data: mirror, isLoading } = useVirtioWinMirror();
   const updateMirror = useUpdateVirtioWinMirror();
+  const settle = useSaveOutcome();
   const { canManage } = usePermissions();
   const readOnly = !canManage("settings");
 
@@ -138,9 +141,14 @@ export function VirtioWinSourceCard() {
   // an acknowledgement must not persist across an edited URL.
   function save(confirmations: Acknowledgement = {}) {
     setSaved(false);
-    updateMirror.mutate(
-      { base_url: baseUrl.trim(), ...confirmations },
+    settle(
+      updateMirror.mutateAsync({ base_url: baseUrl.trim(), ...confirmations }),
       {
+        action: "Saving the virtio-win download source",
+        lateFailure: (err) =>
+          confirmRequiredFromError(err, MIRROR_CONFIRM_CODES, null) === null
+            ? undefined
+            : "The virtio-win download source was not saved: it needs a confirmation. Save it again to be asked for it.",
         onSuccess: () => {
           setWarning(null);
           setSaved(true);
@@ -149,11 +157,22 @@ export function VirtioWinSourceCard() {
           }, 4000);
         },
         // A gate is a prompt, not a failure. Anything else is a real error,
-        // already surfaced as a toast by the mutation hook — repeating it
-        // inline would say the same thing twice — and it clears the prompt so
-        // only what applies to THIS attempt is on screen.
+        // which the card has no place for and toasts, and it clears the prompt
+        // so only what applies to THIS attempt is on screen.
         onError: (err: unknown) => {
-          setWarning(confirmRequiredFromError(err, MIRROR_CONFIRM_CODES, null));
+          const gate = confirmRequiredFromError(
+            err,
+            MIRROR_CONFIRM_CODES,
+            null,
+          );
+          setWarning(gate);
+          if (gate === null) {
+            toast.error(
+              err instanceof Error && err.message.length > 0
+                ? err.message
+                : "Failed to save the virtio-win source",
+            );
+          }
         },
       },
     );

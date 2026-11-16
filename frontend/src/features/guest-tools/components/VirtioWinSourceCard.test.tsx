@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
+import { toast } from "sonner";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { VirtioWinSourceCard } from "./VirtioWinSourceCard";
@@ -21,6 +22,7 @@ vi.mock("../api/virtio-win-queries", () => ({
 vi.mock("@/hooks/usePermissions", () => ({
   usePermissions: vi.fn(),
 }));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mirror: VirtioWinMirror = {
   base_url: "",
@@ -28,23 +30,16 @@ const mirror: VirtioWinMirror = {
   upstream_url: "https://fedorapeople.org/groups/virt/virtio-win",
 };
 
-type MutateOptions = {
-  onSuccess?: (data: VirtioWinMirror) => void;
-  onError?: (err: unknown) => void;
-};
-
-/** Answers the next mutate() with `err`, the way the gate reaches the card. */
-function rejectingMutate(err: unknown) {
-  return vi.fn((_body: VirtioWinMirrorRequest, opts?: MutateOptions) => {
-    opts?.onError?.(err);
-  });
+/** Answers the next mutateAsync() with `err`, the way the gate reaches the card. */
+function rejectingMutate(err: Error) {
+  return vi.fn(() => Promise.reject(err));
 }
 
 function gate(code: string, message: string, details = {}) {
   return new ApiClientError(422, { error: code, message, details });
 }
 
-/** The request body of the nth mutate() call, typed rather than indexed. */
+/** The request body of the nth mutateAsync() call, typed rather than indexed. */
 function callBody(
   mutate: ReturnType<typeof vi.fn>,
   n: number,
@@ -60,7 +55,7 @@ function mockHooks(mutate: ReturnType<typeof vi.fn>) {
     isLoading: false,
   } as unknown as ReturnType<typeof useVirtioWinMirror>);
   vi.mocked(useUpdateVirtioWinMirror).mockReturnValue({
-    mutate,
+    mutateAsync: mutate,
     isPending: false,
     error: null,
   } as unknown as ReturnType<typeof useUpdateVirtioWinMirror>);
@@ -82,7 +77,7 @@ describe("VirtioWinSourceCard", () => {
 
   it("sends no acknowledgement on a first save", async () => {
     const user = userEvent.setup();
-    const mutate = vi.fn();
+    const mutate = vi.fn(() => new Promise<never>(() => undefined));
     mockHooks(mutate);
     renderWithProviders(<VirtioWinSourceCard />);
 
@@ -165,10 +160,8 @@ describe("VirtioWinSourceCard", () => {
       gate("insecure_source_confirm_required", "This source uses plain HTTP."),
       gate("private_address_confirm_required", "", { ip: "10.0.0.5" }),
     ];
-    const mutate = vi.fn(
-      (_body: VirtioWinMirrorRequest, opts?: MutateOptions) => {
-        opts?.onError?.(errors.shift());
-      },
+    const mutate = vi.fn(() =>
+      Promise.reject(errors.shift() ?? new Error("no answer left")),
     );
     mockHooks(mutate);
     renderWithProviders(<VirtioWinSourceCard />);
@@ -206,7 +199,7 @@ describe("VirtioWinSourceCard", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("leaves a failure that is not a gate to the mutation's own toast", async () => {
+  it("toasts a failure that is not a gate, once, and prompts for nothing", async () => {
     const user = userEvent.setup();
     const mutate = rejectingMutate(
       new ApiClientError(500, { error: "internal", message: "boom" }),
@@ -219,6 +212,8 @@ describe("VirtioWinSourceCard", () => {
     expect(
       screen.queryByRole("button", { name: "Use it anyway" }),
     ).not.toBeInTheDocument();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith("boom");
   });
 
   it("offers no confirmation for a 422 gate it does not know", async () => {

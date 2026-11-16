@@ -1,9 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { apiClient, ApiClientError, sessionScope } from "@/lib/api-client";
+import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
-import { MIRROR_CONFIRM_CODES } from "../types/virtio-win";
 import type {
   VirtioWinCheckResult,
   VirtioWinConfig,
@@ -131,33 +129,10 @@ export function useUpdateVirtioWinMirror() {
   return useMutation({
     mutationFn: (body: VirtioWinMirrorRequest) =>
       apiClient.put<VirtioWinMirror>(apiPath`/api/v1/virtio-win/mirror`, body),
-    // The global mutation cache toasts any mutation that defines no onError of
-    // its own. Both confirm-required answers are prompts rather than failures
-    // — the card renders each inline with a "use it anyway" — so they would
-    // arrive as a red error toast on top of the prompt. Defining a handler is
-    // what stands that safety net down, which means real failures have to be
-    // raised here explicitly rather than being swallowed with it.
-    //
-    // Not for a session that has ended, which the net would not report either:
-    // TanStack calls this whenever the answer lands, after a sign-out, and a
-    // toast raised then is shown to whoever is signed in by then, so the
-    // server's words would reach them. `onMutate` takes the session as the save
-    // is submitted; one whose session cannot be told is treated as ended.
-    onMutate: () => sessionScope(),
-    onError: (err: unknown, _variables, ended) => {
-      if (ended === undefined || ended()) return;
-      if (
-        err instanceof ApiClientError &&
-        (MIRROR_CONFIRM_CODES as readonly string[]).includes(err.body.error)
-      ) {
-        return;
-      }
-      toast.error(
-        err instanceof Error && err.message.length > 0
-          ? err.message
-          : "Failed to save the virtio-win source",
-      );
-    },
+    // Its one caller asks a confirm-required answer as a prompt rather than
+    // reporting it as a failure, and settles the save through useSaveOutcome,
+    // which reports a failure that lands after the card has gone.
+    ...errorsHandledLocally,
     onSuccess: () => {
       // Every virtio-win key at once — `all` is the prefix the rest are built
       // on. The catalog was discovered against the previous source, and every
