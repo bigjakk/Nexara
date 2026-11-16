@@ -671,7 +671,8 @@ func (q *Queries) ListUpsOnRollingUpdateHosts(ctx context.Context) ([]uuid.UUID,
 const markUpsDevicesAbsent = `-- name: MarkUpsDevicesAbsent :exec
 WITH gone AS (
     UPDATE ups_devices
-    SET present = FALSE
+    SET present = FALSE,
+        clients_listed_at = NULL
     WHERE server_id = $1
       AND present
       AND NOT (ups_name = ANY(COALESCE($2::text[], '{}')))
@@ -695,7 +696,10 @@ type MarkUpsDevicesAbsentParams struct {
 // Their logins go: nothing lists a missing UPS's clients, and kept they would
 // read as current if it came back. The DELETE sees the rows as they were
 // before the UPDATE, so it names both the devices marked now and those
-// already absent (left over from before this query pruned).
+// already absent (left over from before this query pruned). The listing
+// goes with them: kept, a UPS that comes back would read "listed, nobody
+// logged in", every node it powers not protected, until a fresh listing,
+// which in an outage the poller does not take. Unset, they read unchecked.
 func (q *Queries) MarkUpsDevicesAbsent(ctx context.Context, arg MarkUpsDevicesAbsentParams) error {
 	_, err := q.db.Exec(ctx, markUpsDevicesAbsent, arg.ServerID, arg.PresentNames)
 	return err

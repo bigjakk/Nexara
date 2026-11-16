@@ -81,15 +81,23 @@ func TestUpsQueries(t *testing.T) {
 			}
 			return m
 		}
-		// A device marked absent takes its logins along, and so does one
-		// already absent that still has some.
+		// A device marked absent takes its logins and its listing along (kept,
+		// the listing would read as "nobody logged in"), and so does one
+		// already absent that still has logins.
 		clients := func(id uuid.UUID) (n int) {
 			if err := pool.QueryRow(ctx, `SELECT count(*) FROM ups_clients WHERE ups_id = $1`, id).Scan(&n); err != nil {
 				t.Fatal(err)
 			}
 			return n
 		}
+		listed := func(id uuid.UUID) (ok bool) {
+			if err := pool.QueryRow(ctx, `SELECT clients_listed_at IS NOT NULL FROM ups_devices WHERE id = $1`, id).Scan(&ok); err != nil {
+				t.Fatal(err)
+			}
+			return ok
+		}
 		exec(t, `INSERT INTO ups_clients (ups_id, address) VALUES ($1, '192.0.2.11'), ($2, '192.0.2.12')`, upsDevA, upsDevB)
+		exec(t, `UPDATE ups_devices SET clients_listed_at = now() WHERE id = ANY($1)`, []uuid.UUID{upsDevA, upsDevB})
 		if err := q.MarkUpsDevicesAbsent(ctx, gen.MarkUpsDevicesAbsentParams{ServerID: upsServerID, PresentNames: []string{"a"}}); err != nil {
 			t.Fatal(err)
 		}
@@ -98,6 +106,9 @@ func TestUpsQueries(t *testing.T) {
 		}
 		if a, b := clients(upsDevA), clients(upsDevB); a != 1 || b != 0 {
 			t.Fatalf("logins after b vanished: a %d, b %d; want 1 and 0", a, b)
+		}
+		if !listed(upsDevA) || listed(upsDevB) {
+			t.Fatalf("listed after b vanished: a %v, b %v; want a only", listed(upsDevA), listed(upsDevB))
 		}
 		exec(t, `INSERT INTO ups_clients (ups_id, address) VALUES ($1, '192.0.2.12')`, upsDevB)
 		if err := q.MarkUpsDevicesAbsent(ctx, gen.MarkUpsDevicesAbsentParams{ServerID: upsServerID}); err != nil {

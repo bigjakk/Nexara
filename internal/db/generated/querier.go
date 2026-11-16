@@ -2855,7 +2855,10 @@ type Querier interface {
 	// Their logins go: nothing lists a missing UPS's clients, and kept they would
 	// read as current if it came back. The DELETE sees the rows as they were
 	// before the UPDATE, so it names both the devices marked now and those
-	// already absent (left over from before this query pruned).
+	// already absent (left over from before this query pruned). The listing
+	// goes with them: kept, a UPS that comes back would read "listed, nobody
+	// logged in", every node it powers not protected, until a fresh listing,
+	// which in an outage the poller does not take. Unset, they read unchecked.
 	MarkUpsDevicesAbsent(ctx context.Context, arg MarkUpsDevicesAbsentParams) error
 	// Records that Nexara asked this session to stop.
 	//
