@@ -12,7 +12,9 @@ import ts from "typescript";
  * (errorsHandledLocally) and settle the call through useSaveOutcome.
  *
  * It fails too on settle(x.mutateAsync(…), { onError }) through useSaveOutcome
- * when x's hook is not opted out: that failure is shown and toasted.
+ * when x's hook is not opted out: that failure is shown and toasted. And on a
+ * read of x.error or x.isError, which renders the failure, when x's hook has
+ * no onError, so the toast reports it as well (`x` may be `a ? b : c` of two).
  *
  * A hook counts as having one when its useMutation options hold an onError, a
  * spread of an object in the same file that does, or a spread of
@@ -174,10 +176,13 @@ function scan() {
   const files = Object.keys(sources).map(parse);
   const hooks = mutationHooks(files);
   const findings: Finding[] = [];
+  const rendered: Finding[] = [];
   let callsWithOptions = 0;
   let settled = 0;
-  // Files that call a flag-gated hook with a flag the scan cannot read.
+  // Calls of a flag-gated hook with a flag the scan cannot read.
   const unjudged = new Set<string>();
+  // Reads of a mutation's error that the scan judged, for the floor.
+  let errorReads = 0;
   for (const sf of files) {
     // Where each imported name comes from, and what each local holds.
     const imported = new Map<string, string>();
@@ -198,9 +203,12 @@ function scan() {
       hooks.get(fileOf(callee))?.get(callee);
     const locals = new Map<string, { hook: string; has: Has }>();
     const settlers = new Set<string>();
-    const report = (node: ts.Node, hook: string) => {
+    const at = (node: ts.Node, hook: string): Finding => {
       const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
-      findings.push({ at: `${sf.fileName}:${String(line + 1)}`, hook });
+      return { at: `${sf.fileName}:${String(line + 1)}`, hook };
+    };
+    const report = (node: ts.Node, hook: string) => {
+      findings.push(at(node, hook));
     };
     const visit = (node: ts.Node) => {
       if (
@@ -234,7 +242,7 @@ function scan() {
             has = "no";
           } else {
             has = "unknown";
-            unjudged.add(sf.fileName);
+            unjudged.add(`${sf.fileName} ${callee}(${flag.getText(sf)})`);
           }
         }
         if (has !== undefined) {
@@ -246,9 +254,37 @@ function scan() {
               if (prop === "mutate" || prop === "mutateAsync") {
                 locals.set(`()${el.name.getText(sf)}`, { hook: callee, has });
               }
+              if (prop === "error" && has === "no")
+                rendered.push(at(el, callee));
             }
           }
         }
+      }
+      // const x = cond ? a : b, of two mutations: reported by the toast when
+      // either one is.
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.initializer !== undefined &&
+        ts.isConditionalExpression(node.initializer)
+      ) {
+        const [a, b] = [
+          node.initializer.whenTrue,
+          node.initializer.whenFalse,
+        ].map((e) => locals.get(e.getText(sf)));
+        if (a !== undefined && b !== undefined) {
+          locals.set(node.name.text, a.has === "no" ? a : b);
+        }
+      }
+      // x.error or x.isError: the component renders the failure.
+      if (
+        ts.isPropertyAccessExpression(node) &&
+        (node.name.text === "error" || node.name.text === "isError") &&
+        ts.isIdentifier(node.expression)
+      ) {
+        const m = locals.get(node.expression.text);
+        if (m !== undefined && m.has !== "unknown") errorReads++;
+        if (m?.has === "no") rendered.push(at(node, m.hook));
       }
       if (ts.isCallExpression(node) && node.arguments[1] !== undefined) {
         const e = node.expression;
@@ -290,21 +326,59 @@ function scan() {
     visit(sf);
   }
   const hookCount = [...hooks.values()].reduce((n, m) => n + m.size, 0);
-  return { findings, callsWithOptions, settled, unjudged, hookCount };
+  return {
+    findings,
+    rendered,
+    errorReads,
+    callsWithOptions,
+    settled,
+    unjudged,
+    hookCount,
+  };
 }
+
+/**
+ * Renders a mutation's failure while its hook leaves it to the toast, on
+ * purpose or until its owner fixes it: "<file>#<hook>" -> why. An entry the
+ * scan no longer finds fails the test, so the list only shrinks.
+ */
+const SHOWN_AND_TOASTED: Record<string, string> = {
+  "/src/features/drs/components/CreateRuleDialog.tsx#useCreateHARule":
+    "its create hooks (drs-queries useCreateHARule, useCreateDRSRule) have no onError; the dialog is another lane's in this run",
+};
+
+/** One scan for both tests: it parses every source file. */
+let once: ReturnType<typeof scan> | undefined;
+const scanned = () => (once ??= scan());
 
 describe("a failed mutation", () => {
   it("is never handed an onError at the call by a hook that has none", () => {
-    const { findings, callsWithOptions, settled, unjudged, hookCount } = scan();
+    const { findings, callsWithOptions, settled, unjudged, hookCount } =
+      scanned();
     expect(findings).toEqual([]);
     // The one caller whose opt-out is a flag the scan cannot read: it passes
     // `onError !== undefined` and settles only when that holds.
     expect([...unjudged]).toEqual([
-      "/src/features/clusters/components/node/NodeShutdownConfirm.tsx",
+      "/src/features/clusters/components/node/NodeShutdownConfirm.tsx useShutdownNode(onError !== undefined)",
     ]);
     // The floor: the scan still finds the hooks and the calls it judges.
     expect(hookCount).toBeGreaterThan(250);
-    expect(callsWithOptions).toBeGreaterThan(100);
-    expect(settled).toBeGreaterThan(50);
+    expect(callsWithOptions).toBeGreaterThan(60);
+    expect(settled).toBeGreaterThan(100);
+  });
+
+  it("is not rendered by a component while the toast reports it too", () => {
+    const { rendered, errorReads } = scanned();
+    const found = new Map(
+      rendered.map((f) => [`${f.at.split(":")[0] ?? ""}#${f.hook}`, f.at]),
+    );
+    expect([...found].filter(([key]) => !(key in SHOWN_AND_TOASTED))).toEqual(
+      [],
+    );
+    expect(
+      Object.keys(SHOWN_AND_TOASTED).filter((key) => !found.has(key)),
+    ).toEqual([]);
+    // The floor: the scan still sees the components that render a failure.
+    expect(errorReads).toBeGreaterThan(150);
   });
 });

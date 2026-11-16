@@ -17,6 +17,7 @@ import { renderWithProviders } from "@/test/test-utils";
 import { CreateUserDialog } from "@/features/admin/components/CreateUserDialog";
 import { ChannelsTable } from "@/features/alerts/components/ChannelsTable";
 import { EditPBSServerDialog } from "@/features/backup/components/EditPBSServerDialog";
+import { PoolCreateDialog } from "@/features/ceph/components/PoolCreateDialog";
 import { NodePowerActions } from "@/features/clusters/components/node/NodePowerActions";
 import { NodeShutdownConfirm } from "@/features/clusters/components/node/NodeShutdownConfirm";
 import { DRSConfigCard } from "@/features/drs/components/DRSConfigCard";
@@ -171,6 +172,16 @@ const SHOWN_IN_PLACE: [
     ),
     async (u) => {
       await u.click(screen.getByRole("button", { name: "Save Changes" }));
+    },
+  ],
+  [
+    // Rendered from the mutation's own state, settled through useSaveOutcome.
+    "ceph: Create pool",
+    () => <PoolCreateDialog clusterId="c1" osdCount={3} />,
+    async (u) => {
+      await u.click(screen.getByRole("button", { name: "Create pool" }));
+      await u.type(screen.getByLabelText("Pool name"), "store01");
+      await u.click(last("Create pool"));
     },
   ],
   [
