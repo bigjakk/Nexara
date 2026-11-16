@@ -709,6 +709,7 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 		a.totp.SetIssueTokensFn(ah.IssueTokens)
 		a.totp.SetCurrentPasswordCheck(ah.ProveCurrentPassword)
 		a.totp.SetDirectoryPasswordCheck(ah.ProveDirectoryPassword)
+		a.totp.SetSSOSignInFinish(a.oidc.FinishSignInAfterSecondFactor)
 	}
 
 	uh := &UserHandler{

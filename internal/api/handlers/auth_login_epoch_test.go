@@ -418,7 +418,7 @@ func TestLogin_TheRefusalAuditRunsOnAFollowUpDeadline(t *testing.T) {
 // storeExchange.
 func epochSeedExchange(t *testing.T, a *epochApp, user db.User) string {
 	t.Helper()
-	code, err := a.oidc.storeExchange(t.Context(), user, bindingRecord(false, epochBindingSecret))
+	code, err := a.oidc.storeExchange(t.Context(), user, bindingRecord(false, epochBindingSecret), nil)
 	if err != nil {
 		t.Fatalf("storeExchange: %v", err)
 	}

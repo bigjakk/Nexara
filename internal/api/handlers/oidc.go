@@ -51,6 +51,35 @@ const oidcExchangeEpochKey = "auth_epoch"
 // the code.
 const oidcExchangeBindingKey = "binding"
 
+// oidcExchangeIdentityKey is the key, in the same JSON, of the provider identity of a
+// sign-in the callback left to finish after the second factor (pendingSSOIdentity, as
+// JSON), present only for such a sign-in.
+const oidcExchangeIdentityKey = "sso_identity"
+
+// pendingSSOIdentity is what finishOIDCSignIn needs from a callback whose sign-in waits
+// for a second factor: the identity the provider verified there, and the configuration
+// it came through. It is server-side only: it travels in the exchange record and then in
+// the TOTP pending token, both in Redis, and nothing of it comes from or goes to the
+// client.
+type pendingSSOIdentity struct {
+	ConfigID    string   `json:"config_id"`
+	Issuer      string   `json:"issuer"`
+	Subject     string   `json:"subject"`
+	Email       string   `json:"email"`
+	DisplayName string   `json:"display_name"`
+	Groups      []string `json:"groups"`
+}
+
+func newPendingSSOIdentity(cfg db.OidcConfig, info *auth.OIDCUserInfo) *pendingSSOIdentity {
+	return &pendingSSOIdentity{ConfigID: cfg.ID.String(), Issuer: info.Issuer, Subject: info.Subject,
+		Email: info.Email, DisplayName: info.DisplayName, Groups: info.Groups}
+}
+
+func (p *pendingSSOIdentity) userInfo() *auth.OIDCUserInfo {
+	return &auth.OIDCUserInfo{Issuer: p.Issuer, Subject: p.Subject, Email: p.Email,
+		DisplayName: p.DisplayName, Groups: p.Groups}
+}
+
 // OIDCHandler handles OIDC/SSO configuration and auth flow endpoints.
 type OIDCHandler struct {
 	queries       *db.Queries
@@ -1020,13 +1049,20 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 		return db.User{}, "", "User provisioning failed"
 	}
 
+	// A sign-in left unfinished carries its identity on, to be finished once the second
+	// factor has passed (FinishSignInAfterSecondFactor).
+	var deferred *pendingSSOIdentity
+	if !finish {
+		deferred = newPendingSSOIdentity(cfg, userInfo)
+	}
+
 	// Store short-lived exchange code in Redis (5 second TTL), with the digest of the
 	// browser binding's secret: the exchange refuses a code this browser was not given
 	// (oidcExchangeBinding).
 	secure := oidcBindingSecure(cfg.RedirectUri)
 	secret, record, err := newBinding(secure)
 	if err == nil {
-		exchangeCode, err = h.storeExchange(c.Context(), user, record)
+		exchangeCode, err = h.storeExchange(c.Context(), user, record, deferred)
 	}
 	if err != nil {
 		slog.Error("OIDC callback: could not store the exchange code", "user_id", user.ID, "error", err)
@@ -1049,17 +1085,27 @@ const oidcExchangeTTL = 5 * time.Second
 // with the code, so that a password change, a sign-out of all devices or a
 // deactivation that lands in between refuses the session instead of being
 // outlived by it. binding is the record of the secret the browser's binding
-// cookie holds (oidcExchangeBinding), kept under oidcExchangeBindingKey.
-func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, binding string) (string, error) {
+// cookie holds (oidcExchangeBinding), kept under oidcExchangeBindingKey. deferred, when
+// not nil, is the identity of a sign-in left to finish after the second factor, kept
+// under oidcExchangeIdentityKey.
+func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, binding string, deferred *pendingSSOIdentity) (string, error) {
 	code, err := auth.GenerateRandomString(32)
 	if err != nil {
 		return "", fmt.Errorf("generating the exchange code: %w", err)
 	}
-	data, _ := json.Marshal(map[string]string{
+	record := map[string]string{
 		"user_id":              user.ID.String(),
 		oidcExchangeEpochKey:   strconv.FormatInt(user.AuthEpoch, 10),
 		oidcExchangeBindingKey: binding,
-	})
+	}
+	if deferred != nil {
+		identity, err := json.Marshal(deferred)
+		if err != nil {
+			return "", fmt.Errorf("encoding the sign-in's identity: %w", err)
+		}
+		record[oidcExchangeIdentityKey] = string(identity)
+	}
+	data, _ := json.Marshal(record)
 	if err := h.rdb.Set(ctx, "oidc:exchange:"+code, string(data), oidcExchangeTTL).Err(); err != nil {
 		return "", fmt.Errorf("storing the exchange code: %w", err)
 	}
@@ -1231,6 +1277,64 @@ func (h *OIDCHandler) finishOIDCSignIn(c fiber.Ctx, cfg db.OidcConfig, user db.U
 		}
 	}
 	return user, nil
+}
+
+// FinishSignInAfterSecondFactor finishes, once its second factor has passed
+// (TOTPHandler.VerifyLogin), an SSO sign-in the callback left unfinished for userID:
+// identity is what the callback carried on, server-side. Everything is read again, since
+// up to the pending token's five minutes have passed: the enabled configuration must
+// still be the one the identity came through, under the same issuer; the account must
+// still be an active SSO account with a second factor; and the identity must still
+// resolve to it (accountForIdentity). Then finishOIDCSignIn links it, if no other
+// identity has, and syncs its roles. It returns the account as last written, or the
+// answer that refuses the sign-in; the caller then issues nothing.
+func (h *OIDCHandler) FinishSignInAfterSecondFactor(c fiber.Ctx, userID uuid.UUID, identity *pendingSSOIdentity) (db.User, error) {
+	couldNotComplete := fiber.NewError(fiber.StatusUnauthorized, oidcCouldNotCompleteMessage)
+	cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.User{}, couldNotComplete
+	}
+	if err != nil {
+		slog.Error("oidc sign-in after the second factor: could not load the configuration", "user_id", userID, "error", err)
+		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, oidcCouldNotCompleteMessage)
+	}
+	if cfg.ID.String() != identity.ConfigID || cfg.IssuerUrl != identity.Issuer {
+		slog.Warn("oidc sign-in after the second factor: the configuration changed since the callback; refusing", "user_id", userID)
+		return db.User{}, couldNotComplete
+	}
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, oidcCouldNotCompleteMessage)
+	}
+	if !user.IsActive {
+		return db.User{}, fiber.NewError(fiber.StatusForbidden, "Account is disabled")
+	}
+	if user.AuthSource != "oidc" || !user.TotpSecret.Valid {
+		slog.Warn("oidc sign-in after the second factor: the account changed since the callback; refusing", "user_id", userID)
+		return db.User{}, couldNotComplete
+	}
+	info := identity.userInfo()
+	acct, err := h.accountForIdentity(c.Context(), info)
+	switch {
+	case errors.Is(err, errOIDCIdentityMismatch):
+		h.auditIdentityMismatch(c, acct.User)
+		return db.User{}, fiber.NewError(fiber.StatusForbidden, oidcIdentityMismatchMessage)
+	case err != nil:
+		slog.Error("oidc sign-in after the second factor: could not resolve the identity", "user_id", userID, "error", err)
+		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, oidcCouldNotCompleteMessage)
+	case !acct.Found || acct.User.ID != userID:
+		h.auditIdentityMismatch(c, user)
+		return db.User{}, fiber.NewError(fiber.StatusForbidden, oidcIdentityMismatchMessage)
+	}
+	finished, err := h.finishOIDCSignIn(c, cfg, user, info)
+	if errors.Is(err, errOIDCIdentityMismatch) {
+		return db.User{}, fiber.NewError(fiber.StatusForbidden, oidcIdentityMismatchMessage)
+	}
+	if err != nil {
+		slog.Error("oidc sign-in after the second factor: could not finish it", "user_id", userID, "error", err)
+		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, oidcCouldNotCompleteMessage)
+	}
+	return finished, nil
 }
 
 // linkOIDCAccount binds an unlinked SSO account to the identity signing in to it. The

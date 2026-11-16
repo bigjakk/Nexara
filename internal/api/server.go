@@ -518,6 +518,8 @@ func (s *Server) wireAuthCompositions() {
 	if s.totpHandler != nil && s.oidcHandler != nil {
 		// A single sign-on account's setup proves a fresh sign-in at its provider.
 		s.totpHandler.SetSSOStepUp(s.oidcHandler.StartStepUp)
+		// And an SSO sign-in left for its second factor is finished once the code passes.
+		s.totpHandler.SetSSOSignInFinish(s.oidcHandler.FinishSignInAfterSecondFactor)
 	}
 }
 

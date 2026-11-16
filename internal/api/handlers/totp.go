@@ -87,6 +87,10 @@ type TOTPHandler struct {
 	// provider that a single sign-on account proves itself with. Wired by SetSSOStepUp;
 	// nil refuses every step-up.
 	startSSOStepUp func(c fiber.Ctx, userID, sessionID uuid.UUID) (string, error)
+	// finishSSOSignIn is OIDCHandler.FinishSignInAfterSecondFactor: VerifyLogin's finish
+	// of an SSO sign-in the callback left for the second factor. Wired by
+	// SetSSOSignInFinish; nil refuses every such sign-in.
+	finishSSOSignIn func(c fiber.Ctx, userID uuid.UUID, identity *pendingSSOIdentity) (db.User, error)
 
 	// followUpTimeout bounds each follow-up of a decision that has been made — the
 	// audit row of a second step that was refused — and is authFollowUpTimeout when
@@ -106,10 +110,15 @@ type TOTPHandler struct {
 // one that recorded 0, the epoch of every user who has never had a revoke-all: the
 // first cannot be tied to any check and is refused, the second is an ordinary
 // value.
+//
+// SSO is the provider identity of an SSO sign-in the callback left to finish after the
+// second factor (pendingSSOIdentity); nil for every other sign-in, and for a token minted
+// by a release that carried none.
 type totpPendingLogin struct {
-	UserID      string `json:"user_id"`
-	AuditAction string `json:"audit_action"`
-	AuthEpoch   *int64 `json:"auth_epoch"`
+	UserID      string              `json:"user_id"`
+	AuditAction string              `json:"audit_action"`
+	AuthEpoch   *int64              `json:"auth_epoch"`
+	SSO         *pendingSSOIdentity `json:"sso,omitempty"`
 }
 
 // NewTOTPHandler creates a new TOTP handler.
@@ -156,6 +165,12 @@ func (h *TOTPHandler) SetDirectoryPasswordCheck(fn func(c fiber.Ctx, userID uuid
 // (OIDCHandler.StartStepUp; called from server setup).
 func (h *TOTPHandler) SetSSOStepUp(fn func(c fiber.Ctx, userID, sessionID uuid.UUID) (string, error)) {
 	h.startSSOStepUp = fn
+}
+
+// SetSSOSignInFinish sets how VerifyLogin finishes an SSO sign-in after its second
+// factor (OIDCHandler.FinishSignInAfterSecondFactor; called from server setup).
+func (h *TOTPHandler) SetSSOSignInFinish(fn func(c fiber.Ctx, userID uuid.UUID, identity *pendingSSOIdentity) (db.User, error)) {
+	h.finishSSOSignIn = fn
 }
 
 // BeginSSOStepUp handles POST /api/v1/auth/totp/setup/sso-step-up: it starts the round
@@ -688,6 +703,24 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Token issuer not configured")
 	}
 
+	// An SSO sign-in the callback left for the second factor is finished now, with the
+	// identity the callback carried on and the account read again: linked, its roles
+	// synced, or refused with nothing issued. A token without an identity (any other
+	// sign-in, or one minted by a release that carried none, whose callback had already
+	// done this) goes on as before. A recovery code spent on a sign-in refused here stays
+	// spent: putting it back would make a single-use code reusable.
+	if pending.SSO != nil {
+		if h.finishSSOSignIn == nil {
+			slog.Error("totp verify-login: no SSO finish is wired, so no SSO sign-in can pass its second factor", "user_id", userID)
+			return fiber.NewError(fiber.StatusInternalServerError, oidcCouldNotCompleteMessage)
+		}
+		finished, err := h.finishSSOSignIn(c, userID, pending.SSO)
+		if err != nil {
+			return err
+		}
+		user = finished
+	}
+
 	// The session is created against the epoch the pending token carries — the one
 	// the PASSWORD step read. At this point it equals user.AuthEpoch, because the
 	// comparison above refused any token that differs, so reading it off the re-read
@@ -736,7 +769,8 @@ func (h *TOTPHandler) AdminReset(c fiber.Ctx, p *apischema.Params) error {
 // CreateTOTPPendingToken generates a random token and stores it in Redis with user
 // data, among it epoch: the user's auth epoch as the credential check that earned
 // this challenge read it. VerifyLogin creates the session against that value.
-func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UUID, epoch int64, auditAction string) (string, error) {
+// sso, when not nil, is the identity of an SSO sign-in VerifyLogin is to finish.
+func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UUID, epoch int64, auditAction string, sso *pendingSSOIdentity) (string, error) {
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", fmt.Errorf("generate pending token: %w", err)
@@ -747,6 +781,7 @@ func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UU
 		UserID:      userID.String(),
 		AuditAction: auditAction,
 		AuthEpoch:   &epoch,
+		SSO:         sso,
 	})
 
 	key := fmt.Sprintf("totp:pending:%s", token)
