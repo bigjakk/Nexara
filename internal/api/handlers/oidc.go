@@ -787,13 +787,23 @@ func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *au
 		displayName = userInfo.Email
 	}
 
-	user, err = h.queries.CreateOIDCUser(c.Context(), db.CreateOIDCUserParams{
-		Email:       userInfo.Email,
-		DisplayName: displayName,
-	})
+	// A new account must not differ from an existing one only by case: refused like the
+	// duplicate key below, by the same second lookup, as provisionLDAPUser does.
+	taken, err := h.queries.EmailTakenIgnoringCase(c.Context(), userInfo.Email)
+	if err != nil {
+		return db.User{}, fmt.Errorf("check the address: %w", err)
+	}
+	if taken {
+		err = errEmailTakenInAnotherCase
+	} else {
+		user, err = h.queries.CreateOIDCUser(c.Context(), db.CreateOIDCUserParams{
+			Email:       userInfo.Email,
+			DisplayName: displayName,
+		})
+	}
 	if err != nil {
 		// Handle race condition
-		if isDuplicateKeyError(err) {
+		if isDuplicateKeyError(err) || errors.Is(err, errEmailTakenInAnotherCase) {
 			user, err = h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
 				Email:      userInfo.Email,
 				AuthSource: "oidc",

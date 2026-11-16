@@ -53,3 +53,20 @@ func TestLDAPProvision_RefusesAnAddressAnotherAccountHasInAnotherCase(t *testing
 		t.Errorf("provisioned %t, %d accounts created; want refused, none", ok, len(store.named("CreateLDAPUser")))
 	}
 }
+
+// TestOIDCProvision_RefusesAnAddressAnotherAccountHasInAnotherCase: an SSO identity
+// whose address differs from a local account's only by case gets no account and no
+// exchange code, and the login page's provisioning message, as an exact duplicate does.
+func TestOIDCProvision_RefusesAnAddressAnotherAccountHasInAnotherCase(t *testing.T) {
+	t.Parallel()
+	store := newEpochStore(epochUser(t, epochLoginEmail, 0))
+	a := newEpochApp(t, store, epochOptions{})
+	var failure string
+	callProvision(t, a, func(c fiber.Ctx) error {
+		_, _, failure = a.oidc.provisionAndStoreExchange(c, db.OidcConfig{AutoProvision: true}, &auth.OIDCUserInfo{Email: "Alice@Example.com"})
+		return c.SendStatus(http.StatusNoContent)
+	})
+	if failure != "User provisioning failed" || len(store.named("CreateOIDCUser")) != 0 || len(a.redis.Keys()) != 0 {
+		t.Errorf("failure %q, %d accounts created, codes %v; want refused, none", failure, len(store.named("CreateOIDCUser")), a.redis.Keys())
+	}
+}
