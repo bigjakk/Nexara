@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useUpdateCluster } from "@/features/dashboard/api/dashboard-queries";
 import { Button } from "@/components/ui/button";
@@ -183,7 +183,7 @@ export function EditClusterDialog({
         setFingerprintError(
           err instanceof Error
             ? err.message
-            : "Failed to fetch TLS certificate",
+            : t("editClusterDialog.fetchCertificateFailed"),
         );
       }
     } finally {
@@ -249,7 +249,7 @@ export function EditClusterDialog({
     settle(updateMutation.mutateAsync({ id: cluster.id, body }), {
       // Named: it can land on another page, or over another cluster's open
       // dialog.
-      action: `Saving cluster ${cluster.name}`,
+      action: t("editClusterDialog.savingAction", { name: cluster.name }),
       // Not once the dialog is gone: onOpenChange(false) would close whichever
       // dialog the parent has opened in this one's place.
       onSuccess: (result) => {
@@ -299,14 +299,14 @@ export function EditClusterDialog({
     >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Edit Cluster</DialogTitle>
+          <DialogTitle>{t("editCluster")}</DialogTitle>
           <DialogDescription>
-            Update the configuration for {cluster.name}.
+            {t("editClusterDesc", { name: cluster.name })}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="edit-name">Name</Label>
+            <Label htmlFor="edit-name">{t("common:name")}</Label>
             <Input
               id="edit-name"
               value={name}
@@ -317,7 +317,7 @@ export function EditClusterDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="edit-url">API URL</Label>
+            <Label htmlFor="edit-url">{t("apiUrl")}</Label>
             <Input
               id="edit-url"
               value={apiUrl}
@@ -328,9 +328,7 @@ export function EditClusterDialog({
             />
             {addressChanged && (
               <p className="text-xs text-muted-foreground">
-                This cluster is moving to a new address, so it needs the token
-                secret again — the stored one is only ever sent to the address
-                it was saved for.
+                {t("editClusterDialog.addressMoved")}
               </p>
             )}
           </div>
@@ -341,21 +339,17 @@ export function EditClusterDialog({
                 <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-500 shrink-0" />
                 <div className="space-y-1">
                   <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                    SSH credential will be cleared
+                    {t("editClusterDialog.sshClearedTitle")}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Node addresses are learned from this API, so the stored SSH
-                    credential and every pinned host key were entrusted to
-                    machines this cluster is leaving. Saving clears both.
-                    Re-enter the credential and re-pin each node before the next
-                    rolling update.
+                    {t("editClusterDialog.sshClearedNotice")}
                   </p>
                 </div>
               </div>
             </div>
           )}
           <div className="space-y-2">
-            <Label htmlFor="edit-token">Token ID</Label>
+            <Label htmlFor="edit-token">{t("tokenId")}</Label>
             <Input
               id="edit-token"
               value={tokenId}
@@ -368,8 +362,8 @@ export function EditClusterDialog({
           <div className="space-y-2">
             <Label htmlFor="edit-secret">
               {addressChanged
-                ? "Token Secret (required — the address changed)"
-                : "Token Secret (leave blank to keep current)"}
+                ? t("editClusterDialog.tokenSecretRequired")
+                : t("tokenSecret")}
             </Label>
             <Input
               id="edit-secret"
@@ -380,8 +374,8 @@ export function EditClusterDialog({
               }}
               placeholder={
                 addressChanged
-                  ? "Re-enter the token secret for the new address"
-                  : "Unchanged"
+                  ? t("editClusterDialog.tokenSecretReenter")
+                  : t("tokenSecretPlaceholder")
               }
               required={addressChanged}
             />
@@ -390,7 +384,7 @@ export function EditClusterDialog({
           {/* TLS Certificate Section */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label>TLS Certificate</Label>
+              <Label>{t("editClusterDialog.tlsCertificate")}</Label>
               <Button
                 type="button"
                 variant="outline"
@@ -401,14 +395,16 @@ export function EditClusterDialog({
                 <RefreshCw
                   className={`mr-1.5 h-3.5 w-3.5 ${fetchingFingerprint ? "animate-spin" : ""}`}
                 />
-                {fetchingFingerprint ? "Fetching..." : "Re-fetch Certificate"}
+                {fetchingFingerprint
+                  ? t("editClusterDialog.fetching")
+                  : t("editClusterDialog.refetchCertificate")}
               </Button>
             </div>
 
             {cluster.tls_fingerprint && !fingerprint && (
               <div className="rounded-md bg-muted p-3">
                 <p className="text-xs text-muted-foreground mb-1">
-                  Current SHA-256 Fingerprint
+                  {t("editClusterDialog.currentFingerprint")}
                 </p>
                 <code className="text-xs font-mono break-all select-all">
                   {cluster.tls_fingerprint}
@@ -427,17 +423,20 @@ export function EditClusterDialog({
                     <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
                       <ShieldAlert className="h-5 w-5 shrink-0" />
                       <span className="font-medium">
-                        Self-Signed Certificate
+                        {t("editClusterDialog.selfSignedCertificate")}
                       </span>
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      The server at <strong>{apiUrl}</strong> uses a self-signed
-                      certificate. Verify this fingerprint matches your Proxmox
-                      host before accepting.
+                      <Trans
+                        t={t}
+                        i18nKey="editClusterDialog.selfSignedDescription"
+                        values={{ url: apiUrl }}
+                        components={{ url: <strong /> }}
+                      />
                     </p>
                     <div className="rounded-md bg-muted p-3">
                       <p className="text-xs text-muted-foreground mb-1">
-                        New SHA-256 Fingerprint
+                        {t("editClusterDialog.newFingerprint")}
                       </p>
                       <code className="text-xs font-mono break-all select-all">
                         {fingerprint.fingerprint}
@@ -447,8 +446,7 @@ export function EditClusterDialog({
                       fingerprint.fingerprint !== cluster.tls_fingerprint && (
                         <div className="rounded-md bg-amber-500/15 p-2">
                           <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
-                            This fingerprint differs from the currently stored
-                            fingerprint. The server certificate has changed.
+                            {t("editClusterDialog.fingerprintChanged")}
                           </p>
                         </div>
                       )}
@@ -461,8 +459,7 @@ export function EditClusterDialog({
                         }}
                       />
                       <Label htmlFor="accept-fingerprint" className="text-sm">
-                        I have verified this fingerprint and trust this
-                        certificate
+                        {t("editClusterDialog.acceptFingerprint")}
                       </Label>
                     </div>
                   </div>
@@ -471,16 +468,22 @@ export function EditClusterDialog({
                   <div className="panel rounded-lg p-4">
                     <div className="flex items-center gap-2">
                       <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-500" />
-                      <span className="font-medium">Trusted Certificate</span>
+                      <span className="font-medium">
+                        {t("editClusterDialog.trustedCertificate")}
+                      </span>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">
-                      The server at <strong>{apiUrl}</strong> has a valid
-                      certificate signed by a trusted CA.
+                      <Trans
+                        t={t}
+                        i18nKey="editClusterDialog.trustedDescription"
+                        values={{ url: apiUrl }}
+                        components={{ url: <strong /> }}
+                      />
                     </p>
                     {cluster.tls_fingerprint &&
                       fingerprint.fingerprint !== cluster.tls_fingerprint && (
                         <p className="text-sm text-muted-foreground mt-2">
-                          The fingerprint will be updated on save.
+                          {t("editClusterDialog.fingerprintUpdatedOnSave")}
                         </p>
                       )}
                   </div>
@@ -491,9 +494,9 @@ export function EditClusterDialog({
 
           {sshResetConfirm != null && sshResetConfirm.target === cluster.id && (
             <ConfirmRequiredWarning
-              title="SSH credential will be cleared"
+              title={t("editClusterDialog.sshClearedTitle")}
               message={sshResetConfirm.message}
-              confirmLabel="Clear SSH trust and save"
+              confirmLabel={t("editClusterDialog.clearSSHTrustAndSave")}
               onConfirm={() => {
                 submitUpdate(allowPrivate, true);
               }}
@@ -523,7 +526,7 @@ export function EditClusterDialog({
               <p className="text-sm text-destructive">
                 {updateMutation.error instanceof Error
                   ? updateMutation.error.message
-                  : "Update failed"}
+                  : t("editClusterDialog.updateFailed")}
               </p>
             )}
 
@@ -535,7 +538,7 @@ export function EditClusterDialog({
                 onOpenChange(false);
               }}
             >
-              Cancel
+              {t("common:cancel")}
             </Button>
             <Button
               type="submit"
@@ -546,7 +549,7 @@ export function EditClusterDialog({
                   !fingerprintAccepted)
               }
             >
-              {updateMutation.isPending ? "Saving..." : "Save"}
+              {updateMutation.isPending ? t("saving") : t("common:save")}
             </Button>
           </DialogFooter>
         </form>
