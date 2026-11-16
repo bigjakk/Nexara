@@ -709,7 +709,7 @@ The **Test Connection** panel appears only once the config is saved, and tests t
    The password is only ever sent to the directory on the first two paths — a local account's password never leaves Nexara.
 3. If no local account existed, one is JIT-provisioned with `auth_source=ldap`
 4. LDAP group memberships are mapped to Nexara roles
-5. Every login and sync **replaces** the user's roles: all of them are removed, hand-assigned and cluster-scoped ones included, and only the mapped global roles or the default role are added back
+5. Every login and sync **replaces** the user's roles: all of them are removed, hand-assigned and cluster-scoped ones included, and only the mapped global roles or the default role are added back. When the group search fails (a timeout, a size limit, no read access to the groups), nothing is replaced: the sign-in keeps the roles the user has, and the sync counts the user as skipped
 
 ### OIDC / SSO
 

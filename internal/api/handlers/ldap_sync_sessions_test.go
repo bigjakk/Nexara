@@ -260,3 +260,30 @@ func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 		}
 	}
 }
+
+// TestLDAP_AFailedGroupSearchChangesNoRole: a group search that did not answer says
+// nothing about the user's groups, so neither a sync nor a sign-in revokes or assigns a
+// role (a revoke there strips hand-assigned and cluster-scoped roles too).
+func TestLDAP_AFailedGroupSearchChangesNoRole(t *testing.T) {
+	t.Parallel()
+	user := db.User{ID: uuid.New(), Email: epochLoginEmail, IsActive: true, AuthSource: "ldap"}
+	failed := &auth.LDAPUser{Email: user.Email, GroupLookupFailed: true}
+
+	store := newEpochStore(user)
+	_, _, sync := ldapSyncApp(t, store, &fakeDirectory{found: failed})
+	if status := sync(); status != http.StatusOK || len(store.named("RevokeAllUserRoles")) != 0 {
+		t.Errorf("sync: status %d, %d role revokes; want 200 and none", status, len(store.named("RevokeAllUserRoles")))
+	}
+
+	store = newEpochStore(user)
+	a := newEpochApp(t, store, epochOptions{})
+	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries})
+	var ok bool
+	callProvision(t, a, func(c fiber.Ctx) error {
+		_, ok = a.auth.provisionLDAPUser(c, db.LdapConfig{}, failed, user.Email)
+		return c.SendStatus(http.StatusNoContent)
+	})
+	if !ok || len(store.named("RevokeAllUserRoles"))+len(store.named("AssignUserRole")) != 0 {
+		t.Errorf("sign-in: signed in %t, roles touched %d times; want signed in, none", ok, len(store.named("RevokeAllUserRoles"))+len(store.named("AssignUserRole")))
+	}
+}

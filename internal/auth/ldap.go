@@ -44,6 +44,9 @@ type LDAPUser struct {
 	Email       string
 	DisplayName string
 	Groups      []string
+	// GroupLookupFailed says the group search did not answer, so Groups says nothing:
+	// a caller must leave the user's roles as they are rather than read "no groups".
+	GroupLookupFailed bool
 }
 
 // LDAPClient wraps LDAP operations.
@@ -168,9 +171,7 @@ func (s *LDAPSession) Authenticate(user *LDAPUser, password string) error {
 		return fmt.Errorf("%w: %v", ErrLDAPUserBindFailed, err)
 	}
 	// Fetch groups (re-bind as service account first)
-	if err := s.client.serviceBind(s.conn); err == nil {
-		user.Groups = s.client.getUserGroups(s.conn, user.DN)
-	}
+	s.client.fillGroups(s.conn, user, true)
 	return nil
 }
 
@@ -191,8 +192,21 @@ func (c *LDAPClient) SearchUser(username string) (*LDAPUser, error) {
 		return nil, err
 	}
 
-	user.Groups = c.getUserGroups(conn, user.DN)
+	c.fillGroups(conn, user, false)
 	return user, nil
+}
+
+// fillGroups reads user's groups, after re-binding as the service account when rebind
+// says so; a bind or search that fails marks the lookup failed instead.
+func (c *LDAPClient) fillGroups(conn *ldap.Conn, user *LDAPUser, rebind bool) {
+	if rebind {
+		if err := c.serviceBind(conn); err != nil {
+			user.GroupLookupFailed = true
+			return
+		}
+	}
+	groups, err := c.getUserGroups(conn, user.DN)
+	user.Groups, user.GroupLookupFailed = groups, err != nil
 }
 
 func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*LDAPUser, error) {
@@ -232,9 +246,11 @@ func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*LDAPUser, er
 	}, nil
 }
 
-func (c *LDAPClient) getUserGroups(conn *ldap.Conn, userDN string) []string {
+// getUserGroups lists the DNs of the user's groups: none when no group search is
+// configured, an error when the search fails (a timeout, a size limit, no read access).
+func (c *LDAPClient) getUserGroups(conn *ldap.Conn, userDN string) ([]string, error) {
 	if c.cfg.GroupSearchBaseDN == "" || c.cfg.GroupFilter == "" {
-		return nil
+		return nil, nil
 	}
 
 	filter := strings.ReplaceAll(c.cfg.GroupFilter, "{{userDN}}", ldap.EscapeFilter(userDN))
@@ -253,12 +269,12 @@ func (c *LDAPClient) getUserGroups(conn *ldap.Conn, userDN string) []string {
 
 	result, err := conn.Search(searchReq)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("%w: group search: %v", ErrLDAPSearchFailed, err)
 	}
 
 	groups := make([]string, 0, len(result.Entries))
 	for _, entry := range result.Entries {
 		groups = append(groups, entry.DN)
 	}
-	return groups
+	return groups, nil
 }

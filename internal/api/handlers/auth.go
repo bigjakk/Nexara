@@ -1117,7 +1117,12 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 		slog.Warn("ldap login: could not keep the sign-in name for the sync", "user_id", user.ID, "error", err)
 	}
 
-	// Sync RBAC roles from LDAP group mapping
+	// Sync RBAC roles from LDAP group mapping, unless the group search failed: then the
+	// person signs in with the roles they have.
+	if ldapUser.GroupLookupFailed {
+		slog.Warn("ldap login: the group search failed; the account's roles are left as they are", "user_id", user.ID)
+		return user, true
+	}
 	mapping := make(map[string]string)
 	if len(ldapCfg.GroupRoleMapping) > 0 {
 		_ = json.Unmarshal(ldapCfg.GroupRoleMapping, &mapping)

@@ -747,6 +747,14 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 			continue
 		}
 
+		// A group search that failed says nothing about the user's roles: nothing of
+		// theirs changes this time.
+		if ldapUser.GroupLookupFailed {
+			res.skipped++
+			slog.Warn("LDAP sync: a user's group search failed; the account is left as it is", "user_id", dbUser.ID)
+			continue
+		}
+
 		// In the directory: re-enabled when a sync had disabled them.
 		if !dbUser.IsActive && dbUser.DeactivatedByDirectory {
 			// End any session left from before the deactivation first: the revoke
