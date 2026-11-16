@@ -196,10 +196,12 @@ func (m *mockQueries) DeleteGuestSmbiosForVanishedGuests(_ context.Context, arg 
 func (m *mockQueries) UpsertNode(_ context.Context, arg db.UpsertNodeParams) (db.Node, error) {
 	m.upsertNodeCalls = append(m.upsertNodeCalls, arg)
 	key := arg.ClusterID.String() + ":" + arg.Name
-	// Like the real ON CONFLICT upsert, an existing row keeps its id.
-	id := uuid.New()
+	// Like the real ON CONFLICT upsert, an existing row keeps its id and
+	// created_at, and every write sets last_seen_at.
+	id, now := uuid.New(), time.Now()
+	created := now
 	if existing, ok := m.nodes[key]; ok {
-		id = existing.ID
+		id, created = existing.ID, existing.CreatedAt
 	}
 	node := db.Node{
 		ID:             id,
@@ -213,6 +215,8 @@ func (m *mockQueries) UpsertNode(_ context.Context, arg db.UpsertNodeParams) (db
 		SslFingerprint: arg.SslFingerprint,
 		Uptime:         arg.Uptime,
 		HaState:        arg.HaState,
+		CreatedAt:      created,
+		LastSeenAt:     now,
 	}
 	m.nodes[key] = node
 	return node, nil

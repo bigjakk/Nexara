@@ -33,15 +33,15 @@ import (
 // not loaded the cluster configuration. /cluster/status then has no "cluster"
 // entry, which is how such a read is told apart from a cluster of one.
 
-// clusterMembers reads which nodes the cluster holds from one pass's node list
-// and cluster status, or says why this pass cannot tell. Only an answer it can
-// tell from may remove a node row.
-func clusterMembers(listed []proxmox.NodeListEntry, status []proxmox.ClusterStatusEntry, statusErr error) (members map[string]bool, skip string) {
+// clusterMembers reads which nodes the cluster holds, and the cluster's own
+// (corosync) name, from one pass's node list and cluster status, or says why
+// this pass cannot tell. Only an answer it can tell from may remove a node row.
+func clusterMembers(listed []proxmox.NodeListEntry, status []proxmox.ClusterStatusEntry, statusErr error) (members map[string]bool, name, skip string) {
 	if statusErr != nil {
-		return nil, "the cluster status could not be read"
+		return nil, "", "the cluster status could not be read"
 	}
 	if len(listed) == 0 {
-		return nil, "the node list is empty"
+		return nil, "", "the node list is empty"
 	}
 	var cluster *proxmox.ClusterStatusEntry
 	inStatus := make(map[string]bool, len(status))
@@ -54,51 +54,81 @@ func clusterMembers(listed []proxmox.NodeListEntry, status []proxmox.ClusterStat
 		}
 	}
 	if cluster == nil {
-		return nil, "the cluster status names no cluster"
+		return nil, "", "the cluster status names no cluster"
 	}
 	if cluster.Quorate != 1 {
-		return nil, "the cluster is not quorate"
+		return nil, "", "the cluster is not quorate"
 	}
 	members = make(map[string]bool, len(listed))
 	for _, n := range listed {
 		if n.Node == "" {
-			return nil, "the node list has an entry with no name"
+			return nil, "", "the node list has an entry with no name"
 		}
 		members[n.Node] = true
 	}
 	if !maps.Equal(members, inStatus) || cluster.Nodes != len(members) {
-		return nil, "the node list and the cluster status disagree"
+		return nil, "", "the node list and the cluster status disagree"
 	}
-	return members, ""
+	return members, cluster.Name, ""
 }
 
-// planNodeRemovals decides which node rows go. A row goes when two readings in
-// a row, both clusterMembers could tell from, lack its node: prevAbsent is what
-// the previous reading lacked, absent what this one lacks. Nothing goes, and
-// the count starts over, when this reading cannot tell, or when it lacks every
-// row on record — a cluster that holds none of its nodes is a wrong endpoint
-// or a bad answer, not a membership change.
-func planNodeRemovals(rows []db.Node, listed []proxmox.NodeListEntry, status []proxmox.ClusterStatusEntry,
-	statusErr error, prevAbsent map[string]bool) (remove []db.Node, absent map[string]bool, skip string) {
-	members, skip := clusterMembers(listed, status, statusErr)
+// skipOtherCluster is planNodeRemovals' skip when the cluster status names a
+// cluster other than the one this cluster row's nodes were read from.
+const skipOtherCluster = "the cluster status names another cluster"
+
+// membershipPlan is planNodeRemovals' decision.
+type membershipPlan struct {
+	remove  []db.Node       // the rows to delete
+	absent  map[string]bool // the known rows this reading lacks, for the next pass
+	cluster string          // the cluster this reading named
+	skip    string          // why this reading decides nothing; "" when it decides
+}
+
+// planNodeRemovals decides which node rows go. known is the cluster's rows as
+// they stood before this pass wrote any; prevAbsent is what the previous
+// reading lacked; expected is the cluster name the rows were read from ("" when
+// none is on record yet). A row goes when all of these hold:
+//   - this reading and the previous one could both tell (clusterMembers), and
+//     both lack its node;
+//   - this reading names the expected cluster: an API URL moved to another
+//     cluster must not empty this one, even where the two share a node name;
+//   - some row the cluster still lists was on record by the time the row's
+//     node was last seen. A cluster that lists only rows that came after (or
+//     none of the known rows at all) is another cluster, not a smaller one.
+//
+// Otherwise nothing goes and the count starts over.
+func planNodeRemovals(known []db.Node, listed []proxmox.NodeListEntry, status []proxmox.ClusterStatusEntry,
+	statusErr error, prevAbsent map[string]bool, expected string) membershipPlan {
+	members, name, skip := clusterMembers(listed, status, statusErr)
 	if skip != "" {
-		return nil, nil, skip
+		return membershipPlan{skip: skip}
 	}
-	absent = make(map[string]bool)
-	for _, r := range rows {
+	if expected != "" && name != expected {
+		return membershipPlan{cluster: name, skip: skipOtherCluster}
+	}
+	plan := membershipPlan{absent: make(map[string]bool), cluster: name}
+	for _, r := range known {
 		if !members[r.Name] {
-			absent[r.Name] = true
+			plan.absent[r.Name] = true
 		}
 	}
-	if len(absent) > 0 && len(absent) == len(rows) {
-		return nil, nil, "the cluster lists none of the nodes on record"
-	}
-	for _, r := range rows {
-		if absent[r.Name] && prevAbsent[r.Name] {
-			remove = append(remove, r)
+	for _, r := range known {
+		if plan.absent[r.Name] && prevAbsent[r.Name] && establishedMemberRemains(known, members, r) {
+			plan.remove = append(plan.remove, r)
 		}
 	}
-	return remove, absent, ""
+	return plan
+}
+
+// establishedMemberRemains reports whether a row the cluster still lists was
+// already on record when gone's node was last seen.
+func establishedMemberRemains(known []db.Node, members map[string]bool, gone db.Node) bool {
+	for _, k := range known {
+		if members[k.Name] && !k.CreatedAt.After(gone.LastSeenAt) {
+			return true
+		}
+	}
+	return false
 }
 
 // pruneRemovedNodes removes the rows of the nodes the cluster no longer holds
@@ -108,19 +138,31 @@ func planNodeRemovals(rows []db.Node, listed []proxmox.NodeListEntry, status []p
 // lists them on a node that is not a member, which nothing can reach, and they
 // come back by the normal path once their configs are on a member. History,
 // audit and task rows keep theirs (migrations/000148).
-func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, listed []proxmox.NodeListEntry,
-	status []proxmox.ClusterStatusEntry, statusErr error) bool {
+func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, known []db.Node, knownErr error,
+	listed []proxmox.NodeListEntry, status []proxmox.ClusterStatusEntry, statusErr error) bool {
 	prev, _ := s.nodeAbsent.Load(cluster.ID)
 	prevAbsent, _ := prev.(map[string]bool)
+	exp, _ := s.nodeCluster.Load(cluster.ID)
+	expected, _ := exp.(string)
 
-	rows, err := s.queries.ListNodesByCluster(ctx, cluster.ID)
-	if err != nil {
+	if knownErr != nil {
 		s.nodeAbsent.Delete(cluster.ID)
 		s.logger.Warn("node membership: could not read the cluster's node rows; removing none",
-			"cluster_id", cluster.ID, "error", err)
+			"cluster_id", cluster.ID, "error", knownErr)
 		return false
 	}
-	remove, absent, skip := planNodeRemovals(rows, listed, status, statusErr, prevAbsent)
+	plan := planNodeRemovals(known, listed, status, statusErr, prevAbsent, expected)
+	remove, absent, skip := plan.remove, plan.absent, plan.skip
+	if skip == skipOtherCluster {
+		s.nodeAbsent.Delete(cluster.ID)
+		// Kept: the rows are the expected cluster's until this process
+		// restarts or the cluster row is re-added.
+		if warned, _ := s.nodeClusterWarned.Swap(cluster.ID, plan.cluster); warned != plan.cluster {
+			s.logger.Warn("node membership: the API URL now reaches another cluster; removing no node rows",
+				"cluster_id", cluster.ID, "expected_cluster", expected, "answering_cluster", plan.cluster)
+		}
+		return false
+	}
 	if skip != "" {
 		s.nodeAbsent.Delete(cluster.ID)
 		if len(prevAbsent) > 0 {
@@ -131,6 +173,9 @@ func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, list
 				"cluster_id", cluster.ID, "reason", skip)
 		}
 		return false
+	}
+	if expected == "" {
+		s.nodeCluster.Store(cluster.ID, plan.cluster)
 	}
 	for name := range absent {
 		if !prevAbsent[name] {

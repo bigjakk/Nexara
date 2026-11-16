@@ -344,6 +344,8 @@ type Syncer struct {
 	cephMu               sync.Mutex              // guards cephSeen
 	cephSeen             map[uuid.UUID]*cephSeen // each cluster's last Ceph reading, for the change diff
 	nodeAbsent           sync.Map                // cluster ID → map[string]bool: the nodes the last membership reading lacked (pruneRemovedNodes)
+	nodeCluster          sync.Map                // cluster ID → string: the corosync cluster name its node rows were read from
+	nodeClusterWarned    sync.Map                // cluster ID → string: the other cluster last warned about
 
 	// objectObserveInterval is OBJECT_OBSERVE_INTERVAL, which bounds how far
 	// back an observed change's explanation is looked for (observedLookback).
@@ -658,6 +660,9 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// Only these nodes are eligible for stale-VM pruning — see the
 	// DeleteStaleVMsForNodes call below.
 	syncedNodeIDs := make([]uuid.UUID, 0, len(nodes))
+	// The node rows as they stood before this pass writes any: what a node
+	// removal is planned against (pruneRemovedNodes).
+	knownNodes, knownErr := s.queries.ListNodesByCluster(ctx, cluster.ID)
 	for _, node := range nodes {
 		nr, err := s.syncNode(ctx, client, cluster.ID, node, vmExtra, nodeHAState)
 		if err != nil {
@@ -696,7 +701,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// remove the rows of nodes the cluster no longer lists as members.
 	clusterStatus, statusErr := client.GetClusterStatus(ctx)
 	s.syncNodeAddresses(ctx, cluster.ID, clusterStatus, statusErr)
-	nodesRemoved := s.pruneRemovedNodes(ctx, cluster, nodes, clusterStatus, statusErr)
+	nodesRemoved := s.pruneRemovedNodes(ctx, cluster, knownNodes, knownErr, nodes, clusterStatus, statusErr)
 
 	// Collect storage-replication job status.
 	s.syncReplication(ctx, client, cluster.ID)

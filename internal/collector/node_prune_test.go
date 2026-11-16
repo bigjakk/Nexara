@@ -3,9 +3,13 @@ package collector
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
+	"net/http/httptest"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -17,12 +21,17 @@ import (
 
 // TestPlanNodeRemovals protects the one automatic delete of node rows: a row
 // goes only when two readings in a row that can be trusted both lack its node,
-// and never when the reading failed, came back empty or partial, or would leave
-// the cluster with no row at all. An offline member is listed, so it stays.
+// and never when the reading failed, came back empty or partial, names another
+// cluster, or keeps no row that was on record while the node was still seen.
+// An offline member is listed, so it stays.
 func TestPlanNodeRemovals(t *testing.T) {
 	t.Parallel()
 
-	rows := []db.Node{{ID: uuid.New(), Name: "pve-01"}, {ID: uuid.New(), Name: "pve-02"}, {ID: uuid.New(), Name: "pve-03"}}
+	created, seen := time.Now().Add(-time.Hour), time.Now()
+	rows := make([]db.Node, 0, 3)
+	for _, n := range []string{"pve-01", "pve-02", "pve-03"} {
+		rows = append(rows, db.Node{ID: uuid.New(), Name: n, CreatedAt: created, LastSeenAt: seen})
+	}
 	listed := func(names ...string) []proxmox.NodeListEntry {
 		out := make([]proxmox.NodeListEntry, 0, len(names))
 		for _, n := range names {
@@ -49,6 +58,7 @@ func TestPlanNodeRemovals(t *testing.T) {
 		status     []proxmox.ClusterStatusEntry
 		statusErr  error
 		prev       map[string]bool
+		expected   string
 		wantRemove []string
 		wantAbsent []string
 		wantSkip   bool
@@ -69,29 +79,75 @@ func TestPlanNodeRemovals(t *testing.T) {
 		{name: "node list and cluster status disagree", listed: twoOfThree,
 			status: status(1, "pve-01", "pve-02", "pve-03"), prev: pending, wantSkip: true},
 		{name: "lacks every row on record", listed: listed("pve-09"), status: status(1, "pve-09"),
-			prev: map[string]bool{"pve-01": true, "pve-02": true, "pve-03": true}, wantSkip: true},
+			prev:       map[string]bool{"pve-01": true, "pve-02": true, "pve-03": true},
+			wantAbsent: []string{"pve-01", "pve-02", "pve-03"}},
+		{name: "names another cluster", listed: twoOfThree, status: status(1, "pve-01", "pve-02"),
+			prev: pending, expected: "cluster02", wantSkip: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			remove, absent, skip := planNodeRemovals(rows, tc.listed, tc.status, tc.statusErr, tc.prev)
-			if (skip != "") != tc.wantSkip {
-				t.Fatalf("skip = %q, want skip %v", skip, tc.wantSkip)
+			plan := planNodeRemovals(rows, tc.listed, tc.status, tc.statusErr, tc.prev, tc.expected)
+			if (plan.skip != "") != tc.wantSkip {
+				t.Fatalf("skip = %q, want skip %v", plan.skip, tc.wantSkip)
 			}
 			var got []string
-			for _, r := range remove {
+			for _, r := range plan.remove {
 				got = append(got, r.Name)
 			}
 			if !slices.Equal(got, tc.wantRemove) {
 				t.Errorf("remove = %v, want %v", got, tc.wantRemove)
 			}
-			var gotAbsent []string
-			for n := range absent {
-				gotAbsent = append(gotAbsent, n)
-			}
-			if !slices.Equal(gotAbsent, tc.wantAbsent) {
+			if gotAbsent := slices.Sorted(maps.Keys(plan.absent)); !slices.Equal(gotAbsent, tc.wantAbsent) {
 				t.Errorf("absent = %v, want %v", gotAbsent, tc.wantAbsent)
 			}
 		})
+	}
+}
+
+// fakeMembership answers /nodes and /cluster/status as one quorate cluster
+// whose name and members a test can change between passes.
+type fakeMembership struct {
+	mu      sync.Mutex
+	cluster string
+	nodes   []string
+}
+
+func (f *fakeMembership) set(cluster string, nodes ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cluster, f.nodes = cluster, nodes
+}
+
+func (f *fakeMembership) server(t *testing.T) *httptest.Server {
+	t.Helper()
+	return newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			out := make([]proxmox.NodeListEntry, 0, len(f.nodes))
+			for _, n := range f.nodes {
+				out = append(out, proxmox.NodeListEntry{Node: n, Status: "online"})
+			}
+			jsonResponse(w, out)
+		},
+		"/api2/json/cluster/status": func(w http.ResponseWriter, _ *http.Request) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			out := make([]proxmox.ClusterStatusEntry, 0, 1+len(f.nodes))
+			out = append(out, proxmox.ClusterStatusEntry{Type: "cluster", Name: f.cluster, Quorate: 1, Nodes: len(f.nodes)})
+			for _, n := range f.nodes {
+				out = append(out, proxmox.ClusterStatusEntry{Type: "node", Name: n, Online: 1})
+			}
+			jsonResponse(w, out)
+		},
+	})
+}
+
+// seedNodes records nodes the collector has known for an hour, last seen now.
+func seedNodes(mq *mockQueries, clusterID uuid.UUID, names ...string) {
+	for _, n := range names {
+		mq.nodes[clusterID.String()+":"+n] = db.Node{ID: uuid.New(), ClusterID: clusterID, Name: n, Status: "online",
+			CreatedAt: time.Now().Add(-time.Hour), LastSeenAt: time.Now()}
 	}
 }
 
@@ -101,17 +157,9 @@ func TestPlanNodeRemovals(t *testing.T) {
 func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	t.Parallel()
 
-	srv := newTestServer(t, map[string]http.HandlerFunc{
-		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
-			jsonResponse(w, []proxmox.NodeListEntry{{Node: "pve-01", Status: "online"}})
-		},
-		"/api2/json/cluster/status": func(w http.ResponseWriter, _ *http.Request) {
-			jsonResponse(w, []proxmox.ClusterStatusEntry{
-				{Type: "cluster", Name: "cluster01", Quorate: 1, Nodes: 1},
-				{Type: "node", Name: "pve-01", Online: 1},
-			})
-		},
-	})
+	fake := &fakeMembership{}
+	fake.set("cluster01", "pve-01")
+	srv := fake.server(t)
 	defer srv.Close()
 
 	mq := newMockQueries()
@@ -119,8 +167,7 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	syncer := newTestSyncer(mq)
 	syncer.SetEventPublisher(pub)
 	cluster := makeCluster(t, srv.URL)
-	gone := db.Node{ID: uuid.New(), ClusterID: cluster.ID, Name: "pve-02", Status: "online"}
-	mq.nodes[cluster.ID.String()+":pve-02"] = gone
+	seedNodes(mq, cluster.ID, "pve-01", "pve-02")
 
 	for pass := 1; pass <= 2; pass++ {
 		pub.events = nil
@@ -143,5 +190,55 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	}
 	if pub.countKind(events.KindInventoryChange) == 0 {
 		t.Errorf("the removing pass published no inventory_change: %+v", pub.events)
+	}
+}
+
+// TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster: a cluster row whose
+// API URL is moved to another cluster keeps its nodes however many passes run,
+// whether or not the process saw the old cluster first, and when the two
+// clusters share a node name.
+func TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		seenFirst bool     // a pass reads the old cluster before the URL moves
+		other     []string // the other cluster's nodes
+	}{
+		{name: "no node in common, first pass after a restart", other: []string{"pve-09"}},
+		{name: "shares a node name", seenFirst: true, other: []string{"pve-01", "pve-09"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeMembership{}
+			fake.set("cluster01", "pve-01", "pve-02", "pve-03")
+			srv := fake.server(t)
+			defer srv.Close()
+
+			mq := newMockQueries()
+			syncer := newTestSyncer(mq)
+			cluster := makeCluster(t, srv.URL)
+			seedNodes(mq, cluster.ID, "pve-01", "pve-02", "pve-03")
+			if tc.seenFirst {
+				if _, err := syncer.SyncCluster(context.Background(), cluster); err != nil {
+					t.Fatalf("pass on the old cluster: %v", err)
+				}
+			}
+
+			fake.set("cluster02", tc.other...)
+			for pass := 1; pass <= 4; pass++ {
+				if _, err := syncer.SyncCluster(context.Background(), cluster); err != nil {
+					t.Fatalf("pass %d: SyncCluster: %v", pass, err)
+				}
+			}
+			for _, n := range []string{"pve-01", "pve-02", "pve-03"} {
+				if _, kept := mq.nodes[cluster.ID.String()+":"+n]; !kept {
+					t.Errorf("%s's row was removed", n)
+				}
+			}
+			if len(mq.auditLogs) != 0 {
+				t.Errorf("audit entries = %+v, want none", mq.auditLogs)
+			}
+		})
 	}
 }
