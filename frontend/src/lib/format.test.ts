@@ -1,13 +1,24 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
-import { usePreferencesStore } from "@/stores/preferences-store";
 import {
+  usePreferencesStore,
+  type DateFormat,
+} from "@/stores/preferences-store";
+import {
+  formatAxisDay,
   formatBytes,
   formatBytesPerSecond,
+  formatDate,
   formatDateTime,
+  formatExactDate,
+  formatExactDateTime,
   formatPercent,
   formatRelativeTime,
+  formatTime,
+  formatTimestampLong,
   formatUptime,
+  pad2,
+  type DateInput,
 } from "./format";
 
 describe("formatBytes", () => {
@@ -98,31 +109,83 @@ describe("formatPercent", () => {
   });
 });
 
-describe("formatDateTime", () => {
-  it("renders a parseable ISO timestamp in the locale", () => {
-    // Not asserting the exact text: toLocaleString follows the runtime's
-    // locale, so pin only that it produced a real rendering of that instant.
-    expect(formatDateTime("2026-09-03T14:03:22Z")).toBe(
-      new Date("2026-09-03T14:03:22Z").toLocaleString(),
-    );
+describe("dates under the Date format preference", () => {
+  // A fixed "now"; iso expectations are built from this machine's own zone.
+  const NOW = new Date("2026-09-03T12:00:00Z");
+  const at = (msFromNow: number) => new Date(NOW.getTime() + msFromNow);
+  const offset = (d: Date) => {
+    const m = -d.getTimezoneOffset();
+    const a = Math.abs(m);
+    return `${m < 0 ? "-" : "+"}${pad2(Math.floor(a / 60))}:${pad2(a % 60)}`;
+  };
+  const isoDate = (d: Date) =>
+    `${String(d.getFullYear())}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const isoTime = (d: Date) =>
+    `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  const HOUR = 3_600_000;
+  const DAY = 24 * HOUR;
+  const past = at(-5 * 60_000);
+  const farPast = new Date("2001-01-02T03:04:05Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    usePreferencesStore.getState().setPreferences({ dateFormat: "relative" });
   });
 
-  it("falls back to an em dash when there is no value", () => {
-    expect(formatDateTime(null)).toBe("—");
-    expect(formatDateTime(undefined)).toBe("—");
-    expect(formatDateTime("")).toBe("—");
+  it.each<[DateFormat, DateInput, string]>([
+    ["relative", past.toISOString(), "5m ago"],
+    ["relative", past.getTime(), "5m ago"],
+    ["relative", at(-30_000), "now"],
+    ["relative", at(3 * HOUR + 60_000).toISOString(), "in 3h"],
+    ["relative", at(-2 * DAY).toISOString(), "2d ago"],
+    ["relative", farPast.toISOString(), "25y ago"],
+    ["iso", past.toISOString(), `${isoDate(past)}T${isoTime(past)}${offset(past)}`],
+    ["iso", farPast, `${isoDate(farPast)}T${isoTime(farPast)}${offset(farPast)}`],
+    ["locale", past.toISOString(), past.toLocaleString()],
+    ["locale", farPast.getTime(), farPast.toLocaleString()],
+  ])("formatDateTime under %s: %s → %s", (dateFormat, value, want) => {
+    usePreferencesStore.getState().setPreferences({ dateFormat });
+    expect(formatDateTime(value)).toBe(want);
   });
 
-  it("honors a custom fallback for the missing case", () => {
-    // "Never" is what the Veeam tables pass for a sync that has not run.
-    expect(formatDateTime(null, "Never")).toBe("Never");
-    expect(formatDateTime("", "Never")).toBe("Never");
+  it.each<[DateFormat, (v: DateInput) => string, DateInput, string]>([
+    // A date alone stays a date alone, counted in calendar days.
+    ["relative", formatDate, NOW, "today"],
+    ["relative", formatDate, at(-DAY), "yesterday"],
+    ["relative", formatDate, at(40 * DAY), "in 1mo"],
+    ["iso", formatDate, farPast, isoDate(farPast)],
+    ["locale", formatDate, farPast, farPast.toLocaleDateString()],
+    // A clock reading and an exact time are never relative.
+    ["relative", formatTime, past, past.toLocaleTimeString()],
+    ["iso", formatTime, past, isoTime(past)],
+    ["relative", formatExactDateTime, past, past.toLocaleString()],
+    ["iso", formatExactDateTime, past, `${isoDate(past)}T${isoTime(past)}${offset(past)}`],
+    ["relative", formatExactDate, at(-DAY), at(-DAY).toLocaleDateString()],
+    // A chart tick is never relative; iso writes the day month-day.
+    ["relative", formatTimestampLong, past.getTime(), `${pad2(past.getMonth() + 1)}/${pad2(past.getDate())} ${pad2(past.getHours())}:${pad2(past.getMinutes())}`],
+    ["iso", formatTimestampLong, past.getTime(), `${pad2(past.getMonth() + 1)}-${pad2(past.getDate())} ${pad2(past.getHours())}:${pad2(past.getMinutes())}`],
+    ["iso", formatAxisDay, past.getTime(), `${pad2(past.getMonth() + 1)}-${pad2(past.getDate())}`],
+  ])("under %s, %o of %s is %s", (dateFormat, fn, value, want) => {
+    usePreferencesStore.getState().setPreferences({ dateFormat });
+    expect(fn(value)).toBe(want);
   });
 
-  it("returns an unparseable value verbatim rather than Invalid Date", () => {
-    expect(formatDateTime("not a date")).toBe("not a date");
-    expect(formatDateTime("not a date", "Never")).toBe("not a date");
-  });
+  it.each<DateFormat>(["relative", "iso", "locale"])(
+    "under %s, a missing, zero or unreadable value reads as the fallback or as sent",
+    (dateFormat) => {
+      usePreferencesStore.getState().setPreferences({ dateFormat });
+      expect(formatDateTime(null)).toBe("—");
+      expect(formatDateTime(undefined, "Never")).toBe("Never");
+      expect(formatDateTime("", "Never")).toBe("Never");
+      expect(formatDateTime(0, "-")).toBe("-");
+      expect(formatDate(Number.NaN)).toBe("—");
+      expect(formatDateTime("not a date")).toBe("not a date");
+    },
+  );
 });
 
 describe("formatRelativeTime", () => {
