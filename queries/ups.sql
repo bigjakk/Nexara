@@ -15,11 +15,23 @@ RETURNING *;
 -- Devices LIST UPS no longer names. Kept, not deleted, so their history stays.
 -- A nil Go slice reaches SQL as NULL, which ANY would match against nothing;
 -- COALESCE makes it the empty list it means, so every device is marked absent.
-UPDATE ups_devices
-SET present = FALSE
-WHERE server_id = @server_id
-  AND present
-  AND NOT (ups_name = ANY(COALESCE(@present_names::text[], '{}')));
+-- Their logins go: nothing lists a missing UPS's clients, and kept they would
+-- read as current if it came back. The DELETE sees the rows as they were
+-- before the UPDATE, so it names both the devices marked now and those
+-- already absent (left over from before this query pruned).
+WITH gone AS (
+    UPDATE ups_devices
+    SET present = FALSE
+    WHERE server_id = @server_id
+      AND present
+      AND NOT (ups_name = ANY(COALESCE(@present_names::text[], '{}')))
+    RETURNING id
+)
+DELETE FROM ups_clients c
+USING ups_devices d
+WHERE c.ups_id = d.id
+  AND d.server_id = @server_id
+  AND (NOT d.present OR d.id IN (SELECT id FROM gone));
 
 -- name: ListUpsDevicesByServer :many
 SELECT * FROM ups_devices WHERE server_id = $1 AND present ORDER BY ups_name;

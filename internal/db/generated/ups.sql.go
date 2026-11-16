@@ -669,11 +669,19 @@ func (q *Queries) ListUpsOnRollingUpdateHosts(ctx context.Context) ([]uuid.UUID,
 }
 
 const markUpsDevicesAbsent = `-- name: MarkUpsDevicesAbsent :exec
-UPDATE ups_devices
-SET present = FALSE
-WHERE server_id = $1
-  AND present
-  AND NOT (ups_name = ANY(COALESCE($2::text[], '{}')))
+WITH gone AS (
+    UPDATE ups_devices
+    SET present = FALSE
+    WHERE server_id = $1
+      AND present
+      AND NOT (ups_name = ANY(COALESCE($2::text[], '{}')))
+    RETURNING id
+)
+DELETE FROM ups_clients c
+USING ups_devices d
+WHERE c.ups_id = d.id
+  AND d.server_id = $1
+  AND (NOT d.present OR d.id IN (SELECT id FROM gone))
 `
 
 type MarkUpsDevicesAbsentParams struct {
@@ -684,6 +692,10 @@ type MarkUpsDevicesAbsentParams struct {
 // Devices LIST UPS no longer names. Kept, not deleted, so their history stays.
 // A nil Go slice reaches SQL as NULL, which ANY would match against nothing;
 // COALESCE makes it the empty list it means, so every device is marked absent.
+// Their logins go: nothing lists a missing UPS's clients, and kept they would
+// read as current if it came back. The DELETE sees the rows as they were
+// before the UPDATE, so it names both the devices marked now and those
+// already absent (left over from before this query pruned).
 func (q *Queries) MarkUpsDevicesAbsent(ctx context.Context, arg MarkUpsDevicesAbsentParams) error {
 	_, err := q.db.Exec(ctx, markUpsDevicesAbsent, arg.ServerID, arg.PresentNames)
 	return err

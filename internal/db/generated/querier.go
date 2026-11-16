@@ -2852,6 +2852,10 @@ type Querier interface {
 	// Devices LIST UPS no longer names. Kept, not deleted, so their history stays.
 	// A nil Go slice reaches SQL as NULL, which ANY would match against nothing;
 	// COALESCE makes it the empty list it means, so every device is marked absent.
+	// Their logins go: nothing lists a missing UPS's clients, and kept they would
+	// read as current if it came back. The DELETE sees the rows as they were
+	// before the UPDATE, so it names both the devices marked now and those
+	// already absent (left over from before this query pruned).
 	MarkUpsDevicesAbsent(ctx context.Context, arg MarkUpsDevicesAbsentParams) error
 	// Records that Nexara asked this session to stop.
 	//

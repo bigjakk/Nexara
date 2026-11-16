@@ -81,17 +81,33 @@ func TestUpsQueries(t *testing.T) {
 			}
 			return m
 		}
+		// A device marked absent takes its logins along, and so does one
+		// already absent that still has some.
+		clients := func(id uuid.UUID) (n int) {
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM ups_clients WHERE ups_id = $1`, id).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		exec(t, `INSERT INTO ups_clients (ups_id, address) VALUES ($1, '192.0.2.11'), ($2, '192.0.2.12')`, upsDevA, upsDevB)
 		if err := q.MarkUpsDevicesAbsent(ctx, gen.MarkUpsDevicesAbsentParams{ServerID: upsServerID, PresentNames: []string{"a"}}); err != nil {
 			t.Fatal(err)
 		}
 		if p := present(); !p["a"] || p["b"] {
 			t.Fatalf("after LIST UPS named only a: present %v", p)
 		}
+		if a, b := clients(upsDevA), clients(upsDevB); a != 1 || b != 0 {
+			t.Fatalf("logins after b vanished: a %d, b %d; want 1 and 0", a, b)
+		}
+		exec(t, `INSERT INTO ups_clients (ups_id, address) VALUES ($1, '192.0.2.12')`, upsDevB)
 		if err := q.MarkUpsDevicesAbsent(ctx, gen.MarkUpsDevicesAbsentParams{ServerID: upsServerID}); err != nil {
 			t.Fatal(err)
 		}
 		if p := present(); len(p) != 0 {
 			t.Fatalf("after an empty LIST UPS: present %v", p)
+		}
+		if a, b := clients(upsDevA), clients(upsDevB); a != 0 || b != 0 {
+			t.Fatalf("logins after every device vanished: a %d, b %d; want none", a, b)
 		}
 		if _, err := q.UpsertUpsDevice(ctx, gen.UpsertUpsDeviceParams{ServerID: upsServerID, UpsName: "b"}); err != nil {
 			t.Fatal(err)
