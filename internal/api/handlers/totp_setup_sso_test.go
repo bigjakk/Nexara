@@ -32,11 +32,17 @@ func ssoSetupApp(t *testing.T) (a *epochApp, erin db.User, session uuid.UUID) {
 // beginSetupIn sends a setup from session, carrying cookie ("name=value", or none).
 func (a *epochApp) beginSetupIn(t *testing.T, user db.User, session uuid.UUID, cookie string) int {
 	t.Helper()
+	return a.beginSetupResp(t, user, session, cookie).StatusCode
+}
+
+// beginSetupResp is beginSetupIn's whole response.
+func (a *epochApp) beginSetupResp(t *testing.T, user db.User, session uuid.UUID, cookie string) *http.Response {
+	t.Helper()
 	headers := map[string]string{"X-Test-Acting-User": user.ID.String(), "X-Test-Session": session.String()}
 	if cookie != "" {
 		headers["Cookie"] = cookie
 	}
-	return a.send(t, http.MethodPost, "/auth/totp/setup", `{}`, headers, 20*time.Second).StatusCode
+	return a.send(t, http.MethodPost, "/auth/totp/setup", `{}`, headers, 20*time.Second)
 }
 
 // erinIdentity is the step-up's identity of erin, as the provider vouches for it.

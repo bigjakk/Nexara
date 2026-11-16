@@ -75,6 +75,7 @@ func newStepUpProvider(t *testing.T, email string) *stepUpProvider {
 // The callback must go back to the Security page with a proof the setup then uses, and
 // must never be completed as a sign-in: no exchange code, no session. Under the relaxed
 // rule the URL asks for no fresh sign-in, and a token without auth_time is the proof.
+// Behind a path prefix, the used cookie is cleared at the prefixed path it was set at.
 func TestOIDCCallback_AStepUpRoundTripRecordsAProofAndSignsNobodyIn(t *testing.T) {
 	t.Parallel()
 	for _, relaxed := range []bool{false, true} {
@@ -95,7 +96,7 @@ func stepUpRoundTrip(t *testing.T, relaxed bool) {
 	}
 	a.store.mutate(erin.ID, func(u *db.User) { u.OidcIssuer, u.OidcSubject = idp.srv.URL, "sub-1" })
 	a.store.oidcConfig = &db.OidcConfig{ID: uuid.New(), Enabled: true, IssuerUrl: idp.srv.URL, ClientID: "nexara",
-		RedirectUri: "http://nexara.example.com/api/v1/auth/oidc/callback", EmailClaim: "email", RelaxedStepUp: relaxed}
+		RedirectUri: "http://nexara.example.com/nexara/api/v1/auth/oidc/callback", EmailClaim: "email", RelaxedStepUp: relaxed}
 	a.oidc.newProvider = func(ctx context.Context, cfg auth.OIDCConfig, rdb *redis.Client) (*auth.OIDCProvider, error) {
 		return auth.NewOIDCProviderWithClient(ctx, cfg, rdb, idp.srv.Client())
 	}
@@ -135,7 +136,17 @@ func stepUpRoundTrip(t *testing.T, relaxed bool) {
 	if len(a.store.sessions) != sessionsBefore || len(a.store.stepUpProofs) != 1 {
 		t.Errorf("sessions %d (was %d), proofs %d: want no session made and one proof", len(a.store.sessions), sessionsBefore, len(a.store.stepUpProofs))
 	}
-	if got := a.beginSetupIn(t, erin, session, stepUpCookieOf(resp)); got != http.StatusOK {
-		t.Errorf("the setup with the proof = %d, want 200", got)
+	set := cookiesNamed(resp, totpStepUpCookieName)
+	if len(set) != 1 || set[0].Path != "/nexara/api/v1/auth/totp/setup" {
+		t.Fatalf("the callback set step-up cookies %+v, want one under the prefix", set)
+	}
+	setup := a.beginSetupResp(t, erin, session, stepUpCookieOf(resp))
+	if setup.StatusCode != http.StatusOK {
+		t.Errorf("the setup with the proof = %d, want 200", setup.StatusCode)
+	}
+	cleared := cookiesNamed(setup, totpStepUpCookieName)
+	if len(cleared) != 1 || cleared[0].Value != "" || cleared[0].MaxAge >= 0 || cleared[0].Path != set[0].Path ||
+		cleared[0].HttpOnly != set[0].HttpOnly || cleared[0].Secure != set[0].Secure || cleared[0].SameSite != set[0].SameSite {
+		t.Errorf("the setup cleared %+v, want the cookie set (%+v) expired at its own path and attributes", cleared, set[0])
 	}
 }
