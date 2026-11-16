@@ -18,6 +18,7 @@ import (
 	"github.com/bigjakk/nexara/internal/audit/audittest"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
 type fakeInserter struct {
@@ -108,9 +109,34 @@ func TestWrite(t *testing.T) {
 	}
 }
 
+// orderPub is a real publisher that closes forwarded when Write asks it for its
+// forwarder, and reports on order whether that had happened when the publish
+// began.
+type orderPub struct {
+	*events.Publisher
+	once      sync.Once
+	forwarded chan struct{}
+	order     chan bool
+}
+
+func (p *orderPub) SyslogForwarder() *proxsyslog.Forwarder {
+	p.once.Do(func() { close(p.forwarded) })
+	return p.Publisher.SyslogForwarder()
+}
+
+func (p *orderPub) ClusterEvent(ctx context.Context, clusterID, kind, resourceType, resourceID, action string) {
+	select {
+	case <-p.forwarded:
+		p.order <- true
+	default:
+		p.order <- false
+	}
+	p.Publisher.ClusterEvent(ctx, clusterID, kind, resourceType, resourceID, action)
+}
+
 // TestWriteDoesNotWaitOnAStalledRedis: against a Redis that accepts and never
-// answers, the syslog copy is handed over before the publish and Write returns
-// near publishTimeout, not after the client's 30 s read timeout.
+// answers, the syslog copy is handed over before the publish begins and Write
+// returns near publishTimeout, not after the client's 30 s read timeout.
 func TestWriteDoesNotWaitOnAStalledRedis(t *testing.T) {
 	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -142,15 +168,24 @@ func TestWriteDoesNotWaitOnAStalledRedis(t *testing.T) {
 	collector, next := audittest.Collector(t)
 	rdb := redis.NewClient(&redis.Options{Addr: ln.Addr().String(), ReadTimeout: 30 * time.Second, MaxRetries: -1})
 	t.Cleanup(func() { _ = rdb.Close() })
-	pub := events.NewPublisher(rdb, slog.New(slog.DiscardHandler))
-	pub.SetSyslogForwarder(collector.SyslogForwarder())
+	inner := events.NewPublisher(rdb, slog.New(slog.DiscardHandler))
+	inner.SetSyslogForwarder(collector.SyslogForwarder())
+	pub := &orderPub{Publisher: inner, forwarded: make(chan struct{}), order: make(chan bool, 1)}
 
 	done := make(chan error, 1)
 	go func() {
 		done <- Write(context.Background(), &fakeInserter{}, pub, db.InsertAuditLogParams{ResourceType: "vm", ResourceID: "100", Action: "vm_start"})
 	}()
-	if line := next(publishTimeout / 2); !strings.Contains(line, `action="vm_start"`) {
-		t.Errorf("collector received %q while the publish stalled, want the vm_start record", line)
+	select {
+	case forwardedFirst := <-pub.order:
+		if !forwardedFirst {
+			t.Errorf("the publish began before the syslog copy was handed over, so the copy waits behind Redis")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Write never published")
+	}
+	if line := next(5 * time.Second); !strings.Contains(line, `action="vm_start"`) {
+		t.Errorf("collector received %q, want the vm_start record", line)
 	}
 	select {
 	case <-done:
