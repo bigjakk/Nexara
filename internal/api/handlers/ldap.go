@@ -679,10 +679,11 @@ func userFilterMatchesAddress(filter, emailAttribute string) filterMatch {
 // it searched for were missing (tooManyMissing).
 var errLDAPSyncTooManyMissing = errors.New("ldap sync: most accounts searched for are missing from the directory")
 
-// tooManyMissing is the mass-miss rule: more than half of the accounts whose search
-// answered are missing, and at least three. A sync that meets it deactivates nobody.
+// tooManyMissing is the mass-miss rule: every account whose search answered is
+// missing, or more than half of them and at least three. A sync that meets it
+// deactivates nobody, so it never deactivates the last accounts it can see.
 func tooManyMissing(missing, searched int) bool {
-	return missing >= 3 && 2*missing > searched
+	return missing > 0 && missing == searched || missing >= 3 && 2*missing > searched
 }
 
 // auditDetails are the ldap_sync row's details: the counts and, for a sync that

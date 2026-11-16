@@ -19,6 +19,14 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
+// bystander is an LDAP account the directory still has, so that a test whose one user
+// is missing is not the mass miss that changes nothing (tooManyMissing).
+var bystander = db.User{ID: uuid.MustParse("b7000000-0000-4000-8000-000000000001"), Email: "bystander@example.com", IsActive: true, AuthSource: "ldap"}
+
+func bystanderEntry() map[string]auth.LDAPUser {
+	return map[string]auth.LDAPUser{bystander.Email: {Email: bystander.Email}}
+}
+
 // mailFilter is a user filter that matches the address, so an account no sign-in has
 // named yet is searched by it.
 const mailFilter = "(|(uid={{username}})(mail={{username}}))"
@@ -57,9 +65,9 @@ func ldapSyncApp(t *testing.T, store *epochStore, dir *fakeDirectory) (*epochApp
 func TestLDAPSync_ADisabledUserHasNoSessionToReviveWhenReEnabled(t *testing.T) {
 	t.Parallel()
 	user := db.User{ID: uuid.New(), Email: "alice@example.com", IsActive: true, Role: "user", AuthSource: "ldap"}
-	store := newEpochStore(user)
+	store := newEpochStore(user, bystander)
 	store.sessions = []db.Session{{ID: uuid.New(), UserID: user.ID, ExpiresAt: time.Now().Add(time.Hour)}}
-	_, _, sync := ldapSyncApp(t, store, &fakeDirectory{})
+	_, _, sync := ldapSyncApp(t, store, &fakeDirectory{entries: bystanderEntry()})
 	if status := sync(); status != http.StatusOK {
 		t.Fatalf("sync: status %d", status)
 	}
@@ -110,9 +118,9 @@ func (d fakeDirectory) SearchUser(name string) (*auth.LDAPUser, error) {
 func TestLDAPSync_AFailedRevokeIsRetriedBeforeTheReEnable(t *testing.T) {
 	t.Parallel()
 	user := db.User{ID: uuid.New(), Email: "alice@example.com", IsActive: true, Role: "user", AuthSource: "ldap"}
-	store := newEpochStore(user)
+	store := newEpochStore(user, bystander)
 	store.sessions = []db.Session{{ID: uuid.New(), UserID: user.ID, ExpiresAt: time.Now().Add(time.Hour)}}
-	dir := &fakeDirectory{}
+	dir := &fakeDirectory{entries: bystanderEntry()}
 	_, _, syncStatus := ldapSyncApp(t, store, dir)
 	sync := func() {
 		t.Helper()
@@ -132,7 +140,7 @@ func TestLDAPSync_AFailedRevokeIsRetriedBeforeTheReEnable(t *testing.T) {
 		t.Fatal("precondition: the first sync should disable the user and leave the session unrevoked")
 	}
 
-	dir.found = &auth.LDAPUser{Email: user.Email}
+	dir.entries[user.Email] = auth.LDAPUser{Email: user.Email}
 	sync() // the user is back: re-enabled
 	if !store.user(user.ID).IsActive {
 		t.Fatal("precondition: the second sync did not re-enable the user")
@@ -245,13 +253,17 @@ func TestLDAPSync_SearchesWithTheNameThePersonSignsInWith(t *testing.T) {
 func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		present  int
-		status   int
-		disabled int
-	}{{0, http.StatusUnprocessableEntity, 0}, {3, http.StatusOK, 1}} {
+		users, present int
+		status         int
+		disabled       int
+	}{
+		{4, 0, http.StatusUnprocessableEntity, 0},
+		{4, 3, http.StatusOK, 1},
+		{1, 0, http.StatusUnprocessableEntity, 0}, // the last account it can see
+	} {
 		entries := map[string]auth.LDAPUser{}
-		users := make([]db.User, 0, 4)
-		for i := range 4 {
+		users := make([]db.User, 0, tc.users)
+		for i := range tc.users {
 			u := db.User{ID: uuid.New(), Email: fmt.Sprintf("user%d@example.com", i), IsActive: true, AuthSource: "ldap"}
 			if i < tc.present {
 				entries[u.Email] = auth.LDAPUser{Email: u.Email}
@@ -269,7 +281,7 @@ func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 		}
 		_, details := auditOf(a, "ldap_sync")
 		if status != tc.status || disabled != tc.disabled || len(details) != 1 {
-			t.Errorf("%d of 4 present: status %d, %d disabled, audit %v; want %d, %d, one row", tc.present, status, disabled, details, tc.status, tc.disabled)
+			t.Errorf("%d of %d present: status %d, %d disabled, audit %v; want %d, %d, one row", tc.present, tc.users, status, disabled, details, tc.status, tc.disabled)
 		}
 		if tc.present == 0 && (len(details) != 1 || !strings.Contains(details[0], `"reason":"too_many_missing"`)) {
 			t.Errorf("the mass miss is not audited as too_many_missing: %v", details)
