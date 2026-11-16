@@ -16,6 +16,7 @@ import { useDeleteContent } from "../api/storage-queries";
 import { sessionScope } from "@/lib/api-client";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import { contentKindName } from "../lib/store-rows";
+import { DateTime } from "@/components/DateTime";
 
 interface StorageContentTableProps {
   items: StorageContentItem[];
@@ -248,7 +249,7 @@ export function StorageContentTable({
                 {formatBytes(item.size)}
               </TableCell>
               <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
-                {formatDate(item.ctime)}
+                <DateTime value={item.ctime * 1000} />
               </TableCell>
               <TableCell className="hidden tabular-nums text-muted-foreground md:table-cell">
                 {item.vmid ? item.vmid : "—"}

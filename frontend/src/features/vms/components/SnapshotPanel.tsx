@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Camera, CornerDownRight, RotateCcw, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,8 @@ import {
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import { CreateSnapshotDialog } from "./CreateSnapshotDialog";
 import type { ResourceKind, Snapshot } from "../types/vm";
-import { formatDateTime, formatExactDate } from "@/lib/format";
+import { formatExactDate } from "@/lib/format";
+import { DateTime } from "@/components/DateTime";
 
 interface SnapshotPanelProps {
   clusterId: string;
@@ -78,8 +79,10 @@ export function SnapshotPanel({
     );
   }
 
-  function formatDate(ts: number | undefined): string {
-    return formatDateTime(ts === undefined ? null : ts * 1000, "--");
+  function formatDate(ts: number | undefined) {
+    return (
+      <DateTime value={ts === undefined ? null : ts * 1000} fallback="--" />
+    );
   }
 
   // Build tree from flat list using parent field
@@ -213,7 +216,7 @@ interface SnapshotNodeProps {
   onRollback: (name: string) => void;
   deletePending: boolean;
   rollbackPending: boolean;
-  formatDate: (ts: number | undefined) => string;
+  formatDate: (ts: number | undefined) => ReactNode;
 }
 
 function SnapshotNode({

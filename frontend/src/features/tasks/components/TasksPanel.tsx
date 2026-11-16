@@ -10,7 +10,6 @@ import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { TaskLogSection } from "@/components/TaskLogSection";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
 import type { SortDirection } from "@/hooks/useTableSort";
-import { formatDateTime } from "@/lib/format";
 import { displayProgress } from "@/components/layout/task-status";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useTaskLogStore } from "@/stores/task-log-store";
@@ -148,7 +147,11 @@ function TaskRow({
                 {task.finished_at ? "Finished" : "Elapsed"}
               </span>
               <span>
-                {task.finished_at ? `${formatDateTime(task.finished_at)} ` : ""}
+                {task.finished_at && (
+                  <>
+                    <DateTime value={task.finished_at} />{" "}
+                  </>
+                )}
                 <span className="text-muted-foreground">
                   ({formatDuration(task.started_at, task.finished_at)})
                 </span>

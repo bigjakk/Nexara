@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +28,7 @@ import {
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
 import type { AlertInstance } from "@/types/api";
-import { formatDateTime } from "@/lib/format";
+import { DateTime } from "@/components/DateTime";
 
 export function AlertsTable() {
   const [stateFilter, setStateFilter] = useState<string>("");
@@ -51,7 +51,7 @@ export function AlertsTable() {
 
   const canAcknowledge = hasPermission("acknowledge", "alert");
 
-  const formatDate = (s?: string) => formatDateTime(s);
+  const formatDate = (s?: string) => <DateTime value={s} />;
 
   return (
     <Panel
@@ -163,7 +163,7 @@ export function AlertRow({
   canAcknowledge: boolean;
   onAcknowledge: () => void;
   onResolve: () => void;
-  formatDate: (s?: string) => string;
+  formatDate: (s?: string) => ReactNode;
 }) {
   return (
     <>
