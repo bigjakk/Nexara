@@ -38,6 +38,8 @@
   "cancelJob": "Cancel job",
   "keepJob": "Keep job",
   "sshTestNotRoot": "This account is not root. Sensor readings work, but automated upgrades need root and stop at each node before it is drained.",
+  "sshTestAction": "Testing SSH to {{node}}",
+  "sshPinAction": "Pinning the host key of {{node}}",
   "parallelism": "Parallelism",
   "reboot": "Reboot",
   "completed": "Completed",

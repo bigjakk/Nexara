@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import { signedInUserID } from "@/stores/pbs-key-store";
 import type {
   RollingUpdateJob,
@@ -396,6 +397,7 @@ export function useDeleteSSHCredentials() {
 
 export function useTestSSHConnection() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       nodeName,
@@ -424,6 +426,7 @@ export function useSSHKnownHosts(clusterId: string) {
 export function usePinSSHHostKey() {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       nodeName,

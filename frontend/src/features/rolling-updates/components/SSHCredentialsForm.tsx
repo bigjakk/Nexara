@@ -24,6 +24,8 @@ import type {
 } from "@/types/api";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { BulkPinDialog } from "./BulkPinDialog";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 
 interface SSHCredentialsFormProps {
   clusterId: string;
@@ -53,6 +55,9 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
   const deleteCreds = useDeleteSSHCredentials();
   const testConn = useTestSSHConnection();
   const pinKey = usePinSSHHostKey();
+  // The form shows a failed test or pin itself (the hooks opt out of the app's
+  // toast), and one that lands after it was left is toasted instead.
+  const settle = useSaveOutcome(clusterId);
   const deleteKnownHost = useDeleteSSHKnownHost();
 
   const [editing, setEditing] = useState(false);
@@ -132,61 +137,60 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
     const firstNode = nodes?.[0];
     const nodeName = testNode || (firstNode ? firstNode.name : "");
     if (!nodeName) return;
-    testConn.mutate(
-      { clusterId, nodeName },
-      {
-        onSuccess: (result) => {
-          if (result.success) {
-            // A warning, never a refusal: only an explicit false warns.
-            const notRoot = result.root === false;
-            setTestState(
-              result.fingerprint !== undefined
-                ? { kind: "success", fingerprint: result.fingerprint, notRoot }
-                : { kind: "success", notRoot },
-            );
-            return;
-          }
-          if (result.host_key_pending) {
-            setTestState({
-              kind: "pending",
-              info: result.host_key_pending,
-              nodeName,
-            });
-            return;
-          }
-          if (result.host_key_mismatch) {
-            setTestState({
-              kind: "mismatch",
-              info: result.host_key_mismatch,
-              nodeName,
-            });
-            return;
-          }
-          setTestState({ kind: "error", message: result.message });
-        },
-        onError: () => {
-          setTestState({ kind: "error", message: "Request failed" });
-        },
+    settle(testConn.mutateAsync({ clusterId, nodeName }), {
+      action: t("sshTestAction", { node: nodeName }),
+      onSuccess: (result) => {
+        if (result.success) {
+          // A warning, never a refusal: only an explicit false warns.
+          const notRoot = result.root === false;
+          setTestState(
+            result.fingerprint !== undefined
+              ? { kind: "success", fingerprint: result.fingerprint, notRoot }
+              : { kind: "success", notRoot },
+          );
+          return;
+        }
+        if (result.host_key_pending) {
+          setTestState({
+            kind: "pending",
+            info: result.host_key_pending,
+            nodeName,
+          });
+          return;
+        }
+        if (result.host_key_mismatch) {
+          setTestState({
+            kind: "mismatch",
+            info: result.host_key_mismatch,
+            nodeName,
+          });
+          return;
+        }
+        setTestState({ kind: "error", message: result.message });
       },
-    );
+      onError: (err) => {
+        setTestState({
+          kind: "error",
+          message: describeError(err) || "Request failed",
+        });
+      },
+    });
   };
 
   const handlePin = (nodeName: string, expectedFingerprint: string) => {
-    pinKey.mutate(
-      { clusterId, nodeName, expectedFingerprint },
-      {
-        onSuccess: () => {
-          // Re-run the test against the freshly-pinned key.
-          handleTest();
-        },
-        onError: (err) => {
-          setTestState({
-            kind: "error",
-            message: err instanceof Error ? err.message : "Pin failed",
-          });
-        },
+    settle(pinKey.mutateAsync({ clusterId, nodeName, expectedFingerprint }), {
+      action: t("sshPinAction", { node: nodeName }),
+      onSuccess: () => {
+        // Re-run the test against the freshly-pinned key.
+        handleTest();
       },
-    );
+      onError: (err) => {
+        setTestState({
+          kind: "error",
+          message: err instanceof Error ? err.message : "Pin failed",
+        });
+      },
+    });
   };
 
   const handleDelete = () => {
