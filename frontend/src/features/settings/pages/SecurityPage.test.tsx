@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLocation } from "react-router-dom";
+import { toast } from "sonner";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { SecurityPage } from "./SecurityPage";
@@ -14,11 +15,12 @@ vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 const mockedGet = vi.mocked(apiClient.get);
 const mockedList = vi.mocked(apiClient.list);
 const mockedPost = vi.mocked(apiClient.post);
+const mockedDelete = vi.mocked(apiClient.delete);
 
 const SETUP = "/api/v1/auth/totp/setup";
 
 /** The page's reads, for an account that signs in as authSource says. */
-function serve(authSource: "local" | "ldap" | "oidc") {
+function serve(authSource: "local" | "ldap" | "oidc", enabled = false) {
   mockedGet.mockImplementation((path) =>
     Promise.resolve(
       String(path) === "/api/v1/auth/me"
@@ -31,7 +33,7 @@ function serve(authSource: "local" | "ldap" | "oidc") {
             totp_enabled: false,
             created_at: "2026-01-01T00:00:00Z",
           }
-        : { enabled: false, recovery_codes_remaining: 0 },
+        : { enabled, recovery_codes_remaining: 5 },
     ),
   );
   mockedList.mockResolvedValue([]);
@@ -217,4 +219,62 @@ describe("SecurityPage: beginning a 2FA setup", () => {
       expect(screen.getByTestId("search")).toHaveTextContent(/^$/);
     },
   );
+});
+
+// Disable shows its failure inside its dialog, which stays open; one that arrives
+// after the dialog was closed is reported once, in a toast.
+describe("SecurityPage: turning 2FA off", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows a wrong code in the dialog, and a late failure once", async () => {
+    serve("local", true);
+    let fail: (reason: unknown) => void = () => {};
+    mockedDelete
+      .mockRejectedValueOnce(
+        new ApiClientError(401, {
+          error: "unauthorized",
+          message: "Invalid TOTP code",
+        }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            fail = reject;
+          }),
+      );
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<SecurityPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Disable 2FA" }),
+    );
+    await user.type(screen.getByLabelText("Authentication code"), "123456");
+    const dialog = screen.getByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Disable 2FA" }),
+    );
+    expect(
+      await within(dialog).findByText("Invalid TOTP code"),
+    ).toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Disable 2FA" }),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await act(async () => {
+      fail(
+        new ApiClientError(503, {
+          error: "unavailable",
+          message: "Try again shortly.",
+        }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(toast.error).toHaveBeenCalledTimes(1);
+    });
+  });
 });

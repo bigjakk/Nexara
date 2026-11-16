@@ -111,6 +111,11 @@ export function SecurityPage() {
   const [disableCode, setDisableCode] = useState("");
 
   const [regenDialogOpen, setRegenDialogOpen] = useState(false);
+  // The failure of Disable or Regenerate, shown inside its dialog.
+  const [dialogError, setDialogError] = useState("");
+  const settleVerify = useSaveOutcome(setupStep);
+  const settleDisable = useSaveOutcome(disableDialogOpen);
+  const settleRegen = useSaveOutcome(regenDialogOpen);
   const [regenCode, setRegenCode] = useState("");
 
   // The password is kept only while the dialog is open: here, and in the
@@ -174,52 +179,74 @@ export function SecurityPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [continueAfterStepUp, setupDialogOpen]);
 
-  const handleVerify = async () => {
-    setError("");
-    try {
-      const res = await confirmMutation.mutateAsync(verifyCode);
-      setRecoveryCodes(res.recovery_codes);
-      setSetupStep("recovery");
-      setVerifyCode("");
-    } catch (err) {
-      if (err instanceof ApiClientError) {
-        setError(err.body.message);
-      } else {
-        setError("Verification failed");
-      }
-    }
+  // Confirm, Disable and Regenerate show their failure where they were sent
+  // from, and only there (their hooks opt out of the toast); one that settles
+  // after its dialog or step is gone is toasted once (useSaveOutcome). New
+  // recovery codes that arrive late are still shown: they are the only copy.
+  const showCodes = (codes: string[]) => {
+    setRecoveryCodes(codes);
+    setSetupStep("recovery");
   };
 
-  const handleDisable = async () => {
+  const handleVerify = () => {
     setError("");
-    try {
-      await disableMutation.mutateAsync({ code: disableCode });
-      setDisableDialogOpen(false);
-      setDisableCode("");
-    } catch (err) {
-      if (err instanceof ApiClientError) {
-        setError(err.body.message);
-      } else {
-        setError("Failed to disable 2FA");
-      }
-    }
+    settleVerify(confirmMutation.mutateAsync(verifyCode), {
+      action: t("confirmAction"),
+      onSuccess: (res) => {
+        showCodes(res.recovery_codes);
+        setVerifyCode("");
+      },
+      onLateSuccess: (res) => {
+        showCodes(res.recovery_codes);
+      },
+      onError: (err) => {
+        setError(
+          err instanceof ApiClientError
+            ? err.body.message
+            : "Verification failed",
+        );
+      },
+    });
   };
 
-  const handleRegenerate = async () => {
-    setError("");
-    try {
-      const res = await regenMutation.mutateAsync(regenCode);
-      setRecoveryCodes(res.recovery_codes);
-      setRegenDialogOpen(false);
-      setRegenCode("");
-      setSetupStep("recovery");
-    } catch (err) {
-      if (err instanceof ApiClientError) {
-        setError(err.body.message);
-      } else {
-        setError("Failed to regenerate codes");
-      }
-    }
+  const handleDisable = () => {
+    setDialogError("");
+    settleDisable(disableMutation.mutateAsync({ code: disableCode }), {
+      action: t("disableAction"),
+      onSuccess: () => {
+        setDisableDialogOpen(false);
+        setDisableCode("");
+      },
+      onError: (err) => {
+        setDialogError(
+          err instanceof ApiClientError
+            ? err.body.message
+            : "Failed to disable 2FA",
+        );
+      },
+    });
+  };
+
+  const handleRegenerate = () => {
+    setDialogError("");
+    settleRegen(regenMutation.mutateAsync(regenCode), {
+      action: t("regenerateAction"),
+      onSuccess: (res) => {
+        setRegenDialogOpen(false);
+        setRegenCode("");
+        showCodes(res.recovery_codes);
+      },
+      onLateSuccess: (res) => {
+        showCodes(res.recovery_codes);
+      },
+      onError: (err) => {
+        setDialogError(
+          err instanceof ApiClientError
+            ? err.body.message
+            : "Failed to regenerate codes",
+        );
+      },
+    });
   };
 
   const copyRecoveryCodes = () => {
@@ -310,7 +337,7 @@ export function SecurityPage() {
                   variant="outline"
                   onClick={() => {
                     setRegenDialogOpen(true);
-                    setError("");
+                    setDialogError("");
                   }}
                 >
                   <RefreshCw className="h-4 w-4" />
@@ -326,7 +353,7 @@ export function SecurityPage() {
                   className="text-destructive hover:text-destructive"
                   onClick={() => {
                     setDisableDialogOpen(true);
-                    setError("");
+                    setDialogError("");
                   }}
                 >
                   Disable 2FA
@@ -397,7 +424,7 @@ export function SecurityPage() {
               </div>
               <div className="flex gap-2">
                 <Button
-                  onClick={() => void handleVerify()}
+                  onClick={handleVerify}
                   disabled={
                     verifyCode.length !== 6 || confirmMutation.isPending
                   }
@@ -572,6 +599,9 @@ export function SecurityPage() {
               }}
             />
           </div>
+          {dialogError && (
+            <p className="text-sm text-destructive">{dialogError}</p>
+          )}
           <DialogFooter>
             <Button
               variant="ghost"
@@ -584,7 +614,7 @@ export function SecurityPage() {
             <Button
               variant="destructive"
               disabled={disableCode.length !== 6 || disableMutation.isPending}
-              onClick={() => void handleDisable()}
+              onClick={handleDisable}
             >
               {disableMutation.isPending && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -622,6 +652,9 @@ export function SecurityPage() {
               }}
             />
           </div>
+          {dialogError && (
+            <p className="text-sm text-destructive">{dialogError}</p>
+          )}
           <DialogFooter>
             <Button
               variant="ghost"
@@ -633,7 +666,7 @@ export function SecurityPage() {
             </Button>
             <Button
               disabled={regenCode.length !== 6 || regenMutation.isPending}
-              onClick={() => void handleRegenerate()}
+              onClick={handleRegenerate}
             >
               {regenMutation.isPending && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

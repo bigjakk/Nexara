@@ -52,6 +52,8 @@ export function useTOTPSSOStepUp() {
   });
 }
 
+/** Confirm, Disable and Regenerate: SecurityPage, their only caller, shows a
+ * failure itself and settles it through useSaveOutcome. */
 export function useTOTPConfirm() {
   const qc = useQueryClient();
   return useMutation({
@@ -65,6 +67,7 @@ export function useTOTPConfirm() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["totp", "status"] });
     },
+    ...errorsHandledLocally,
   });
 }
 
@@ -76,6 +79,7 @@ export function useTOTPDisable() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["totp", "status"] });
     },
+    ...errorsHandledLocally,
   });
 }
 
@@ -90,6 +94,7 @@ export function useRegenerateRecoveryCodes() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["totp", "status"] });
     },
+    ...errorsHandledLocally,
   });
 }
 
