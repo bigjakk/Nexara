@@ -14,12 +14,9 @@ vi.mock("@/features/vms/api/vm-queries", async (importOriginal) => {
   return {
     ...actual,
     useMoveDisk: () => ({
-      mutate: (
-        vars: Record<string, unknown>,
-        opts?: { onSuccess?: (data: { upid: string }) => void },
-      ) => {
+      mutateAsync: (vars: Record<string, unknown>) => {
         moveState.vars = vars;
-        opts?.onSuccess?.({
+        return Promise.resolve({
           upid: "UPID:pve1:0001:0002:0003:qmmove:100:root@pam:",
         });
       },

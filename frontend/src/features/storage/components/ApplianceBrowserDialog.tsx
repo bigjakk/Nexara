@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { useAppliances, useDownloadAppliance } from "../api/storage-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { ApplianceTemplate } from "../types/storage";
 
 interface ApplianceBrowserDialogProps {
@@ -57,6 +58,7 @@ export function ApplianceBrowserDialog({
 
   const appliancesQuery = useAppliances(clusterId, open);
   const downloadMutation = useDownloadAppliance();
+  const settle = useSaveOutcome(open);
   const queryClient = useQueryClient();
 
   const appliances: ApplianceTemplate[] = useMemo(
@@ -89,16 +91,18 @@ export function ApplianceBrowserDialog({
   function handleDownload(t: ApplianceTemplate) {
     setActiveTemplate(t.template);
     setTaskUpid(null);
-    downloadMutation.mutate(
-      {
+    settle(
+      downloadMutation.mutateAsync({
         clusterId,
         storageId,
         data: { template: t.template },
-      },
+      }),
       {
+        action: `Downloading ${t.template} to ${storageName}`,
         onSuccess: (data) => {
           if (data.upid) setTaskUpid(data.upid);
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { usePullOCIImage } from "../api/storage-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface OCIPullDialogProps {
   clusterId: string;
@@ -47,6 +48,7 @@ export function OCIPullDialog({
   const [filename, setFilename] = useState("");
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
   const pullMutation = usePullOCIImage();
+  const settle = useSaveOutcome(open);
   const queryClient = useQueryClient();
 
   const referenceTrimmed = reference.trim();
@@ -62,21 +64,23 @@ export function OCIPullDialog({
   function handleSubmit() {
     if (!referenceValid || !filenameValid) return;
     setTaskUpid(null);
-    pullMutation.mutate(
-      {
+    settle(
+      pullMutation.mutateAsync({
         clusterId,
         storageId,
         data: {
           reference: referenceTrimmed,
           ...(filenameTrimmed && { file_name: filenameTrimmed }),
         },
-      },
+      }),
       {
+        action: `Pulling ${referenceTrimmed}`,
         onSuccess: (data) => {
           if (data.upid) {
             setTaskUpid(data.upid);
           }
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

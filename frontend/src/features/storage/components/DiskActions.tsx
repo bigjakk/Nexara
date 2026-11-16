@@ -18,6 +18,7 @@ import {
   resolveDiskFormat,
 } from "@/features/storage/lib/disk-move";
 import { useTaskLogStore } from "@/stores/task-log-store";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 // --- Resize Disk Dialog ---
 
@@ -35,16 +36,23 @@ export function ResizeDiskDialog({
   const [open, setOpen] = useState(false);
   const [size, setSize] = useState("");
   const resizeMutation = useResizeDisk();
+  const settle = useSaveOutcome(open);
 
   function handleResize() {
     if (!size) return;
-    resizeMutation.mutate(
-      { clusterId, vmId, disk: diskName, size },
+    settle(
+      resizeMutation.mutateAsync({ clusterId, vmId, disk: diskName, size }),
       {
+        action: `Resizing disk ${diskName}`,
         onSuccess: () => {
           setOpen(false);
           setSize("");
         },
+        // The dialog stays mounted while closed: put the size away too.
+        onLateSuccess: (_result, now) => {
+          if (!now.open) setSize("");
+        },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }
@@ -127,6 +135,7 @@ export function MoveDiskDialog({
   const [deleteOriginal, setDeleteOriginal] = useState(false);
   const [bwlimit, setBwlimit] = useState("");
   const moveMutation = useMoveDisk();
+  const settle = useSaveOutcome(open);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
   // Proxmox rejects moving a disk onto the storage it already lives on.
@@ -146,8 +155,17 @@ export function MoveDiskDialog({
 
   function handleMove() {
     if (!targetStorage || bwlimitInvalid) return;
-    moveMutation.mutate(
-      {
+    const focus = (data: { upid: string }) => {
+      if (data.upid) {
+        setFocusedTask({
+          clusterId,
+          upid: data.upid,
+          description: `Move disk ${diskName} → ${targetStorage}`,
+        });
+      }
+    };
+    settle(
+      moveMutation.mutateAsync({
         clusterId,
         vmId,
         disk: diskName,
@@ -155,19 +173,21 @@ export function MoveDiskDialog({
         deleteOriginal,
         format: resolveDiskFormat(format, currentFormat, target?.type),
         bwlimitKib,
-      },
+      }),
       {
+        action: `Moving disk ${diskName} to ${targetStorage}`,
         onSuccess: (data) => {
-          if (data.upid) {
-            setFocusedTask({
-              clusterId,
-              upid: data.upid,
-              description: `Move disk ${diskName} → ${targetStorage}`,
-            });
-          }
+          focus(data);
           setOpen(false);
           reset();
         },
+        // The dialog stays mounted while closed: follow the task and put the
+        // form away as onSuccess would have.
+        onLateSuccess: (data, now) => {
+          focus(data);
+          if (!now.open) reset();
+        },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

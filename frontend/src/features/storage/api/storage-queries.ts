@@ -325,6 +325,7 @@ interface PullOCIParams {
 export function usePullOCIImage() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, storageId, data }: PullOCIParams) =>
       apiClient.post<StorageActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/oci-pull`,
@@ -355,6 +356,7 @@ interface DownloadURLParams {
 export function useDownloadURL() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, storageId, data }: DownloadURLParams) =>
       apiClient.post<StorageActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/download-url`,
@@ -400,6 +402,7 @@ interface DownloadApplianceParams {
 export function useDownloadAppliance() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, storageId, data }: DownloadApplianceParams) =>
       apiClient.post<StorageActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/appliances`,

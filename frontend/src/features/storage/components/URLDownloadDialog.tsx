@@ -23,6 +23,7 @@ import {
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { deriveFilenameFromURL } from "@/lib/derive-filename";
 import { useDownloadURL } from "../api/storage-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface URLDownloadDialogProps {
   clusterId: string;
@@ -62,6 +63,7 @@ export function URLDownloadDialog({
   const [verifyCerts, setVerifyCerts] = useState(true);
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
   const downloadMutation = useDownloadURL();
+  const settle = useSaveOutcome(open);
   const queryClient = useQueryClient();
 
   const urlTrimmed = url.trim();
@@ -87,8 +89,8 @@ export function URLDownloadDialog({
   function handleSubmit() {
     if (!urlValid || !filenameValid) return;
     setTaskUpid(null);
-    downloadMutation.mutate(
-      {
+    settle(
+      downloadMutation.mutateAsync({
         clusterId,
         storageId,
         data: {
@@ -102,11 +104,13 @@ export function URLDownloadDialog({
           ...(decompression && { decompression_algorithm: decompression }),
           ...(!verifyCerts && { verify_certificates: false }),
         },
-      },
+      }),
       {
+        action: `Downloading ${filenameTrimmed}`,
         onSuccess: (data) => {
           if (data.upid) setTaskUpid(data.upid);
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }
