@@ -99,7 +99,7 @@ func TestGuard_OnlyThePasswordRoutesTouchTheLockout(t *testing.T) {
 			// and the second factor's and sign-in's lockouts, which count in the same stores
 			// under keys of their own and are cleared only by a credential that verified.
 			"reserve": {"admitPasswordAttempt", "admitTOTPAttempt", "admitLoginAttempt"},
-			"release": {"handBackAttempt", "handBackLoginAttempt"},
+			"release": {"handBackAttempt", "handBackLoginAttempt", "handBackTOTPAttempt"},
 			"clear":   {"forgetPasswordFailures", "forgetTOTPFailures", "forgetLoginFailures"},
 		}
 		selectorOnly := map[string]bool{"reserve": true, "release": true, "clear": true}

@@ -528,3 +528,67 @@ func TestTOTP_VerifyLogin_RecoveryCodesHaveABudgetOfTheirOwn(t *testing.T) {
 		})
 	}
 }
+
+// TestTOTP_VerifyLogin_ARecoveryCodeTheDatabaseCannotCheckCostsNothing: a failed read
+// or spend of the recovery codes is not a wrong code. It answers 503, gives back both
+// budgets' attempt (the user's and the pending token's), spends no code and keeps the
+// pending sign-in, so the same code can be retried.
+func TestTOTP_VerifyLogin_ARecoveryCodeTheDatabaseCannotCheckCostsNothing(t *testing.T) {
+	t.Parallel()
+	for _, stmt := range []string{"ListRecoveryCodes", "DeleteRecoveryCode"} {
+		t.Run(stmt, func(t *testing.T) {
+			t.Parallel()
+			user, _ := epochTOTPUser(t, epochLoginEmail, 0)
+			store := newEpochStore(user)
+			plain, hashes, err := auth.NewTOTPService(totpTestKey).GenerateRecoveryCodes(1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store.recoveryCodes[user.ID] = []db.ListRecoveryCodesRow{{ID: uuid.New(), CodeHash: hashes[0]}}
+			a := newEpochApp(t, store, epochOptions{totp: true})
+			token := epochFirstStep(t, a, epochLoginEmail)
+			body := `{"totp_pending_token":"` + token + `","recovery_code":"` + plain[0] + `"}`
+
+			store.mu.Lock()
+			store.failOn[stmt] = errRaceTransient
+			store.mu.Unlock()
+			if resp := a.post(t, "/auth/totp/verify-login", body); resp.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503", resp.StatusCode)
+			}
+			for _, key := range []string{totpRecoveryLockoutPolicy.failKey(user.ID), "totp:attempts:" + token} {
+				if n, _ := a.redis.Get(key); n != "" && n != "0" {
+					t.Errorf("%s = %s after a code that was not checked, want nothing counted", key, n)
+				}
+			}
+			if n := len(store.recoveryCodesOf(user.ID)); n != 1 {
+				t.Errorf("%d recovery codes left, want the one that was not spent", n)
+			}
+
+			store.mu.Lock()
+			delete(store.failOn, stmt)
+			store.mu.Unlock()
+			if resp := a.post(t, "/auth/totp/verify-login", body); resp.StatusCode != http.StatusOK {
+				t.Errorf("the same code once the database is back = %d, want 200", resp.StatusCode)
+			}
+		})
+	}
+}
+
+// TestTOTP_Disable_ARecoveryCodeTheDatabaseCannotCheckDisablesNothing: Disable's wiring
+// of the same rule — 503, nothing changed, nothing counted against the session.
+func TestTOTP_Disable_ARecoveryCodeTheDatabaseCannotCheckDisablesNothing(t *testing.T) {
+	t.Parallel()
+	user, _ := epochTOTPUser(t, epochLoginEmail, 0)
+	store := newEpochStore(user)
+	store.failOn["ListRecoveryCodes"] = errRaceTransient
+	a := newEpochApp(t, store, epochOptions{totp: true})
+	session := uuid.New()
+	resp := a.send(t, http.MethodDelete, "/auth/totp", `{"recovery_code":"AAAA-BBBB"}`,
+		map[string]string{"X-Test-Acting-User": user.ID.String(), "X-Test-Session": session.String()}, 20*time.Second)
+	if resp.StatusCode != http.StatusServiceUnavailable || len(store.named("ClearTOTPSecret")) != 0 {
+		t.Errorf("status = %d, %d ClearTOTPSecret; want 503 and none", resp.StatusCode, len(store.named("ClearTOTPSecret")))
+	}
+	if n, _ := a.redis.Get(totpManageLockoutPolicy.failKey(session)); n != "" && n != "0" {
+		t.Errorf("the session's count = %s, want nothing counted", n)
+	}
+}

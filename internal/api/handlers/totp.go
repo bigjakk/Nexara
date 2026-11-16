@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -462,6 +463,11 @@ func (h *TOTPHandler) Disable(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 	validated, err := h.validateCodeOrRecovery(c.Context(), userID, row.TotpSecret.String, code, recoveryCode)
+	if errors.Is(err, errRecoveryCodesUnchecked) {
+		slog.Warn("totp disable: the recovery codes could not be checked; nothing was counted or spent", "user_id", userID, "error", err)
+		h.handBackTOTPAttempt(c, totpManageLockoutPolicy, passwordLockoutSubject(c, userID), userID, attempt)
+		return fiber.NewError(fiber.StatusServiceUnavailable, totpRecoveryUncheckedMessage)
+	}
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to validate code")
 	}
@@ -683,6 +689,16 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 	validated, verr := h.validateCodeOrRecovery(c.Context(), userID, user.TotpSecret.String, code, recoveryCode)
+	if errors.Is(verr, errRecoveryCodesUnchecked) {
+		// Neither right nor wrong: both budgets get their attempt back and the pending
+		// sign-in stays, so the user can retry the same code.
+		slog.Warn("totp verify-login: the recovery codes could not be checked; nothing was counted or spent", "user_id", userID, "error", verr)
+		h.handBackTOTPAttempt(c, policy, userID, userID, attempt)
+		ctx, cancel := context.WithTimeout(c.Context(), h.followUpDuration())
+		_ = givebackPendingAttempt.Run(ctx, h.rdb, []string{attemptKey}).Err()
+		cancel()
+		return fiber.NewError(fiber.StatusServiceUnavailable, totpRecoveryUncheckedMessage)
+	}
 	if verr != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to validate code")
 	}
@@ -934,8 +950,10 @@ func (h *TOTPHandler) forgetTOTPFailures(c fiber.Ctx, policy lockoutPolicy, subj
 // the user's stored secret/recovery hashes. Returns (validated, internalErr).
 // `internalErr` is non-nil only for genuine internal errors (e.g. decryption
 // failure); a wrong code returns (false, nil) so the caller can register a
-// failure rather than a 500. Format checks on `code` are the caller's
-// responsibility — call the regex first, then this helper.
+// failure rather than a 500. A recovery code that could not be looked up or spent
+// is errRecoveryCodesUnchecked: it was neither right nor wrong, and nothing was
+// spent. Format checks on `code` are the caller's responsibility — call the regex
+// first, then this helper.
 func (h *TOTPHandler) validateCodeOrRecovery(ctx context.Context, userID uuid.UUID, encryptedSecret, code, recoveryCode string) (bool, error) {
 	if code != "" {
 		valid, err := h.totpService.ValidateCode(encryptedSecret, code)
@@ -945,15 +963,24 @@ func (h *TOTPHandler) validateCodeOrRecovery(ctx context.Context, userID uuid.UU
 		return valid, nil
 	}
 	if err := h.consumeRecoveryCode(ctx, userID, recoveryCode); err != nil {
-		// Same handling as the original inline path: any error from the
-		// recovery flow (no match, DB blip) is treated as "no match." A
-		// rigorous fix to distinguish DB errors from misses would require
-		// sentinel errors in consumeRecoveryCode; left as-is to keep this
-		// commit's blast radius bounded.
-		return false, nil
+		if errors.Is(err, errNoMatchingRecoveryCode) {
+			return false, nil
+		}
+		return false, fmt.Errorf("%w: %w", errRecoveryCodesUnchecked, err)
 	}
 	return true, nil
 }
+
+// errNoMatchingRecoveryCode is a recovery code that matches none of the user's, and
+// errRecoveryCodesUnchecked one the database could not check or spend.
+var (
+	errNoMatchingRecoveryCode = errors.New("no matching recovery code")
+	errRecoveryCodesUnchecked = errors.New("the recovery codes could not be checked")
+)
+
+// totpRecoveryUncheckedMessage is the 503 of a recovery code the database could not
+// check: nothing was counted and no code was spent.
+const totpRecoveryUncheckedMessage = "The recovery code cannot be checked right now; nothing was counted or spent. Try again shortly."
 
 // consumeRecoveryCode finds and deletes a matching recovery code.
 func (h *TOTPHandler) consumeRecoveryCode(ctx context.Context, userID uuid.UUID, inputCode string) error {
@@ -971,5 +998,28 @@ func (h *TOTPHandler) consumeRecoveryCode(ctx context.Context, userID uuid.UUID,
 		}
 	}
 
-	return fmt.Errorf("no matching recovery code")
+	return errNoMatchingRecoveryCode
 }
+
+// handBackTOTPAttempt gives back the attempt admitTOTPAttempt counted for a code that
+// was never checked, because the recovery codes could not be read or spent: a guess
+// that was not judged must not cost the owner a step toward the lock. Best effort,
+// on a follow-up deadline.
+func (h *TOTPHandler) handBackTOTPAttempt(c fiber.Ctx, policy lockoutPolicy, subject, userID uuid.UUID, attempt lockoutReservation) {
+	ctx, cancel := context.WithTimeout(c.Context(), h.followUpDuration())
+	defer cancel()
+	if err := h.totpLockout(policy).release(ctx, subject, attempt); err != nil {
+		slog.Warn("two-factor: could not give back the attempt of a code that was not checked; it stays counted until its window ends",
+			"user_id", userID, "error", err)
+	}
+}
+
+// givebackPendingAttempt takes one back from a pending token's attempt counter, and
+// only from a counter that still exists, so a counter that has run out is not
+// recreated without an expiry.
+var givebackPendingAttempt = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return redis.call('DECR', KEYS[1])
+end
+return 0
+`)
