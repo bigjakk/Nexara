@@ -119,6 +119,10 @@ describe("deriveTaskStatus precedence", () => {
     expect(
       deriveTaskStatus({}, { upid: "UPID:x", status: "err: 1" }, undefined),
     ).toBe("failed");
+    // Read while in flight, before the task had a row: running, not failed.
+    expect(
+      deriveTaskStatus({}, { upid: "UPID:x", status: "RUNNING" }, undefined),
+    ).toBe("running");
   });
 
   it("returns none for non-task or statusless entries", () => {

@@ -84,6 +84,11 @@ export function deriveTaskStatus(
     typeof details["status"] === "string" &&
     details["status"] !== ""
   ) {
+    // The collector records the status Proxmox's task list gave when it read
+    // the task (collector/task_ingest.go), and for a task still in flight that
+    // is "RUNNING": not an exit status, and not a failure. Until the task's
+    // row lands (the collector adopts one with none), it is running.
+    if (details["status"].trim().toUpperCase() === "RUNNING") return "running";
     return isOkExit(details["status"]) ? "ok" : "failed";
   }
   return "none";
