@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/url"
 	"reflect"
 	"slices"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/api/handlers"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -119,6 +122,10 @@ func TestSDNBodiesDeclareEveryProxmoxParamField(t *testing.T) {
 				t.Fatal("no JSON tags found; this guard would pass vacuously")
 			}
 			for _, tag := range tags {
+				// The VNet update's delete is built by the handler from a flag sent as 0.
+				if tag == "delete" && tt.name == "vnet update" {
+					continue
+				}
 				if _, ok := e.Parameters[tag]; !ok {
 					t.Errorf("%s %s does not declare %q, which c.Bind().Body accepted before the "+
 						"migration", tt.method, tt.path, tag)
@@ -446,4 +453,40 @@ func sdnParamsWith(t *testing.T, e Endpoint, overrides map[string]any) map[strin
 		out[k] = v
 	}
 	return out
+}
+
+// An unticked flag on a VNet update is a 0, and Proxmox clears an option only when
+// delete= names it (Vnets.pm's update); omitted, the flag is left alone.
+func TestSDNVNetUpdateClearsAFlagSentAsZero(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, body string
+		want       url.Values
+	}{
+		{"both unticked", `{"vlanaware": 0, "isolate": 0}`, url.Values{"delete": {"isolate-ports,vlanaware"}}},
+		{"one ticked, one left out", `{"isolate": 1}`, url.Values{"isolate-ports": {"1"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pve := &accessUpdatePVE{}
+			h := handlers.NewNetworkHandler(db.New(newClusterStore(t, pve.serve(t), "", "")), accessUpdateEncKey, nil)
+			app := mountReal(t, stubAuth(grantsOf("manage:network")),
+				realRoute{fiber.MethodPut, sdnScope + "/vnets/:vnet", h.UpdateSDNVNet})
+			target := strings.ReplaceAll(sdnScope+"/vnets/vnet01", ":cluster_id", testClusterID)
+			req := jsonRequest(fiber.MethodPut, target, tt.body)
+			req.Header.Set("X-Test-User", "yes")
+			if status, body := sendBody(t, app, req); status != fiber.StatusOK {
+				t.Fatalf("answered %d %s", status, body)
+			}
+			var got url.Values
+			for _, r := range pve.requests() {
+				if r.method == fiber.MethodPut {
+					got = r.form
+				}
+			}
+			if !sameForm(got, tt.want) {
+				t.Errorf("Proxmox was sent %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

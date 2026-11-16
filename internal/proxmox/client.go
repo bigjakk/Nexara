@@ -558,6 +558,9 @@ func sdnVNetUpdateToForm(p UpdateSDNVNetParams) url.Values {
 	if p.Isolate != 0 {
 		form.Set("isolate-ports", strconv.Itoa(p.Isolate))
 	}
+	if len(p.Delete) > 0 {
+		form.Set("delete", strings.Join(p.Delete, ","))
+	}
 	return form
 }
 

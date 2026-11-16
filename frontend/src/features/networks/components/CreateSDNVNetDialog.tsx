@@ -74,8 +74,12 @@ export function CreateSDNVNetDialog({
     const params: CreateSDNVNetRequest = { vnet, zone };
     if (tag) params.tag = Number(tag);
     if (alias) params.alias = alias;
+    // On an edit an unticked box is sent as 0, which clears the setting; a
+    // create leaves it out.
     if (vlanaware) params.vlanaware = 1;
+    else if (isEdit) params.vlanaware = 0;
     if (isolate) params.isolate = 1;
+    else if (isEdit) params.isolate = 0;
 
     if (isEdit) {
       const updateParams: Omit<CreateSDNVNetRequest, "vnet"> =

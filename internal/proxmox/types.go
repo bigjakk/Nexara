@@ -2022,6 +2022,9 @@ type UpdateSDNVNetParams struct {
 	Alias     string `json:"alias,omitempty"`
 	VLANAware int    `json:"vlanaware,omitempty"`
 	Isolate   int    `json:"isolate,omitempty"`
+	// Delete names the options to clear (Vnets.pm's update takes SectionConfig's
+	// delete list): "vlanaware" or "isolate-ports", which a 0 above cannot say.
+	Delete []string `json:"delete,omitempty"`
 }
 
 // CreateSDNSubnetParams holds parameters for creating an SDN subnet.

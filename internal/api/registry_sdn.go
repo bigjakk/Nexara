@@ -84,6 +84,13 @@ func sdnFlagParam(description string) apischema.Property {
 	return sdnZeroMeansUnsetParam(1, description)
 }
 
+// sdnUpdateFlagParam is sdnFlagParam on a VNet update, where a 0 sent clears the setting.
+func sdnUpdateFlagParam(description string) apischema.Property {
+	p := sdnFlagParam(description)
+	p.Description = description + " 0 clears it; omitted leaves it as it is."
+	return p
+}
+
 // sdnTypeParam is the plugin type of a zone, controller, IPAM or DNS entry.
 //
 // No Enum, for the reason the node ZFS raidlevel gives: Proxmox owns this
@@ -314,6 +321,9 @@ func registerSDNEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 		Permissions: clusterCheck("manage", "network"),
 		Parameters: clusterParams(withParams(sdnVNetSettings(), apischema.Properties{
 			"vnet": pveObjectNameParam("VNet to change."),
+			// On the update 0 clears a flag (delete=), where on create it means "not set".
+			"vlanaware": sdnUpdateFlagParam("1 makes the VNet carry tagged traffic through to the guest."),
+			"isolate":   sdnUpdateFlagParam("1 stops guests on this VNet from reaching each other."),
 			// Optional here and required on create, mirroring
 			// proxmox.UpdateSDNVNetParams: sdnVNetUpdateToForm sends zone only
 			// when it is non-empty, so an omitted OR empty zone keeps the

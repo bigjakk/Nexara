@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -260,6 +261,13 @@ func (h *NetworkHandler) UpdateSDNVNet(c fiber.Ctx, p *apischema.Params) error {
 	// Optional on this route only; an omitted zone stays empty and the form
 	// builder drops it, which is how "keep the current zone" is spelled.
 	req.Zone = p.String("zone")
+	// On an update a flag sent as 0 is an untick: Proxmox clears it only by name.
+	for key, option := range map[string]string{"vlanaware": "vlanaware", "isolate": "isolate-ports"} {
+		if v, supplied := p.OptInt(key); supplied && v == 0 {
+			req.Delete = append(req.Delete, option)
+		}
+	}
+	slices.Sort(req.Delete)
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
