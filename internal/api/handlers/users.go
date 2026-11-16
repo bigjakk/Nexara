@@ -184,8 +184,10 @@ func (h *UserHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 	})
 }
 
-// globalRoleNames is a user's global RBAC role names, sorted and each once: the
-// roles List answers for the same user (ListUsersWithRoles' rbac_roles).
+// globalRoleNames is a user's global RBAC role names, each once, in the query's own
+// ORDER BY r.name: the roles List answers for the same user (ListUsersWithRoles'
+// rbac_roles orders by the same column). Not re-sorted here: Go's byte order is not
+// the database's collation.
 func (h *UserHandler) globalRoleNames(ctx context.Context, id uuid.UUID) ([]string, error) {
 	rows, err := h.queries.ListUserRoles(ctx, id)
 	if err != nil {
@@ -197,7 +199,6 @@ func (h *UserHandler) globalRoleNames(ctx context.Context, id uuid.UUID) ([]stri
 			names = append(names, r.RoleName)
 		}
 	}
-	slices.Sort(names)
 	return names, nil
 }
 
