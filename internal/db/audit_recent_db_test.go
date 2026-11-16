@@ -117,14 +117,30 @@ func TestRecentFeed_KeepsLongTasks(t *testing.T) {
 		t.Fatalf("seed newer entries: %v", err)
 	}
 
+	// A task whose row the retention sweep archived: its entry, among the
+	// newest, reads the archive's outcome rather than none.
+	const archivedUPID = "UPID:recent-feed-test:archived"
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO task_history_archive (upid, cluster_id, vmid, user_id, status, exit_status, started_at, finished_at)
+		 VALUES ($1, $2, 101, $3, 'failed', 'command failed', $4, $4)`,
+		archivedUPID, feedTestClusterA, feedTestUser, now.Add(-9*24*time.Hour)); err != nil {
+		t.Fatalf("seed archived task: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details)
+		 VALUES ($1, $2, $3, 'archived', 'archived', $4)`,
+		feedTestClusterA, feedTestUser, feedTestResourceType, `{"upid":"`+archivedUPID+`","status":"RUNNING"}`); err != nil {
+		t.Fatalf("seed archived entry: %v", err)
+	}
+
 	queries := gen.New(pool)
 	for _, tt := range []struct {
 		name  string
 		scope []uuid.UUID
 		want  []string
 	}{
-		{"global caller", nil, []string{"finished-recently", "finished-recently-on-offline-node", "running", "running-other-cluster"}},
-		{"caller scoped to the cluster", []uuid.UUID{feedTestClusterA}, []string{"finished-recently", "finished-recently-on-offline-node", "running"}},
+		{"global caller", nil, []string{"archived", "finished-recently", "finished-recently-on-offline-node", "running", "running-other-cluster"}},
+		{"caller scoped to the cluster", []uuid.UUID{feedTestClusterA}, []string{"archived", "finished-recently", "finished-recently-on-offline-node", "running"}},
 		{"caller with no grants", []uuid.UUID{}, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,6 +156,9 @@ func TestRecentFeed_KeepsLongTasks(t *testing.T) {
 				got = append(got, r.Action)
 				if r.Action == "running" && r.TaskStatus != "running" {
 					t.Errorf("task_status = %q, want running: the row lost its task", r.TaskStatus)
+				}
+				if r.Action == "archived" && r.TaskStatus != "failed" {
+					t.Errorf("archived task_status = %q, want failed from the archive", r.TaskStatus)
 				}
 			}
 			slices.Sort(got)

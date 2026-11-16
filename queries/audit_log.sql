@@ -111,8 +111,8 @@ SELECT
   (a.cluster_id IS NOT NULL AND c.id IS NULL)::boolean AS cluster_removed,
   COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
   COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name,
-  COALESCE(th.status, '') AS task_status,
-  COALESCE(th.exit_status, '') AS task_exit_status,
+  COALESCE(th.status, ar.status, '') AS task_status,
+  COALESCE(th.exit_status, ar.exit_status, '') AS task_exit_status,
   th.progress AS task_progress
 FROM feed
 JOIN audit_log a ON a.id = feed.id
@@ -121,6 +121,10 @@ LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
+-- A task row the retention sweep archived still says how the task ended
+-- (ListAuditTaskOutcomes reads it the same way): without it, an old entry has
+-- no outcome at all.
+LEFT JOIN task_history_archive ar ON ar.upid = (a.details->>'upid') AND ar.cluster_id = a.cluster_id
 ORDER BY a.created_at DESC;
 
 -- ListAuditLogAdvanced backs the audit log page and the CSV/JSON/syslog export:

@@ -2433,6 +2433,9 @@ type Querier interface {
 	// DeleteCompletedTasks never prunes it, so it would otherwise stay in the feed
 	// for good. A task_history row goes with its cluster, so this arm needs the scope
 	// but not the check that the cluster exists.
+	// A task row the retention sweep archived still says how the task ended
+	// (ListAuditTaskOutcomes reads it the same way): without it, an old entry has
+	// no outcome at all.
 	ListRecentAuditLogEnriched(ctx context.Context, accessibleClusterIds []uuid.UUID) ([]ListRecentAuditLogEnrichedRow, error)
 	// Failed tasks in the last 24h, grouped by type so we surface a count, not spam.
 	ListRecentFailedTasksByType(ctx context.Context) ([]ListRecentFailedTasksByTypeRow, error)

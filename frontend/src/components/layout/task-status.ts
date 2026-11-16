@@ -85,10 +85,11 @@ export function deriveTaskStatus(
     details["status"] !== ""
   ) {
     // The collector records the status Proxmox's task list gave when it read
-    // the task (collector/task_ingest.go), and for a task still in flight that
-    // is "RUNNING": not an exit status, and not a failure. Until the task's
-    // row lands (the collector adopts one with none), it is running.
-    if (details["status"].trim().toUpperCase() === "RUNNING") return "running";
+    // the task (collector/task_ingest.go), and for a task in flight that is
+    // "RUNNING": not an exit status. It writes the task's row first, so with
+    // no row (and none archived) the row was pruned: the task ended, and how
+    // is not on record. Neither failed nor running, which nothing would poll.
+    if (details["status"].trim().toUpperCase() === "RUNNING") return "none";
     return isOkExit(details["status"]) ? "ok" : "failed";
   }
   return "none";

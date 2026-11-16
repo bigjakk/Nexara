@@ -119,10 +119,19 @@ describe("deriveTaskStatus precedence", () => {
     expect(
       deriveTaskStatus({}, { upid: "UPID:x", status: "err: 1" }, undefined),
     ).toBe("failed");
-    // Read while in flight, before the task had a row: running, not failed.
+  });
+
+  // Read in flight by the collector: with its row it is what the row says;
+  // with none (pruned) it ended and how is not recorded, so neither running
+  // nor failed.
+  it.each([
+    [{ task_status: "running" }, "running"],
+    [{}, "none"],
+    [{ task_status: "failed" }, "failed"],
+  ] as const)("reads %j beside details RUNNING as %s", (entry, want) => {
     expect(
-      deriveTaskStatus({}, { upid: "UPID:x", status: "RUNNING" }, undefined),
-    ).toBe("running");
+      deriveTaskStatus(entry, { upid: "UPID:x", status: "RUNNING" }, undefined),
+    ).toBe(want);
   });
 
   it("returns none for non-task or statusless entries", () => {
