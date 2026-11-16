@@ -209,3 +209,45 @@ describe("A ref on Tabs", () => {
     expect(seen[0]).toBeInstanceOf(HTMLDivElement);
   });
 });
+
+describe("A tab strip wider than its container", () => {
+  // On a phone the active tab could sit past the strip's edge, unseen.
+  it("scrolls sideways to show the tab that becomes active", async () => {
+    function Strip() {
+      const [tab, setTab] = useState("overview");
+      return (
+        <>
+          <button
+            onClick={() => {
+              setTab("history");
+            }}
+          >
+            Go to history
+          </button>
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList>
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </>
+      );
+    }
+    render(<Strip />);
+    const list = screen.getByRole("tablist");
+    // A 100px strip whose History tab is drawn at 150-200px.
+    const rect = (left: number, right: number) => ({ left, right }) as DOMRect;
+    list.getBoundingClientRect = () => rect(0, 100);
+    screen.getByRole("tab", { name: "History" }).getBoundingClientRect = () =>
+      rect(150 - list.scrollLeft, 200 - list.scrollLeft);
+    expect(list.scrollLeft).toBe(0);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Go to history" }),
+    );
+
+    await waitFor(() => {
+      expect(list.scrollLeft).toBe(100);
+    });
+  });
+});

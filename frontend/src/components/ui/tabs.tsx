@@ -56,25 +56,65 @@ function activePanel(root: HTMLElement | null): HTMLElement | null {
   );
 }
 
+/**
+ * Scrolls a strip that is wider than its container (a phone) sideways, and
+ * only sideways, so that its active tab is in view: one chosen by a link, or
+ * restored on load, could sit past the edge where nothing showed it was on.
+ */
+function revealActiveTab(list: HTMLElement): void {
+  const tab = list.querySelector<HTMLElement>(
+    ':scope > [role="tab"][data-state="active"]',
+  );
+  if (tab === null) return;
+  const strip = list.getBoundingClientRect();
+  const own = tab.getBoundingClientRect();
+  if (own.left < strip.left) list.scrollLeft -= strip.left - own.left;
+  else if (own.right > strip.right) list.scrollLeft += own.right - strip.right;
+}
+
 const TabsList = React.forwardRef<
   React.ComponentRef<typeof TabsPrimitive.List>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
->(({ className, ...props }, ref) => (
-  <TabsPrimitive.List
-    ref={ref}
-    className={cn(
-      // justify-start + overflow-x-auto (not center): when the strip is wider
-      // than a phone viewport it scrolls within itself instead of widening
-      // the page; centered content inside a scroll container clips its start.
-      // An underlined strip the width of its container. The rule is an inset
-      // shadow, not a border: with overflow-x-auto a border would need a
-      // negative margin on the active tab, and that makes the strip scroll.
-      "flex h-9 max-w-full items-stretch justify-start gap-5 overflow-x-auto text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]",
-      className,
-    )}
-    {...props}
-  />
-));
+>(({ className, ...props }, ref) => {
+  // The active tab changes in Radix's own state, which re-renders the
+  // triggers and not this, so the change is watched for in the DOM.
+  const setList = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      const cleanup = setRef(ref, node);
+      if (node === null) return cleanup;
+      revealActiveTab(node);
+      const watch = new MutationObserver(() => {
+        revealActiveTab(node);
+      });
+      watch.observe(node, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["data-state"],
+      });
+      return () => {
+        watch.disconnect();
+        cleanup?.();
+      };
+    },
+    [ref],
+  );
+  return (
+    <TabsPrimitive.List
+      ref={setList}
+      className={cn(
+        // justify-start + overflow-x-auto (not center): when the strip is wider
+        // than a phone viewport it scrolls within itself instead of widening
+        // the page; centered content inside a scroll container clips its start.
+        // An underlined strip the width of its container. The rule is an inset
+        // shadow, not a border: with overflow-x-auto a border would need a
+        // negative margin on the active tab, and that makes the strip scroll.
+        "flex h-9 max-w-full items-stretch justify-start gap-5 overflow-x-auto text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
 TabsList.displayName = TabsPrimitive.List.displayName;
 
 const TabsTrigger = React.forwardRef<
