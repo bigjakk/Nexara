@@ -21,14 +21,15 @@ func ConnectWithRetry(ctx context.Context, databaseURL string, logger *slog.Logg
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		pool, err = newAppPool(ctx, databaseURL, logger)
 		if err == nil {
-			if pingErr := pool.Ping(ctx); pingErr == nil {
+			pingErr := pool.Ping(ctx)
+			if pingErr == nil {
 				if attempt > 1 {
 					logger.Info("connected to database", "attempt", attempt)
 				}
 				return pool, nil
 			}
 			pool.Close()
-			err = fmt.Errorf("ping failed: %w", err)
+			err = fmt.Errorf("ping failed: %w", pingErr)
 		}
 
 		if attempt == maxAttempts {
