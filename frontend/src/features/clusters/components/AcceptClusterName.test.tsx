@@ -76,6 +76,29 @@ describe("AcceptClusterName", () => {
     }
   });
 
+  // The fields are the server's word on the names; the detail is only prose.
+  it("takes the names from the issue's fields over its detail", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <AcceptClusterName
+        clusterId={CLUSTER}
+        issue={{
+          ...ISSUE,
+          detail: "Reworded: now cluster09 answers.",
+          recorded_name: "cluster01",
+          reported_name: "cluster03",
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Accept new name" }));
+    expect(
+      screen.getByRole("dialog", {
+        name: "Accept the cluster name cluster03?",
+      }),
+    ).toHaveTextContent("Nexara recorded this cluster as cluster01");
+  });
+
   it("is not offered without manage:cluster", () => {
     useAuthStore.setState({ permissions: ["view:cluster"] });
     renderWithProviders(

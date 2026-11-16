@@ -725,6 +725,10 @@ export interface HealthIssue {
   target: string;
   summary: string;
   detail: string;
+  /** cluster_name_changed only: the corosync name Nexara recorded. */
+  recorded_name?: string;
+  /** cluster_name_changed only: the name the API URL answers with now. */
+  reported_name?: string;
 }
 
 export interface ClusterResponse {
