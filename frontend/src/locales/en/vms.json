@@ -32,6 +32,7 @@
   "serial": "Serial",
   "attach": "Attach",
   "start": "Start",
+  "startNeedsExecute": "Starting it needs the {{permission}} permission, which you do not have.",
   "shutdown": "Shutdown",
   "reboot": "Reboot",
   "stop": "Stop",

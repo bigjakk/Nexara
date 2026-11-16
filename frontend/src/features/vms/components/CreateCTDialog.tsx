@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +35,7 @@ import {
   useResourcePools,
 } from "../api/vm-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import { filterStorageByContent } from "../lib/storage-filter";
 
@@ -98,6 +100,7 @@ export function CreateCTDialog({
   onOpenChange,
   clusterId,
 }: CreateCTDialogProps) {
+  const { t } = useTranslation("vms");
   const { data: nodes } = useClusterNodes(clusterId);
   const { data: storageList } = useClusterStorage(clusterId);
   const { data: usedVMIDs } = useClusterVMIDs(clusterId);
@@ -232,6 +235,10 @@ export function CreateCTDialog({
   const [startup, setStartup] = useState("");
   const [cmode, setCmode] = useState("tty");
   const [startAfter, setStartAfter] = useState(false);
+  // The server holds a create's start to what the power route needs (execute
+  // on the kind), so the tick is offered only to a holder, as RestoreDialog's.
+  const { canExecute } = usePermissions();
+  const canStart = canExecute("container");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [sshKeys, setSshKeys] = useState("");
@@ -322,7 +329,7 @@ export function CreateCTDialog({
           password,
           ssh_keys: sshKeys,
           unprivileged,
-          start: startAfter,
+          start: startAfter && canStart,
           description: description || undefined,
           tags: tags || undefined,
           pool: pool || undefined,
@@ -1096,7 +1103,15 @@ export function CreateCTDialog({
                     <CheckField
                       id="ct-start-after"
                       label="Start after creation"
-                      checked={startAfter}
+                      checked={startAfter && canStart}
+                      disabled={!canStart}
+                      hint={
+                        canStart
+                          ? undefined
+                          : t("startNeedsExecute", {
+                              permission: "execute:container",
+                            })
+                      }
                       onCheckedChange={setStartAfter}
                     />
                     <CheckField
@@ -1272,7 +1287,7 @@ export function CreateCTDialog({
                       <PropertyRow label="SSH keys">Provided</PropertyRow>
                     )}
                     <PropertyRow label="Start after creation">
-                      {startAfter ? "Yes" : "No"}
+                      {startAfter && canStart ? "Yes" : "No"}
                     </PropertyRow>
                   </PropertyList>
                 </FormSection>

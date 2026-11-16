@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
@@ -37,6 +38,7 @@ import {
   useResourcePools,
 } from "../api/vm-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
 import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { NodeResponse, VMResponse } from "@/types/api";
@@ -123,6 +125,7 @@ export function CreateVMDialog({
   onOpenChange,
   clusterId,
 }: CreateVMDialogProps) {
+  const { t } = useTranslation("vms");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: nodes } = useClusterNodes(clusterId);
@@ -288,6 +291,10 @@ export function CreateVMDialog({
 
   // Confirm
   const [startAfter, setStartAfter] = useState(false);
+  // The server holds a create's start to what the power route needs (execute
+  // on the kind), so the tick is offered only to a holder, as RestoreDialog's.
+  const { canExecute } = usePermissions();
+  const canStart = canExecute("vm");
   const [onboot, setOnboot] = useState(false);
 
   // Fetch ISO content when isoStorage selected (using UUID)
@@ -593,7 +600,7 @@ export function CreateVMDialog({
       net0: buildNet0(),
       ostype,
       boot: bootOrder,
-      start: startAfter,
+      start: startAfter && canStart,
     };
     if (primaryDiskField) body.scsi0 = primaryDiskField;
     if (ide2) body.ide2 = ide2;
@@ -1722,7 +1729,13 @@ export function CreateVMDialog({
                   <CheckField
                     id="start-after"
                     label="Start after creation"
-                    checked={startAfter}
+                    checked={startAfter && canStart}
+                    disabled={!canStart}
+                    hint={
+                      canStart
+                        ? undefined
+                        : t("startNeedsExecute", { permission: "execute:vm" })
+                    }
                     onCheckedChange={setStartAfter}
                   />
                   <CheckField

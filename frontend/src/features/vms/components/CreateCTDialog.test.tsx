@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { apiClient } from "@/lib/api-client";
 import { renderWithProviders } from "@/test/test-utils";
+import { useAuthStore } from "@/stores/auth-store";
 import { CreateCTDialog } from "./CreateCTDialog";
 
 vi.mock("@/lib/api-client", async () =>
@@ -55,4 +56,46 @@ describe("CreateCTDialog", () => {
       screen.getByRole("button", { name: "Create container" }),
     ).toBeEnabled();
   });
+
+  // The server refuses a create's start without execute:container (403), so
+  // the tick is offered only to a holder, and says why to anyone else.
+  it.each([
+    [["manage:container"], false],
+    [["manage:container", "execute:container"], true],
+  ])(
+    "with %j offers Start after creation: %s",
+    async (permissions, offered) => {
+      useAuthStore.setState({ permissions });
+      const answer = (path: unknown) =>
+        Promise.resolve(String(path).endsWith("/nodes") ? [NODE] : []);
+      vi.mocked(apiClient.list).mockImplementation(answer);
+      vi.mocked(apiClient.get).mockImplementation(answer);
+      const user = userEvent.setup();
+      renderWithProviders(
+        <CreateCTDialog
+          open
+          onOpenChange={() => undefined}
+          clusterId="cluster01"
+        />,
+      );
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+      });
+      await user.click(screen.getByRole("button", { name: "Template" }));
+      await user.type(
+        screen.getByLabelText("Template path"),
+        "local:vztmpl/debian-12.tar.zst",
+      );
+      await user.click(screen.getByRole("button", { name: "DNS and options" }));
+
+      const tick = screen.getByRole("checkbox", {
+        name: "Start after creation",
+      });
+      if (offered) expect(tick).toBeEnabled();
+      else expect(tick).toBeDisabled();
+      expect(
+        screen.queryByText(/needs the execute:container permission/) === null,
+      ).toBe(offered);
+    },
+  );
 });

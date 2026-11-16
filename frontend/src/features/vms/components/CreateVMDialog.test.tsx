@@ -24,6 +24,7 @@ import {
   type FakeServer,
 } from "@/test/fake-server";
 import { emptyPerSessionStores } from "@/test/per-session-stores";
+import { renderWithProviders } from "@/test/test-utils";
 import type { User } from "@/types/api";
 import { useAuthStore } from "@/stores/auth-store";
 import { CreateVMDialog } from "./CreateVMDialog";
@@ -223,5 +224,35 @@ describe("CreateVMDialog, looking for the VM it created", () => {
       expect(router.state.location.pathname).toBe(VM_PAGE);
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+// The server refuses a create's start without execute:vm (403), so the tick is
+// offered only to a holder, and says why to anyone else.
+describe("CreateVMDialog, Start after creation", () => {
+  it.each([
+    [["manage:vm"], false],
+    [["manage:vm", "execute:vm"], true],
+  ])("with %j is offered: %s", async (permissions, offered) => {
+    useAuthStore.setState({ permissions });
+    renderWithProviders(
+      <CreateVMDialog open onOpenChange={onOpenChange} clusterId={CLUSTER} />,
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("option", { name: /pve-01/ });
+    await user.selectOptions(screen.getByLabelText("Node"), ["pve-01"]);
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "101" },
+    });
+    for (let step = 0; step < 8; step++) {
+      await user.click(screen.getByRole("button", { name: "Next" }));
+    }
+
+    const tick = screen.getByRole("checkbox", { name: "Start after creation" });
+    if (offered) expect(tick).toBeEnabled();
+    else expect(tick).toBeDisabled();
+    expect(screen.queryByText(/needs the execute:vm permission/) === null).toBe(
+      offered,
+    );
   });
 });

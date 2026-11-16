@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -98,7 +99,12 @@ export function ImportVMDialog({
   const { data: importSources } = useImportSources(clusterId);
   const { data: resourcePools } = useResourcePools(clusterId);
   const queryClient = useQueryClient();
-  const { canManage } = usePermissions();
+  const { canManage, canExecute } = usePermissions();
+  const { t } = useTranslation("vms");
+  // The server holds a start after the import, and a live import (which boots
+  // the VM), to what the power route needs: execute on VMs. Offered only to a
+  // holder, as RestoreDialog's "Start after restore".
+  const canStart = canExecute("vm");
 
   const [step, setStep] = useState<Step>("source");
 
@@ -551,8 +557,8 @@ export function ImportVMDialog({
       source_acquisition: sourceIsEsxi ? "esxi" : acquisition,
       target_node: targetNode,
       target_storage: targetStorage,
-      start_after: startAfter,
-      live_import: liveImport,
+      start_after: startAfter && canStart,
+      live_import: liveImport && canStart,
     };
     if (workingStorage) body.working_storage = workingStorage;
     if (bridge) body.bridge = bridge;
@@ -1525,8 +1531,8 @@ export function ImportVMDialog({
                 </div>
                 <label className="flex items-center gap-2">
                   <Checkbox
-                    checked={startAfter}
-                    disabled={liveImport}
+                    checked={startAfter && canStart}
+                    disabled={liveImport || !canStart}
                     onCheckedChange={(v) => {
                       setStartAfter(v === true);
                     }}
@@ -1535,7 +1541,8 @@ export function ImportVMDialog({
                 </label>
                 <label className="flex items-start gap-2">
                   <Checkbox
-                    checked={liveImport}
+                    checked={liveImport && canStart}
+                    disabled={!canStart}
                     onCheckedChange={(v) => {
                       const on = v === true;
                       setLiveImport(on);
@@ -1551,6 +1558,11 @@ export function ImportVMDialog({
                     </span>
                   </span>
                 </label>
+                {!canStart && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("startNeedsExecute", { permission: "execute:vm" })}
+                  </p>
+                )}
                 {startMutation.isError && (
                   <p className="text-destructive">
                     Import failed: {startMutation.error.message}
