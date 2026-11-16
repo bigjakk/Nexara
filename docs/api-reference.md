@@ -1210,7 +1210,7 @@ asked of Proxmox.
 | POST | `/clusters/:id/vms/:vm_id/convert-to-template` | Convert VM to template |
 | POST | `/clusters/:id/vms/:vm_id/clone-to-template` | Clone VM as template |
 | POST | `/clusters/:id/vms/:vm_id/migrate` | Migrate VM to another node |
-| DELETE | `/clusters/:id/vms/:vm_id` | Destroy a VM |
+| DELETE | `/clusters/:id/vms/:vm_id` | Destroy a VM. Its audit row lists in `volumes` the storage volumes its config held that it owned, which Proxmox frees with it (read before the destroy; `volumes_unknown: true` when the config could not be read) |
 | GET | `/clusters/:id/vms/:vm_id/snapshot-capability` | Check whether the guest can be snapshotted — returns `{ "supported": bool, "blocking_volumes": [...] }` |
 | GET | `/clusters/:id/vms/:vm_id/snapshots` | List VM snapshots |
 | POST | `/clusters/:id/vms/:vm_id/snapshots` | Create a snapshot |
@@ -1252,7 +1252,7 @@ Organize guests into folders in the Nexara inventory tree (Nexara-side only — 
 | POST | `/clusters/:id/containers/:ct_id/convert-to-template` | Convert to template |
 | POST | `/clusters/:id/containers/:ct_id/clone-to-template` | Clone as template |
 | POST | `/clusters/:id/containers/:ct_id/migrate` | Migrate container |
-| DELETE | `/clusters/:id/containers/:ct_id` | Destroy a container |
+| DELETE | `/clusters/:id/containers/:ct_id` | Destroy a container. Its audit row lists its own volumes in `volumes`, as a VM destroy does |
 | GET | `/clusters/:id/containers/:ct_id/snapshot-capability` | Check whether the container can be snapshotted — returns `{ "supported": bool, "blocking_volumes": [...] }` |
 | GET | `/clusters/:id/containers/:ct_id/snapshots` | List snapshots |
 | POST | `/clusters/:id/containers/:ct_id/snapshots` | Create a snapshot |

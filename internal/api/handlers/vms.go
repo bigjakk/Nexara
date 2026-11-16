@@ -540,6 +540,11 @@ func (h *VMHandler) DestroyVM(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// Read before the destroy: once it has run there is no config to read.
+	extra := destroyAuditVolumes(c.Context(), func(ctx context.Context) (proxmox.VMConfig, error) {
+		return pxClient.GetVMConfig(ctx, node.Name, int(vm.Vmid))
+	}, vm.Vmid, false)
+	extra["vmid"] = vm.Vmid
 	upid, err := pxClient.DestroyVM(c.Context(), node.Name, int(vm.Vmid))
 	if err != nil {
 		return mapProxmoxError(err)
@@ -554,7 +559,7 @@ func (h *VMHandler) DestroyVM(c fiber.Ctx, p *apischema.Params) error {
 		Action:       "destroy",
 		UPID:         upid,
 		Description:  guestActionDesc("destroy", vm),
-		Extra:        map[string]any{"vmid": vm.Vmid},
+		Extra:        extra,
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "destroy")
 
