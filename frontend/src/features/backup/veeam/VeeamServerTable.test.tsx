@@ -6,9 +6,9 @@ import { apiClient } from "@/lib/api-client";
 import { VeeamServerTable } from "./VeeamServerTable";
 import type { VeeamProbeResult, VeeamServer } from "../types/backup";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { post: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedPost = vi.mocked(apiClient.post);
 

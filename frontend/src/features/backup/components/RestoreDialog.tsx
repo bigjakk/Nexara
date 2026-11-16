@@ -14,6 +14,8 @@ import { Label } from "@/components/ui/label";
 
 import { RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
 import { useRestoreBackup } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
@@ -110,6 +112,9 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
   }, [force, existingVMNode]);
 
   const restoreMutation = useRestoreBackup();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open);
 
   const handleRestore = () => {
     if (!targetClusterId || !targetNode || !vmid) return;
@@ -118,8 +123,8 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
     if (isNaN(parsedVmid) || parsedVmid <= 0) return;
 
     setError(null);
-    restoreMutation.mutate(
-      {
+    settle(
+      restoreMutation.mutateAsync({
         clusterId: targetClusterId,
         body: {
           pbs_server_id: pbsId,
@@ -134,14 +139,15 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
           unique,
           start_after_restore: startAfter,
         },
-      },
+      }),
       {
+        action: `Restoring ${snapshot.backup_type}/${snapshot.backup_id} to ${targetNode}`,
         onSuccess: (data) => {
           setError(null);
           setRestoreUpid(data.upid);
         },
-        onError: (err: Error) => {
-          setError(err.message || "Restore failed");
+        onError: (err) => {
+          setError(describeError(err) || "Restore failed");
         },
       },
     );

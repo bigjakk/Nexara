@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useUpdatePBSServer } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   privateAddressWarningFromError,
@@ -42,6 +43,9 @@ export function EditPBSServerDialog({
   const [allowPrivate, setAllowPrivate] = useState(false);
 
   const updatePBS = useUpdatePBSServer();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open ? server.id : null);
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
 
@@ -89,7 +93,8 @@ export function EditPBSServerDialog({
 
     setPrivateWarning(null);
 
-    updatePBS.mutate(body, {
+    settle(updatePBS.mutateAsync(body), {
+      action: `Saving the PBS server "${server.name}"`,
       onSuccess: () => {
         onOpenChange(false);
       },

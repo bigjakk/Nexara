@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath, queryParams } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import {
   describeBackupJobRun,
   normalizeBackupJobRun,
@@ -208,10 +209,16 @@ export function useTriggerGC() {
   });
 }
 
-export function useDeleteSnapshot() {
+/**
+ * `errorsShownByCaller`: the caller shows a failure itself and settles it
+ * through useSaveOutcome, so the app's error toast stays out of it. Left
+ * false, the toast reports it.
+ */
+export function useDeleteSnapshot(errorsShownByCaller = false) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: ({
       pbsId,
       store,
@@ -273,6 +280,7 @@ export function useRunVerifyJob() {
 
 export function useRestoreBackup() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       body,
@@ -337,6 +345,7 @@ export function useUpdatePBSServer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     // `id` is destructured OUT of the payload on purpose, not for tidiness:
     // the endpoint declares it as a PATH parameter, so the server rejects it
     // in the body with "id: must be sent in the request path". The edit
@@ -447,6 +456,7 @@ export function usePBSTaskLog(pbsId: string, upid: string) {
 
 export function useTriggerBackup() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       body,
@@ -707,6 +717,7 @@ export function useUpdateVeeamServer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ id, ...body }: UpdateVeeamServerRequest & { id: string }) =>
       apiClient.put<VeeamServer>(apiPath`/api/v1/veeam-servers/${id}`, body),
     onSuccess: () => {
@@ -734,6 +745,7 @@ export function useDeleteVeeamServer() {
  */
 export function useTestVeeamServer() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (id: string) =>
       apiClient.post<VeeamProbeResult>(
         apiPath`/api/v1/veeam-servers/${id}/test`,

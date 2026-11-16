@@ -108,8 +108,11 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
     setProtectError(null);
     // Optimistic update
     setProtectOverrides((prev) => ({ ...prev, [key]: newProtected }));
-    protectMutation.mutate(
-      {
+    // The app's error toast reports a failure (the hook has no onError); the
+    // promise only reverts the row, and settles even when another toggle has
+    // replaced this one, where mutate()'s callbacks would be dropped.
+    void protectMutation
+      .mutateAsync({
         pbsId,
         store: snap.datastore,
         body: {
@@ -118,24 +121,23 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
           backup_time: snap.backup_time,
           protected: newProtected,
         },
-      },
-      {
-        onSuccess: () => {
-          setProtectingKey(null);
+      })
+      .then(
+        () => {
+          setProtectingKey((k) => (k === key ? null : k));
         },
-        onError: () => {
+        () => {
           // Revert optimistic update
           setProtectOverrides((prev) =>
             Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)),
           );
-          setProtectingKey(null);
+          setProtectingKey((k) => (k === key ? null : k));
           setProtectError(key);
           setTimeout(() => {
             setProtectError(null);
           }, 3000);
         },
-      },
-    );
+      );
   };
 
   const startEditComment = (snap: PBSSnapshot) => {

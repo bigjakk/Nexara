@@ -17,6 +17,8 @@ import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { backupHistories } from "@/features/history/lib/backup-histories";
 import { useTestVeeamServer } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 import type { VeeamProbeResult, VeeamServer } from "../types/backup";
 import { VeeamProbeSummary } from "./VeeamProbeSummary";
 import { VeeamServerStatusBadge } from "./VeeamServerStatusBadge";
@@ -79,6 +81,9 @@ function VeeamServerTestButton({
   onError: (id: string, message: string) => void;
 }) {
   const testServer = useTestVeeamServer();
+  // The row shows its test's failure (the hook opts out of the app's toast);
+  // one that lands after the row has gone is toasted instead.
+  const settle = useSaveOutcome();
 
   return (
     <Button
@@ -88,15 +93,13 @@ function VeeamServerTestButton({
       disabled={testServer.isPending}
       onClick={() => {
         onStart(server.id);
-        testServer.mutate(server.id, {
+        settle(testServer.mutateAsync(server.id), {
+          action: `Testing the Veeam server "${server.name}"`,
           onSuccess: (result) => {
             onResult(server.id, result);
           },
           onError: (err) => {
-            onError(
-              server.id,
-              err instanceof Error ? err.message : "Connection test failed",
-            );
+            onError(server.id, describeError(err) || "Connection test failed");
           },
         });
       }}

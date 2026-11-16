@@ -6,12 +6,11 @@ import { apiClient } from "@/lib/api-client";
 import { EditPBSServerDialog } from "./EditPBSServerDialog";
 import type { PBSServer } from "../types/backup";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: {
-    put: vi.fn(),
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
     get: vi.fn().mockResolvedValue({ items: [], total: 0 }),
-  },
-}));
+  }),
+);
 
 const mockedPut = vi.mocked(apiClient.put);
 

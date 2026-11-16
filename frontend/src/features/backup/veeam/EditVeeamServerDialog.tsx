@@ -17,6 +17,7 @@ import {
 } from "@/lib/private-address";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { useUpdateVeeamServer } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { VeeamServer } from "../types/backup";
 import { VeeamCertificateStep } from "./VeeamCertificateStep";
 import { useVeeamFingerprint } from "./useVeeamFingerprint";
@@ -63,6 +64,9 @@ export function EditVeeamServerDialog({
 
   const cert = useVeeamFingerprint();
   const updateServer = useUpdateVeeamServer();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open ? server.id : null);
 
   const addressChanged = baseUrl !== server.base_url;
   // Bound to a local so TypeScript narrows it inside the branch below, and
@@ -91,8 +95,8 @@ export function EditVeeamServerDialog({
 
   function submit(allowPrivateNow: boolean) {
     setUpdatePrivateWarning(null);
-    updateServer.mutate(
-      {
+    settle(
+      updateServer.mutateAsync({
         id: server.id,
         name,
         base_url: baseUrl,
@@ -103,8 +107,9 @@ export function EditVeeamServerDialog({
         // stays untouched, and sending "" would silently unpin the server.
         ...(addressChanged ? { tls_fingerprint: cert.pinToStore() } : {}),
         ...(allowPrivateNow ? { allow_private_address: true } : {}),
-      },
+      }),
       {
+        action: `Saving the Veeam server "${server.name}"`,
         onSuccess: () => {
           onOpenChange(false);
         },

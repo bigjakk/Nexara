@@ -28,6 +28,8 @@ import {
   useDeleteSnapshot,
 } from "@/features/backup/api/backup-queries";
 import { useClusterStorage } from "@/features/clusters/api/cluster-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 import { RestoreDialog } from "@/features/backup/components/RestoreDialog";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { PBSSnapshot } from "@/features/backup/types/backup";
@@ -69,13 +71,20 @@ export function BackupPanel({
   const [deleteTarget, setDeleteTarget] = useState<PBSSnapshot | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const deleteMutation = useDeleteSnapshot();
+  const deleteMutation = useDeleteSnapshot(true);
+  // The dialog shows a failed delete itself, and one that lands after it was
+  // closed is toasted instead. Told apart by the snapshot it is for.
+  const settleDelete = useSaveOutcome(
+    deleteTarget
+      ? `${deleteTarget.pbs_server_id}/${deleteTarget.datastore}/${deleteTarget.backup_type}/${deleteTarget.backup_id}/${String(deleteTarget.backup_time)}`
+      : null,
+  );
 
   const handleDelete = () => {
     if (!deleteTarget) return;
     setDeleteError(null);
-    deleteMutation.mutate(
-      {
+    settleDelete(
+      deleteMutation.mutateAsync({
         pbsId: deleteTarget.pbs_server_id,
         store: deleteTarget.datastore,
         body: {
@@ -83,13 +92,17 @@ export function BackupPanel({
           backup_id: deleteTarget.backup_id,
           backup_time: deleteTarget.backup_time,
         },
-      },
+      }),
       {
+        action: t("guestBackupDeleteAction", {
+          backup: `${deleteTarget.backup_type}/${deleteTarget.backup_id}`,
+          time: formatUnixTime(deleteTarget.backup_time),
+        }),
         onSuccess: () => {
           setDeleteTarget(null);
         },
-        onError: (err: Error) => {
-          setDeleteError(err.message || "Delete failed");
+        onError: (err) => {
+          setDeleteError(describeError(err) || "Delete failed");
         },
       },
     );
@@ -321,6 +334,7 @@ function BackupNowDialog({
   vmid,
   kind,
 }: BackupNowDialogProps) {
+  const { t } = useTranslation("backup");
   const [storage, setStorage] = useState("");
   const [mode, setMode] = useState("snapshot");
   const [compress, setCompress] = useState("zstd");
@@ -363,12 +377,15 @@ function BackupNowDialog({
   const effectiveStorage = storage || defaultStorage;
 
   const triggerBackup = useTriggerBackup();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open);
 
   const handleBackup = () => {
     if (!effectiveStorage || !nodeName) return;
     setError(null);
-    triggerBackup.mutate(
-      {
+    settle(
+      triggerBackup.mutateAsync({
         clusterId,
         body: {
           vmid: String(vmid),
@@ -377,14 +394,18 @@ function BackupNowDialog({
           mode,
           compress,
         },
-      },
+      }),
       {
+        action: t("guestBackupNowAction", {
+          vmid: String(vmid),
+          storage: effectiveStorage,
+        }),
         onSuccess: (data) => {
           setError(null);
           setBackupUpid(data.upid);
         },
-        onError: (err: Error) => {
-          setError(err.message || "Backup failed");
+        onError: (err) => {
+          setError(describeError(err) || "Backup failed");
         },
       },
     );
