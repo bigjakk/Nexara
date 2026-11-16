@@ -35,6 +35,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   useHAResources,
@@ -222,6 +223,12 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   const settle = useSaveOutcome();
   const settleGroupCreate = useSaveOutcome(grpCreateOpen);
   const settleGroupEdit = useSaveOutcome(grpEditing?.group ?? null);
+  // A group save's failure, shown in its dialog: the tab's banner is behind
+  // the modal, which stays open when the save fails.
+  const [grpError, setGrpError] = useState<string | null>(null);
+  const showGroupError = (err: unknown) => {
+    setGrpError(describeError(err) || "Operation failed");
+  };
 
   // --- Rule dialog state ---
   const [ruleCreateOpen, setRuleCreateOpen] = useState(false);
@@ -272,6 +279,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
 
   const handleCreateGroup = (e: React.SyntheticEvent) => {
     e.preventDefault();
+    setGrpError(null);
     settleGroupCreate(
       createGroup.mutateAsync({
         group: grpName,
@@ -286,7 +294,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
           setGrpNodes("");
           setGrpComment("");
         },
-        onError: handleMutationError,
+        onError: showGroupError,
       },
     );
   };
@@ -294,6 +302,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   const handleUpdateGroup = (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!grpEditing) return;
+    setGrpError(null);
     settleGroupEdit(
       updateGroup.mutateAsync({
         group: grpEditing.group,
@@ -305,12 +314,13 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         onSuccess: () => {
           setGrpEditing(null);
         },
-        onError: handleMutationError,
+        onError: showGroupError,
       },
     );
   };
 
   const startEditGroup = (g: HAGroup) => {
+    setGrpError(null);
     setGrpEditing(g);
     setGrpNodes(g.nodes);
     setGrpComment(g.comment ?? "");
@@ -958,7 +968,13 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
             }
             actions={
               canManage("ha") && groupWritesAllowed ? (
-                <Dialog open={grpCreateOpen} onOpenChange={setGrpCreateOpen}>
+                <Dialog
+                  open={grpCreateOpen}
+                  onOpenChange={(open) => {
+                    if (open) setGrpError(null);
+                    setGrpCreateOpen(open);
+                  }}
+                >
                   <DialogTrigger asChild>
                     <Button size="sm">
                       <Plus className="mr-2 h-4 w-4" />
@@ -1006,6 +1022,11 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                           }}
                         />
                       </div>
+                      {grpError && (
+                        <p role="alert" className="text-sm text-destructive">
+                          {grpError}
+                        </p>
+                      )}
                       <Button type="submit" disabled={createGroup.isPending}>
                         {createGroup.isPending ? "Creating..." : "Create"}
                       </Button>
@@ -1160,6 +1181,11 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                     }}
                   />
                 </div>
+                {grpError && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {grpError}
+                  </p>
+                )}
                 <Button type="submit" disabled={updateGroup.isPending}>
                   {updateGroup.isPending ? "Saving..." : "Save"}
                 </Button>

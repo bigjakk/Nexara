@@ -17,6 +17,7 @@ import { renderWithProviders } from "@/test/test-utils";
 import { CreateUserDialog } from "@/features/admin/components/CreateUserDialog";
 import { ChannelsTable } from "@/features/alerts/components/ChannelsTable";
 import { EditPBSServerDialog } from "@/features/backup/components/EditPBSServerDialog";
+import { NodePowerActions } from "@/features/clusters/components/node/NodePowerActions";
 import { NodeShutdownConfirm } from "@/features/clusters/components/node/NodeShutdownConfirm";
 import { DRSConfigCard } from "@/features/drs/components/DRSConfigCard";
 import { GuestToolsPolicyCard } from "@/features/guest-tools/components/GuestToolsPolicyCard";
@@ -74,6 +75,7 @@ const READS: Record<string, unknown> = {
   },
   "/api/v1/clusters/c1/nodes": [{ id: "n1", name: "pve-01", status: "online" }],
   "/api/v1/clusters/c1/ssh-known-hosts": [],
+  "/api/v1/clusters/c1/ssh-credentials/configured": { configured: false },
 };
 
 beforeEach(() => {
@@ -269,6 +271,30 @@ describe("a failed save", () => {
     await act(userEvent.setup());
 
     expect(await screen.findByText(new RegExp(REFUSED))).toBeInTheDocument();
+    await settle();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  // A dialog that stays open on a failure shows it inside: the page's banner is
+  // behind the modal, out of sight and out of a screen reader's reach.
+  it("is shown inside the dialog that stays open over the page", async () => {
+    renderWithProviders(
+      <NodePowerActions
+        clusterId="c1"
+        nodeName="pve-01"
+        otherNodes={["pve-02"]}
+        inMaintenance={false}
+        canReport={false}
+      />,
+      { client: createAppQueryClient() },
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Evacuate/ }));
+    await user.click(screen.getByRole("button", { name: "Evacuate" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(await within(dialog).findByText(REFUSED)).toBeInTheDocument();
     await settle();
     expect(toast.error).not.toHaveBeenCalled();
   });

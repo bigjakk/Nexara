@@ -46,6 +46,7 @@ import {
 import { useSSHConfigured } from "@/features/rolling-updates/api/rolling-update-queries";
 import { useAuth } from "@/hooks/useAuth";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 import { NodeShutdownConfirm } from "./NodeShutdownConfirm";
 import { useTaskLogStore } from "@/stores/task-log-store";
 
@@ -105,6 +106,12 @@ export function NodePowerActions({
   const [migrations, setMigrations] = useState<EvacuateMigration[] | null>(
     null,
   );
+  // An evacuate's failure, shown in its dialog, which stays open over the
+  // page's banner; one that lands after the dialog closed is toasted.
+  const [evacuateError, setEvacuateError] = useState<string | null>(null);
+  const settleEvacuate = useSaveOutcome(
+    dialog === "evacuate" ? `${clusterId}/${nodeName}` : null,
+  );
 
   const handleError = (err: unknown) => {
     const msg = err instanceof Error ? err.message : "Unknown error";
@@ -114,24 +121,31 @@ export function NodePowerActions({
   const handleEvacuate = () => {
     if (mode === "single" && !targetNode) return;
     setActionError(null);
+    setEvacuateError(null);
     setMigrations(null);
     const params = mode === "single" ? { target_node: targetNode } : {};
-    settle(evacuate.mutateAsync(params), {
+    // Focus the first successful migration task, the dialog open or not.
+    const focusFirst = (data: { migrations: EvacuateMigration[] }) => {
+      const first = data.migrations.find((m) => m.upid && !m.error);
+      if (first) {
+        setFocusedTask({
+          clusterId,
+          upid: first.upid,
+          description: `Evacuate ${nodeName}`,
+        });
+        setPanelOpen(true);
+      }
+    };
+    settleEvacuate(evacuate.mutateAsync(params), {
       action: `Evacuating ${nodeName}`,
       onSuccess: (data) => {
         setMigrations(data.migrations);
-        // Focus the first successful migration task.
-        const first = data.migrations.find((m) => m.upid && !m.error);
-        if (first) {
-          setFocusedTask({
-            clusterId,
-            upid: first.upid,
-            description: `Evacuate ${nodeName}`,
-          });
-          setPanelOpen(true);
-        }
+        focusFirst(data);
       },
-      onError: handleError,
+      onLateSuccess: focusFirst,
+      onError: (err) => {
+        setEvacuateError(describeError(err) || "Unknown error");
+      },
     });
   };
 
@@ -140,6 +154,7 @@ export function NodePowerActions({
     setTargetNode("");
     setMode("distribute");
     setMigrations(null);
+    setEvacuateError(null);
   };
 
   const reportError =
@@ -372,6 +387,11 @@ export function NodePowerActions({
                   </div>
                 )}
               </div>
+              {evacuateError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {evacuateError}
+                </p>
+              )}
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" onClick={closeEvacuate}>
                   Cancel
