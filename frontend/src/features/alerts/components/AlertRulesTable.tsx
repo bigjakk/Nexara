@@ -21,6 +21,7 @@ import { Panel } from "@/components/page/Panel";
 import type { AlertRule } from "@/types/api";
 import { useUpsDevices } from "@/features/power/api/ups-queries";
 import { usePermissions } from "@/hooks/usePermissions";
+import { UPS_METRICS } from "../lib/ups-metrics";
 
 export function AlertRulesTable() {
   const { data: rules, isLoading } = useAlertRules();
@@ -31,9 +32,14 @@ export function AlertRulesTable() {
   const [pendingDelete, setPendingDelete] = useState<AlertRule | null>(null);
   // A UPS's rule is named by its UPS, read only where the caller may list them.
   const { hasGlobalPermission } = usePermissions();
+  const canViewUps = hasGlobalPermission("view", "ups");
   const upsDevices = useUpsDevices(
-    hasGlobalPermission("view", "ups") && (rules ?? []).some((r) => r.scope_type === "ups"),
+    canViewUps && (rules ?? []).some((r) => r.scope_type === "ups"),
   );
+  // The server refuses to enable a UPS rule without a global view:ups (its
+  // alerts name a UPS); turning one off stays open, so only Enable is withheld.
+  const enableRefused = (rule: AlertRule) =>
+    !rule.enabled && !canViewUps && UPS_METRICS.has(rule.metric);
   const upsName = (id: string | undefined) => {
     const d = upsDevices.data?.find((u) => u.id === id);
     return d === undefined ? "" : `${d.name}@${d.server_name}`;
@@ -127,7 +133,14 @@ export function AlertRulesTable() {
                   : `${String(rule.duration_seconds)}s`}
               </TableCell>
               <TableCell>
-                {canManage ? (
+                {canManage && enableRefused(rule) ? (
+                  <div>
+                    <span>No</span>
+                    <div className="text-[12.5px] text-muted-foreground">
+                      Enabling it takes view:ups
+                    </div>
+                  </div>
+                ) : canManage ? (
                   <Button
                     variant="ghost"
                     size="sm"

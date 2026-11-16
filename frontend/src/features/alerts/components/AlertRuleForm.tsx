@@ -28,6 +28,7 @@ import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { ClusterResponse, EscalationStep } from "@/types/api";
 import { EscalationChainEditor } from "./EscalationChainEditor";
+import { UPS_METRICS } from "../lib/ups-metrics";
 import { FormSection } from "./FormParts";
 import { TemplateEditor } from "./TemplateEditor";
 
@@ -55,15 +56,6 @@ const METRICS = [
   { value: "ups_unreachable", label: "UPS unreachable (count)" },
   { value: "ups_replace_battery", label: "UPS battery needs replacing (count)" },
 ];
-
-const UPS_METRICS = new Set([
-  "ups_on_battery",
-  "ups_battery_charge",
-  "ups_runtime",
-  "ups_load",
-  "ups_unreachable",
-  "ups_replace_battery",
-]);
 
 /**
  * Metrics whose value is "how many happened inside the Duration window", as

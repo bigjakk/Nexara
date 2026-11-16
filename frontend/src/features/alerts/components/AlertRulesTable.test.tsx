@@ -96,4 +96,19 @@ describe("AlertRulesTable", () => {
     renderWithProviders(<AlertRulesTable />);
     expect(await screen.findByText("ups01@nut01")).toBeInTheDocument();
   });
+
+  // Enabling a UPS rule takes a global view:ups, which the server checks; a
+  // manage:alert holder without it can still turn one off.
+  it("offers no Enable for a UPS rule the caller may not enable", async () => {
+    mockedList.mockResolvedValue([
+      makeRule({ id: "r-off", name: "On battery", metric: "ups_on_battery", enabled: false }),
+      makeRule({ id: "r-on", name: "Low charge", metric: "ups_battery_charge" }),
+    ]);
+    renderWithProviders(<AlertRulesTable />);
+    const row = (name: string) => (screen.getByText(name).closest("tr") as HTMLElement);
+    await screen.findByText("On battery");
+    expect(within(row("On battery")).queryByRole("button", { name: "Enable rule" })).not.toBeInTheDocument();
+    expect(within(row("On battery")).getByText("Enabling it takes view:ups")).toBeInTheDocument();
+    expect(within(row("Low charge")).getByRole("button", { name: "Disable rule" })).toBeInTheDocument();
+  });
 });
