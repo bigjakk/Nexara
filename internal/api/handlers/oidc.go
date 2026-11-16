@@ -562,6 +562,8 @@ func (h *OIDCHandler) Authorize(c fiber.Ctx, _ *apischema.Params) error {
 	}
 	authURL, state, err := provider.GenerateAuthURL(c.Context(), record)
 	if err != nil {
+		// A refused authorization endpoint lands here as well as a Redis failure.
+		slog.Error("OIDC authorize: could not generate the auth URL", "error", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
 	}
 	// The callback refuses a state this browser was not given (oidcStateBinding).
