@@ -254,7 +254,7 @@ function scan() {
               if (prop === "mutate" || prop === "mutateAsync") {
                 locals.set(`()${el.name.getText(sf)}`, { hook: callee, has });
               }
-              if (prop === "error" && has === "no")
+              if ((prop === "error" || prop === "isError") && has === "no")
                 rendered.push(at(el, callee));
             }
           }
