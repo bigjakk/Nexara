@@ -14,6 +14,10 @@ import (
 
 type Querier interface {
 	AbandonUnreadBackupJobs(ctx context.Context, arg AbandonUnreadBackupJobsParams) (int64, error)
+	// An operator's acceptance of the reported name, for a renamed cluster or a
+	// row moved to another cluster on purpose. Only the name they were shown: zero
+	// rows when no mismatch is reported or another name is reported now.
+	AcceptClusterCorosyncName(ctx context.Context, arg AcceptClusterCorosyncNameParams) (int64, error)
 	AcknowledgeAlert(ctx context.Context, arg AcknowledgeAlertParams) error
 	AddFavorite(ctx context.Context, arg AddFavoriteParams) error
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
@@ -856,10 +860,17 @@ type Querier interface {
 	// construction — the WHERE clause only touches rows that have none yet, so a
 	// pruned session cannot un-attribute a job that was already resolved.
 	DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error
-	// Turns off the node-scoped rules of a node row the collector removed: with no
-	// node left they can evaluate nothing, and an edit that keeps one enabled is
-	// refused for its unknown node_id.
-	DisableNodeAlertRules(ctx context.Context, nodeID pgtype.UUID) (int64, error)
+	// Turns off the node-scoped rules of a node row the collector is about to
+	// remove (with no node left they can evaluate nothing, and an edit that keeps
+	// one enabled is refused for its unknown node_id), and keeps the node's name and
+	// whether each rule was on, for ReattachNodeAlertRules. A rule already waiting
+	// for this name keeps its flag, so a removal retried after a failed delete does
+	// not forget it. Answers how many of the rules were on.
+	DetachNodeAlertRules(ctx context.Context, arg DetachNodeAlertRulesParams) (int64, error)
+	// Keeps the node's name on the maintenance windows pinned to a node row the
+	// collector is about to remove, for ReattachNodeMaintenanceWindows. A window
+	// whose node_id names no row covers nothing (isInMaintenanceWindow).
+	DetachNodeMaintenanceWindows(ctx context.Context, arg DetachNodeMaintenanceWindowsParams) (int64, error)
 	// DisableScheduledTaskForBadSchedule parks a task whose cron can never fire.
 	//
 	// Leaving it enabled is the busy loop: this table's due predicate counts NULL
@@ -980,6 +991,9 @@ type Querier interface {
 	// pinned by the WHERE clause, so each bucket yields exactly one row.
 	GetCephClusterMetricsHistory(ctx context.Context, arg GetCephClusterMetricsHistoryParams) ([]GetCephClusterMetricsHistoryRow, error)
 	GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
+	// The corosync name the cluster's node rows were read from, and another one
+	// its API URL answered with since ('' when none). Syncer.pruneRemovedNodes.
+	GetClusterCorosyncName(ctx context.Context, id uuid.UUID) (GetClusterCorosyncNameRow, error)
 	// pve_task_failed / pve_backup_failed: how many Proxmox tasks failed in a window.
 	//
 	// "Failed" is task_history.status, which the collector derives from
@@ -1725,6 +1739,9 @@ type Querier interface {
 	ListCVEScanVulnsKEV(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]CveScan, error)
 	ListCleanupPendingJobsForCluster(ctx context.Context, clusterID uuid.UUID) ([]RollingUpdateJob, error)
+	// The clusters whose API URL answers with another cluster's name, for the
+	// clusters API's health issues.
+	ListClusterCorosyncNameMismatches(ctx context.Context) ([]ListClusterCorosyncNameMismatchesRow, error)
 	// ListClusterObjectBaselines is the signature each kind of a cluster was last
 	// read whole under, and when (000119, 000124). The replication trigger's own
 	// mark has neither.
@@ -2886,6 +2903,13 @@ type Querier interface {
 	// A sync found again an account that a sync had deactivated. One deactivated by hand,
 	// or reactivated by an administrator in the meantime, is not touched.
 	ReactivateLDAPUserFromDirectory(ctx context.Context, id uuid.UUID) (int64, error)
+	// Points the rules waiting for a removed node's name (DetachNodeAlertRules) at
+	// the cluster's node row of that name, turning back on the ones that were on.
+	// Only a rule whose node_id still names that row (the removal failed) or no row
+	// at all: one an operator pointed at another node meanwhile stays there.
+	ReattachNodeAlertRules(ctx context.Context, clusterID uuid.UUID) (int64, error)
+	// ReattachNodeAlertRules for maintenance windows.
+	ReattachNodeMaintenanceWindows(ctx context.Context, clusterID uuid.UUID) (int64, error)
 	// ReconcileDispatchedScheduledTasks settles every dispatched run whose Proxmox
 	// task has finished, from the task_history row the collector keeps for its
 	// UPID. It is the other half of UpdateTaskLastRun: dispatching a run records
@@ -2965,6 +2989,11 @@ type Querier interface {
 	// own, from its task row, which the cluster_id must match: the write lands
 	// only on the cluster whose collector read the log.
 	RecordBackupJobLog(ctx context.Context, arg RecordBackupJobLogParams) error
+	// Records the name a reading that can tell the cluster's members named: the
+	// first one (none recorded yet), or the recorded one again, which clears a
+	// reported mismatch. Never replaces another recorded name; writes nothing when
+	// nothing changes.
+	RecordClusterCorosyncName(ctx context.Context, arg RecordClusterCorosyncNameParams) (int64, error)
 	// A failed read records why and when, and keeps the last good read.
 	RecordNodeMemoryFailure(ctx context.Context, arg RecordNodeMemoryFailureParams) error
 	// RecordObservedObjects writes one reading of one kind of a cluster — or one
@@ -3012,6 +3041,10 @@ type Querier interface {
 	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)
 	// Moves the lease's end on, for the sync that holds it; 0 rows: it no longer does.
 	RenewLDAPSyncLease(ctx context.Context, arg RenewLDAPSyncLeaseParams) (int64, error)
+	// Records that the API URL answered with a cluster other than the recorded
+	// one. One row only when the reported name changes, so the caller audits each
+	// mismatch once.
+	ReportClusterCorosyncNameMismatch(ctx context.Context, arg ReportClusterCorosyncNameMismatchParams) (int64, error)
 	// RequestDRSEvaluation queues an out-of-band evaluation for the scheduler
 	// leader to pick up on its next tick. The API's manual-trigger endpoint uses
 	// this instead of executing migrations itself, so every dispatch goes through

@@ -127,6 +127,25 @@ func buildAllClusterIssues(ctx context.Context, q *db.Queries) map[uuid.UUID][]h
 		}
 	}
 
+	// Cluster name — the API URL answers with a corosync cluster other than the
+	// one the node rows were read from, so the collector removes no node row
+	// (Syncer.pruneRemovedNodes) until it answers with that one again or an
+	// operator accepts the new name (ClusterHandler.AcceptClusterName).
+	if rows, err := q.ListClusterCorosyncNameMismatches(ctx); err == nil {
+		for _, r := range rows {
+			add(r.ID, healthIssueResponse{
+				Type: "cluster_name_changed", Severity: healthSevWarn, Scope: "cluster",
+				Summary: "Cluster name changed",
+				Detail: fmt.Sprintf(
+					"The API URL now reaches a cluster named %s, not %s, so Nexara removes no node from this "+
+						"cluster. If the cluster was renamed or this entry was moved to it on purpose, accept the "+
+						"new name (POST /api/v1/clusters/%s/accept-cluster-name). Otherwise point the API URL back "+
+						"at %s.",
+					r.CorosyncNameReported, r.CorosyncName, r.ID, r.CorosyncName),
+			})
+		}
+	}
+
 	// Nodes — offline or HA-fenced.
 	if rows, err := q.ListNodeHealthProblems(ctx); err == nil {
 		for _, r := range rows {

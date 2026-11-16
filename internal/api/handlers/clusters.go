@@ -1394,3 +1394,32 @@ func decideCertificateVerify(pinned, live, attested string) certVerifyOutcome {
 	}
 	return certVerifyAccept
 }
+
+// AcceptClusterName handles POST /api/v1/clusters/:id/accept-cluster-name.
+//
+// While the cluster's API URL answers with a corosync cluster other than the
+// one its node rows were read from, the collector removes no node row
+// (Syncer.pruneRemovedNodes) and the cluster carries a cluster_name_changed
+// issue. This is the operator saying the change is deliberate: a renamed
+// cluster, or a row moved to another cluster on purpose. Pinned to the name the
+// operator was shown, so a different cluster answering since is not accepted
+// with it. Node rows the accepted cluster does not list are then removed by
+// the ordinary two-pass rule.
+func (h *ClusterHandler) AcceptClusterName(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
+	if err != nil {
+		return err
+	}
+	name := p.String("cluster_name")
+	n, err := h.queries.AcceptClusterCorosyncName(c.Context(), db.AcceptClusterCorosyncNameParams{ID: id, Reported: name})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to accept the cluster name")
+	}
+	if n == 0 {
+		return fiber.NewError(fiber.StatusConflict,
+			"This cluster does not report that name now. Reload the cluster and check its issues.")
+	}
+	details, _ := json.Marshal(map[string]any{"corosync_name": name})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_name_accepted", details)
+	return c.JSON(fiber.Map{"status": "ok", "corosync_name": name})
+}

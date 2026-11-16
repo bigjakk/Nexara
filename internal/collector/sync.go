@@ -155,7 +155,13 @@ type SyncQueries interface {
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
 	DeleteClusterNodes(ctx context.Context, arg db.DeleteClusterNodesParams) ([]db.DeleteClusterNodesRow, error)
 	ListActiveAlertsForNodes(ctx context.Context, nodeIDs []uuid.UUID) ([]db.AlertHistory, error)
-	DisableNodeAlertRules(ctx context.Context, nodeID pgtype.UUID) (int64, error)
+	DetachNodeAlertRules(ctx context.Context, arg db.DetachNodeAlertRulesParams) (int64, error)
+	DetachNodeMaintenanceWindows(ctx context.Context, arg db.DetachNodeMaintenanceWindowsParams) (int64, error)
+	ReattachNodeAlertRules(ctx context.Context, clusterID uuid.UUID) (int64, error)
+	ReattachNodeMaintenanceWindows(ctx context.Context, clusterID uuid.UUID) (int64, error)
+	GetClusterCorosyncName(ctx context.Context, id uuid.UUID) (db.GetClusterCorosyncNameRow, error)
+	RecordClusterCorosyncName(ctx context.Context, arg db.RecordClusterCorosyncNameParams) (int64, error)
+	ReportClusterCorosyncNameMismatch(ctx context.Context, arg db.ReportClusterCorosyncNameMismatchParams) (int64, error)
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) (int64, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
 	DeleteStaleVMsForNodes(ctx context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error)
@@ -349,8 +355,6 @@ type Syncer struct {
 	cephMu               sync.Mutex              // guards cephSeen
 	cephSeen             map[uuid.UUID]*cephSeen // each cluster's last Ceph reading, for the change diff
 	nodeAbsent           sync.Map                // cluster ID → map[string]bool: the nodes the last membership reading lacked (pruneRemovedNodes)
-	nodeCluster          sync.Map                // cluster ID → string: the corosync cluster name its node rows were read from
-	nodeClusterWarned    sync.Map                // cluster ID → string: the other cluster last warned about
 
 	// objectObserveInterval is OBJECT_OBSERVE_INTERVAL, which bounds how far
 	// back an observed change's explanation is looked for (observedLookback).
@@ -719,6 +723,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	clusterStatus, statusErr := client.GetClusterStatus(ctx)
 	s.syncNodeAddresses(ctx, cluster.ID, clusterStatus, statusErr)
 	nodesRemoved := s.pruneRemovedNodes(ctx, cluster, knownNodes, knownErr, nodes, clusterStatus, statusErr)
+	s.reattachNodeRows(ctx, cluster.ID)
 
 	// Collect storage-replication job status.
 	s.syncReplication(ctx, client, cluster.ID)

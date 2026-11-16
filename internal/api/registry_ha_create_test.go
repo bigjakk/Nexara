@@ -143,8 +143,8 @@ func (haCreateCacheQueries) ListNodeEndpoints(context.Context, uuid.UUID) ([]db.
 // haCreateDBTX stands in for the database behind the handler. CreateResource
 // touches it twice, both after Proxmox has answered: resolveSIDName's guest
 // lookup, answered with no rows so the audit row carries no guest name, and
-// AuditLog's insert, whose arguments are recorded. Any other Exec or Query
-// fails.
+// AuditLog's insert, whose arguments are recorded. Any other Exec (but those
+// named in updates) or Query fails.
 type haCreateDBTX struct {
 	mu     sync.Mutex
 	audits [][]any
@@ -152,9 +152,21 @@ type haCreateDBTX struct {
 	// models answers a QueryRow whose SQL names the key (as "-- name: GetVMByClusterAndVmid")
 	// with that model; any other QueryRow finds no row.
 	models map[string]any
+	// updates answers an Exec whose SQL names the key with that many rows,
+	// recording its arguments in updateArgs.
+	updates    map[string]int64
+	updateArgs [][]any
 }
 
 func (d *haCreateDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	for name, n := range d.updates {
+		if strings.Contains(sql, "-- name: "+name+" ") {
+			d.mu.Lock()
+			d.updateArgs = append(d.updateArgs, args)
+			d.mu.Unlock()
+			return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", n)), nil
+		}
+	}
 	if !strings.Contains(sql, "INSERT INTO audit_log") {
 		return pgconn.CommandTag{}, errHACreateUnexpectedQuery
 	}

@@ -106,3 +106,45 @@ SET tls_fingerprint = $2,
 -- re-pointed the cluster in between, pinning would attach the old endpoint's
 -- certificate to the new address. Zero rows means "it moved, start over".
 WHERE id = $1 AND api_url = $3;
+
+-- name: GetClusterCorosyncName :one
+-- The corosync name the cluster's node rows were read from, and another one
+-- its API URL answered with since ('' when none). Syncer.pruneRemovedNodes.
+SELECT corosync_name, corosync_name_reported FROM clusters WHERE id = $1;
+
+-- name: RecordClusterCorosyncName :execrows
+-- Records the name a reading that can tell the cluster's members named: the
+-- first one (none recorded yet), or the recorded one again, which clears a
+-- reported mismatch. Never replaces another recorded name; writes nothing when
+-- nothing changes.
+UPDATE clusters
+SET corosync_name = @name, corosync_name_reported = ''
+WHERE id = @id
+  AND @name::text <> ''
+  AND (corosync_name = '' OR corosync_name = @name)
+  AND (corosync_name <> @name OR corosync_name_reported <> '');
+
+-- name: ReportClusterCorosyncNameMismatch :execrows
+-- Records that the API URL answered with a cluster other than the recorded
+-- one. One row only when the reported name changes, so the caller audits each
+-- mismatch once.
+UPDATE clusters
+SET corosync_name_reported = @reported
+WHERE id = @id
+  AND corosync_name <> ''
+  AND corosync_name <> @reported
+  AND corosync_name_reported <> @reported;
+
+-- name: AcceptClusterCorosyncName :execrows
+-- An operator's acceptance of the reported name, for a renamed cluster or a
+-- row moved to another cluster on purpose. Only the name they were shown: zero
+-- rows when no mismatch is reported or another name is reported now.
+UPDATE clusters
+SET corosync_name = corosync_name_reported, corosync_name_reported = ''
+WHERE id = @id AND corosync_name_reported <> '' AND corosync_name_reported = @reported;
+
+-- name: ListClusterCorosyncNameMismatches :many
+-- The clusters whose API URL answers with another cluster's name, for the
+-- clusters API's health issues.
+SELECT id, corosync_name, corosync_name_reported FROM clusters
+WHERE corosync_name_reported <> '';

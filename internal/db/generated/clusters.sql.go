@@ -12,6 +12,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptClusterCorosyncName = `-- name: AcceptClusterCorosyncName :execrows
+UPDATE clusters
+SET corosync_name = corosync_name_reported, corosync_name_reported = ''
+WHERE id = $1 AND corosync_name_reported <> '' AND corosync_name_reported = $2
+`
+
+type AcceptClusterCorosyncNameParams struct {
+	ID       uuid.UUID `json:"id"`
+	Reported string    `json:"reported"`
+}
+
+// An operator's acceptance of the reported name, for a renamed cluster or a
+// row moved to another cluster on purpose. Only the name they were shown: zero
+// rows when no mismatch is reported or another name is reported now.
+func (q *Queries) AcceptClusterCorosyncName(ctx context.Context, arg AcceptClusterCorosyncNameParams) (int64, error) {
+	result, err := q.db.Exec(ctx, acceptClusterCorosyncName, arg.ID, arg.Reported)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearClusterCredentialProvenance = `-- name: ClearClusterCredentialProvenance :exec
 UPDATE clusters
 SET credential_source      = 'manual',
@@ -81,7 +103,7 @@ INSERT INTO clusters (
     bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at
+RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at, corosync_name, corosync_name_reported
 `
 
 type CreateClusterParams struct {
@@ -136,6 +158,8 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		&i.BootstrapCreatedUser,
 		&i.BootstrapCreatedAcl,
 		&i.BootstrapCreatedAt,
+		&i.CorosyncName,
+		&i.CorosyncNameReported,
 	)
 	return i, err
 }
@@ -178,7 +202,7 @@ func (q *Queries) DeleteClusterAndScopedRoles(ctx context.Context, id uuid.UUID)
 }
 
 const getCluster = `-- name: GetCluster :one
-SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at FROM clusters WHERE id = $1
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at, corosync_name, corosync_name_reported FROM clusters WHERE id = $1
 `
 
 func (q *Queries) GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error) {
@@ -203,12 +227,32 @@ func (q *Queries) GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 		&i.BootstrapCreatedUser,
 		&i.BootstrapCreatedAcl,
 		&i.BootstrapCreatedAt,
+		&i.CorosyncName,
+		&i.CorosyncNameReported,
 	)
 	return i, err
 }
 
+const getClusterCorosyncName = `-- name: GetClusterCorosyncName :one
+SELECT corosync_name, corosync_name_reported FROM clusters WHERE id = $1
+`
+
+type GetClusterCorosyncNameRow struct {
+	CorosyncName         string `json:"corosync_name"`
+	CorosyncNameReported string `json:"corosync_name_reported"`
+}
+
+// The corosync name the cluster's node rows were read from, and another one
+// its API URL answered with since (” when none). Syncer.pruneRemovedNodes.
+func (q *Queries) GetClusterCorosyncName(ctx context.Context, id uuid.UUID) (GetClusterCorosyncNameRow, error) {
+	row := q.db.QueryRow(ctx, getClusterCorosyncName, id)
+	var i GetClusterCorosyncNameRow
+	err := row.Scan(&i.CorosyncName, &i.CorosyncNameReported)
+	return i, err
+}
+
 const listActiveClusters = `-- name: ListActiveClusters :many
-SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at FROM clusters WHERE is_active = true ORDER BY created_at
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at, corosync_name, corosync_name_reported FROM clusters WHERE is_active = true ORDER BY created_at
 `
 
 func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
@@ -239,6 +283,8 @@ func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
 			&i.BootstrapCreatedUser,
 			&i.BootstrapCreatedAcl,
 			&i.BootstrapCreatedAt,
+			&i.CorosyncName,
+			&i.CorosyncNameReported,
 		); err != nil {
 			return nil, err
 		}
@@ -250,8 +296,41 @@ func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
 	return items, nil
 }
 
+const listClusterCorosyncNameMismatches = `-- name: ListClusterCorosyncNameMismatches :many
+SELECT id, corosync_name, corosync_name_reported FROM clusters
+WHERE corosync_name_reported <> ''
+`
+
+type ListClusterCorosyncNameMismatchesRow struct {
+	ID                   uuid.UUID `json:"id"`
+	CorosyncName         string    `json:"corosync_name"`
+	CorosyncNameReported string    `json:"corosync_name_reported"`
+}
+
+// The clusters whose API URL answers with another cluster's name, for the
+// clusters API's health issues.
+func (q *Queries) ListClusterCorosyncNameMismatches(ctx context.Context) ([]ListClusterCorosyncNameMismatchesRow, error) {
+	rows, err := q.db.Query(ctx, listClusterCorosyncNameMismatches)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListClusterCorosyncNameMismatchesRow{}
+	for rows.Next() {
+		var i ListClusterCorosyncNameMismatchesRow
+		if err := rows.Scan(&i.ID, &i.CorosyncName, &i.CorosyncNameReported); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listClusters = `-- name: ListClusters :many
-SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at FROM clusters ORDER BY created_at DESC
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at, corosync_name, corosync_name_reported FROM clusters ORDER BY created_at DESC
 `
 
 func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
@@ -282,6 +361,8 @@ func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
 			&i.BootstrapCreatedUser,
 			&i.BootstrapCreatedAcl,
 			&i.BootstrapCreatedAt,
+			&i.CorosyncName,
+			&i.CorosyncNameReported,
 		); err != nil {
 			return nil, err
 		}
@@ -291,6 +372,57 @@ func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordClusterCorosyncName = `-- name: RecordClusterCorosyncName :execrows
+UPDATE clusters
+SET corosync_name = $1, corosync_name_reported = ''
+WHERE id = $2
+  AND $1::text <> ''
+  AND (corosync_name = '' OR corosync_name = $1)
+  AND (corosync_name <> $1 OR corosync_name_reported <> '')
+`
+
+type RecordClusterCorosyncNameParams struct {
+	Name string    `json:"name"`
+	ID   uuid.UUID `json:"id"`
+}
+
+// Records the name a reading that can tell the cluster's members named: the
+// first one (none recorded yet), or the recorded one again, which clears a
+// reported mismatch. Never replaces another recorded name; writes nothing when
+// nothing changes.
+func (q *Queries) RecordClusterCorosyncName(ctx context.Context, arg RecordClusterCorosyncNameParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordClusterCorosyncName, arg.Name, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reportClusterCorosyncNameMismatch = `-- name: ReportClusterCorosyncNameMismatch :execrows
+UPDATE clusters
+SET corosync_name_reported = $1
+WHERE id = $2
+  AND corosync_name <> ''
+  AND corosync_name <> $1
+  AND corosync_name_reported <> $1
+`
+
+type ReportClusterCorosyncNameMismatchParams struct {
+	Reported string    `json:"reported"`
+	ID       uuid.UUID `json:"id"`
+}
+
+// Records that the API URL answered with a cluster other than the recorded
+// one. One row only when the reported name changes, so the caller audits each
+// mismatch once.
+func (q *Queries) ReportClusterCorosyncNameMismatch(ctx context.Context, arg ReportClusterCorosyncNameMismatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reportClusterCorosyncNameMismatch, arg.Reported, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateCluster = `-- name: UpdateCluster :one
@@ -303,7 +435,7 @@ SET name = $2,
     sync_interval_seconds = $7,
     is_active = $8
 WHERE id = $1
-RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at
+RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at, corosync_name, corosync_name_reported
 `
 
 type UpdateClusterParams struct {
@@ -348,6 +480,8 @@ func (q *Queries) UpdateCluster(ctx context.Context, arg UpdateClusterParams) (C
 		&i.BootstrapCreatedUser,
 		&i.BootstrapCreatedAcl,
 		&i.BootstrapCreatedAt,
+		&i.CorosyncName,
+		&i.CorosyncNameReported,
 	)
 	return i, err
 }

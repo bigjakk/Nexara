@@ -62,6 +62,10 @@ type AlertRule struct {
 	VmVmid          pgtype.Int4     `json:"vm_vmid"`
 	// The UPS a rule of scope ups judges; NULL for every other scope
 	UpsID pgtype.UUID `json:"ups_id"`
+	// The name of the removed node this rule waits for; it reattaches when that name rejoins
+	DetachedNodeName string `json:"detached_node_name"`
+	// Whether the rule was enabled when its node was removed; it is turned back on when it reattaches
+	DetachedEnabled bool `json:"detached_enabled"`
 }
 
 type ApiKey struct {
@@ -194,6 +198,10 @@ type Cluster struct {
 	BootstrapCreatedUser bool               `json:"bootstrap_created_user"`
 	BootstrapCreatedAcl  bool               `json:"bootstrap_created_acl"`
 	BootstrapCreatedAt   pgtype.Timestamptz `json:"bootstrap_created_at"`
+	// The corosync cluster name this row's nodes were read from; '' until recorded or for a single node
+	CorosyncName string `json:"corosync_name"`
+	// Another corosync name the API URL answered with; while set, no node row is removed
+	CorosyncNameReported string `json:"corosync_name_reported"`
 }
 
 type ClusterObjectBaseline struct {
@@ -597,6 +605,8 @@ type MaintenanceWindow struct {
 	UpdatedAt   time.Time   `json:"updated_at"`
 	// The UPS the window covers; NULL for a cluster's window, which names cluster_id instead
 	UpsID pgtype.UUID `json:"ups_id"`
+	// The name of the removed node this window waits for; it reattaches when that name rejoins
+	DetachedNodeName string `json:"detached_node_name"`
 }
 
 type MigrationJob struct {

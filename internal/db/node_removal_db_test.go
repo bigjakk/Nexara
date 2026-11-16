@@ -118,8 +118,9 @@ func TestDeleteClusterNodes_KeepsHistory(t *testing.T) {
 		}
 	}
 
-	if n, err := q.DisableNodeAlertRules(ctx, pgtype.UUID{Bytes: nrGoneID, Valid: true}); err != nil || n != 1 {
-		t.Errorf("DisableNodeAlertRules = %d, %v; want the removed node's rule turned off", n, err)
+	if n, err := q.DetachNodeAlertRules(ctx, gen.DetachNodeAlertRulesParams{
+		NodeID: pgtype.UUID{Bytes: nrGoneID, Valid: true}, NodeName: "pve-02"}); err != nil || n != 1 {
+		t.Errorf("DetachNodeAlertRules = %d, %v; want the removed node's rule turned off", n, err)
 	}
 
 	// The last row is never removed, whatever the caller asks.

@@ -15,7 +15,7 @@ import (
 // this API where the path parameter :id is a cluster id.
 //
 // namesACluster (permissions.go) accepts it as a special case, anchored as a
-// whole segment, precisely because these five routes exist; every other
+// whole segment, precisely because these six routes exist; every other
 // cluster-scoped route spells it :cluster_id. Renaming it here would be an API
 // break for every caller that has a cluster URL saved.
 const (
@@ -23,7 +23,7 @@ const (
 	clusterByID   = clustersScope + "/:id"
 )
 
-// clusterIDPathParam is :id on the five per-cluster routes.
+// clusterIDPathParam is :id on the six per-cluster routes.
 var clusterIDPathParam = apischema.Property{
 	Type:        apischema.String,
 	Format:      "uuid",
@@ -88,9 +88,9 @@ var clusterBootstrapParam = apischema.Property{
 		"or recorded.",
 }
 
-// registerClusterEndpoints declares ClusterHandler's seven routes.
+// registerClusterEndpoints declares ClusterHandler's eight routes.
 //
-// Five of them are the ordinary shape — a cluster-scoped Check resolved from
+// Six of them are the ordinary shape — a cluster-scoped Check resolved from
 // :id, or a global one — and two are not:
 //
 //   - GET /api/v1/clusters is Advisory. It lists every cluster and drops the
@@ -285,6 +285,26 @@ func registerClusterEndpoints(reg *Registry, h *handlers.ClusterHandler,
 		RateLimiter: verifyCertificateLimiter,
 		Parameters:  apischema.Properties{"id": clusterIDPathParam},
 		Handler:     h.VerifyCertificate,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPost,
+		Path:   clusterByID + "/accept-cluster-name",
+		Description: "Accept the corosync cluster name the cluster's API URL answers with now, after a " +
+			"deliberate rename or a move to another cluster. Until then (the cluster_name_changed issue) " +
+			"Nexara removes no node row from the cluster. 409 when that name is not the one reported now.",
+		Group:       "Clusters",
+		Permissions: clusterCheck("manage", "cluster"),
+		Parameters: apischema.Properties{
+			"id": clusterIDPathParam,
+			"cluster_name": {
+				Type:        apischema.String,
+				MinLength:   apischema.Ptr(1),
+				MaxLength:   apischema.Ptr(255),
+				Typetext:    "<corosync cluster name>",
+				Description: "The name the cluster_name_changed issue reports, exactly.",
+			},
+		},
+		Handler: h.AcceptClusterName,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodDelete,

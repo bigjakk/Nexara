@@ -7,10 +7,13 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/api/handlers"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // clusterRouteCount is how many endpoints registerClusterEndpoints declares.
-const clusterRouteCount = 7
+const clusterRouteCount = 8
 
 // clusterRoutesOutsideTheClusterCheckShape records why three of the seven are
 // not cluster-scoped Checks. It is folded into
@@ -46,7 +49,9 @@ var clusterLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:id":                     "view:cluster",
 	"PUT /api/v1/clusters/:id":                     "manage:cluster",
 	"POST /api/v1/clusters/:id/verify-certificate": "manage:cluster",
-	"DELETE /api/v1/clusters/:id":                  "delete:cluster",
+	// Added after the migration (000151), with the permission an edit needs.
+	"POST /api/v1/clusters/:id/accept-cluster-name": "manage:cluster",
+	"DELETE /api/v1/clusters/:id":                   "delete:cluster",
 }
 
 func declaredClusterEndpoints(t *testing.T) map[string]Endpoint {
@@ -423,6 +428,38 @@ func TestEveryClusterEndpointIsDocumented(t *testing.T) {
 			if strings.TrimSpace(prop.Description) == "" {
 				t.Errorf("%s: parameter %q has no description", key, name)
 			}
+		}
+	}
+}
+
+// Accepting a changed cluster name passes the name the operator was shown to
+// AcceptClusterCorosyncName, audits it, and answers 409 when that name is not
+// the one reported now (zero rows).
+func TestClusterAcceptClusterName(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		rows       int64
+		wantStatus int
+		wantAudits int
+	}{
+		{rows: 1, wantStatus: fiber.StatusOK, wantAudits: 1},
+		{rows: 0, wantStatus: fiber.StatusConflict},
+	} {
+		dbtx := &haCreateDBTX{updates: map[string]int64{"AcceptClusterCorosyncName": tt.rows}}
+		e := declaredEndpoint(t, fiber.MethodPost, clusterByID+"/accept-cluster-name")
+		e.Handler = handlers.NewClusterHandler(db.New(dbtx), haCreateEncKey, nil, nil).AcceptClusterName
+		app := newRegistryApp(t, stubAuth(map[string]bool{"manage:cluster": true}), e)
+		req := jsonRequest(http.MethodPost, "/api/v1/clusters/"+testClusterID+"/accept-cluster-name",
+			`{"cluster_name":"cluster02"}`)
+		req.Header.Set("X-Test-User", "yes")
+		if status, env := send(t, app, req); status != tt.wantStatus {
+			t.Errorf("rows %d: status = %d (%q), want %d", tt.rows, status, env.Message, tt.wantStatus)
+		}
+		if len(dbtx.updateArgs) != 1 || dbtx.updateArgs[0][1] != "cluster02" {
+			t.Errorf("rows %d: AcceptClusterCorosyncName args = %v, want the shown name", tt.rows, dbtx.updateArgs)
+		}
+		if len(dbtx.audits) != tt.wantAudits {
+			t.Errorf("rows %d: audit rows = %d, want %d", tt.rows, len(dbtx.audits), tt.wantAudits)
 		}
 	}
 }

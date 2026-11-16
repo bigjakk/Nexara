@@ -330,9 +330,55 @@ LIMIT @row_limit::int;
 SELECT * FROM alert_history
 WHERE node_id = ANY(@node_ids::uuid[]) AND state IN ('pending', 'firing', 'acknowledged');
 
--- name: DisableNodeAlertRules :execrows
--- Turns off the node-scoped rules of a node row the collector removed: with no
--- node left they can evaluate nothing, and an edit that keeps one enabled is
--- refused for its unknown node_id.
-UPDATE alert_rules SET enabled = false, updated_at = now()
-WHERE scope_type = 'node' AND node_id = @node_id AND enabled;
+-- name: DetachNodeAlertRules :one
+-- Turns off the node-scoped rules of a node row the collector is about to
+-- remove (with no node left they can evaluate nothing, and an edit that keeps
+-- one enabled is refused for its unknown node_id), and keeps the node's name and
+-- whether each rule was on, for ReattachNodeAlertRules. A rule already waiting
+-- for this name keeps its flag, so a removal retried after a failed delete does
+-- not forget it. Answers how many of the rules were on.
+WITH detached AS (
+    UPDATE alert_rules
+    SET detached_node_name = @node_name,
+        detached_enabled = enabled OR (detached_node_name = @node_name AND detached_enabled),
+        enabled = false,
+        updated_at = now()
+    WHERE scope_type = 'node' AND node_id = @node_id
+    RETURNING detached_enabled
+)
+SELECT count(*) FILTER (WHERE detached_enabled) FROM detached;
+
+-- name: ReattachNodeAlertRules :execrows
+-- Points the rules waiting for a removed node's name (DetachNodeAlertRules) at
+-- the cluster's node row of that name, turning back on the ones that were on.
+-- Only a rule whose node_id still names that row (the removal failed) or no row
+-- at all: one an operator pointed at another node meanwhile stays there.
+UPDATE alert_rules r
+SET node_id = n.id,
+    enabled = r.enabled OR r.detached_enabled,
+    detached_node_name = '',
+    detached_enabled = false,
+    updated_at = now()
+FROM nodes n
+WHERE n.cluster_id = @cluster_id
+  AND r.cluster_id = n.cluster_id
+  AND r.scope_type = 'node'
+  AND r.detached_node_name = n.name
+  AND (r.node_id = n.id OR NOT EXISTS (SELECT 1 FROM nodes x WHERE x.id = r.node_id));
+
+-- name: DetachNodeMaintenanceWindows :execrows
+-- Keeps the node's name on the maintenance windows pinned to a node row the
+-- collector is about to remove, for ReattachNodeMaintenanceWindows. A window
+-- whose node_id names no row covers nothing (isInMaintenanceWindow).
+UPDATE maintenance_windows SET detached_node_name = @node_name
+WHERE node_id = @node_id;
+
+-- name: ReattachNodeMaintenanceWindows :execrows
+-- ReattachNodeAlertRules for maintenance windows.
+UPDATE maintenance_windows w
+SET node_id = n.id, detached_node_name = ''
+FROM nodes n
+WHERE n.cluster_id = @cluster_id
+  AND w.cluster_id = n.cluster_id
+  AND w.detached_node_name = n.name
+  AND (w.node_id = n.id OR NOT EXISTS (SELECT 1 FROM nodes x WHERE x.id = w.node_id));

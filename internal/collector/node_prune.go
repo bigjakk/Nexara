@@ -138,13 +138,19 @@ func establishedMemberRemains(known []db.Node, members map[string]bool, gone db.
 // change. The node's guest rows go with it (vms ON DELETE CASCADE): Proxmox
 // lists them on a node that is not a member, which nothing can reach, and they
 // come back by the normal path once their configs are on a member. History,
-// audit and task rows keep theirs (migrations/000148).
+// audit and task rows keep theirs (migrations/000148); its alert rules and
+// maintenance windows are detached first and wait for the name to rejoin
+// (reattachNodeRows).
+//
+// The cluster name the rows were read from is clusters.corosync_name
+// (migrations/000151), so a restart does not forget it. A reading that names
+// another cluster removes nothing and is recorded in corosync_name_reported,
+// which the clusters API reports as an issue, until the cluster names the
+// recorded one again or an operator accepts the new name.
 func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, known []db.Node, knownErr error,
 	listed []proxmox.NodeListEntry, status []proxmox.ClusterStatusEntry, statusErr error) bool {
 	prev, _ := s.nodeAbsent.Load(cluster.ID)
 	prevAbsent, _ := prev.(map[string]bool)
-	exp, _ := s.nodeCluster.Load(cluster.ID)
-	expected, _ := exp.(string)
 
 	if knownErr != nil {
 		s.nodeAbsent.Delete(cluster.ID)
@@ -152,16 +158,18 @@ func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, know
 			"cluster_id", cluster.ID, "error", knownErr)
 		return false
 	}
-	plan := planNodeRemovals(known, listed, status, statusErr, prevAbsent, expected)
+	stored, err := s.queries.GetClusterCorosyncName(ctx, cluster.ID)
+	if err != nil {
+		s.nodeAbsent.Delete(cluster.ID)
+		s.logger.Warn("node membership: could not read the cluster name its node rows were read from; removing none",
+			"cluster_id", cluster.ID, "error", err)
+		return false
+	}
+	plan := planNodeRemovals(known, listed, status, statusErr, prevAbsent, stored.CorosyncName)
 	remove, absent, skip := plan.remove, plan.absent, plan.skip
 	if skip == skipOtherCluster {
 		s.nodeAbsent.Delete(cluster.ID)
-		// Kept: the rows are the expected cluster's until this process
-		// restarts or the cluster row is re-added.
-		if warned, _ := s.nodeClusterWarned.Swap(cluster.ID, plan.cluster); warned != plan.cluster {
-			s.logger.Warn("node membership: the API URL now reaches another cluster; removing no node rows",
-				"cluster_id", cluster.ID, "expected_cluster", expected, "answering_cluster", plan.cluster)
-		}
+		s.reportOtherCluster(ctx, cluster, stored.CorosyncName, plan.cluster)
 		return false
 	}
 	if skip != "" {
@@ -175,8 +183,15 @@ func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, know
 		}
 		return false
 	}
-	if expected == "" {
-		s.nodeCluster.Store(cluster.ID, plan.cluster)
+	if stored.CorosyncName == "" || stored.CorosyncNameReported != "" {
+		// First reading on record, or the recorded cluster answering again.
+		if _, err := s.queries.RecordClusterCorosyncName(ctx, db.RecordClusterCorosyncNameParams{
+			ID: cluster.ID, Name: plan.cluster}); err != nil {
+			s.logger.Warn("node membership: could not record the cluster's name; removing none this pass",
+				"cluster_id", cluster.ID, "error", err)
+			s.nodeAbsent.Store(cluster.ID, absent)
+			return false
+		}
 	}
 	for name := range absent {
 		if !prevAbsent[name] {
@@ -184,15 +199,31 @@ func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, know
 				"cluster_id", cluster.ID, "node", name)
 		}
 	}
-	if len(remove) == 0 {
+
+	// Detach each node's rules and windows before its row goes. A node whose
+	// detach failed is kept for a later pass; a detach whose delete then fails
+	// is undone by reattachNodeRows, since the row is still there.
+	ids := make([]uuid.UUID, 0, len(remove))
+	disabled := make(map[uuid.UUID]int64, len(remove))
+	for _, r := range remove {
+		node := pgtype.UUID{Bytes: r.ID, Valid: true}
+		n, err := s.queries.DetachNodeAlertRules(ctx, db.DetachNodeAlertRulesParams{NodeID: node, NodeName: r.Name})
+		if err == nil {
+			_, err = s.queries.DetachNodeMaintenanceWindows(ctx, db.DetachNodeMaintenanceWindowsParams{NodeID: node, NodeName: r.Name})
+		}
+		if err != nil {
+			s.logger.Warn("node membership: could not set aside the alert rules and maintenance windows of a node the cluster no longer lists; keeping its row",
+				"cluster_id", cluster.ID, "node", r.Name, "error", err)
+			continue
+		}
+		disabled[r.ID] = n
+		ids = append(ids, r.ID)
+	}
+	if len(ids) == 0 {
 		s.nodeAbsent.Store(cluster.ID, absent)
 		return false
 	}
 
-	ids := make([]uuid.UUID, 0, len(remove))
-	for _, r := range remove {
-		ids = append(ids, r.ID)
-	}
 	// Read before the delete, which nulls alert_history.node_id.
 	active, alertErr := s.queries.ListActiveAlertsForNodes(ctx, ids)
 	if alertErr != nil {
@@ -210,15 +241,61 @@ func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, know
 		delete(absent, d.Name)
 		s.logger.Warn("node membership: removed the row of a node the cluster no longer lists, with its guest, storage and hardware rows",
 			"cluster_id", cluster.ID, "node", d.Name, "node_id", d.ID)
-		disabled, derr := s.queries.DisableNodeAlertRules(ctx, pgtype.UUID{Bytes: d.ID, Valid: true})
-		if derr != nil {
-			s.logger.Warn("node membership: could not turn off the removed node's alert rules",
-				"cluster_id", cluster.ID, "node", d.Name, "error", derr)
-		}
-		s.auditNodeRemoved(ctx, cluster, d, disabled, s.resolveRemovedNodeAlerts(ctx, cluster, d, active))
+		s.auditNodeRemoved(ctx, cluster, d, disabled[d.ID], s.resolveRemovedNodeAlerts(ctx, cluster, d, active))
 	}
 	s.nodeAbsent.Store(cluster.ID, absent)
 	return len(deleted) > 0
+}
+
+// reportOtherCluster records that the cluster's API URL answered with another
+// corosync cluster, and audits it as a system action the first pass it does
+// (ReportClusterCorosyncNameMismatch writes a row only on a new name).
+func (s *Syncer) reportOtherCluster(ctx context.Context, cluster db.Cluster, expected, answering string) {
+	n, err := s.queries.ReportClusterCorosyncNameMismatch(ctx, db.ReportClusterCorosyncNameMismatchParams{
+		ID: cluster.ID, Reported: answering})
+	if err != nil {
+		s.logger.Warn("node membership: could not record that the API URL reaches another cluster",
+			"cluster_id", cluster.ID, "error", err)
+		return
+	}
+	if n == 0 {
+		return
+	}
+	s.logger.Warn("node membership: the API URL now reaches another cluster; removing no node rows",
+		"cluster_id", cluster.ID, "expected_cluster", expected, "answering_cluster", answering)
+	details, _ := json.Marshal(map[string]any{
+		"cluster_name":      cluster.Name,
+		"expected_cluster":  expected,
+		"answering_cluster": answering,
+	})
+	_ = audit.Write(ctx, s.queries, s.eventPub, db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+		ResourceType: "cluster",
+		ResourceID:   cluster.ID.String(),
+		Action:       "cluster_name_mismatch",
+		Details:      details,
+	})
+}
+
+// reattachNodeRows points the alert rules and maintenance windows a removed
+// node left behind (DetachNodeAlertRules) at the cluster's node row of the same
+// name, once a node of that name is back: a rejoining node gets a new id.
+func (s *Syncer) reattachNodeRows(ctx context.Context, clusterID uuid.UUID) {
+	rules, err := s.queries.ReattachNodeAlertRules(ctx, clusterID)
+	if err != nil {
+		s.logger.Warn("node membership: could not reattach the alert rules of a node that rejoined",
+			"cluster_id", clusterID, "error", err)
+	}
+	windows, werr := s.queries.ReattachNodeMaintenanceWindows(ctx, clusterID)
+	if werr != nil {
+		s.logger.Warn("node membership: could not reattach the maintenance windows of a node that rejoined",
+			"cluster_id", clusterID, "error", werr)
+	}
+	if rules > 0 || windows > 0 {
+		s.logger.Info("node membership: reattached a rejoined node's alert rules and maintenance windows",
+			"cluster_id", clusterID, "alert_rules", rules, "maintenance_windows", windows)
+	}
 }
 
 // resolveRemovedNodeAlerts resolves the active alerts on a removed node, as the

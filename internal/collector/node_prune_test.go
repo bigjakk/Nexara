@@ -234,6 +234,13 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	if mq.enabledNodeRules[keptID] != 1 {
 		t.Errorf("pve-01's rules were turned off")
 	}
+	// Set aside for a rejoin under the same name, and looked for every pass.
+	if !slices.Equal(mq.detachedNodes, []string{"pve-02"}) || mq.reattachCalls != 2 {
+		t.Errorf("detached %v, reattach passes %d; want pve-02 and 2", mq.detachedNodes, mq.reattachCalls)
+	}
+	if got := mq.corosync[cluster.ID].CorosyncName; got != "cluster01" {
+		t.Errorf("recorded cluster name = %q, want cluster01", got)
+	}
 	if n := pub.countKind(events.KindAuditEntry); n != 1 {
 		t.Errorf("audit_entry events = %d, want 1", n)
 	}
@@ -250,18 +257,21 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 
 // TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster: a cluster row whose
 // API URL is moved to another cluster keeps its nodes however many passes run,
-// whether or not the process saw the old cluster first, and when the two
-// clusters share a node name.
+// when the two share a node name, and when the name was recorded before this
+// process started (clusters.corosync_name). The mismatch is audited once, and
+// accepting the new name lets the ordinary removal run.
 func TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		name      string
 		seenFirst bool     // a pass reads the old cluster before the URL moves
+		stored    string   // the corosync name on record when the test starts
 		other     []string // the other cluster's nodes
 	}{
-		{name: "no node in common, first pass after a restart", other: []string{"pve-09"}},
+		{name: "no node in common, nothing on record", other: []string{"pve-09"}},
 		{name: "shares a node name", seenFirst: true, other: []string{"pve-01", "pve-09"}},
+		{name: "shares a node name, first pass after a restart", stored: "cluster01", other: []string{"pve-01", "pve-09"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -274,25 +284,50 @@ func TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster(t *testing.T) {
 			syncer := newTestSyncer(mq)
 			cluster := makeCluster(t, srv.URL)
 			seedNodes(mq, cluster.ID, "pve-01", "pve-02", "pve-03")
-			if tc.seenFirst {
-				if _, err := syncer.SyncCluster(context.Background(), cluster); err != nil {
-					t.Fatalf("pass on the old cluster: %v", err)
+			if tc.stored != "" {
+				mq.setCorosync(cluster.ID, db.GetClusterCorosyncNameRow{CorosyncName: tc.stored})
+			}
+			pass := func(n int) {
+				t.Helper()
+				for range n {
+					if _, err := syncer.SyncCluster(context.Background(), cluster); err != nil {
+						t.Fatalf("SyncCluster: %v", err)
+					}
 				}
+			}
+			if tc.seenFirst {
+				pass(1)
 			}
 
 			fake.set("cluster02", tc.other...)
-			for pass := 1; pass <= 4; pass++ {
-				if _, err := syncer.SyncCluster(context.Background(), cluster); err != nil {
-					t.Fatalf("pass %d: SyncCluster: %v", pass, err)
-				}
-			}
+			pass(4)
 			for _, n := range []string{"pve-01", "pve-02", "pve-03"} {
 				if _, kept := mq.nodes[cluster.ID.String()+":"+n]; !kept {
 					t.Errorf("%s's row was removed", n)
 				}
 			}
-			if len(mq.auditLogs) != 0 {
-				t.Errorf("audit entries = %+v, want none", mq.auditLogs)
+			recorded := tc.seenFirst || tc.stored != ""
+			wantAudits := 0
+			if recorded {
+				wantAudits = 1
+				if got := mq.corosync[cluster.ID].CorosyncNameReported; got != "cluster02" {
+					t.Errorf("reported name = %q, want cluster02", got)
+				}
+			}
+			if len(mq.auditLogs) != wantAudits || (recorded && mq.auditLogs[0].Action != "cluster_name_mismatch") {
+				t.Fatalf("audit entries = %+v, want %d cluster_name_mismatch", mq.auditLogs, wantAudits)
+			}
+			if !recorded || len(tc.other) < 2 {
+				return
+			}
+			// An operator accepts the new name (AcceptClusterCorosyncName): the
+			// rows the other cluster does not list go.
+			mq.setCorosync(cluster.ID, db.GetClusterCorosyncNameRow{CorosyncName: "cluster02"})
+			pass(2)
+			for n, want := range map[string]bool{"pve-01": true, "pve-02": false, "pve-03": false} {
+				if _, kept := mq.nodes[cluster.ID.String()+":"+n]; kept != want {
+					t.Errorf("after accepting: %s's row kept = %v, want %v", n, kept, want)
+				}
 			}
 		})
 	}

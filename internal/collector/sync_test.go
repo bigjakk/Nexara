@@ -17,7 +17,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -52,7 +51,10 @@ type mockQueries struct {
 	deleteStaleVMsForNodesRemoved int64
 	nodeStatusFastCalls           []db.UpdateNodeStatusFastParams
 	activeAlerts                  []db.AlertHistory   // ListActiveAlertsForNodes answers those on the nodes asked about
-	enabledNodeRules              map[uuid.UUID]int64 // DisableNodeAlertRules turns these off
+	enabledNodeRules              map[uuid.UUID]int64 // DetachNodeAlertRules turns these off
+	detachedNodes                 []string            // the nodes DetachNodeAlertRules was asked about
+	reattachCalls                 int
+	corosync                      map[uuid.UUID]db.GetClusterCorosyncNameRow // clusters.corosync_name{,_reported}
 	autoResolved                  []uuid.UUID
 	resolvedElsewhere             map[uuid.UUID]bool // AutoResolveAlert finds these already resolved
 	deleteAbsentCalls             []db.DeleteVMsAbsentFromClusterParams
@@ -415,10 +417,56 @@ func (m *mockQueries) ListActiveAlertsForNodes(_ context.Context, nodeIDs []uuid
 	return out, nil
 }
 
-func (m *mockQueries) DisableNodeAlertRules(_ context.Context, nodeID pgtype.UUID) (int64, error) {
-	n := m.enabledNodeRules[uuid.UUID(nodeID.Bytes)]
-	delete(m.enabledNodeRules, uuid.UUID(nodeID.Bytes))
+func (m *mockQueries) DetachNodeAlertRules(_ context.Context, arg db.DetachNodeAlertRulesParams) (int64, error) {
+	m.detachedNodes = append(m.detachedNodes, arg.NodeName)
+	n := m.enabledNodeRules[uuid.UUID(arg.NodeID.Bytes)]
+	delete(m.enabledNodeRules, uuid.UUID(arg.NodeID.Bytes))
 	return n, nil
+}
+
+func (*mockQueries) DetachNodeMaintenanceWindows(context.Context, db.DetachNodeMaintenanceWindowsParams) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockQueries) ReattachNodeAlertRules(context.Context, uuid.UUID) (int64, error) {
+	m.reattachCalls++
+	return 0, nil
+}
+
+func (*mockQueries) ReattachNodeMaintenanceWindows(context.Context, uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+// The three corosync-name queries, as queries/clusters.sql writes them.
+func (m *mockQueries) GetClusterCorosyncName(_ context.Context, id uuid.UUID) (db.GetClusterCorosyncNameRow, error) {
+	return m.corosync[id], nil
+}
+
+func (m *mockQueries) RecordClusterCorosyncName(_ context.Context, arg db.RecordClusterCorosyncNameParams) (int64, error) {
+	cur := m.corosync[arg.ID]
+	if arg.Name == "" || (cur.CorosyncName != "" && cur.CorosyncName != arg.Name) ||
+		(cur.CorosyncName == arg.Name && cur.CorosyncNameReported == "") {
+		return 0, nil
+	}
+	m.setCorosync(arg.ID, db.GetClusterCorosyncNameRow{CorosyncName: arg.Name})
+	return 1, nil
+}
+
+func (m *mockQueries) ReportClusterCorosyncNameMismatch(_ context.Context, arg db.ReportClusterCorosyncNameMismatchParams) (int64, error) {
+	cur := m.corosync[arg.ID]
+	if cur.CorosyncName == "" || cur.CorosyncName == arg.Reported || cur.CorosyncNameReported == arg.Reported {
+		return 0, nil
+	}
+	cur.CorosyncNameReported = arg.Reported
+	m.setCorosync(arg.ID, cur)
+	return 1, nil
+}
+
+func (m *mockQueries) setCorosync(id uuid.UUID, row db.GetClusterCorosyncNameRow) {
+	if m.corosync == nil {
+		m.corosync = make(map[uuid.UUID]db.GetClusterCorosyncNameRow)
+	}
+	m.corosync[id] = row
 }
 
 func (m *mockQueries) AutoResolveAlert(_ context.Context, id uuid.UUID) (int64, error) {

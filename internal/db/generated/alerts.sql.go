@@ -153,16 +153,52 @@ func (q *Queries) DeleteNotificationChannel(ctx context.Context, id uuid.UUID) e
 	return err
 }
 
-const disableNodeAlertRules = `-- name: DisableNodeAlertRules :execrows
-UPDATE alert_rules SET enabled = false, updated_at = now()
-WHERE scope_type = 'node' AND node_id = $1 AND enabled
+const detachNodeAlertRules = `-- name: DetachNodeAlertRules :one
+WITH detached AS (
+    UPDATE alert_rules
+    SET detached_node_name = $1,
+        detached_enabled = enabled OR (detached_node_name = $1 AND detached_enabled),
+        enabled = false,
+        updated_at = now()
+    WHERE scope_type = 'node' AND node_id = $2
+    RETURNING detached_enabled
+)
+SELECT count(*) FILTER (WHERE detached_enabled) FROM detached
 `
 
-// Turns off the node-scoped rules of a node row the collector removed: with no
-// node left they can evaluate nothing, and an edit that keeps one enabled is
-// refused for its unknown node_id.
-func (q *Queries) DisableNodeAlertRules(ctx context.Context, nodeID pgtype.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, disableNodeAlertRules, nodeID)
+type DetachNodeAlertRulesParams struct {
+	NodeName string      `json:"node_name"`
+	NodeID   pgtype.UUID `json:"node_id"`
+}
+
+// Turns off the node-scoped rules of a node row the collector is about to
+// remove (with no node left they can evaluate nothing, and an edit that keeps
+// one enabled is refused for its unknown node_id), and keeps the node's name and
+// whether each rule was on, for ReattachNodeAlertRules. A rule already waiting
+// for this name keeps its flag, so a removal retried after a failed delete does
+// not forget it. Answers how many of the rules were on.
+func (q *Queries) DetachNodeAlertRules(ctx context.Context, arg DetachNodeAlertRulesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, detachNodeAlertRules, arg.NodeName, arg.NodeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const detachNodeMaintenanceWindows = `-- name: DetachNodeMaintenanceWindows :execrows
+UPDATE maintenance_windows SET detached_node_name = $1
+WHERE node_id = $2
+`
+
+type DetachNodeMaintenanceWindowsParams struct {
+	NodeName string      `json:"node_name"`
+	NodeID   pgtype.UUID `json:"node_id"`
+}
+
+// Keeps the node's name on the maintenance windows pinned to a node row the
+// collector is about to remove, for ReattachNodeMaintenanceWindows. A window
+// whose node_id names no row covers nothing (isInMaintenanceWindow).
+func (q *Queries) DetachNodeMaintenanceWindows(ctx context.Context, arg DetachNodeMaintenanceWindowsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, detachNodeMaintenanceWindows, arg.NodeName, arg.NodeID)
 	if err != nil {
 		return 0, err
 	}
@@ -219,7 +255,7 @@ func (q *Queries) GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHisto
 }
 
 const getAlertRule = `-- name: GetAlertRule :one
-SELECT id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id FROM alert_rules WHERE id = $1
+SELECT id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id, detached_node_name, detached_enabled FROM alert_rules WHERE id = $1
 `
 
 func (q *Queries) GetAlertRule(ctx context.Context, id uuid.UUID) (AlertRule, error) {
@@ -246,6 +282,8 @@ func (q *Queries) GetAlertRule(ctx context.Context, id uuid.UUID) (AlertRule, er
 		&i.MessageTemplate,
 		&i.VmVmid,
 		&i.UpsID,
+		&i.DetachedNodeName,
+		&i.DetachedEnabled,
 	)
 	return i, err
 }
@@ -346,7 +384,7 @@ func (q *Queries) GetLatestAlertForRule(ctx context.Context, arg GetLatestAlertF
 }
 
 const getMaintenanceWindow = `-- name: GetMaintenanceWindow :one
-SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id FROM maintenance_windows WHERE id = $1
+SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id, detached_node_name FROM maintenance_windows WHERE id = $1
 `
 
 func (q *Queries) GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (MaintenanceWindow, error) {
@@ -363,6 +401,7 @@ func (q *Queries) GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (Maint
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UpsID,
+		&i.DetachedNodeName,
 	)
 	return i, err
 }
@@ -624,7 +663,7 @@ INSERT INTO alert_rules (name, description, enabled, severity, metric, operator,
     duration_seconds, scope_type, cluster_id, node_id, vm_vmid, cooldown_seconds, escalation_chain, created_by, message_template,
     ups_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-RETURNING id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id
+RETURNING id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id, detached_node_name, detached_enabled
 `
 
 type InsertAlertRuleParams struct {
@@ -690,6 +729,8 @@ func (q *Queries) InsertAlertRule(ctx context.Context, arg InsertAlertRuleParams
 		&i.MessageTemplate,
 		&i.VmVmid,
 		&i.UpsID,
+		&i.DetachedNodeName,
+		&i.DetachedEnabled,
 	)
 	return i, err
 }
@@ -698,7 +739,7 @@ const insertMaintenanceWindow = `-- name: InsertMaintenanceWindow :one
 
 INSERT INTO maintenance_windows (cluster_id, node_id, description, starts_at, ends_at, created_by)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id
+RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id, detached_node_name
 `
 
 type InsertMaintenanceWindowParams struct {
@@ -732,6 +773,7 @@ func (q *Queries) InsertMaintenanceWindow(ctx context.Context, arg InsertMainten
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UpsID,
+		&i.DetachedNodeName,
 	)
 	return i, err
 }
@@ -780,7 +822,7 @@ func (q *Queries) InsertNotificationChannel(ctx context.Context, arg InsertNotif
 const insertUpsMaintenanceWindow = `-- name: InsertUpsMaintenanceWindow :one
 INSERT INTO maintenance_windows (ups_id, description, starts_at, ends_at, created_by)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id
+RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id, detached_node_name
 `
 
 type InsertUpsMaintenanceWindowParams struct {
@@ -812,6 +854,7 @@ func (q *Queries) InsertUpsMaintenanceWindow(ctx context.Context, arg InsertUpsM
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UpsID,
+		&i.DetachedNodeName,
 	)
 	return i, err
 }
@@ -971,7 +1014,7 @@ func (q *Queries) ListActiveAlertsForNodes(ctx context.Context, nodeIds []uuid.U
 }
 
 const listActiveMaintenanceWindows = `-- name: ListActiveMaintenanceWindows :many
-SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id FROM maintenance_windows
+SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id, detached_node_name FROM maintenance_windows
 WHERE now() BETWEEN starts_at AND ends_at
 `
 
@@ -995,6 +1038,7 @@ func (q *Queries) ListActiveMaintenanceWindows(ctx context.Context) ([]Maintenan
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UpsID,
+			&i.DetachedNodeName,
 		); err != nil {
 			return nil, err
 		}
@@ -1203,7 +1247,7 @@ func (q *Queries) ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHis
 }
 
 const listAlertRules = `-- name: ListAlertRules :many
-SELECT id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id FROM alert_rules
+SELECT id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id, detached_node_name, detached_enabled FROM alert_rules
 WHERE ($3::uuid[] IS NULL
        OR cluster_id = ANY($3::uuid[]))
 ORDER BY created_at DESC
@@ -1260,6 +1304,8 @@ func (q *Queries) ListAlertRules(ctx context.Context, arg ListAlertRulesParams) 
 			&i.MessageTemplate,
 			&i.VmVmid,
 			&i.UpsID,
+			&i.DetachedNodeName,
+			&i.DetachedEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -1272,7 +1318,7 @@ func (q *Queries) ListAlertRules(ctx context.Context, arg ListAlertRulesParams) 
 }
 
 const listAlertRulesByCluster = `-- name: ListAlertRulesByCluster :many
-SELECT id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id FROM alert_rules
+SELECT id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id, detached_node_name, detached_enabled FROM alert_rules
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -1314,6 +1360,8 @@ func (q *Queries) ListAlertRulesByCluster(ctx context.Context, arg ListAlertRule
 			&i.MessageTemplate,
 			&i.VmVmid,
 			&i.UpsID,
+			&i.DetachedNodeName,
+			&i.DetachedEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -1326,7 +1374,7 @@ func (q *Queries) ListAlertRulesByCluster(ctx context.Context, arg ListAlertRule
 }
 
 const listEnabledAlertRules = `-- name: ListEnabledAlertRules :many
-SELECT id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id FROM alert_rules WHERE enabled = true
+SELECT id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id, detached_node_name, detached_enabled FROM alert_rules WHERE enabled = true
 `
 
 func (q *Queries) ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error) {
@@ -1359,6 +1407,8 @@ func (q *Queries) ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error
 			&i.MessageTemplate,
 			&i.VmVmid,
 			&i.UpsID,
+			&i.DetachedNodeName,
+			&i.DetachedEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -1422,7 +1472,7 @@ func (q *Queries) ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory,
 }
 
 const listMaintenanceWindows = `-- name: ListMaintenanceWindows :many
-SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id FROM maintenance_windows
+SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id, detached_node_name FROM maintenance_windows
 WHERE cluster_id = $1
 ORDER BY starts_at DESC
 LIMIT $2 OFFSET $3
@@ -1454,6 +1504,7 @@ func (q *Queries) ListMaintenanceWindows(ctx context.Context, arg ListMaintenanc
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UpsID,
+			&i.DetachedNodeName,
 		); err != nil {
 			return nil, err
 		}
@@ -1559,7 +1610,7 @@ func (q *Queries) ListTopAlertRulesInWindow(ctx context.Context, arg ListTopAler
 }
 
 const listUpsMaintenanceWindows = `-- name: ListUpsMaintenanceWindows :many
-SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id FROM maintenance_windows
+SELECT id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id, detached_node_name FROM maintenance_windows
 WHERE ups_id = $1
 ORDER BY starts_at DESC
 LIMIT $2 OFFSET $3
@@ -1591,6 +1642,7 @@ func (q *Queries) ListUpsMaintenanceWindows(ctx context.Context, arg ListUpsMain
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UpsID,
+			&i.DetachedNodeName,
 		); err != nil {
 			return nil, err
 		}
@@ -1609,6 +1661,52 @@ UPDATE alert_history SET notification_sent_at = now() WHERE id = $1
 func (q *Queries) MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markAlertNotificationSent, id)
 	return err
+}
+
+const reattachNodeAlertRules = `-- name: ReattachNodeAlertRules :execrows
+UPDATE alert_rules r
+SET node_id = n.id,
+    enabled = r.enabled OR r.detached_enabled,
+    detached_node_name = '',
+    detached_enabled = false,
+    updated_at = now()
+FROM nodes n
+WHERE n.cluster_id = $1
+  AND r.cluster_id = n.cluster_id
+  AND r.scope_type = 'node'
+  AND r.detached_node_name = n.name
+  AND (r.node_id = n.id OR NOT EXISTS (SELECT 1 FROM nodes x WHERE x.id = r.node_id))
+`
+
+// Points the rules waiting for a removed node's name (DetachNodeAlertRules) at
+// the cluster's node row of that name, turning back on the ones that were on.
+// Only a rule whose node_id still names that row (the removal failed) or no row
+// at all: one an operator pointed at another node meanwhile stays there.
+func (q *Queries) ReattachNodeAlertRules(ctx context.Context, clusterID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, reattachNodeAlertRules, clusterID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reattachNodeMaintenanceWindows = `-- name: ReattachNodeMaintenanceWindows :execrows
+UPDATE maintenance_windows w
+SET node_id = n.id, detached_node_name = ''
+FROM nodes n
+WHERE n.cluster_id = $1
+  AND w.cluster_id = n.cluster_id
+  AND w.detached_node_name = n.name
+  AND (w.node_id = n.id OR NOT EXISTS (SELECT 1 FROM nodes x WHERE x.id = w.node_id))
+`
+
+// ReattachNodeAlertRules for maintenance windows.
+func (q *Queries) ReattachNodeMaintenanceWindows(ctx context.Context, clusterID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, reattachNodeMaintenanceWindows, clusterID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const resolveAlert = `-- name: ResolveAlert :execrows
@@ -1665,7 +1763,7 @@ SET name = $2, description = $3, enabled = $4, severity = $5, metric = $6,
     cluster_id = $11, node_id = $12, vm_vmid = $13, cooldown_seconds = $14,
     escalation_chain = $15, message_template = $16, ups_id = $17, updated_at = now()
 WHERE id = $1
-RETURNING id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id
+RETURNING id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid, ups_id, detached_node_name, detached_enabled
 `
 
 type UpdateAlertRuleParams struct {
@@ -1730,6 +1828,8 @@ func (q *Queries) UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams
 		&i.MessageTemplate,
 		&i.VmVmid,
 		&i.UpsID,
+		&i.DetachedNodeName,
+		&i.DetachedEnabled,
 	)
 	return i, err
 }
@@ -1752,7 +1852,7 @@ const updateMaintenanceWindow = `-- name: UpdateMaintenanceWindow :one
 UPDATE maintenance_windows
 SET description = $2, starts_at = $3, ends_at = $4, node_id = $5, updated_at = now()
 WHERE id = $1
-RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id
+RETURNING id, cluster_id, node_id, description, starts_at, ends_at, created_by, created_at, updated_at, ups_id, detached_node_name
 `
 
 type UpdateMaintenanceWindowParams struct {
@@ -1783,6 +1883,7 @@ func (q *Queries) UpdateMaintenanceWindow(ctx context.Context, arg UpdateMainten
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UpsID,
+		&i.DetachedNodeName,
 	)
 	return i, err
 }
