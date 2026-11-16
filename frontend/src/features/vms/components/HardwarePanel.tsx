@@ -609,6 +609,10 @@ export function HardwarePanel({
   const storedSelects = useMemo(() => {
     const wd = parseWatchdog(str(original?.["watchdog"] ?? ""));
     return {
+      ostype: str(original?.["ostype"] ?? DEFAULT_OSTYPE),
+      cpuType: parseCPU(str(original?.["cpu"] ?? "")).model || DEFAULT_CPU_TYPE,
+      bios: str(original?.["bios"] ?? "seabios"),
+      audio: parseAudio(str(original?.["audio0"] ?? "")).device,
       machine: machineTypeOf(str(original?.["machine"] ?? "")),
       scsihw: str(original?.["scsihw"] ?? DEFAULT_SCSIHW),
       keyboard: str(original?.["keyboard"] ?? ""),
@@ -1801,6 +1805,10 @@ export function HardwarePanel({
                         setCpuType(e.target.value);
                       }}
                     >
+                      <CurrentValueOption
+                        value={storedSelects.cpuType}
+                        known={cpuTypes}
+                      />
                       {cpuTypes.map((t) => (
                         <option key={t} value={t}>
                           {t}
@@ -2150,6 +2158,10 @@ export function HardwarePanel({
                                 updateDiskEdit(key, { cache: e.target.value });
                               }}
                             >
+                              <CurrentValueOption
+                                value={parsed.cache}
+                                known={cacheModes.map((c) => c.value)}
+                              />
                               <option value="">Default</option>
                               {cacheModes.map((c) => (
                                 <option key={c.value} value={c.value}>
@@ -3127,6 +3139,10 @@ export function HardwarePanel({
                         setOstype(e.target.value);
                       }}
                     >
+                      <CurrentValueOption
+                        value={storedSelects.ostype}
+                        known={osTypes.map((o) => o.value)}
+                      />
                       {osTypes.map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}
@@ -3568,6 +3584,10 @@ export function HardwarePanel({
                         setAudioDevice(e.target.value);
                       }}
                     >
+                      <CurrentValueOption
+                        value={storedSelects.audio}
+                        known={audioDevices.map((a) => a.value)}
+                      />
                       {audioDevices.map((a) => (
                         <option key={a.value} value={a.value}>
                           {a.label}
@@ -3588,6 +3608,10 @@ export function HardwarePanel({
                         setBios(e.target.value);
                       }}
                     >
+                      <CurrentValueOption
+                        value={storedSelects.bios}
+                        known={biosOptions.map((o) => o.value)}
+                      />
                       {biosOptions.map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}

@@ -681,12 +681,16 @@ describe("HardwarePanel dirty check", () => {
         net3: "virtio=02:00:00:00:00:04",
         vga: "qxl2",
         keyboard: "ko",
-        audio0: "device=ich9-intel-hda,driver=none",
+        audio0: "device=es1370,driver=none",
         vmstatestorage: "store09",
         watchdog: "model=diag288,action=inject-nmi",
         // Beside an option, so that the type alone is what is current.
         machine: "pc-q35-8.1,viommu=virtio",
         scsihw: "megasas2",
+        ostype: "win12",
+        cpu: "EPYC-Genoa-v9",
+        bios: "ovmf2",
+        scsi0: "store01:vm-101-disk-0,cache=unsafe2,size=32G",
       }),
     );
     expect(save).toBeDisabled();
@@ -767,6 +771,41 @@ describe("HardwarePanel dirty check", () => {
         "inject-nmi",
         "reset",
         "Reset",
+      ],
+      [
+        "OS type",
+        () => control(document.body, "OS type"),
+        "win12",
+        "l26",
+        "Linux 2.6+",
+      ],
+      [
+        "CPU type",
+        () => control(document.body, "CPU type"),
+        "EPYC-Genoa-v9",
+        "host",
+        "host",
+      ],
+      [
+        "BIOS",
+        () => control(document.body, "BIOS"),
+        "ovmf2",
+        "seabios",
+        "SeaBIOS (Legacy)",
+      ],
+      [
+        "audio device",
+        () => control(document.body, "Audio"),
+        "es1370",
+        "AC97",
+        "AC97",
+      ],
+      [
+        "disk cache",
+        () => control(diskCard("scsi0"), "Cache"),
+        "unsafe2",
+        "none",
+        "No cache (none)",
       ],
     ];
     for (const [name, select, was, other, otherLabel] of stored) {
