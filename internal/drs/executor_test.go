@@ -383,8 +383,20 @@ func TestExecute_RecordsWhatItKnowsAfterItsContextEnds(t *testing.T) {
 				haStartGrace:     time.Minute,
 			}
 			rec := Recommendation{VMID: 101, VMType: "qemu", SourceNode: "pve-01", TargetNode: "pve-02"}
-			if err := e.Execute(ctx, newHAClient(t, srv.URL), uuid.New(), "automatic", []Recommendation{rec, rec}); err != nil {
-				t.Fatalf("Execute: %v", err)
+			// Execute returns within milliseconds here; a regression that ignores the
+			// shutdown polls for 30 minutes, so the bound turns that hang into a failure.
+			client := newHAClient(t, srv.URL)
+			returned := make(chan error, 1)
+			go func() {
+				returned <- e.Execute(ctx, client, uuid.New(), "automatic", []Recommendation{rec, rec})
+			}()
+			select {
+			case err := <-returned:
+				if err != nil {
+					t.Fatalf("Execute: %v", err)
+				}
+			case <-time.After(30 * time.Second):
+				t.Fatal("Execute still running 30s after its context ended: the task poll no longer stops on a shutdown")
 			}
 
 			// The second recommendation is never started, so one outcome is all there is.
