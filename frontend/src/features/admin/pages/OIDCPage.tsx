@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -88,11 +89,15 @@ type ProviderPreset =
 
 const presets: Record<
   ProviderPreset,
-  { label: string; hint: string; defaults: Partial<OIDCConfigRequest> }
+  {
+    labelKey: string;
+    hintKey: string;
+    defaults: Partial<OIDCConfigRequest>;
+  }
 > = {
   keycloak: {
-    label: "Keycloak",
-    hint: "Issuer: https://<host>/realms/<realm>",
+    labelKey: "keycloak",
+    hintKey: "oidcPage.hintKeycloak",
     defaults: {
       scopes: ["openid", "email", "profile"],
       email_claim: "email",
@@ -101,8 +106,8 @@ const presets: Record<
     },
   },
   authentik: {
-    label: "Authentik",
-    hint: "Issuer: https://<host>/application/o/<slug>/",
+    labelKey: "authentik",
+    hintKey: "oidcPage.hintAuthentik",
     defaults: {
       scopes: ["openid", "email", "profile"],
       email_claim: "email",
@@ -111,8 +116,8 @@ const presets: Record<
     },
   },
   azure: {
-    label: "Azure AD",
-    hint: "Issuer: https://login.microsoftonline.com/<tenant-id>/v2.0",
+    labelKey: "azureAD",
+    hintKey: "oidcPage.hintAzure",
     defaults: {
       scopes: ["openid", "email", "profile"],
       email_claim: "email",
@@ -121,8 +126,8 @@ const presets: Record<
     },
   },
   google: {
-    label: "Google",
-    hint: "Issuer: https://accounts.google.com",
+    labelKey: "google",
+    hintKey: "oidcPage.hintGoogle",
     defaults: {
       issuer_url: "https://accounts.google.com",
       scopes: ["openid", "email", "profile"],
@@ -132,8 +137,8 @@ const presets: Record<
     },
   },
   okta: {
-    label: "Okta",
-    hint: "Issuer: https://<domain>.okta.com or https://<domain>.okta.com/oauth2/<auth-server-id>",
+    labelKey: "okta",
+    hintKey: "oidcPage.hintOkta",
     defaults: {
       scopes: ["openid", "email", "profile", "groups"],
       email_claim: "email",
@@ -142,8 +147,8 @@ const presets: Record<
     },
   },
   custom: {
-    label: "Custom",
-    hint: "Enter your OIDC provider details manually",
+    labelKey: "customProvider",
+    hintKey: "oidcPage.hintCustom",
     defaults: {},
   },
 };
@@ -187,6 +192,7 @@ function configToForm(cfg: OIDCConfig): OIDCConfigRequest {
 }
 
 export function OIDCPage() {
+  const { t } = useTranslation("admin");
   const { data: configs, isLoading } = useOIDCConfigs();
   const { data: roles } = useRoles();
   const createConfig = useCreateOIDCConfig();
@@ -247,7 +253,9 @@ export function OIDCPage() {
     activeConfig != null &&
     activeConfig.linked_accounts > 0 &&
     form.issuer_url !== activeConfig.issuer_url
-      ? `${String(activeConfig.linked_accounts)} account${activeConfig.linked_accounts !== 1 ? "s are" : " is"} linked to the current issuer. After the change, each is refused at sign-in until its link is reset.`
+      ? t("oidcPage.linkedAccountsStranded", {
+          count: activeConfig.linked_accounts,
+        })
       : undefined;
 
   useEffect(() => {
@@ -361,7 +369,7 @@ export function OIDCPage() {
     // What a failure nobody is looking at names: the config as the operator
     // knows it, which is the stored name when an edit renames it.
     const stored = isNew ? undefined : activeConfig?.name;
-    const named = `"${stored ?? data.name}"`;
+    const named = stored ?? data.name;
 
     setSaveError(null);
     setAcks(given);
@@ -385,9 +393,7 @@ export function OIDCPage() {
       }
       setRedirectWarning(null);
       setSaveError(
-        err instanceof Error
-          ? err.message
-          : "Failed to save OIDC configuration",
+        err instanceof Error ? err.message : t("oidcPage.saveFailed"),
       );
     };
 
@@ -395,7 +401,7 @@ export function OIDCPage() {
     // the prompt of, whichever form has been opened in its place.
     if (isNew) {
       settle(createConfig.mutateAsync(data), {
-        action: `Creating the OIDC configuration ${named}`,
+        action: t("oidcPage.creatingAction", { name: named }),
         onSuccess: () => {
           setIsNew(false);
           setRedirectWarning(null);
@@ -404,7 +410,7 @@ export function OIDCPage() {
       });
     } else if (editingId) {
       settle(updateConfig.mutateAsync({ ...data, id: editingId }), {
-        action: `Saving the OIDC configuration ${named}`,
+        action: t("oidcPage.savingAction", { name: named }),
         onSuccess: () => {
           setEditingId(null);
           setRedirectWarning(null);
@@ -422,7 +428,9 @@ export function OIDCPage() {
     if (!editingId) return;
     setTestResult(null);
     settle(testConnection.mutateAsync(editingId), {
-      action: `Testing the OIDC configuration "${activeConfig?.name ?? form.name}"`,
+      action: t("oidcPage.testingAction", {
+        name: activeConfig?.name ?? form.name,
+      }),
       onSuccess: (result) => {
         setTestResult(result);
       },
@@ -431,7 +439,7 @@ export function OIDCPage() {
         // address the configuration has not confirmed, they say how to confirm it.
         setTestResult({
           success: false,
-          message: describeError(err) || "Request failed",
+          message: describeError(err) || t("authConfig.requestFailed"),
         });
       },
     });
@@ -444,7 +452,7 @@ export function OIDCPage() {
       <div>
         <AdminNav />
         <div className="flex h-64 items-center justify-center text-muted-foreground">
-          Loading OIDC configuration...
+          {t("loadingOIDC")}
         </div>
       </div>
     );
@@ -469,17 +477,17 @@ export function OIDCPage() {
       <AdminNav />
       <div className="space-y-5">
         <PageHeader
-          title="OIDC / SSO"
+          title={t("oidcSSO")}
           summary={
             total === 0
-              ? "No identity provider is configured, so there is no single sign-on."
-              : `${String(total)} identity provider${total !== 1 ? "s" : ""} configured, ${String(enabledCount)} enabled.`
+              ? t("oidcPage.summaryNone")
+              : t("oidcPage.summary", { count: total, enabled: enabledCount })
           }
           actions={
             !showForm ? (
               <Button onClick={startNew}>
                 <Plus className="h-4 w-4" />
-                Add configuration
+                {t("authConfig.addConfiguration")}
               </Button>
             ) : undefined
           }
@@ -491,11 +499,11 @@ export function OIDCPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Issuer</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>{t("common:name")}</TableHead>
+                  <TableHead>{t("oidcPage.issuer")}</TableHead>
+                  <TableHead>{t("common:status")}</TableHead>
                   <TableHead className="w-32">
-                    <span className="sr-only">Actions</span>
+                    <span className="sr-only">{t("common:actions")}</span>
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -510,9 +518,11 @@ export function OIDCPage() {
                     </TableCell>
                     <TableCell>
                       {cfg.enabled ? (
-                        <Badge variant="healthy">Enabled</Badge>
+                        <Badge variant="healthy">{t("common:enabled")}</Badge>
                       ) : (
-                        <span className="text-muted-foreground">Disabled</span>
+                        <span className="text-muted-foreground">
+                          {t("common:disabled")}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell>
@@ -524,19 +534,17 @@ export function OIDCPage() {
                             startEdit(cfg);
                           }}
                         >
-                          Edit
+                          {t("common:edit")}
                         </Button>
                         <Button
-                          aria-label={`Delete ${cfg.name}`}
+                          aria-label={t("authConfig.deleteLabel", {
+                            name: cfg.name,
+                          })}
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-destructive"
                           onClick={() => {
-                            if (
-                              confirm(
-                                "Delete this OIDC configuration? SSO users will no longer be able to log in.",
-                              )
-                            ) {
+                            if (confirm(t("deleteOIDCConfirm"))) {
                               deleteConfig.mutate(cfg.id);
                             }
                           }}
@@ -555,8 +563,8 @@ export function OIDCPage() {
         {!showForm && (!configs || configs.length === 0) && (
           <EmptyState
             icon={KeyRound}
-            title="No OIDC configuration"
-            description="Add a configuration to let people sign in through your identity provider."
+            title={t("oidcPage.emptyTitle")}
+            description={t("oidcPage.emptyDescription")}
           />
         )}
 
@@ -565,7 +573,7 @@ export function OIDCPage() {
           <div className="max-w-3xl space-y-4">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h2 className="text-lg font-semibold">
-                {isNew ? "New OIDC configuration" : "Edit OIDC configuration"}
+                {isNew ? t("oidcPage.newTitle") : t("oidcPage.editTitle")}
               </h2>
               {!isNew && activeConfig != null && (
                 <span className="text-sm text-muted-foreground">
@@ -574,16 +582,16 @@ export function OIDCPage() {
               )}
             </div>
 
-            <SettingsSection title="Provider">
+            <SettingsSection title={t("oidcPage.provider")}>
               <SettingRow
                 className={WIDE}
-                label="Provider preset"
-                description={presets[providerPreset].hint}
+                label={t("oidcPage.providerPreset")}
+                description={t(presets[providerPreset].hintKey)}
               >
                 {/* Full width, so the presets start at the label's edge. */}
                 <div className="w-full">
                   <Segmented
-                    aria-label="Provider preset"
+                    aria-label={t("oidcPage.providerPreset")}
                     size="md"
                     value={providerPreset}
                     onValueChange={applyPreset}
@@ -595,14 +603,14 @@ export function OIDCPage() {
                       >
                     ).map(([key, preset]) => ({
                       value: key,
-                      label: preset.label,
+                      label: t(preset.labelKey),
                     }))}
                   />
                 </div>
               </SettingRow>
               <SettingRow
-                label="Name"
-                description="What this configuration is called in the list."
+                label={t("common:name")}
+                description={t("authConfig.nameDescription")}
                 htmlFor="oidc-name"
               >
                 <Input
@@ -611,12 +619,12 @@ export function OIDCPage() {
                   onChange={(e) => {
                     setForm({ ...form, name: e.target.value });
                   }}
-                  placeholder="Default"
+                  placeholder={t("authConfig.namePlaceholder")}
                 />
               </SettingRow>
               <SettingRow
-                label="Enabled"
-                description="People can sign in through this provider only while it is on."
+                label={t("common:enabled")}
+                description={t("oidcPage.enabledDescription")}
                 htmlFor="oidc-enabled"
               >
                 <Switch
@@ -629,19 +637,19 @@ export function OIDCPage() {
               </SettingRow>
             </SettingsSection>
 
-            <SettingsSection title="Client">
+            <SettingsSection title={t("oidcPage.client")}>
               <SettingRow
                 className={WIDE}
-                label="Issuer URL"
+                label={t("issuerUrl")}
                 description={
                   [
                     linkedAccountsStranded,
                     addressChanged
-                      ? "This provider is moving to a new issuer, so it needs the client secret again. The stored one is only ever sent to the address it was saved for."
+                      ? t("oidcPage.issuerMoved")
                       : !isNew &&
                           activeConfig?.allow_private_address === true &&
                           form.issuer_url === activeConfig.issuer_url
-                        ? "Confirmed for a private network address. A new issuer is asked about again."
+                        ? t("oidcPage.issuerPrivateConfirmed")
                         : undefined,
                   ]
                     .filter(Boolean)
@@ -659,7 +667,7 @@ export function OIDCPage() {
                   placeholder="https://auth.example.com/realms/main"
                 />
               </SettingRow>
-              <SettingRow label="Client ID" htmlFor="oidc-client-id">
+              <SettingRow label={t("clientId")} htmlFor="oidc-client-id">
                 <Input
                   id="oidc-client-id"
                   className="font-mono"
@@ -671,12 +679,12 @@ export function OIDCPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Client secret"
+                label={t("oidcPage.clientSecret")}
                 description={
                   !isNew && activeConfig?.client_secret_set
                     ? addressChanged
-                      ? "Required: the issuer changed."
-                      : "Leave blank to keep the current one."
+                      ? t("oidcPage.clientSecretRequired")
+                      : t("authConfig.keepCurrent")
                     : undefined
                 }
                 htmlFor="oidc-client-secret"
@@ -690,18 +698,18 @@ export function OIDCPage() {
                   }}
                   placeholder={
                     addressChanged
-                      ? "Re-enter the client secret for the new issuer"
+                      ? t("oidcPage.clientSecretReenter")
                       : !isNew && activeConfig?.client_secret_set
                         ? "********"
-                        : "Client secret"
+                        : t("oidcPage.clientSecret")
                   }
                   required={addressChanged}
                 />
               </SettingRow>
               <SettingRow
                 className={WIDE}
-                label="Redirect URI"
-                description="Register this URL in your IdP as the redirect/callback URI"
+                label={t("redirectUri")}
+                description={t("redirectUriHint")}
                 htmlFor="oidc-redirect-uri"
               >
                 <Input
@@ -719,10 +727,13 @@ export function OIDCPage() {
             </SettingsSection>
 
             <SettingsSection
-              title="Claims"
-              description="Which claims in the ID token become the account's email, name and groups."
+              title={t("oidcPage.claims")}
+              description={t("oidcPage.claimsDescription")}
             >
-              <SettingRow label="Email claim" htmlFor="oidc-email-claim">
+              <SettingRow
+                label={t("oidcPage.emailClaim")}
+                htmlFor="oidc-email-claim"
+              >
                 <Input
                   id="oidc-email-claim"
                   className="font-mono"
@@ -734,7 +745,7 @@ export function OIDCPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Display name claim"
+                label={t("oidcPage.displayNameClaim")}
                 htmlFor="oidc-display-name-claim"
               >
                 <Input
@@ -747,7 +758,10 @@ export function OIDCPage() {
                   placeholder="name"
                 />
               </SettingRow>
-              <SettingRow label="Groups claim" htmlFor="oidc-groups-claim">
+              <SettingRow
+                label={t("oidcPage.groupsClaim")}
+                htmlFor="oidc-groups-claim"
+              >
                 <Input
                   id="oidc-groups-claim"
                   className="font-mono"
@@ -759,8 +773,8 @@ export function OIDCPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Scopes"
-                description="Comma-separated."
+                label={t("oidcPage.scopes")}
+                description={t("oidcPage.commaSeparated")}
                 htmlFor="oidc-scopes"
               >
                 <Input
@@ -775,10 +789,10 @@ export function OIDCPage() {
               </SettingRow>
             </SettingsSection>
 
-            <SettingsSection title="Accounts">
+            <SettingsSection title={t("oidcPage.accounts")}>
               <SettingRow
-                label="Auto-provision users"
-                description="Automatically create accounts on first SSO login"
+                label={t("oidcPage.autoProvision")}
+                description={t("autoProvisionHint")}
                 htmlFor="oidc-auto-provision"
               >
                 <Switch
@@ -790,8 +804,8 @@ export function OIDCPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Allowed email domains"
-                description="Comma-separated. Empty allows every domain."
+                label={t("oidcPage.allowedDomains")}
+                description={t("oidcPage.allowedDomainsDescription")}
                 htmlFor="oidc-allowed-domains"
               >
                 <Input
@@ -804,8 +818,8 @@ export function OIDCPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Allow relaxed 2FA confirmation for a provider that cannot report a fresh sign-in"
-                description="Before 2FA setup, accept a completed sign-in round trip at the provider as the confirmation. This still keeps out someone who has only a stolen session token. It does not keep out someone at the owner's unlocked browser while their provider session is open."
+                label={t("oidcPage.relaxedStepUp")}
+                description={t("oidcPage.relaxedStepUpDescription")}
                 htmlFor="oidc-relaxed-step-up"
               >
                 <Switch
@@ -818,31 +832,29 @@ export function OIDCPage() {
               </SettingRow>
               {!isNew && activeConfig != null && (
                 <SettingRow
-                  label="Linked accounts"
-                  description={`${String(activeConfig.linked_accounts)} account${activeConfig.linked_accounts !== 1 ? "s are" : " is"} bound to an identity of this issuer. After an issuer change, reset every link so that each account links again by its address at its next sign-in.`}
+                  label={t("oidcPage.linkedAccounts")}
+                  description={t("oidcPage.linkedAccountsDescription", {
+                    count: activeConfig.linked_accounts,
+                  })}
                 >
                   <Button
                     variant="outline"
                     disabled={resetAllLinks.isPending}
                     onClick={() => {
-                      if (
-                        confirm(
-                          "Reset the SSO link of every SSO account? Every SSO session ends now, yours too if you signed in with SSO, and each account links to whichever identity presents its address at its next sign-in, so make sure the addresses match what the provider sends now.",
-                        )
-                      ) {
+                      if (confirm(t("oidcPage.resetAllLinksConfirm"))) {
                         resetAllLinks.mutate();
                       }
                     }}
                   >
-                    Reset all SSO links
+                    {t("oidcPage.resetAllLinks")}
                   </Button>
                 </SettingRow>
               )}
             </SettingsSection>
 
             <SettingsSection
-              title="Group-to-role mapping"
-              description="Each mapped group gives its members a role."
+              title={t("authConfig.groupToRoleMapping")}
+              description={t("authConfig.groupToRoleMappingDescription")}
               actions={
                 <Button
                   variant="outline"
@@ -852,14 +864,13 @@ export function OIDCPage() {
                   }}
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Add mapping
+                  {t("authConfig.addMapping")}
                 </Button>
               }
             >
               {mappingRows.length === 0 ? (
                 <p className="pb-3.5 pt-1 text-sm text-muted-foreground">
-                  No mappings configured. SSO users will be assigned the default
-                  role.
+                  {t("oidcPage.noMappings")}
                 </p>
               ) : (
                 <div className="space-y-2 pb-3.5 pt-1">
@@ -869,7 +880,9 @@ export function OIDCPage() {
                       className="flex flex-wrap items-center gap-2"
                     >
                       <Input
-                        aria-label={`Group of mapping ${String(idx + 1)}`}
+                        aria-label={t("oidcPage.mappingGroupLabel", {
+                          index: idx + 1,
+                        })}
                         className="min-w-0 flex-[2_1_14rem]"
                         value={row.group}
                         onChange={(e) => {
@@ -877,7 +890,7 @@ export function OIDCPage() {
                           updated[idx] = { ...row, group: e.target.value };
                           setMappingRows(updated);
                         }}
-                        placeholder="IdP group name"
+                        placeholder={t("oidcPage.groupPlaceholder")}
                       />
                       <Select
                         value={row.roleId}
@@ -888,10 +901,12 @@ export function OIDCPage() {
                         }}
                       >
                         <SelectTrigger
-                          aria-label={`Role of mapping ${String(idx + 1)}`}
+                          aria-label={t("authConfig.mappingRoleLabel", {
+                            index: idx + 1,
+                          })}
                           className="min-w-0 flex-[1_1_10rem]"
                         >
-                          <SelectValue placeholder="Select role" />
+                          <SelectValue placeholder={t("selectRole")} />
                         </SelectTrigger>
                         <SelectContent>
                           {roles?.map((role) => (
@@ -902,7 +917,9 @@ export function OIDCPage() {
                         </SelectContent>
                       </Select>
                       <Button
-                        aria-label={`Remove group mapping ${row.group || String(idx + 1)}`}
+                        aria-label={t("authConfig.removeMappingLabel", {
+                          mapping: row.group || String(idx + 1),
+                        })}
                         variant="ghost"
                         size="icon"
                         className="text-muted-foreground hover:text-destructive"
@@ -919,8 +936,8 @@ export function OIDCPage() {
                 </div>
               )}
               <SettingRow
-                label="Default role"
-                description="Given to someone who is in no mapped group."
+                label={t("authConfig.defaultRole")}
+                description={t("authConfig.defaultRoleDescription")}
                 htmlFor="oidc-default-role"
               >
                 <Select
@@ -936,10 +953,10 @@ export function OIDCPage() {
                     id="oidc-default-role"
                     className="w-full sm:w-64"
                   >
-                    <SelectValue placeholder="No default role" />
+                    <SelectValue placeholder={t("noDefaultRole")} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No default role</SelectItem>
+                    <SelectItem value="none">{t("noDefaultRole")}</SelectItem>
                     {roles?.map((role) => (
                       <SelectItem key={role.id} value={role.id}>
                         {role.name}
@@ -953,12 +970,12 @@ export function OIDCPage() {
             {/* Test connection: the saved configuration, not the edits above */}
             {!isNew && editingId && (
               <SettingsSection
-                title="Test connection"
-                description="Tries the configuration as it is saved. Edits above are not tested until they are saved."
+                title={t("authConfig.testConnection")}
+                description={t("authConfig.testConnectionDescription")}
               >
                 <SettingRow
-                  label="Discovery endpoint"
-                  description="Asks the issuer for its OpenID configuration."
+                  label={t("oidcPage.discoveryEndpoint")}
+                  description={t("oidcPage.discoveryEndpointDescription")}
                 >
                   <Button
                     variant="outline"
@@ -970,7 +987,7 @@ export function OIDCPage() {
                     ) : (
                       <Plug className="h-4 w-4" />
                     )}
-                    Test discovery endpoint
+                    {t("oidcPage.testDiscoveryEndpoint")}
                   </Button>
                 </SettingRow>
                 {testResult && (
@@ -1013,9 +1030,11 @@ export function OIDCPage() {
               redirectWarning.target === saveTarget &&
               redirectWarning.code === INSECURE_OIDC_REDIRECT && (
                 <ConfirmRequiredWarning
-                  title="Callback is not encrypted"
-                  message={`${redirectWarning.message} This is fine for a self-hosted lab with no TLS — confirm to continue, or go back and use an https callback.`}
-                  confirmLabel="Save with a cleartext callback"
+                  title={t("oidcPage.cleartextCallbackTitle")}
+                  message={t("oidcPage.cleartextCallbackMessage", {
+                    message: redirectWarning.message,
+                  })}
+                  confirmLabel={t("oidcPage.cleartextCallbackConfirm")}
                   onConfirm={() => {
                     save({ ...acks, insecureRedirect: true });
                   }}
@@ -1030,9 +1049,11 @@ export function OIDCPage() {
               redirectWarning.target === saveTarget &&
               redirectWarning.code === ISSUER_CHANGE && (
                 <ConfirmRequiredWarning
-                  title="Accounts are linked to the current issuer"
-                  message={`${redirectWarning.message} Reset all SSO links after the change to let them sign in again.`}
-                  confirmLabel="Change the issuer"
+                  title={t("oidcPage.issuerChangeTitle")}
+                  message={t("oidcPage.issuerChangeMessage", {
+                    message: redirectWarning.message,
+                  })}
+                  confirmLabel={t("oidcPage.issuerChangeConfirm")}
                   onConfirm={() => {
                     save({ ...acks, issuerChange: true });
                   }}
@@ -1050,11 +1071,11 @@ export function OIDCPage() {
             {/* Actions */}
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="outline" onClick={cancel}>
-                Cancel
+                {t("common:cancel")}
               </Button>
               <Button onClick={handleSave} disabled={saving}>
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {isNew ? "Create" : "Save"}
+                {isNew ? t("common:create") : t("common:save")}
               </Button>
             </div>
           </div>

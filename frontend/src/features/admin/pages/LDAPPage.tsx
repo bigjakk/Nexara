@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -70,10 +71,13 @@ const WIDE = "sm:grid-cols-1";
 
 const presets: Record<
   DirectoryType,
-  { label: string; defaults: Partial<LDAPConfigRequest> }
+  {
+    labelKey: "openLDAP" | "activeDirectory";
+    defaults: Partial<LDAPConfigRequest>;
+  }
 > = {
   openldap: {
-    label: "OpenLDAP",
+    labelKey: "openLDAP",
     defaults: {
       user_filter: "(|(uid={{username}})(mail={{username}}))",
       username_attribute: "uid",
@@ -84,7 +88,7 @@ const presets: Record<
     },
   },
   ad: {
-    label: "Active Directory",
+    labelKey: "activeDirectory",
     defaults: {
       user_filter:
         "(|(sAMAccountName={{username}})(userPrincipalName={{username}})(mail={{username}}))",
@@ -134,10 +138,6 @@ function missingCount(stopped: ConfirmRequired): number {
   return typeof n === "number" ? n : 0;
 }
 
-function accountsLabel(n: number): string {
-  return `${String(n)} account${n === 1 ? "" : "s"}`;
-}
-
 function configToForm(cfg: LDAPConfig): LDAPConfigRequest {
   return {
     name: cfg.name,
@@ -162,6 +162,7 @@ function configToForm(cfg: LDAPConfig): LDAPConfigRequest {
 }
 
 export function LDAPPage() {
+  const { t } = useTranslation("admin");
   const { data: configs, isLoading } = useLDAPConfigs();
   const { data: roles } = useRoles();
   const createConfig = useCreateLDAPConfig();
@@ -294,7 +295,7 @@ export function LDAPPage() {
     // What a failure nobody is looking at names: the config as the operator
     // knows it, which is the stored name when an edit renames it.
     const stored = isNew ? undefined : activeConfig?.name;
-    const named = `"${stored ?? data.name}"`;
+    const named = stored ?? data.name;
 
     // The warning stays mounted across a confirmed re-submit so its button can
     // show progress; it is cleared on success, or replaced on a fresh refusal.
@@ -319,9 +320,7 @@ export function LDAPPage() {
       }
       setTransportWarning(null);
       setSaveError(
-        err instanceof Error
-          ? err.message
-          : "Failed to save LDAP configuration",
+        err instanceof Error ? err.message : t("ldapPage.saveFailed"),
       );
     };
 
@@ -329,7 +328,7 @@ export function LDAPPage() {
     // the prompt of, whichever form has been opened in its place.
     if (isNew) {
       settle(createConfig.mutateAsync(data), {
-        action: `Creating the LDAP configuration ${named}`,
+        action: t("ldapPage.creatingAction", { name: named }),
         onSuccess: () => {
           setIsNew(false);
           onSettledSuccess();
@@ -338,7 +337,7 @@ export function LDAPPage() {
       });
     } else if (editingId) {
       settle(updateConfig.mutateAsync({ ...data, id: editingId }), {
-        action: `Saving the LDAP configuration ${named}`,
+        action: t("ldapPage.savingAction", { name: named }),
         onSuccess: () => {
           setEditingId(null);
           onSettledSuccess();
@@ -362,14 +361,16 @@ export function LDAPPage() {
       testPayload.test_username = testUsername;
     }
     settle(testConnection.mutateAsync(testPayload), {
-      action: `Testing the LDAP configuration "${activeConfig?.name ?? form.name}"`,
+      action: t("ldapPage.testingAction", {
+        name: activeConfig?.name ?? form.name,
+      }),
       onSuccess: (result) => {
         setTestResult(result);
       },
       onError: (err) => {
         setTestResult({
           success: false,
-          message: describeError(err) || "Request failed",
+          message: describeError(err) || t("authConfig.requestFailed"),
         });
       },
     });
@@ -388,21 +389,36 @@ export function LDAPPage() {
         acknowledge_missing: acknowledgeMissing,
       }),
       {
-        action: `Syncing the LDAP configuration "${activeConfig?.name ?? form.name}"`,
+        action: t("ldapPage.syncingAction", {
+          name: activeConfig?.name ?? form.name,
+        }),
         onSuccess: (result) => {
-          const parts = [`${String(result.users_synced)} synced`];
+          const parts = [
+            t("ldapPage.syncedCount", { count: result.users_synced }),
+          ];
           if (result.users_disabled > 0) {
-            parts.push(`${String(result.users_disabled)} disabled`);
+            parts.push(
+              t("ldapPage.disabledCount", { count: result.users_disabled }),
+            );
           }
           if (result.users_re_enabled > 0) {
-            parts.push(`${String(result.users_re_enabled)} re-enabled`);
+            parts.push(
+              t("ldapPage.reEnabledCount", { count: result.users_re_enabled }),
+            );
           }
           if ((result.users_kept_active ?? 0) > 0) {
             parts.push(
-              `${String(result.users_kept_active)} kept active (you, or the last user manager)`,
+              t("ldapPage.keptActiveCount", {
+                count: result.users_kept_active,
+              }),
             );
           }
-          setSyncResult(`${result.message} (${parts.join(", ")})`);
+          setSyncResult(
+            t("ldapPage.syncResult", {
+              message: result.message,
+              details: parts.join(t("ldapPage.syncResultSeparator")),
+            }),
+          );
           setSyncWarning(null);
         },
         onError: (err) => {
@@ -417,7 +433,11 @@ export function LDAPPage() {
           }
           setSyncWarning(null);
           const reason = describeError(err);
-          setSyncResult(reason ? `Sync failed: ${reason}` : "Sync failed");
+          setSyncResult(
+            reason
+              ? t("ldapPage.syncFailedReason", { reason })
+              : t("ldapPage.syncFailed"),
+          );
         },
       },
     );
@@ -430,7 +450,7 @@ export function LDAPPage() {
       <div>
         <AdminNav />
         <div className="flex h-64 items-center justify-center text-muted-foreground">
-          Loading LDAP configuration...
+          {t("loadingLDAP")}
         </div>
       </div>
     );
@@ -449,17 +469,17 @@ export function LDAPPage() {
       <AdminNav />
       <div className="space-y-5">
         <PageHeader
-          title="LDAP / Active Directory"
+          title={t("ldapActiveDirectory")}
           summary={
             total === 0
-              ? "No directory is configured, so nobody signs in through LDAP."
-              : `${String(total)} director${total !== 1 ? "ies" : "y"} configured, ${String(enabledCount)} enabled. Group membership decides each person's role.`
+              ? t("ldapPage.summaryNone")
+              : t("ldapPage.summary", { count: total, enabled: enabledCount })
           }
           actions={
             !showForm ? (
               <Button onClick={startNew}>
                 <Plus className="h-4 w-4" />
-                Add configuration
+                {t("authConfig.addConfiguration")}
               </Button>
             ) : undefined
           }
@@ -471,12 +491,14 @@ export function LDAPPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Server</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="whitespace-nowrap">Last sync</TableHead>
+                  <TableHead>{t("common:name")}</TableHead>
+                  <TableHead>{t("ldapPage.server")}</TableHead>
+                  <TableHead>{t("common:status")}</TableHead>
+                  <TableHead className="whitespace-nowrap">
+                    {t("ldapPage.lastSync")}
+                  </TableHead>
                   <TableHead className="w-32">
-                    <span className="sr-only">Actions</span>
+                    <span className="sr-only">{t("common:actions")}</span>
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -491,13 +513,18 @@ export function LDAPPage() {
                     </TableCell>
                     <TableCell>
                       {cfg.enabled ? (
-                        <Badge variant="healthy">Enabled</Badge>
+                        <Badge variant="healthy">{t("common:enabled")}</Badge>
                       ) : (
-                        <span className="text-muted-foreground">Disabled</span>
+                        <span className="text-muted-foreground">
+                          {t("common:disabled")}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                      <DateTime value={cfg.last_sync_at} fallback="Never" />
+                      <DateTime
+                        value={cfg.last_sync_at}
+                        fallback={t("ldapPage.never")}
+                      />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
@@ -508,19 +535,17 @@ export function LDAPPage() {
                             startEdit(cfg);
                           }}
                         >
-                          Edit
+                          {t("common:edit")}
                         </Button>
                         <Button
-                          aria-label={`Delete ${cfg.name}`}
+                          aria-label={t("authConfig.deleteLabel", {
+                            name: cfg.name,
+                          })}
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-destructive"
                           onClick={() => {
-                            if (
-                              confirm(
-                                "Delete this LDAP configuration? LDAP users will no longer be able to log in.",
-                              )
-                            ) {
+                            if (confirm(t("deleteLDAPConfirm"))) {
                               deleteConfig.mutate(cfg.id);
                             }
                           }}
@@ -539,8 +564,8 @@ export function LDAPPage() {
         {!showForm && (!configs || configs.length === 0) && (
           <EmptyState
             icon={BookUser}
-            title="No LDAP configuration"
-            description="Add a configuration to let people sign in with their OpenLDAP or Active Directory account."
+            title={t("ldapPage.emptyTitle")}
+            description={t("ldapPage.emptyDescription")}
           />
         )}
 
@@ -549,7 +574,7 @@ export function LDAPPage() {
           <div className="max-w-3xl space-y-4">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h2 className="text-lg font-semibold">
-                {isNew ? "New LDAP configuration" : "Edit LDAP configuration"}
+                {isNew ? t("ldapPage.newTitle") : t("ldapPage.editTitle")}
               </h2>
               {!isNew && activeConfig != null && (
                 <span className="text-sm text-muted-foreground">
@@ -558,17 +583,17 @@ export function LDAPPage() {
               )}
             </div>
 
-            <SettingsSection title="Directory">
+            <SettingsSection title={t("ldapPage.directory")}>
               <SettingRow
-                label="Directory type"
+                label={t("ldapPage.directoryType")}
                 description={
                   directoryType === "ad"
-                    ? "Pre-filled for Active Directory (sAMAccountName, userPrincipalName, displayName)"
-                    : "Pre-filled for OpenLDAP (uid, mail, cn)"
+                    ? t("prefilledActiveDirectory")
+                    : t("prefilledOpenLDAP")
                 }
               >
                 <Segmented
-                  aria-label="Directory type"
+                  aria-label={t("ldapPage.directoryType")}
                   size="md"
                   value={directoryType}
                   onValueChange={applyPreset}
@@ -580,13 +605,13 @@ export function LDAPPage() {
                     >
                   ).map(([key, preset]) => ({
                     value: key,
-                    label: preset.label,
+                    label: t(preset.labelKey),
                   }))}
                 />
               </SettingRow>
               <SettingRow
-                label="Name"
-                description="What this configuration is called in the list."
+                label={t("common:name")}
+                description={t("authConfig.nameDescription")}
                 htmlFor="ldap-name"
               >
                 <Input
@@ -595,12 +620,12 @@ export function LDAPPage() {
                   onChange={(e) => {
                     setForm({ ...form, name: e.target.value });
                   }}
-                  placeholder="Default"
+                  placeholder={t("authConfig.namePlaceholder")}
                 />
               </SettingRow>
               <SettingRow
-                label="Enabled"
-                description="People can sign in through this directory only while it is on."
+                label={t("common:enabled")}
+                description={t("ldapPage.enabledDescription")}
                 htmlFor="ldap-enabled"
               >
                 <Switch
@@ -613,14 +638,14 @@ export function LDAPPage() {
               </SettingRow>
             </SettingsSection>
 
-            <SettingsSection title="Connection">
+            <SettingsSection title={t("connection")}>
               <SettingRow
                 className={WIDE}
-                label="Server URL"
+                label={t("serverUrl")}
                 description={
                   addressChanged
-                    ? "This directory is moving to a new address, so it needs the bind password again. The stored one is only ever sent to the address it was saved for."
-                    : "Starts with ldap:// or ldaps:// and names the port."
+                    ? t("ldapPage.serverUrlMoved")
+                    : t("ldapPage.serverUrlDescription")
                 }
                 htmlFor="ldap-server-url"
               >
@@ -635,8 +660,8 @@ export function LDAPPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="StartTLS"
-                description="Upgrade an ldap:// connection to TLS before any password is sent."
+                label={t("startTLS")}
+                description={t("ldapPage.startTLSDescription")}
                 htmlFor="ldap-start-tls"
               >
                 <Switch
@@ -648,8 +673,8 @@ export function LDAPPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Skip TLS verify"
-                description="Accept the server's certificate without checking it."
+                label={t("ldapPage.skipTLSVerify")}
+                description={t("ldapPage.skipTLSVerifyDescription")}
                 htmlFor="ldap-skip-tls-verify"
               >
                 <Switch
@@ -662,8 +687,8 @@ export function LDAPPage() {
               </SettingRow>
               <SettingRow
                 className={WIDE}
-                label="Bind DN"
-                description="The account Nexara searches the directory as."
+                label={t("bindDN")}
+                description={t("ldapPage.bindDNDescription")}
                 htmlFor="ldap-bind-dn"
               >
                 <Input
@@ -677,12 +702,12 @@ export function LDAPPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Bind password"
+                label={t("ldapPage.bindPassword")}
                 description={
                   !isNew && activeConfig?.bind_password_set
                     ? addressChanged
-                      ? "Required: the address changed."
-                      : "Leave blank to keep the current one."
+                      ? t("ldapPage.bindPasswordRequired")
+                      : t("authConfig.keepCurrent")
                     : undefined
                 }
                 htmlFor="ldap-bind-password"
@@ -696,10 +721,10 @@ export function LDAPPage() {
                   }}
                   placeholder={
                     addressChanged
-                      ? "Re-enter the bind password for the new address"
+                      ? t("ldapPage.bindPasswordReenter")
                       : !isNew && activeConfig?.bind_password_set
                         ? "********"
-                        : "Password"
+                        : t("ldapPage.passwordPlaceholder")
                   }
                   required={addressChanged}
                 />
@@ -707,12 +732,12 @@ export function LDAPPage() {
             </SettingsSection>
 
             <SettingsSection
-              title="User search"
-              description="How a person who signs in is found, and which attributes become their account."
+              title={t("ldapPage.userSearch")}
+              description={t("ldapPage.userSearchDescription")}
             >
               <SettingRow
                 className={WIDE}
-                label="Search base DN"
+                label={t("ldapPage.searchBaseDN")}
                 htmlFor="ldap-search-base-dn"
               >
                 <Input
@@ -727,8 +752,10 @@ export function LDAPPage() {
               </SettingRow>
               <SettingRow
                 className={WIDE}
-                label="User filter"
-                description="{{username}} stands for what was typed at sign-in."
+                label={t("ldapPage.userFilter")}
+                description={t("ldapPage.userFilterDescription", {
+                  placeholder: "{{username}}",
+                })}
                 htmlFor="ldap-user-filter"
               >
                 <Input
@@ -742,7 +769,7 @@ export function LDAPPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Username attribute"
+                label={t("ldapPage.usernameAttribute")}
                 htmlFor="ldap-username-attribute"
               >
                 <Input
@@ -756,7 +783,7 @@ export function LDAPPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Email attribute"
+                label={t("ldapPage.emailAttribute")}
                 htmlFor="ldap-email-attribute"
               >
                 <Input
@@ -770,7 +797,7 @@ export function LDAPPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Display name attribute"
+                label={t("ldapPage.displayNameAttribute")}
                 htmlFor="ldap-display-name-attribute"
               >
                 <Input
@@ -788,10 +815,10 @@ export function LDAPPage() {
               </SettingRow>
             </SettingsSection>
 
-            <SettingsSection title="Group search">
+            <SettingsSection title={t("ldapPage.groupSearch")}>
               <SettingRow
                 className={WIDE}
-                label="Group search base DN"
+                label={t("ldapPage.groupSearchBaseDN")}
                 htmlFor="ldap-group-search-base-dn"
               >
                 <Input
@@ -809,8 +836,10 @@ export function LDAPPage() {
               </SettingRow>
               <SettingRow
                 className={WIDE}
-                label="Group filter"
-                description="{{userDN}} stands for the DN of the person signing in."
+                label={t("ldapPage.groupFilter")}
+                description={t("ldapPage.groupFilterDescription", {
+                  placeholder: "{{userDN}}",
+                })}
                 htmlFor="ldap-group-filter"
               >
                 <Input
@@ -824,7 +853,7 @@ export function LDAPPage() {
                 />
               </SettingRow>
               <SettingRow
-                label="Group attribute"
+                label={t("ldapPage.groupAttribute")}
                 htmlFor="ldap-group-attribute"
               >
                 <Input
@@ -840,8 +869,8 @@ export function LDAPPage() {
             </SettingsSection>
 
             <SettingsSection
-              title="Group-to-role mapping"
-              description="Each mapped group gives its members a role."
+              title={t("authConfig.groupToRoleMapping")}
+              description={t("authConfig.groupToRoleMappingDescription")}
               actions={
                 <Button
                   variant="outline"
@@ -854,14 +883,13 @@ export function LDAPPage() {
                   }}
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Add mapping
+                  {t("authConfig.addMapping")}
                 </Button>
               }
             >
               {mappingRows.length === 0 ? (
                 <p className="pb-3.5 pt-1 text-sm text-muted-foreground">
-                  No mappings configured. LDAP users will be assigned the
-                  default role.
+                  {t("ldapPage.noMappings")}
                 </p>
               ) : (
                 <div className="space-y-2 pb-3.5 pt-1">
@@ -871,7 +899,9 @@ export function LDAPPage() {
                       className="flex flex-wrap items-center gap-2"
                     >
                       <Input
-                        aria-label={`Group DN of mapping ${String(idx + 1)}`}
+                        aria-label={t("ldapPage.mappingGroupDNLabel", {
+                          index: idx + 1,
+                        })}
                         className="min-w-0 flex-[2_1_14rem] font-mono"
                         value={row.groupDN}
                         onChange={(e) => {
@@ -890,10 +920,12 @@ export function LDAPPage() {
                         }}
                       >
                         <SelectTrigger
-                          aria-label={`Role of mapping ${String(idx + 1)}`}
+                          aria-label={t("authConfig.mappingRoleLabel", {
+                            index: idx + 1,
+                          })}
                           className="min-w-0 flex-[1_1_10rem]"
                         >
-                          <SelectValue placeholder="Select role" />
+                          <SelectValue placeholder={t("selectRole")} />
                         </SelectTrigger>
                         <SelectContent>
                           {roles?.map((role) => (
@@ -904,7 +936,9 @@ export function LDAPPage() {
                         </SelectContent>
                       </Select>
                       <Button
-                        aria-label={`Remove group mapping ${row.groupDN || String(idx + 1)}`}
+                        aria-label={t("authConfig.removeMappingLabel", {
+                          mapping: row.groupDN || String(idx + 1),
+                        })}
                         variant="ghost"
                         size="icon"
                         className="text-muted-foreground hover:text-destructive"
@@ -921,8 +955,8 @@ export function LDAPPage() {
                 </div>
               )}
               <SettingRow
-                label="Default role"
-                description="Given to someone who is in no mapped group."
+                label={t("authConfig.defaultRole")}
+                description={t("authConfig.defaultRoleDescription")}
                 htmlFor="ldap-default-role"
               >
                 <Select
@@ -938,10 +972,10 @@ export function LDAPPage() {
                     id="ldap-default-role"
                     className="w-full sm:w-64"
                   >
-                    <SelectValue placeholder="No default role" />
+                    <SelectValue placeholder={t("noDefaultRole")} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No default role</SelectItem>
+                    <SelectItem value="none">{t("noDefaultRole")}</SelectItem>
                     {roles?.map((role) => (
                       <SelectItem key={role.id} value={role.id}>
                         {role.name}
@@ -952,10 +986,10 @@ export function LDAPPage() {
               </SettingRow>
             </SettingsSection>
 
-            <SettingsSection title="Sync">
+            <SettingsSection title={t("ldapPage.sync")}>
               <SettingRow
-                label="Sync interval"
-                description="Minutes between background syncs of this directory. 0 turns them off."
+                label={t("ldapPage.syncInterval")}
+                description={t("ldapPage.syncIntervalDescription")}
                 htmlFor="ldap-sync-interval"
               >
                 <Input
@@ -972,15 +1006,14 @@ export function LDAPPage() {
                     });
                   }}
                 />
-                <span className="text-sm text-muted-foreground">minutes</span>
+                <span className="text-sm text-muted-foreground">
+                  {t("ldapPage.minutes")}
+                </span>
               </SettingRow>
               {!isNew && editingId && (
                 <SettingRow
-                  label="Sync now"
-                  description={
-                    syncResult ??
-                    "Runs a sync of the saved configuration without waiting for the interval."
-                  }
+                  label={t("ldapPage.syncNow")}
+                  description={syncResult ?? t("ldapPage.syncNowDescription")}
                 >
                   <Button
                     variant="outline"
@@ -994,16 +1027,22 @@ export function LDAPPage() {
                     ) : (
                       <RefreshCw className="h-4 w-4" />
                     )}
-                    Sync now
+                    {t("ldapPage.syncNow")}
                   </Button>
                 </SettingRow>
               )}
               {syncWarning != null && syncWarning.target === editingId && (
                 <div className="pb-3.5">
                   <ConfirmRequiredWarning
-                    title={`Deactivate ${accountsLabel(missingCount(syncWarning))}?`}
-                    message={`The directory found no entry for ${accountsLabel(missingCount(syncWarning))}, so the sync changed nothing. This usually means the user filter, the search base DN or the bind account's access is wrong. Deactivate them only if these people have left: the accounts named will no longer be able to sign in, and their sessions end. Your own account and the last user manager stay active.`}
-                    confirmLabel={`Deactivate ${accountsLabel(missingCount(syncWarning))}`}
+                    title={t("ldapPage.deactivateTitle", {
+                      count: missingCount(syncWarning),
+                    })}
+                    message={t("ldapPage.deactivateMessage", {
+                      count: missingCount(syncWarning),
+                    })}
+                    confirmLabel={t("ldapPage.deactivateConfirm", {
+                      count: missingCount(syncWarning),
+                    })}
                     onConfirm={() => {
                       handleSync(missingCount(syncWarning));
                     }}
@@ -1019,12 +1058,12 @@ export function LDAPPage() {
             {/* Test connection: the saved configuration, not the edits above */}
             {!isNew && editingId && (
               <SettingsSection
-                title="Test connection"
-                description="Tries the configuration as it is saved. Edits above are not tested until they are saved."
+                title={t("authConfig.testConnection")}
+                description={t("authConfig.testConnectionDescription")}
               >
                 <SettingRow
-                  label="Test username"
-                  description="Optional."
+                  label={t("ldapPage.testUsername")}
+                  description={t("ldapPage.optional")}
                   htmlFor="ldap-test-username"
                 >
                   <Input
@@ -1034,7 +1073,7 @@ export function LDAPPage() {
                     onChange={(e) => {
                       setTestUsername(e.target.value);
                     }}
-                    placeholder="Test username (optional)"
+                    placeholder={t("testUsernamePlaceholder")}
                   />
                   <Button
                     variant="outline"
@@ -1046,7 +1085,7 @@ export function LDAPPage() {
                     ) : (
                       <Plug className="h-4 w-4" />
                     )}
-                    Test
+                    {t("common:test")}
                   </Button>
                 </SettingRow>
                 {testResult && (
@@ -1074,15 +1113,17 @@ export function LDAPPage() {
                   title={
                     confirmDetailString(transportWarning, "transport_kind") ===
                     "cleartext"
-                      ? "Passwords would travel in cleartext"
-                      : "Certificate would never be verified"
+                      ? t("ldapPage.cleartextTitle")
+                      : t("ldapPage.unverifiedTitle")
                   }
-                  message={`${transportWarning.message} This is fine for a self-hosted lab directory — confirm to continue, or go back and use ldaps:// or StartTLS.`}
+                  message={t("ldapPage.transportMessage", {
+                    message: transportWarning.message,
+                  })}
                   confirmLabel={
                     confirmDetailString(transportWarning, "transport_kind") ===
                     "cleartext"
-                      ? "Save without encryption"
-                      : "Save without verification"
+                      ? t("ldapPage.saveWithoutEncryption")
+                      : t("ldapPage.saveWithoutVerification")
                   }
                   onConfirm={() => {
                     save(true);
@@ -1101,11 +1142,11 @@ export function LDAPPage() {
             {/* Actions */}
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="outline" onClick={cancel}>
-                Cancel
+                {t("common:cancel")}
               </Button>
               <Button onClick={handleSave} disabled={saving}>
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {isNew ? "Create" : "Save"}
+                {isNew ? t("common:create") : t("common:save")}
               </Button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Table,
   TableBody,
@@ -33,13 +34,14 @@ import { CreateUserDialog } from "../components/CreateUserDialog";
 import { AdminNav } from "../components/AdminNav";
 import { SYSTEM_USER_ID } from "@/lib/constants";
 
-const SOURCE_LABELS: Record<string, string> = {
-  local: "Local",
-  ldap: "LDAP",
-  oidc: "OIDC",
+const SOURCE_LABEL_KEYS: Record<string, "local" | "ldap" | "oidc"> = {
+  local: "local",
+  ldap: "ldap",
+  oidc: "oidc",
 };
 
 export function UsersPage() {
+  const { t } = useTranslation("admin");
   const { data: rawUsers, isLoading } = useUsers();
   const users = rawUsers?.filter((u) => u.id !== SYSTEM_USER_ID);
   const updateUser = useUpdateUser();
@@ -55,7 +57,7 @@ export function UsersPage() {
       <div>
         <AdminNav />
         <div className="flex h-64 items-center justify-center text-muted-foreground">
-          Loading users...
+          {t("loadingUsers")}
         </div>
       </div>
     );
@@ -70,8 +72,12 @@ export function UsersPage() {
       <AdminNav />
       <div className="space-y-5">
         <PageHeader
-          title="Users"
-          summary={`${String(total)} account${total !== 1 ? "s" : ""}, ${String(active)} active, ${String(withTotp)} with two-factor authentication.`}
+          title={t("usersPage.title")}
+          summary={t("usersPage.summary", {
+            count: total,
+            active,
+            withTotp,
+          })}
           actions={
             <Button
               onClick={() => {
@@ -79,7 +85,7 @@ export function UsersPage() {
               }}
             >
               <UserPlus className="h-4 w-4" />
-              Create user
+              {t("usersPage.createUser")}
             </Button>
           }
         />
@@ -88,14 +94,16 @@ export function UsersPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead className="whitespace-nowrap">Sign-in</TableHead>
-                <TableHead>2FA</TableHead>
-                <TableHead>Roles</TableHead>
-                <TableHead>Active</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead>{t("usersPage.user")}</TableHead>
+                <TableHead className="whitespace-nowrap">
+                  {t("usersPage.signIn")}
+                </TableHead>
+                <TableHead>{t("twoFA")}</TableHead>
+                <TableHead>{t("usersPage.roles")}</TableHead>
+                <TableHead>{t("usersPage.active")}</TableHead>
+                <TableHead>{t("usersPage.created")}</TableHead>
                 <TableHead className="w-40">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">{t("common:actions")}</span>
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -113,19 +121,21 @@ export function UsersPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {SOURCE_LABELS[user.auth_source] ?? "Local"}
+                    {t(SOURCE_LABEL_KEYS[user.auth_source] ?? "local")}
                     {user.auth_source === "oidc" &&
                       user.sso_linked === false && (
                         <div className="whitespace-nowrap text-[12.5px]">
-                          Not linked yet
+                          {t("usersPage.notLinkedYet")}
                         </div>
                       )}
                   </TableCell>
                   <TableCell>
                     {user.totp_enabled ? (
-                      <Badge variant="healthy">On</Badge>
+                      <Badge variant="healthy">{t("usersPage.on")}</Badge>
                     ) : (
-                      <span className="text-muted-foreground">Off</span>
+                      <span className="text-muted-foreground">
+                        {t("usersPage.off")}
+                      </span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -137,13 +147,17 @@ export function UsersPage() {
                           </Badge>
                         ))
                       ) : (
-                        <span className="text-muted-foreground">No roles</span>
+                        <span className="text-muted-foreground">
+                          {t("usersPage.noRoles")}
+                        </span>
                       )}
                     </div>
                   </TableCell>
                   <TableCell>
                     <Switch
-                      aria-label={`${user.email} is active`}
+                      aria-label={t("usersPage.isActiveLabel", {
+                        email: user.email,
+                      })}
                       checked={user.is_active}
                       onCheckedChange={(checked) => {
                         updateUser.mutate({ id: user.id, is_active: checked });
@@ -162,12 +176,14 @@ export function UsersPage() {
                           setRoleDialogUserId(user.id);
                         }}
                       >
-                        Manage roles
+                        {t("manageRoles")}
                       </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
-                            aria-label={`More actions for ${user.email}`}
+                            aria-label={t("usersPage.moreActionsFor", {
+                              email: user.email,
+                            })}
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
@@ -181,14 +197,14 @@ export function UsersPage() {
                               onClick={() => {
                                 if (
                                   confirm(
-                                    `Reset 2FA for ${user.email}? They will need to set up 2FA again.`,
+                                    t("reset2FAConfirm", { email: user.email }),
                                   )
                                 ) {
                                   resetTotp.mutate(user.id);
                                 }
                               }}
                             >
-                              Reset 2FA
+                              {t("reset2FA")}
                             </DropdownMenuItem>
                           )}
                           {user.auth_source === "oidc" &&
@@ -197,14 +213,16 @@ export function UsersPage() {
                                 onClick={() => {
                                   if (
                                     confirm(
-                                      `Reset the SSO link of ${user.email}? Their sessions end now, and their next SSO sign-in links the account to whichever identity presents this address, so make sure it is the address the provider sends now.`,
+                                      t("usersPage.resetSSOLinkConfirm", {
+                                        email: user.email,
+                                      }),
                                     )
                                   ) {
                                     resetSSOLink.mutate(user.id);
                                   }
                                 }}
                               >
-                                Reset SSO link
+                                {t("usersPage.resetSSOLink")}
                               </DropdownMenuItem>
                             )}
                           {user.auth_source === "ldap" &&
@@ -213,14 +231,16 @@ export function UsersPage() {
                                 onClick={() => {
                                   if (
                                     confirm(
-                                      `Reset the directory link of ${user.email}? Their sessions end now, and their next sign-in or sync binds the account to whichever directory entry presents this address, so make sure it is the address the directory has now.`,
+                                      t("usersPage.resetDirectoryLinkConfirm", {
+                                        email: user.email,
+                                      }),
                                     )
                                   ) {
                                     resetDirectoryLink.mutate(user.id);
                                   }
                                 }}
                               >
-                                Reset directory link
+                                {t("usersPage.resetDirectoryLink")}
                               </DropdownMenuItem>
                             )}
                           <DropdownMenuItem
@@ -228,14 +248,14 @@ export function UsersPage() {
                             onClick={() => {
                               if (
                                 confirm(
-                                  `Delete user ${user.email}? This cannot be undone.`,
+                                  t("deleteUserConfirm", { email: user.email }),
                                 )
                               ) {
                                 deleteUser.mutate(user.id);
                               }
                             }}
                           >
-                            Delete user
+                            {t("deleteUser")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
