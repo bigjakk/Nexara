@@ -181,6 +181,8 @@ func TestJudgeOIDCDiscovery(t *testing.T) {
 			`"claims_supported":["sub","auth_time"]}`, pass: true, advertised: &yes},
 		{name: "no claims listed", doc: `{"authorization_endpoint":"https://idp.example.com/auth"}`,
 			pass: true, advertised: &no},
+		{name: "claims listed without auth_time", doc: `{"authorization_endpoint":"https://idp.example.com/auth",` +
+			`"claims_supported":["sub"]}`, pass: true, advertised: &no},
 		{name: "an endpoint a sign-in refuses", doc: `{"authorization_endpoint":"javascript:alert(1)//x",` +
 			`"claims_supported":["auth_time"]}`},
 		{name: "not a document", doc: `<html>`},
