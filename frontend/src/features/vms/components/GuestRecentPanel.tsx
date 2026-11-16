@@ -71,7 +71,7 @@ export function GuestRecentPanel({
                 )}
               </span>
               <span className="shrink-0 text-[12.5px] text-muted-foreground/75">
-                <DateTime value={entry.occurred_at} />
+                <DateTime value={entry.occurred_at} auto="relative" />
               </span>
             </li>
           );

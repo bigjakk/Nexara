@@ -18,7 +18,7 @@ import {
   usePreferencesStore,
   type ByteUnit,
   type ConsoleOpenMode,
-  type DateFormat,
+  type DateDisplay,
 } from "@/stores/preferences-store";
 import { useUpsertSetting } from "@/features/settings/api/settings-queries";
 import { USER_PREFERENCES_KEY } from "@/features/settings/components/LoadSavedPreferences";
@@ -47,10 +47,11 @@ const byteUnitOptions: {
 ];
 
 const dateFormatOptions: {
-  value: DateFormat;
+  value: DateDisplay;
   labelKey: string;
   exampleKey: string;
 }[] = [
+  { value: "auto", labelKey: "automatic", exampleKey: "automaticExample" },
   { value: "relative", labelKey: "relative", exampleKey: "relativeExample" },
   { value: "iso", labelKey: "iso8601", exampleKey: "isoExample" },
   { value: "locale", labelKey: "local", exampleKey: "localeExample" },
@@ -238,9 +239,9 @@ export function AppearancePage() {
             htmlFor="pref-date-format"
           >
             <Select
-              value={preferences.dateFormat}
+              value={preferences.dateDisplay}
               onValueChange={(v) => {
-                savePreferences({ dateFormat: v as DateFormat });
+                savePreferences({ dateDisplay: v as DateDisplay });
               }}
             >
               <SelectTrigger id="pref-date-format" className="w-full sm:w-64">

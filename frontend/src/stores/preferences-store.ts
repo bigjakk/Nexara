@@ -2,13 +2,22 @@ import { create } from "zustand";
 import i18n from "@/lib/i18n";
 
 export type ByteUnit = "binary" | "decimal";
+/** The retired Date format value: saved by older versions, never read. */
 export type DateFormat = "relative" | "iso" | "locale";
+/**
+ * How dates are written (Settings → Appearance). "auto", the default, is what
+ * the app showed before the choice was honoured: relative in the few places
+ * that were, the browser's locale everywhere else.
+ */
+export type DateDisplay = "auto" | "relative" | "iso" | "locale";
 /** Where a console opens: the floating window, or a browser tab of its own. */
 export type ConsoleOpenMode = "floating" | "tab";
 
 export interface UserPreferences {
   byteUnit: ByteUnit;
+  /** Retired: its stored default ("relative") was never honoured. */
   dateFormat: DateFormat;
+  dateDisplay: DateDisplay;
   refreshInterval: number; // seconds, 0 = manual
   accentColor: string; // HSL string e.g. "240 5.9% 10%" or preset name
   language: string; // BCP 47 language code e.g. "en", "de", "fr"
@@ -28,6 +37,7 @@ const STORAGE_KEY = "nexara-preferences";
 const defaultPreferences: UserPreferences = {
   byteUnit: "binary",
   dateFormat: "relative",
+  dateDisplay: "auto",
   refreshInterval: 30,
   accentColor: "default",
   language: "en",

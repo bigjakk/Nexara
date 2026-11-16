@@ -103,6 +103,7 @@ function leaveNothingBehind() {
     preferences: {
       byteUnit: "binary",
       dateFormat: "relative",
+      dateDisplay: "auto",
       refreshInterval: 30,
       accentColor: "default",
       language: "en",

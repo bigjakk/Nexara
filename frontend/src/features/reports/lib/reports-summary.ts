@@ -21,7 +21,7 @@ export function latestCompletedRun(
 export function reportsSummary(
   schedules: readonly ReportSchedule[] | undefined,
   runs: readonly ReportRun[] | undefined,
-  ago: (iso: string) => string = formatDateTime,
+  ago: (iso: string) => string = (iso) => formatDateTime(iso, "—", "relative"),
 ): string {
   if (schedules === undefined || runs === undefined) {
     return "Generate a report now, or schedule one and have it emailed.";

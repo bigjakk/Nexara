@@ -127,7 +127,7 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
                     }
                   >
                     {s.last_run_at
-                      ? `last ran ${formatDateTime(s.last_run_at)}`
+                      ? `last ran ${formatDateTime(s.last_run_at, "—", "relative")}`
                       : "never run"}
                   </div>
                 </TableCell>

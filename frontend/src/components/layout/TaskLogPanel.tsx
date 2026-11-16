@@ -280,7 +280,7 @@ function ActivityFilterControl({
 function ActivitySummaryLine({ summary }: { summary: ActivitySummary }) {
   const { t } = useTranslation("common");
   const { featured, latest } = summary;
-  const when = useDateText(latest?.entry.created_at);
+  const when = useDateText(latest?.entry.created_at, { auto: "relative" });
   if (featured) {
     return (
       <span className="hidden min-w-0 items-center gap-2.5 text-[12.5px] sm:flex">

@@ -84,7 +84,7 @@ const VIEW_OPTIONS = [
 ] as const;
 
 function ago(unixSeconds: number): string {
-  return formatDateTime(unixSeconds * 1000);
+  return formatDateTime(unixSeconds * 1000, "—", "relative");
 }
 
 function gcSub(last: LastRun | null): string | undefined {

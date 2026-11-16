@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from "react";
 
 import {
+  describeDate,
   formatDateValue,
   type DateInput,
-  type DateKind,
+  type DateOptions,
 } from "@/lib/format";
 import { usePreferencesStore } from "@/stores/preferences-store";
 
@@ -20,9 +21,8 @@ let tickTimer: ReturnType<typeof setInterval> | null = null;
 function subscribe(onChange: () => void): () => void {
   tickListeners.add(onChange);
   tickTimer ??= setInterval(() => {
-    if (usePreferencesStore.getState().preferences.dateFormat !== "relative") {
-      return;
-    }
+    const format = usePreferencesStore.getState().preferences.dateDisplay;
+    if (format !== "relative" && format !== "auto") return;
     for (const listener of tickListeners) listener();
   }, TICK_MS);
   // A change of preference redraws at once, without a reload.
@@ -37,52 +37,39 @@ function subscribe(onChange: () => void): () => void {
   };
 }
 
-type DateTextOptions = Parameters<typeof formatDateValue>[1];
-
 /**
  * The text a DateTime would show, for a date that has to sit inside a string
  * (a translated sentence) in a component that stays on screen, such as the
  * shell's: it follows a change of preference at once and moves on by itself.
  */
 // eslint-disable-next-line react-refresh/only-export-components -- the hook belongs beside the component it mirrors
-export function useDateText(value: DateInput, options?: DateTextOptions): string {
+export function useDateText(value: DateInput, options?: DateOptions): string {
   return useSyncExternalStore(subscribe, () => formatDateValue(value, options));
 }
 
 /**
  * A date or time as the Date format preference writes it (lib/format.ts),
- * kept current: under relative it moves on by itself and the exact time is
- * its hover title. Use it wherever a date is rendered as text of its own; a
- * date inside a string (an aria-label, a sentence passed as a prop) calls
- * formatDateTime and friends instead.
+ * kept current: a relative time moves on by itself. Whenever the text is not
+ * the exact time (relative, or a compact cell) the exact time is its hover
+ * title and is read out after it. Use it wherever a date is rendered as text
+ * of its own; a date inside a string (an aria-label, a sentence passed as a
+ * prop) calls formatDateTime and friends instead.
  */
 export function DateTime({
   value,
-  kind = "datetime",
-  fallback = "—",
-  exact = false,
-  locale,
-}: {
-  value: DateInput;
-  kind?: DateKind | undefined;
-  fallback?: string | undefined;
-  exact?: boolean | undefined;
-  locale?: Intl.DateTimeFormatOptions | undefined;
-}) {
-  const read = () => formatDateValue(value, { kind, fallback, exact, locale });
-  // Switching to or from relative always changes the text, so the title,
-  // read here, never lags behind it.
-  const text = useSyncExternalStore(subscribe, read);
-  const relative =
-    usePreferencesStore.getState().preferences.dateFormat === "relative" &&
-    !exact &&
-    kind !== "time";
-  const title = relative
-    ? formatDateValue(value, { kind, fallback: "", exact: true, locale })
-    : "";
-  return title === "" || title === text ? (
-    <>{text}</>
-  ) : (
-    <span title={title}>{text}</span>
+  ...options
+}: { value: DateInput } & DateOptions) {
+  // The text is the snapshot, so a tick re-renders only a changed one; a
+  // change of format always changes it, so the rest, read here, never lags.
+  const text = useSyncExternalStore(subscribe, () =>
+    formatDateValue(value, options),
+  );
+  const { exact, iso } = describeDate(value, options);
+  if (iso === "") return <>{text}</>;
+  return (
+    <time dateTime={iso} title={exact === "" ? undefined : exact}>
+      {text}
+      {exact !== "" && <span className="sr-only"> ({exact})</span>}
+    </time>
   );
 }

@@ -65,14 +65,14 @@ export function NodeMemoryModules({
     <Panel
       flush
       title="Memory modules"
-      aside={`read ${formatDateTime(read.read_at)}`}
+      aside={`read ${formatDateTime(read.read_at, "—", "relative")}`}
       actions={readNow}
     >
       <div className="space-y-2 px-[18px] pb-3">
         {read.status !== "ok" && (
           <p className="text-sm text-amber-700 dark:text-amber-400">
             The last read failed: {read.reason} Showing the read from{" "}
-            <DateTime value={read.read_at} />.
+            <DateTime value={read.read_at} auto="relative" />.
           </p>
         )}
         <p className="text-sm">

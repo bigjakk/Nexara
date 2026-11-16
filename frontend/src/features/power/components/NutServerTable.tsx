@@ -101,7 +101,7 @@ const COLUMNS: ColumnDef<NutServer, SortKey, Ctx>[] = [
       return (
         <div className="flex items-center gap-2">
           <Badge variant={st.variant}>{st.label}</Badge>
-          {s.last_poll_at !== null && <span className="text-xs text-muted-foreground"><DateTime value={s.last_poll_at} /></span>}
+          {s.last_poll_at !== null && <span className="text-xs text-muted-foreground"><DateTime value={s.last_poll_at} auto="relative" /></span>}
         </div>
       );
     },

@@ -40,12 +40,12 @@ beforeEach(() => {
 
 // The rows are found by their date as the locale format writes it.
 beforeEach(() => {
-  usePreferencesStore.getState().setPreferences({ dateFormat: "locale" });
+  usePreferencesStore.getState().setPreferences({ dateDisplay: "locale" });
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  usePreferencesStore.getState().setPreferences({ dateFormat: "relative" });
+  usePreferencesStore.getState().setPreferences({ dateDisplay: "auto" });
 });
 
 function renderTable() {

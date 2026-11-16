@@ -114,7 +114,7 @@ export function ActiveSessionsCard() {
                   </div>
                 </TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">
-                  <DateTime value={session.last_used_at} />
+                  <DateTime value={session.last_used_at} auto="relative" />
                 </TableCell>
                 <TableCell className="text-right">
                   <Button

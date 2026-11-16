@@ -179,7 +179,7 @@ function UpsRow({ device }: { device: UpsDevice }) {
           >
             {device.last_reading_at === null
               ? "Never read"
-              : `Read ${formatDateTime(device.last_reading_at)}`}
+              : `Read ${formatDateTime(device.last_reading_at, "—", "relative")}`}
           </div>
         </div>
         <ChevronRight

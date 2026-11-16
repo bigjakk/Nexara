@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
 import {
   usePreferencesStore,
-  type DateFormat,
+  type DateDisplay,
 } from "@/stores/preferences-store";
 import {
   formatAxisDay,
@@ -10,6 +10,7 @@ import {
   formatBytesPerSecond,
   formatDate,
   formatDateTime,
+  formatDateValue,
   formatExactDate,
   formatExactDateTime,
   formatPercent,
@@ -133,10 +134,10 @@ describe("dates under the Date format preference", () => {
   });
   afterEach(() => {
     vi.useRealTimers();
-    usePreferencesStore.getState().setPreferences({ dateFormat: "relative" });
+    usePreferencesStore.getState().setPreferences({ dateDisplay: "auto" });
   });
 
-  it.each<[DateFormat, DateInput, string]>([
+  it.each<[DateDisplay, DateInput, string]>([
     ["relative", past.toISOString(), "5m ago"],
     ["relative", past.getTime(), "5m ago"],
     ["relative", at(-30_000), "now"],
@@ -147,12 +148,33 @@ describe("dates under the Date format preference", () => {
     ["iso", farPast, `${isoDate(farPast)}T${isoTime(farPast)}${offset(farPast)}`],
     ["locale", past.toISOString(), past.toLocaleString()],
     ["locale", farPast.getTime(), farPast.toLocaleString()],
-  ])("formatDateTime under %s: %s → %s", (dateFormat, value, want) => {
-    usePreferencesStore.getState().setPreferences({ dateFormat });
+    // Automatic, the default: the locale, as a place showed it before.
+    ["auto", past.toISOString(), past.toLocaleString()],
+  ])("formatDateTime under %s: %s → %s", (dateDisplay, value, want) => {
+    usePreferencesStore.getState().setPreferences({ dateDisplay });
     expect(formatDateTime(value)).toBe(want);
   });
 
-  it.each<[DateFormat, (v: DateInput) => string, DateInput, string]>([
+  const today = NOW;
+  const earlier = at(-2 * DAY);
+  it.each<[DateDisplay, (v: DateInput) => string, DateInput, string]>([
+    // Automatic: a place that was relative keeps the old wording (its "auto"
+    // argument), a fixed clock stays one, the server's text stays as sent.
+    ["auto", (v) => formatDateTime(v, "—", "relative"), at(-30_000), "30s ago"],
+    ["auto", (v) => formatDateTime(v, "—", "relative"), at(-2 * DAY), "2d ago"],
+    ["auto", (v) => formatExactDateTime(v, "—", "relative"), past, "5m ago"],
+    ["auto", (v) => formatExactDateTime(v, "—", "clock"), past, isoTime(past)],
+    ["auto", (v) => formatDateValue(v, { exact: true, auto: "as-sent" }), "2026-09-03T11:55:00Z", "2026-09-03T11:55:00Z"],
+    ["auto", formatDate, farPast, farPast.toLocaleDateString()],
+    ["relative", (v) => formatDateTime(v, "—", "relative"), at(-30_000), "now"],
+    ["iso", (v) => formatDateValue(v, { auto: "as-sent" }), past.toISOString(), `${isoDate(past)}T${isoTime(past)}${offset(past)}`],
+    // A narrow cell: the clock today, the date otherwise; Automatic keeps the place's form.
+    ["iso", (v) => formatDateValue(v, { compact: true }), today, isoTime(today).slice(0, 5)],
+    ["iso", (v) => formatDateValue(v, { compact: true }), earlier, isoDate(earlier)],
+    ["locale", (v) => formatDateValue(v, { compact: true }), earlier, earlier.toLocaleDateString()],
+    ["auto", (v) => formatDateValue(v, { compact: true }), earlier, earlier.toLocaleString()],
+    // A bare date is that calendar day in any zone, not UTC midnight.
+    ["iso", formatDate, "2026-11-16", "2026-11-16"],
     // A date alone stays a date alone, counted in calendar days.
     ["relative", formatDate, NOW, "today"],
     ["relative", formatDate, at(-DAY), "yesterday"],
@@ -169,15 +191,15 @@ describe("dates under the Date format preference", () => {
     ["relative", (v) => formatTimestampLong(Number(v)), past.getTime(), `${pad2(past.getMonth() + 1)}/${pad2(past.getDate())} ${pad2(past.getHours())}:${pad2(past.getMinutes())}`],
     ["iso", (v) => formatTimestampLong(Number(v)), past.getTime(), `${pad2(past.getMonth() + 1)}-${pad2(past.getDate())} ${pad2(past.getHours())}:${pad2(past.getMinutes())}`],
     ["iso", (v) => formatAxisDay(Number(v)), past.getTime(), `${pad2(past.getMonth() + 1)}-${pad2(past.getDate())}`],
-  ])("under %s, %o of %s is %s", (dateFormat, fn, value, want) => {
-    usePreferencesStore.getState().setPreferences({ dateFormat });
+  ])("under %s, %o of %s is %s", (dateDisplay, fn, value, want) => {
+    usePreferencesStore.getState().setPreferences({ dateDisplay });
     expect(fn(value)).toBe(want);
   });
 
-  it.each<DateFormat>(["relative", "iso", "locale"])(
+  it.each<DateDisplay>(["auto", "relative", "iso", "locale"])(
     "under %s, a missing, zero or unreadable value reads as the fallback or as sent",
-    (dateFormat) => {
-      usePreferencesStore.getState().setPreferences({ dateFormat });
+    (dateDisplay) => {
+      usePreferencesStore.getState().setPreferences({ dateDisplay });
       expect(formatDateTime(null)).toBe("—");
       expect(formatDateTime(undefined, "Never")).toBe("Never");
       expect(formatDateTime("", "Never")).toBe("Never");

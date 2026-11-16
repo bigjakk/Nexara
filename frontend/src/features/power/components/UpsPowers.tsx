@@ -191,7 +191,7 @@ export function UpsPowers({ device }: { device: UpsDevice }) {
                     <TableCell className="text-[12.5px] text-muted-foreground">
                       {c.missed === 0
                         ? "Logged in"
-                        : `Gone since ${formatDateTime(c.last_seen_at)}`}
+                        : `Gone since ${formatDateTime(c.last_seen_at, "—", "relative")}`}
                     </TableCell>
                   </TableRow>
                 ))}

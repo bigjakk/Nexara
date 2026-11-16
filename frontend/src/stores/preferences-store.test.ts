@@ -7,6 +7,7 @@ const STORAGE_KEY = "nexara-preferences";
 const defaultPreferences: UserPreferences = {
   byteUnit: "binary",
   dateFormat: "relative",
+  dateDisplay: "auto",
   refreshInterval: 30,
   accentColor: "default",
   language: "en",
@@ -35,6 +36,13 @@ describe("preferences-store — defaults", () => {
   it("has the correct default dateFormat", () => {
     const { preferences } = usePreferencesStore.getState();
     expect(preferences.dateFormat).toBe("relative");
+  });
+
+  // Automatic: each place as it was before the Date format was honoured. The
+  // retired dateFormat keeps its stored "relative", which nothing reads.
+  it("defaults the date display to auto", () => {
+    const { preferences } = usePreferencesStore.getState();
+    expect(preferences.dateDisplay).toBe("auto");
   });
 
   it("has the correct default refreshInterval", () => {
@@ -185,6 +193,7 @@ describe("preferences-store — loadFromJSON", () => {
     const full: UserPreferences = {
       byteUnit: "decimal",
       dateFormat: "locale",
+      dateDisplay: "iso",
       refreshInterval: 5,
       accentColor: "red",
       language: "en",

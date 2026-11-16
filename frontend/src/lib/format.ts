@@ -1,7 +1,7 @@
 import i18n from "@/lib/i18n";
 import {
   usePreferencesStore,
-  type DateFormat,
+  type DateDisplay,
 } from "@/stores/preferences-store";
 
 const BINARY_UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"] as const;
@@ -69,9 +69,12 @@ export function pad2(n: number): string {
 // ---------------------------------------------------------------------------
 // Dates and times. Every date the app shows goes through here, so the Date
 // format chosen under Settings → Appearance decides how it reads:
+//   auto     — the default: what each place showed before the choice was
+//              honoured. A place that was relative says so (`auto:
+//              "relative"`, old "3m ago" wording); the rest use the locale;
 //   relative — "5m ago" / "in 3h", the exact time in formatExactDateTime;
 //   iso      — ISO 8601 in the browser's zone with its offset, sortable;
-//   locale   — the browser's locale, as the app showed every date before.
+//   locale   — the browser's locale.
 // A number is milliseconds since the epoch (pass a PVE unix time × 1000); 0
 // means "never set" and reads as the fallback. lib/date-format.guard.test.ts
 // fails on a date formatted anywhere else.
@@ -80,14 +83,23 @@ export function pad2(n: number): string {
 /** A timestamp as the API sends it: ISO-8601 text, epoch milliseconds or a Date. */
 export type DateInput = string | number | Date | null | undefined;
 
-function dateFormat(): DateFormat {
-  return usePreferencesStore.getState().preferences.dateFormat;
+function dateFormat(): DateDisplay {
+  return usePreferencesStore.getState().preferences.dateDisplay;
 }
+
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** The instant, null when there is none, or the raw text when it will not parse. */
 function toDate(value: DateInput): Date | null | string {
   if (value == null || value === "" || value === 0) return null;
-  const parsed = value instanceof Date ? value : new Date(value);
+  // A bare date is a calendar day here, not UTC midnight (which reads as the
+  // day before west of UTC).
+  const day = typeof value === "string" ? DATE_ONLY.exec(value) : null;
+  const parsed = day
+    ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]))
+    : value instanceof Date
+      ? value
+      : new Date(value);
   if (!Number.isNaN(parsed.getTime())) return parsed;
   // Text we cannot read is shown as sent: hiding it behind "Invalid Date"
   // helps nobody. A bad number or Date has nothing worth showing.
@@ -168,53 +180,92 @@ function relativeDate(d: Date, now: number): string {
 /** What a date shows: the date and time, the date alone, or the time alone. */
 export type DateKind = "datetime" | "date" | "time";
 
-function render(
-  d: Date,
-  kind: DateKind,
-  format: DateFormat,
-  locale: Intl.DateTimeFormatOptions | undefined,
-): string {
+/** What a place showed before the Date format was honoured, used under auto. */
+export type AutoStyle = "relative" | "clock" | "as-sent";
+
+export interface DateOptions {
+  kind?: DateKind | undefined;
+  fallback?: string | undefined;
+  /** Never relative: for a tooltip, or a date inside a sentence ("as of …"). */
+  exact?: boolean | undefined;
+  /** The place's own locale options (a long month, no seconds). */
+  locale?: Intl.DateTimeFormatOptions | undefined;
+  /** Under auto: "relative" where the place was relative, "clock" where it
+   *  showed a fixed 24-hour clock, "as-sent" where it showed the server's
+   *  text. Omitted: the locale. */
+  auto?: AutoStyle | undefined;
+  /** A narrow cell: an absolute value under iso or locale reads as the clock
+   *  for today and the date otherwise (DateTime puts the exact time beside). */
+  compact?: boolean | undefined;
+}
+
+function isToday(d: Date, now: number): boolean {
+  return isoDate(d) === isoDate(new Date(now));
+}
+
+function render(d: Date, o: DateOptions): string {
+  const kind = o.kind ?? "datetime";
+  const format = dateFormat();
+  const now = Date.now();
+  if (format === "auto") {
+    if (o.auto === "relative" && kind !== "time") {
+      return formatRelativeTime(d.toISOString());
+    }
+    if (o.auto === "clock") return isoTime(d);
+  }
+  const compact = o.compact === true && kind === "datetime" && format !== "auto";
   if (format === "iso") {
-    if (kind === "date") return isoDate(d);
+    if (kind === "date" || (compact && !isToday(d, now))) return isoDate(d);
+    if (compact) return isoTime(d).slice(0, 5);
     if (kind === "time") return isoTime(d);
     return `${isoDate(d)}T${isoTime(d)}${isoOffset(d)}`;
   }
   // A clock reading is never relative: "since 5m ago" says less than the time.
-  if (format === "relative" && kind !== "time") {
-    return kind === "date"
-      ? relativeDate(d, Date.now())
-      : relativeDateTime(d, Date.now());
+  if (format === "relative" && kind !== "time" && o.exact !== true) {
+    return kind === "date" ? relativeDate(d, now) : relativeDateTime(d, now);
   }
-  if (kind === "date") return d.toLocaleDateString(undefined, locale);
-  if (kind === "time") return d.toLocaleTimeString(undefined, locale);
-  return d.toLocaleString(undefined, locale);
+  if (compact) {
+    return isToday(d, now)
+      ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+      : d.toLocaleDateString();
+  }
+  if (kind === "date") return d.toLocaleDateString(undefined, o.locale);
+  if (kind === "time") return d.toLocaleTimeString(undefined, o.locale);
+  return d.toLocaleString(undefined, o.locale);
+}
+
+/** A date under the Appearance preference, or `fallback` when there is none. */
+export function formatDateValue(value: DateInput, options: DateOptions = {}): string {
+  const d = toDate(value);
+  if (d === null) return options.fallback ?? "—";
+  if (typeof d === "string") return d;
+  if (
+    options.auto === "as-sent" &&
+    typeof value === "string" &&
+    dateFormat() === "auto"
+  ) {
+    return value;
+  }
+  return render(d, options);
 }
 
 /**
- * A date under the Appearance preference, or `fallback` when there is none.
- * `locale` keeps a place's own locale options (a long month, no seconds) for
- * the locale format; iso and relative ignore it.
+ * What DateTime renders: the text, the exact time when the text is not it
+ * (relative, compact), and the instant for <time dateTime>.
  */
-export function formatDateValue(
+export function describeDate(
   value: DateInput,
-  {
-    kind = "datetime",
-    fallback = "—",
-    exact = false,
-    locale,
-  }: {
-    kind?: DateKind | undefined;
-    fallback?: string | undefined;
-    /** Never relative: for a tooltip, or a date inside a sentence ("as of …"). */
-    exact?: boolean | undefined;
-    locale?: Intl.DateTimeFormatOptions | undefined;
-  } = {},
-): string {
+  options: DateOptions = {},
+): { text: string; exact: string; iso: string } {
+  const text = formatDateValue(value, options);
   const d = toDate(value);
-  if (d === null) return fallback;
-  if (typeof d === "string") return d;
-  const format = dateFormat();
-  return render(d, kind, exact && format === "relative" ? "locale" : format, locale);
+  if (!(d instanceof Date)) return { text, exact: "", iso: "" };
+  const exact = formatDateValue(d, {
+    kind: options.kind,
+    locale: options.locale,
+    exact: true,
+  });
+  return { text, exact: exact === text ? "" : exact, iso: d.toISOString() };
 }
 
 /**
@@ -227,13 +278,24 @@ export function formatDateValue(
  * A text value that will not parse is returned verbatim: if the server sent
  * something we cannot read, showing it beats hiding it behind "Invalid Date".
  */
-export function formatDateTime(value: DateInput, fallback = "—"): string {
-  return formatDateValue(value, { fallback });
+export function formatDateTime(
+  value: DateInput,
+  fallback = "—",
+  auto?: AutoStyle,
+): string {
+  return formatDateValue(value, { fallback, auto });
 }
 
-/** The exact date and time, never relative: a hover title, a chart tooltip. */
-export function formatExactDateTime(value: DateInput, fallback = "—"): string {
-  return formatDateValue(value, { fallback, exact: true });
+/**
+ * The exact date and time, never relative: a hover title, a chart tooltip, a
+ * date inside a sentence. Under auto, `auto` keeps what the place showed before.
+ */
+export function formatExactDateTime(
+  value: DateInput,
+  fallback = "—",
+  auto?: AutoStyle,
+): string {
+  return formatDateValue(value, { fallback, exact: true, auto });
 }
 
 /** The date alone under the preference ("today", "2026-03-08", "3/8/2026"). */
