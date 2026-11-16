@@ -59,6 +59,7 @@ type Entry struct {
 	Name        string `json:"name"`
 	Type        string `json:"type"`
 	Status      string `json:"status"`
+	RunState    string `json:"run_state,omitempty"` // a running VM's halted QEMU state
 	ClusterID   string `json:"cluster_id"`
 	ClusterName string `json:"cluster_name"`
 	// LatestBackup and BackupCount are the PBS figures, unchanged, and remain
@@ -366,6 +367,7 @@ func Compute(ctx context.Context, q Querier, scope Scope, opts Options) ([]Entry
 			Name:        vm.Name,
 			Type:        vm.Type,
 			Status:      vm.Status,
+			RunState:    vm.RunState,
 			ClusterID:   vm.ClusterID.String(),
 			ClusterName: vm.ClusterName,
 			Eligibility: Eligible,

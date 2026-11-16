@@ -69,3 +69,13 @@ it("filters the guests by the figure that is pressed", async () => {
   await user.selectOptions(screen.getByLabelText("Coverage"), "all");
   expect(screen.getByText("vbr01-worker01")).toBeInTheDocument();
 });
+
+// A guest's state is read beside its run state: a paused VM's is not Running.
+it("shows a halted guest in its halted state", async () => {
+  vi.mocked(apiClient.list).mockResolvedValue([
+    { ...guest(100, "linux01", "recent"), run_state: "watchdog" },
+  ]);
+  renderWithProviders(<BackupCoverageReport />);
+
+  expect(await screen.findByText("Watchdog fired")).toBeInTheDocument();
+});

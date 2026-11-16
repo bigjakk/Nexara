@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useThemeStore } from "@/stores/theme-store";
 import { StatusIcon } from "@/components/StatusIcon";
+import { guestState } from "@/lib/guest-state";
 import {
   useCreateResourceStore,
   type CreateKind,
@@ -808,6 +809,7 @@ export function SearchBar() {
                             name: r.name,
                             kind: r.type === "ct" ? "ct" : "vm",
                             status: r.status ?? "unknown",
+                            runState: r.run_state,
                             currentNode: r.node ?? "",
                             template: r.template ?? false,
                           }}
@@ -819,7 +821,12 @@ export function SearchBar() {
                               handleSelect(r);
                             }}
                           >
-                            <StatusIcon status={r.status ?? "unknown"} />
+                            <StatusIcon
+                              status={guestState(
+                                r.status ?? "unknown",
+                                r.run_state,
+                              )}
+                            />
                             <RowIcon>{getIcon(r.type)}</RowIcon>
                             <span className="min-w-0 truncate">{r.name}</span>
                             <RowAside>

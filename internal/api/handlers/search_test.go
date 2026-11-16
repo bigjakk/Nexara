@@ -62,3 +62,34 @@ func TestGlobalSearchFindsUps(t *testing.T) {
 		}
 	}
 }
+
+// A guest result carries its halted QEMU state, which the SPA's dot shows in
+// place of Running.
+func TestGlobalSearchCarriesRunState(t *testing.T) {
+	t.Parallel()
+	vm := db.ListAllVMsRow{ID: uuid.New(), ClusterID: uuid.New(), Vmid: 101, Name: "linux01", Type: "qemu", Status: "running", RunState: "io-error"}
+	dbtx := &auditRowsDBTX{rowsFor: map[string][]any{"ListAllVMs": {vm}}}
+	h := NewSearchHandler(db.New(dbtx), testEncryptionKey, nil)
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", newGrantEngine("view:cluster"))
+		return c.Next()
+	})
+	app.Get("/search", withRequestParams(t, apischema.Properties{"q": {Type: apischema.String}}, nil, h.GlobalSearch))
+	resp, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/search?q=linux", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	var page struct {
+		Items []searchResult `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &page); err != nil {
+		t.Fatalf("%v (%s)", err, raw)
+	}
+	if len(page.Items) != 1 || page.Items[0].RunState != "io-error" {
+		t.Errorf("results %s, want linux01 with run_state io-error", raw)
+	}
+}

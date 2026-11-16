@@ -299,7 +299,7 @@ export function BackupCoverageReport() {
                 </TableCell>
                 <TableCell>{entry.cluster_name}</TableCell>
                 <TableCell>
-                  <StatusBadge status={entry.status} />
+                  <StatusBadge status={entry.status} runState={entry.run_state} />
                 </TableCell>
                 <TableCell>
                   <CoverageState status={entry.coverage_status} />

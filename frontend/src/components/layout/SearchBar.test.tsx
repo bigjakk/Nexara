@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
 import { setupUser } from "@/test/user";
@@ -49,5 +49,25 @@ describe("SearchBar", () => {
     await user.type(screen.getByRole("combobox"), "power");
     expect(await screen.findByText(/No results/i)).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Power/ })).not.toBeInTheDocument();
+  });
+
+  // A running VM whose vCPUs are halted reads as its halted state here too,
+  // not as Running (lib/guest-state.ts is the one source).
+  it("shows a halted VM's dot as its halted state", async () => {
+    useAuthStore.setState({ globalPermissions: ["view:cluster"], permissions: ["view:cluster"] });
+    vi.mocked(apiClient.list).mockImplementation((path: unknown) =>
+      Promise.resolve(
+        (String(path).startsWith("/api/v1/search")
+          ? [{ type: "vm", id: "v1", name: "linux01", vmid: 101, status: "running", run_state: "io-error", cluster_id: "c1", cluster_name: "cluster01" }]
+          : []) as never,
+      ),
+    );
+    const user = setupUser();
+    renderWithProviders(<SearchBar />);
+
+    await user.click(screen.getByRole("button", { name: /Search or jump to/ }));
+    await user.type(screen.getByRole("combobox"), "linux");
+    const row = await screen.findByRole("option", { name: /linux01/ });
+    expect(within(row).getByRole("img", { name: "I/O error" })).toBeInTheDocument();
   });
 });

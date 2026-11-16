@@ -259,7 +259,7 @@ WITH favs AS MATERIALIZED (
 )
 SELECT f.cluster_id, f.created_at,
        c.name AS cluster_name,
-       v.id AS vm_id, v.vmid, v.name AS vm_name, v.type, v.status,
+       v.id AS vm_id, v.vmid, v.name AS vm_name, v.type, v.status, v.run_state,
        v.template, v.ostype, v.config_ostype,
        n.name AS node_name
 FROM favs f
@@ -283,6 +283,7 @@ type ListFavoriteVMsRow struct {
 	VmName       string    `json:"vm_name"`
 	Type         string    `json:"type"`
 	Status       string    `json:"status"`
+	RunState     string    `json:"run_state"`
 	Template     bool      `json:"template"`
 	Ostype       string    `json:"ostype"`
 	ConfigOstype string    `json:"config_ostype"`
@@ -332,6 +333,7 @@ func (q *Queries) ListFavoriteVMs(ctx context.Context, arg ListFavoriteVMsParams
 			&i.VmName,
 			&i.Type,
 			&i.Status,
+			&i.RunState,
 			&i.Template,
 			&i.Ostype,
 			&i.ConfigOstype,

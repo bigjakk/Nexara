@@ -14,6 +14,7 @@ import {
   treeRowClass,
 } from "@/components/layout/tree-row-style";
 import { StatusIcon } from "@/components/StatusIcon";
+import { guestState } from "@/lib/guest-state";
 import { OSIcon } from "@/components/OSIcon";
 import { VMIcon } from "@/components/VMIcon";
 import { classifyOS } from "@/lib/os-classify";
@@ -117,7 +118,7 @@ function FavoriteRow({
 
       {fav.resource_type === "vm" && (
         <>
-          <StatusIcon status={fav.status} />
+          <StatusIcon status={guestState(fav.status, fav.run_state)} />
           <VMIcon type={fav.vm_kind} template={fav.template} />
           {(classifyOS(fav.ostype) !== "unknown" ||
             classifyOS(fav.config_ostype) !== "unknown") && (
@@ -151,6 +152,7 @@ function FavoriteRow({
           name: fav.name,
           kind: fav.vm_kind === "lxc" ? "ct" : "vm",
           status: fav.status,
+          runState: fav.run_state,
           currentNode: fav.node_name,
           template: fav.template,
         }}

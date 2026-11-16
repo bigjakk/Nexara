@@ -96,6 +96,8 @@ type favoriteResponse struct {
 	TargetID string `json:"target_id"`
 	Name     string `json:"name"`
 	Status   string `json:"status"`
+	// RunState is a running guest's halted QEMU state, read beside Status.
+	RunState string `json:"run_state,omitempty"`
 	// VMKind is "qemu" or "lxc" for a guest and empty otherwise. It selects the
 	// SPA's /inventory/:kind route segment as well as the icon.
 	VMKind string `json:"vm_kind"`
@@ -202,6 +204,7 @@ func (h *FavoritesHandler) ListFavorites(c fiber.Ctx, _ *apischema.Params) error
 				TargetID:     r.VmID.String(),
 				Name:         r.VmName,
 				Status:       r.Status,
+				RunState:     r.RunState,
 				VMKind:       r.Type,
 				VMID:         r.Vmid,
 				Template:     r.Template,

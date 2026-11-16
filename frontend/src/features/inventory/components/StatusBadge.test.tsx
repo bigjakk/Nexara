@@ -17,7 +17,19 @@ describe("StatusBadge", () => {
   });
 
   it("renders arbitrary unknown statuses with the raw value as label", () => {
-    render(<StatusBadge status="io-error" />);
-    expect(screen.getByText("Io-error")).toBeInTheDocument();
+    render(<StatusBadge status="hibernating" />);
+    expect(screen.getByText("Hibernating")).toBeInTheDocument();
+  });
+
+  // A running VM with halted vCPUs is shown as its halted state, as the guest
+  // page and the tables show it; a run state beside any other status is not.
+  it.each([
+    ["running", "io-error", "I/O error"],
+    ["running", "suspended", "Asleep"],
+    ["running", "", "Running"],
+    ["stopped", "io-error", "Stopped"],
+  ])("reads %s with run state %j as %s", (status, runState, label) => {
+    render(<StatusBadge status={status} runState={runState} />);
+    expect(screen.getByText(label)).toBeInTheDocument();
   });
 });

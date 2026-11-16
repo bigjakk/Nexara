@@ -67,7 +67,7 @@ WITH favs AS MATERIALIZED (
 )
 SELECT f.cluster_id, f.created_at,
        c.name AS cluster_name,
-       v.id AS vm_id, v.vmid, v.name AS vm_name, v.type, v.status,
+       v.id AS vm_id, v.vmid, v.name AS vm_name, v.type, v.status, v.run_state,
        v.template, v.ostype, v.config_ostype,
        n.name AS node_name
 FROM favs f

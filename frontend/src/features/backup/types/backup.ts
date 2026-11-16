@@ -332,6 +332,8 @@ export interface BackupCoverageEntry {
   name: string;
   type: string;
   status: string;
+  /** A running VM's halted QEMU state (VMResponse.run_state), if any. */
+  run_state?: string;
   cluster_id: string;
   cluster_name: string;
   /** PBS figures. A Veeam-only guest has null/0 here and is still protected. */

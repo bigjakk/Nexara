@@ -293,6 +293,8 @@ export interface Favorite {
   target_id: string;
   name: string;
   status: string;
+  /** A running guest's halted QEMU state (VMResponse.run_state), if any. */
+  run_state?: string;
   /** "qemu" | "lxc" for a guest, "" otherwise. Picks the route and the icon. */
   vm_kind: string;
   vmid: number;

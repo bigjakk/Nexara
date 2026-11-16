@@ -8,6 +8,8 @@ export interface SearchResult {
   name: string;
   node?: string;
   status?: string;
+  /** A running VM's halted QEMU state (VMResponse.run_state), if any. */
+  run_state?: string;
   cluster_id: string;
   cluster_name: string;
   vmid?: number;

@@ -41,6 +41,8 @@ interface GuestRow {
   name: string;
   /** PVE power state (e.g. "running", "stopped"); "" when the guest is unknown. */
   status: string;
+  /** A running VM's halted QEMU state, if any. */
+  runState: string;
   /** Resolved host node name; "" when unknown. */
   nodeName: string;
   cpuCount: number;
@@ -107,6 +109,7 @@ export function StorageGuestTable({
         guestKind: kind,
         name: meta?.name ?? `(unknown ${kind === "ct" ? "container" : "VM"})`,
         status: meta?.status ?? "",
+        runState: meta?.run_state ?? "",
         nodeName: meta ? (nodeNameById.get(meta.node_id) ?? "") : "",
         cpuCount: meta?.cpu_count ?? 0,
         memTotal: meta?.mem_total ?? 0,
@@ -280,7 +283,7 @@ export function StorageGuestTable({
                   </TableCell>
                   <TableCell>
                     {row.status ? (
-                      <StatusBadge status={row.status} />
+                      <StatusBadge status={row.status} runState={row.runState} />
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}

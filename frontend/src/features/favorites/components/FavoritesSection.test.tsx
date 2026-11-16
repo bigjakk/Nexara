@@ -181,6 +181,14 @@ describe("FavoritesSection", () => {
     expect(await screen.findByLabelText("Maintenance")).toBeInTheDocument();
   });
 
+  // A starred VM with halted vCPUs reads as the tree reads it, not Running.
+  it("shows a halted guest's dot as its halted state", async () => {
+    serveFavorites([favorite({ run_state: "guest-panicked" })]);
+    renderSection();
+
+    expect(await screen.findByRole("img", { name: "Panicked" })).toBeInTheDocument();
+  });
+
   it("folds away and back", async () => {
     serveFavorites([favorite()]);
     renderSection();

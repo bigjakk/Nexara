@@ -33,6 +33,7 @@ type searchResult struct {
 	Name        string `json:"name"`
 	Node        string `json:"node,omitempty"`
 	Status      string `json:"status,omitempty"`
+	RunState    string `json:"run_state,omitempty"` // a running VM's halted QEMU state
 	ClusterID   string `json:"cluster_id"`
 	ClusterName string `json:"cluster_name"`
 	VMID        int    `json:"vmid,omitempty"`
@@ -95,6 +96,7 @@ func (h *SearchHandler) GlobalSearch(c fiber.Ctx, p *apischema.Params) error {
 					Name:        vm.Name,
 					Node:        nodeName,
 					Status:      vm.Status,
+					RunState:    vm.RunState,
 					ClusterID:   vm.ClusterID.String(),
 					ClusterName: vm.ClusterName,
 					VMID:        int(vm.Vmid),
