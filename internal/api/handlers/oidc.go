@@ -801,7 +801,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 			return stepUpRedirect(c, h.refuseStepUp(c, stepUp, "provider_error"))
 		}
 		// The provider's own words go to the log, for the operator; the page shows its own.
-		slog.Warn("oidc callback: the identity provider came back without a code",
+		slog.Warn("oidc callback: the identity provider came back without a code", "ip", c.IP(),
 			"error", auditSafe(c.Query("error")), "error_description", auditSafe(c.Query("error_description")))
 		return loginRefused(c, oidcErrProvider)
 	}
