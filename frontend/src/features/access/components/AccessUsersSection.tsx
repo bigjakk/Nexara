@@ -68,6 +68,7 @@ import { TokenSecretDialog } from "./TokenSecretDialog";
 import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
 import { isOverridable, refusedBeyondOverride } from "./selfCredentialRefusal";
 import { holdFocusInDialog } from "./holdFocusInDialog";
+import { DateTime } from "@/components/DateTime";
 
 interface Props {
   clusterId: string;
@@ -75,9 +76,14 @@ interface Props {
 }
 
 /** Renders a PVE expiry timestamp; 0 or absent means "never". */
-function expiryLabel(expire?: number): string {
-  if (!expire) return "Never";
-  return new Date(expire * 1000).toLocaleDateString();
+function expiryLabel(expire?: number) {
+  return (
+    <DateTime
+      value={expire === undefined ? null : expire * 1000}
+      kind="date"
+      fallback="Never"
+    />
+  );
 }
 
 function errorMessage(err: unknown, fallback: string): string {
