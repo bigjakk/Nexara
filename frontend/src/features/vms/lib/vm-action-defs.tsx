@@ -61,7 +61,11 @@ export const lifecycleActions: ActionConfig[] = [
     icon: <Play className="h-4 w-4" />,
     variant: "outline",
     needsConfirm: false,
-    showWhen: (s, k) => s === "stopped" || (s === "suspended" && k === "ct"),
+    // Not for a suspended container: pct suspend checkpoints it to disk and
+    // stops it (lxc-checkpoint -s, vm_suspend in pve-container's
+    // src/PVE/API2/LXC/Status.pm), and only resume restores that checkpoint
+    // (lxc-checkpoint -r); a start boots it afresh and leaves it behind.
+    showWhen: (s) => s === "stopped",
   },
   {
     action: "shutdown",

@@ -24,7 +24,8 @@ describe("lifecycleActions per guest state", () => {
     expect(offered(state)).toEqual(actions);
   });
 
-  it("leaves a suspended container its Start and Resume", () => {
-    expect(offered("suspended", "ct")).toEqual(["start", "resume"]);
+  // Its checkpoint comes back only by resume; a start would boot it afresh.
+  it("offers a suspended container Resume, not Start", () => {
+    expect(offered("suspended", "ct")).toEqual(["resume"]);
   });
 });
