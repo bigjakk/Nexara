@@ -28,8 +28,6 @@ const ALLOWED: Record<string, string> = {
     "reads the browser's time zone name to send with a schedule; not display",
   "/src/features/history/lib/history.ts toDateString":
     "compares whether two instants fall on the same day; not display",
-  "/src/features/admin/pages/UsersPage.tsx toLocaleDateString":
-    "pending, lane L24 round 2",
 };
 
 const ALWAYS_DATE = new Set([

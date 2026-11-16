@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
+import { DateTime } from "@/components/DateTime";
 import { MoreHorizontal, UserPlus } from "lucide-react";
 import {
   useUsers,
@@ -148,7 +149,7 @@ export function UsersPage() {
                     />
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {new Date(user.created_at).toLocaleDateString()}
+                    <DateTime value={user.created_at} kind="date" />
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
