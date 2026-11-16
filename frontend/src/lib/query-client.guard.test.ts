@@ -11,6 +11,9 @@ import ts from "typescript";
  * This reads the source and fails on such a call: put the onError on the hook
  * (errorsHandledLocally) and settle the call through useSaveOutcome.
  *
+ * It fails too on settle(x.mutateAsync(…), { onError }) through useSaveOutcome
+ * when x's hook is not opted out: that failure is shown and toasted.
+ *
  * A hook counts as having one when its useMutation options hold an onError, a
  * spread of an object in the same file that does, or a spread of
  * errorsHandledLocally; one spread only on a flag counts where the hook is
@@ -25,7 +28,10 @@ const sources: Record<string, string> = import.meta.glob(
   { eager: true, query: "?raw", import: "default" },
 );
 
-/** "param": only when the hook is called with `true` (errorsShownByCaller). */
+/**
+ * "param": only when the hook is called with `true` for its flag, which is its
+ * last parameter (errorsShownByCaller = false).
+ */
 type Has = "yes" | "no" | "unknown" | "param";
 
 function parse(file: string): ts.SourceFile {
@@ -98,6 +104,9 @@ function optionsOfUseMutation(node: ts.Node, sf: ts.SourceFile) {
   return out;
 }
 
+/** Where each flag-gated hook takes its flag: hook name -> argument index. */
+const flagAt = new Map<string, number>();
+
 /** file -> hook name -> whether its mutation has an onError. */
 function mutationHooks(files: ts.SourceFile[]) {
   const hooks = new Map<string, Map<string, Has>>();
@@ -105,9 +114,11 @@ function mutationHooks(files: ts.SourceFile[]) {
     const visit = (node: ts.Node) => {
       let name: string | null = null;
       let body: ts.Node | undefined;
+      let params = 0;
       if (ts.isFunctionDeclaration(node) && node.name) {
         name = node.name.text;
         body = node.body;
+        params = node.parameters.length;
       } else if (
         ts.isVariableDeclaration(node) &&
         ts.isIdentifier(node.name) &&
@@ -117,12 +128,15 @@ function mutationHooks(files: ts.SourceFile[]) {
       ) {
         name = node.name.text;
         body = node.initializer.body;
+        params = node.initializer.parameters.length;
       }
       if (name !== null && /^use[A-Z]/.test(name) && body !== undefined) {
         const opts = optionsOfUseMutation(body, sf);
         if (opts.length === 1 && opts[0]) {
           const byName = hooks.get(sf.fileName) ?? new Map<string, Has>();
-          byName.set(name, hasOnError(opts[0], sf));
+          const has = hasOnError(opts[0], sf);
+          byName.set(name, has);
+          if (has === "param") flagAt.set(`${sf.fileName}#${name}`, params - 1);
           hooks.set(sf.fileName, byName);
         }
       }
@@ -161,6 +175,9 @@ function scan() {
   const hooks = mutationHooks(files);
   const findings: Finding[] = [];
   let callsWithOptions = 0;
+  let settled = 0;
+  // Files that call a flag-gated hook with a flag the scan cannot read.
+  const unjudged = new Set<string>();
   for (const sf of files) {
     // Where each imported name comes from, and what each local holds.
     const imported = new Map<string, string>();
@@ -176,11 +193,15 @@ function scan() {
         continue;
       for (const el of named.elements) imported.set(el.name.text, file);
     }
-    const hookOf = (callee: string): Has | undefined => {
-      const file = imported.get(callee) ?? sf.fileName;
-      return hooks.get(file)?.get(callee);
-    };
+    const fileOf = (callee: string) => imported.get(callee) ?? sf.fileName;
+    const hookOf = (callee: string): Has | undefined =>
+      hooks.get(fileOf(callee))?.get(callee);
     const locals = new Map<string, { hook: string; has: Has }>();
+    const settlers = new Set<string>();
+    const report = (node: ts.Node, hook: string) => {
+      const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+      findings.push({ at: `${sf.fileName}:${String(line + 1)}`, hook });
+    };
     const visit = (node: ts.Node) => {
       if (
         ts.isVariableDeclaration(node) &&
@@ -196,10 +217,25 @@ function scan() {
           ts.isObjectLiteralExpression(arg)
             ? hasOnError(arg, sf)
             : hookOf(callee);
+        if (callee === "useSaveOutcome" && ts.isIdentifier(node.name)) {
+          settlers.add(node.name.text);
+        }
         if (has === "param") {
-          has = call.arguments.some((a) => a.kind === ts.SyntaxKind.TrueKeyword)
-            ? "yes"
-            : "no";
+          // Literal true opts out; absent or literal false does not; any other
+          // flag is not judged, and is pinned in the test below.
+          const flag =
+            call.arguments[flagAt.get(`${fileOf(callee)}#${callee}`) ?? -1];
+          if (flag?.kind === ts.SyntaxKind.TrueKeyword) {
+            has = "yes";
+          } else if (
+            flag === undefined ||
+            flag.kind === ts.SyntaxKind.FalseKeyword
+          ) {
+            has = "no";
+          } else {
+            has = "unknown";
+            unjudged.add(sf.fileName);
+          }
         }
         if (has !== undefined) {
           if (ts.isIdentifier(node.name)) {
@@ -227,13 +263,25 @@ function scan() {
         if (target !== undefined && ts.isObjectLiteralExpression(opts)) {
           callsWithOptions++;
           if (target.has === "no" && hasOnError(opts, sf) === "yes") {
-            const { line } = sf.getLineAndCharacterOfPosition(
-              node.getStart(sf),
-            );
-            findings.push({
-              at: `${sf.fileName}:${String(line + 1)}`,
-              hook: target.hook,
-            });
+            report(node, target.hook);
+          }
+        }
+        // settle(x.mutateAsync(…), { onError }): useSaveOutcome shows the
+        // failure, so the hook must be opted out of the toast as well.
+        const save = node.arguments[0];
+        if (
+          ts.isIdentifier(e) &&
+          settlers.has(e.text) &&
+          save !== undefined &&
+          ts.isCallExpression(save) &&
+          ts.isPropertyAccessExpression(save.expression) &&
+          save.expression.name.text === "mutateAsync" &&
+          ts.isObjectLiteralExpression(opts)
+        ) {
+          const hook = locals.get(save.expression.expression.getText(sf));
+          if (hook !== undefined) {
+            settled++;
+            if (hook.has === "no") report(node, hook.hook);
           }
         }
       }
@@ -242,15 +290,21 @@ function scan() {
     visit(sf);
   }
   const hookCount = [...hooks.values()].reduce((n, m) => n + m.size, 0);
-  return { findings, callsWithOptions, hookCount };
+  return { findings, callsWithOptions, settled, unjudged, hookCount };
 }
 
 describe("a failed mutation", () => {
   it("is never handed an onError at the call by a hook that has none", () => {
-    const { findings, callsWithOptions, hookCount } = scan();
+    const { findings, callsWithOptions, settled, unjudged, hookCount } = scan();
     expect(findings).toEqual([]);
+    // The one caller whose opt-out is a flag the scan cannot read: it passes
+    // `onError !== undefined` and settles only when that holds.
+    expect([...unjudged]).toEqual([
+      "/src/features/clusters/components/node/NodeShutdownConfirm.tsx",
+    ]);
     // The floor: the scan still finds the hooks and the calls it judges.
     expect(hookCount).toBeGreaterThan(250);
     expect(callsWithOptions).toBeGreaterThan(100);
+    expect(settled).toBeGreaterThan(50);
   });
 });
