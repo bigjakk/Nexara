@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { ApiClientError } from "@/lib/api-client";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   useSyslogConfig,
   useSaveSyslogConfig,
@@ -141,6 +142,7 @@ export function SyslogConfigCard() {
   const savedConfig = syslogQuery.data;
   const saveMutation = useSaveSyslogConfig();
   const testMutation = useTestSyslog();
+  const settle = useSaveOutcome();
 
   const [config, setConfig] = useState<SyslogConfig>({
     enabled: false,
@@ -194,11 +196,21 @@ export function SyslogConfigCard() {
     reply !== undefined && "warning" in reply ? reply.warning : null;
 
   const handleSave = () => {
-    saveMutation.mutate(config);
+    settle(saveMutation.mutateAsync(config), {
+      action: "Saving the syslog settings",
+      onError: () => undefined, // shown below from the mutation's state
+    });
   };
 
   const handleTest = () => {
-    testMutation.mutate(config);
+    settle(testMutation.mutateAsync(config), {
+      action: "Testing syslog",
+      onError: () => undefined, // shown below from the mutation's state
+      lateFailure: (e) =>
+        e instanceof Error
+          ? `Testing syslog failed: ${testFailure(e)}`
+          : undefined,
+    });
   };
 
   const update = (partial: Partial<SyslogConfig>) => {

@@ -53,7 +53,12 @@ function mutation(mutate: Send, outcome?: Outcome) {
   const reply = outcome && "reply" in outcome ? outcome.reply : undefined;
   const error = outcome && "error" in outcome ? outcome.error : null;
   return {
-    mutate,
+    // Records the body and stays out: what the card does with an answer is
+    // given by `outcome` instead.
+    mutateAsync: (cfg: SyslogConfig) => {
+      mutate(cfg);
+      return new Promise<never>(() => undefined);
+    },
     isPending: false,
     isSuccess: reply !== undefined,
     isError: error !== null,

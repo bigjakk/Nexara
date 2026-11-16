@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath, type ApiPath } from "@/lib/api-path";
 import { usePermissions } from "@/hooks/usePermissions";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 import { useRefreshInterval } from "@/lib/refresh-interval";
 
@@ -135,6 +136,7 @@ export function useSyslogConfig() {
 export function useSaveSyslogConfig() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (cfg: SyslogConfig) =>
       apiClient.put<SyslogConfig | SyslogSaveWarning>(
         apiPath`/api/v1/audit-log/syslog-config`,
@@ -148,6 +150,7 @@ export function useSaveSyslogConfig() {
 
 export function useTestSyslog() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (cfg: SyslogConfig) =>
       apiClient.post<{ success: boolean; error?: string }>(
         apiPath`/api/v1/audit-log/syslog-test`,
