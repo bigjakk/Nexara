@@ -1880,6 +1880,10 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 	// node the VM lives on: find it now, before anything below is decided on the
 	// node or changed on the cluster.
 	var existingVM *db.Vm
+	// stopFirst is set only once the caller was checked for execute on the
+	// guest: a row that says stopped sends no stop (Proxmox itself refuses a
+	// restore over a guest that is running after all).
+	stopFirst := false
 	if req.Force {
 		vm, vmErr := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
 			ClusterID: clusterID,
@@ -1901,6 +1905,7 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 					"Restoring over a running guest stops it, which"); err != nil {
 					return err
 				}
+				stopFirst = true
 			}
 			// Auto-correct to the correct node.
 			req.TargetNode = existingNode.Name
@@ -1938,7 +1943,7 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 	archive := pveStorageName + ":backup/" + req.BackupType + "/" + req.BackupID + "/" + backupTime.Format(time.RFC3339Nano)
 
 	// Stop the VM before overwriting.
-	if existingVM != nil {
+	if existingVM != nil && stopFirst {
 		var stopUpid string
 		var stopErr error
 		resourceType := "vm"
