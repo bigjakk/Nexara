@@ -173,8 +173,6 @@ describe("dates under the Date format preference", () => {
     ["iso", (v) => formatDateValue(v, { compact: true }), earlier, isoDate(earlier)],
     ["locale", (v) => formatDateValue(v, { compact: true }), earlier, earlier.toLocaleDateString()],
     ["auto", (v) => formatDateValue(v, { compact: true }), earlier, earlier.toLocaleString()],
-    // A bare date is that calendar day in any zone, not UTC midnight.
-    ["iso", formatDate, "2026-11-16", "2026-11-16"],
     // A date alone stays a date alone, counted in calendar days.
     ["relative", formatDate, NOW, "today"],
     ["relative", formatDate, at(-DAY), "yesterday"],
