@@ -609,7 +609,10 @@ A request whose head leaves its body's length open to another reading is
 refused with `400` and the `bad_request` envelope: a header line that starts
 with a space or tab — obsolete line folding, which continues the line above
 it — and `Transfer-Encoding: identity`, in any letter case, which the server
-would otherwise ignore. The connection is closed after the refusal.
+would otherwise ignore. The connection is closed after the refusal. So is a
+request with two `Content-Type` lines that differ, which is refused with `400`
+and the `bad_request` envelope before it reaches any endpoint; a line repeated
+byte for byte counts as one.
 
 Whenever the server answers a request without reading all of its body — one of
 the refusals above, the trailing-slash `400` among them, a `401`, `404` or
