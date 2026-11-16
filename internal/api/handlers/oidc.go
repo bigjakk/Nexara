@@ -775,15 +775,10 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		return stepUpRedirect(c, h.finishStepUp(c, stepUp, userInfo, oidcBindingSecure(cfg.RedirectUri), cfg.RelaxedStepUp))
 	}
 
-	user, exchangeCode, failure := h.provisionAndStoreExchange(c, cfg, userInfo)
+	_, exchangeCode, failure := h.provisionAndStoreExchange(c, cfg, userInfo)
 	if failure != "" {
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(failure))
 	}
-
-	// Through the shared path, so the row is published and forwarded to syslog like
-	// every other: c.Locals has no user on a callback, hence AuditLogAs.
-	details, _ := json.Marshal(map[string]string{"email": userInfo.Email, "ip": c.IP()})
-	AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), "oidc_callback", details)
 
 	return c.Redirect().Status(fiber.StatusFound).To("/oidc-callback?oidc_token=" + exchangeCode)
 }
@@ -1069,7 +1064,20 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 		return db.User{}, "", "Internal error"
 	}
 	oidcExchangeBinding.set(c, exchangeCode, secret, secure)
+	// The callback's row is written where the sign-in is finished: here, or for a sign-in
+	// left for its second factor once the code passes (FinishSignInAfterSecondFactor).
+	if finish {
+		h.auditOIDCCallback(c, user.ID, userInfo.Email)
+	}
 	return user, exchangeCode, ""
+}
+
+// auditOIDCCallback writes the oidc_callback row of a finished SSO sign-in, through the
+// shared path so the row is published and forwarded to syslog like every other: c.Locals
+// has no user on a callback, hence AuditLogAs.
+func (h *OIDCHandler) auditOIDCCallback(c fiber.Ctx, userID uuid.UUID, email string) {
+	details, _ := json.Marshal(map[string]string{"email": email, "ip": c.IP()})
+	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "oidc_callback", details)
 }
 
 // oidcExchangeTTL is how long the code Callback redirects the browser with can be
@@ -1334,6 +1342,7 @@ func (h *OIDCHandler) FinishSignInAfterSecondFactor(c fiber.Ctx, userID uuid.UUI
 		slog.Error("oidc sign-in after the second factor: could not finish it", "user_id", userID, "error", err)
 		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, oidcCouldNotCompleteMessage)
 	}
+	h.auditOIDCCallback(c, finished.ID, identity.Email)
 	return finished, nil
 }
 

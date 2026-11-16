@@ -73,6 +73,9 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 
 			untouched := func(when string) {
 				t.Helper()
+				if n := callbackRows(store); n != 0 {
+					t.Errorf("%s: %d oidc_callback rows before the sign-in was finished", when, n)
+				}
 				got := store.user(user.ID)
 				if got.OidcSubject != "" && !tc.taken || len(store.named("RevokeAllUserRoles")) != 0 || got.DisplayName != user.DisplayName {
 					t.Errorf("%s: subject %q, role syncs %d, name %q: changed before the second factor passed",
@@ -114,9 +117,18 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 			if len(store.named("RevokeAllUserRoles")) != 1 || len(assigned) != 1 || assigned[0] != tc.wantRole {
 				t.Errorf("roles revoked %d times, assigned %v; want replaced by %v alone", len(store.named("RevokeAllUserRoles")), assigned, tc.wantRole)
 			}
-			if n := len(store.liveSessionsOf(user.ID)); n != 1 {
-				t.Errorf("%d sessions, want 1", n)
+			if n := len(store.liveSessionsOf(user.ID)); n != 1 || callbackRows(store) != 1 {
+				t.Errorf("%d sessions, %d oidc_callback rows; want 1 and 1", n, callbackRows(store))
 			}
 		})
 	}
+}
+
+func callbackRows(store *epochStore) (n int) {
+	for _, action := range store.auditActions() {
+		if action == "oidc_callback" {
+			n++
+		}
+	}
+	return n
 }
