@@ -28,6 +28,7 @@ import {
   useTasks,
   type TaskRecord,
 } from "../api/tasks-queries";
+import { DateTime } from "@/components/DateTime";
 
 export type TaskLayout = ColumnLayout<TaskRecord, TaskSortKey, TaskCellCtx>;
 
@@ -141,7 +142,7 @@ function TaskRow({
               <span className="font-mono">{task.task_type || "—"}</span>
 
               <span className="text-muted-foreground">Started</span>
-              <span>{formatDateTime(task.started_at)}</span>
+              <span><DateTime value={task.started_at} /></span>
 
               <span className="text-muted-foreground">
                 {task.finished_at ? "Finished" : "Elapsed"}

@@ -13,9 +13,9 @@ import {
 import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
-import { formatDateTime } from "@/lib/format";
 import type { TaskRecord } from "../api/tasks-queries";
 import type { TaskCellCtx, TaskSortKey } from "./task-columns";
+import { DateTime } from "@/components/DateTime";
 
 /** A plain render helper rather than a component, so this module exports only
  *  data and fast refresh treats it as such. A finished task gets no mark, only
@@ -61,7 +61,7 @@ export const TASK_COLUMNS_WITH_VM: ColumnDef<
           className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${ctx.expanded ? "" : "-rotate-90"}`}
         />
         {statusIcon(ctx.display)}
-        {formatDateTime(task.started_at)}
+        <DateTime value={task.started_at} />
       </div>
     ),
   },
