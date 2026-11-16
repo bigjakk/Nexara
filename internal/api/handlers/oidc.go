@@ -102,6 +102,9 @@ type oidcConfigRequest struct {
 	// AllowPrivateAddress confirms an issuer on a private network address
 	// (checkOIDCIssuer).
 	AllowPrivateAddress bool
+	// AcknowledgeIssuerChange confirms moving the issuer of a configuration that
+	// accounts are linked under (requireOIDCIssuerChangeAck).
+	AcknowledgeIssuerChange bool
 }
 
 // oidcConfigFromParams reads the declared body.
@@ -132,6 +135,7 @@ func oidcConfigFromParams(p *apischema.Params) (oidcConfigRequest, error) {
 
 		AcknowledgeInsecureRedirect: p.Bool("acknowledge_insecure_redirect"),
 		AllowPrivateAddress:         p.Bool("allow_private_address"),
+		AcknowledgeIssuerChange:     p.Bool("acknowledge_issuer_change"),
 	}, nil
 }
 
@@ -157,6 +161,22 @@ type oidcConfigResponse struct {
 	// AllowPrivateAddress: the operator confirmed this configuration's issuer on
 	// a private network address.
 	AllowPrivateAddress bool `json:"allow_private_address"`
+
+	// LinkedAccounts is how many accounts are bound to an identity of this
+	// configuration's issuer: the ones a change of the issuer leaves refused.
+	LinkedAccounts int64 `json:"linked_accounts"`
+}
+
+// configResponse is toOIDCConfigResponse with the count of accounts linked under
+// the configuration's issuer.
+func (h *OIDCHandler) configResponse(ctx context.Context, cfg db.OidcConfig) (oidcConfigResponse, error) {
+	resp := toOIDCConfigResponse(cfg)
+	n, err := h.queries.CountUsersLinkedToIssuer(ctx, cfg.IssuerUrl)
+	if err != nil {
+		return oidcConfigResponse{}, fmt.Errorf("count linked accounts: %w", err)
+	}
+	resp.LinkedAccounts = n
+	return resp, nil
 }
 
 func toOIDCConfigResponse(cfg db.OidcConfig) oidcConfigResponse {
@@ -214,7 +234,9 @@ func (h *OIDCHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 
 	resp := make([]oidcConfigResponse, len(configs))
 	for i, cfg := range configs {
-		resp[i] = toOIDCConfigResponse(cfg)
+		if resp[i], err = h.configResponse(c.Context(), cfg); err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list OIDC configs")
+		}
 	}
 
 	return RespondItems(c, resp)
@@ -235,7 +257,11 @@ func (h *OIDCHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get OIDC config")
 	}
 
-	return c.JSON(toOIDCConfigResponse(cfg))
+	resp, err := h.configResponse(c.Context(), cfg)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get OIDC config")
+	}
+	return c.JSON(resp)
 }
 
 // Create handles POST /api/v1/oidc/configs.
@@ -317,7 +343,11 @@ func (h *OIDCHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", cfg.ID.String(), "oidc_config_created", details)
 
-	return c.Status(fiber.StatusCreated).JSON(toOIDCConfigResponse(cfg))
+	resp, err := h.configResponse(c.Context(), cfg)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "The OIDC config was created; reading it back failed")
+	}
+	return c.Status(fiber.StatusCreated).JSON(resp)
 }
 
 // Update handles PUT /api/v1/oidc/configs/:id.
@@ -379,6 +409,16 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", id.String(),
 			"oidc_credential_redirect_refused", redirectDetails)
 		return errCredentialRedirect("issuer URL", "client secret")
+	}
+
+	if req.IssuerURL != existing.IssuerUrl && !req.AcknowledgeIssuerChange {
+		linked, err := h.queries.CountUsersLinkedToIssuer(c.Context(), existing.IssuerUrl)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to update OIDC config")
+		}
+		if err := requireOIDCIssuerChangeAck(linked); err != nil {
+			return renderConfirmRequired(c, err)
+		}
 	}
 
 	// If secret is provided, encrypt it; otherwise keep existing
@@ -455,7 +495,11 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", cfg.ID.String(), "oidc_config_updated", details)
 
-	return c.JSON(toOIDCConfigResponse(cfg))
+	resp, err := h.configResponse(c.Context(), cfg)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "The OIDC config was updated; reading it back failed")
+	}
+	return c.JSON(resp)
 }
 
 // Delete handles DELETE /api/v1/oidc/configs/:id.
@@ -997,6 +1041,28 @@ func (h *OIDCHandler) buildOIDCConfig(cfg db.OidcConfig) (auth.OIDCConfig, error
 
 		AllowPrivateAddress: cfg.AllowPrivateAddress,
 	}, nil
+}
+
+// confirmOIDCIssuerChange is the code the admin page keys on to warn that moving the
+// issuer leaves the accounts linked under the old one refused.
+const confirmOIDCIssuerChange = "oidc_issuer_change_confirm_required"
+
+// requireOIDCIssuerChangeAck asks for a confirmation before a configuration's issuer
+// moves while linked accounts are bound to the current one: each of them answers to its
+// old issuer's identity only, so it is refused at its next sign-in until an
+// administrator resets its link. The safe default is kept; the confirmation makes it a
+// decision rather than a surprise.
+func requireOIDCIssuerChangeAck(linked int64) error {
+	if linked == 0 {
+		return nil
+	}
+	return &confirmRequiredError{
+		Code: confirmOIDCIssuerChange,
+		Message: fmt.Sprintf("%d account(s) are linked to the current issuer. After the change each of them is "+
+			"refused at single sign-on until its link is reset.", linked),
+		AcknowledgeField: "acknowledge_issuer_change",
+		Fields:           map[string]any{"linked_accounts": linked},
+	}
 }
 
 // confirmInsecureOIDCRedirect is the code the admin page keys on to turn the

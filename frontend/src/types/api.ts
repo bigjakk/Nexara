@@ -145,6 +145,8 @@ export interface OIDCConfig {
   allowed_domains: string[];
   /** The operator confirmed this configuration's issuer on a private network address. */
   allow_private_address: boolean;
+  /** Accounts bound to an identity of this issuer: refused at sign-in if the issuer moves. */
+  linked_accounts: number;
   created_at: string;
   updated_at: string;
 }
@@ -176,6 +178,11 @@ export interface OIDCConfigRequest {
    * configuration.
    */
   allow_private_address?: boolean;
+  /**
+   * Confirms moving the issuer while accounts are linked to the current one.
+   * Only sent after the operator accepts the backend's refusal.
+   */
+  acknowledge_issuer_change?: boolean;
 }
 
 export interface OIDCTestResponse {

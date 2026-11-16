@@ -129,6 +129,20 @@ func registerUserEndpoints(reg *Registry, h *handlers.UserHandler) {
 		Parameters:  apischema.Properties{"id": userIDParam},
 		Handler:     h.ResetSSOLink,
 	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodDelete,
+		Path:   pathPrefix + "oidc/links",
+		Description: "Reset the provider link of EVERY single sign-on account at once, for after an OIDC " +
+			"configuration's issuer has moved (an account stays bound to the issuer it linked under, so " +
+			"each is refused until reset). Each account's next SSO sign-in links again by address, and every " +
+			"session of each account ends at once, the caller's own included when they sign in by SSO. " +
+			"Answers {\"reset\": <accounts cleared>}. One transaction, one audit row; an answer that says the " +
+			"reset could not be confirmed may have taken effect, and repeating it is safe.",
+		Group:       "User Management",
+		Permissions: globalCheck("manage", "user"),
+		Parameters:  apischema.Properties{},
+		Handler:     h.ResetAllSSOLinks,
+	})
 }
 
 // updateUserParams is the body of PUT /api/v1/users/:id.

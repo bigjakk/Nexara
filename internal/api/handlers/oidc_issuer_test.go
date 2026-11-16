@@ -28,7 +28,7 @@ func oidcConfigMirror() apischema.Properties {
 		"redirect_uri": str, "scopes": list, "email_claim": str, "display_name_claim": str, "groups_claim": str,
 		"group_role_mapping": {Type: apischema.Object, Optional: true}, "default_role_id": str,
 		"auto_provision": flag, "allowed_domains": list, "acknowledge_insecure_redirect": flag,
-		"allow_private_address": flag,
+		"allow_private_address": flag, "acknowledge_issuer_change": flag,
 	}
 }
 
@@ -36,7 +36,8 @@ func oidcConfigMirror() apischema.Properties {
 // refused with the notification channels' 422 and its address until confirmed; the
 // confirmation is stored and audited, kept by an edit that leaves the issuer alone and
 // asked again for a new one, and the test of a stored, unconfirmed one answers the same
-// 422. Loopback and a zoned address are refused confirmed or not.
+// 422. Loopback and a zoned address are refused confirmed or not. A new issuer while
+// accounts are linked to the old one asks to confirm the change, with their count.
 func TestOIDCConfigWrites_AskToConfirmAPrivateIssuer(t *testing.T) {
 	t.Parallel()
 	const redirect = `"redirect_uri":"https://nexara.example.com/api/v1/auth/oidc/callback"`
@@ -55,19 +56,29 @@ func TestOIDCConfigWrites_AskToConfirmAPrivateIssuer(t *testing.T) {
 		status                   int
 		allowStored              bool   // what the configuration holds after a write that answered 2xx
 		ip                       string // details.ip of a 422
+		linked                   int    // accounts linked under the stored issuer; a 422 asks to confirm the move
 	}{
-		{"create, not confirmed", http.MethodPost, "/oidc/configs", body("https://10.0.0.5/realms/main", false), nil, 422, false, "10.0.0.5"},
-		{"create, confirmed", http.MethodPost, "/oidc/configs", body("https://10.0.0.5/realms/main", true), nil, 201, true, ""},
-		{"create, loopback confirmed", http.MethodPost, "/oidc/configs", body("https://127.0.0.1/realms/main", true), nil, 400, false, ""},
-		{"create, a zoned private address confirmed", http.MethodPost, "/oidc/configs", body("https://[fd12::1%25eth0]/realms/main", true), nil, 400, false, ""},
-		{"update, issuer kept", http.MethodPut, "/oidc/configs/" + confirmed.ID.String(), body(confirmed.IssuerUrl, false), confirmed, 200, true, ""},
-		{"update, a new private issuer", http.MethodPut, "/oidc/configs/" + confirmed.ID.String(), body("https://10.0.0.6/realms/main", false), confirmed, 422, false, "10.0.0.6"},
+		{"create, not confirmed", http.MethodPost, "/oidc/configs", body("https://10.0.0.5/realms/main", false), nil, 422, false, "10.0.0.5", 0},
+		{"create, confirmed", http.MethodPost, "/oidc/configs", body("https://10.0.0.5/realms/main", true), nil, 201, true, "", 0},
+		{"create, loopback confirmed", http.MethodPost, "/oidc/configs", body("https://127.0.0.1/realms/main", true), nil, 400, false, "", 0},
+		{"create, a zoned private address confirmed", http.MethodPost, "/oidc/configs", body("https://[fd12::1%25eth0]/realms/main", true), nil, 400, false, "", 0},
+		{"update, issuer kept", http.MethodPut, "/oidc/configs/" + confirmed.ID.String(), body(confirmed.IssuerUrl, false), confirmed, 200, true, "", 0},
+		{"update, a new private issuer", http.MethodPut, "/oidc/configs/" + confirmed.ID.String(), body("https://10.0.0.6/realms/main", false), confirmed, 422, false, "10.0.0.6", 0},
 		{"test, not confirmed", http.MethodPost, "/oidc/configs/" + confirmed.ID.String() + "/test", "",
-			&db.OidcConfig{ID: confirmed.ID, IssuerUrl: confirmed.IssuerUrl}, 422, false, "10.0.0.5"},
+			&db.OidcConfig{ID: confirmed.ID, IssuerUrl: confirmed.IssuerUrl}, 422, false, "10.0.0.5", 0},
+		{"update, a new issuer with accounts linked to the old", http.MethodPut, "/oidc/configs/" + confirmed.ID.String(),
+			body("https://10.0.0.6/realms/main", true), confirmed, 422, false, "", 2},
+		{"update, a new issuer with linked accounts, confirmed", http.MethodPut, "/oidc/configs/" + confirmed.ID.String(),
+			strings.TrimSuffix(body("https://10.0.0.6/realms/main", true), "}") + `,"acknowledge_issuer_change":true}`, confirmed, 200, true, "", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			store := newEpochStore()
+			for range tc.linked {
+				u := epochUser(t, uuid.NewString()+"@example.com", 0)
+				u.AuthSource, u.OidcIssuer, u.OidcSubject = "oidc", confirmed.IssuerUrl, uuid.NewString()
+				store.users[u.ID] = &u
+			}
 			if tc.stored != nil {
 				cfg := *tc.stored
 				store.oidcConfig = &cfg
@@ -90,15 +101,17 @@ func TestOIDCConfigWrites_AskToConfirmAPrivateIssuer(t *testing.T) {
 			if resp.StatusCode != tc.status {
 				t.Fatalf("status %d (%s), want %d", resp.StatusCode, raw, tc.status)
 			}
-			if tc.ip != "" {
-				var env struct {
-					Error   string            `json:"error"`
-					Details map[string]string `json:"details"`
-				}
-				_ = json.Unmarshal(raw, &env)
-				if env.Error != "private_address_confirm_required" || env.Details["ip"] != tc.ip {
-					t.Errorf("answer %s, want private_address_confirm_required with ip %s", raw, tc.ip)
-				}
+			var env struct {
+				Error   string         `json:"error"`
+				Details map[string]any `json:"details"`
+			}
+			_ = json.Unmarshal(raw, &env)
+			if tc.ip != "" && (env.Error != "private_address_confirm_required" || env.Details["ip"] != tc.ip) {
+				t.Errorf("answer %s, want private_address_confirm_required with ip %s", raw, tc.ip)
+			}
+			if tc.status == 422 && tc.linked > 0 && (env.Error != "oidc_issuer_change_confirm_required" ||
+				env.Details["linked_accounts"] != float64(tc.linked)) {
+				t.Errorf("answer %s, want oidc_issuer_change_confirm_required with linked_accounts %d", raw, tc.linked)
 			}
 			wrote := len(store.named("CreateOIDCConfig"))+len(store.named("UpdateOIDCConfig")) > 0
 			if want := tc.status < 300; wrote != want {

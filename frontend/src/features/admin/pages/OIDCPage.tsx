@@ -47,13 +47,20 @@ import {
 const INSECURE_OIDC_REDIRECT = "insecure_oidc_redirect_confirm_required";
 /** The backend's code for an issuer on a private address (checkOIDCIssuer). */
 const PRIVATE_ADDRESS = "private_address_confirm_required";
+/** The backend's code for moving an issuer accounts are linked under (oidc.go). */
+const ISSUER_CHANGE = "oidc_issuer_change_confirm_required";
 
 /** The confirmations a save carries, each given at its own prompt. */
 interface SaveAcks {
   insecureRedirect: boolean;
   privateAddress: boolean;
+  issuerChange: boolean;
 }
-const NO_ACKS: SaveAcks = { insecureRedirect: false, privateAddress: false };
+const NO_ACKS: SaveAcks = {
+  insecureRedirect: false,
+  privateAddress: false,
+  issuerChange: false,
+};
 
 /**
  * A setting whose control runs the full width under its label: an issuer or
@@ -66,6 +73,7 @@ import {
   useUpdateOIDCConfig,
   useDeleteOIDCConfig,
   useTestOIDCConnection,
+  useResetAllSSOLinks,
 } from "../api/oidc-queries";
 import { useRoles } from "../api/rbac-queries";
 import type { OIDCConfig, OIDCConfigRequest } from "@/types/api";
@@ -195,6 +203,7 @@ export function OIDCPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const deleteConfig = useDeleteOIDCConfig();
   const testConnection = useTestOIDCConnection();
+  const resetAllLinks = useResetAllSSOLinks();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<OIDCConfigRequest>(emptyForm);
@@ -229,6 +238,15 @@ export function OIDCPage() {
     activeConfig != null &&
     activeConfig.client_secret_set &&
     form.issuer_url !== activeConfig.issuer_url;
+  // Accounts stay bound to the issuer they linked under, so moving it leaves
+  // each of them refused at sign-in until its link is reset.
+  const linkedAccountsStranded =
+    !isNew &&
+    activeConfig != null &&
+    activeConfig.linked_accounts > 0 &&
+    form.issuer_url !== activeConfig.issuer_url
+      ? `${String(activeConfig.linked_accounts)} account${activeConfig.linked_accounts !== 1 ? "s are" : " is"} linked to the current issuer. After the change, each is refused at sign-in until its link is reset.`
+      : undefined;
 
   useEffect(() => {
     // Skip while a confirm is pending: re-seeding would replace the values the
@@ -335,6 +353,7 @@ export function OIDCPage() {
         ? { acknowledge_insecure_redirect: true }
         : {}),
       ...(given.privateAddress ? { allow_private_address: true } : {}),
+      ...(given.issuerChange ? { acknowledge_issuer_change: true } : {}),
     };
     const target = saveTarget;
     // What a failure nobody is looking at names: the config as the operator
@@ -344,14 +363,18 @@ export function OIDCPage() {
 
     setSaveError(null);
     setAcks(given);
-    if (!given.insecureRedirect && !given.privateAddress) {
+    if (
+      !given.insecureRedirect &&
+      !given.privateAddress &&
+      !given.issuerChange
+    ) {
       setRedirectWarning(null);
     }
 
     const onError = (err: unknown) => {
       const confirm = confirmRequiredFromError(
         err,
-        [INSECURE_OIDC_REDIRECT, PRIVATE_ADDRESS],
+        [INSECURE_OIDC_REDIRECT, PRIVATE_ADDRESS, ISSUER_CHANGE],
         target,
       );
       if (confirm != null) {
@@ -609,13 +632,18 @@ export function OIDCPage() {
                 className={WIDE}
                 label="Issuer URL"
                 description={
-                  addressChanged
-                    ? "This provider is moving to a new issuer, so it needs the client secret again. The stored one is only ever sent to the address it was saved for."
-                    : !isNew &&
-                        activeConfig?.allow_private_address === true &&
-                        form.issuer_url === activeConfig.issuer_url
-                      ? "Confirmed for a private network address. A new issuer is asked about again."
-                      : undefined
+                  [
+                    linkedAccountsStranded,
+                    addressChanged
+                      ? "This provider is moving to a new issuer, so it needs the client secret again. The stored one is only ever sent to the address it was saved for."
+                      : !isNew &&
+                          activeConfig?.allow_private_address === true &&
+                          form.issuer_url === activeConfig.issuer_url
+                        ? "Confirmed for a private network address. A new issuer is asked about again."
+                        : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" ") || undefined
                 }
                 htmlFor="oidc-issuer-url"
               >
@@ -773,6 +801,28 @@ export function OIDCPage() {
                   placeholder="example.com, corp.example.com"
                 />
               </SettingRow>
+              {!isNew && activeConfig != null && (
+                <SettingRow
+                  label="Linked accounts"
+                  description={`${String(activeConfig.linked_accounts)} account${activeConfig.linked_accounts !== 1 ? "s are" : " is"} bound to an identity of this issuer. After an issuer change, reset every link so that each account links again by its address at its next sign-in.`}
+                >
+                  <Button
+                    variant="outline"
+                    disabled={resetAllLinks.isPending}
+                    onClick={() => {
+                      if (
+                        confirm(
+                          "Reset the SSO link of every SSO account? Every SSO session ends now, yours too if you signed in with SSO, and each account links to whichever identity presents its address at its next sign-in.",
+                        )
+                      ) {
+                        resetAllLinks.mutate();
+                      }
+                    }}
+                  >
+                    Reset all SSO links
+                  </Button>
+                </SettingRow>
+              )}
             </SettingsSection>
 
             <SettingsSection
@@ -953,6 +1003,23 @@ export function OIDCPage() {
                   confirmLabel="Save with a cleartext callback"
                   onConfirm={() => {
                     save({ ...acks, insecureRedirect: true });
+                  }}
+                  onCancel={() => {
+                    setRedirectWarning(null);
+                  }}
+                  pending={saving}
+                />
+              )}
+
+            {redirectWarning != null &&
+              redirectWarning.target === saveTarget &&
+              redirectWarning.code === ISSUER_CHANGE && (
+                <ConfirmRequiredWarning
+                  title="Accounts are linked to the current issuer"
+                  message={`${redirectWarning.message} Reset all SSO links after the change to let them sign in again.`}
+                  confirmLabel="Change the issuer"
+                  onConfirm={() => {
+                    save({ ...acks, issuerChange: true });
                   }}
                   onCancel={() => {
                     setRedirectWarning(null);

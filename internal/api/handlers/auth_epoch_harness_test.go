@@ -306,6 +306,14 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 			return authFakeRow{value: db.GetUserTOTPSecretRow{ID: u.ID, TotpSecret: u.TotpSecret}}
 		}
 		return authFakeRow{err: pgx.ErrNoRows}
+	case "CountUsersLinkedToIssuer":
+		var n int64
+		for _, u := range s.users {
+			if u.OidcSubject != "" && u.OidcIssuer == args[0].(string) {
+				n++
+			}
+		}
+		return authFakeScalar{value: n}
 	case "CountUsers":
 		return authFakeScalar{value: int64(len(s.users))}
 	case "CreateUser":
@@ -512,6 +520,17 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 			items = append(items, r)
 		}
 		return &authFakeRows{items: items}, nil
+	case "ClearAllOIDCIdentities":
+		// Every linked SSO account, as the SQL's WHERE; its ids, as RETURNING id. A Query
+		// has no undo here: the tests that roll back do so before it.
+		var items []any
+		for _, u := range s.users {
+			if u.AuthSource == "oidc" && u.OidcSubject != "" {
+				u.OidcIssuer, u.OidcSubject = "", ""
+				items = append(items, struct{ ID uuid.UUID }{u.ID})
+			}
+		}
+		return &authFakeRows{items: items}, nil
 	case "ListUserIDsByRole":
 		return &authFakeRows{}, nil
 	case "GetUserScopedPermissions":
@@ -691,6 +710,7 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 		app.Post("/auth/totp/recovery-codes/regenerate", withRequestParams(t, totpConfirmSetupMirror(), nil, a.totp.RegenerateRecoveryCodes))
 	}
 	app.Put("/users/:id", withRequestParams(t, epochUserUpdateMirror(), []string{"id"}, uh.Update))
+	app.Delete("/oidc/links", withRequestParams(t, apischema.Properties{}, nil, uh.ResetAllSSOLinks))
 	app.Delete("/users/:id/sso-link", withRequestParams(t, apischema.Properties{
 		"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}}, []string{"id"}, uh.ResetSSOLink))
 	app.Post("/auth/console-token", withRequestParams(t, consoleTokenMirror(), nil, ah.ConsoleToken))

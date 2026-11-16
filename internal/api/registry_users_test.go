@@ -18,9 +18,9 @@ import (
 // why the registry total is a sum of per-domain constants.
 const userRouteCount = 4 + userSSOLinkRouteCount
 
-// userSSOLinkRouteCount is the single sign-on link reset, which came after the
-// migration the tally below records.
-const userSSOLinkRouteCount = 1
+// userSSOLinkRouteCount is the single sign-on link resets (one account, every
+// account), which came after the migration the tally below records.
+const userSSOLinkRouteCount = 2
 
 const testUserRowID = "c3d4e5f6-0000-4000-8000-000000000044"
 
@@ -57,6 +57,7 @@ var userRoutesOutsideTheClusterCheckShape = map[string]string{
 	"PUT /api/v1/users/:id":             "Deferred: manage:user always, plus manage:role only when the body carries `role`",
 	"DELETE /api/v1/users/:id":          "a Nexara account is instance-wide; the path names no cluster",
 	"DELETE /api/v1/users/:id/sso-link": "a Nexara account is instance-wide; the path names no cluster",
+	"DELETE /api/v1/oidc/links":         "every SSO account of the install; the path names no cluster",
 }
 
 // declaredUserEndpoints returns every declaration in this domain, keyed
@@ -366,8 +367,10 @@ func TestEveryUserEndpointIsDocumented(t *testing.T) {
 // TestUserSSOLinkResetIsGatedByManageUser: the link reset ends another account's
 // sessions, so it takes the permission the other user-admin writes take.
 func TestUserSSOLinkResetIsGatedByManageUser(t *testing.T) {
-	e := declaredEndpoint(t, fiber.MethodDelete, userScope+"/:id/sso-link")
-	if e.Permissions.Check == nil || e.Permissions.Describe() != "manage:user" || e.Permissions.Check.Scope != ScopeGlobal {
-		t.Errorf("declares %q, want a global manage:user Check", e.Permissions.Describe())
+	for _, path := range []string{userScope + "/:id/sso-link", pathPrefix + "oidc/links"} {
+		e := declaredEndpoint(t, fiber.MethodDelete, path)
+		if e.Permissions.Check == nil || e.Permissions.Describe() != "manage:user" || e.Permissions.Check.Scope != ScopeGlobal {
+			t.Errorf("%s declares %q, want a global manage:user Check", path, e.Permissions.Describe())
+		}
 	}
 }

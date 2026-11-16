@@ -86,8 +86,10 @@ func registerOIDCEndpoints(reg *Registry, h *handlers.OIDCHandler) {
 		Method: fiber.MethodPut,
 		Path:   oidcConfigScope + "/:id",
 		Description: "Replace an OIDC provider configuration. Omitting client_secret keeps the stored " +
-			"one, and moving issuer_url while a secret is stored is refused outright. redirect_uri is " +
-			"re-validated only when it CHANGES, so a value predating the rule does not block unrelated edits.",
+			"one, and moving issuer_url while a secret is stored is refused outright. Moving issuer_url " +
+			"while accounts are linked to the current issuer asks for acknowledge_issuer_change first. " +
+			"redirect_uri is re-validated only when it CHANGES, so a value predating the rule does not " +
+			"block unrelated edits.",
 		Group:       "Authentication",
 		Permissions: globalCheck("manage", "user"),
 		Parameters:  oidcConfigParams(apischema.Properties{"id": oidcConfigIDParam}),
@@ -244,5 +246,10 @@ func oidcConfigParams(extra apischema.Properties) apischema.Properties {
 			Description: "Confirms a plain-http callback on anything but loopback. Only sent after the " +
 				"operator accepts the refusal the first attempt returns.",
 		},
+		"acknowledge_issuer_change": optFlag("Confirms moving issuer_url while accounts are linked to the " +
+			"current issuer. Without it such an update answers 422 oidc_issuer_change_confirm_required with " +
+			"linked_accounts in details: an SSO account stays bound to the issuer it linked under, so after " +
+			"the change each of them is refused at sign-in until its link is reset (DELETE /api/v1/oidc/links " +
+			"resets them all). Ignored on create."),
 	}, extra)
 }

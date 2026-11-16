@@ -65,6 +65,7 @@ var auditClusterExempt = map[string]string{
 	"users.go.Update":                 "users is install-global; no cluster column",
 	"users.go.Delete":                 "users is install-global; no cluster column",
 	"users.go.ResetSSOLink":           "users is install-global; no cluster column",
+	"users.go.ResetAllSSOLinks":       "users is install-global; no cluster column",
 
 	// Roles and their assignments. An assignment may target one cluster via
 	// scope_id, but that is the grant's reach, not the audit row's cluster:

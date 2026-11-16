@@ -531,6 +531,36 @@ func (h *UserHandler) ResetSSOLink(c fiber.Ctx, p *apischema.Params) error {
 	return c.JSON(fiber.Map{"message": "Single sign-on link reset; the account's sessions have ended"})
 }
 
+// ResetAllSSOLinks handles DELETE /api/v1/oidc/links: the reset of every SSO account's
+// link at once, for after a configuration's issuer has moved and every account bound
+// under the old one is refused. Each account's sessions end, as at a single reset (the
+// caller's own too, when they sign in by SSO), and the whole is one transaction and one
+// audit row.
+func (h *UserHandler) ResetAllSSOLinks(c fiber.Ctx, _ *apischema.Params) error {
+	var cleared int
+	revoked, unconfirmed, err := h.resetSSOLinks(c, func(ctx context.Context, qx *db.Queries) ([]uuid.UUID, error) {
+		ids, err := qx.ClearAllOIDCIdentities(ctx)
+		cleared = len(ids)
+		return ids, err
+	})
+	if err != nil && !unconfirmed {
+		return err
+	}
+	details := map[string]any{"accounts": cleared}
+	if unconfirmed {
+		details["outcome"] = "unconfirmed"
+	}
+	raw, _ := json.Marshal(details)
+	h.withFollowUp(c, func() {
+		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", "links", "oidc_links_reset", raw)
+	})
+	if err != nil {
+		return err
+	}
+	h.forgetSessions(c, revoked)
+	return c.JSON(fiber.Map{"reset": cleared})
+}
+
 // resetSSOLinks runs clear — which clears links and returns the accounts it cleared —
 // and ends every session of each of those accounts, in ONE transaction, for the reason
 // deactivate gives: a reset whose sessions could not be ended is not done. It returns

@@ -67,6 +67,7 @@ function oidcConfig(id: string, name: string): OIDCConfig {
     auto_provision: true,
     allowed_domains: [],
     allow_private_address: false,
+    linked_accounts: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };
@@ -272,6 +273,59 @@ describe("an OIDC configuration save that settles", () => {
     );
     expect(mockedPost.mock.calls[1]?.[1]).toMatchObject({
       allow_private_address: true,
+    });
+  });
+
+  it("warns that a new issuer strands the linked accounts, and resends the save confirmed", async () => {
+    const user = userEvent.setup();
+    const linked = { ...oidcConfig("oidc-01", FIRST), linked_accounts: 2 };
+    mockedList.mockResolvedValue([linked]);
+    mockedPut.mockRejectedValueOnce(
+      new ApiClientError(422, {
+        error: "oidc_issuer_change_confirm_required",
+        message: "2 account(s) are linked to the current issuer.",
+        details: { linked_accounts: 2 },
+      }),
+    );
+    renderPage();
+
+    await openEdit(user);
+    const issuer = screen.getByLabelText("Issuer URL");
+    await user.clear(issuer);
+    await user.type(issuer, "https://idp2.example.com/realms/example");
+    expect(
+      screen.getByText(/2 accounts are linked to the current issuer/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Change the issuer" }),
+    );
+
+    await waitFor(() => {
+      expect(mockedPut).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedPut.mock.calls[0]?.[1]).not.toHaveProperty(
+      "acknowledge_issuer_change",
+    );
+    expect(mockedPut.mock.calls[1]?.[1]).toMatchObject({
+      acknowledge_issuer_change: true,
+    });
+  });
+
+  it("resets every SSO link only after a confirm", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(apiClient.delete).mockResolvedValue({ reset: 2 });
+    renderPage();
+
+    await openEdit(user);
+    await user.click(
+      screen.getByRole("button", { name: "Reset all SSO links" }),
+    );
+
+    expect(confirm).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(apiClient.delete).toHaveBeenCalledWith("/api/v1/oidc/links");
     });
   });
 

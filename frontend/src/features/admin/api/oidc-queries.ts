@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type {
@@ -71,6 +72,25 @@ export function useDeleteOIDCConfig() {
       apiClient.delete(apiPath`/api/v1/oidc/configs/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["oidc", "configs"] });
+    },
+  });
+}
+
+/**
+ * Clears the provider link of every SSO account and ends their sessions, for
+ * after an issuer change. A failure is the global toast's.
+ */
+export function useResetAllSSOLinks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiClient.delete<{ reset: number }>(apiPath`/api/v1/oidc/links`),
+    onSuccess: (result) => {
+      toast.success(
+        `SSO links reset for ${String(result.reset)} account${result.reset !== 1 ? "s" : ""}. Each links again at its next sign-in.`,
+      );
+      void qc.invalidateQueries({ queryKey: ["oidc", "configs"] });
+      void qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });
 }
