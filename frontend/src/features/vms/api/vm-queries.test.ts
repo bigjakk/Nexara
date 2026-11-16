@@ -10,11 +10,11 @@ const VM = "d0000000-0000-4000-8000-000000000001";
 
 const postMock = vi.fn();
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: {
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
     post: (path: string, body: unknown) => postMock(path, body) as unknown,
-  },
-}));
+  }),
+);
 
 // A detach can free a storage volume — an unusedN or vmstate key, or a
 // cloud-init drive — so it leaves the same views stale that a disk move does.

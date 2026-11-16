@@ -6,9 +6,9 @@ import { AlertRuleForm } from "./AlertRuleForm";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { list: vi.fn(), post: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedList = vi.mocked(apiClient.list);
 const mockedPost = vi.mocked(apiClient.post);

@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { apiClient } from "@/lib/api-client";
 import { createConsoleTokenMinter } from "./console-queries";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { post: vi.fn(), get: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedPost = vi.mocked(apiClient.post);
 

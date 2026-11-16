@@ -9,11 +9,11 @@ const RULE = "bbbbbbbb-0000-0000-0000-000000000002";
 
 const deleteMock = vi.fn();
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: {
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
     delete: (path: string) => deleteMock(path) as unknown,
-  },
-}));
+  }),
+);
 
 // The server answers 404 when the rule is already gone — deleted from another
 // tab, or by another operator — or belongs to another cluster. The list that

@@ -25,13 +25,13 @@ const listMock = vi.fn();
 const deleteMock = vi.fn();
 const postMock = vi.fn();
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: {
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
     list: (path: string) => listMock(path) as unknown,
     delete: (path: string) => deleteMock(path) as unknown,
     post: (path: string, body: unknown) => postMock(path, body) as unknown,
-  },
-}));
+  }),
+);
 
 function signIn(id: string) {
   useAuthStore.setState({

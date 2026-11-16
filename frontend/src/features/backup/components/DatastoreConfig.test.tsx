@@ -5,9 +5,9 @@ import { apiClient } from "@/lib/api-client";
 import { DatastoreConfig } from "./DatastoreConfig";
 import type { PBSPruneJob } from "../types/backup";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { get: vi.fn(), list: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedList = vi.mocked(apiClient.list);

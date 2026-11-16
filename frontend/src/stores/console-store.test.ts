@@ -10,9 +10,9 @@ import {
 import { createConsoleSessionStore, useConsoleStore } from "./console-store";
 import { apiClient } from "@/lib/api-client";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { get: vi.fn(), list: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedGet = vi.mocked(apiClient.get);
 // The node re-resolution reads a collection, so it goes through apiClient.list

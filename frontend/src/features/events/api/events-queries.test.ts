@@ -13,11 +13,11 @@ import { usePermissions } from "@/hooks/usePermissions";
 
 const getMock = vi.fn();
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: {
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
     get: (path: string) => getMock(path) as unknown,
-  },
-}));
+  }),
+);
 vi.mock("@/hooks/usePermissions", () => ({
   usePermissions: vi.fn(),
 }));

@@ -5,9 +5,9 @@ import { apiClient } from "@/lib/api-client";
 import { VeeamPlatformMapping } from "./VeeamPlatformMapping";
 import type { VeeamPlatform, VeeamInfrastructureGuest } from "../types/backup";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { list: vi.fn(), put: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedList = vi.mocked(apiClient.list);
 

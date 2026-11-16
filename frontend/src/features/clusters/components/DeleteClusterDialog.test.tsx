@@ -10,19 +10,11 @@ const deleteMock = vi.fn();
 
 // Only the transport is replaced; the path useDeleteCluster hands it is built
 // by the real apiPath.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      ...actual.apiClient,
-      delete: (...args: unknown[]) => deleteMock(...args) as unknown,
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
+    delete: (...args: unknown[]) => deleteMock(...args) as unknown,
+  }),
+);
 
 // The revoke option is gated on GLOBAL manage:cluster, matching the server.
 let granted: string[] = [];

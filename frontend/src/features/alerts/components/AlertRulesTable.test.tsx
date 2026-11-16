@@ -8,9 +8,9 @@ import { useAuth } from "@/hooks/useAuth";
 import type { AlertRule } from "@/types/api";
 import { useAuthStore } from "@/stores/auth-store";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { list: vi.fn(), put: vi.fn(), delete: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 vi.mock("@/hooks/useAuth", () => ({ useAuth: vi.fn() }));
 
 const mockedList = vi.mocked(apiClient.list);
