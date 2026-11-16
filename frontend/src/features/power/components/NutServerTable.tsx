@@ -18,6 +18,8 @@ import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { useTestNutServer } from "../api/ups-queries";
 import type { NutProbeResult, NutServer } from "../types/ups";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 type SortKey = "expand" | "name" | "address" | "version" | "access" | "status" | "actions";
 
@@ -35,12 +37,12 @@ function serverStatus(s: NutServer): {
   rank: number;
   variant: "healthy" | "secondary" | "warning" | "destructive";
 } {
-  if (!s.enabled) return { label: "Disabled", rank: 2, variant: "secondary" };
-  if (s.last_poll_error !== "") return { label: "Failing", rank: 0, variant: "destructive" };
-  if (s.last_poll_at === null) return { label: "Waiting", rank: 3, variant: "secondary" };
+  if (!s.enabled) return { label: i18n.t("power:nutServerTable.disabled"), rank: 2, variant: "secondary" };
+  if (s.last_poll_error !== "") return { label: i18n.t("power:nutServerTable.failing"), rank: 0, variant: "destructive" };
+  if (s.last_poll_at === null) return { label: i18n.t("power:nutServerTable.waiting"), rank: 3, variant: "secondary" };
   // A success the poller has not repeated lately is not a live connection.
-  if (!s.connected) return { label: "Not polled lately", rank: 1, variant: "warning" };
-  return { label: "Connected", rank: 4, variant: "healthy" };
+  if (!s.connected) return { label: i18n.t("power:nutServerTable.notPolledLately"), rank: 1, variant: "warning" };
+  return { label: i18n.t("power:nutServerTable.connected"), rank: 4, variant: "healthy" };
 }
 
 /**
@@ -49,17 +51,18 @@ function serverStatus(s: NutServer): {
  * mutate()'s own onError is never run then (useSaveOutcome).
  */
 function TestButton({ server, onResult }: { server: NutServer; onResult: Ctx["onTestResult"] }) {
+  const { t } = useTranslation("power");
   const test = useTestNutServer();
   const settle = useSaveOutcome();
   return (
     <Button
       variant="ghost"
       size="sm"
-      title="Test connection"
+      title={t("nutServerTable.testConnection")}
       disabled={test.isPending}
       onClick={() => {
         settle(test.mutateAsync(server.id), {
-          action: `Testing NUT server ${server.name}`,
+          action: t("nutServerTable.testingNUTServerName", { name: server.name }),
           onSuccess: (r) => { onResult(server.id, r); },
           onError: (e) => { onResult(server.id, describeError(e) || "the request did not reach Nexara"); },
         });
@@ -72,41 +75,41 @@ function TestButton({ server, onResult }: { server: NutServer; onResult: Ctx["on
 
 const COLUMNS: ColumnDef<NutServer, SortKey, Ctx>[] = [
   expandColumn("expand"),
-  { key: "name", label: "Name", width: 160, sortValue: (s) => s.name, cell: (s) => <span className="font-medium">{s.name}</span> },
+  { key: "name", get label() { return i18n.t("power:nutServerTable.name"); }, width: 160, sortValue: (s) => s.name, cell: (s) => <span className="font-medium">{s.name}</span> },
   {
     key: "address",
-    label: "Address",
+    get label() { return i18n.t("power:nutServerTable.address"); },
     width: 200,
     sortValue: (s) => `${s.host}:${String(s.port)}`,
     cell: (s) => <span className="font-mono text-xs">{s.host}:{s.port}</span>,
   },
   {
     key: "version",
-    label: "NUT",
+    get label() { return i18n.t("power:nutServerTable.nut"); },
     width: 150,
     sortValue: (s) => s.nut_version || null,
     cell: (s) => (
       <span className="text-sm">
         {s.nut_version || "?"}
-        {s.protocol_version !== "" && <span className="text-muted-foreground"> · protocol {s.protocol_version}</span>}
+        {s.protocol_version !== "" && <span className="text-muted-foreground"> {i18n.t("power:nutServerTable.protocolProtocolVersion", { protocolVersion: s.protocol_version })}</span>}
       </span>
     ),
   },
   {
     key: "access",
-    label: "Access",
+    get label() { return i18n.t("power:nutServerTable.access"); },
     width: 170,
     sortValue: (s) => (s.commands_verified_at !== null ? 2 : s.has_password ? 1 : 0),
     cell: (s) => (
       <span className="text-sm">
-        {s.commands_verified_at !== null ? "Commands" : s.has_password ? "With credentials" : "Anonymous"} ·{" "}
-        {s.tls_mode === "starttls" ? "STARTTLS" : "no TLS"}
+        {s.commands_verified_at !== null ? i18n.t("power:nutServerTable.commands") : s.has_password ? i18n.t("power:nutServerTable.withCredentials") : i18n.t("power:nutServerTable.anonymous")} ·{" "}
+        {s.tls_mode === "starttls" ? i18n.t("power:nutServerTable.starttls") : i18n.t("power:nutServerTable.noTLS")}
       </span>
     ),
   },
   {
     key: "status",
-    label: "Status",
+    get label() { return i18n.t("power:nutServerTable.status"); },
     width: 170,
     sortValue: (s) => serverStatus(s).rank,
     cell: (s) => {
@@ -121,7 +124,7 @@ const COLUMNS: ColumnDef<NutServer, SortKey, Ctx>[] = [
   },
   {
     key: "actions",
-    label: "Actions",
+    get label() { return i18n.t("power:nutServerTable.actions"); },
     width: 150,
     align: "right",
     fixed: true,
@@ -129,12 +132,12 @@ const COLUMNS: ColumnDef<NutServer, SortKey, Ctx>[] = [
       <div onClick={(e) => { e.stopPropagation(); }}>
         {ctx.canManage && <TestButton server={s} onResult={ctx.onTestResult} />}
         {ctx.canManage && (
-          <Button variant="ghost" size="sm" title="Edit" onClick={() => { ctx.onEdit(s); }}>
+          <Button variant="ghost" size="sm" title={i18n.t("power:nutServerTable.edit")} onClick={() => { ctx.onEdit(s); }}>
             <Pencil className="h-4 w-4" />
           </Button>
         )}
         {ctx.canDelete && (
-          <Button variant="ghost" size="sm" title="Remove" onClick={() => { ctx.onDelete(s); }}>
+          <Button variant="ghost" size="sm" title={i18n.t("power:nutServerTable.remove")} onClick={() => { ctx.onDelete(s); }}>
             <Trash2 className="h-4 w-4" />
           </Button>
         )}
@@ -156,6 +159,7 @@ export function NutServerTable({
   onEdit: (s: NutServer) => void;
   onDelete: (s: NutServer) => void;
 }) {
+  const { t } = useTranslation("power");
   const { layout, rows, toggle, directionFor } = useDataTable("nut-servers", COLUMNS, servers, byId);
   const { expanded, toggle: toggleExpand, expand } = useExpandedRows();
   const [tests, setTests] = useState<Record<string, NutProbeResult | string>>({});
@@ -187,29 +191,28 @@ export function NutServerTable({
               {expanded.has(s.id) && (
                 <ExpandedDetailRow colSpan={layout.columns.length} spacing="space-y-3">
                   <DefGrid>
-                    <DetailField label="Username" variant={s.username === "" ? "muted" : "mono"}>
-                      {s.username !== "" ? s.username : s.has_password ? "Hidden — requires manage:ups" : "None"}
+                    <DetailField label={t("nutServerTable.username")} variant={s.username === "" ? "muted" : "mono"}>
+                      {s.username !== "" ? s.username : s.has_password ? t("nutServerTable.hiddenRequiresManageUps") : t("nutServerTable.none")}
                     </DetailField>
-                    <DetailField label="Certificate">
+                    <DetailField label={t("nutServerTable.certificate")}>
                       {s.tls_mode !== "starttls"
-                        ? "No TLS"
+                        ? t("nutServerTable.noTLS2")
                         : s.tls_fingerprint !== ""
-                          ? "Pinned (SHA-256)"
+                          ? t("nutServerTable.pinnedSHA256")
                           : s.verify_tls
-                            ? "Verified against system CAs"
-                            : "Not verified"}
+                            ? t("nutServerTable.verifiedAgainstSystemCAs")
+                            : t("nutServerTable.notVerified")}
                     </DetailField>
-                    <DetailField label="Last successful poll"><DateTime value={s.last_poll_at} fallback="Never" /></DetailField>
-                    <DetailField label="Added"><DateTime value={s.created_at} /></DetailField>
+                    <DetailField label={t("nutServerTable.lastSuccessfulPoll")}><DateTime value={s.last_poll_at} fallback={t("nutServerTable.never")} /></DetailField>
+                    <DetailField label={t("nutServerTable.added")}><DateTime value={s.created_at} /></DetailField>
                   </DefGrid>
                   {s.last_poll_error !== "" && (
-                    <p className="text-sm text-destructive">Last poll failed: {s.last_poll_error}</p>
+                    <p className="text-sm text-destructive">{t("nutServerTable.lastPollFailedLastPollError", { lastPollError: s.last_poll_error })}</p>
                   )}
-                  {typeof test === "string" && <p className="text-sm text-destructive">Test failed: {test}</p>}
+                  {typeof test === "string" && <p className="text-sm text-destructive">{t("nutServerTable.testFailedTest", { test })}</p>}
                   {test !== undefined && typeof test !== "string" && (
                     <p className="text-sm">
-                      Test passed in {test.took_ms} ms: {test.devices.length} UPS (
-                      {test.devices.map((d) => d.name).join(", ")})
+                      {t("nutServerTable.testPassedInTookMsMs", { tookMs: test.took_ms, length: test.devices.length, devices: test.devices.map((d) => d.name).join(", ") })}
                     </p>
                   )}
                 </ExpandedDetailRow>

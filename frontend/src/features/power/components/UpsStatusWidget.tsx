@@ -4,24 +4,26 @@ import { QueryFailureNote, QueryStateNotice } from "@/components/QueryStateNotic
 import { useUpsDevices } from "../api/ups-queries";
 import { formatRuntime } from "../lib/ups-state";
 import { UpsStatusBadges } from "./UpsBadges";
+import { useTranslation, Trans } from "react-i18next";
 
 /** The dashboard's UPS widget: each UPS's status, charge and runtime left. */
 export function UpsStatusWidget() {
+  const { t } = useTranslation("power");
   const devices = useUpsDevices();
   const list = devices.data ?? [];
 
   return (
     <Card className="h-full">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">UPS status</CardTitle>
+        <CardTitle className="text-sm font-medium">{t("upsStatusWidget.upsStatus")}</CardTitle>
         <Link to="/power" className="text-xs text-muted-foreground hover:underline">
-          Power
+          {t("upsStatusWidget.power")}
         </Link>
       </CardHeader>
       <CardContent className="space-y-2">
         {list.length > 0 ? (
           <>
-            <QueryFailureNote query={devices} subject="the latest UPS readings" />
+            <QueryFailureNote query={devices} subject={t("upsStatusWidget.theLatestUPSReadings")} />
             <ul className="divide-y">
               {list.map((d) => {
                 const live = d.state !== "unknown";
@@ -44,13 +46,10 @@ export function UpsStatusWidget() {
         ) : (
           <QueryStateNotice
             query={devices}
-            subject="UPS devices"
+            subject={t("upsStatusWidget.upsDevices")}
             empty={
               <>
-                No UPS monitored yet.{" "}
-                <Link to="/power" className="underline">
-                  Add a NUT server
-                </Link>
+                <Trans t={t} i18nKey="upsStatusWidget.noUPSMonitoredYetLink" components={{ navlink: <Link to="/power" className="underline" /> }} />
               </>
             }
           />

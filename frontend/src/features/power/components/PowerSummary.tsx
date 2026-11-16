@@ -4,6 +4,7 @@ import type { UpsDevice } from "../types/ups";
 import { formatRuntime, upsOnBattery } from "../lib/ups-state";
 import { protectionSummary } from "../lib/ups-feeds";
 import { upsRead } from "../lib/power-summary";
+import { useTranslation } from "react-i18next";
 
 /**
  * The figures that answer "how much power and time do I have": how many UPS
@@ -12,6 +13,7 @@ import { upsRead } from "../lib/power-summary";
  * many of the nodes they power would shut down with them.
  */
 export function PowerSummary({ devices }: { devices: UpsDevice[] }) {
+  const { t } = useTranslation("power");
   const live = devices.filter(upsRead);
   const unread = devices.length - live.length;
   const onBattery = live.filter(upsOnBattery);
@@ -27,48 +29,49 @@ export function PowerSummary({ devices }: { devices: UpsDevice[] }) {
   const nominal = live.reduce((sum, d) => sum + (d.realpower_nominal ?? 0), 0);
   const estimated = live.some((d) => d.realpower_estimated);
 
-  const unreadNote = unread > 0 ? ` · ${String(unread)} not read` : "";
   const protection = protectionSummary(devices);
 
   return (
-    <Panel flush bodyClassName="py-4" aria-label="Power summary">
+    <Panel flush bodyClassName="py-4" aria-label={t("powerSummary.powerSummary")}>
       <StatStrip>
         {/* Counts, as the strip's other figures are: a sentence here is cut short on a phone. */}
         <Stat
-          label="On battery"
+          label={t("powerSummary.onBattery")}
           value={live.length > 0 ? String(onBattery.length) : "—"}
           sub={
             // Wraps where the strip would cut it: "not read" is the part that matters.
             <span className="whitespace-normal">
-              {`${String(live.length)} of ${String(devices.length)} UPS read${unreadNote}`}
+              {unread > 0
+                ? t("powerSummary.upsReadUnread", { read: String(live.length), total: String(devices.length), unread: String(unread) })
+                : t("powerSummary.upsRead", { read: String(live.length), total: String(devices.length) })}
             </span>
           }
           tone={outage ? "warn" : "quiet"}
         />
         <Stat
-          label="Shortest runtime"
+          label={t("powerSummary.shortestRuntime")}
           value={shortest === null ? "—" : formatRuntime(shortest.battery_runtime)}
-          sub={shortest === null ? "No runtime reported" : `${shortest.name} at its current load`}
+          sub={shortest === null ? t("powerSummary.noRuntimeReported") : t("powerSummary.nameAtItsCurrentLoad", { name: shortest.name })}
           tone={outage ? "warn" : shortest === null ? "quiet" : "default"}
         />
         <Stat
-          label="Load"
+          label={t("powerSummary.load")}
           value={watts > 0 ? `${estimated ? "≈" : ""}${String(Math.round(watts))} W` : "—"}
-          sub={nominal > 0 ? `of ${String(Math.round(nominal))} W across ${String(live.length)} UPS` : "No power reported"}
+          sub={nominal > 0 ? t("powerSummary.ofNominalWAcrossLength", { nominal: String(Math.round(nominal)), length: String(live.length) }) : t("powerSummary.noPowerReported")}
           tone={watts > 0 ? "default" : "quiet"}
           percent={watts > 0 && nominal > 0 ? (watts / nominal) * 100 : undefined}
         />
         <Stat
-          label="Nodes protected"
-          value={protection.judged === 0 ? "—" : `${String(protection.protected)} of ${String(protection.judged)}`}
+          label={t("powerSummary.nodesProtected")}
+          value={protection.judged === 0 ? "—" : t("powerSummary.protectedOfJudged", { protected: String(protection.protected), judged: String(protection.judged) })}
           sub={
             // Wraps too: every unprotected node is named, however many there are.
             <span className="whitespace-normal">
               {protection.judged === 0
-                ? "No node it powers is checked yet"
+                ? t("powerSummary.noNodeItPowersIs")
                 : protection.unprotected.length > 0
-                  ? `Not protected: ${protection.unprotected.join(", ")}`
-                  : "run upsmon against the UPS that powers them"}
+                  ? t("powerSummary.notProtectedUnprotected", { unprotected: protection.unprotected.join(", ") })
+                  : t("powerSummary.runUpsmonAgainstTheUPS")}
             </span>
           }
           tone={protection.unprotected.length > 0 ? "warn" : protection.judged === 0 ? "quiet" : "default"}

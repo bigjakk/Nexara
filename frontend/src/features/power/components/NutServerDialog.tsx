@@ -21,6 +21,8 @@ import { describeError } from "@/lib/api-error";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { useCreateNutServer, useProbeNutServer, useUpdateNutServer } from "../api/ups-queries";
 import type { NutProbeResult, NutServer, NutServerRequest } from "../types/ups";
+import { useTranslation, Trans } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 const CONFIRM_CODES = [
   "nut_cleartext_credentials_confirm_required",
@@ -43,7 +45,7 @@ interface NutServerDialogProps {
 function errorText(err: unknown): string {
   // describeError gives "HTTP 429" for a body-less answer, and nothing for a
   // request that never got one.
-  return describeError(err) || "The request failed — check your connection and try again.";
+  return describeError(err) || i18n.t("power:nutServerDialog.theRequestFailedCheckYour");
 }
 
 /**
@@ -53,6 +55,7 @@ function errorText(err: unknown): string {
  * refusal: a NUT server on a LAN without TLS is the usual case.
  */
 export function NutServerDialog({ server, trigger, open: openProp, onOpenChange }: NutServerDialogProps) {
+  const { t } = useTranslation("power");
   const editing = server !== undefined;
   const [openState, setOpenState] = useState(false);
   const open = openProp ?? openState;
@@ -123,7 +126,7 @@ export function NutServerDialog({ server, trigger, open: openProp, onOpenChange 
     const req = { ...body(extra), name };
     settle(editing ? update.mutateAsync({ ...req, enabled, id: server.id }) : create.mutateAsync(req), {
       // Named: a late failure is toasted, perhaps over another page.
-      action: editing ? `Saving NUT server ${server.name}` : `Adding NUT server ${name}`,
+      action: editing ? t("nutServerDialog.savingNUTServerName", { name: server.name }) : t("nutServerDialog.addingNUTServerName", { name }),
       onSuccess: () => { setOpen(false); },
       // Shown below from the mutation's own state: a prompt for a refusal
       // that needs confirming, or the error itself.
@@ -149,9 +152,9 @@ export function NutServerDialog({ server, trigger, open: openProp, onOpenChange 
       {trigger !== undefined && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{editing ? `Edit ${server.name}` : "Add NUT server"}</DialogTitle>
+          <DialogTitle>{editing ? t("nutServerDialog.editName", { name: server.name }) : t("nutServerDialog.addNUTServer")}</DialogTitle>
           <DialogDescription>
-            Nexara connects to upsd on TCP and reads every UPS that server reports.
+            {t("nutServerDialog.nexaraConnectsToUpsdOn")}
           </DialogDescription>
         </DialogHeader>
 
@@ -163,78 +166,75 @@ export function NutServerDialog({ server, trigger, open: openProp, onOpenChange 
           }}
         >
           <div className="space-y-2">
-            <Label htmlFor="nut-name">Name</Label>
+            <Label htmlFor="nut-name">{t("nutServerDialog.name")}</Label>
             <Input id="nut-name" value={name} onChange={(e) => { setName(e.target.value); }} required maxLength={64} />
           </div>
           <div className="grid grid-cols-[1fr_7rem] gap-3">
             <div className="space-y-2">
-              <Label htmlFor="nut-host">Host</Label>
+              <Label htmlFor="nut-host">{t("nutServerDialog.host")}</Label>
               <Input id="nut-host" value={host} onChange={(e) => { setHost(e.target.value); }} required placeholder="192.0.2.40" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="nut-port">Port</Label>
+              <Label htmlFor="nut-port">{t("nutServerDialog.port")}</Label>
               <Input id="nut-port" type="number" min={1} max={65535} value={port} onChange={(e) => { setPort(e.target.value); }} required />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="nut-username">Username</Label>
+              <Label htmlFor="nut-username">{t("nutServerDialog.username")}</Label>
               <Input id="nut-username" value={username} disabled={clearCredentials} onChange={(e) => { setUsername(e.target.value); }} placeholder="optional" autoComplete="off" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="nut-password">Password</Label>
+              <Label htmlFor="nut-password">{t("nutServerDialog.password")}</Label>
               <Input
                 id="nut-password"
                 type="password"
                 value={password}
                 disabled={clearCredentials}
                 onChange={(e) => { setPassword(e.target.value); }}
-                placeholder={editing && server.has_password ? "unchanged" : "optional"}
+                placeholder={editing && server.has_password ? t("nutServerDialog.unchanged") : t("nutServerDialog.optional")}
                 autoComplete="new-password"
               />
             </div>
           </div>
           <p className="-mt-2 text-xs text-muted-foreground">
-            Only needed where upsd demands an account. Leave both empty and Nexara reads anonymously.
+            {t("nutServerDialog.onlyNeededWhereUpsdDemands")}
           </p>
           {editing && (server.has_password || server.username !== "") && (
             <label className="flex items-center gap-2 text-sm">
               <Checkbox checked={clearCredentials} onCheckedChange={(v) => { setClearCredentials(v === true); }} />
-              Remove the stored username and password
+              {t("nutServerDialog.removeTheStoredUsernameAnd")}
             </label>
           )}
           <div className="space-y-2">
-            <Label htmlFor="nut-tls">Connection security</Label>
+            <Label htmlFor="nut-tls">{t("nutServerDialog.connectionSecurity")}</Label>
             <select
               id="nut-tls"
               className="h-9 w-full rounded-md border bg-background px-3 text-sm"
               value={tlsMode}
               onChange={(e) => { setTlsMode(e.target.value === "starttls" ? "starttls" : "off"); }}
             >
-              <option value="off">Plain TCP</option>
-              <option value="starttls">STARTTLS (required)</option>
+              <option value="off">{t("nutServerDialog.plainTCP")}</option>
+              <option value="starttls">{t("nutServerDialog.starttlsRequired")}</option>
             </select>
           </div>
           {editing && (
             <label className="flex items-start gap-2 text-sm">
               <Checkbox className="mt-0.5" checked={enabled} onCheckedChange={(v) => { setEnabled(v === true); }} />
               <span>
-                Poll this server
-                <span className="block text-xs text-muted-foreground">
-                  Off keeps the server and its history; its UPSes show Polling off and leave the alerts.
-                </span>
+                <Trans t={t} i18nKey="nutServerDialog.pollThisServerSpanOff" components={{ span: <span className="block text-xs text-muted-foreground" /> }} />
               </span>
             </label>
           )}
           {tlsMode === "starttls" && (
             <div className="space-y-3 border-t pt-4">
               <div className="space-y-2">
-                <Label htmlFor="nut-fp">Pinned certificate fingerprint</Label>
-                <Input id="nut-fp" value={fingerprint} onChange={(e) => { setFingerprint(e.target.value); }} placeholder="SHA-256, from Test connection" className="font-mono text-xs" />
+                <Label htmlFor="nut-fp">{t("nutServerDialog.pinnedCertificateFingerprint")}</Label>
+                <Input id="nut-fp" value={fingerprint} onChange={(e) => { setFingerprint(e.target.value); }} placeholder={t("nutServerDialog.sha256FromTestConnection")} className="font-mono text-xs" />
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox checked={verifyTls} onCheckedChange={(v) => { setVerifyTls(v === true); }} />
-                Verify against the system's trusted CAs when no fingerprint is pinned
+                {t("nutServerDialog.verifyAgainstTheSystemS")}
               </label>
             </div>
           )}
@@ -250,9 +250,9 @@ export function NutServerDialog({ server, trigger, open: openProp, onOpenChange 
           )}
           {confirm !== null && (
             <ConfirmRequiredWarning
-              title={confirm.code === CONFIRM_CODES[0] ? "Password without TLS" : "Certificate not verified"}
+              title={confirm.code === CONFIRM_CODES[0] ? t("nutServerDialog.passwordWithoutTLS") : t("nutServerDialog.certificateNotVerified")}
               message={confirm.message}
-              confirmLabel="Store it anyway"
+              confirmLabel={t("nutServerDialog.storeItAnyway")}
               pending={pending}
               onConfirm={() => {
                 resend(
@@ -272,16 +272,19 @@ export function NutServerDialog({ server, trigger, open: openProp, onOpenChange 
             <div className="space-y-1 rounded-md bg-foreground/[0.05] p-3 text-sm">
               <div className="flex items-center gap-2 font-medium">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden="true" />
-                Connected in {probe.took_ms} ms · upsd {probe.nut_version || "?"}, protocol {probe.protocol_version || "?"}
+                {t("nutServerDialog.connectedInTookMsMsUpsd", { tookMs: probe.took_ms, nutVersion: probe.nut_version || "?", protocolVersion: probe.protocol_version || "?" })}
               </div>
               <div className="text-muted-foreground">
                 {probe.devices.length === 0
-                  ? "No UPS configured on this server."
-                  : `${String(probe.devices.length)} UPS: ${probe.devices.map((d) => (d.description !== "" ? `${d.name} (${d.description})` : d.name)).join(", ")}`}
+                  ? t("nutServerDialog.noUPSConfiguredOnThis")
+                  : t("nutServerDialog.upsFound", {
+                      number: String(probe.devices.length),
+                      devices: probe.devices.map((d) => (d.description !== "" ? `${d.name} (${d.description})` : d.name)).join(", "),
+                    })}
               </div>
               {probe.tls && probe.tls_fingerprint !== "" && fingerprint === "" && (
                 <Button type="button" size="sm" variant="outline" onClick={() => { setFingerprint(probe.tls_fingerprint); }}>
-                  Pin this certificate
+                  {t("nutServerDialog.pinThisCertificate")}
                 </Button>
               )}
             </div>
@@ -289,18 +292,18 @@ export function NutServerDialog({ server, trigger, open: openProp, onOpenChange 
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => { setOpen(false); }}>
-              Cancel
+              {t("nutServerDialog.cancel")}
             </Button>
             {/* Add only: an edit with the password left blank would test an
                 anonymous connection, not the stored one. Saving re-probes,
                 and each table row has its own Test. */}
             {!editing && (
               <Button type="button" variant="outline" disabled={pending || host === ""} onClick={() => { test(); }}>
-                {probeServer.isPending ? "Testing…" : "Test connection"}
+                {probeServer.isPending ? t("nutServerDialog.testing") : t("nutServerDialog.testConnection")}
               </Button>
             )}
             <Button type="submit" disabled={pending || name === "" || host === ""}>
-              {save.isPending ? "Saving…" : editing ? "Save" : "Add server"}
+              {save.isPending ? t("nutServerDialog.saving") : editing ? t("nutServerDialog.save") : t("nutServerDialog.addServer")}
             </Button>
           </DialogFooter>
         </form>

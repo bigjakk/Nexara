@@ -26,6 +26,7 @@ import { HistoryTabContent, HistoryTabTrigger } from "@/features/history/compone
 import { usePermissions } from "@/hooks/usePermissions";
 import type { UpsWritableVar } from "../types/ups";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
 
 function series(points: UpsMetricPoint[], key: keyof UpsMetricPoint): number[] {
   return points.map((p) => p[key]).filter((v): v is number => typeof v === "number");
@@ -36,6 +37,7 @@ function series(points: UpsMetricPoint[], key: keyof UpsMetricPoint): number[] {
  * which also picks the measure the chart below draws over the chosen range.
  */
 function Readings({ device }: { device: UpsDevice }) {
+  const { t } = useTranslation("power");
   const [range, setRange] = useState<TimeRange>("24h");
   const [focus, setFocus] = useState<UpsChartFocus>("charge");
   const r: UpsRange = range === "live" ? "1h" : range;
@@ -56,36 +58,43 @@ function Readings({ device }: { device: UpsDevice }) {
   });
 
   return (
-    <Panel flush title="Readings" actions={<TimeRangeSelector value={range} onChange={setRange} />}>
+    <Panel flush title={t("upsDetailPage.readings")} actions={<TimeRangeSelector value={range} onChange={setRange} />}>
       <StatStrip>
         <Stat
-          label="Charge"
+          label={t("upsDetailPage.charge")}
           value={device.battery_charge == null ? "—" : `${String(Math.round(device.battery_charge))}%`}
-          sub={device.battery_charge_low == null ? undefined : `goes low at ${String(device.battery_charge_low)}%`}
+          sub={device.battery_charge_low == null ? undefined : t("upsDetailPage.goesLowAtBatteryChargeLow", { batteryChargeLow: String(device.battery_charge_low) })}
           tone={battery}
           trend={series(points, "charge")}
           trendMax={100}
           {...pick("charge")}
         />
         <Stat
-          label="Runtime"
+          label={t("upsDetailPage.runtime")}
           value={formatRuntime(device.battery_runtime)}
-          sub={onBattery ? "falling, on battery" : "at the current load"}
+          sub={onBattery ? t("upsDetailPage.fallingOnBattery") : t("upsDetailPage.atTheCurrentLoad")}
           tone={battery}
           trend={series(points, "runtime")}
           {...pick("runtime")}
         />
         <Stat
-          label="Load"
+          label={t("upsDetailPage.load")}
           value={device.load == null ? "—" : `${String(Math.round(device.load))}%`}
-          sub={`${formatWatts(device.realpower, device.realpower_estimated)}${device.realpower_nominal == null ? "" : ` of ${String(device.realpower_nominal)} W`}`}
+          sub={
+            device.realpower_nominal == null
+              ? formatWatts(device.realpower, device.realpower_estimated)
+              : t("upsDetailPage.wattsOfNominal", {
+                  watts: formatWatts(device.realpower, device.realpower_estimated),
+                  nominal: String(device.realpower_nominal),
+                })
+          }
           tone={plain}
           trend={series(points, "load")}
           trendMax={100}
           {...pick("load")}
         />
         <Stat
-          label="Input"
+          label={t("upsDetailPage.input")}
           value={device.input_voltage == null ? "—" : `${String(Math.round(device.input_voltage))} V`}
           sub={device.input_frequency == null ? undefined : `${device.input_frequency.toFixed(1)} Hz`}
           tone={battery}
@@ -93,9 +102,9 @@ function Readings({ device }: { device: UpsDevice }) {
           {...pick("voltage")}
         />
         <Stat
-          label="Output"
+          label={t("upsDetailPage.output")}
           value={device.output_voltage == null ? "—" : `${String(Math.round(device.output_voltage))} V`}
-          sub="supplied to the load"
+          sub={t("upsDetailPage.suppliedToTheLoad")}
           tone={plain}
           trend={series(points, "output_voltage")}
           {...pick("voltage")}
@@ -104,11 +113,11 @@ function Readings({ device }: { device: UpsDevice }) {
       <div className="-mt-px border-t px-[18px] pb-1 pt-4">
         {metrics.data !== undefined && metrics.data.points.length > 0 ? (
           <>
-            <QueryFailureNote query={metrics} subject="this UPS's readings" className="pb-2" />
+            <QueryFailureNote query={metrics} subject={t("upsDetailPage.thisUPSSReadings")} className="pb-2" />
             <UpsChart focus={focus} points={metrics.data.points} range={r} bucketSeconds={metrics.data.bucket_seconds} />
           </>
         ) : (
-          <QueryStateNotice query={metrics} subject="this UPS's readings" empty="No readings in this range yet." />
+          <QueryStateNotice query={metrics} subject={t("upsDetailPage.thisUPSSReadings")} empty={t("upsDetailPage.noReadingsInThisRange")} />
         )}
       </div>
     </Panel>
@@ -117,32 +126,33 @@ function Readings({ device }: { device: UpsDevice }) {
 
 /** What the battery and the unit are: read once, seldom changing. */
 function Identity({ device }: { device: UpsDevice }) {
+  const { t } = useTranslation("power");
   return (
     <>
-      <Panel title="Battery">
+      <Panel title={t("upsDetailPage.battery")}>
         <PropertyList>
-          <PropertyRow label="Chemistry">{device.battery_type || "—"}</PropertyRow>
-          <PropertyRow label="Voltage">{device.battery_voltage == null ? "—" : `${String(device.battery_voltage)} V`}</PropertyRow>
-          <PropertyRow label="Installed">{device.battery_date || "—"}</PropertyRow>
-          <PropertyRow label="Goes low at">
+          <PropertyRow label={t("upsDetailPage.chemistry")}>{device.battery_type || "—"}</PropertyRow>
+          <PropertyRow label={t("upsDetailPage.voltage")}>{device.battery_voltage == null ? "—" : `${String(device.battery_voltage)} V`}</PropertyRow>
+          <PropertyRow label={t("upsDetailPage.installed")}>{device.battery_date || "—"}</PropertyRow>
+          <PropertyRow label={t("upsDetailPage.goesLowAt")}>
             {[
               device.battery_charge_low == null ? "" : `${String(device.battery_charge_low)}%`,
               device.battery_runtime_low == null ? "" : formatRuntime(device.battery_runtime_low),
             ].filter((s) => s !== "").join(" or ") || "—"}
           </PropertyRow>
-          <PropertyRow label="Last self-test">{device.test_result || "—"}</PropertyRow>
+          <PropertyRow label={t("upsDetailPage.lastSelfTest")}>{device.test_result || "—"}</PropertyRow>
         </PropertyList>
       </Panel>
-      <Panel title="Device">
+      <Panel title={t("upsDetailPage.device")}>
         <PropertyList>
-          <PropertyRow label="Manufacturer">{device.manufacturer || "—"}</PropertyRow>
-          <PropertyRow label="Model">{device.model || "—"}</PropertyRow>
-          <PropertyRow label="Serial">
+          <PropertyRow label={t("upsDetailPage.manufacturer")}>{device.manufacturer || "—"}</PropertyRow>
+          <PropertyRow label={t("upsDetailPage.model")}>{device.model || "—"}</PropertyRow>
+          <PropertyRow label={t("upsDetailPage.serial")}>
             <span className="font-mono text-[12.5px]">{device.serial || "—"}</span>
           </PropertyRow>
-          <PropertyRow label="Firmware">{device.firmware || "—"}</PropertyRow>
-          <PropertyRow label="Driver">{device.driver || "—"}</PropertyRow>
-          <PropertyRow label="Transfer range">
+          <PropertyRow label={t("upsDetailPage.firmware")}>{device.firmware || "—"}</PropertyRow>
+          <PropertyRow label={t("upsDetailPage.driver")}>{device.driver || "—"}</PropertyRow>
+          <PropertyRow label={t("upsDetailPage.transferRange")}>
             {device.input_transfer_low == null || device.input_transfer_high == null
               ? "—"
               : `${String(device.input_transfer_low)}–${String(device.input_transfer_high)} V`}
@@ -155,6 +165,7 @@ function Identity({ device }: { device: UpsDevice }) {
 
 /** One UPS: its readings and charts, every variable upsd reports, and its power events. */
 export function UpsDetailPage() {
+  const { t } = useTranslation("power");
   const { upsId = "" } = useParams<{ upsId: string }>();
   const device = useUpsDevice(upsId);
   const events = useUpsEvents(upsId);
@@ -165,21 +176,21 @@ export function UpsDetailPage() {
   // As the server gates it: one that can change the power also takes
   // execute:ups, and manage:node on the clusters the UPS powers.
   const whyNotSet = (v: UpsWritableVar): string | null => {
-    if (!v.editable) return v.reason ?? "Nexara does not offer it for editing";
-    if (!hasGlobalPermission("manage", "ups")) return "Setting it takes manage:ups";
+    if (!v.editable) return v.reason ?? t("upsDetailPage.nexaraDoesNotOfferIt");
+    if (!hasGlobalPermission("manage", "ups")) return t("upsDetailPage.settingItTakesManageUps");
     if (v.affects_power && !(hasGlobalPermission("execute", "ups") && canManage("node"))) {
-      return "It can change the power the UPS supplies, so setting it also takes execute:ups and manage:node";
+      return t("upsDetailPage.itCanChangeThePower");
     }
-    if (!hasAccount) return "Setting it takes an account from upsd.users, stored on the NUT server";
+    if (!hasAccount) return t("upsDetailPage.settingItTakesAnAccount");
     return null;
   };
 
   if (d === undefined) {
     return (
       <div className="space-y-5">
-        <Breadcrumbs crumbs={[{ label: "Power", to: "/power" }, { label: "UPS" }]} />
+        <Breadcrumbs crumbs={[{ label: t("upsDetailPage.power"), to: "/power" }, { label: t("upsDetailPage.ups") }]} />
         <Panel>
-          <QueryStateNotice query={device} subject="this UPS" empty="This UPS was not found." />
+          <QueryStateNotice query={device} subject={t("upsDetailPage.thisUPS")} empty={t("upsDetailPage.thisUPSWasNotFound")} />
         </Panel>
       </div>
     );
@@ -194,7 +205,7 @@ export function UpsDetailPage() {
   return (
     <div className="space-y-5">
       <DetailHeader
-        crumbs={[{ label: "Power", to: "/power" }, { label: d.name }]}
+        crumbs={[{ label: t("upsDetailPage.power"), to: "/power" }, { label: d.name }]}
         icon={<BatteryCharging />}
         title={d.name}
         titleAside={d.description !== "" ? <span className="text-muted-foreground">{d.description}</span> : undefined}
@@ -206,7 +217,7 @@ export function UpsDetailPage() {
               nameDot
               detail={
                 upsOnBattery(d) && d.on_battery_since !== null
-                  ? `since ${formatTime(d.on_battery_since)}`
+                  ? t("upsDetailPage.sinceOnBatterySince", { onBatterySince: formatTime(d.on_battery_since) })
                   : undefined
               }
             />
@@ -216,32 +227,32 @@ export function UpsDetailPage() {
                 {f.label}
               </span>
             ))}
-            {model !== "" && <Fact label="Model">{model}</Fact>}
-            <Fact label="NUT server">{d.server_name}</Fact>
-            <Fact label="Last read"><DateTime value={d.last_reading_at} fallback="never" /></Fact>
+            {model !== "" && <Fact label={t("upsDetailPage.model")}>{model}</Fact>}
+            <Fact label={t("upsDetailPage.nutServer")}>{d.server_name}</Fact>
+            <Fact label={t("upsDetailPage.lastRead")}><DateTime value={d.last_reading_at} fallback={t("upsDetailPage.never")} /></Fact>
           </>
         }
       />
-      <QueryFailureNote query={device} subject="the latest reading of this UPS" />
+      <QueryFailureNote query={device} subject={t("upsDetailPage.theLatestReadingOfThis")} />
       {d.state === "unknown" && (
         <p className="rounded-[10px] bg-amber-500/10 px-[18px] py-3 text-sm">
           {d.last_reading_at === null
-            ? "Nexara has not read this UPS yet."
-            : `Nexara has no current reading for this UPS (${status.label.toLowerCase()}). The values below are the last ones it read.`}
+            ? t("upsDetailPage.nexaraHasNotReadThis")
+            : t("upsDetailPage.nexaraHasNoCurrentReading", { label: status.label.toLowerCase() })}
         </p>
       )}
       <Tabs defaultValue="overview">
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="overview">{t("upsDetailPage.overview")}</TabsTrigger>
           <TabsTrigger value="powers">
-            Powers ({d.feeds.length})
+            {t("upsDetailPage.powersLength", { length: d.feeds.length })}
             {unprotected && (
-              <span role="img" className="ml-1.5 h-2 w-2 rounded-full bg-amber-500" aria-label="a node is not protected" />
+              <span role="img" className="ml-1.5 h-2 w-2 rounded-full bg-amber-500" aria-label={t("upsDetailPage.aNodeIsNotProtected")} />
             )}
           </TabsTrigger>
-          <TabsTrigger value="variables">Variables ({Object.keys(d.vars ?? {}).length})</TabsTrigger>
-          <TabsTrigger value="commands">Commands ({d.commands?.length ?? 0})</TabsTrigger>
-          <TabsTrigger value="events">Power events</TabsTrigger>
+          <TabsTrigger value="variables">{t("upsDetailPage.variablesLength", { length: Object.keys(d.vars ?? {}).length })}</TabsTrigger>
+          <TabsTrigger value="commands">{t("upsDetailPage.commandsLength", { length: d.commands?.length ?? 0 })}</TabsTrigger>
+          <TabsTrigger value="events">{t("upsDetailPage.powerEvents")}</TabsTrigger>
           <HistoryTabTrigger history={upsHistory(d.id)} />
         </TabsList>
         <TabsContent value="overview" className="mt-5">
@@ -288,7 +299,7 @@ export function UpsDetailPage() {
             </Panel>
           ) : (
             <Panel>
-              <QueryStateNotice query={events} subject="this UPS's power events" empty="No power events recorded yet." />
+              <QueryStateNotice query={events} subject={t("upsDetailPage.thisUPSSPowerEvents")} empty={t("upsDetailPage.noPowerEventsRecordedYet")} />
             </Panel>
           )}
         </TabsContent>

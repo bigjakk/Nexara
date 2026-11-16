@@ -23,6 +23,7 @@ import auditEN from "@/locales/en/audit.json";
 import cephEN from "@/locales/en/ceph.json";
 import networksEN from "@/locales/en/networks.json";
 import snapshotsEN from "@/locales/en/snapshots.json";
+import powerEN from "@/locales/en/power.json";
 // The timeline every History shares keeps its strings in history; each kind
 // its own in history-<kind> (features/history/types/history.ts says how).
 import historyEN from "@/locales/en/history.json";
@@ -64,6 +65,7 @@ export const resources = {
     ceph: cephEN,
     networks: networksEN,
     snapshots: snapshotsEN,
+    power: powerEN,
     history: historyEN,
     "history-guest": historyGuestEN,
     "history-folder": historyFolderEN,

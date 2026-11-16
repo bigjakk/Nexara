@@ -11,6 +11,7 @@ import { describeError } from "@/lib/api-error";
 import { useSetUpsVariable, useUpsCommandRuns } from "../api/ups-queries";
 import { reportUpsRun } from "../lib/ups-runs";
 import type { UpsDevice, UpsWritableVar } from "../types/ups";
+import { useTranslation, Trans } from "react-i18next";
 
 /**
  * Sets one writable variable, with the editor its type calls for: a choice for
@@ -28,6 +29,7 @@ export function UpsVariableDialog({
   variable: UpsWritableVar;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("power");
   const id = useId();
   const [value, setValue] = useState(variable.value);
   const [understood, setUnderstood] = useState(false);
@@ -44,7 +46,7 @@ export function UpsVariableDialog({
     settle(
       set.mutateAsync({ name: variable.name, value, ...(variable.confirm === "typed" ? { confirm: typed } : {}) }),
       {
-        action: `Setting ${variable.name} on ${device.name}`,
+        action: t("upsVariableDialog.settingNameOnName2", { name: variable.name, name2: device.name }),
         onSuccess: (r) => {
           setRunId(r.id);
         },
@@ -66,16 +68,21 @@ export function UpsVariableDialog({
         <DialogHeader>
           <DialogTitle className="break-all font-mono text-base">{variable.name}</DialogTitle>
           <DialogDescription>
-            Set on {device.name} through {device.server_name}. It now reads <span className="font-mono">{variable.value || "(empty)"}</span>.
+            <Trans
+              t={t}
+              i18nKey="upsVariableDialog.setOnNameThroughServerName"
+              values={{ name: device.name, serverName: device.server_name, value: variable.value || t("upsVariableDialog.empty") }}
+              components={{ span: <span className="font-mono" /> }}
+            />
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor={id}>New value</Label>
+            <Label htmlFor={id}>{t("upsVariableDialog.newValue")}</Label>
             {variable.type === "enum" ? (
               <Select value={value} onValueChange={setValue} disabled={runId !== null}>
                 <SelectTrigger id={id}>
-                  <SelectValue placeholder="Choose a value" />
+                  <SelectValue placeholder={t("upsVariableDialog.chooseAValue")} />
                 </SelectTrigger>
                 <SelectContent>
                   {(variable.enum ?? []).map((v) => (
@@ -101,15 +108,14 @@ export function UpsVariableDialog({
             )}
             {variable.type === "range" && (variable.ranges ?? []).length > 0 && (
               <p className="text-xs text-muted-foreground">
-                upsd allows {(variable.ranges ?? []).map(([lo, hi]) => `${String(lo)}–${String(hi)}`).join(" or ")}.
+                {t("upsVariableDialog.upsdAllowsRanges", { ranges: (variable.ranges ?? []).map(([lo, hi]) => `${String(lo)}–${String(hi)}`).join(t("upsVariableDialog.rangesJoin")) })}
               </p>
             )}
           </div>
           {variable.affects_power && (
             <p className="flex items-start gap-1.5 text-sm text-amber-700 dark:text-amber-400">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              This can change the power {device.name} supplies, or when upsmon shuts machines down: a battery-low point set too low
-              means no warning before the battery is flat.
+              {t("upsVariableDialog.thisCanChangeThePower", { name: device.name })}
             </p>
           )}
           {variable.confirm === "plain" && (
@@ -121,13 +127,13 @@ export function UpsVariableDialog({
                   setUnderstood(v === true);
                 }}
               />
-              I understand what this changes
+              {t("upsVariableDialog.iUnderstandWhatThisChanges")}
             </label>
           )}
           {variable.confirm === "typed" && (
             <div className="space-y-1.5">
               <Label htmlFor={`${id}-confirm`}>
-                Type <span className="font-mono font-semibold">{device.name}</span> to confirm
+                <Trans t={t} i18nKey="upsVariableDialog.typeSpanNameSpanTo" values={{ name: device.name }} components={{ span: <span className="font-mono font-semibold" /> }} />
               </Label>
               <Input
                 id={`${id}-confirm`}
@@ -145,20 +151,24 @@ export function UpsVariableDialog({
           {runId !== null && (
             <p role="status" className={run?.status === "failed" ? "text-sm text-destructive" : "text-sm"}>
               {run === undefined || run.status === "sent" || run.status === "pending"
-                ? "Sent. Waiting for the driver's answer…"
+                ? t("upsVariableDialog.sentWaitingForTheDriver")
                 : run.status === "succeeded"
-                  ? `Set.${run.result === "" ? "" : ` ${run.result}`}`
-                  : `${run.status === "failed" ? "Failed" : "Not confirmed"}: ${run.result}`}
+                  ? run.result === ""
+                    ? t("upsVariableDialog.setDone")
+                    : t("upsVariableDialog.setDoneResult", { result: run.result })
+                  : run.status === "failed"
+                    ? t("upsVariableDialog.failedResult", { result: run.result })
+                    : t("upsVariableDialog.notConfirmedResult", { result: run.result })}
             </p>
           )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            {runId === null ? "Cancel" : "Close"}
+            {runId === null ? t("upsVariableDialog.cancel") : t("upsVariableDialog.close")}
           </Button>
           {runId === null && (
             <Button disabled={!confirmed || value === variable.value || set.isPending} onClick={save}>
-              {set.isPending ? "Setting…" : "Set"}
+              {set.isPending ? t("upsVariableDialog.setting") : t("upsVariableDialog.set")}
             </Button>
           )}
         </DialogFooter>

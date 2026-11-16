@@ -34,16 +34,18 @@ import { useNutServers, useRunUpsCommand, useUpsCommandRuns } from "../api/ups-q
 import { DANGER_OUTLINE } from "../lib/ups-style";
 import type { UpsCommand, UpsCommandRun, UpsCommandTier, UpsDevice } from "../types/ups";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 const TIERS: { tier: UpsCommandTier; title: string; note: string }[] = [
-  { tier: "everyday", title: "Everyday", note: "The beeper, the panel test, and stopping something, such as a shutdown in progress." },
-  { tier: "test", title: "Tests", note: "A battery test drains the battery; a deep one runs it down to low." },
-  { tier: "powers_on", title: "Powers on", note: "Switches power on to what the UPS feeds." },
-  { tier: "driver", title: "Driver", note: "Reloads the NUT driver; readings pause while it does." },
+  { tier: "everyday", get title() { return i18n.t("power:upsCommands.everyday"); }, get note() { return i18n.t("power:upsCommands.theBeeperThePanelTest"); } },
+  { tier: "test", get title() { return i18n.t("power:upsCommands.tests"); }, get note() { return i18n.t("power:upsCommands.aBatteryTestDrainsThe"); } },
+  { tier: "powers_on", get title() { return i18n.t("power:upsCommands.powersOn"); }, get note() { return i18n.t("power:upsCommands.switchesPowerOnToWhat"); } },
+  { tier: "driver", get title() { return i18n.t("power:upsCommands.driver"); }, get note() { return i18n.t("power:upsCommands.reloadsTheNUTDriverReadings"); } },
   {
     tier: "cuts_power",
-    title: "Cuts power",
-    note: "Switches off the power the UPS supplies, now or after a delay. A command Nexara does not recognise is here too.",
+    get title() { return i18n.t("power:upsCommands.cutsPower"); },
+    get note() { return i18n.t("power:upsCommands.switchesOffThePowerThe"); },
   },
 ];
 
@@ -54,6 +56,7 @@ const TIERS: { tier: UpsCommandTier; title: string; note: string }[] = [
  * which the server checks.
  */
 export function UpsCommands({ device }: { device: UpsDevice }) {
+  const { t } = useTranslation("power");
   const { hasGlobalPermission, canManage } = usePermissions();
   const canRun = hasGlobalPermission("execute", "ups");
   // The server also wants manage:node on each cluster the UPS powers; one
@@ -78,7 +81,7 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
     return (
       <Panel>
         <p className="text-sm text-muted-foreground">
-          Nexara has not read this UPS&apos;s commands yet. It lists them within a minute of reading the UPS.
+          {t("upsCommands.nexaraHasNotReadThis")}
         </p>
       </Panel>
     );
@@ -86,11 +89,11 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
   const commands = device.commands ?? [];
   return (
     <div className="space-y-4">
-      <Panel title="Commands" aside={commands.length > 0 ? `${String(commands.length)} from upsd` : undefined}>
+      <Panel title={t("upsCommands.commands")} aside={commands.length > 0 ? t("upsCommands.lengthFromUpsd", { length: String(commands.length) }) : undefined}>
         <div className="-mt-2 max-w-[70ch]">
           <AccountNote hasAccount={hasAccount} verifiedAt={server?.commands_verified_at ?? null} />
         </div>
-        {commands.length === 0 && <p className="mt-3 text-sm text-muted-foreground">upsd lists no instant commands for this UPS.</p>}
+        {commands.length === 0 && <p className="mt-3 text-sm text-muted-foreground">{t("upsCommands.upsdListsNoInstantCommands")}</p>}
         {/* A tier per band: what it can do on the left, its commands on the right. */}
         <div className="@container mt-3 divide-y border-t empty:hidden">
           {TIERS.map(({ tier, title, note }) => {
@@ -120,12 +123,12 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
                           className={cn("shrink-0", cuts && DANGER_OUTLINE)}
                           variant="outline"
                           disabled={!hasAccount || run.isPending}
-                          aria-label={`Run ${cmd.name}`}
+                          aria-label={t("upsCommands.runName", { name: cmd.name })}
                           onClick={() => {
                             start(cmd);
                           }}
                         >
-                          Run
+                          {t("upsCommands.run")}
                         </Button>
                       )}
                     </li>
@@ -146,19 +149,19 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Run {confirming?.name} on {device.name}?</AlertDialogTitle>
+            <AlertDialogTitle>{t("upsCommands.runNameOnName2", { name: confirming?.name, name2: device.name })}</AlertDialogTitle>
             <AlertDialogDescription>
               {TIERS.find((t) => t.tier === confirming?.tier)?.note} {confirming?.description}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("upsCommands.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (confirming !== null) send(confirming);
               }}
             >
-              Run
+              {t("upsCommands.run")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -172,12 +175,14 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
         onConfirm={(cmd, typed) => {
           send(cmd, typed);
         }}
-        title={(cmd) => `Run ${cmd.name} on ${device.name}?`}
+        title={(cmd) => t("upsCommands.runNameOnName2", { name: cmd.name, name2: device.name })}
         description={(cmd) =>
-          `This switches off the power ${device.name} supplies${cmd.description === "" ? "" : ` (${cmd.description})`}. Everything it feeds goes down without shutting down first.`
+          cmd.description === ""
+            ? t("upsCommands.thisSwitchesOffThePower", { name: device.name })
+            : t("upsCommands.thisSwitchesOffThePowerDescribed", { name: device.name, description: cmd.description })
         }
         name={() => device.name}
-        confirmLabel="Cut the power"
+        confirmLabel={t("upsCommands.cutThePower")}
         details={() => <WhatItPowers device={device} />}
       />
     </div>
@@ -185,19 +190,19 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
 }
 
 function AccountNote({ hasAccount, verifiedAt }: { hasAccount: boolean; verifiedAt: string | null }) {
+  const { t } = useTranslation("power");
   if (!hasAccount) {
     return (
       <p className="text-sm text-muted-foreground">
-        upsd runs commands only for an account from its upsd.users. Add one with instcmds to this UPS&apos;s NUT server, on
-        the Power page&apos;s NUT servers tab.
+        {t("upsCommands.upsdRunsCommandsOnlyFor")}
       </p>
     );
   }
   return (
     <p className="text-sm text-muted-foreground">
       {verifiedAt === null
-        ? "upsd checks the stored account only when a command runs, so the first command is its test."
-        : `upsd last took a command from the stored account on ${formatExactDateTime(verifiedAt)}.`}
+        ? t("upsCommands.upsdChecksTheStoredAccount")
+        : t("upsCommands.upsdLastTookACommand", { verifiedAt: formatExactDateTime(verifiedAt) })}
     </p>
   );
 }
@@ -207,6 +212,7 @@ function AccountNote({ hasAccount, verifiedAt }: { hasAccount: boolean; verified
  * running on each, and a warning when the NUT server runs on one of them.
  */
 function WhatItPowers({ device }: { device: UpsDevice }) {
+  const { t } = useTranslation("power");
   const nodes = device.feeds.filter((f) => f.kind === "node");
   const clusters = [...new Set(nodes.flatMap((f) => (f.cluster_id === null ? [] : [f.cluster_id])))];
   const guests = useQueries({
@@ -228,7 +234,7 @@ function WhatItPowers({ device }: { device: UpsDevice }) {
   return (
     <div className="space-y-2 text-sm">
       {nodes.length === 0 && labels.length === 0 ? (
-        <p className="text-muted-foreground">Nexara knows nothing this UPS powers.</p>
+        <p className="text-muted-foreground">{t("upsCommands.nexaraKnowsNothingThisUPS")}</p>
       ) : (
         <ul className="space-y-1">
           {nodes.map((f) => {
@@ -237,7 +243,7 @@ function WhatItPowers({ device }: { device: UpsDevice }) {
               <li key={f.id}>
                 <span className="font-medium">{f.node_name}</span>{" "}
                 <span className="text-muted-foreground">
-                  ({f.cluster_name}){n === null ? "" : n === 1 ? ", 1 guest running" : `, ${String(n)} guests running`}
+                  ({f.cluster_name}){n === null ? "" : n === 1 ? t("upsCommands.n1GuestRunning") : t("upsCommands.nGuestsRunning", { n: String(n) })}
                 </span>
               </li>
             );
@@ -250,8 +256,7 @@ function WhatItPowers({ device }: { device: UpsDevice }) {
       {hostFed && (
         <p className="flex items-start gap-1.5 text-red-700 dark:text-red-400">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          {device.server_name} runs on {host.node_name}: cutting the power stops it too, and Nexara may not hear how the command
-          went.
+          {t("upsCommands.serverNameRunsOnNodeNameCutting", { serverName: device.server_name, nodeName: host.node_name })}
         </p>
       )}
     </div>
@@ -270,11 +275,11 @@ type RunKey = "expand" | "when" | "who" | "what" | "status";
 
 const RUN_COLUMNS: ColumnDef<UpsCommandRun, RunKey, { expanded: Set<string> }>[] = [
   expandColumn("expand"),
-  { key: "when", label: "When", width: 180, sortValue: (r) => r.requested_at, cell: (r) => <DateTime value={r.requested_at} compact /> },
-  { key: "who", label: "Who", width: 160, sortValue: (r) => r.user_display_name || r.user_email, cell: (r) => r.user_display_name || r.user_email || "—" },
+  { key: "when", get label() { return i18n.t("power:upsCommands.when"); }, width: 180, sortValue: (r) => r.requested_at, cell: (r) => <DateTime value={r.requested_at} compact /> },
+  { key: "who", get label() { return i18n.t("power:upsCommands.who"); }, width: 160, sortValue: (r) => r.user_display_name || r.user_email, cell: (r) => r.user_display_name || r.user_email || "—" },
   {
     key: "what",
-    label: "What",
+    get label() { return i18n.t("power:upsCommands.what"); },
     width: 380,
     wrap: true,
     sortValue: (r) => r.name,
@@ -284,23 +289,24 @@ const RUN_COLUMNS: ColumnDef<UpsCommandRun, RunKey, { expanded: Set<string> }>[]
   },
   {
     key: "status",
-    label: "Outcome",
+    get label() { return i18n.t("power:upsCommands.outcome"); },
     width: 160,
     sortValue: (r) => r.status,
     cell: (r) => (
-      <Badge variant={STATUS_VARIANT[r.status]}>{r.status === "pending" || r.status === "sent" ? "waiting" : r.status}</Badge>
+      <Badge variant={STATUS_VARIANT[r.status]}>{r.status === "pending" || r.status === "sent" ? i18n.t("power:upsCommands.waiting") : r.status}</Badge>
     ),
   },
 ];
 
 /** The UPS's newest runs and variable sets, live while one waits on its driver. */
 function RunHistory({ upsId }: { upsId: string }) {
+  const { t } = useTranslation("power");
   const runs = useUpsCommandRuns(upsId);
   const { layout, rows, toggle, directionFor } = useDataTable("ups-command-runs", RUN_COLUMNS, runs.data ?? [], (r) => r.id);
   const { expanded, toggle: toggleExpand } = useExpandedRows();
   if ((runs.data ?? []).length === 0) return null;
   return (
-    <Panel flush title="Runs" aside="commands run and variables set">
+    <Panel flush title={t("upsCommands.runs")} aside={t("upsCommands.commandsRunAndVariablesSet")}>
       <DataTableFrame layout={layout}>
         <TableHeader>
           <DataTableHeadRow layout={layout} directionFor={directionFor} onSort={toggle} />
@@ -314,9 +320,9 @@ function RunHistory({ upsId }: { upsId: string }) {
               {expanded.has(r.id) && (
                 <ExpandedDetailRow colSpan={layout.columns.length}>
                   <DefGrid>
-                    <DetailField label="Outcome">{r.result || (r.status === "succeeded" ? "The driver ran it" : "—")}</DetailField>
-                    <DetailField label="Finished"><DateTime value={r.finished_at} /></DetailField>
-                    {r.kind === "set" && <DetailField label="Before">{r.previous ?? "—"}</DetailField>}
+                    <DetailField label={t("upsCommands.outcome")}>{r.result || (r.status === "succeeded" ? t("upsCommands.theDriverRanIt") : "—")}</DetailField>
+                    <DetailField label={t("upsCommands.finished")}><DateTime value={r.finished_at} /></DetailField>
+                    {r.kind === "set" && <DetailField label={t("upsCommands.before")}>{r.previous ?? "—"}</DetailField>}
                   </DefGrid>
                 </ExpandedDetailRow>
               )}

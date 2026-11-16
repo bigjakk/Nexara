@@ -13,6 +13,8 @@ import { getTimestampFormatter, timeAxisProps } from "@/features/dashboard/compo
 import { DATA_COLOR } from "@/lib/chart-colors";
 import type { UpsMetricPoint, UpsRange } from "../types/ups";
 import { formatRuntime, onBatteryRuns } from "../lib/ups-state";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 /** The measure the UPS page's strip has selected. Input and output share one chart. */
 export type UpsChartFocus = "charge" | "runtime" | "load" | "voltage";
@@ -51,35 +53,35 @@ const CHARTS: Record<
   { title: string; subtitle: string; format: (v: number) => string; domain: [number | "auto", number | "auto" | ((max: number) => number)]; series: Series[] }
 > = {
   charge: {
-    title: "Battery charge",
-    subtitle: "Lowest charge in each bucket",
+    get title() { return i18n.t("power:upsCharts.batteryCharge"); },
+    get subtitle() { return i18n.t("power:upsCharts.lowestChargeInEachBucket"); },
     format: pct,
     domain: PERCENT_DOMAIN,
-    series: [{ key: "charge", label: "Charge", style: "solid" }],
+    series: [{ key: "charge", get label() { return i18n.t("power:upsCharts.charge"); }, style: "solid" }],
   },
   runtime: {
-    title: "Runtime",
-    subtitle: "Shortest runtime in each bucket, at the load of the time",
+    get title() { return i18n.t("power:upsCharts.runtime"); },
+    get subtitle() { return i18n.t("power:upsCharts.shortestRuntimeInEachBucket"); },
     format: (v) => formatRuntime(v),
     domain: [0, "auto"],
-    series: [{ key: "runtime", label: "Runtime", style: "solid" }],
+    series: [{ key: "runtime", get label() { return i18n.t("power:upsCharts.runtime"); }, style: "solid" }],
   },
   load: {
-    title: "Load",
-    subtitle: "Highest load in each bucket",
+    get title() { return i18n.t("power:upsCharts.load"); },
+    get subtitle() { return i18n.t("power:upsCharts.highestLoadInEachBucket"); },
     format: pct,
     domain: PERCENT_DOMAIN,
-    series: [{ key: "load", label: "Load", style: "solid" }],
+    series: [{ key: "load", get label() { return i18n.t("power:upsCharts.load"); }, style: "solid" }],
   },
   voltage: {
-    title: "Input and output voltage",
-    subtitle: "Input's low and high in each bucket, against the output the UPS holds",
+    get title() { return i18n.t("power:upsCharts.inputAndOutputVoltage"); },
+    get subtitle() { return i18n.t("power:upsCharts.inputSLowAndHigh"); },
     format: volts,
     domain: [0, "auto"],
     series: [
-      { key: "input_voltage_min", label: "Input (low)", style: "solid" },
-      { key: "input_voltage_max", label: "Input (high)", style: "faint" },
-      { key: "output_voltage", label: "Output", style: "reference" },
+      { key: "input_voltage_min", get label() { return i18n.t("power:upsCharts.inputLow"); }, style: "solid" },
+      { key: "input_voltage_max", get label() { return i18n.t("power:upsCharts.inputHigh"); }, style: "faint" },
+      { key: "output_voltage", get label() { return i18n.t("power:upsCharts.output"); }, style: "reference" },
     ],
   },
 };
@@ -108,6 +110,7 @@ export function UpsChart({
   range: UpsRange;
   bucketSeconds: number;
 }) {
+  const { t } = useTranslation("power");
   const chart = CHARTS[focus];
   const ts = getTimestampFormatter(range);
   const outages = onBatteryRuns(points, bucketSeconds * 1000);
@@ -172,7 +175,7 @@ export function UpsChart({
           ))}
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-3 rounded-sm bg-amber-500/30" aria-hidden="true" />
-          On battery
+          {t("upsCharts.onBattery")}
         </span>
       </div>
     </div>

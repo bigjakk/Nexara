@@ -16,6 +16,7 @@ import {
 } from "../lib/ups-state";
 import { TONE_DOT, TONE_TEXT } from "../lib/ups-style";
 import { ProtectionBadge, UpsStatusText } from "./UpsBadges";
+import { useTranslation } from "react-i18next";
 
 /** One column template for the header line and every row, once there is room. */
 const COLUMNS =
@@ -71,6 +72,7 @@ function Sub({ children }: { children: ReactNode }) {
  * Unreachable and nothing is drawn as if it were live.
  */
 function UpsRow({ device }: { device: UpsDevice }) {
+  const { t } = useTranslation("power");
   const status = upsStatus(device);
   const live = device.reachability === "ok" && !device.reading_stale;
   const tone: UpsTone = live ? status.tone : "idle";
@@ -81,7 +83,7 @@ function UpsRow({ device }: { device: UpsDevice }) {
   const charge = device.battery_charge;
   const model =
     [device.manufacturer, device.model].filter((s) => s !== "").join(" ") ||
-    "Unknown model";
+    t("upsList.unknownModel");
 
   return (
     <li
@@ -106,13 +108,13 @@ function UpsRow({ device }: { device: UpsDevice }) {
           )}
         </div>
         <div className="truncate pl-4 text-[12.5px] text-muted-foreground">
-          {model} · via {device.server_name}
+          {t("upsList.modelViaServerName", { model, serverName: device.server_name })}
         </div>
       </div>
 
       <div className="order-3 grid basis-full grid-cols-2 gap-x-6 gap-y-3 @xl:grid-cols-4 @4xl:contents">
         <Reading
-          label="Charge"
+          label={t("upsList.charge")}
           value={charge == null ? "—" : `${String(Math.round(charge))}%`}
           tone={battery}
         >
@@ -124,14 +126,14 @@ function UpsRow({ device }: { device: UpsDevice }) {
           />
         </Reading>
         <Reading
-          label="Runtime"
+          label={t("upsList.runtime")}
           value={formatRuntime(device.battery_runtime)}
           tone={battery}
         >
-          <Sub>{onBattery ? "falling, on battery" : "at the current load"}</Sub>
+          <Sub>{onBattery ? t("upsList.fallingOnBattery") : t("upsList.atTheCurrentLoad")}</Sub>
         </Reading>
         <Reading
-          label="Load"
+          label={t("upsList.load")}
           value={
             <>
               {device.load == null
@@ -152,7 +154,7 @@ function UpsRow({ device }: { device: UpsDevice }) {
           />
         </Reading>
         <Reading
-          label="Input"
+          label={t("upsList.input")}
           value={
             device.input_voltage == null
               ? "—"
@@ -161,7 +163,7 @@ function UpsRow({ device }: { device: UpsDevice }) {
           tone={battery}
         >
           {device.input_frequency != null && (
-            <Sub>{device.input_frequency.toFixed(1)} Hz</Sub>
+            <Sub>{t("upsList.inputFrequencyHz", { inputFrequency: device.input_frequency.toFixed(1) })}</Sub>
           )}
         </Reading>
       </div>
@@ -178,8 +180,8 @@ function UpsRow({ device }: { device: UpsDevice }) {
             )}
           >
             {device.last_reading_at === null
-              ? "Never read"
-              : `Read ${formatDateTime(device.last_reading_at, "—", "relative")}`}
+              ? t("upsList.neverRead")
+              : t("upsList.readLastReadingAt", { lastReadingAt: formatDateTime(device.last_reading_at, "—", "relative") })}
           </div>
         </div>
         <ChevronRight
@@ -190,7 +192,7 @@ function UpsRow({ device }: { device: UpsDevice }) {
 
       {device.feeds.length > 0 && (
         <div className="order-4 flex basis-full flex-wrap items-center gap-x-1.5 gap-y-1 pl-4 text-[12.5px] text-muted-foreground @4xl:order-none @4xl:col-span-full">
-          <span className="text-muted-foreground/75">Powers</span>
+          <span className="text-muted-foreground/75">{t("upsList.powers")}</span>
           {device.feeds.slice(0, FEED_LIMIT).map((f, i, shown) => {
             const name = f.kind === "node" ? f.node_name : f.label;
             const unprotected =
@@ -209,7 +211,7 @@ function UpsRow({ device }: { device: UpsDevice }) {
             );
           })}
           {device.feeds.length > FEED_LIMIT && (
-            <span>and {device.feeds.length - FEED_LIMIT} more</span>
+            <span>{t("upsList.andLengthMore", { length: device.feeds.length - FEED_LIMIT })}</span>
           )}
         </div>
       )}
@@ -223,6 +225,7 @@ function UpsRow({ device }: { device: UpsDevice }) {
  * wide, a block per UPS where it is not.
  */
 export function UpsList({ devices }: { devices: UpsDevice[] }) {
+  const { t } = useTranslation("power");
   return (
     <div className="@container">
       <div
@@ -232,12 +235,12 @@ export function UpsList({ devices }: { devices: UpsDevice[] }) {
           COLUMNS,
         )}
       >
-        <span>UPS</span>
-        <span>Charge</span>
-        <span>Runtime</span>
-        <span>Load</span>
-        <span>Input</span>
-        <span>Status</span>
+        <span>{t("upsList.ups")}</span>
+        <span>{t("upsList.charge")}</span>
+        <span>{t("upsList.runtime")}</span>
+        <span>{t("upsList.load")}</span>
+        <span>{t("upsList.input")}</span>
+        <span>{t("upsList.status")}</span>
       </div>
       <ul className="divide-y">
         {devices.map((d) => (

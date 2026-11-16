@@ -17,6 +17,8 @@ import type { UpsEvent } from "../types/ups";
 import { UPS_EVENTS_LIMIT } from "../api/ups-queries";
 import { eventDuration, eventEnded, eventLabel, eventTone, formatRuntime, type UpsTone } from "../lib/ups-state";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 type SortKey = "expand" | "when" | "event" | "ups" | "duration";
 
@@ -37,14 +39,14 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
     expandColumn("expand"),
     {
       key: "when",
-      label: "When",
+      label: i18n.t("power:powerEventsTable.when"),
       width: 190,
       sortValue: (e) => e.started_at,
       cell: (e) => <span className="text-sm"><DateTime value={e.started_at} compact /></span>,
     },
     {
       key: "event",
-      label: "Event",
+      label: i18n.t("power:powerEventsTable.event"),
       width: 340,
       sortValue: (e) => eventLabel(e),
       cell: (e) => (
@@ -58,7 +60,7 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
   if (showUps) {
     cols.push({
       key: "ups",
-      label: "UPS",
+      label: i18n.t("power:powerEventsTable.ups"),
       width: 200,
       sortValue: (e) => e.ups_name,
       cell: (e) => (
@@ -70,7 +72,7 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
   }
   cols.push({
     key: "duration",
-    label: "Duration",
+    label: i18n.t("power:powerEventsTable.duration"),
     width: 200,
     sortValue: (e) => (e.ended_at === null ? Infinity : Date.parse(e.ended_at) - Date.parse(e.started_at)),
     cell: (e, ctx) => <span className="text-sm text-muted-foreground">{eventDuration(e, ctx.now)}</span>,
@@ -80,10 +82,11 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
 
 /** Says a list stops at the newest page the API returned. */
 export function LatestEventsNote({ count }: { count: number }) {
+  const { t } = useTranslation("power");
   if (count < UPS_EVENTS_LIMIT) return null;
   return (
     <p className="border-t px-[18px] pt-3 text-[12.5px] text-muted-foreground">
-      Showing the latest {UPS_EVENTS_LIMIT} power events.
+      {t("powerEventsTable.showingTheLatestUpsEventsLimitPower", { upsEventsLimit: UPS_EVENTS_LIMIT })}
     </p>
   );
 }
@@ -94,6 +97,7 @@ export function LatestEventsNote({ count }: { count: number }) {
  * a lost connection is never presented as the moment power came back.
  */
 export function PowerEventsTable({ events, showUps = false }: { events: UpsEvent[]; showUps?: boolean }) {
+  const { t } = useTranslation("power");
   const cols = useMemo(() => columns(showUps), [showUps]);
   const { layout, rows, toggle, directionFor } = useDataTable(
     showUps ? "ups-events" : "ups-device-events",
@@ -105,7 +109,7 @@ export function PowerEventsTable({ events, showUps = false }: { events: UpsEvent
   const ctx: Ctx = { expanded, now: Date.now() };
 
   if (events.length === 0) {
-    return <p className="py-6 text-center text-sm text-muted-foreground">No power events recorded yet.</p>;
+    return <p className="py-6 text-center text-sm text-muted-foreground">{t("powerEventsTable.noPowerEventsRecordedYet")}</p>;
   }
 
   return (
@@ -122,28 +126,28 @@ export function PowerEventsTable({ events, showUps = false }: { events: UpsEvent
             {expanded.has(e.id) && (
               <ExpandedDetailRow colSpan={layout.columns.length}>
                 <DefGrid>
-                  <DetailField label="Started"><DateTime value={e.started_at} /></DetailField>
+                  <DetailField label={t("powerEventsTable.started")}><DateTime value={e.started_at} /></DetailField>
                   {e.kind !== "self_test" && (
-                    <DetailField label="Ended">
+                    <DetailField label={t("powerEventsTable.ended")}>
                       {eventEnded(e, e.ended_at === null ? "" : formatExactDateTime(e.ended_at))}
                     </DetailField>
                   )}
-                  <DetailField label="UPS">{e.ups_description !== "" ? `${e.ups_name} (${e.ups_description})` : e.ups_name}</DetailField>
-                  <DetailField label="NUT server">{e.server_name}</DetailField>
+                  <DetailField label={t("powerEventsTable.ups")}>{e.ups_description !== "" ? `${e.ups_name} (${e.ups_description})` : e.ups_name}</DetailField>
+                  <DetailField label={t("powerEventsTable.nutServer")}>{e.server_name}</DetailField>
                   {e.details.lowest_charge !== undefined && (
-                    <DetailField label="Lowest charge">{`${String(Math.round(e.details.lowest_charge))}%`}</DetailField>
+                    <DetailField label={t("powerEventsTable.lowestCharge")}>{`${String(Math.round(e.details.lowest_charge))}%`}</DetailField>
                   )}
                   {e.details.lowest_runtime !== undefined && (
-                    <DetailField label="Lowest runtime">{formatRuntime(e.details.lowest_runtime)}</DetailField>
+                    <DetailField label={t("powerEventsTable.lowestRuntime")}>{formatRuntime(e.details.lowest_runtime)}</DetailField>
                   )}
                   {e.details.peak_load !== undefined && (
-                    <DetailField label="Peak load">{`${String(Math.round(e.details.peak_load))}%`}</DetailField>
+                    <DetailField label={t("powerEventsTable.peakLoad")}>{`${String(Math.round(e.details.peak_load))}%`}</DetailField>
                   )}
                   {e.details.status !== undefined && e.details.status !== "" && (
-                    <DetailField label="Status" variant="mono">{e.details.status}</DetailField>
+                    <DetailField label={t("powerEventsTable.status")} variant="mono">{e.details.status}</DetailField>
                   )}
-                  {e.details.reason !== undefined && <DetailField label="Reason">{e.details.reason}</DetailField>}
-                  {e.details.result !== undefined && <DetailField label="Result">{e.details.result}</DetailField>}
+                  {e.details.reason !== undefined && <DetailField label={t("powerEventsTable.reason")}>{e.details.reason}</DetailField>}
+                  {e.details.result !== undefined && <DetailField label={t("powerEventsTable.result")}>{e.details.result}</DetailField>}
                 </DefGrid>
               </ExpandedDetailRow>
             )}
