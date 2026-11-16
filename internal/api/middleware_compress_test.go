@@ -409,8 +409,8 @@ func TestCompression_MutatingResponsesAreNotCompressed(t *testing.T) {
 // brute-force-capped auth route that somehow escaped the cookie scope would
 // fail here.
 func TestCompression_AuthPathsAreAllExcluded(t *testing.T) {
-	paths := make([]string, 0, 2+len(authLimitedPaths))
-	paths = append(paths, refreshLimitedPath, wsTokenLimitedPath)
+	paths := make([]string, 0, 3+len(authLimitedPaths))
+	paths = append(paths, refreshLimitedPath, wsTokenLimitedPath, consoleTokenLimitedPath)
 	for p := range authLimitedPaths {
 		paths = append(paths, p)
 	}

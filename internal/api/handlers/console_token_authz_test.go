@@ -143,9 +143,8 @@ func TestConsoleToken_ViewOnlyDenied(t *testing.T) {
 		t.Run(tt.consoleType, func(t *testing.T) {
 			engine := &recordingEngine{actions: map[string]bool{"view": true}}
 			app, capture := newConsoleTokenTestApp(t, engine)
-			clusterID := uuid.New()
 
-			resp, err := app.Test(mintConsoleTokenReq(clusterID, tt.consoleType, tt.vmid))
+			resp, err := app.Test(mintConsoleTokenReq(uuid.New(), tt.consoleType, tt.vmid))
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
 			}
@@ -156,12 +155,13 @@ func TestConsoleToken_ViewOnlyDenied(t *testing.T) {
 					resp.StatusCode, http.StatusForbidden, tt.consoleType)
 			}
 			// The refusal is audited in the row the WebSocket gate writes too,
-			// with nothing the caller typed (no node).
+			// with nothing the caller typed (no node), and under no cluster: the
+			// fake database knows none by that id.
 			rows := capture.auditInserts(t)
 			want := `{"reason":"permission","type":"` + tt.consoleType + `"}`
 			if len(rows) != 1 || rows[0].Action != audit.ConsoleOpenRefused || string(rows[0].Details) != want ||
-				uuid.UUID(rows[0].ClusterID.Bytes) != clusterID {
-				t.Errorf("audit rows = %+v, want one %s %s on the cluster asked for", rows, audit.ConsoleOpenRefused, want)
+				rows[0].ClusterID.Valid {
+				t.Errorf("audit rows = %+v, want one %s %s under no cluster", rows, audit.ConsoleOpenRefused, want)
 			}
 		})
 	}

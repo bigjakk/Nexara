@@ -180,6 +180,10 @@ func main() {
 		AllowedOrigins: ws.ParseAllowedOrigins(cfg.WSAllowedOrigins),
 		// Holds each /ws hub socket to the session or key that minted its token.
 		Queries: queries,
+		// The process publisher, which the API server gives the syslog forwarder:
+		// the gate's audit rows reach syslog and the live stream like any other.
+		EventPub: application.EventPub,
+		Redis:    rdb,
 	})
 	if err != nil {
 		log.Fatalf("failed to build the WebSocket server: %v", err)

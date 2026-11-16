@@ -319,6 +319,21 @@ func (s *Server) setupMiddleware() {
 		},
 	}))
 
+	// Console-token mint limiter — 60/min/IP, as the ws-token's. The SPA mints
+	// one per console it opens; everything under /api/v1/auth/ is exempt from
+	// the general limiter, so without this a loop of mints (and of the refusals
+	// each audits) was capped by nothing.
+	s.app.Use(limiter.New(limiter.Config{
+		Max:        60,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() + ":console-token"
+		},
+		Next: func(c fiber.Ctx) bool {
+			return limiterPath(c) != consoleTokenLimitedPath
+		},
+	}))
+
 	// Snapshot-resync limiter — each call makes one Proxmox listing plus one
 	// DB write per snapshot, and the endpoint is view-gated, so without a
 	// dedicated cap a read-only account could pin both the DB and PVE well
@@ -1160,6 +1175,9 @@ const (
 
 	// wsTokenLimitedPath is capped separately, at 60/min/IP.
 	wsTokenLimitedPath = "/api/v1/auth/ws-token"
+
+	// consoleTokenLimitedPath is capped separately, at 60/min/IP.
+	consoleTokenLimitedPath = "/api/v1/auth/console-token"
 )
 
 // routerFold lower-cases path the way Fiber's router does for its detection path

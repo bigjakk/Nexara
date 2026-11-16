@@ -18,11 +18,11 @@ import (
 
 // rateLimitedPaths is every path the three limiters select on, flattened.
 func rateLimitedPaths() []string {
-	out := make([]string, 0, len(authLimitedPaths)+2)
+	out := make([]string, 0, len(authLimitedPaths)+3)
 	for path := range authLimitedPaths {
 		out = append(out, path)
 	}
-	out = append(out, refreshLimitedPath, wsTokenLimitedPath)
+	out = append(out, refreshLimitedPath, wsTokenLimitedPath, consoleTokenLimitedPath)
 	sort.Strings(out)
 	return out
 }
@@ -131,5 +131,8 @@ func TestGuard_CredentialRoutesKeepTheirRateLimit(t *testing.T) {
 	}
 	if wsTokenLimitedPath != "/api/v1/auth/ws-token" {
 		t.Errorf("wsTokenLimitedPath = %q; the ws-token cap exists to bound mint loops", wsTokenLimitedPath)
+	}
+	if consoleTokenLimitedPath != "/api/v1/auth/console-token" {
+		t.Errorf("consoleTokenLimitedPath = %q; the console-token cap bounds mint loops and the refusals they audit", consoleTokenLimitedPath)
 	}
 }

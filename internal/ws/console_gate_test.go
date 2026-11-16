@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -64,6 +65,24 @@ func (d *gateLookupDB) Exec(_ context.Context, sql string, args ...any) (pgconn.
 		d.mu.Unlock()
 	}
 	return pgconn.CommandTag{}, nil
+}
+
+// auditRecorder is an audit.Publisher that keeps the action of each row published.
+type auditRecorder struct {
+	mu      sync.Mutex
+	actions []string
+}
+
+func (r *auditRecorder) ClusterEvent(_ context.Context, _, _, _, _, action string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.actions = append(r.actions, action)
+}
+
+func (r *auditRecorder) audited() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.actions...)
 }
 
 func (d *gateLookupDB) audited() []string {
@@ -203,6 +222,7 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
 	lookups := &gateLookupDB{}
 	queries := db.New(lookups)
+	pub := &auditRecorder{}
 
 	hub := NewHub(logger, 0)
 	hub.Run()
@@ -211,6 +231,7 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 		ConsoleHandler: NewConsoleHandler(queries, "unused", jwtSvc, logger),
 		VNCHandler:     NewVNCHandler(queries, "unused", jwtSvc, logger),
 		Queries:        queries,
+		EventPub:       pub,
 	})
 	app := fiber.New()
 	server.RegisterRoutes(app)
@@ -253,10 +274,12 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 		{"vm_serial token for A with a second cluster, node and type appended",
 			"/ws/console?cluster_id=" + gateClusterA + "&node=pve-01&vmid=100&type=vm_serial" +
 				"&cluster_id=" + gateClusterB + "&node=pve-02&type=node_shell", serialToken, http.StatusBadRequest, ""},
-		// The token's own cluster and type are recorded, nothing the query typed.
+		// The token's type is recorded, nothing the query typed; its cluster is
+		// looked up (this database knows none, so the row names none), and the
+		// row is published like any other.
 		{"vm_serial token for A asking for B",
 			"/ws/console?cluster_id=" + gateClusterB + "&node=pve-02&vmid=100&type=vm_serial", serialToken,
-			http.StatusForbidden, gateClusterA + ` console_open_refused {"reason":"scope","type":"vm_serial"}`},
+			http.StatusForbidden, uuid.Nil.String() + ` console_open_refused {"reason":"scope","type":"vm_serial"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -273,8 +296,15 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 				t.Errorf("status = %d (first message %q), want %d — this request must be refused at the gate",
 					status, msg, tt.wantStatus)
 			}
-			if got := lookups.lookedUp()[before:]; len(got) != 0 {
-				t.Errorf("a console handler ran and looked up cluster %v", got)
+			var wantLookups []uuid.UUID // the audit row's naming of the token's cluster
+			if tt.wantAudit != "" {
+				wantLookups = []uuid.UUID{uuid.MustParse(gateClusterA)}
+				if got := pub.audited(); !slices.Contains(got, audit.ConsoleOpenRefused) {
+					t.Errorf("published %q, want the %s row", got, audit.ConsoleOpenRefused)
+				}
+			}
+			if got := lookups.lookedUp()[before:]; !slices.Equal(got, wantLookups) {
+				t.Errorf("looked up clusters %v, want %v: a console handler ran", got, wantLookups)
 			}
 		})
 	}

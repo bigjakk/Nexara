@@ -12,7 +12,7 @@ import (
 	"github.com/gofiber/contrib/v3/websocket"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
@@ -50,6 +50,10 @@ type Server struct {
 	// queries answers whether a hub socket's sign-in is still live
 	// (console_credential.go).
 	queries *db.Queries
+	// eventPub publishes and forwards to syslog the audit rows the gate writes;
+	// redis holds their once-a-minute claim. Either may be nil.
+	eventPub audit.Publisher
+	redis    *redis.Client
 	// checkEvery is how often an open hub socket re-checks it; tests shorten it.
 	checkEvery time.Duration
 
@@ -85,6 +89,12 @@ type ServerConfig struct {
 	// minted its token is still live; the socket is closed when it is not.
 	// Required: NewServer refuses to build a server without it.
 	Queries *db.Queries
+	// EventPub is the process publisher the API server attaches the syslog
+	// forwarder to: a refused console open the gate audits is published and
+	// forwarded through it. Redis keeps such rows to one a minute per user,
+	// cluster and reason. Both optional.
+	EventPub audit.Publisher
+	Redis    *redis.Client
 }
 
 // NewServer creates a new WebSocket server. It fails without a database to hold
@@ -107,6 +117,8 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		s.testPermissionLoader = opts[0].TestPermissionLoader
 		s.allowedOrigins = opts[0].AllowedOrigins
 		s.queries = opts[0].Queries
+		s.eventPub = opts[0].EventPub
+		s.redis = opts[0].Redis
 	}
 	if s.queries == nil {
 		return nil, errors.New("ws server: no database configured to hold /ws hub sockets to their sign-in")
@@ -441,25 +453,20 @@ func (s *Server) authenticate(c fiber.Ctx, consoleRoute bool) error {
 
 // auditScopeRefusal records a console token refused for a console other than the
 // one it was minted for, as the mint records a refused permission
-// (audit.ConsoleOpenRefused). The cluster and type are the signed token's, never
-// the query's. A failed write is logged; the refusal stands either way.
+// (audit.ConsoleOpenRefusal, at most one row a minute per user, cluster and
+// reason). The cluster and type are the signed token's, never the query's. A
+// failed write is logged; the refusal stands either way.
 func (s *Server) auditScopeRefusal(c fiber.Ctx, userID uuid.UUID, scope *auth.ConsoleScope) {
 	if s.queries == nil { // NewServer refuses that; a test's bare Server has none
 		s.logger.Warn("ws auth: no database to audit a console token refused for another console", "user_id", userID)
 		return
 	}
-	var cluster pgtype.UUID
-	if id, err := uuid.Parse(scope.ClusterID); err == nil {
-		cluster = pgtype.UUID{Bytes: id, Valid: true}
+	row, write := audit.ConsoleOpenRefusal(c.Context(), s.queries, s.redis, userID, scope.ClusterID,
+		audit.ConsoleRefusedScope, scope.Type)
+	if !write {
+		return
 	}
-	if err := audit.Write(c.Context(), s.queries, nil, db.InsertAuditLogParams{
-		ClusterID:    cluster,
-		UserID:       pgtype.UUID{Bytes: userID, Valid: userID != uuid.Nil},
-		ResourceType: "auth",
-		ResourceID:   userID.String(),
-		Action:       audit.ConsoleOpenRefused,
-		Details:      audit.ConsoleOpenRefusedDetails(audit.ConsoleRefusedScope, scope.Type),
-	}); err != nil {
+	if err := audit.Write(c.Context(), s.queries, s.eventPub, row); err != nil {
 		s.logger.Warn("ws auth: could not audit a console token refused for another console", "user_id", userID, "error", err)
 	}
 }

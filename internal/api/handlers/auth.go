@@ -1551,8 +1551,10 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 		// A refusal for the permission is audited, in the row shape the WebSocket
 		// gate writes for a token used on another console (audit.ConsoleOpenRefused).
 		if fe := (*fiber.Error)(nil); errors.As(err, &fe) && fe.Code == fiber.StatusForbidden {
-			AuditLogAs(c, h.queries, h.eventPub, userID, ClusterUUID(clusterUUID), "auth", userID.String(),
-				audit.ConsoleOpenRefused, audit.ConsoleOpenRefusedDetails(audit.ConsoleRefusedPermission, consoleType))
+			if row, write := audit.ConsoleOpenRefusal(c.Context(), h.queries, h.rdb, userID, clusterID,
+				audit.ConsoleRefusedPermission, consoleType); write {
+				AuditLogAs(c, h.queries, h.eventPub, userID, row.ClusterID, row.ResourceType, row.ResourceID, row.Action, row.Details)
+			}
 		}
 		return err
 	}

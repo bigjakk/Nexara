@@ -650,6 +650,7 @@ envelope documented above, with a `Retry-After` header. Requests that pass carry
 | End one session | 30/min per session | `DELETE /auth/sessions/:id` — keyed on the caller's session like sign out everywhere, with a budget of its own: ending one session is signing out everywhere one device at a time, so it is capped too, but a person ends several devices in a sitting, which is why the cap is larger. A refused API key spends none of it, and a call over the cap revokes nothing and leaves the refresh cookie in place |
 | Refresh | 30/min | `/auth/refresh` |
 | WS token | 60/min | `/auth/ws-token` |
+| Console token | 60/min | `/auth/console-token` |
 | Snapshot resync | 30/min | `/clusters/:id/guest-snapshots/resync` |
 | Cluster create | 10/min | `POST /clusters` — in bootstrap mode each call spends a Proxmox login attempt |
 | Certificate fetch | 30/min, one budget per route | `POST /clusters/fetch-fingerprint`, which the cluster, PBS and Veeam add flows share, and `POST /clusters/:id/verify-certificate` |
@@ -2636,8 +2637,9 @@ or a password change.
   removed from Nexara, whatever grant its user holds. The sign-in is untouched: a client should
   stop reconnecting, and not sign out. Permission changes can take up to the
   RBAC cache's lifetime (about five minutes) to be seen.
-- A refused console open is audited as `console_open_refused`, on the console's
-  cluster, with `reason` and the console `type` and nothing else: `permission` when
+- A refused console open is audited as `console_open_refused`, at most once a
+  minute per user, cluster and reason, on the console's cluster (none when no
+  cluster has that id), with `reason` and the console `type` and nothing else: `permission` when
   the mint is refused for want of `console:*` (`403`), `scope` when `/ws/console` or
   `/ws/vnc` is opened with a token minted for another console (`403`). An expired
   or invalid token is not audited.
