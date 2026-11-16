@@ -3,7 +3,6 @@ import { Pencil, PlugZap, Trash2 } from "lucide-react";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -17,6 +16,7 @@ import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { describeError } from "@/lib/api-error";
 import { useTestNutServer } from "../api/ups-queries";
 import type { NutProbeResult, NutServer } from "../types/ups";
+import { DateTime } from "@/components/DateTime";
 
 type SortKey = "expand" | "name" | "address" | "version" | "access" | "status" | "actions";
 
@@ -101,7 +101,7 @@ const COLUMNS: ColumnDef<NutServer, SortKey, Ctx>[] = [
       return (
         <div className="flex items-center gap-2">
           <Badge variant={st.variant}>{st.label}</Badge>
-          {s.last_poll_at !== null && <span className="text-xs text-muted-foreground">{formatRelativeTime(s.last_poll_at)}</span>}
+          {s.last_poll_at !== null && <span className="text-xs text-muted-foreground"><DateTime value={s.last_poll_at} /></span>}
         </div>
       );
     },
@@ -186,8 +186,8 @@ export function NutServerTable({
                             ? "Verified against system CAs"
                             : "Not verified"}
                     </DetailField>
-                    <DetailField label="Last successful poll">{formatDateTime(s.last_poll_at, "Never")}</DetailField>
-                    <DetailField label="Added">{formatDateTime(s.created_at)}</DetailField>
+                    <DetailField label="Last successful poll"><DateTime value={s.last_poll_at} fallback="Never" /></DetailField>
+                    <DetailField label="Added"><DateTime value={s.created_at} /></DetailField>
                   </DefGrid>
                   {s.last_poll_error !== "" && (
                     <p className="text-sm text-destructive">Last poll failed: {s.last_poll_error}</p>

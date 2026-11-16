@@ -12,7 +12,7 @@ import type { ClusterHistory } from "@/features/history/lib/cluster-histories";
 import { historyKind } from "@/features/history/lib/history";
 import type { HistoryEntry } from "@/features/history/types/history";
 import { apiPath } from "@/lib/api-path";
-import { formatDateTime } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 import strings from "@/locales/en/history-ups-device.json";
 import type { UpsEvent } from "../types/ups";
 import { eventDuration, eventEnded, eventLabel, isUpsEventKind } from "./ups-state";
@@ -79,7 +79,7 @@ export function upsHistorySummary(entry: HistoryEntry, t: TFunction): string | u
     if (typeof d["error"] === "string") parts.push(t("summaries.error", { error: d["error"] }));
   } else if (entry.action.startsWith("ups_maintenance_window_")) {
     if (typeof d["starts_at"] === "string" && typeof d["ends_at"] === "string") {
-      parts.push(t("summaries.window", { from: formatDateTime(d["starts_at"]), to: formatDateTime(d["ends_at"]) }));
+      parts.push(t("summaries.window", { from: formatExactDateTime(d["starts_at"]), to: formatExactDateTime(d["ends_at"]) }));
     }
   } else if (entry.action.startsWith("ups_feed_")) {
     const node = typeof d["node"] === "string" ? d["node"] : "";
@@ -99,7 +99,7 @@ export function upsHistorySummary(entry: HistoryEntry, t: TFunction): string | u
 export function upsHistoryNote(entry: HistoryEntry, t: TFunction): string | undefined {
   const event = powerEvent(entry);
   if (event === undefined || event.kind === "self_test") return undefined;
-  return t("notes.ended", { when: eventEnded(event, event.ended_at === null ? "" : formatDateTime(event.ended_at)) });
+  return t("notes.ended", { when: eventEnded(event, event.ended_at === null ? "" : formatExactDateTime(event.ended_at)) });
 }
 
 export const upsHistoryKind = historyKind("ups-device", strings, {

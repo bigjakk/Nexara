@@ -16,7 +16,7 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
-import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import { formatDateTime, formatExactDateTime } from "@/lib/format";
 import {
   useAddUpsFeed,
   useRemoveUpsFeed,
@@ -43,7 +43,7 @@ function ListedNote({ device }: { device: UpsDevice }) {
   }
   return (
     <p className={NOTE}>
-      Logins as of {formatDateTime(device.clients_listed_at)}
+      Logins as of {formatExactDateTime(device.clients_listed_at)}
       {upsOnBattery(device) || device.state === "unknown"
         ? ", held until the UPS is read on mains again: nodes log out on purpose as they shut down."
         : "."}
@@ -191,7 +191,7 @@ export function UpsPowers({ device }: { device: UpsDevice }) {
                     <TableCell className="text-[12.5px] text-muted-foreground">
                       {c.missed === 0
                         ? "Logged in"
-                        : `Gone since ${formatRelativeTime(c.last_seen_at)}`}
+                        : `Gone since ${formatDateTime(c.last_seen_at)}`}
                     </TableCell>
                   </TableRow>
                 ))}

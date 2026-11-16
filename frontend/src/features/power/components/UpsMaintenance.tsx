@@ -9,7 +9,7 @@ import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
-import { formatDateTime } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 import { useCreateUpsMaintenanceWindow, useDeleteUpsMaintenanceWindow, useUpsMaintenanceWindows } from "../api/ups-queries";
 import type { UpsDevice } from "../types/ups";
 
@@ -75,7 +75,7 @@ export function UpsMaintenance({ device }: { device: UpsDevice }) {
               <li key={w.id} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    {formatDateTime(w.starts_at)} – {formatDateTime(w.ends_at)}
+                    {formatExactDateTime(w.starts_at)} – {formatExactDateTime(w.ends_at)}
                     {state === "Open now" ? (
                       <Badge variant="secondary">{state}</Badge>
                     ) : (
@@ -88,7 +88,7 @@ export function UpsMaintenance({ device }: { device: UpsDevice }) {
                   <Button
                     size="sm"
                     variant="ghost"
-                    aria-label={`Remove the window from ${formatDateTime(w.starts_at)}`}
+                    aria-label={`Remove the window from ${formatExactDateTime(w.starts_at)}`}
                     disabled={remove.isPending}
                     onClick={() => {
                       remove.mutate(w.id);

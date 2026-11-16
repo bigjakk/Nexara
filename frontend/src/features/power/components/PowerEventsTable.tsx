@@ -1,7 +1,7 @@
 import { Fragment, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
-import { formatDateTime } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import type { UpsEvent } from "../types/ups";
 import { UPS_EVENTS_LIMIT } from "../api/ups-queries";
 import { eventDuration, eventEnded, eventLabel, eventTone, formatRuntime, type UpsTone } from "../lib/ups-state";
+import { DateTime } from "@/components/DateTime";
 
 type SortKey = "expand" | "when" | "event" | "ups" | "duration";
 
@@ -39,7 +40,7 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
       label: "When",
       width: 190,
       sortValue: (e) => e.started_at,
-      cell: (e) => <span className="text-sm">{formatDateTime(e.started_at)}</span>,
+      cell: (e) => <span className="text-sm"><DateTime value={e.started_at} /></span>,
     },
     {
       key: "event",
@@ -121,10 +122,10 @@ export function PowerEventsTable({ events, showUps = false }: { events: UpsEvent
             {expanded.has(e.id) && (
               <ExpandedDetailRow colSpan={layout.columns.length}>
                 <DefGrid>
-                  <DetailField label="Started">{formatDateTime(e.started_at)}</DetailField>
+                  <DetailField label="Started"><DateTime value={e.started_at} /></DetailField>
                   {e.kind !== "self_test" && (
                     <DetailField label="Ended">
-                      {eventEnded(e, e.ended_at === null ? "" : formatDateTime(e.ended_at))}
+                      {eventEnded(e, e.ended_at === null ? "" : formatExactDateTime(e.ended_at))}
                     </DetailField>
                   )}
                   <DetailField label="UPS">{e.ups_description !== "" ? `${e.ups_name} (${e.ups_description})` : e.ups_name}</DetailField>

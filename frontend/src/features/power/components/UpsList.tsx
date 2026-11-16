@@ -5,7 +5,7 @@ import { StatusIcon } from "@/components/StatusIcon";
 import { UsageBar } from "@/components/UsageBar";
 import type { UsageLevel } from "@/lib/usage-level";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import type { UpsDevice } from "../types/ups";
 import {
   formatRuntime,
@@ -179,7 +179,7 @@ function UpsRow({ device }: { device: UpsDevice }) {
           >
             {device.last_reading_at === null
               ? "Never read"
-              : `Read ${formatRelativeTime(device.last_reading_at)}`}
+              : `Read ${formatDateTime(device.last_reading_at)}`}
           </div>
         </div>
         <ChevronRight

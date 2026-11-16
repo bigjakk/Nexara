@@ -7,7 +7,7 @@ import { Panel, PropertyList, PropertyRow } from "@/components/page/Panel";
 import { Stat, StatStrip, type StatTone } from "@/components/page/StatStrip";
 import { QueryFailureNote, QueryStateNotice } from "@/components/QueryStateNotice";
 import { TimeRangeSelector } from "@/features/dashboard/components/TimeRangeSelector";
-import { formatDateTime } from "@/lib/format";
+import { formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { TimeRange } from "@/types/api";
 import { useNutServers, useUpsDevice, useUpsEvents, useUpsMetrics } from "../api/ups-queries";
@@ -25,6 +25,7 @@ import { UpsMaintenance } from "../components/UpsMaintenance";
 import { HistoryTabContent, HistoryTabTrigger } from "@/features/history/components/HistoryTab";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { UpsWritableVar } from "../types/ups";
+import { DateTime } from "@/components/DateTime";
 
 function series(points: UpsMetricPoint[], key: keyof UpsMetricPoint): number[] {
   return points.map((p) => p[key]).filter((v): v is number => typeof v === "number");
@@ -205,7 +206,7 @@ export function UpsDetailPage() {
               nameDot
               detail={
                 upsOnBattery(d) && d.on_battery_since !== null
-                  ? `since ${new Date(d.on_battery_since).toLocaleTimeString()}`
+                  ? `since ${formatTime(d.on_battery_since)}`
                   : undefined
               }
             />
@@ -217,7 +218,7 @@ export function UpsDetailPage() {
             ))}
             {model !== "" && <Fact label="Model">{model}</Fact>}
             <Fact label="NUT server">{d.server_name}</Fact>
-            <Fact label="Last read">{d.last_reading_at === null ? "never" : formatDateTime(d.last_reading_at)}</Fact>
+            <Fact label="Last read"><DateTime value={d.last_reading_at} fallback="never" /></Fact>
           </>
         }
       />

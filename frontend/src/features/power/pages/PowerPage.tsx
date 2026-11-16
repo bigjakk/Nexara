@@ -18,6 +18,7 @@ import { NutServerTable } from "../components/NutServerTable";
 import { NutServerDialog } from "../components/NutServerDialog";
 import { LatestEventsNote, PowerEventsTable } from "../components/PowerEventsTable";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { formatTime } from "@/lib/format";
 
 function OutageBanner({ devices }: { devices: UpsDevice[] }) {
   const onBattery = devices.filter(upsOnBattery);
@@ -41,7 +42,7 @@ function OutageBanner({ devices }: { devices: UpsDevice[] }) {
       <div className="min-w-0 text-sm">
         <div className="text-[15px] font-semibold text-amber-700 dark:text-amber-400">
           {onBattery.length === 1 ? `${onBattery[0]?.name ?? ""} is on battery` : `${String(onBattery.length)} UPS are on battery`}
-          {since !== undefined && ` since ${new Date(since).toLocaleTimeString()}`}
+          {since !== undefined && ` since ${formatTime(since)}`}
         </div>
         <div className="mt-0.5 text-muted-foreground">
           Shortest runtime: {shortest.name}, {formatRuntime(shortest.battery_runtime)} at the current load.

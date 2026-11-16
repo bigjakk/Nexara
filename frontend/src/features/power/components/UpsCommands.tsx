@@ -27,12 +27,13 @@ import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { usePermissions } from "@/hooks/usePermissions";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
-import { formatDateTime } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { VMResponse } from "@/types/api";
 import { useNutServers, useRunUpsCommand, useUpsCommandRuns } from "../api/ups-queries";
 import { DANGER_OUTLINE } from "../lib/ups-style";
 import type { UpsCommand, UpsCommandRun, UpsCommandTier, UpsDevice } from "../types/ups";
+import { DateTime } from "@/components/DateTime";
 
 const TIERS: { tier: UpsCommandTier; title: string; note: string }[] = [
   { tier: "everyday", title: "Everyday", note: "The beeper, the panel test, and stopping something, such as a shutdown in progress." },
@@ -196,7 +197,7 @@ function AccountNote({ hasAccount, verifiedAt }: { hasAccount: boolean; verified
     <p className="text-sm text-muted-foreground">
       {verifiedAt === null
         ? "upsd checks the stored account only when a command runs, so the first command is its test."
-        : `upsd last took a command from the stored account on ${formatDateTime(verifiedAt)}.`}
+        : `upsd last took a command from the stored account on ${formatExactDateTime(verifiedAt)}.`}
     </p>
   );
 }
@@ -269,7 +270,7 @@ type RunKey = "expand" | "when" | "who" | "what" | "status";
 
 const RUN_COLUMNS: ColumnDef<UpsCommandRun, RunKey, { expanded: Set<string> }>[] = [
   expandColumn("expand"),
-  { key: "when", label: "When", width: 180, sortValue: (r) => r.requested_at, cell: (r) => formatDateTime(r.requested_at) },
+  { key: "when", label: "When", width: 180, sortValue: (r) => r.requested_at, cell: (r) => <DateTime value={r.requested_at} /> },
   { key: "who", label: "Who", width: 160, sortValue: (r) => r.user_display_name || r.user_email, cell: (r) => r.user_display_name || r.user_email || "—" },
   {
     key: "what",
@@ -314,7 +315,7 @@ function RunHistory({ upsId }: { upsId: string }) {
                 <ExpandedDetailRow colSpan={layout.columns.length}>
                   <DefGrid>
                     <DetailField label="Outcome">{r.result || (r.status === "succeeded" ? "The driver ran it" : "—")}</DetailField>
-                    <DetailField label="Finished">{formatDateTime(r.finished_at)}</DetailField>
+                    <DetailField label="Finished"><DateTime value={r.finished_at} /></DetailField>
                     {r.kind === "set" && <DetailField label="Before">{r.previous ?? "—"}</DetailField>}
                   </DefGrid>
                 </ExpandedDetailRow>
