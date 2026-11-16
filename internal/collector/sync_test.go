@@ -54,6 +54,7 @@ type mockQueries struct {
 	activeAlerts                  []db.AlertHistory   // ListActiveAlertsForNodes answers those on the nodes asked about
 	enabledNodeRules              map[uuid.UUID]int64 // DisableNodeAlertRules turns these off
 	autoResolved                  []uuid.UUID
+	resolvedElsewhere             map[uuid.UUID]bool // AutoResolveAlert finds these already resolved
 	deleteAbsentCalls             []db.DeleteVMsAbsentFromClusterParams
 
 	runningTasks   []db.TaskHistory
@@ -422,6 +423,9 @@ func (m *mockQueries) DisableNodeAlertRules(_ context.Context, nodeID pgtype.UUI
 
 func (m *mockQueries) AutoResolveAlert(_ context.Context, id uuid.UUID) (int64, error) {
 	m.autoResolved = append(m.autoResolved, id)
+	if m.resolvedElsewhere[id] {
+		return 0, nil
+	}
 	return 1, nil
 }
 

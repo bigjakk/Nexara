@@ -185,9 +185,12 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	seedNodes(mq, cluster.ID, "pve-01", "pve-02")
 	goneID, keptID := mq.nodes[cluster.ID.String()+":pve-02"].ID, mq.nodes[cluster.ID.String()+":pve-01"].ID
 	on := func(id uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: id, Valid: true} }
-	firing, pending, other := uuid.New(), uuid.New(), uuid.New()
+	firing, pending, raced, other := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	mq.activeAlerts = []db.AlertHistory{{ID: firing, State: "firing", NodeID: on(goneID)},
-		{ID: pending, State: "pending", NodeID: on(goneID)}, {ID: other, State: "firing", NodeID: on(keptID)}}
+		{ID: pending, State: "pending", NodeID: on(goneID)}, {ID: raced, State: "firing", NodeID: on(goneID)},
+		{ID: other, State: "firing", NodeID: on(keptID)}}
+	// The engine resolved this one first and sent its "resolved": no second.
+	mq.resolvedElsewhere = map[uuid.UUID]bool{raced: true}
 	mq.enabledNodeRules = map[uuid.UUID]int64{goneID: 2, keptID: 1}
 	notifier := &recordingNotifier{}
 	syncer.SetAlertResolveNotifier(notifier)
@@ -218,8 +221,11 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	if err := json.Unmarshal(a.Details, &details); err != nil || details.RulesDisabled != 2 || details.AlertsResolved != 2 {
 		t.Errorf("audit details = %s, want rules_disabled 2 and alerts_resolved 2", a.Details)
 	}
-	if want := []uuid.UUID{firing, pending}; !slices.Equal(mq.autoResolved, want) || !slices.Equal(notifier.got, want) {
-		t.Errorf("resolved %v and notified %v, want %v for both", mq.autoResolved, notifier.got, want)
+	if want := []uuid.UUID{firing, pending, raced}; !slices.Equal(mq.autoResolved, want) {
+		t.Errorf("resolve attempts %v, want %v", mq.autoResolved, want)
+	}
+	if want := []uuid.UUID{firing, pending}; !slices.Equal(notifier.got, want) {
+		t.Errorf("notified %v, want %v", notifier.got, want)
 	}
 	if mq.enabledNodeRules[keptID] != 1 {
 		t.Errorf("pve-01's rules were turned off")
