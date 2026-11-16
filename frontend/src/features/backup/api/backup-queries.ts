@@ -102,6 +102,17 @@ export function usePBSSnapshots(pbsId: string, datastore?: string) {
 
 // --- Snapshot by Backup ID (cross-server, for VM detail pages) ---
 
+/** A guest's backups, and whether the cluster's storages could be read. */
+export interface GuestBackups {
+  items: PBSSnapshot[];
+  total: number;
+  /**
+   * The cluster's storages could not be read from Proxmox, so these are the
+   * snapshots on the PBS servers attached to the cluster, unchecked.
+   */
+  storage_unread?: boolean;
+}
+
 /**
  * A guest's PBS snapshots: PBS groups them by VMID alone, so the server keeps
  * only those on a datastore one of this cluster's PBS storages reads.
@@ -110,7 +121,7 @@ export function usePBSSnapshotsByBackupID(clusterId: string, backupId: string) {
   return useQuery({
     queryKey: ["pbs-snapshots", clusterId, backupId],
     queryFn: () =>
-      apiClient.list<PBSSnapshot>(
+      apiClient.get<GuestBackups>(
         apiPath`/api/v1/clusters/${clusterId}/pbs-snapshots?backup_id=${backupId}`,
       ),
     enabled: clusterId.length > 0 && backupId.length > 0,

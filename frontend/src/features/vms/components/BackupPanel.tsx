@@ -64,10 +64,11 @@ export function BackupPanel({
   const { t } = useTranslation("backup");
   const backupId = String(vmid);
   const {
-    data: snapshots,
+    data: backups,
     isLoading,
     error,
   } = usePBSSnapshotsByBackupID(clusterId, backupId);
+  const snapshots = backups?.items;
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PBSSnapshot | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -146,6 +147,11 @@ export function BackupPanel({
           )
         }
       >
+        {backups?.storage_unread && (
+          <p className="px-[18px] pb-3 text-[12.5px] text-amber-700 dark:text-amber-400">
+            {t("guestBackupsStorageUnread")}
+          </p>
+        )}
         {error ? (
           <p className="px-[18px] py-6 text-sm text-destructive">
             Failed to load backups: {error.message}
@@ -175,9 +181,11 @@ export function BackupPanel({
                 />
               </StatStrip>
             )}
-            <p className="px-[18px] pb-3 text-[12.5px] text-muted-foreground">
-              {t("guestSnapshotsSharedDatastore")}
-            </p>
+            {!backups.storage_unread && (
+              <p className="px-[18px] pb-3 text-[12.5px] text-muted-foreground">
+                {t("guestSnapshotsSharedDatastore")}
+              </p>
+            )}
             <div className="border-t">
               <Table>
                 <TableHeader>

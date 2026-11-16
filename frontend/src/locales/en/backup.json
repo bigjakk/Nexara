@@ -27,6 +27,7 @@
   "starting": "Starting...",
   "deleteSnapshot": "Delete Snapshot",
   "deleteSnapshotConfirm": "Are you sure you want to delete {{snapshot}} from {{datastore}}? This action cannot be undone.",
+  "guestBackupsStorageUnread": "Proxmox could not be asked which datastores this cluster backs up to, so these are the backups on the PBS servers attached to it, by VMID. Ones on other servers may be missing.",
   "guestSnapshotsSharedDatastore": "Matched by VMID on the datastores this cluster backs up to. A guest with the same VMID on another cluster that backs up to the same datastore shows here too: PBS cannot tell them apart.",
   "guestBackupDeleteAction": "Deleting the backup of {{backup}} from {{time}}",
   "guestBackupNowAction": "Backing up {{vmid}} to {{storage}}",

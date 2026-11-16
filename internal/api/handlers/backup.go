@@ -1073,29 +1073,46 @@ func (h *BackupHandler) ListClusterSnapshotsByBackupID(c fiber.Ctx, p *apischema
 	if err != nil {
 		return err
 	}
+	// Unread, the storages cannot say which datastores are this cluster's, and
+	// the tab lists what Nexara itself ties to the cluster: the snapshots on the
+	// PBS servers attached to it. It says so, rather than listing nothing.
 	ctx, cancel := h.readContext(c)
 	cfgs, err := client.ListStorageConfigs(ctx)
-	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	cancel()
-	if err != nil {
-		if timedOut {
-			return fiber.NewError(fiber.StatusBadGateway, "Proxmox did not list its storages in time, so this cluster's backups cannot be told from another's. Try again.")
-		}
-		return mapProxmoxError(err)
+	storageUnread := err != nil
+	if storageUnread {
+		slog.Warn("guest backups: could not read the cluster's storages; listing its attached PBS servers' snapshots",
+			"cluster_id", clusterID, "error", err)
 	}
 
 	snaps, err := h.queries.ListPBSSnapshotsByBackupID(c.Context(), p.String("backup_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list snapshots")
 	}
-	filtered := snaps[:0]
+	filtered := make([]db.PbsSnapshot, 0, len(snaps))
 	for _, sn := range snaps {
 		server, ok := allowedPBS[sn.PbsServerID]
-		if ok && clusterReadsDatastore(cfgs, clusterID, server, servers, sn.Datastore) {
+		if !ok {
+			continue
+		}
+		if storageUnread {
+			if server.ClusterID.Valid && uuid.UUID(server.ClusterID.Bytes) == clusterID {
+				filtered = append(filtered, sn)
+			}
+		} else if clusterReadsDatastore(cfgs, clusterID, server, servers, sn.Datastore) {
 			filtered = append(filtered, sn)
 		}
 	}
-	return RespondItems(c, filtered)
+	return c.JSON(guestSnapshotList{Items: filtered, Total: int64(len(filtered)), StorageUnread: storageUnread})
+}
+
+// guestSnapshotList is the list envelope with one more field: StorageUnread
+// says the cluster's storages could not be read, so the list is only the
+// snapshots on the PBS servers attached to the cluster.
+type guestSnapshotList struct {
+	Items         []db.PbsSnapshot `json:"items"`
+	Total         int64            `json:"total"`
+	StorageUnread bool             `json:"storage_unread,omitempty"`
 }
 
 // --- Backup Job endpoints (PVE vzdump) ---
