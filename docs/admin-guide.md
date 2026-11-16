@@ -752,7 +752,7 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on. Only one enabled
 An SSO account is bound to one identity at the provider: the ID token's issuer (`iss`) and subject (`sub`), stored on the account when it is created or first linked. At every sign-in:
 
 - the account bound to this issuer and subject is the account, whatever address the token carries now. Its address is not rewritten from the token;
-- otherwise, the SSO account whose address the token carries (exact spelling first, else the one account that differs only by case) is linked to this identity, if it has no link yet, and signed in. An account with two-factor authentication, or a deactivated one, is not linked by the sign-in (a check after the provider could still refuse it): it signs in by its address, as before, and stays **Not linked yet**;
+- otherwise, the SSO account whose address the token carries (exact spelling first, else the one account that differs only by case) is linked to this identity, if it has no link yet, and signed in. An account with two-factor authentication is linked, and has its roles and name updated from the provider, only once its second-factor code passes; if by then another identity has taken the account, the sign-in is refused and nothing is issued. A deactivated account is not linked;
 - otherwise, with **Auto-Provision Users** on, a new account is created, bound to this identity;
 - an SSO account with that address that is already bound to **another** identity — another subject, or another issuer — is refused. Nothing is created or linked; the sign-in page says *This sign-in does not match the single sign-on identity your account is linked to. Contact an administrator.*, and the audit log records `login_failed` under that account with reason `identity_mismatch`. The record carries the account's own address, never the subject, issuer or address the provider sent.
 
@@ -788,7 +788,7 @@ the provider must support:
 
 A provider that sends no `auth_time` (Dex, for one, which also ignores `prompt=login`), or that refuses `prompt=login`,
 cannot give the strict confirmation, and its users cannot turn 2FA on. For such a provider you can choose the
-relaxed confirmation, per configuration, with `relaxed_step_up` on the configuration (off for every existing and new
+relaxed confirmation, per configuration, with **Allow relaxed 2FA confirmation** in the configuration's **Accounts** section (`relaxed_step_up`; off for every existing and new
 one; audited when it changes). Nexara then asks for neither `prompt` nor `max_age`, and accepts the completed round
 trip through the provider as the confirmation, still bound to the same browser, the same Nexara sign-in and the same
 account. It keeps out someone who has only a stolen Nexara session token. It does not keep out someone at the
@@ -808,7 +808,8 @@ typing anything. It is your choice; the audit log records which rule each confir
    An account that signs in through single sign-on has no password to enter: click **Confirm with your identity
    provider**, sign in there again, and you come back to this page with the setup continuing. Nexara accepts the
    confirmation only if the provider says you signed in within the last 5 minutes, only in the browser and for the
-   sign-in that asked for it, and only once
+   sign-in that asked for it, only for the provider identity the account is linked to, and only once. An account
+   not linked yet (signed in before the upgrade that added links) is asked to sign out and sign in again once
 4. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.)
 5. Enter the 6-digit code to verify
 6. Save the recovery codes in a secure location: 10 single-use `XXXX-XXXX` codes, shown once. **Regenerate Recovery Codes** needs a code from your authenticator

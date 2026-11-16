@@ -331,7 +331,11 @@ also takes at most five attempts of either kind.
    As with password login, the refresh token is set as an HttpOnly cookie
    rather than returned in the body, and a user with 2FA enabled gets
    `{ "totp_required": true, "totp_pending_token": "..." }` here instead of
-   tokens — complete it against `/auth/totp/verify-login` as above.
+   tokens — complete it against `/auth/totp/verify-login` as above. An SSO account found by
+   its address with no link yet and with 2FA is linked, and has its roles and name updated,
+   only once that code passes; if by then the account is bound to another identity, or the
+   configuration has changed, the second step is refused (`403` with the mismatch message
+   above, or `401`) and issues nothing.
 
    The exchange code carries the state of the account as the callback read it, and
    the session is created against that: a revoke-all of the account's sessions
@@ -366,7 +370,9 @@ An account that signs in through single sign-on has no password to send to
    the same browser-binding cookie as step 2 of the OIDC flow.
 2. The browser signs in at the provider again and comes back to the OIDC callback. That
    callback signs nobody in and creates or links no account. It accepts the answer only when it
-   comes back in the browser that began it, its ID token resolves to the same account, and the
+   comes back in the browser that began it, its ID token's issuer and subject are the identity the
+   account is bound to (an account with no link yet is refused as `not_linked`: sign out and sign
+   in again once, which links it), and the
    token carries an `auth_time` within the last 5 minutes (1 minute ahead allowed for clock
    skew), by the database's clock. On a configuration with `relaxed_step_up: true` the URL
    carries neither `prompt` nor `max_age`, and `auth_time` is neither required nor judged:
@@ -377,7 +383,7 @@ An account that signs in through single sign-on has no password to send to
    `/api/v1/auth/totp/setup` otherwise), and redirects to `/settings/security?sso_step_up=confirmed`. Anything
    else is refused and audited (`totp_step_up_refused`, with the class of the refusal), and
    redirects to `/settings/security?sso_step_up_error=<class>`, a reason class such as
-   `another_browser`, `another_account`, `no_auth_time`, `stale_sign_in` or
+   `another_browser`, `another_account`, `not_linked`, `no_auth_time`, `stale_sign_in` or
    `session_ended` (never text), which the page puts in its own words. A provider that sends no
    `auth_time` although `max_age` was asked cannot confirm anything.
 3. `POST /api/v1/auth/totp/setup` from the same session and the same browser (its cookie),
