@@ -110,6 +110,7 @@ func TestLogout_HasNoPerAddressLimit(t *testing.T) {
 // other spellings of its path spend the same budget: 61 mints, the last two in
 // upper case and escaped, and only the last is refused.
 func TestConsoleTokenMintsAreCapped(t *testing.T) {
+	// Not parallel: newTestServer writes the process-global SetCookieSecureMode.
 	s := newTestServer(t)
 	var got []int
 	for i := 0; i < 61; i++ {
