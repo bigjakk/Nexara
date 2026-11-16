@@ -49,6 +49,8 @@ func TestSecurityHeaders_TheAPIIsNeverStored(t *testing.T) {
 		{"/api/v1/probe", "no-store"},
 		{"/API/V1/probe", "no-store"},
 		{"/api/v1/no-such-route", "no-store"},
+		{"/x/../api/v1/probe", "no-store"}, // routed to /api/v1/probe (Fiber v3.6)
+		{"/%61pi/v1/probe", "no-store"},
 		{"/dashboard", ""},
 	} {
 		_, header, _ := sendFull(t, app, authedRequest(http.MethodGet, tc.target))
