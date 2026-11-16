@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -166,16 +165,18 @@ func TestPasswordLockoutBoundedCallsDoNotLeakOrPanic(t *testing.T) {
 	})
 
 	t.Run("an answer that arrives after the caller gave up is dropped, and nothing is left running", func(t *testing.T) {
-		// Many calls are given up on and then let go. Each answer must go into a buffer nobody
-		// reads and each goroutine must end: an unbuffered channel would leave every one of them
-		// blocked on a send for ever, one per request a stalled Redis was asked about. In a
-		// synctest bubble the deadlines pass on a fake clock and Wait returns once every
-		// goroutine has ended or is blocked for good, so what is left is exactly the leak.
+		// Each abandoned call's answer must go into a buffer nobody reads and its goroutine
+		// must end; an unbuffered channel would leave one blocked for ever per stalled call.
+		// synctest.Test waits for every bubble goroutine and panics on one blocked for good,
+		// which is bubble-scoped, unlike runtime.NumGoroutine.
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("abandoned calls never ended: their answers must not block on a reader that left (%v)", r)
+			}
+		}()
 		synctest.Test(t, func(t *testing.T) {
-			const abandoned = 40
-			before := runtime.NumGoroutine()
 			release := make(chan struct{})
-			for range abandoned {
+			for range 40 {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 				_, err := boundedByContext(ctx, func(context.Context) (int, error) {
 					<-release
@@ -187,10 +188,6 @@ func TestPasswordLockoutBoundedCallsDoNotLeakOrPanic(t *testing.T) {
 				}
 			}
 			close(release)
-			synctest.Wait()
-			if left := runtime.NumGoroutine() - before; left > abandoned/4 {
-				t.Fatalf("%d goroutines outlived their calls: the abandoned calls never ended, their answers must not block on a reader that left", left)
-			}
 		})
 	})
 
