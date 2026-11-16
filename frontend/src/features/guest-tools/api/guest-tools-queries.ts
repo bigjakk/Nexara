@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type {
   GuestToolsConfig,
   GuestToolsConfigRequest,
@@ -34,6 +35,7 @@ export function useGuestToolsConfig(clusterId: string) {
 export function useUpdateGuestToolsConfig(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (config: GuestToolsConfigRequest) =>
       apiClient.put<GuestToolsConfig>(
         apiPath`/api/v1/clusters/${clusterId}/guest-tools/config`,

@@ -31,6 +31,8 @@ import {
 } from "../lib/virtio-win-schedule";
 import { VirtioWinScheduleFields } from "./VirtioWinScheduleFields";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 
 /** Sentinel for the "follow upstream stable" choice — Select cannot hold "". */
 const FOLLOW_STABLE = "__stable__";
@@ -46,6 +48,9 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
   const updateConfig = useUpdateVirtioWinConfig(clusterId);
   const download = useDownloadVirtioWin(clusterId);
   const checkNow = useCheckVirtioWinNow(clusterId);
+  // The card shows each failure itself (the hooks opt out of the app's
+  // toast), and one that lands after it was left is toasted instead.
+  const settle = useSaveOutcome(clusterId);
   const { canManage } = usePermissions();
   const readOnly = !canManage("storage");
 
@@ -146,7 +151,8 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
       // zone against a cluster that is on the six-hourly interval.
       check_timezone: cron === "" ? "" : timezone,
     };
-    updateConfig.mutate(request, {
+    settle(updateConfig.mutateAsync(request), {
+      action: "Saving the virtio-win ISO settings",
       onSuccess: () => {
         setSaveStatus("saved");
         setTimeout(() => {
@@ -161,33 +167,38 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
 
   const handleDownloadNow = () => {
     setDownloadNote("");
-    download.mutate(targetVersion ? { version: targetVersion } : {}, {
-      onSuccess: (result) => {
-        if (result.status === "already_present") {
+    settle(
+      download.mutateAsync(targetVersion ? { version: targetVersion } : {}),
+      {
+        action: "Downloading virtio-win",
+        onSuccess: (result) => {
+          if (result.status === "already_present") {
+            setDownloadNote(
+              `virtio-win ${result.version} is already on ${storage}.`,
+            );
+          } else if (result.status === "already_running") {
+            setDownloadNote(
+              `A download of virtio-win ${result.version} is already in progress.`,
+            );
+          } else {
+            setDownloadNote(
+              `Download of virtio-win ${result.version} started on ${result.node}.`,
+            );
+          }
+        },
+        onError: (err: unknown) => {
           setDownloadNote(
-            `virtio-win ${result.version} is already on ${storage}.`,
+            err instanceof Error ? err.message : "Download failed.",
           );
-        } else if (result.status === "already_running") {
-          setDownloadNote(
-            `A download of virtio-win ${result.version} is already in progress.`,
-          );
-        } else {
-          setDownloadNote(
-            `Download of virtio-win ${result.version} started on ${result.node}.`,
-          );
-        }
+        },
       },
-      onError: (err: unknown) => {
-        setDownloadNote(
-          err instanceof Error ? err.message : "Download failed.",
-        );
-      },
-    });
+    );
   };
 
   const handleCheckNow = () => {
     setDownloadNote("");
-    checkNow.mutate(undefined, {
+    settle(checkNow.mutateAsync(), {
+      action: "Checking for virtio-win",
       onSuccess: (result) => {
         if (result.download) {
           setDownloadNote(
@@ -393,7 +404,8 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
           )}
           {saveStatus === "error" && (
             <span className="text-sm text-destructive">
-              Save failed. Check your permissions and try again.
+              {describeError(updateConfig.error) ||
+                "Save failed. Check your permissions and try again."}
             </span>
           )}
         </div>

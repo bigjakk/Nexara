@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/select";
 import { WarningCallout } from "@/components/WarningCallout";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 import { useVirtioWinReleases } from "../api/virtio-win-queries";
 import {
   useGuestToolsConfig,
@@ -35,6 +37,9 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
   const { data: config, isLoading } = useGuestToolsConfig(clusterId);
   const { data: releases } = useVirtioWinReleases();
   const updateConfig = useUpdateGuestToolsConfig(clusterId);
+  // The card shows a failed save itself (the hook opts out of the app's
+  // toast), and one that lands after it was left is toasted instead.
+  const settle = useSaveOutcome(clusterId);
   const { canManage } = usePermissions();
   const readOnly = !canManage("guest_tools");
 
@@ -67,7 +72,8 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
       max_concurrent: maxConcurrent,
       snapshot_before: snapshotBefore,
     };
-    updateConfig.mutate(request, {
+    settle(updateConfig.mutateAsync(request), {
+      action: "Saving the guest tools policy",
       onSuccess: () => {
         setSaveStatus("saved");
         setTimeout(() => {
@@ -218,7 +224,8 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
           )}
           {saveStatus === "error" && (
             <span className="text-sm text-destructive">
-              Save failed. Check your permissions and try again.
+              {describeError(updateConfig.error) ||
+                "Save failed. Check your permissions and try again."}
             </span>
           )}
         </div>

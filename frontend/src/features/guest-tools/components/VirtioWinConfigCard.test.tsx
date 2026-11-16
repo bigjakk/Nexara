@@ -100,8 +100,13 @@ const storages = [
  * hooks' slots too — so handing a query hook a mutation stub would compile
  * clean and fail at render instead of at the keyboard.
  */
+/** `mutate` records each request the card sends; the request never answers. */
 function idleMutation(mutate: ReturnType<typeof vi.fn> = vi.fn()) {
-  return { mutate, isPending: false, error: null };
+  const mutateAsync = (...args: unknown[]) => {
+    (mutate as (...a: unknown[]) => unknown)(...args);
+    return new Promise<never>(() => undefined);
+  };
+  return { mutateAsync, isPending: false, error: null };
 }
 
 function mockHooks(

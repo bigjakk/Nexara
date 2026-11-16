@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiClient, ApiClientError, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import { MIRROR_CONFIRM_CODES } from "../types/virtio-win";
 import type {
   VirtioWinCheckResult,
@@ -53,6 +54,7 @@ export function useVirtioWinConfig(clusterId: string) {
 export function useUpdateVirtioWinConfig(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (config: VirtioWinConfigRequest) =>
       apiClient.put<VirtioWinConfig>(
         apiPath`/api/v1/clusters/${clusterId}/virtio-win/config`,
@@ -93,6 +95,7 @@ export function useVirtioWinDownloads(clusterId: string) {
 export function useDownloadVirtioWin(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (body: VirtioWinDownloadRequest) =>
       apiClient.post<VirtioWinDownloadResult>(
         apiPath`/api/v1/clusters/${clusterId}/virtio-win/download`,
@@ -174,6 +177,7 @@ export function useUpdateVirtioWinMirror() {
 export function useCheckVirtioWinNow(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: () =>
       apiClient.post<VirtioWinCheckResult>(
         apiPath`/api/v1/clusters/${clusterId}/virtio-win/check`,
