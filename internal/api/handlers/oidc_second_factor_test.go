@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -146,6 +147,11 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 			}
 			if n := len(store.liveSessionsOf(user.ID)); n != 1 || callbackRows(store) != 1 {
 				t.Errorf("%d sessions, %d oidc_callback rows; want 1 and 1", n, callbackRows(store))
+			}
+			// The callback's row is written once the session exists, so after its oidc_login.
+			if got := store.auditActions(); slices.Index(got, "oidc_login") < 0 ||
+				slices.Index(got, "oidc_callback") < slices.Index(got, "oidc_login") {
+				t.Errorf("audit order %v: want oidc_callback after oidc_login", got)
 			}
 		})
 	}
