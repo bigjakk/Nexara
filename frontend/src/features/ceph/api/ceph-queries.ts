@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type {
   CephStatus,
   CephOSD,
@@ -137,6 +138,7 @@ export function useCreateCephPool() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, body }: CreatePoolParams) =>
       apiClient.post<CephPoolActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/ceph/pools`,
@@ -211,6 +213,7 @@ export function useCephOSDAction() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, osdId, action }: OSDActionParams) =>
       apiClient.post<CephOSDActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/ceph/osds/${osdId}/${action}`,

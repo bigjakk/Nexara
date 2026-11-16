@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCephOSDAction, useCephOSDPreflight } from "../api/ceph-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { CephOSD, CephOSDAction, CephOSDPreflight } from "../types/ceph";
 
 interface OSDActionDialogProps {
@@ -93,6 +94,7 @@ function OSDActionDialogContent({
   onClose,
 }: OSDActionDialogContentProps) {
   const osdAction = useCephOSDAction();
+  const settle = useSaveOutcome();
   const preflight = useCephOSDPreflight(clusterId, osd.id, action);
 
   const copy = actionCopy[action];
@@ -101,10 +103,11 @@ function OSDActionDialogContent({
   const critical = assessment?.severity === "critical";
 
   function handleConfirm() {
-    osdAction.mutate(
-      { clusterId, osdId: osd.id, action },
-      { onSuccess: onClose },
-    );
+    settle(osdAction.mutateAsync({ clusterId, osdId: osd.id, action }), {
+      action: copy.title.replace("%s", osdName),
+      onSuccess: onClose,
+      onError: () => undefined, // shown below from the mutation's state
+    });
   }
 
   function handleOpenChange(next: boolean) {

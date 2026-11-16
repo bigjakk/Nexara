@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Plus } from "lucide-react";
 import { PGCalculator } from "./PGCalculator";
 import { useCreateCephPool } from "../api/ceph-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface PoolCreateDialogProps {
   clusterId: string;
@@ -29,20 +30,31 @@ export function PoolCreateDialog({
   const [pgNum, setPgNum] = useState(128);
 
   const createPool = useCreateCephPool();
+  const settle = useSaveOutcome(open);
 
   function handleCreate() {
-    createPool.mutate(
-      {
+    // The dialog stays mounted while closed, so a create that lands after it
+    // closed clears the form too.
+    const clear = () => {
+      setName("");
+      setSize(3);
+      setPgNum(128);
+    };
+    settle(
+      createPool.mutateAsync({
         clusterId,
         body: { name, size, pg_num: pgNum },
-      },
+      }),
       {
+        action: `Creating pool ${name}`,
         onSuccess: () => {
           setOpen(false);
-          setName("");
-          setSize(3);
-          setPgNum(128);
+          clear();
         },
+        onLateSuccess: (_result, now) => {
+          if (!now.open) clear();
+        },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }
