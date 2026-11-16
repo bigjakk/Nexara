@@ -109,6 +109,12 @@ var credentialRenderers = map[string]credentialRendererNote{
 		reason: "redacts Value in fmt and slog; no MarshalJSON on purpose, the token routes return the secret once, as JSON, " +
 			"to the operator who minted it — see TestGuard_AccessTypesNeverPrintTheirSecrets",
 	},
+	"internal/proxmox.CreateAccessUserParams": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Password and keys in fmt and slog; no MarshalJSON, it is sent as a form — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
 	"internal/ssh.Config": {
 		redacts:    true,
 		renderings: []string{"GoString", "LogValue", "MarshalJSON", "String"},

@@ -3028,6 +3028,45 @@ type UpdateAccessUserParams struct {
 	Append bool `json:"append,omitempty"`
 }
 
+// The two params below carry what AccessUser's renderings hide — keys, through
+// AccessUserFields, and a create's Password — and render the same way: the user id
+// and whether each secret is set. No MarshalJSON, as for AccessUser: they go to
+// Proxmox as a form (setAccessUserFields), never as JSON.
+
+func (p CreateAccessUserParams) String() string {
+	return "CreateAccessUserParams{userid:" + p.UserID + " password:" + redactedIfSet(p.Password) +
+		" keys:" + redactedIfSet(derefString(p.Keys)) + "}"
+}
+
+func (p CreateAccessUserParams) GoString() string {
+	return `proxmox.CreateAccessUserParams{UserID:"` + p.UserID + `", Password:"` + redactedIfSet(p.Password) +
+		`", Keys:"` + redactedIfSet(derefString(p.Keys)) + `"}`
+}
+
+func (p CreateAccessUserParams) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("userid", p.UserID))
+}
+
+func (p UpdateAccessUserParams) String() string {
+	return "UpdateAccessUserParams{keys:" + redactedIfSet(derefString(p.Keys)) + "}"
+}
+
+func (p UpdateAccessUserParams) GoString() string {
+	return `proxmox.UpdateAccessUserParams{Keys:"` + redactedIfSet(derefString(p.Keys)) + `"}`
+}
+
+func (p UpdateAccessUserParams) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("keys", redactedIfSet(derefString(p.Keys))), slog.Bool("append", p.Append))
+}
+
+// derefString is *s, or "" for nil.
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // AccessToken is an API token's metadata. It never carries the secret:
 // Proxmox returns that exactly once, at creation or regeneration.
 type AccessToken struct {

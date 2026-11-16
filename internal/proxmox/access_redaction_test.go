@@ -17,6 +17,9 @@ func TestGuard_AccessTypesNeverPrintTheirSecrets(t *testing.T) {
 	user := AccessUser{UserID: "alice@pve", Keys: secret}
 	detail := AccessUserDetail{UserID: "alice@pve", Keys: secret}
 	token := AccessTokenCreated{FullTokenID: "nexara@pve!ci", Value: secret}
+	keys := secret
+	create := CreateAccessUserParams{UserID: "alice@pve", Password: secret, AccessUserFields: AccessUserFields{Keys: &keys}}
+	update := UpdateAccessUserParams{AccessUserFields: AccessUserFields{Keys: &keys}}
 
 	for _, tc := range []struct {
 		name     string
@@ -26,6 +29,8 @@ func TestGuard_AccessTypesNeverPrintTheirSecrets(t *testing.T) {
 		{"AccessUser", user, "alice@pve"},
 		{"AccessUserDetail", detail, "alice@pve"},
 		{"AccessTokenCreated", token, "nexara@pve!ci"},
+		{"CreateAccessUserParams", create, "alice@pve"},
+		{"UpdateAccessUserParams", update, "REDACTED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
