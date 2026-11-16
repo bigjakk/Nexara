@@ -354,7 +354,8 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 			// oidc_issuer, oidc_subject; users_oidc_identity_key refuses a second holder.
 			u.OidcIssuer, u.OidcSubject = args[2].(string), args[3].(string)
 			if s.byIdentity(u.OidcIssuer, u.OidcSubject) != nil {
-				return authFakeRow{err: &pgconn.PgError{Code: "23505", ConstraintName: "users_oidc_identity_key"}}
+				return authFakeRow{err: &pgconn.PgError{Code: "23505", ConstraintName: "users_oidc_identity_key",
+					Message: `duplicate key value violates unique constraint "users_oidc_identity_key"`}}
 			}
 		}
 		s.users[u.ID] = u
@@ -375,7 +376,8 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 			return authFakeRow{err: pgx.ErrNoRows}
 		}
 		if s.byIdentity(iss, sub) != nil {
-			return authFakeRow{err: &pgconn.PgError{Code: "23505", ConstraintName: "users_oidc_identity_key"}}
+			return authFakeRow{err: &pgconn.PgError{Code: "23505", ConstraintName: "users_oidc_identity_key",
+				Message: `duplicate key value violates unique constraint "users_oidc_identity_key"`}}
 		}
 		before := *u
 		remember(func() { *u = before })

@@ -736,8 +736,12 @@ func (h *OIDCHandler) exchangeFailure(c fiber.Ctx, err error) string {
 // provisionUser read or created is the user whose epoch the code records — is
 // something a test can drive: Callback itself needs an identity provider.
 func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, userInfo *auth.OIDCUserInfo) (user db.User, exchangeCode, failure string) {
-	// JIT provision or update the user
-	user, err := h.provisionUser(c, cfg, userInfo)
+	// JIT provision, or find the account; then, unless a check after the provider can
+	// still refuse this sign-in, link it and bring its roles and name up to date.
+	user, finish, err := h.provisionUser(c, cfg, userInfo)
+	if err == nil && finish {
+		user, err = h.finishOIDCSignIn(c, cfg, user, userInfo)
+	}
 	if errors.Is(err, errOIDCIdentityMismatch) {
 		return db.User{}, "", oidcIdentityMismatchMessage
 	}
@@ -745,13 +749,6 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 		slog.Error("OIDC user provisioning failed", "email", userInfo.Email, "error", err)
 		return db.User{}, "", "User provisioning failed"
 	}
-
-	// Sync group-to-role mapping
-	mapping := make(map[string]string)
-	if len(cfg.GroupRoleMapping) > 0 {
-		_ = json.Unmarshal(cfg.GroupRoleMapping, &mapping)
-	}
-	h.syncUserRoles(c, user.ID, userInfo.Groups, mapping, cfg.DefaultRoleID)
 
 	// Store short-lived exchange code in Redis (5 second TTL), with the digest of the
 	// browser binding's secret: the exchange refuses a code this browser was not given
@@ -862,46 +859,29 @@ func (h *OIDCHandler) accountForIdentity(ctx context.Context, info *auth.OIDCUse
 }
 
 // provisionUser is the account a verified sign-in signs in to: the one
-// accountForIdentity names — linked to the identity first when it has no link — or a
-// new one bound to it when auto-provisioning is on. A sign-in whose address names an
-// account bound to another identity is refused (errOIDCIdentityMismatch) and audited
-// as a failed sign-in under that account. Nothing else ever writes a link.
-func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *auth.OIDCUserInfo) (db.User, error) {
+// accountForIdentity names, or a new one bound to the identity when auto-provisioning
+// is on. finish says the caller is to finish the sign-in for it now
+// (finishOIDCSignIn): always, except for an account found by address that a check
+// after the provider can still refuse — one with a second factor, or a deactivated one
+// — which is left exactly as it is, unlinked, with its roles and name untouched. A
+// sign-in whose address names an account bound to another identity is refused
+// (errOIDCIdentityMismatch) and audited as a failed sign-in under that account.
+func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *auth.OIDCUserInfo) (user db.User, finish bool, err error) {
 	acct, err := h.accountForIdentity(c.Context(), userInfo)
 	if errors.Is(err, errOIDCIdentityMismatch) {
 		h.auditIdentityMismatch(c, acct.User)
-		return db.User{}, err
+		return db.User{}, false, err
 	}
 	if err != nil {
-		return db.User{}, err
+		return db.User{}, false, err
 	}
 	if acct.Found {
-		user := acct.User
-		// Linked here only when nothing after the provider's word can still refuse the
-		// sign-in: a second factor (checked after the exchange) or a deactivated account
-		// would leave a link written by a sign-in that was then refused, so such an
-		// account signs in as before, by its address, and stays unlinked.
-		if !acct.Bound && user.IsActive && !user.TotpSecret.Valid {
-			if user, err = h.linkOIDCAccount(c, user, userInfo); err != nil {
-				return db.User{}, err
-			}
-		}
-		// Update display name if changed. The address is not rewritten from the token:
-		// a bound account keeps its own, whatever the claim says now.
-		if userInfo.DisplayName != "" && userInfo.DisplayName != user.DisplayName {
-			if updated, updateErr := h.queries.UpdateOIDCUserProfile(c.Context(), db.UpdateOIDCUserProfileParams{
-				ID:          user.ID,
-				DisplayName: userInfo.DisplayName,
-			}); updateErr == nil {
-				user = updated
-			}
-		}
-		return user, nil
+		return acct.User, acct.Bound || acct.User.IsActive && !acct.User.TotpSecret.Valid, nil
 	}
 
 	// User not found — JIT provision if enabled
 	if !cfg.AutoProvision {
-		return db.User{}, fmt.Errorf("auto-provisioning disabled and user not found")
+		return db.User{}, false, fmt.Errorf("auto-provisioning disabled and user not found")
 	}
 
 	displayName := userInfo.DisplayName
@@ -913,9 +893,8 @@ func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *au
 	// duplicate key below, by the same second lookup, as provisionLDAPUser does.
 	taken, err := h.queries.EmailTakenIgnoringCase(c.Context(), userInfo.Email)
 	if err != nil {
-		return db.User{}, fmt.Errorf("check the address: %w", err)
+		return db.User{}, false, fmt.Errorf("check the address: %w", err)
 	}
-	var user db.User
 	if taken {
 		err = errEmailTakenInAnotherCase
 	} else {
@@ -929,12 +908,58 @@ func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *au
 	if err != nil {
 		// Handle race condition: another sign-in created the account in the meantime.
 		if isDuplicateKeyError(err) || errors.Is(err, errEmailTakenInAnotherCase) {
-			return h.boundAccountAfterRace(c, userInfo)
+			user, err = h.boundAccountAfterRace(c, userInfo)
+			return user, err == nil, err
 		}
-		return db.User{}, fmt.Errorf("create user: %w", err)
+		return db.User{}, false, fmt.Errorf("create user: %w", err)
+	}
+	return user, true, nil
+}
+
+// finishOIDCSignIn finishes an SSO sign-in for user, the account the identity info
+// signs in to, once nothing can refuse that sign-in any more: the callback calls it
+// for an account with no later check, and the second-factor step can call it once the
+// code has passed. It links the account to the identity if it has no link
+// (LinkOIDCIdentity, conditional in SQL), refusing with errOIDCIdentityMismatch an
+// account bound — then, or by a sign-in that won a race — to any other identity; then
+// replaces its roles from info.Groups by cfg's mapping and takes info.DisplayName. It
+// needs from the provider only info.Issuer, Subject, Groups and DisplayName; the
+// address is never rewritten. It returns the account as last written.
+func (h *OIDCHandler) finishOIDCSignIn(c fiber.Ctx, cfg db.OidcConfig, user db.User, info *auth.OIDCUserInfo) (db.User, error) {
+	if info.Issuer == "" || info.Subject == "" {
+		return db.User{}, fmt.Errorf("oidc: the identity has no issuer or subject")
+	}
+	if user.OidcSubject == "" && user.OidcIssuer == "" {
+		linked, err := h.linkOIDCAccount(c, user, info)
+		if err != nil {
+			return db.User{}, err
+		}
+		if linked.ID != user.ID {
+			// The identity was bound to another account while this one waited.
+			h.auditIdentityMismatch(c, user)
+			return db.User{}, errOIDCIdentityMismatch
+		}
+		user = linked
+	} else if user.OidcIssuer != info.Issuer || user.OidcSubject != info.Subject {
+		h.auditIdentityMismatch(c, user)
+		return db.User{}, errOIDCIdentityMismatch
 	}
 
-	// Role assignment is handled by syncUserRoles called after provisionUser
+	mapping := make(map[string]string)
+	if len(cfg.GroupRoleMapping) > 0 {
+		_ = json.Unmarshal(cfg.GroupRoleMapping, &mapping)
+	}
+	h.syncUserRoles(c, user.ID, info.Groups, mapping, cfg.DefaultRoleID)
+
+	// The address is not rewritten from the token: a bound account keeps its own.
+	if info.DisplayName != "" && info.DisplayName != user.DisplayName {
+		if updated, err := h.queries.UpdateOIDCUserProfile(c.Context(), db.UpdateOIDCUserProfileParams{
+			ID:          user.ID,
+			DisplayName: info.DisplayName,
+		}); err == nil {
+			user = updated
+		}
+	}
 	return user, nil
 }
 

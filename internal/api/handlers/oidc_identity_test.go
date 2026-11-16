@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -16,7 +17,8 @@ import (
 // TestOIDCProvision_FindsTheAccountByItsProviderIdentity: which account a verified SSO
 // sign-in signs in to. The bound account wins over the address; an unlinked SSO account
 // found by address is linked; an account bound to another identity, or of another
-// source, is never signed in to or linked; a new account is bound at creation.
+// source, is never signed in to or linked; a new account is bound at creation. Only an
+// account the sign-in finishes for has its roles synced and its name updated.
 func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 	t.Parallel()
 	account := func(email, source, issuer, subject string) db.User {
@@ -67,7 +69,7 @@ func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 				}
 			}
 			a := newEpochApp(t, store, epochOptions{})
-			info := &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: carol, DisplayName: "Example User"}
+			info := &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: carol, DisplayName: "Renamed By The Provider"}
 			var user db.User
 			var failure string
 			callProvision(t, a, func(c fiber.Ctx) error {
@@ -92,17 +94,67 @@ func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 				t.Errorf("signed in to %v, want %v", user.ID, tc.users[tc.want].ID)
 			}
 			got := store.user(user.ID)
+			synced := len(store.named("RevokeAllUserRoles")) > 0
 			if tc.unlinked {
-				if got.OidcSubject != "" {
-					t.Errorf("the account was linked to %q before its sign-in could be refused", got.OidcSubject)
+				if got.OidcSubject != "" || synced || got.DisplayName != tc.users[0].DisplayName {
+					t.Errorf("subject %q, roles synced %t, name %q: changed before its sign-in could be refused",
+						got.OidcSubject, synced, got.DisplayName)
 				}
 				return
+			}
+			if !synced || got.DisplayName != info.DisplayName {
+				t.Errorf("roles synced %t, name %q; want synced and the provider's name", synced, got.DisplayName)
 			}
 			if got.OidcIssuer != epochIssuer || got.OidcSubject != epochSubject {
 				t.Errorf("the account holds %q %q, want bound to the identity", got.OidcIssuer, got.OidcSubject)
 			}
 			if tc.want >= 0 && got.Email != tc.users[tc.want].Email || tc.want < 0 && got.Email != carol {
 				t.Errorf("the account's address is %q: rewritten, or not the new account's", got.Email)
+			}
+		})
+	}
+}
+
+// TestFinishOIDCSignIn_RefusesALostRace: finishing for an account read unlinked links
+// it only to this identity; when another sign-in has bound the account to another
+// identity, or this identity to another account, in the meantime, it is refused and the
+// roles are left alone.
+func TestFinishOIDCSignIn_RefusesALostRace(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name            string
+		stored, another string // the account's subject now; another account's
+		refused         bool
+	}{
+		{name: "this identity won the race", stored: epochSubject},
+		{name: "another identity took the account", stored: "subject-of-another", refused: true},
+		{name: "the identity was bound to another account", another: epochSubject, refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			read := epochUser(t, "carol@example.com", 0)
+			read.AuthSource = "oidc"
+			now := read
+			if tc.stored != "" {
+				now.OidcIssuer, now.OidcSubject = epochIssuer, tc.stored
+			}
+			users := []db.User{now}
+			if tc.another != "" {
+				other := epochUser(t, "dave@example.com", 0)
+				other.AuthSource, other.OidcIssuer, other.OidcSubject = "oidc", epochIssuer, tc.another
+				users = append(users, other)
+			}
+			store := newEpochStore(users...)
+			a := newEpochApp(t, store, epochOptions{})
+			info := &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: read.Email}
+			var err error
+			callProvision(t, a, func(c fiber.Ctx) error {
+				_, err = a.oidc.finishOIDCSignIn(c, db.OidcConfig{}, read, info)
+				return c.SendStatus(http.StatusNoContent)
+			})
+			synced := len(store.named("RevokeAllUserRoles")) > 0
+			if tc.refused != errors.Is(err, errOIDCIdentityMismatch) || synced == tc.refused {
+				t.Errorf("err %v, roles synced %t; want refused %t", err, synced, tc.refused)
 			}
 		})
 	}
