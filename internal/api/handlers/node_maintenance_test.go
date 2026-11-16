@@ -1,6 +1,17 @@
 package handlers
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+
+	"github.com/bigjakk/nexara/internal/rolling"
+	sshpkg "github.com/bigjakk/nexara/internal/ssh"
+)
 
 func TestNodeMaintenanceCommand(t *testing.T) {
 	if got := nodeMaintenanceCommand(true, "pve1"); got != "ha-manager crm-command node-maintenance enable 'pve1'" {
@@ -27,5 +38,28 @@ func TestNodeMaintenanceNameRe(t *testing.T) {
 		if nodeMaintenanceNameRe.MatchString(n) {
 			t.Errorf("expected %q to be rejected", n)
 		}
+	}
+}
+
+// A refused SSH login, and one held back after a refusal, say which instead of
+// "Node command failed"; any other failure stays generic, its detail unsent.
+func TestMaintenanceCommandError_SaysWhenTheLoginWasRefusedOrHeldBack(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, want string
+		err        error
+	}{
+		{"held back", "not trying it again", fmt.Errorf("pve-01: %w", rolling.ErrSSHLoginHeldBack)},
+		{"refused", "This node refused the SSH login. Check", fmt.Errorf("dial 192.0.2.10: %w", sshpkg.ErrAuthRejected)},
+		{"anything else", "Node command failed", errors.New("dial 192.0.2.10: i/o timeout")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var fe *fiber.Error
+			if err := maintenanceCommandError(tc.err, uuid.New(), "pve-01"); !errors.As(err, &fe) ||
+				fe.Code != fiber.StatusBadGateway || !strings.Contains(fe.Message, tc.want) || strings.Contains(fe.Message, "192.0.2.10") {
+				t.Errorf("got %v, want a 502 saying %q and no address", err, tc.want)
+			}
+		})
 	}
 }

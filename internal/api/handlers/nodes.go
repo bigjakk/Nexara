@@ -22,6 +22,7 @@ import (
 	"github.com/bigjakk/nexara/internal/nodememory"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/rolling"
+	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 )
 
 // NodeHandler handles node endpoints.
@@ -92,10 +93,7 @@ func (h *NodeHandler) SetNodeMaintenance(c fiber.Ctx, p *apischema.Params) error
 
 	result, err := rolling.RunNodeCommand(ctx, h.queries, h.encryptionKey, clusterID, nodeName, nodeMaintenanceCommand(enable, nodeName))
 	if err != nil {
-		// Engine errors embed node IPs / SSH host-key / decrypt detail — log
-		// server-side, return a generic message.
-		slog.Error("node maintenance command failed", "cluster_id", clusterID, "node", nodeName, "error", err)
-		return fiber.NewError(fiber.StatusBadGateway, "Node command failed")
+		return maintenanceCommandError(err, clusterID, nodeName)
 	}
 	if result.ExitCode != 0 {
 		msg := strings.TrimSpace(result.Stderr)
@@ -112,6 +110,22 @@ func (h *NodeHandler) SetNodeMaintenance(c fiber.Ctx, p *apischema.Params) error
 	details, _ := json.Marshal(map[string]any{"enable": enable})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, action, details)
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// maintenanceCommandError answers a maintenance command that never ran. A
+// refused login, and one held back after a recent refusal, say which, in
+// rolling.UnavailableReason's words; anything else embeds node IPs, host-key or
+// decrypt detail, so it is logged and answered generically.
+func maintenanceCommandError(err error, clusterID uuid.UUID, nodeName string) error {
+	if errors.Is(err, sshpkg.ErrAuthRejected) {
+		reason, heldBack := rolling.UnavailableReason(err, "")
+		if !heldBack { // a login the node refused just now is worth a log line
+			slog.Warn("node maintenance: the node refused the SSH login", "cluster_id", clusterID, "node", nodeName, "error", err)
+		}
+		return fiber.NewError(fiber.StatusBadGateway, reason)
+	}
+	slog.Error("node maintenance command failed", "cluster_id", clusterID, "node", nodeName, "error", err)
+	return fiber.NewError(fiber.StatusBadGateway, "Node command failed")
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster ID.
