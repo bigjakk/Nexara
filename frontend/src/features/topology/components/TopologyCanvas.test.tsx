@@ -47,35 +47,74 @@ function input(): TopologyInput {
 
 const where = () => flow.nodes.find((n) => n.id === "host-n1")?.position;
 
+const props = {
+  filters: { showVMs: false, showStorage: false, selectedClusterId: null },
+  direction: "TB" as const,
+  liveMetrics: new Map(),
+  migrations: [],
+  power: null,
+};
+const to = { x: 999, y: 777 };
+
+/** The canvas with host-n1 dragged to `to`, as React Flow reports a drag. */
+function dragged() {
+  const view = renderWithProviders(
+    <TopologyCanvas input={input()} {...props} />,
+  );
+  const laidOut = where();
+  act(() => {
+    flow.onNodesChange?.([
+      { id: "host-n1", type: "position", position: to, dragging: true },
+    ]);
+    flow.onNodesChange?.([
+      { id: "host-n1", type: "position", position: to, dragging: false },
+    ]);
+  });
+  return { ...view, laidOut };
+}
+
 describe("TopologyCanvas arrangement", () => {
   // Every refetch builds a new input and lays the graph out again, which put
   // a dragged node back within 30 s. It stays until Reset layout.
   it("keeps a dragged node in place over a re-layout until the layout is reset", () => {
-    const props = {
-      filters: { showVMs: false, showStorage: false, selectedClusterId: null },
-      direction: "TB" as const,
-      liveMetrics: new Map(),
-      migrations: [],
-      power: null,
-    };
-    const { rerender } = renderWithProviders(
-      <TopologyCanvas input={input()} {...props} />,
-    );
-    const laidOut = where();
-    const to = { x: 999, y: 777 };
-
-    act(() => {
-      flow.onNodesChange?.([
-        { id: "host-n1", type: "position", position: to, dragging: true },
-      ]);
-      flow.onNodesChange?.([
-        { id: "host-n1", type: "position", position: to, dragging: false },
-      ]);
-    });
+    const { rerender, laidOut } = dragged();
     rerender(<TopologyCanvas input={input()} {...props} />);
     expect(where()).toEqual(to);
 
     fireEvent.click(screen.getByRole("button", { name: "Reset layout" }));
+    expect(where()).toEqual(laidOut);
+  });
+
+  // A filter lays the map out anew, and a node that left and came back is
+  // laid out afresh: a kept place from another layout strands it.
+  it.each([
+    {
+      name: "a filter changes",
+      next: (r: (ui: ReactNode) => void) => {
+        r(
+          <TopologyCanvas
+            input={input()}
+            {...props}
+            filters={{ ...props.filters, showVMs: true }}
+          />,
+        );
+      },
+    },
+    {
+      name: "the node goes and comes back",
+      next: (r: (ui: ReactNode) => void) => {
+        r(
+          <TopologyCanvas
+            input={{ ...input(), nodesByCluster: new Map() }}
+            {...props}
+          />,
+        );
+        r(<TopologyCanvas input={input()} {...props} />);
+      },
+    },
+  ])("lays a dragged node out afresh when $name", ({ next }) => {
+    const { rerender, laidOut } = dragged();
+    next(rerender);
     expect(where()).toEqual(laidOut);
   });
 });

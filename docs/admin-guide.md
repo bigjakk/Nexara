@@ -173,7 +173,7 @@ Navigate to **Topology** from the sidebar for an interactive map of your infrast
 - **Click-through** — click any element to jump to its detail page
 - **Power** — with a global `view:ups`, the **Power** toggle shows each UPS just above the hosts it powers (left of the clusters in the Left-Right layout), joined to them by a solid line while it is on mains and a dashed one on battery, and marks **No upsmon** on a host that would lose power without shutting down (see [Shutdown Protection](#shutdown-protection))
 - Pan and zoom with the mouse or trackpad
-- **Arrange** — drag an element to move it; it stays where you leave it as the map refreshes, until you click **Reset layout** (beside the zoom buttons) or switch the layout or the Power toggle
+- **Arrange** — drag an element to move it; it stays where you leave it as the map refreshes, until you click **Reset layout** (beside the zoom buttons) or change a filter, the layout or the Power toggle
 
 ---
 

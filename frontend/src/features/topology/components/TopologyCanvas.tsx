@@ -245,13 +245,20 @@ export function TopologyCanvas({
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
 
   // What the person arranged by hand, held over every re-layout (a refetch
-  // lays the graph out again) until they reset it or pick another direction
-  // or overlay, which lay it out anew. A ref: a drag notes a position on
+  // lays the graph out again) until they reset it or pick another direction,
+  // overlay or filter, which lay it out anew. A ref: a drag notes a position on
   // every move, and nothing renders from it but what setNodes is given.
   const arrangement = useRef<Arrangement>(new Map());
   const [isArranged, setIsArranged] = useState(false);
   const [resets, setResets] = useState(0);
-  const basis = `${direction}|${String(reserveLane)}|${String(resets)}`;
+  const basis = [
+    direction,
+    String(reserveLane),
+    String(resets),
+    filters.selectedClusterId ?? "",
+    String(filters.showVMs),
+    String(filters.showStorage),
+  ].join("|");
   const arrangedFor = useRef(basis);
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -295,6 +302,13 @@ export function TopologyCanvas({
           },
         };
       });
+      // A node that has gone loses its place: back under the same id, it is
+      // laid out afresh. A UPS is not in the layout; it is kept while drawn.
+      const present = new Set(synced.map((n) => n.id));
+      for (const n of current) if (n.type === "upsNode") present.add(n.id);
+      for (const id of [...arrangement.current.keys()]) {
+        if (!present.has(id)) arrangement.current.delete(id);
+      }
       return arranged(synced, arrangement.current);
     });
   }, [layoutNodes, setNodes, basis]);
