@@ -60,7 +60,7 @@ export function useUpsDevice(id: string) {
 }
 
 export function useUpsMetrics(id: string, range: UpsRange) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: upsKeys.metrics(id, range),
     queryFn: () =>
@@ -91,7 +91,7 @@ export function useUpsCommandRuns(id: string) {
 export const UPS_EVENTS_LIMIT = 100;
 
 export function useUpsEvents(upsId?: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: upsKeys.events(upsId),
     queryFn: () =>

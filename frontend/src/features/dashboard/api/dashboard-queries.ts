@@ -18,7 +18,7 @@ import type {
 import { useRefreshInterval } from "@/lib/refresh-interval";
 
 export function useClusters() {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(30_000);
   return useQuery({
     queryKey: ["clusters"],
     queryFn: () => apiClient.list<ClusterResponse>(apiPath`/api/v1/clusters`),

@@ -31,7 +31,7 @@ export interface AuditLogEntry {
 }
 
 export function useRecentActivity() {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(120_000);
   return useQuery({
     queryKey: ["recent-activity"],
     queryFn: () =>

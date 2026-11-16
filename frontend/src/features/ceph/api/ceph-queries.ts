@@ -22,7 +22,7 @@ import { useRefreshInterval } from "@/lib/refresh-interval";
 // --- Live Proxmox data ---
 
 export function useCephStatus(clusterId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "status"],
     queryFn: () =>
@@ -35,7 +35,7 @@ export function useCephStatus(clusterId: string) {
 }
 
 export function useCephOSDs(clusterId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "osds"],
     queryFn: () =>
@@ -46,7 +46,7 @@ export function useCephOSDs(clusterId: string) {
 }
 
 export function useCephPools(clusterId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "pools"],
     queryFn: () =>
@@ -92,7 +92,7 @@ export function useCephCrushRules(clusterId: string) {
 // --- DB metrics ---
 
 export function useCephMetrics(clusterId: string, timeframe: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "metrics", timeframe],
     queryFn: () =>

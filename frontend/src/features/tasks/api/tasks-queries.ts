@@ -76,7 +76,7 @@ export function useTasks({
   params.set("sort", sort);
   params.set("order", order);
 
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: [
       "tasks",

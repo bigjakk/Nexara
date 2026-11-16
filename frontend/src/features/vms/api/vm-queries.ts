@@ -78,7 +78,7 @@ export function useResourcePools(clusterId: string) {
 // apiPath refuses an empty id, and building it in the hook body would throw
 // during render while the id is still loading.
 export function useVM(clusterId: string, vmId: string, kind: ResourceKind) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: [
       "clusters",
@@ -678,7 +678,7 @@ export interface TaskHistoryEntry {
 }
 
 export function useTaskHistory(): UseQueryResult<TaskHistoryEntry[]> {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: ["task-history"],
     queryFn: () => apiClient.list<TaskHistoryEntry>(apiPath`/api/v1/tasks`),
@@ -734,7 +734,6 @@ export function useGuestAgentInfo(
   vmId: string,
   enabled: boolean,
 ) {
-  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "vms", vmId, "agent"],
     queryFn: () =>
@@ -742,7 +741,9 @@ export function useGuestAgentInfo(
         apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/agent`,
       ),
     enabled: enabled && clusterId.length > 0 && vmId.length > 0,
-    refetchInterval,
+    // Its own rate, not the preference's: this poll is how the card notices
+    // the agent coming up after a boot.
+    refetchInterval: 30_000,
   });
 }
 

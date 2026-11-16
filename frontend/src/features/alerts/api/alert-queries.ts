@@ -94,7 +94,7 @@ export function useAlerts(filters?: {
 }
 
 export function useAlertSummary() {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(30000);
   return useQuery({
     queryKey: ["alert-summary"],
     queryFn: () => apiClient.get<AlertSummary>(apiPath`/api/v1/alerts/summary`),
@@ -276,7 +276,7 @@ export function useNotificationDLQ(state?: string) {
   const params = new URLSearchParams();
   if (state) params.set("state", state);
 
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(30000);
   return useQuery({
     queryKey: ["notification-dlq", state ?? "all"],
     queryFn: () =>
@@ -288,7 +288,7 @@ export function useNotificationDLQ(state?: string) {
 }
 
 export function useNotificationDLQSummary() {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(30000);
   return useQuery({
     queryKey: ["notification-dlq-summary"],
     queryFn: () =>

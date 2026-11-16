@@ -75,7 +75,7 @@ export function usePBSDatastores(pbsId: string) {
 }
 
 export function usePBSDatastoreStatus(pbsId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(120_000);
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "datastores", "status"],
     queryFn: () =>
@@ -146,7 +146,7 @@ export function usePBSVerifyJobs(pbsId: string) {
 // --- Task Queries (live proxy) ---
 
 export function usePBSTasks(pbsId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(120_000);
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "tasks"],
     queryFn: () =>
@@ -164,7 +164,7 @@ export function usePBSDatastoreMetrics(
   pbsId: string,
   timeframe: string = "latest",
 ) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(120_000);
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "metrics", timeframe],
     queryFn: () =>
@@ -184,7 +184,7 @@ export function usePBSDatastoreRRD(
   timeframe: string = "hour",
   cf: string = "AVERAGE",
 ) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(120_000);
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "datastores", store, "rrd", timeframe, cf],
     queryFn: () =>
@@ -685,7 +685,7 @@ export function usePruneJobs(pbsId: string, store: string) {
 // --- Backup Coverage ---
 
 export function useBackupCoverage() {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(120_000);
   return useQuery({
     queryKey: ["backup-coverage"],
     queryFn: () =>
@@ -793,7 +793,7 @@ export function useVeeamRepositoryMetrics(
 }
 
 export function useVeeamJobs(serverId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: ["veeam-servers", serverId, "jobs"],
     queryFn: () =>
@@ -811,7 +811,7 @@ export function useVeeamJobs(serverId: string) {
  * newest few hundred, cannot promise of a job that seldom runs.
  */
 export function useVeeamSessions(serverId: string, jobId?: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: [
       "veeam-servers",

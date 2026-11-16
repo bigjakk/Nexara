@@ -27,7 +27,7 @@ import { useRefreshInterval } from "@/lib/refresh-interval";
 // --- Storage pools for a cluster ---
 
 export function useClusterStorage(clusterId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: ["clusters", clusterId, "storage"],
     queryFn: () =>

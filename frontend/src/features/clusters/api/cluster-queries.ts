@@ -881,7 +881,7 @@ export function useSetNodeMaintenance(
 }
 
 export function useClusterVMs(clusterId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: ["clusters", clusterId, "vms"],
     queryFn: () =>
@@ -1026,7 +1026,7 @@ export function useNodeSensors(
   nodeName: string,
   enabled = true,
 ) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "sensors"],
     queryFn: () =>

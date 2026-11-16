@@ -56,7 +56,7 @@ export function useEvents({
   if (startTime) params.set("start_time", startTime);
   if (endTime) params.set("end_time", endTime);
 
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(120_000);
   return useQuery({
     queryKey: [
       "audit-log",

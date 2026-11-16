@@ -322,7 +322,7 @@ export function useUpdateHARule(clusterId: string) {
 }
 
 export function useHAManagerStatus(clusterId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(30_000);
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "manager-status"],
     queryFn: () =>
@@ -335,7 +335,7 @@ export function useHAManagerStatus(clusterId: string) {
 }
 
 export function useHAStatus(clusterId: string) {
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(30_000);
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "status"],
     queryFn: () =>

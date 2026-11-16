@@ -116,7 +116,7 @@ export function routeKey(target: HistoryTarget): string {
  */
 export function useHistory(p: HistoryParams) {
   const { target, page, enabled } = p;
-  const refetchInterval = useRefreshInterval();
+  const refetchInterval = useRefreshInterval(60_000);
   return useQuery({
     queryKey: [
       "history",
