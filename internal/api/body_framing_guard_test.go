@@ -223,6 +223,7 @@ var requestCtxMethodsRefused = map[string]string{
 	"HijackSetNoResponse":      "suppresses the answer the Connection: close rides on",
 	"Init":                     "copies another request over this one",
 	"Init2":                    "puts another connection under this request",
+	"SetReadDeadline":          "moves the read deadline closeConnectionsLeftMidBody armed for the body, clearing it with a zero time",
 	"TimeoutError":             "swaps the answer for one the handler never sees",
 	"TimeoutErrorWithCode":     "swaps the answer for one the handler never sees",
 	"TimeoutErrorWithResponse": "swaps the answer for one the handler never sees",
