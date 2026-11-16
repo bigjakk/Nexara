@@ -72,6 +72,28 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			vm:       &db.Vm{Vmid: 109, Type: "lxc", Name: "linux01"},
 			wantType: "ha_resource", wantID: "ct:109", wantAction: "created", wantNoProbe: true,
 		},
+		// A create records that a comment was given, never its text: a Viewer reads the row.
+		{
+			name: "HA resource create with a comment", method: fiber.MethodPost, path: haScope + "/resources",
+			target: "/ha/resources", body: `{"sid":"vm:109","comment":"web"}`,
+			bind:     func(q *db.Queries) Handler { return ha(q).CreateResource },
+			wantType: "ha_resource", wantID: "vm:109", wantAction: "created",
+			wantDetails: map[string]any{"comment_set": true}, wantAbsent: []string{"comment"},
+		},
+		{
+			name: "HA group create with a comment", method: fiber.MethodPost, path: haScope + "/groups",
+			target: "/ha/groups", body: `{"group":"group01","nodes":"pve-01","comment":"web"}`,
+			bind:     func(q *db.Queries) Handler { return ha(q).CreateGroup },
+			wantType: "ha_group", wantID: "group01", wantAction: "created",
+			wantDetails: map[string]any{"comment_set": true}, wantAbsent: []string{"comment"},
+		},
+		{
+			name: "HA rule create with a comment", method: fiber.MethodPost, path: haScope + "/rules",
+			target: "/ha/rules", body: `{"rule":"rule01","type":"node-affinity","resources":"vm:109","nodes":"pve-01","comment":"web"}`,
+			bind:     func(q *db.Queries) Handler { return ha(q).CreateRule },
+			wantType: "ha_rule", wantID: "rule01", wantAction: "created",
+			wantDetails: map[string]any{"comment_set": true}, wantAbsent: []string{"comment"},
+		},
 		{
 			// What Proxmox reports is taken only if it is this VMID's own sid.
 			name: "HA update with a bare VMID, Proxmox naming another resource", method: fiber.MethodPut, path: haScope + "/resources/:sid",
