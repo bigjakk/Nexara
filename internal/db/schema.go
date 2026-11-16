@@ -52,11 +52,22 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool, databaseURL string, l
 // migration set baked into this binary. The returned cleanup releases the
 // source and database handles.
 func NewMigrator(databaseURL string) (*migrate.Migrate, func(), error) {
+	// Only the URL form is accepted. golang-migrate takes everything before the first
+	// ":" as a driver name, so a keyword/value DATABASE_URL (host=… password=…) made it
+	// answer "unknown driver <that text>", password included, into the startup fatal
+	// and the CLI's stderr. It is refused, not converted: a second parse of the string
+	// would be a second reading of the credentials beside the pool's (pgx).
+	if !strings.HasPrefix(databaseURL, "postgres://") && !strings.HasPrefix(databaseURL, "postgresql://") {
+		return nil, nil, errors.New("init migrate: DATABASE_URL must be a URL of the form " +
+			"postgres://user:password@host:5432/dbname?sslmode=disable; the keyword/value form (host=... password=...) " +
+			"is not supported (value withheld from logs)")
+	}
 	// Pre-validate the URL ourselves: url.Error embeds the raw URL — password
 	// included — and the message below ends up in container logs via both the
 	// startup fatal and the migrate CLI's stderr. pgx redacts its own connect
 	// errors, so this parse is the only leak path.
-	if _, err := url.Parse(toPgx5URL(databaseURL)); err != nil {
+	parsed, err := url.Parse(toPgx5URL(databaseURL))
+	if err != nil {
 		return nil, nil, errors.New("init migrate: DATABASE_URL is not a valid URL (value withheld from logs)")
 	}
 
@@ -68,12 +79,29 @@ func NewMigrator(databaseURL string) (*migrate.Migrate, func(), error) {
 	m, err := migrate.NewWithSourceInstance("iofs", src, toPgx5URL(databaseURL))
 	if err != nil {
 		_ = src.Close()
-		return nil, nil, fmt.Errorf("init migrate: %w", err)
+		// golang-migrate's text is not ours to trust: anything in it that spells the
+		// URL or its password is replaced before it can be logged or printed.
+		return nil, nil, errors.New("init migrate: " + withoutSecrets(err.Error(), databaseURL, parsed))
 	}
 
 	// migrate.Close closes both the source and database drivers.
 	cleanup := func() { _, _ = m.Close() }
 	return m, cleanup, nil
+}
+
+// withoutSecrets replaces in msg every spelling of the configured URL and of its
+// password: as given, as handed to golang-migrate, and the password raw and escaped.
+func withoutSecrets(msg, databaseURL string, parsed *url.URL) string {
+	secrets := []string{databaseURL, toPgx5URL(databaseURL)}
+	if pw, ok := parsed.User.Password(); ok && pw != "" {
+		secrets = append(secrets, pw, url.QueryEscape(pw), url.PathEscape(pw))
+	}
+	for _, s := range secrets {
+		if s != "" {
+			msg = strings.ReplaceAll(msg, s, "REDACTED")
+		}
+	}
+	return msg
 }
 
 // LatestMigrationVersion reports the highest migration version embedded in

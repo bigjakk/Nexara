@@ -81,7 +81,7 @@ All configuration is via environment variables.
 | `POSTGRES_USER` | No | `nexara` | PostgreSQL username |
 | `POSTGRES_PASSWORD` | **Yes** | — | PostgreSQL password (change from default) |
 | `POSTGRES_DB` | No | `nexara` | PostgreSQL database name |
-| `DATABASE_URL` | No | auto | Full PostgreSQL connection string. Accepts `pool_max_conns` and the `lock_timeout` (default `2min`) and `idle_in_transaction_session_timeout` (default `1min`) backstops as query keys; see [Production Deployment](admin-guide.md#security--deployment-settings) |
+| `DATABASE_URL` | No | auto | Full PostgreSQL connection URL, `postgres://user:password@host:5432/dbname?sslmode=disable` (the keyword/value form `host=… password=…` is refused at startup). Accepts `pool_max_conns` and the `lock_timeout` (default `2min`) and `idle_in_transaction_session_timeout` (default `1min`) backstops as query keys; see [Production Deployment](admin-guide.md#security--deployment-settings) |
 | `REDIS_URL` | No | `redis://nexara-redis:6379/0` | Redis connection string |
 | `API_PORT` | No | `8080` | API server listen port |
 | `JWT_SECRET` | No | auto-generated | Secret for signing JWT tokens (min 16 chars) |

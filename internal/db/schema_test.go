@@ -1,6 +1,9 @@
 package db
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseMigrationVersion(t *testing.T) {
 	t.Parallel()
@@ -99,6 +102,31 @@ func TestToPgx5URL(t *testing.T) {
 			t.Parallel()
 			if got := toPgx5URL(tc.in); got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNewMigrator_ErrorsNeverCarryThePassword: the error is printed by the startup
+// fatal and by `nexara migrate`, so the password must not be in it, whatever form
+// DATABASE_URL takes. A keyword/value string with a ":" in it once came back from
+// golang-migrate as "unknown driver <the whole string>".
+func TestNewMigrator_ErrorsNeverCarryThePassword(t *testing.T) {
+	t.Parallel()
+	const pw = "s3cr3t:Pa55-synthetic"
+	for _, tc := range []struct{ name, dsn, says string }{
+		{"keyword/value", "host=/var/run/postgresql user=nexara password=" + pw + " dbname=nexara", "postgres://user:password@host"},
+		{"a URL that cannot connect", "postgres://nexara:" + pw + "@127.0.0.1:1/nexara?sslmode=disable&connect_timeout=2", "init migrate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, cleanup, err := NewMigrator(tc.dsn)
+			if err == nil {
+				cleanup()
+				t.Fatalf("NewMigrator(%s) succeeded, want an error", tc.name)
+			}
+			if strings.Contains(err.Error(), "s3cr3t") || !strings.Contains(err.Error(), tc.says) {
+				t.Errorf("error = %q: want no password and %q in it", err, tc.says)
 			}
 		})
 	}
