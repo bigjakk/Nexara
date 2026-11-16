@@ -189,7 +189,7 @@ describe("SecurityPage: beginning a 2FA setup", () => {
     [
       "refused as stale",
       "?sso_step_up_error=stale_sign_in",
-      /sign in when the provider asks/,
+      /Sign out at your identity provider first/,
       0,
     ],
     [
