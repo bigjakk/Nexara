@@ -40,14 +40,20 @@ func (e *OIDCEmailNotVerifiedError) Error() string {
 }
 
 // emailUnverified reports an email_verified claim that says false: the JSON
-// boolean, or the string "false" that some providers send. A missing claim, or
-// any other value, is not a refusal.
+// boolean, the number 0, or the strings "false", "0" and "no" that some providers
+// send. A missing claim, or any other value, is not a refusal.
 func emailUnverified(claims map[string]interface{}) bool {
 	switch v := claims["email_verified"].(type) {
 	case bool:
 		return !v
+	case float64:
+		return v == 0
 	case string:
-		return strings.EqualFold(strings.TrimSpace(v), "false")
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "false", "0", "no":
+			return true
+		}
+		return false
 	default:
 		return false
 	}

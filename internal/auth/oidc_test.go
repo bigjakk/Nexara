@@ -36,6 +36,10 @@ func TestEmailUnverified(t *testing.T) {
 		{"false", map[string]interface{}{"email_verified": false}, true},
 		{"the string false", map[string]interface{}{"email_verified": "False"}, true},
 		{"the string true", map[string]interface{}{"email_verified": "true"}, false},
+		{"the number 0", map[string]interface{}{"email_verified": float64(0)}, true},
+		{"the number 1", map[string]interface{}{"email_verified": float64(1)}, false},
+		{"the string 0", map[string]interface{}{"email_verified": "0"}, true},
+		{"the string no", map[string]interface{}{"email_verified": "No"}, true},
 	} {
 		if got := emailUnverified(tc.claims); got != tc.want {
 			t.Errorf("%s: emailUnverified = %v, want %v", tc.name, got, tc.want)
