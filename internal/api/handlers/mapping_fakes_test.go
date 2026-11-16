@@ -48,6 +48,8 @@ type mappingFakeClient struct {
 	hangVMIDs     map[int]bool
 	hangResources bool
 	hangDevices   bool
+	// devicesDeadline records whether the device read's context carried a deadline.
+	devicesDeadline bool
 
 	// deleteErr, updateErr and createErr answer the writes; afterDelete, when
 	// set, replaces the plain USB listing once a delete has been made.
@@ -205,6 +207,9 @@ func (f *mappingFakeClient) ListPCIMappings(_ context.Context, checkNode string)
 
 func (f *mappingFakeClient) ListNodePCIDevicesAllClasses(ctx context.Context, node string) ([]proxmox.NodePCIDevice, error) {
 	f.logCall("devices:" + node)
+	f.mu.Lock()
+	_, f.devicesDeadline = ctx.Deadline()
+	f.mu.Unlock()
 	if f.hangDevices {
 		return nil, mappingHangUntilDone(ctx)
 	}

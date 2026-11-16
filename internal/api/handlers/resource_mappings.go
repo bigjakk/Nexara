@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -164,7 +165,11 @@ func createPCIMapping(ctx context.Context, px pciMappingCreator, isMember func(c
 	if !member {
 		return proxmox.CreatePCIMappingParams{}, errNodeNotMember
 	}
-	devices, err := px.ListNodePCIDevicesAllClasses(ctx, node)
+	// Held to its own deadline, as an update's read is: fiber.Ctx.Context()
+	// carries none, and a node that does not answer would hold the request.
+	devCtx, cancel := context.WithTimeout(ctx, pciMappingDeviceTimeout)
+	devices, err := px.ListNodePCIDevicesAllClasses(devCtx, node)
+	cancel()
 	if err != nil {
 		return proxmox.CreatePCIMappingParams{}, mapProxmoxError(err)
 	}
@@ -340,14 +345,25 @@ type usbMappingDeleter interface {
 
 // eachWithin runs work on every item, on at most workers goroutines. An item
 // not yet started when budget ends goes to skipped instead, and its work never
-// runs. It returns once every item has gone to one or the other, so the
-// callers' results are complete — and it holds at most workers goroutines
-// however many items there are.
-func eachWithin[T any](budget context.Context, workers int, items []T, work, skipped func(T)) {
+// runs; one whose work panics goes to failed, the panic logged, and the other
+// items carry on — a worker is not the request's goroutine, so no recover
+// above it would catch the panic, and the process would end. It returns once
+// every item has gone to one of them, so the callers' results are complete —
+// and it holds at most workers goroutines however many items there are.
+func eachWithin[T any](budget context.Context, workers int, items []T, work, skipped, failed func(T)) {
 	// At least one, or the first send below would wait for a worker forever.
 	workers = max(workers, 1)
 	jobs := make(chan T)
 	var wg sync.WaitGroup
+	run := func(item T) {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("a mapping check panicked", "panic", r, "stack", string(debug.Stack()))
+				failed(item)
+			}
+		}()
+		work(item)
+	}
 	for range min(workers, len(items)) {
 		wg.Add(1)
 		go func() {
@@ -357,7 +373,7 @@ func eachWithin[T any](budget context.Context, workers int, items []T, work, ski
 					skipped(item)
 					continue
 				}
-				work(item)
+				run(item)
 			}
 		}()
 	}
@@ -367,6 +383,9 @@ func eachWithin[T any](budget context.Context, workers int, items []T, work, ski
 	close(jobs)
 	wg.Wait()
 }
+
+// mappingCheckFailed is an unchecked item's reason when its check panicked.
+const mappingCheckFailed = "Not checked: Nexara failed while checking it; the server log has the detail."
 
 // mapEntryNode is the node a stored entry names, of either kind, or "".
 // Deliberately lenient — the first node= value, whatever else the entry holds
@@ -493,6 +512,9 @@ func checkMappingNodes[M any, P nodeLister](ctx context.Context, px P, list func
 		},
 		func(node string) {
 			record(node, mappingNodeCheck[M]{reason: outOfTime})
+		},
+		func(node string) {
+			record(node, mappingNodeCheck[M]{reason: mappingCheckFailed})
 		})
 	return out
 }
@@ -1201,6 +1223,9 @@ func scanMappingUsage(ctx context.Context, px guestConfigReader, kind, id string
 		},
 		func(guest mappingGuest) {
 			unchecked(guest, mappingBudgetReason())
+		},
+		func(guest mappingGuest) {
+			unchecked(guest, mappingCheckFailed)
 		})
 
 	byVMID := func(a, b mappingGuest) int { return a.VMID - b.VMID }
@@ -1404,9 +1429,9 @@ func (h *VMHandler) ListClusterPCIMappings(c fiber.Ctx, p *apischema.Params) err
 	return RespondItems(c, mappings)
 }
 
-// pciMappingDeviceTimeout bounds the read of add_node's devices an update
-// makes to build the entry it adds. A variable only so the tests can shorten
-// it.
+// pciMappingDeviceTimeout bounds the read of a node's devices that a create,
+// and an update's add_node, make to build the entry they write. A variable only
+// so the tests can shorten it.
 var pciMappingDeviceTimeout = 10 * time.Second
 
 // pciMappingStaleMessage is the 409 an update answers when the digest it

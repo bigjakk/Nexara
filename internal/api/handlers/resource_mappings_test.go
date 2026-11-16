@@ -117,6 +117,9 @@ func TestCreatePCIMapping_BuildsTheEntryFromTheNodesDevice(t *testing.T) {
 		MDev:        true,
 	}
 	fake.requireCalls(t, "devices:pve-01", "create:gpu01")
+	if !fake.devicesDeadline { // the request's own context carries none
+		t.Error("the device read had no deadline")
+	}
 	if len(fake.created) != 1 || !reflect.DeepEqual(fake.created[0], want) || !reflect.DeepEqual(got, want) {
 		t.Errorf("created %+v, returned %+v, want %+v", fake.created, got, want)
 	}
@@ -731,7 +734,7 @@ func TestEachWithin(t *testing.T) {
 		done := make(chan int, 1)
 		go func() {
 			ran := 0
-			eachWithin(context.Background(), 0, []int{1, 2, 3}, func(int) { ran++ }, func(int) {})
+			eachWithin(context.Background(), 0, []int{1, 2, 3}, func(int) { ran++ }, func(int) {}, func(int) {})
 			done <- ran
 		}()
 		select {
@@ -778,7 +781,7 @@ func TestEachWithin(t *testing.T) {
 				mu.Lock()
 				inFlight--
 				mu.Unlock()
-			}, func(int) { t.Error("an item was skipped with the budget unspent") })
+			}, func(int) { t.Error("an item was skipped with the budget unspent") }, func(int) { t.Error("an item failed") })
 		}()
 		select {
 		case <-atBound:
@@ -816,9 +819,31 @@ func TestEachWithin(t *testing.T) {
 			mu.Lock()
 			skipped++
 			mu.Unlock()
-		})
+		}, func(int) { t.Error("an item failed") })
 		if ran+skipped != 6 || skipped == 0 || ran > 3 {
 			t.Errorf("ran %d, skipped %d; want every item accounted for and the rest skipped", ran, skipped)
+		}
+	})
+	// A worker is not the request's goroutine: a panic in one item's work, left
+	// alone, would end the process. It fails that item, and the rest still run.
+	t.Run("an item whose work panics fails alone", func(t *testing.T) {
+		var mu sync.Mutex
+		var ran, failed []int
+		eachWithin(context.Background(), 2, []int{1, 2, 3}, func(i int) {
+			if i == 2 {
+				panic("sentinel")
+			}
+			mu.Lock()
+			ran = append(ran, i)
+			mu.Unlock()
+		}, func(int) { t.Error("an item was skipped with the budget unspent") }, func(i int) {
+			mu.Lock()
+			failed = append(failed, i)
+			mu.Unlock()
+		})
+		slices.Sort(ran)
+		if !slices.Equal(ran, []int{1, 3}) || !slices.Equal(failed, []int{2}) {
+			t.Errorf("ran %v, failed %v; want 1 and 3 run, 2 failed", ran, failed)
 		}
 	})
 }
