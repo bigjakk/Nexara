@@ -118,7 +118,13 @@ type OIDCProvider struct {
 // another host. Checking the issuer when it is saved is not enough: the name
 // can resolve elsewhere by the time a sign-in contacts it.
 func NewOIDCProvider(ctx context.Context, cfg OIDCConfig, rdb *redis.Client) (*OIDCProvider, error) {
-	client := notifications.SafeHTTPClientAllowingPrivate(15*time.Second, cfg.AllowPrivateAddress)
+	return NewOIDCProviderWithClient(ctx, cfg, rdb, notifications.SafeHTTPClientAllowingPrivate(15*time.Second, cfg.AllowPrivateAddress))
+}
+
+// NewOIDCProviderWithClient is NewOIDCProvider over client instead of the
+// address-checked one. Production code calls NewOIDCProvider; this exists for tests
+// whose provider is on loopback, which that client always refuses.
+func NewOIDCProviderWithClient(ctx context.Context, cfg OIDCConfig, rdb *redis.Client, client *http.Client) (*OIDCProvider, error) {
 	safeCtx := oidc.ClientContext(ctx, client)
 	provider, err := oidc.NewProvider(safeCtx, cfg.IssuerURL)
 	if err != nil {

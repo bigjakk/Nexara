@@ -58,6 +58,18 @@ type OIDCHandler struct {
 	rbac          *auth.RBACEngine
 	eventPub      *events.Publisher
 	rdb           *redis.Client
+
+	// newProvider, when set, replaces auth.NewOIDCProvider (openProvider); tests only,
+	// to reach a provider on loopback, which the production client refuses.
+	newProvider func(ctx context.Context, cfg auth.OIDCConfig, rdb *redis.Client) (*auth.OIDCProvider, error)
+}
+
+// openProvider is auth.NewOIDCProvider, or newProvider when a test set it.
+func (h *OIDCHandler) openProvider(ctx context.Context, cfg auth.OIDCConfig) (*auth.OIDCProvider, error) {
+	if h.newProvider != nil {
+		return h.newProvider(ctx, cfg, h.rdb)
+	}
+	return auth.NewOIDCProvider(ctx, cfg, h.rdb)
 }
 
 // NewOIDCHandler creates a new OIDC handler.
@@ -616,7 +628,7 @@ func (h *OIDCHandler) Authorize(c fiber.Ctx, _ *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to initialize OIDC configuration")
 	}
 
-	provider, err := auth.NewOIDCProvider(c.Context(), oidcCfg, h.rdb)
+	provider, err := h.openProvider(c.Context(), oidcCfg)
 	if err != nil {
 		slog.Error("OIDC provider init failed", "error", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to initialize OIDC provider")
@@ -716,7 +728,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		return fail("OIDC config error")
 	}
 
-	provider, err := auth.NewOIDCProvider(c.Context(), oidcCfg, h.rdb)
+	provider, err := h.openProvider(c.Context(), oidcCfg)
 	if err != nil {
 		slog.Error("OIDC provider init failed in callback", "error", err)
 		return fail("OIDC provider error")
@@ -825,7 +837,7 @@ func (h *OIDCHandler) StartStepUp(c fiber.Ctx, userID, sessionID uuid.UUID) (str
 		slog.Error("OIDC step-up: could not build the configuration", "error", err)
 		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to initialize OIDC configuration")
 	}
-	provider, err := auth.NewOIDCProvider(c.Context(), oidcCfg, h.rdb)
+	provider, err := h.openProvider(c.Context(), oidcCfg)
 	if err != nil {
 		slog.Error("OIDC step-up: provider init failed", "error", err)
 		return "", fiber.NewError(fiber.StatusServiceUnavailable, "The identity provider could not be reached. Try again shortly.")
