@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { clearTokens, storeTokens } from "@/lib/api-client";
 import { queryClient } from "@/lib/query-client";
 import {
@@ -164,5 +164,29 @@ describe("the app when the session changes hands", () => {
     expect(mintedFor).toEqual([ADMIN.id]);
     expect(sockets).toHaveLength(1);
     expect(sockets[0]?.closed).toBe(false);
+  });
+});
+
+describe("the router's gates", () => {
+  // /clusters had no gate of its own, unlike its gated siblings.
+  it("refuses /clusters to a caller without view:cluster", async () => {
+    act(() => {
+      storeTokens(authResponse(VIEWER));
+      useAuthStore.getState().setAuthFromResponse(authResponse(VIEWER));
+    });
+    renderTheApp();
+    // The router reads the address at import, so this goes as a Back would.
+    act(() => {
+      window.history.pushState({}, "", "/clusters");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    try {
+      expect(await screen.findByText("view:cluster")).toBeInTheDocument();
+    } finally {
+      act(() => {
+        window.history.pushState({}, "", "/");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+    }
   });
 });

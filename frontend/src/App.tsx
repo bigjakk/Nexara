@@ -210,9 +210,11 @@ const router = createBrowserRouter([
           {
             path: "clusters",
             element: (
-              <LazyPage>
-                <ClustersListPage />
-              </LazyPage>
+              <RequirePermission action="view" resource="cluster">
+                <LazyPage>
+                  <ClustersListPage />
+                </LazyPage>
+              </RequirePermission>
             ),
           },
           {
