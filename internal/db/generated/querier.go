@@ -1470,8 +1470,16 @@ type Querier interface {
 	// the collector. Unlike InsertTaskHistory it sets started_at/finished_at/
 	// exit_status explicitly, so a task already finished when first seen is stored
 	// fully-formed (and a still-running one as status='running'). Attributed to the
-	// system user; ON CONFLICT keeps it idempotent across sync ticks.
+	// system user; ON CONFLICT keeps it idempotent across sync ticks, and takes
+	// over a filed row as InsertTaskHistory does.
 	InsertExternalTaskHistory(ctx context.Context, arg InsertExternalTaskHistoryParams) error
+	// InsertFiledTaskHistory backs POST /api/v1/tasks: a task the caller says
+	// Nexara dispatched, which Proxmox confirmed it runs. Its start is Proxmox's,
+	// so filing it late cannot put off the collector's give-up, and it never
+	// replaces a row already on record. Source 'filed' marks the user as who
+	// filed it: whoever ran it takes the row over (InsertTaskHistory and
+	// InsertExternalTaskHistory).
+	InsertFiledTaskHistory(ctx context.Context, arg InsertFiledTaskHistoryParams) (TaskHistory, error)
 	// A node a login came from. A feed that already exists is left as it is: one
 	// added by hand, and one the operator removed, which stays removed.
 	InsertFoundUpsFeed(ctx context.Context, arg InsertFoundUpsFeedParams) (int64, error)
@@ -1502,6 +1510,11 @@ type Querier interface {
 	// forget it. Non-guest tasks (empty/non-numeric id) store NULL; the {1,9}
 	// bound (VMIDs cap at 999999999) keeps a pathological all-numeric id from
 	// overflowing the ::int cast.
+	//
+	// A row someone FILED (POST /api/v1/tasks, source 'filed') gives way to the
+	// one who ran the task: both inserts take it over in the same cluster, actor,
+	// source and description, and never move its start later. Any other row
+	// already on record wins, so the conflict returns no row.
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	InsertUpsCommand(ctx context.Context, arg InsertUpsCommandParams) (UpsCommand, error)
 	// A UPS's window (000137) names the UPS and no cluster or node.
@@ -1863,6 +1876,10 @@ type Querier interface {
 	// already-ingested external) and audit_log (any source: a UI action Nexara
 	// already audited, or a legacy external task ingested before task_history rows
 	// existed). Backed by idx_task_history_upid and idx_audit_log_upid.
+	//
+	// A filed row (source 'filed') is not recorded for this purpose: it is only
+	// what a manage:task holder said, so the task is still ingested, takes the row
+	// over and gets its own audit entry.
 	ListExistingTaskHistoryUPIDs(ctx context.Context, upids []string) ([]string, error)
 	// Physical disks whose SMART overall-health assessment reports failure. A
 	// deny-list (LIKE 'FAIL%') rather than an allow-list, so an unexpected benign

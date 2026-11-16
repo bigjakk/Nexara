@@ -15,8 +15,12 @@ ON CONFLICT (cluster_id) DO UPDATE SET last_synced_at = $2;
 -- already audited, or a legacy external task ingested before task_history rows
 -- existed). Backed by idx_task_history_upid and idx_audit_log_upid.
 
+--
+-- A filed row (source 'filed') is not recorded for this purpose: it is only
+-- what a manage:task holder said, so the task is still ingested, takes the row
+-- over and gets its own audit entry.
 -- name: ListExistingTaskHistoryUPIDs :many
-SELECT upid FROM task_history WHERE upid = ANY(sqlc.arg('upids')::text[]);
+SELECT upid FROM task_history WHERE upid = ANY(sqlc.arg('upids')::text[]) AND source <> 'filed';
 
 -- ListExistingAuditLogUPIDs asks about ONE cluster's entries. Audit entries
 -- outlive a removed cluster (under its old id, since 000122), and a cluster added

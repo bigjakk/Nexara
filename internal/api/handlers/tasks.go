@@ -405,13 +405,16 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	// for Proxmox's: Proxmox's task status carries none to take instead, so it
 	// is kept in the filing's audit entry, as provided_description, beside who
 	// provided it.
-	task, err := h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
+	// Filed, not run: the caller is recorded as who filed it, and whoever ran
+	// the task takes the row over (InsertFiledTaskHistory). It starts when
+	// Proxmox says it did, so filing late cannot put off the give-up.
+	task, err := h.queries.InsertFiledTaskHistory(c.Context(), db.InsertFiledTaskHistoryParams{
 		ClusterID: clusterID,
 		UserID:    uid,
 		Upid:      upid,
-		Status:    status,
 		Node:      upidNode,
 		TaskType:  reported.Type,
+		StartedAt: filedTaskStart(reported.StartTime, time.Now()),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fiber.NewError(fiber.StatusConflict, "The task is already on record")
@@ -431,6 +434,18 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindTaskCreated, "task", task.ID.String(), "create")
 
 	return c.Status(fiber.StatusCreated).JSON(mapTaskHistory(task))
+}
+
+// filedTaskStart is when a filed task started: Proxmox's start time, held no
+// later than now, as the node's clock is not ours. Now when Proxmox gives none.
+func filedTaskStart(reported int64, now time.Time) time.Time {
+	if reported <= 0 {
+		return now
+	}
+	if start := time.Unix(reported, 0); start.Before(now) {
+		return start
+	}
+	return now
 }
 
 // Update updates a task history record by UPID.

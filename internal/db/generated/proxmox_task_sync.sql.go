@@ -432,7 +432,7 @@ func (q *Queries) ListExistingAuditLogUPIDs(ctx context.Context, arg ListExistin
 
 const listExistingTaskHistoryUPIDs = `-- name: ListExistingTaskHistoryUPIDs :many
 
-SELECT upid FROM task_history WHERE upid = ANY($1::text[])
+SELECT upid FROM task_history WHERE upid = ANY($1::text[]) AND source <> 'filed'
 `
 
 // ListExistingTaskHistoryUPIDs and ListExistingAuditLogUPIDs are the batch
@@ -443,6 +443,10 @@ SELECT upid FROM task_history WHERE upid = ANY($1::text[])
 // already-ingested external) and audit_log (any source: a UI action Nexara
 // already audited, or a legacy external task ingested before task_history rows
 // existed). Backed by idx_task_history_upid and idx_audit_log_upid.
+//
+// A filed row (source 'filed') is not recorded for this purpose: it is only
+// what a manage:task holder said, so the task is still ingested, takes the row
+// over and gets its own audit entry.
 func (q *Queries) ListExistingTaskHistoryUPIDs(ctx context.Context, upids []string) ([]string, error) {
 	rows, err := q.db.Query(ctx, listExistingTaskHistoryUPIDs, upids)
 	if err != nil {

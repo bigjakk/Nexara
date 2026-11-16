@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -21,13 +22,17 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
+// runningTaskStart is when Proxmox says runningTask started.
+const runningTaskStart = 1700000000
+
 // runningTask answers the handler's read of a task from Proxmox: one the node
 // runs, of the type its UPID names.
 func runningTask(_ fiber.Ctx, _ uuid.UUID, node, upid string) (*proxmox.TaskStatus, error) {
-	return &proxmox.TaskStatus{Status: "running", Type: strings.Split(upid, ":")[5], UPID: upid, Node: node}, nil
+	return &proxmox.TaskStatus{Status: "running", Type: strings.Split(upid, ":")[5], UPID: upid, Node: node,
+		StartTime: runningTaskStart}, nil
 }
 
-// taskInsertDBTX answers InsertTaskHistory with a row and records the
+// taskInsertDBTX answers InsertFiledTaskHistory with a row and records the
 // arguments the insert was handed, and holds every node as a member — or, with
 // members set, those alone. onRecord answers TaskUPIDOnRecord, and
 // insertConflicts makes the insert find its UPID taken. With task set it is
@@ -76,7 +81,7 @@ func (d *taskInsertDBTX) QueryRow(_ context.Context, sql string, args ...any) pg
 	if strings.Contains(sql, "-- name: TaskUPIDOnRecord :one") {
 		return replayRow{row: struct{ OnRecord bool }{d.onRecord}}
 	}
-	if !strings.Contains(sql, "-- name: InsertTaskHistory :one") {
+	if !strings.Contains(sql, "-- name: InsertFiledTaskHistory :one") {
 		return failRow{err: errCaptured}
 	}
 	if d.insertConflicts {
@@ -87,21 +92,15 @@ func (d *taskInsertDBTX) QueryRow(_ context.Context, sql string, args ...any) pg
 }
 
 // TestTaskCreateFilesAnEmptyStatusAsRunning drives the real Create with the
-// status omitted, sent EMPTY and set, and checks what reaches the insert.
+// status omitted, sent EMPTY and set, and checks each is filed (the insert
+// writes running itself).
 //
 // Before the registry the handler substituted "running" for an empty status
 // as well as an absent one. The declaration's Default covers the absent case,
 // but a Default never applies to a key the caller sent, so an explicit "" has
-// to be substituted by the handler — or it is written into the row, which
-// then carries no state the listing's status filter can match.
+// to be accepted by the handler as running.
 func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 	clusterID := uuid.New()
-	// Where the status sits among the insert's arguments.
-	probe := &taskInsertDBTX{}
-	if _, err := db.New(probe).InsertTaskHistory(context.Background(), db.InsertTaskHistoryParams{Status: "probe"}); err != nil {
-		t.Fatal(err)
-	}
-	atStatus := slices.Index(probe.args, any("probe"))
 	mirror := compiledMirror(t, apischema.Properties{
 		"task_cluster_id": {Type: apischema.String, Alias: "cluster_id", Format: "uuid"},
 		"upid":            {Type: apischema.String, MaxLength: apischema.Ptr(512)},
@@ -116,11 +115,10 @@ func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 		name string
 		// status is the JSON member the body carries for it, if any.
 		status string
-		want   string
 	}{
-		{"omitted", ``, "running"},
-		{"empty", `,"status":""`, "running"},
-		{"set", `,"status":"running"`, "running"},
+		{"omitted", ``},
+		{"empty", `,"status":""`},
+		{"set", `,"status":"running"`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dbtx := &taskInsertDBTX{}
@@ -161,9 +159,6 @@ func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 			}
 			if dbtx.args == nil {
 				t.Fatal("the insert never ran")
-			}
-			if dbtx.args[atStatus] != tt.want {
-				t.Errorf("the insert was handed %v; want the state %q", dbtx.args, tt.want)
 			}
 		})
 	}
@@ -235,13 +230,14 @@ func TestTaskCreateRefusesWhatIsNotANewRunningTaskOfTheCluster(t *testing.T) {
 		if resp.StatusCode != tt.want || dbtx.audits != tt.audits {
 			t.Errorf("%s: status %d, %d audit rows; want %d, %d", tt.name, resp.StatusCode, dbtx.audits, tt.want, tt.audits)
 		}
-		// Filed with the type Proxmox reports, not the body's, and the body's
-		// description in the audit entry, as the caller's, not as the task's.
+		// Filed with the type and start Proxmox reports, not the body's, and the
+		// body's description in the audit entry, as the caller's, not as the task's.
 		if tt.want == http.StatusCreated && (!slices.Contains(dbtx.args, any("qmcreate")) ||
+			!slices.ContainsFunc(dbtx.args, func(a any) bool { at, ok := a.(time.Time); return ok && at.Unix() == runningTaskStart }) ||
 			slices.Contains(dbtx.args, any("forged")) || slices.Contains(dbtx.args, any("forged too")) ||
 			dbtx.details["provided_description"] != "forged too") {
 			t.Errorf("%s: the insert was handed %v, the audit entry %v; want Proxmox's type, qmcreate, and the "+
-				"description as provided_description alone", tt.name, dbtx.args, dbtx.details)
+				"description as provided_description alone, and Proxmox's start", tt.name, dbtx.args, dbtx.details)
 		}
 	}
 }

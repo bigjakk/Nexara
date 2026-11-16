@@ -178,7 +178,8 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 			"the task: Proxmox is asked, through that cluster's own client, and a task it does not have " +
 			"there is refused with 400, a read that fails with 502. The task is recorded running, of the " +
 			"type Proxmox reports, and once: a UPID already on record — in the audit log or the task " +
-			"archive, of any cluster — is refused with 409.",
+			"archive, of any cluster — is refused with 409. The row is source \"filed\", the caller as who " +
+			"filed it, started when Proxmox says the task did; whoever ran the task takes the row over.",
 		Group: "Tasks",
 		Permissions: Permissions{Deferred: "the cluster comes from the request BODY, since the path names " +
 			"none, so middleware cannot resolve which cluster to authorize; the handler parses it and then " +

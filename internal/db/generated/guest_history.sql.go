@@ -309,6 +309,7 @@ WHERE th.cluster_id = $2
   AND th.vmid IS NULL
   AND split_part(th.upid, ':', 6) = 'vzdump'
   AND th.status <> 'running'
+  AND th.source <> 'filed' -- read once whoever ran it takes the row over
   AND th.node = split_part(th.upid, ':', 2)
   AND th.node = ANY($3::text[])
   AND NOT EXISTS (SELECT 1 FROM backup_job_logs l WHERE l.upid = th.upid)

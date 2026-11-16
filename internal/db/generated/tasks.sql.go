@@ -280,7 +280,10 @@ INSERT INTO task_history (
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'proxmox',
     CASE WHEN split_part($3, ':', 7) ~ '^[0-9]{1,9}$'
          THEN split_part($3, ':', 7)::int END)
-ON CONFLICT (upid) DO NOTHING
+ON CONFLICT (upid) DO UPDATE
+SET user_id = EXCLUDED.user_id, source = EXCLUDED.source, description = EXCLUDED.description,
+    task_type = EXCLUDED.task_type, started_at = LEAST(task_history.started_at, EXCLUDED.started_at)
+WHERE task_history.source = 'filed' AND task_history.cluster_id = EXCLUDED.cluster_id
 `
 
 type InsertExternalTaskHistoryParams struct {
@@ -300,7 +303,8 @@ type InsertExternalTaskHistoryParams struct {
 // the collector. Unlike InsertTaskHistory it sets started_at/finished_at/
 // exit_status explicitly, so a task already finished when first seen is stored
 // fully-formed (and a still-running one as status='running'). Attributed to the
-// system user; ON CONFLICT keeps it idempotent across sync ticks.
+// system user; ON CONFLICT keeps it idempotent across sync ticks, and takes
+// over a filed row as InsertTaskHistory does.
 func (q *Queries) InsertExternalTaskHistory(ctx context.Context, arg InsertExternalTaskHistoryParams) error {
 	_, err := q.db.Exec(ctx, insertExternalTaskHistory,
 		arg.ClusterID,
@@ -317,12 +321,70 @@ func (q *Queries) InsertExternalTaskHistory(ctx context.Context, arg InsertExter
 	return err
 }
 
+const insertFiledTaskHistory = `-- name: InsertFiledTaskHistory :one
+INSERT INTO task_history (cluster_id, user_id, upid, description, status, node, task_type, started_at, source, vmid)
+VALUES ($1, $2, $3, '', 'running', $4, $5, $6, 'filed',
+    CASE WHEN split_part($3, ':', 7) ~ '^[0-9]{1,9}$'
+         THEN split_part($3, ':', 7)::int END)
+ON CONFLICT (upid) DO NOTHING
+RETURNING id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid
+`
+
+type InsertFiledTaskHistoryParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Upid      string    `json:"upid"`
+	Node      string    `json:"node"`
+	TaskType  string    `json:"task_type"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+// InsertFiledTaskHistory backs POST /api/v1/tasks: a task the caller says
+// Nexara dispatched, which Proxmox confirmed it runs. Its start is Proxmox's,
+// so filing it late cannot put off the collector's give-up, and it never
+// replaces a row already on record. Source 'filed' marks the user as who
+// filed it: whoever ran it takes the row over (InsertTaskHistory and
+// InsertExternalTaskHistory).
+func (q *Queries) InsertFiledTaskHistory(ctx context.Context, arg InsertFiledTaskHistoryParams) (TaskHistory, error) {
+	row := q.db.QueryRow(ctx, insertFiledTaskHistory,
+		arg.ClusterID,
+		arg.UserID,
+		arg.Upid,
+		arg.Node,
+		arg.TaskType,
+		arg.StartedAt,
+	)
+	var i TaskHistory
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.UserID,
+		&i.Upid,
+		&i.Description,
+		&i.Status,
+		&i.ExitStatus,
+		&i.Node,
+		&i.TaskType,
+		&i.Progress,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Source,
+		&i.Vmid,
+	)
+	return i, err
+}
+
 const insertTaskHistory = `-- name: InsertTaskHistory :one
 INSERT INTO task_history (cluster_id, user_id, upid, description, status, node, task_type, vmid)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
     CASE WHEN split_part($3, ':', 7) ~ '^[0-9]{1,9}$'
          THEN split_part($3, ':', 7)::int END)
-ON CONFLICT (upid) DO NOTHING
+ON CONFLICT (upid) DO UPDATE
+SET user_id = EXCLUDED.user_id, source = EXCLUDED.source, description = EXCLUDED.description,
+    task_type = EXCLUDED.task_type, started_at = LEAST(task_history.started_at, EXCLUDED.started_at)
+WHERE task_history.source = 'filed' AND task_history.cluster_id = EXCLUDED.cluster_id
 RETURNING id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid
 `
 
@@ -342,6 +404,11 @@ type InsertTaskHistoryParams struct {
 // forget it. Non-guest tasks (empty/non-numeric id) store NULL; the {1,9}
 // bound (VMIDs cap at 999999999) keeps a pathological all-numeric id from
 // overflowing the ::int cast.
+//
+// A row someone FILED (POST /api/v1/tasks, source 'filed') gives way to the
+// one who ran the task: both inserts take it over in the same cluster, actor,
+// source and description, and never move its start later. Any other row
+// already on record wins, so the conflict returns no row.
 func (q *Queries) InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error) {
 	row := q.db.QueryRow(ctx, insertTaskHistory,
 		arg.ClusterID,
