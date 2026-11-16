@@ -236,25 +236,30 @@ export function BackupPanel({
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center justify-end gap-1">
-                          <RestoreDialog
-                            snapshot={snap}
-                            pbsId={snap.pbs_server_id}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                            title="Delete backup"
-                            aria-label="Delete backup"
-                            onClick={() => {
-                              setDeleteTarget(snap);
-                            }}
-                            disabled={snap.protected}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        {/* Listed by the cluster's last storage reading, not a
+                            live one: whose guest it is rests on remembered
+                            data, so nothing is restored or deleted from here. */}
+                        {!backups.storage_unread && (
+                          <div className="flex items-center justify-end gap-1">
+                            <RestoreDialog
+                              snapshot={snap}
+                              pbsId={snap.pbs_server_id}
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                              title="Delete backup"
+                              aria-label="Delete backup"
+                              onClick={() => {
+                                setDeleteTarget(snap);
+                              }}
+                              disabled={snap.protected}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

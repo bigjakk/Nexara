@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -36,6 +37,8 @@ type BackupHandler struct {
 	// stopPoll is how long a force restore waits between looks at the guest's
 	// stop task; zero means a second.
 	stopPoll time.Duration
+	// lastStorages is each cluster's last storage list read; see storageMemory.
+	lastStorages storageMemory
 }
 
 // NewBackupHandler creates a new backup handler.
@@ -1073,16 +1076,21 @@ func (h *BackupHandler) ListClusterSnapshotsByBackupID(c fiber.Ctx, p *apischema
 	if err != nil {
 		return err
 	}
-	// Unread, the storages cannot say which datastores are this cluster's, and
-	// the tab lists what Nexara itself ties to the cluster: the snapshots on the
-	// PBS servers attached to it. It says so, rather than listing nothing.
+	// Unread, the storages are taken from the last reading that succeeded, and
+	// the same rule is applied to them: never a snapshot the live read would
+	// have refused, and nothing at all with no reading yet. Those rows rest on
+	// remembered data, so the response says so and the panel offers no delete
+	// or restore on them.
 	ctx, cancel := h.readContext(c)
 	cfgs, err := client.ListStorageConfigs(ctx)
 	cancel()
 	storageUnread := err != nil
 	if storageUnread {
-		slog.Warn("guest backups: could not read the cluster's storages; listing its attached PBS servers' snapshots",
+		slog.Warn("guest backups: could not read the cluster's storages; filtering by the last reading",
 			"cluster_id", clusterID, "error", err)
+		cfgs = h.lastStorages.get(clusterID)
+	} else {
+		h.lastStorages.put(clusterID, cfgs)
 	}
 
 	snaps, err := h.queries.ListPBSSnapshotsByBackupID(c.Context(), p.String("backup_id"))
@@ -1092,14 +1100,7 @@ func (h *BackupHandler) ListClusterSnapshotsByBackupID(c fiber.Ctx, p *apischema
 	filtered := make([]db.PbsSnapshot, 0, len(snaps))
 	for _, sn := range snaps {
 		server, ok := allowedPBS[sn.PbsServerID]
-		if !ok {
-			continue
-		}
-		if storageUnread {
-			if server.ClusterID.Valid && uuid.UUID(server.ClusterID.Bytes) == clusterID {
-				filtered = append(filtered, sn)
-			}
-		} else if clusterReadsDatastore(cfgs, clusterID, server, servers, sn.Datastore) {
+		if ok && clusterReadsDatastore(cfgs, clusterID, server, servers, sn.Datastore) {
 			filtered = append(filtered, sn)
 		}
 	}
@@ -1107,12 +1108,45 @@ func (h *BackupHandler) ListClusterSnapshotsByBackupID(c fiber.Ctx, p *apischema
 }
 
 // guestSnapshotList is the list envelope with one more field: StorageUnread
-// says the cluster's storages could not be read, so the list is only the
-// snapshots on the PBS servers attached to the cluster.
+// says the cluster's storages could not be read, so the list was filtered by
+// the last reading that succeeded (empty when there is none) and is read-only.
 type guestSnapshotList struct {
 	Items         []db.PbsSnapshot `json:"items"`
 	Total         int64            `json:"total"`
 	StorageUnread bool             `json:"storage_unread,omitempty"`
+}
+
+// maxRememberedStorages bounds storageMemory: one entry per cluster, and an
+// install has far fewer clusters than this.
+const maxRememberedStorages = 256
+
+// storageMemory is the last storage list read from each cluster, for the
+// guest Backups tab to filter by when a live read fails. In memory only: a
+// restart forgets it, and the tab then lists nothing until a read succeeds.
+type storageMemory struct {
+	mu   sync.Mutex
+	byID map[uuid.UUID][]proxmox.StorageConfig
+}
+
+func (m *storageMemory) get(clusterID uuid.UUID) []proxmox.StorageConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.byID[clusterID]
+}
+
+func (m *storageMemory) put(clusterID uuid.UUID, cfgs []proxmox.StorageConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.byID == nil {
+		m.byID = map[uuid.UUID][]proxmox.StorageConfig{}
+	}
+	if _, known := m.byID[clusterID]; !known && len(m.byID) >= maxRememberedStorages {
+		for id := range m.byID { // drop any one: a cluster past the bound is rare
+			delete(m.byID, id)
+			break
+		}
+	}
+	m.byID[clusterID] = cfgs
 }
 
 // --- Backup Job endpoints (PVE vzdump) ---

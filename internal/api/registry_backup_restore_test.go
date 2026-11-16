@@ -241,11 +241,14 @@ func (p *restorePVE) handle(w http.ResponseWriter, r *http.Request) bool {
 	switch {
 	case r.Method == http.MethodGet && path == "/api2/json/storage":
 		record()
-		if p.storage == restoreHangs {
+		p.mu.Lock()
+		storage := p.storage
+		p.mu.Unlock()
+		if storage == restoreHangs {
 			<-r.Context().Done()
 			return true
 		}
-		reply(p.storage)
+		reply(storage)
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/status/stop"):
 		record()
 		reply(`"` + restoreStopUPID + `"`)
@@ -268,31 +271,30 @@ func (p *restorePVE) handle(w http.ResponseWriter, r *http.Request) bool {
 // A guest's Backups tab lists a snapshot only when this cluster has a PBS
 // storage reading its server and datastore: the same VMID on a datastore no
 // storage here reads is another cluster's. The tie rules are TestClusterReadsDatastore's.
-// With the storages unreadable it still lists, and says so: every snapshot on a
-// PBS server attached to this cluster, and none on a standalone one.
+// With the storages unreadable it filters by the last reading that succeeded,
+// marked read-only, and lists nothing when there has been none.
 func TestClusterSnapshotsAreTheClustersOwn(t *testing.T) {
 	t.Parallel()
+	own := []string{"pbs01/datastore01", "pbs02/datastore01"}
 	for _, tt := range []struct {
-		name, storage string
-		want          []string
-		unread        bool
+		name  string
+		reads []string // the storage list's answer to each request in turn
+		want  []string
 	}{
-		{"storages read", restoreStorages, []string{"pbs01/datastore01", "pbs02/datastore01"}, false},
-		{"storages unreadable", restoreHangs,
-			[]string{"pbs01/datastore01", "pbs02/datastore01", "pbs01/datastore09", "pbs02/datastore02"}, true},
+		{"storages read", []string{restoreStorages}, own},
+		{"storages unreadable after a reading", []string{restoreStorages, restoreHangs}, own},
+		{"storages never read", []string{restoreHangs}, []string{}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			pve := &restorePVE{storage: tt.storage}
+			pve := &restorePVE{}
 			// Global, so that the standalone server is one the caller may see.
 			listed := []auth.ScopedPermission{{Action: "view", Resource: "backup", ScopeType: "global"}}
-			base := &backupRunPVE{handle: pve.handle, listed: listed}
-			if tt.storage == restoreHangs {
-				base.readTimeout = 300 * time.Millisecond
-			}
+			base := &backupRunPVE{handle: pve.handle, listed: listed, readTimeout: 300 * time.Millisecond}
 			app, dbtx := newBackupAppAs(t, base, grantsOf("view:backup"), fiber.MethodGet,
 				clusterScope+"/pbs-snapshots", (*handlers.BackupHandler).ListClusterSnapshotsByBackupID)
-			// Two attached to this cluster and a standalone one.
+			// Two attached to this cluster, holding datastores another cluster
+			// writes as well as this one's, and a standalone one.
 			bound := pgtype.UUID{Bytes: uuid.MustParse(testClusterID), Valid: true}
 			pbs01 := db.PbsServer{ID: uuid.MustParse(testPBSServerID), Name: "pbs01", ApiUrl: "https://pbs01.example.com:8007", ClusterID: bound}
 			pbs02 := db.PbsServer{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000007"), Name: "pbs02", ApiUrl: "https://pbs02.example.com:8007", ClusterID: bound}
@@ -305,27 +307,39 @@ func TestClusterSnapshotsAreTheClustersOwn(t *testing.T) {
 				"ListPBSSnapshotsByBackupID": {snap(pbs01.ID, "datastore01"), snap(pbs02.ID, "datastore01"),
 					snap(pbs01.ID, "datastore09"), snap(pbs02.ID, "datastore02"), snap(pbs03.ID, "datastore01")},
 			}
-			req := httptest.NewRequest(http.MethodGet, backupRoute(clusterScope+"/pbs-snapshots")+"?backup_id=101", nil)
-			req.Header.Set("X-Test-User", "yes")
-			resp, err := app.Test(req)
-			if err != nil {
-				t.Fatalf("app.Test: %v", err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-			var got struct {
-				Items         []db.PbsSnapshot `json:"items"`
-				StorageUnread bool             `json:"storage_unread"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || resp.StatusCode != http.StatusOK {
-				t.Fatalf("status %d, decode: %v", resp.StatusCode, err)
-			}
 			names := map[uuid.UUID]string{pbs01.ID: "pbs01", pbs02.ID: "pbs02", pbs03.ID: "pbs03"}
-			where := make([]string, 0, len(got.Items))
-			for _, sn := range got.Items {
-				where = append(where, names[sn.PbsServerID]+"/"+sn.Datastore)
+			var where []string
+			var unread bool
+			for _, storage := range tt.reads {
+				pve.mu.Lock()
+				pve.storage = storage
+				pve.mu.Unlock()
+				req := httptest.NewRequest(http.MethodGet, backupRoute(clusterScope+"/pbs-snapshots")+"?backup_id=101", nil)
+				req.Header.Set("X-Test-User", "yes")
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatalf("app.Test: %v", err)
+				}
+				var got struct {
+					Items         []db.PbsSnapshot `json:"items"`
+					StorageUnread bool             `json:"storage_unread"`
+				}
+				err = json.NewDecoder(resp.Body).Decode(&got)
+				_ = resp.Body.Close()
+				if err != nil || resp.StatusCode != http.StatusOK {
+					t.Fatalf("status %d, decode: %v", resp.StatusCode, err)
+				}
+				where = make([]string, 0, len(got.Items))
+				for _, sn := range got.Items {
+					where = append(where, names[sn.PbsServerID]+"/"+sn.Datastore)
+				}
+				unread = got.StorageUnread
 			}
-			if !slices.Equal(where, tt.want) || got.StorageUnread != tt.unread {
-				t.Errorf("listed %q, storage_unread %v; want %q, %v", where, got.StorageUnread, tt.want, tt.unread)
+			// The last answer is the one that counts; it is read-only exactly
+			// when the storages could not be read for it.
+			wantUnread := tt.reads[len(tt.reads)-1] == restoreHangs
+			if !slices.Equal(where, tt.want) || unread != wantUnread {
+				t.Errorf("listed %q, storage_unread %v; want %q, %v", where, unread, tt.want, wantUnread)
 			}
 		})
 	}

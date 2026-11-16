@@ -12,11 +12,11 @@ vi.mock("@/lib/api-client", async () =>
 // which the server filters by the cluster's PBS storages, and says what it
 // cannot tell apart.
 describe("BackupPanel", () => {
-  // With the cluster's storages unread, the server lists its attached PBS
-  // servers' snapshots and says so, and the panel says that instead.
+  // With the cluster's storages unread, the server filters by its last reading
+  // and says so; the panel says that instead, and offers no delete or restore.
   it.each([
     [false, /PBS cannot tell them apart/],
-    [true, /Proxmox could not be asked which datastores/],
+    [true, /read-only until it answers/],
   ])(
     "lists this cluster's snapshots (storages unread: %s), with its note",
     async (unread, note) => {
@@ -50,6 +50,9 @@ describe("BackupPanel", () => {
 
       expect(await screen.findByText(note)).toBeInTheDocument();
       expect(screen.getByText("datastore01")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Delete backup" }) === null,
+      ).toBe(unread);
       expect(vi.mocked(apiClient.get)).toHaveBeenCalledWith(
         "/api/v1/clusters/c1/pbs-snapshots?backup_id=101",
       );

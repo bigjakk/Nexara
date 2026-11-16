@@ -1764,7 +1764,7 @@ Rules are addressed by position, so every rule listing returns a `digest` on eac
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/pbs-snapshots` | List snapshots by backup ID |
-| GET | `/clusters/:id/pbs-snapshots` | List a guest's snapshots by backup ID, only from datastores one of the cluster's PBS storages reads (two clusters writing to one datastore are both listed). When the cluster's storages cannot be read from Proxmox it lists the snapshots on the PBS servers attached to the cluster instead and sets `storage_unread: true` beside `items` and `total` |
+| GET | `/clusters/:id/pbs-snapshots` | List a guest's snapshots by backup ID, only from datastores one of the cluster's PBS storages reads (two clusters writing to one datastore are both listed). When the cluster's storages cannot be read from Proxmox it filters by the last storage list it read from that cluster since it started (nothing when there is none) and sets `storage_unread: true` beside `items` and `total`; the SPA then offers no restore or delete on those rows |
 | GET | `/backup-coverage` | Get backup coverage report |
 | POST | `/clusters/:id/restore` | Restore a backup |
 | POST | `/clusters/:id/backup` | Trigger an ad-hoc backup |
