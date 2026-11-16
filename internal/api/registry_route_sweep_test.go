@@ -799,6 +799,7 @@ var sweepRouteOverrides = map[string]sweepEndpointOverride{
 	// private-address confirmation the forced allow_private_address gives.
 	"POST " + pbsScope:                             sweepRefusedAddress("api_url"),
 	"POST " + veeamScope:                           sweepRefusedAddress("base_url"),
+	// The sweep itself replaces this one with a loopback TLS listener.
 	"POST " + clustersScope + "/fetch-fingerprint": sweepRefusedAddress("api_url"),
 	"PUT " + virtioWinGlobalScope + "/mirror":      sweepRefusedAddress("base_url"),
 	"POST " + nutServerScope:                       sweepRefusedHost(),
@@ -1292,6 +1293,16 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 	// Membership is TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold's.
 	mountRegistry(app, reg, sweepAuth(reg), everyNodeIsAMember(), everySessionIsLive())
 
+	// fetch-fingerprint reads a leaf certificate, and only a live TLS listener has
+	// one: this loopback server keeps its success path in the sweep.
+	tlsServer := httptest.NewTLSServer(http.NotFoundHandler())
+	t.Cleanup(tlsServer.Close)
+	fingerprintRoute := "POST " + clustersScope + "/fetch-fingerprint"
+	overrides := maps.Clone(sweepRouteOverrides)
+	fetch := sweepRefusedAddress("api_url")
+	fetch.values["api_url"] = tlsServer.URL
+	overrides[fingerprintRoute] = fetch
+
 	type sweepSkip struct {
 		route  string
 		pass   string
@@ -1306,19 +1317,20 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 	}
 
 	var (
-		exercised     int
-		attributed    int64
-		skips         []sweepSkip
-		findings      []sweepFinding
-		expectedHits  int
-		matchedExpect = make(map[string]bool, len(sweepExpectedFindings))
+		exercised         int
+		attributed        int64
+		fingerprintPasses int
+		skips             []sweepSkip
+		findings          []sweepFinding
+		expectedHits      int
+		matchedExpect     = make(map[string]bool, len(sweepExpectedFindings))
 	)
 
 	for _, e := range endpoints {
 		route := e.Method + " " + e.Path
 		gated := sweepGated(e)
 		for _, v := range sweepVariants {
-			req := synthesizeSweepRequest(e, v.includeOptional)
+			req := synthesizeSweepRequestWith(e, v.includeOptional, overrides[route])
 			if !req.ok {
 				skips = append(skips, sweepSkip{route: route, pass: v.name, reason: req.reason})
 				continue
@@ -1332,6 +1344,13 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 			before := sweepOutbound.lookups.Load()
 			outcome := sweepDispatch(app, e.Method, req.target, req.body)
 			kind := sweepFindingClassification(outcome, gated)
+			if route == fingerprintRoute {
+				fingerprintPasses++
+				if outcome.status != fiber.StatusOK {
+					t.Errorf("%s %s answered %d (%q) against a live TLS listener, want 200",
+						v.name, route, outcome.status, outcome.message)
+				}
+			}
 			if n := sweepOutbound.lookups.Load() - before; n > 0 {
 				attributed += n
 				findings = append(findings, sweepFinding{route: route, pass: v.name, kind: sweepFindingOutbound,
@@ -1363,6 +1382,9 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 		}
 	}
 
+	if fingerprintPasses == 0 {
+		t.Errorf("%s was never dispatched, so its success path went untested", fingerprintRoute)
+	}
 	if stray := sweepOutbound.lookups.Load() - attributed; stray > 0 {
 		t.Errorf("%d outbound name lookups happened outside any one request (server construction, or work a handler left running)", stray)
 	}
