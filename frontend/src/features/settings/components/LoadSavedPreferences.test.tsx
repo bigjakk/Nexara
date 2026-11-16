@@ -94,4 +94,20 @@ describe("LoadSavedPreferences", () => {
       );
     });
   });
+
+  // Saving before this user's row is applied would write the local copy, the
+  // previous user's accent and language, over it.
+  it("saves no theme change made while the user's row is still loading", async () => {
+    vi.mocked(apiClient.get).mockReturnValue(new Promise(() => undefined));
+    const { queryClient } = renderWithProviders(<LoadSavedPreferences />);
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledTimes(1);
+    });
+
+    useThemeStore.getState().setMode("dark");
+    useThemeStore.getState().setMode("light");
+    await queryClient.cancelQueries();
+
+    expect(apiClient.put).not.toHaveBeenCalled();
+  });
 });
