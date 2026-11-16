@@ -81,6 +81,25 @@ func TestValidateAccessToken_ExpiredToken(t *testing.T) {
 	}
 }
 
+// TestMintedTokensCarryAnExpiry: ValidateAccessToken refuses a token with no exp
+// (TestAccessTokenIsSomeoneElses holds that), so every kind Nexara mints must carry one.
+func TestMintedTokensCarryAnExpiry(t *testing.T) {
+	t.Parallel()
+	svc := newTestJWTService()
+	user, cred := uuid.New(), ConsoleCredential{SessionID: uuid.New()}
+	access, _, err1 := svc.GenerateAccessToken(user, "alice@example.com", "admin", cred.SessionID)
+	console, _, err2 := svc.GenerateConsoleToken(user, "alice@example.com", "admin", cred, ConsoleScope{ClusterID: uuid.NewString(), Node: "pve-01", VMID: 100, Type: "vm_vnc"}, time.Minute)
+	hub, _, err3 := svc.GenerateWSHubToken(user, "alice@example.com", "admin", cred, time.Minute)
+	for i, tok := range []string{access, console, hub} {
+		if err := []error{err1, err2, err3}[i]; err != nil {
+			t.Fatalf("mint %d: %v", i, err)
+		}
+		if claims, err := svc.ValidateAccessToken(tok); err != nil || claims.ExpiresAt == nil {
+			t.Errorf("minted token %d: %v, exp %v; want it valid with an exp", i, err, claims)
+		}
+	}
+}
+
 func TestGenerateAndValidateConsoleToken(t *testing.T) {
 	svc := newTestJWTService()
 	userID := uuid.New()

@@ -156,7 +156,8 @@ func TestAccessTokenIsSomeoneElses(t *testing.T) {
 				claims.ExpiresAt = nil
 				return signedClaims(t, jwt.SigningMethodHS256, secret, claims)
 			},
-			want: true, live: true,
+			// Not live: a token without exp would never expire (ValidateAccessToken).
+			want: true,
 		},
 		{
 			name: "an expired access token after a stray space, the second space of a header",

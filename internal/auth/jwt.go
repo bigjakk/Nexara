@@ -271,9 +271,12 @@ func (j *JWTService) keyFunc(t *jwt.Token) (any, error) {
 	return j.secret, nil
 }
 
-// ValidateAccessToken parses and validates a JWT access token.
+// ValidateAccessToken parses and validates a JWT access token. A token with no exp
+// is refused: the library checks exp only when it is present, and every token this
+// service mints (access, console, WS hub) carries one, so a signed token without it
+// would otherwise never expire.
 func (j *JWTService) ValidateAccessToken(tokenString string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, j.keyFunc)
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, j.keyFunc, jwt.WithExpirationRequired())
 	if err != nil {
 		return nil, ErrInvalidToken
 	}
