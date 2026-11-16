@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -644,10 +645,53 @@ func (h *OIDCHandler) TestConnection(c fiber.Ctx, p *apischema.Params) error {
 		})
 	}
 
-	return c.JSON(testConnectionResponse{
-		Success: true,
-		Message: "OIDC discovery endpoint is reachable and returned a valid response",
-	})
+	doc, err := io.ReadAll(io.LimitReader(resp.Body, oidcDiscoveryMaxBytes))
+	if err != nil {
+		doc = nil // judged as no OpenID configuration
+	}
+	return c.JSON(judgeOIDCDiscovery(doc))
+}
+
+// oidcDiscoveryMaxBytes bounds the discovery document the test reads; one larger is
+// cut short and so judged unreadable.
+const oidcDiscoveryMaxBytes = 1 << 20
+
+// oidcTestResponse is the answer of a configuration's test. AuthTimeAdvertised, set
+// only on a pass, says the discovery document lists auth_time in claims_supported: the
+// provider says it sends it, which the strict 2FA confirmation needs (StartStepUp).
+// Only a sign-in proves it does; a provider that lists no claims says nothing.
+type oidcTestResponse struct {
+	Success            bool   `json:"success"`
+	Message            string `json:"message"`
+	AuthTimeAdvertised *bool  `json:"auth_time_advertised,omitempty"`
+}
+
+// judgeOIDCDiscovery is the test's verdict on the discovery document doc: a document
+// that does not parse, or whose authorization endpoint a sign-in would refuse
+// (auth.CheckAuthorizationEndpoint), fails; else it passes, saying whether the provider
+// says it sends auth_time.
+func judgeOIDCDiscovery(doc []byte) oidcTestResponse {
+	var meta struct {
+		AuthorizationEndpoint string   `json:"authorization_endpoint"`
+		ClaimsSupported       []string `json:"claims_supported"`
+	}
+	if json.Unmarshal(doc, &meta) != nil {
+		return oidcTestResponse{Message: "The discovery endpoint answered, but not with an OpenID configuration " +
+			"Nexara can read."}
+	}
+	if auth.CheckAuthorizationEndpoint(meta.AuthorizationEndpoint) != nil {
+		return oidcTestResponse{Message: "The discovery document's authorization endpoint is not an http or https " +
+			"URL, so every sign-in through this provider would be refused."}
+	}
+	advertised := slices.Contains(meta.ClaimsSupported, "auth_time")
+	message := "The discovery endpoint is reachable and returned a valid response. The provider says it sends " +
+		"auth_time, which the strict 2FA confirmation needs; only a sign-in proves that it does."
+	if !advertised {
+		message = "The discovery endpoint is reachable and returned a valid response. The provider does not say it " +
+			"sends auth_time, which the strict 2FA confirmation needs: if 2FA setup through single sign-on is refused " +
+			"for a missing auth_time, turn on the relaxed confirmation."
+	}
+	return oidcTestResponse{Success: true, Message: message, AuthTimeAdvertised: &advertised}
 }
 
 // --- Auth flow endpoints (public, no auth required) ---

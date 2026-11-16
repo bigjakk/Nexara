@@ -189,12 +189,8 @@ func (p *OIDCProvider) GenerateStepUpURL(ctx context.Context, bindingDigest, ste
 }
 
 func (p *OIDCProvider) generateAuthURL(ctx context.Context, bindingDigest, stepUp string, extra ...oauth2.AuthCodeOption) (authURL, state string, err error) {
-	// The browser is sent to this URL (the SPA assigns it to window.location), and
-	// the discovery document names it: anything but an http(s) URL with a host —
-	// javascript:, data: — is refused.
-	if u, perr := url.Parse(p.oauth2Cfg.Endpoint.AuthURL); perr != nil || u.Host == "" ||
-		!strings.EqualFold(u.Scheme, "https") && !strings.EqualFold(u.Scheme, "http") {
-		return "", "", fmt.Errorf("%w: the authorization endpoint is not an http or https URL", ErrOIDCProviderInit)
+	if err := CheckAuthorizationEndpoint(p.oauth2Cfg.Endpoint.AuthURL); err != nil {
+		return "", "", err
 	}
 	state, err = generateRandomString(32)
 	if err != nil {
@@ -232,6 +228,18 @@ func (p *OIDCProvider) generateAuthURL(ctx context.Context, bindingDigest, stepU
 	authURL = p.oauth2Cfg.AuthCodeURL(state, opts...)
 
 	return authURL, state, nil
+}
+
+// CheckAuthorizationEndpoint refuses the authorization endpoint a discovery document
+// names when a sign-in must not send the browser to it (the SPA assigns it to
+// window.location): anything but an http(s) URL with a host — javascript:, data: — is
+// refused. Every sign-in and step-up checks it, and so does the configuration's test.
+func CheckAuthorizationEndpoint(raw string) error {
+	if u, err := url.Parse(raw); err != nil || u.Host == "" ||
+		!strings.EqualFold(u.Scheme, "https") && !strings.EqualFold(u.Scheme, "http") {
+		return fmt.Errorf("%w: the authorization endpoint is not an http or https URL", ErrOIDCProviderInit)
+	}
+	return nil
 }
 
 // ExchangeAndVerify validates state, exchanges the code with PKCE, verifies the ID token,

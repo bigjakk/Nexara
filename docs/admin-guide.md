@@ -736,7 +736,7 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on. Only one enabled
    - **Default Role (no group match)**
 6. Click **Create**
 
-**Test Discovery Endpoint** appears once the config is saved, and tests the saved values. An issuer that has come to resolve to a private address the configuration was not confirmed for is reported as such; save the configuration to confirm it.
+**Test Discovery Endpoint** appears once the config is saved, and tests the saved values. An issuer that has come to resolve to a private address the configuration was not confirmed for is reported as such; save the configuration to confirm it. The test fails when the discovery document cannot be read, or when its authorization endpoint is not an http or https URL (a sign-in would refuse it). On a pass it says whether the provider lists `auth_time` among its supported claims: "the provider says it sends auth_time" means the strict 2FA confirmation (below) can work, though only a sign-in proves it; "does not say" means it may not, and you may need the relaxed confirmation.
 
 #### How OIDC Login Works
 

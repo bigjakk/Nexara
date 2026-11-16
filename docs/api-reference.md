@@ -2413,7 +2413,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | GET | `/oidc/configs/:id` | Get OIDC config. `linked_accounts` (also in the list) counts the accounts bound to an identity of its issuer |
 | PUT | `/oidc/configs/:id` | Update OIDC config. Moving `issuer_url` while accounts are linked to the current issuer answers `422 oidc_issuer_change_confirm_required`, with `details.linked_accounts`, until the body sets `acknowledge_issuer_change`: those accounts are refused at sign-in until their links are reset (`DELETE /oidc/links`) |
 | DELETE | `/oidc/configs/:id` | Delete OIDC config |
-| POST | `/oidc/configs/:id/test` | Test OIDC connection. `422 private_address_confirm_required` when the issuer now resolves to a private address the config is not confirmed for |
+| POST | `/oidc/configs/:id/test` | Test OIDC connection: `{success, message}`. Fails when the discovery document does not parse or its `authorization_endpoint` is not an http(s) URL with a host. A pass adds `auth_time_advertised`: whether `claims_supported` lists `auth_time` (what the provider says, not proof). `422 private_address_confirm_required` when the issuer now resolves to a private address the config is not confirmed for |
 
 ### Settings
 

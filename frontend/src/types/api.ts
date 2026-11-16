@@ -195,6 +195,8 @@ export interface OIDCConfigRequest {
 export interface OIDCTestResponse {
   success: boolean;
   message: string;
+  /** On a pass: the discovery document lists auth_time in claims_supported. */
+  auth_time_advertised?: boolean;
 }
 
 export interface OIDCAuthorizeResponse {

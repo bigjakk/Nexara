@@ -164,3 +164,31 @@ func TestOIDCConfigWrites_TheRelaxedStepUpIsTheOperatorsAndAudited(t *testing.T)
 		t.Errorf("audit details %v, want the change recorded once", d)
 	}
 }
+
+// TestJudgeOIDCDiscovery: the test passes only a document a sign-in could use — its
+// authorization endpoint by the sign-in's own rule — and says whether the provider says
+// it sends auth_time, which decides whether the strict 2FA confirmation can work.
+func TestJudgeOIDCDiscovery(t *testing.T) {
+	t.Parallel()
+	yes, no := true, false
+	for _, tc := range []struct {
+		name       string
+		doc        string
+		pass       bool
+		advertised *bool
+	}{
+		{name: "auth_time listed", doc: `{"authorization_endpoint":"https://idp.example.com/auth",` +
+			`"claims_supported":["sub","auth_time"]}`, pass: true, advertised: &yes},
+		{name: "no claims listed", doc: `{"authorization_endpoint":"https://idp.example.com/auth"}`,
+			pass: true, advertised: &no},
+		{name: "an endpoint a sign-in refuses", doc: `{"authorization_endpoint":"javascript:alert(1)//x",` +
+			`"claims_supported":["auth_time"]}`},
+		{name: "not a document", doc: `<html>`},
+	} {
+		got := judgeOIDCDiscovery([]byte(tc.doc))
+		if got.Success != tc.pass || (got.AuthTimeAdvertised == nil) != (tc.advertised == nil) ||
+			tc.advertised != nil && *got.AuthTimeAdvertised != *tc.advertised {
+			t.Errorf("%s: %+v, want pass %v, auth_time advertised %v", tc.name, got, tc.pass, tc.advertised)
+		}
+	}
+}
