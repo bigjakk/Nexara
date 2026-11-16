@@ -194,7 +194,7 @@ export function UsersPage() {
                                 onClick={() => {
                                   if (
                                     confirm(
-                                      `Reset the SSO link of ${user.email}? Their sessions end now, and their next SSO sign-in links the account to whichever identity presents this address.`,
+                                      `Reset the SSO link of ${user.email}? Their sessions end now, and their next SSO sign-in links the account to whichever identity presents this address, so make sure it is the address the provider sends now.`,
                                     )
                                   ) {
                                     resetSSOLink.mutate(user.id);

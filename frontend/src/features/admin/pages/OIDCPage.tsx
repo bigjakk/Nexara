@@ -812,7 +812,7 @@ export function OIDCPage() {
                     onClick={() => {
                       if (
                         confirm(
-                          "Reset the SSO link of every SSO account? Every SSO session ends now, yours too if you signed in with SSO, and each account links to whichever identity presents its address at its next sign-in.",
+                          "Reset the SSO link of every SSO account? Every SSO session ends now, yours too if you signed in with SSO, and each account links to whichever identity presents its address at its next sign-in, so make sure the addresses match what the provider sends now.",
                         )
                       ) {
                         resetAllLinks.mutate();
