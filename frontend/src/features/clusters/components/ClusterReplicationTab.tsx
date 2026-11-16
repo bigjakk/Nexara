@@ -44,6 +44,7 @@ import {
   useClusterVMs,
   useClusterNodes,
 } from "@/features/clusters/api/cluster-queries";
+import { DateTime } from "@/components/DateTime";
 
 interface ClusterReplicationTabProps {
   clusterId: string;
@@ -63,10 +64,9 @@ export function ClusterReplicationTab({
     null,
   );
 
-  const formatTime = (ts?: number) => {
-    if (!ts) return "—";
-    return new Date(ts * 1000).toLocaleString();
-  };
+  const formatTime = (ts?: number) => (
+    <DateTime value={ts === undefined ? null : ts * 1000} />
+  );
 
   const jobs = jobsQuery.data ?? [];
   const failing = jobs.filter((job) => Boolean(job.error)).length;

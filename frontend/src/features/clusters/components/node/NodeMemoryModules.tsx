@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatBytes, formatRelativeTime } from "@/lib/format";
+import { formatBytes, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   useNodeMemoryModules,
@@ -18,6 +18,7 @@ import {
   type NodeMemoryModule,
   type NodeMemoryModulesResponse,
 } from "../../api/cluster-queries";
+import { DateTime } from "@/components/DateTime";
 
 /**
  * A node's memory DIMM layout: every slot, its module, and the headroom to the
@@ -64,14 +65,14 @@ export function NodeMemoryModules({
     <Panel
       flush
       title="Memory modules"
-      aside={`read ${formatRelativeTime(read.read_at)}`}
+      aside={`read ${formatDateTime(read.read_at)}`}
       actions={readNow}
     >
       <div className="space-y-2 px-[18px] pb-3">
         {read.status !== "ok" && (
           <p className="text-sm text-amber-700 dark:text-amber-400">
             The last read failed: {read.reason} Showing the read from{" "}
-            {formatRelativeTime(read.read_at)}.
+            <DateTime value={read.read_at} />.
           </p>
         )}
         <p className="text-sm">

@@ -43,7 +43,6 @@ import {
 import {
   formatBytes,
   formatBytesPerSecond,
-  formatDateTime,
   formatPercent,
   formatUptime,
 } from "@/lib/format";
@@ -90,6 +89,7 @@ import {
 import { EditClusterDialog } from "../components/EditClusterDialog";
 import { DeleteClusterDialog } from "../components/DeleteClusterDialog";
 import { nodesNote } from "../lib/cluster-summary";
+import { DateTime } from "@/components/DateTime";
 
 const STATUS_LABEL: Record<ClusterResponse["status"], string> = {
   online: "Online",
@@ -899,7 +899,7 @@ function ConnectionPanel({ cluster }: { cluster: ClusterResponse }) {
           Every {String(cluster.sync_interval_seconds)} s
         </DetailField>
         <DetailField label="Added">
-          {formatDateTime(cluster.created_at)}
+          <DateTime value={cluster.created_at} />
         </DetailField>
       </DefGrid>
     </Panel>

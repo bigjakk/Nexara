@@ -71,6 +71,7 @@ import {
   isPVEVersionKnown,
   PVE_FEATURES,
 } from "@/lib/pve-version";
+import { DateTime } from "@/components/DateTime";
 
 interface ClusterHATabProps {
   clusterId: string;
@@ -496,9 +497,9 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                               : (n.state ?? "—"))}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {n.timestamp
-                            ? new Date(n.timestamp * 1000).toLocaleString()
-                            : "—"}
+                          <DateTime
+                            value={n.timestamp ? n.timestamp * 1000 : null}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}

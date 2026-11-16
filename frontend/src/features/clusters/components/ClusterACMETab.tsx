@@ -61,6 +61,7 @@ import { ClusterHistoryButton } from "@/features/history/components/ClusterHisto
 import { HistoryTabContent } from "@/features/history/components/HistoryTab";
 import { useCanViewHistory } from "@/features/history/hooks/useCanViewHistory";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
+import { DateTime } from "@/components/DateTime";
 
 interface ClusterACMETabProps {
   clusterId: string;
@@ -977,10 +978,9 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
   const domainSaveBlocked =
     addingDomain && (!acmeConfig || acmeConfigQuery.isFetching);
 
-  const formatDate = (ts?: number) => {
-    if (!ts) return "—";
-    return new Date(ts * 1000).toLocaleDateString();
-  };
+  const formatDate = (ts?: number) => (
+    <DateTime value={ts === undefined ? null : ts * 1000} kind="date" />
+  );
 
   const isExpiringSoon = (ts?: number) => {
     if (!ts) return false;
