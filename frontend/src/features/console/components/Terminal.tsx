@@ -3,6 +3,8 @@ import { Terminal as XTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import { useTranslation } from "react-i18next";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { MAX_CONSOLE_AUTO_RETRIES, type ConsoleTab } from "../types/console";
 import { useConsoleSession, useConsoleStoreApi } from "@/stores/console-store";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
@@ -32,6 +34,22 @@ interface TerminalProps {
  */
 function openGuestLink(uri: string) {
   window.open(uri, "_blank", "noopener,noreferrer");
+}
+
+/**
+ * A link the guest printed, as the parser reads it, or null for one that is
+ * not http(s). The host is the parser's, so a user part before it cannot pass
+ * for it and a lookalike shows as punycode, and anything hidden in the rest is
+ * percent-encoded in href.
+ */
+function guestLink(uri: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return null;
+  }
+  return url.protocol === "http:" || url.protocol === "https:" ? url : null;
 }
 
 function buildConsoleWsUrl(
@@ -70,6 +88,9 @@ export function Terminal({ tab, visible }: TerminalProps) {
   // rather than minting — and auditing — one per attempt. Created once via
   // the lazy useState initializer so the cache survives effect re-runs.
   const [mintToken] = useState(createConsoleTokenMinter);
+  const { t } = useTranslation("console");
+  // A link the guest printed waits here until the user says to open it.
+  const [pendingLink, setPendingLink] = useState<URL | null>(null);
 
   // A tab dials Proxmox the first time it becomes the active tab, and stays
   // connected after that — switching away must never kill a live shell.
@@ -118,35 +139,20 @@ export function Terminal({ tab, visible }: TerminalProps) {
       },
       scrollback: 5000,
       convertEol: true,
-      // OSC 8 links, whose text need not be where they go: asked first, as
-      // xterm's own handler does, but naming the host the parser finds, so a
-      // user part before it cannot pass for it and a lookalike shows as
-      // punycode, and then the whole URL as the parser reads it (anything
-      // hidden in the rest percent-encoded). xterm passes only http(s) ones,
-      // and so does this, should that change.
+      // OSC 8 links, whose text need not be where they go, and plain URLs
+      // alike: asked first, in the app's dialog, naming the host and the whole
+      // address as the parser reads them (guestLink). xterm passes only
+      // http(s) ones, and so does this, should that change.
       linkHandler: {
         activate: (_event, uri) => {
-          let url: URL;
-          try {
-            url = new URL(uri);
-          } catch {
-            return;
-          }
-          if (url.protocol !== "http:" && url.protocol !== "https:") return;
-          if (
-            confirm(
-              `Do you want to navigate to ${url.host}?\n\n${url.href}\n\nWARNING: This link could potentially be dangerous`,
-            )
-          ) {
-            openGuestLink(url.href);
-          }
+          setPendingLink(guestLink(uri));
         },
       },
     });
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon((_event, uri) => {
-      openGuestLink(uri);
+      setPendingLink(guestLink(uri));
     });
 
     term.loadAddon(fitAddon);
@@ -410,10 +416,33 @@ export function Terminal({ tab, visible }: TerminalProps) {
   }, [visible, isMinimized]);
 
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full"
-      style={{ display: visible ? "block" : "none" }}
-    />
+    <>
+      <div
+        ref={containerRef}
+        className="h-full w-full"
+        style={{ display: visible ? "block" : "none" }}
+      />
+      <ConfirmDeleteDialog
+        target={pendingLink}
+        onClose={() => {
+          setPendingLink(null);
+        }}
+        onConfirm={(url) => {
+          openGuestLink(url.href);
+        }}
+        destructive={false}
+        title={(url) => t("openGuestLinkTitle", { host: url.host })}
+        description={(url) => (
+          <>
+            <span className="block break-all rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-foreground">
+              {url.href}
+            </span>
+            <span className="mt-2 block">{t("openGuestLinkDescription")}</span>
+          </>
+        )}
+        confirmLabel={t("openGuestLink")}
+        cancelLabel={t("cancel", { ns: "common" })}
+      />
+    </>
   );
 }

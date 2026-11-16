@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 // useGuestPowerSync → useVM needs a QueryClientProvider.
 import { renderWithProviders } from "@/test/test-utils";
 import { Terminal } from "./Terminal";
@@ -174,52 +180,55 @@ describe("Terminal", () => {
   });
 
   const spoof = "https://nexara.example.com@xn--nxara-zwe.example.com/";
-  it.each<[string, () => LinkActivate | null, string, string | null, string[]]>(
+  // A link the guest prints opens only from the app's dialog, which names the
+  // host the parser finds (not a user part before it; a lookalike, U+0435
+  // here, as punycode) and the whole address. Opened, it has no opener and no
+  // referrer: it would share this tab's browsing context group otherwise.
+  it.each<[string, () => LinkActivate | null, string, string | null, string]>([
     [
-      [
-        "opens a URL the guest prints with no opener and no referrer",
-        () => linkHandler.current,
-        "https://example.com/",
-        "https://example.com/",
-        [],
-      ],
-      // OSC 8: its text need not be where it goes. The host is the parser's:
-      // not the user part before it, and a lookalike (U+0435, a Cyrillic "e",
-      // here) as punycode.
-      [
-        "asks before opening an OSC 8 link, naming the host the parser finds",
-        () => termOptions.current?.linkHandler?.activate ?? null,
-        "https://nexara.example.com@n\u0435xara.example.com/",
-        spoof,
-        [
-          `Do you want to navigate to xn--nxara-zwe.example.com?\n\n${spoof}\n\nWARNING: This link could potentially be dangerous`,
-        ],
-      ],
-      [
-        "does not open an OSC 8 link to another scheme",
-        () => termOptions.current?.linkHandler?.activate ?? null,
-        "file:///etc/passwd",
-        null,
-        [],
-      ],
+      "asks before opening a URL the guest prints",
+      () => linkHandler.current,
+      "https://example.com/a",
+      "https://example.com/a",
+      "Open a link to example.com?",
     ],
-  )("%s", async (_, handler, printed, opened, asked) => {
-    // Opened from this page it would share this tab's browsing context
-    // group, and with it a copy of its sessionStorage.
+    [
+      "asks before opening an OSC 8 link, naming the host the parser finds",
+      () => termOptions.current?.linkHandler?.activate ?? null,
+      "https://nexara.example.com@n\u0435xara.example.com/",
+      spoof,
+      "Open a link to xn--nxara-zwe.example.com?",
+    ],
+    [
+      "does not open an OSC 8 link to another scheme",
+      () => termOptions.current?.linkHandler?.activate ?? null,
+      "file:///etc/passwd",
+      null,
+      "",
+    ],
+  ])("%s", async (_, handler, printed, opened, title) => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
-    const confirm = vi.fn<(message?: string) => boolean>(() => true);
-    vi.stubGlobal("confirm", confirm);
     renderWithProviders(<Terminal tab={tab} visible={true} />);
     await waitFor(() => {
       expect(handler()).not.toBeNull();
     });
 
-    handler()?.(new MouseEvent("click"), printed);
+    act(() => {
+      handler()?.(new MouseEvent("click"), printed);
+    });
+    expect(open).not.toHaveBeenCalled();
+    if (opened === null) {
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      return;
+    }
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent(title);
+    expect(dialog).toHaveTextContent(opened);
 
-    expect(confirm.mock.calls.map(([message]) => message)).toEqual(asked);
-    expect(open.mock.calls).toEqual(
-      opened === null ? [] : [[opened, "_blank", "noopener,noreferrer"]],
-    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open link" }));
+    expect(open.mock.calls).toEqual([
+      [opened, "_blank", "noopener,noreferrer"],
+    ]);
   });
 
   it("does not dial a background tab until it is first shown", async () => {

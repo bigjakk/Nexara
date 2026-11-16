@@ -12,5 +12,8 @@
   "noVMsOrContainersFound": "No VMs or containers found",
   "vncConsole": "VNC Console",
   "serialConsole": "Serial Console",
-  "containerAttach": "Container Attach"
+  "containerAttach": "Container Attach",
+  "openGuestLinkTitle": "Open a link to {{host}}?",
+  "openGuestLinkDescription": "The console printed this address. A guest can print any link, so open it only if you expected it.",
+  "openGuestLink": "Open link"
 }
