@@ -2859,6 +2859,8 @@ type Querier interface {
 	// goes with them: kept, a UPS that comes back would read "listed, nobody
 	// logged in", every node it powers not protected, until a fresh listing,
 	// which in an outage the poller does not take. Unset, they read unchecked.
+	// An already-absent device that still has one (kept by v1.17.x, which kept
+	// the logins too) loses it here as well, since the DELETE takes its logins.
 	MarkUpsDevicesAbsent(ctx context.Context, arg MarkUpsDevicesAbsentParams) error
 	// Records that Nexara asked this session to stop.
 	//

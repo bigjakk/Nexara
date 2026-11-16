@@ -22,13 +22,15 @@ RETURNING *;
 -- goes with them: kept, a UPS that comes back would read "listed, nobody
 -- logged in", every node it powers not protected, until a fresh listing,
 -- which in an outage the poller does not take. Unset, they read unchecked.
+-- An already-absent device that still has one (kept by v1.17.x, which kept
+-- the logins too) loses it here as well, since the DELETE takes its logins.
 WITH gone AS (
     UPDATE ups_devices
     SET present = FALSE,
         clients_listed_at = NULL
     WHERE server_id = @server_id
-      AND present
-      AND NOT (ups_name = ANY(COALESCE(@present_names::text[], '{}')))
+      AND ((present AND NOT (ups_name = ANY(COALESCE(@present_names::text[], '{}'))))
+           OR (NOT present AND clients_listed_at IS NOT NULL))
     RETURNING id
 )
 DELETE FROM ups_clients c

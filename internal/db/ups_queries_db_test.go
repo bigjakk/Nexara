@@ -110,7 +110,9 @@ func TestUpsQueries(t *testing.T) {
 		if !listed(upsDevA) || listed(upsDevB) {
 			t.Fatalf("listed after b vanished: a %v, b %v; want a only", listed(upsDevA), listed(upsDevB))
 		}
+		// What v1.17.x left: an absent device with its logins and its listing.
 		exec(t, `INSERT INTO ups_clients (ups_id, address) VALUES ($1, '192.0.2.12')`, upsDevB)
+		exec(t, `UPDATE ups_devices SET clients_listed_at = now() WHERE id = $1`, upsDevB)
 		if err := q.MarkUpsDevicesAbsent(ctx, gen.MarkUpsDevicesAbsentParams{ServerID: upsServerID}); err != nil {
 			t.Fatal(err)
 		}
@@ -119,6 +121,9 @@ func TestUpsQueries(t *testing.T) {
 		}
 		if a, b := clients(upsDevA), clients(upsDevB); a != 0 || b != 0 {
 			t.Fatalf("logins after every device vanished: a %d, b %d; want none", a, b)
+		}
+		if listed(upsDevA) || listed(upsDevB) {
+			t.Fatalf("listed after every device vanished: a %v, b %v; want neither", listed(upsDevA), listed(upsDevB))
 		}
 		if _, err := q.UpsertUpsDevice(ctx, gen.UpsertUpsDeviceParams{ServerID: upsServerID, UpsName: "b"}); err != nil {
 			t.Fatal(err)
