@@ -31,7 +31,7 @@ import { CephMetricsChart } from "@/features/ceph/components/CephMetricsChart";
 import { ApiClientError } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import { retryState, useSettledQueryError } from "@/hooks/useSettledQueryError";
-import { formatTimestamp } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 import { HistoryTabContent } from "@/features/history/components/HistoryTab";
 import { useCanViewHistory } from "@/features/history/hooks/useCanViewHistory";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
@@ -242,7 +242,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
               The timestamp matters: a stale HEALTH_OK is the reading most
               likely to be believed and most likely to be wrong. */}
           <span className="min-w-0 [overflow-wrap:anywhere]">
-            {`Ceph status as of ${formatTimestamp(statusQuery.dataUpdatedAt)} — the most recent refresh failed${serverMessage !== "" ? `: ${serverMessage}` : "."}`}
+            {`Ceph status as of ${formatExactDateTime(statusQuery.dataUpdatedAt, "—", "clock")} — the most recent refresh failed${serverMessage !== "" ? `: ${serverMessage}` : "."}`}
           </span>
         </p>
       )}
