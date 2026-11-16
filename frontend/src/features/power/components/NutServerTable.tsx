@@ -14,6 +14,7 @@ import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { DefGrid } from "@/components/page/Panel";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { describeError } from "@/lib/api-error";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { useTestNutServer } from "../api/ups-queries";
 import type { NutProbeResult, NutServer } from "../types/ups";
 import { DateTime } from "@/components/DateTime";
@@ -42,9 +43,14 @@ function serverStatus(s: NutServer): {
   return { label: "Connected", rank: 4, variant: "healthy" };
 }
 
-/** Its own mutation per row, so two rows tested at once each keep their result. */
+/**
+ * Its own mutation per row, so two rows tested at once each keep their result.
+ * A failure that lands once the row has gone (the page left) is toasted, once:
+ * mutate()'s own onError is never run then (useSaveOutcome).
+ */
 function TestButton({ server, onResult }: { server: NutServer; onResult: Ctx["onTestResult"] }) {
   const test = useTestNutServer();
+  const settle = useSaveOutcome();
   return (
     <Button
       variant="ghost"
@@ -52,7 +58,8 @@ function TestButton({ server, onResult }: { server: NutServer; onResult: Ctx["on
       title="Test connection"
       disabled={test.isPending}
       onClick={() => {
-        test.mutate(server.id, {
+        settle(test.mutateAsync(server.id), {
+          action: `Testing NUT server ${server.name}`,
           onSuccess: (r) => { onResult(server.id, r); },
           onError: (e) => { onResult(server.id, describeError(e) || "the request did not reach Nexara"); },
         });
