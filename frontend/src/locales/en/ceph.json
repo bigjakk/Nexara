@@ -43,5 +43,8 @@
   "rawUsage": "Raw Usage",
   "maxAvail": "Max Avail",
   "noPoolsFound": "No pools found.",
-  "crushTree": "CRUSH Tree"
+  "crushTree": "CRUSH Tree",
+  "poolCreateDialogActions": {
+    "creatingPoolName": "Creating pool {{name}}"
+  }
 }

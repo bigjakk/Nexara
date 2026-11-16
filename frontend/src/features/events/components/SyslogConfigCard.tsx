@@ -13,6 +13,7 @@ import {
   useTestSyslog,
   type SyslogConfig,
 } from "../api/events-queries";
+import { useTranslation } from "react-i18next";
 
 const inputClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
@@ -138,6 +139,7 @@ function unlistedProtocols(current: string, saved: string): string[] {
 const portErrorId = "syslog-port-error";
 
 export function SyslogConfigCard() {
+  const { t } = useTranslation("events");
   const syslogQuery = useSyslogConfig();
   const savedConfig = syslogQuery.data;
   const saveMutation = useSaveSyslogConfig();
@@ -197,14 +199,14 @@ export function SyslogConfigCard() {
 
   const handleSave = () => {
     settle(saveMutation.mutateAsync(config), {
-      action: "Saving the syslog settings",
+      action: t("syslogConfigCardActions.savingTheSyslogSettings"),
       onError: () => undefined, // shown below from the mutation's state
     });
   };
 
   const handleTest = () => {
     settle(testMutation.mutateAsync(config), {
-      action: "Testing syslog",
+      action: t("syslogConfigCardActions.testingSyslog"),
       onError: () => undefined, // shown below from the mutation's state
       lateFailure: (e) =>
         e instanceof Error

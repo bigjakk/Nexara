@@ -24,6 +24,10 @@ import cephEN from "@/locales/en/ceph.json";
 import networksEN from "@/locales/en/networks.json";
 import snapshotsEN from "@/locales/en/snapshots.json";
 import powerEN from "@/locales/en/power.json";
+import eventsEN from "@/locales/en/events.json";
+import mappingsEN from "@/locales/en/mappings.json";
+import haEN from "@/locales/en/ha.json";
+import guestToolsEN from "@/locales/en/guest-tools.json";
 // The timeline every History shares keeps its strings in history; each kind
 // its own in history-<kind> (features/history/types/history.ts says how).
 import historyEN from "@/locales/en/history.json";
@@ -66,6 +70,10 @@ export const resources = {
     networks: networksEN,
     snapshots: snapshotsEN,
     power: powerEN,
+    events: eventsEN,
+    mappings: mappingsEN,
+    ha: haEN,
+    "guest-tools": guestToolsEN,
     history: historyEN,
     "history-guest": historyGuestEN,
     "history-folder": historyFolderEN,

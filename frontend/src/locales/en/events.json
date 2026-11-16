@@ -1,0 +1,6 @@
+{
+  "syslogConfigCardActions": {
+    "savingTheSyslogSettings": "Saving the syslog settings",
+    "testingSyslog": "Testing syslog"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "haMaintenanceCardActions": {
+    "disarmingHA": "Disarming HA",
+    "reArmingHA": "Re-arming HA"
+  },
+  "haResourceFormActions": {
+    "addingSidToHA": "Adding {{sid}} to HA",
+    "savingHAResourceSid": "Saving HA resource {{sid}}"
+  },
+  "haRuleFormActions": {
+    "savingHARule": "Saving HA rule {{rule}}"
+  }
+}

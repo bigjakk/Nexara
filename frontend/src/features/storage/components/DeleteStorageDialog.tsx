@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { CopyableName } from "@/components/CopyableName";
 import { useDeleteStorage } from "../api/storage-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface DeleteStorageDialogProps {
   clusterId: string;
@@ -35,6 +36,7 @@ export function DeleteStorageDialog({
   open: openProp,
   onOpenChange,
 }: DeleteStorageDialogProps) {
+  const { t } = useTranslation("storage");
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = openProp !== undefined;
   const open = controlled ? openProp : internalOpen;
@@ -64,7 +66,9 @@ export function DeleteStorageDialog({
     setError(null);
 
     settle(deleteMutation.mutateAsync({ clusterId, storageId }), {
-      action: `Deleting storage ${storageName}`,
+      action: t("deleteStorageDialogActions.deletingStorageStorageName", {
+        storageName,
+      }),
       onSuccess: () => {
         setOpen(false);
         setConfirmName("");

@@ -20,6 +20,7 @@ import { useNotificationChannels } from "@/features/alerts/api/alert-queries";
 import { useEmailReportRun } from "../api/report-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { ReportRun } from "@/types/api";
+import { useTranslation } from "react-i18next";
 
 interface ReportEmailDialogProps {
   run: ReportRun | null;
@@ -34,6 +35,7 @@ export function ReportEmailDialog({
   run,
   onOpenChange,
 }: ReportEmailDialogProps) {
+  const { t } = useTranslation("reports");
   const open = run !== null;
   const { data: channels } = useNotificationChannels();
   const emailChannels =
@@ -69,7 +71,7 @@ export function ReportEmailDialog({
         with_csv: withCSV,
       }),
       {
-        action: "Emailing the report",
+        action: t("reportEmailDialogActions.emailingTheReport"),
         onSuccess: () => {
           setSent(true);
         },

@@ -40,6 +40,7 @@ import { useNotificationChannels } from "@/features/alerts/api/alert-queries";
 import type { HAConflict, HAPreFlightReport } from "@/types/api";
 import { describeError } from "@/lib/api-error";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface CreateRollingUpdateWizardProps {
   clusterId: string;
@@ -74,6 +75,7 @@ function ConflictCard({ conflict }: { conflict: HAConflict }) {
 export function CreateRollingUpdateWizard({
   clusterId,
 }: CreateRollingUpdateWizardProps) {
+  const { t } = useTranslation("security");
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"nodes" | "ha_review" | "configure">(
     "nodes",
@@ -138,7 +140,7 @@ export function CreateRollingUpdateWizard({
           parallelism: effectiveParallelism,
         }),
         {
-          action: "Checking HA constraints",
+          action: t("createRollingUpdateWizardActions.checkingHAConstraints"),
           onSuccess: (report) => {
             setPreflightReport(report);
           },

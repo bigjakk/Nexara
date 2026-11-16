@@ -27,6 +27,7 @@ import { ApiClientError, sessionScope } from "@/lib/api-client";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { VMResponse } from "@/types/api";
 import type { NodeResponse } from "@/types/api";
+import { useTranslation } from "react-i18next";
 
 type RuleType = "node-affinity" | "resource-affinity";
 
@@ -120,6 +121,7 @@ function describeHARuleError(err: unknown): { title: string; hint?: string } {
 }
 
 export function HARuleForm(props: Props) {
+  const { t } = useTranslation("ha");
   const createMut = useCreateHARule(props.clusterId);
   const updateMut = useUpdateHARule(props.clusterId);
   const createResourceMut = useCreateHAResource(props.clusterId);
@@ -324,7 +326,9 @@ export function HARuleForm(props: Props) {
     // The form shows a failure itself (the hooks opt out of the app's toast),
     // and one that lands after it was closed is toasted instead.
     settle(write(), {
-      action: `Saving HA rule ${props.mode === "create" ? name : props.rule.rule}`,
+      action: t("haRuleFormActions.savingHARule", {
+        rule: props.mode === "create" ? name : props.rule.rule,
+      }),
       onSuccess: () => {
         props.onSuccess();
       },

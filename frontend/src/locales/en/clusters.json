@@ -232,5 +232,42 @@
   "diskWrite": "Disk Write",
   "networkIn": "Network In",
   "networkOut": "Network Out",
-  "noLiveData": "No live data"
+  "noLiveData": "No live data",
+  "clusterHATabActions": {
+    "creatingHAGroupGrpName": "Creating HA group {{grpName}}",
+    "savingHAGroupGroup": "Saving HA group {{group}}",
+    "settingSidToState": "Setting {{sid}} to {{state}}",
+    "removingSidFromHA": "Removing {{sid}} from HA",
+    "deletingHAGroupGroup": "Deleting HA group {{group}}",
+    "deletingHARuleRule": "Deleting HA rule {{rule}}",
+    "disablingHARule": "Disabling HA rule {{rule}}",
+    "enablingHARule": "Enabling HA rule {{rule}}"
+  },
+  "nodeStorageSectionsActions": {
+    "destroyingZFSPoolName": "Destroying ZFS pool {{name}}",
+    "destroyingVolumeGroupName": "Destroying volume group {{name}}",
+    "destroyingThinPoolVgLv": "Destroying thin pool {{vg}}/{{lv}}"
+  },
+  "clusterOptionsTabActions": {
+    "savingTheDatacenterOptions": "Saving the datacenter options"
+  },
+  "deleteClusterDialogActions": {
+    "deletingClusterName": "Deleting cluster {{name}}"
+  },
+  "clusterACMETabActions": {
+    "creatingACMEPluginId": "Creating ACME plugin {{id}}"
+  },
+  "clusterReplicationTabActions": {
+    "creatingReplicationJobJobId": "Creating replication job {{jobId}}",
+    "savingReplicationJobId": "Saving replication job {{id}}"
+  },
+  "nodePowerActionsActions": {
+    "evacuatingNodeName": "Evacuating {{nodeName}}",
+    "rebootingNodeName": "Rebooting {{nodeName}}",
+    "takingOutOfMaintenance": "Taking {{nodeName}} out of maintenance",
+    "puttingIntoMaintenance": "Putting {{nodeName}} into maintenance"
+  },
+  "nodeShutdownConfirmActions": {
+    "shuttingDownNodeName": "Shutting down {{nodeName}}"
+  }
 }

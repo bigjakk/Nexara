@@ -14,6 +14,7 @@ import { Plus } from "lucide-react";
 import { PGCalculator } from "./PGCalculator";
 import { useCreateCephPool } from "../api/ceph-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface PoolCreateDialogProps {
   clusterId: string;
@@ -24,6 +25,7 @@ export function PoolCreateDialog({
   clusterId,
   osdCount,
 }: PoolCreateDialogProps) {
+  const { t } = useTranslation("ceph");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [size, setSize] = useState(3);
@@ -46,7 +48,7 @@ export function PoolCreateDialog({
         body: { name, size, pg_num: pgNum },
       }),
       {
-        action: `Creating pool ${name}`,
+        action: t("poolCreateDialogActions.creatingPoolName", { name }),
         onSuccess: () => {
           setOpen(false);
           clear();

@@ -24,6 +24,7 @@ import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner
 import { deriveFilenameFromURL } from "@/lib/derive-filename";
 import { useDownloadURL } from "../api/storage-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface URLDownloadDialogProps {
   clusterId: string;
@@ -38,6 +39,7 @@ export function URLDownloadDialog({
   storageId,
   supportedContent,
 }: URLDownloadDialogProps) {
+  const { t } = useTranslation("storage");
   const supportsIso = supportedContent.includes("iso");
   const supportsVztmpl = supportedContent.includes("vztmpl");
   const supportsImport = supportedContent.includes("import");
@@ -106,7 +108,9 @@ export function URLDownloadDialog({
         },
       }),
       {
-        action: `Downloading ${filenameTrimmed}`,
+        action: t("urlDownloadDialogActions.downloadingFilenameTrimmed", {
+          filenameTrimmed,
+        }),
         onSuccess: (data) => {
           if (data.upid) setTaskUpid(data.upid);
         },

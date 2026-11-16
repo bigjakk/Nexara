@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Wrench,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -79,6 +80,7 @@ export function NodePowerActions({
   /** Shown first in the row: the page's primary action. */
   children?: ReactNode;
 }) {
+  const { t } = useTranslation("clusters");
   const reboot = useRebootNode(clusterId, nodeName);
   const evacuate = useEvacuateNode(clusterId, nodeName);
   const maintenance = useSetNodeMaintenance(clusterId, nodeName, true);
@@ -137,7 +139,7 @@ export function NodePowerActions({
       }
     };
     settleEvacuate(evacuate.mutateAsync(params), {
-      action: `Evacuating ${nodeName}`,
+      action: t("nodePowerActionsActions.evacuatingNodeName", { nodeName }),
       onSuccess: (data) => {
         setMigrations(data.migrations);
         focusFirst(data);
@@ -212,7 +214,13 @@ export function NodePowerActions({
                 onClick={() => {
                   setActionError(null);
                   settle(maintenance.mutateAsync(!inMaintenance), {
-                    action: `${inMaintenance ? "Taking" : "Putting"} ${nodeName} ${inMaintenance ? "out of" : "into"} maintenance`,
+                    action: inMaintenance
+                      ? t("nodePowerActionsActions.takingOutOfMaintenance", {
+                          nodeName,
+                        })
+                      : t("nodePowerActionsActions.puttingIntoMaintenance", {
+                          nodeName,
+                        }),
                     onError: handleError,
                   });
                 }}
@@ -461,7 +469,9 @@ export function NodePowerActions({
               onClick={() => {
                 setActionError(null);
                 settle(reboot.mutateAsync(), {
-                  action: `Rebooting ${nodeName}`,
+                  action: t("nodePowerActionsActions.rebootingNodeName", {
+                    nodeName,
+                  }),
                   onError: handleError,
                 });
               }}

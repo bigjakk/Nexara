@@ -68,6 +68,7 @@ import { NodeCheckResult } from "./NodeCheckResult";
 import { USBDevicePicker } from "./USBDevicePicker";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
+import { useTranslation } from "react-i18next";
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
@@ -786,6 +787,7 @@ function NewMappingDialog({
   /** Where focus goes on close if New mapping cannot take it back. */
   fallbackFocus: () => HTMLElement | null;
 }) {
+  const { t } = useTranslation("mappings");
   const create = useCreateUSBMapping(clusterId);
   // A create that fails after the dialog has gone is toasted instead.
   const settle = useSaveOutcome();
@@ -845,7 +847,7 @@ function NewMappingDialog({
           : {}),
       }),
       {
-        action: `Creating USB mapping ${name}`,
+        action: t("usbMappingsCardActions.creatingUSBMappingName", { name }),
         onSuccess: onClose,
         onError: () => undefined, // rendered below from create.error
       },
@@ -1005,6 +1007,7 @@ function EditMappingDialog({
    * cannot take it back: held after a save, gone after a conflict. */
   fallbackFocus: () => HTMLElement | null;
 }) {
+  const { t } = useTranslation("mappings");
   const listQuery = useClusterUSBMappings(clusterId);
   const update = useUpdateUSBMapping(clusterId);
   // A save that lands after the dialog has gone is toasted instead.
@@ -1142,7 +1145,9 @@ function EditMappingDialog({
           : {}),
       }),
       {
-        action: `Saving USB mapping ${saving.id}`,
+        action: t("usbMappingsCardActions.savingUSBMappingId", {
+          id: saving.id,
+        }),
         onSuccess: () => {
           onSaved(saving.id, Promise.resolve());
           onClose();

@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { usePullOCIImage } from "../api/storage-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface OCIPullDialogProps {
   clusterId: string;
@@ -37,6 +38,7 @@ export function OCIPullDialog({
   open: openProp,
   onOpenChange,
 }: OCIPullDialogProps) {
+  const { t } = useTranslation("storage");
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = openProp !== undefined;
   const open = controlled ? openProp : internalOpen;
@@ -74,7 +76,9 @@ export function OCIPullDialog({
         },
       }),
       {
-        action: `Pulling ${referenceTrimmed}`,
+        action: t("ociPullDialogActions.pullingReferenceTrimmed", {
+          referenceTrimmed,
+        }),
         onSuccess: (data) => {
           if (data.upid) {
             setTaskUpid(data.upid);

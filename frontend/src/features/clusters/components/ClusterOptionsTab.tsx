@@ -68,6 +68,7 @@ import {
 } from "../lib/prop-string";
 import { useNetworkInterfaces } from "@/features/networks/api/network-queries";
 import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
+import { useTranslation } from "react-i18next";
 
 /** Compute the network address of an IPv4 CIDR, e.g.
  *  "10.10.10.5/24" → "10.10.10.0/24". Returns null on invalid input or
@@ -465,6 +466,7 @@ function GeneralSection({
   clusterId: string;
   pveVersion: string;
 }) {
+  const { t } = useTranslation("clusters");
   const crsDynamicSupported = isPVEAtLeast(
     pveVersion,
     PVE_FEATURES.CRS_DYNAMIC,
@@ -570,7 +572,7 @@ function GeneralSection({
     }
 
     settle(updateOpts.mutateAsync(params), {
-      action: "Saving the datacenter options",
+      action: t("clusterOptionsTabActions.savingTheDatacenterOptions"),
       onSuccess: () => {
         setDirty(false);
         setFeedback({ kind: "success", message: "Datacenter options saved." });

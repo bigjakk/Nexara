@@ -33,6 +33,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
 import { useArmHA, useDisarmHA } from "../api/ha-queries";
+import { useTranslation } from "react-i18next";
 
 type ResourceMode = "freeze" | "ignore";
 
@@ -49,6 +50,7 @@ export function HAMaintenanceCard({
   clusterId,
   pveVersion,
 }: HAMaintenanceCardProps) {
+  const { t } = useTranslation("ha");
   const { canManage } = useAuth();
   const armHA = useArmHA(clusterId);
   const disarmHA = useDisarmHA(clusterId);
@@ -71,7 +73,7 @@ export function HAMaintenanceCard({
   const handleDisarm = () => {
     setError(null);
     settleDisarm(disarmHA.mutateAsync(resourceMode), {
-      action: "Disarming HA",
+      action: t("haMaintenanceCardActions.disarmingHA"),
       onSuccess: () => {
         setDisarmOpen(false);
       },
@@ -168,7 +170,7 @@ export function HAMaintenanceCard({
                   onClick={() => {
                     setError(null);
                     settleArm(armHA.mutateAsync(undefined), {
-                      action: "Re-arming HA",
+                      action: t("haMaintenanceCardActions.reArmingHA"),
                       onError: handleError,
                     });
                   }}

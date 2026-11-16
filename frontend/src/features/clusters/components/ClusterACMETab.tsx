@@ -63,6 +63,7 @@ import { HistoryTabContent } from "@/features/history/components/HistoryTab";
 import { useCanViewHistory } from "@/features/history/hooks/useCanViewHistory";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
 
 interface ClusterACMETabProps {
   clusterId: string;
@@ -377,6 +378,7 @@ function CreatePluginForm({
   clusterId: string;
   onSuccess: () => void;
 }) {
+  const { t } = useTranslation("clusters");
   const createPlugin = useCreateACMEPlugin(clusterId);
   const settle = useSaveOutcome();
   const schemaQuery = useACMEChallengeSchema(clusterId);
@@ -425,7 +427,7 @@ function CreatePluginForm({
           : {}),
       }),
       {
-        action: `Creating ACME plugin ${id}`,
+        action: t("clusterACMETabActions.creatingACMEPluginId", { id }),
         onSuccess,
         onError: () => undefined, // shown below from the mutation's state
       },

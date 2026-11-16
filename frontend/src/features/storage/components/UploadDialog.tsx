@@ -17,6 +17,7 @@ import { formatBytes } from "@/lib/format";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { useUploadFile } from "../api/storage-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface UploadDialogProps {
   clusterId: string;
@@ -31,6 +32,7 @@ export function UploadDialog({
   storageId,
   supportedContent,
 }: UploadDialogProps) {
+  const { t } = useTranslation("storage");
   const [open, setOpen] = useState(false);
   const [contentType, setContentType] = useState<ContentType>("iso");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -65,7 +67,9 @@ export function UploadDialog({
         onProgress,
       }),
       {
-        action: `Uploading ${selectedFile.name}`,
+        action: t("uploadDialogActions.uploadingName", {
+          name: selectedFile.name,
+        }),
         onSuccess: (data) => {
           setProgress(null);
           if (data.upid) {

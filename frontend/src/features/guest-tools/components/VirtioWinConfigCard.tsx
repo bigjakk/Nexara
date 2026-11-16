@@ -34,6 +34,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
 
 /** Sentinel for the "follow upstream stable" choice — Select cannot hold "". */
 const FOLLOW_STABLE = "__stable__";
@@ -43,6 +44,7 @@ interface VirtioWinConfigCardProps {
 }
 
 export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
+  const { t } = useTranslation("guest-tools");
   const { data: config, isLoading } = useVirtioWinConfig(clusterId);
   const { data: releases } = useVirtioWinReleases();
   const { data: storages } = useClusterStorage(clusterId);
@@ -153,7 +155,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
       check_timezone: cron === "" ? "" : timezone,
     };
     settle(updateConfig.mutateAsync(request), {
-      action: "Saving the virtio-win ISO settings",
+      action: t("virtioWinConfigCardActions.savingTheVirtioWinISO"),
       onSuccess: () => {
         setSaveStatus("saved");
         setTimeout(() => {
@@ -171,7 +173,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
     settle(
       download.mutateAsync(targetVersion ? { version: targetVersion } : {}),
       {
-        action: "Downloading virtio-win",
+        action: t("virtioWinConfigCardActions.downloadingVirtioWin"),
         onSuccess: (result) => {
           if (result.status === "already_present") {
             setDownloadNote(
@@ -199,7 +201,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
   const handleCheckNow = () => {
     setDownloadNote("");
     settle(checkNow.mutateAsync(), {
-      action: "Checking for virtio-win",
+      action: t("virtioWinConfigCardActions.checkingForVirtioWin"),
       onSuccess: (result) => {
         if (result.download) {
           setDownloadNote(

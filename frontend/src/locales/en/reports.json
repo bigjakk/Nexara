@@ -1,5 +1,14 @@
 {
   "reports": "Reports",
   "schedules": "Schedules",
-  "reportHistory": "Report History"
+  "reportHistory": "Report History",
+  "reportEmailDialogActions": {
+    "emailingTheReport": "Emailing the report"
+  },
+  "reportGenerateDialogActions": {
+    "generatingTheReportTypeReport": "Generating the {{reportType}} report"
+  },
+  "reportRunsTableActions": {
+    "deletingTheReportRun": "Deleting the report run"
+  }
 }

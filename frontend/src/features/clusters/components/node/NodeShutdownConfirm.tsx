@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useShutdownNode } from "../../api/cluster-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 /**
  * A node's shutdown behind its confirm, shared by the page's power actions and
@@ -38,6 +39,7 @@ export function NodeShutdownConfirm({
   onConfirm?: () => void;
   onError?: (err: unknown) => void;
 }) {
+  const { t } = useTranslation("clusters");
   // With an onError the caller shows a failure, and one that lands after it
   // has gone is toasted; without one the app's error toast reports it.
   const shutdown = useShutdownNode(clusterId, nodeName, onError !== undefined);
@@ -68,7 +70,7 @@ export function NodeShutdownConfirm({
                 shutdown.mutate();
               } else {
                 settle(shutdown.mutateAsync(), {
-                  action: `Shutting down ${nodeName}`,
+                  action: t("nodeShutdownConfirmActions.shuttingDownNodeName", { nodeName }),
                   onError,
                 });
               }

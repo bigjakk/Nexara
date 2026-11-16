@@ -1,0 +1,13 @@
+{
+  "guestToolsPolicyCardActions": {
+    "savingTheGuestToolsPolicy": "Saving the guest tools policy"
+  },
+  "virtioWinConfigCardActions": {
+    "savingTheVirtioWinISO": "Saving the virtio-win ISO settings",
+    "downloadingVirtioWin": "Downloading virtio-win",
+    "checkingForVirtioWin": "Checking for virtio-win"
+  },
+  "virtioWinSourceCardActions": {
+    "savingTheVirtioWinDownload": "Saving the virtio-win download source"
+  }
+}

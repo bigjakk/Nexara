@@ -49,6 +49,7 @@ import { reportTypeLabel, periodLabel, runFileName } from "../report-types";
 import { ReportEmailDialog } from "./ReportEmailDialog";
 import { DateTime } from "@/components/DateTime";
 import { formatExactDateTime } from "@/lib/format";
+import { useTranslation } from "react-i18next";
 
 /** A run's state in words. A finished run is the ordinary case and stays plain. */
 function RunStatus({ run }: { run: ReportRun }) {
@@ -78,6 +79,7 @@ function RunStatus({ run }: { run: ReportRun }) {
 }
 
 export function ReportRunsTable() {
+  const { t } = useTranslation("reports");
   const { data: runs, isLoading, error } = useReportRuns();
   const { data: clusters } = useClusters();
   const deleteRun = useDeleteReportRun(true);
@@ -293,7 +295,7 @@ export function ReportRunsTable() {
                   // button is gated on the global grant, so a refusal must
                   // be shown rather than swallowed.
                   settle(deleteRun.mutateAsync(deleteTarget.id), {
-                    action: "Deleting the report run",
+                    action: t("reportRunsTableActions.deletingTheReportRun"),
                     onError: (err) => {
                       setDeleteError(
                         err instanceof Error

@@ -71,6 +71,7 @@ import { PCIDevicePicker } from "./PCIDevicePicker";
 import { PCIRiskConfirm } from "./PCIRiskConfirm";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
+import { useTranslation } from "react-i18next";
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
@@ -785,6 +786,7 @@ function EditMappingDialog({
   onClose: () => void;
   fallbackFocus: () => HTMLElement | null;
 }) {
+  const { t } = useTranslation("mappings");
   const listQuery = useClusterPCIMappings(clusterId);
   const update = useUpdatePCIMapping(clusterId);
   // A save that lands after the dialog has gone is toasted instead.
@@ -930,7 +932,9 @@ function EditMappingDialog({
             },
       ),
       {
-        action: `Saving PCI mapping ${saving.id}`,
+        action: t("pciMappingsCardActions.savingPCIMappingId", {
+          id: saving.id,
+        }),
         onSuccess: () => {
           onSaved(saving.id, Promise.resolve());
           onClose();

@@ -20,6 +20,7 @@ import {
 } from "../api/virtio-win-queries";
 import { MIRROR_CONFIRM_CODES } from "../types/virtio-win";
 import type { VirtioWinMirrorRequest } from "../types/virtio-win";
+import { useTranslation } from "react-i18next";
 
 type Acknowledgement = Omit<VirtioWinMirrorRequest, "base_url">;
 type MirrorCode = (typeof MIRROR_CONFIRM_CODES)[number];
@@ -113,6 +114,7 @@ function MirrorWarning({ warning, pending, onConfirm }: MirrorWarningProps) {
  * repoints every cluster's downloads at once.
  */
 export function VirtioWinSourceCard() {
+  const { t } = useTranslation("guest-tools");
   const { data: mirror, isLoading } = useVirtioWinMirror();
   const updateMirror = useUpdateVirtioWinMirror();
   const settle = useSaveOutcome();
@@ -144,7 +146,7 @@ export function VirtioWinSourceCard() {
     settle(
       updateMirror.mutateAsync({ base_url: baseUrl.trim(), ...confirmations }),
       {
-        action: "Saving the virtio-win download source",
+        action: t("virtioWinSourceCardActions.savingTheVirtioWinDownload"),
         lateFailure: (err) =>
           confirmRequiredFromError(err, MIRROR_CONFIRM_CODES, null) === null
             ? undefined

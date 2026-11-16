@@ -47,6 +47,7 @@ import {
   pbsSuppliedFields,
   type PBSSource,
 } from "../lib/pbs-source";
+import { useTranslation } from "react-i18next";
 
 interface AddStorageDialogProps {
   clusterId: string;
@@ -92,6 +93,7 @@ export function AddStorageDialog({
   open: openProp,
   onOpenChange,
 }: AddStorageDialogProps) {
+  const { t } = useTranslation("storage");
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = openProp !== undefined;
   const open = controlled ? openProp : internalOpen;
@@ -287,7 +289,9 @@ export function AddStorageDialog({
         },
       }),
       {
-        action: `Adding storage ${storageName.trim()}`,
+        action: t("addStorageDialogActions.addingStorageStorageName", {
+          storageName: storageName.trim(),
+        }),
         onSuccess: () => {
           resetForm();
           setOpen(false);

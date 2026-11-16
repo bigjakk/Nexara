@@ -1,0 +1,9 @@
+{
+  "usbMappingsCardActions": {
+    "creatingUSBMappingName": "Creating USB mapping {{name}}",
+    "savingUSBMappingId": "Saving USB mapping {{id}}"
+  },
+  "pciMappingsCardActions": {
+    "savingPCIMappingId": "Saving PCI mapping {{id}}"
+  }
+}

@@ -24,6 +24,7 @@ import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner
 import { useAppliances, useDownloadAppliance } from "../api/storage-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { ApplianceTemplate } from "../types/storage";
+import { useTranslation } from "react-i18next";
 
 interface ApplianceBrowserDialogProps {
   clusterId: string;
@@ -44,6 +45,7 @@ export function ApplianceBrowserDialog({
   open: openProp,
   onOpenChange,
 }: ApplianceBrowserDialogProps) {
+  const { t: ts } = useTranslation("storage");
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = openProp !== undefined;
   const open = controlled ? openProp : internalOpen;
@@ -98,7 +100,10 @@ export function ApplianceBrowserDialog({
         data: { template: t.template },
       }),
       {
-        action: `Downloading ${t.template} to ${storageName}`,
+        action: ts(
+          "applianceBrowserDialogActions.downloadingTemplateToStorageName",
+          { template: t.template, storageName },
+        ),
         onSuccess: (data) => {
           if (data.upid) setTaskUpid(data.upid);
         },

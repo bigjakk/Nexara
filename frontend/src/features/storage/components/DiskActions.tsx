@@ -19,6 +19,7 @@ import {
 } from "@/features/storage/lib/disk-move";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 // --- Resize Disk Dialog ---
 
@@ -33,6 +34,7 @@ export function ResizeDiskDialog({
   vmId,
   diskName,
 }: ResizeDiskDialogProps) {
+  const { t } = useTranslation("storage");
   const [open, setOpen] = useState(false);
   const [size, setSize] = useState("");
   const resizeMutation = useResizeDisk();
@@ -43,7 +45,7 @@ export function ResizeDiskDialog({
     settle(
       resizeMutation.mutateAsync({ clusterId, vmId, disk: diskName, size }),
       {
-        action: `Resizing disk ${diskName}`,
+        action: t("diskActionsActions.resizingDiskDiskName", { diskName }),
         onSuccess: () => {
           setOpen(false);
           setSize("");
@@ -125,6 +127,7 @@ export function MoveDiskDialog({
   currentStorage,
   currentFormat,
 }: MoveDiskDialogProps) {
+  const { t } = useTranslation("storage");
   const [open, setOpen] = useState(false);
   const [targetStorage, setTargetStorage] = useState("");
   // null = untouched, so the source format is used; "" is an explicit "let the
@@ -175,7 +178,10 @@ export function MoveDiskDialog({
         bwlimitKib,
       }),
       {
-        action: `Moving disk ${diskName} to ${targetStorage}`,
+        action: t("diskActionsActions.movingDiskDiskNameToTargetStorage", {
+          diskName,
+          targetStorage,
+        }),
         onSuccess: (data) => {
           focus(data);
           setOpen(false);

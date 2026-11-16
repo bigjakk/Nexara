@@ -51,5 +51,30 @@
   "diskImages": "Disk Images",
   "containerRootdir": "Container",
   "snippets": "Snippets",
-  "editStorage": "Edit Storage"
+  "editStorage": "Edit Storage",
+  "diskActionsActions": {
+    "resizingDiskDiskName": "Resizing disk {{diskName}}",
+    "movingDiskDiskNameToTargetStorage": "Moving disk {{diskName}} to {{targetStorage}}"
+  },
+  "addStorageDialogActions": {
+    "addingStorageStorageName": "Adding storage {{storageName}}"
+  },
+  "applianceBrowserDialogActions": {
+    "downloadingTemplateToStorageName": "Downloading {{template}} to {{storageName}}"
+  },
+  "urlDownloadDialogActions": {
+    "downloadingFilenameTrimmed": "Downloading {{filenameTrimmed}}"
+  },
+  "ociPullDialogActions": {
+    "pullingReferenceTrimmed": "Pulling {{referenceTrimmed}}"
+  },
+  "editStorageDialogActions": {
+    "savingStorageStorageName": "Saving storage {{storageName}}"
+  },
+  "uploadDialogActions": {
+    "uploadingName": "Uploading {{name}}"
+  },
+  "deleteStorageDialogActions": {
+    "deletingStorageStorageName": "Deleting storage {{storageName}}"
+  }
 }

@@ -46,6 +46,7 @@ import {
   pbsKeyStatus,
   type PBSEncryptionChoice,
 } from "../lib/pbs-encryption";
+import { useTranslation } from "react-i18next";
 
 interface EditStorageDialogProps {
   clusterId: string;
@@ -79,6 +80,7 @@ export function EditStorageDialog({
   storageName,
   storageType,
 }: EditStorageDialogProps) {
+  const { t } = useTranslation("storage");
   const [open, setOpen] = useState(false);
   const [params, setParams] = useState<Record<string, string>>({});
   const [initialParams, setInitialParams] = useState<Record<string, string>>(
@@ -283,7 +285,9 @@ export function EditStorageDialog({
         },
       }),
       {
-        action: `Saving storage ${storageName}`,
+        action: t("editStorageDialogActions.savingStorageStorageName", {
+          storageName,
+        }),
         onSuccess: () => {
           // closeEditor also drops the mutation's copy of the request and
           // response, either of which can hold a key; by now any generated

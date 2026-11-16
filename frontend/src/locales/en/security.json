@@ -62,5 +62,8 @@
   "summaryVulns_one": "{{count}} known vulnerability",
   "summaryVulns_other": "{{count}} known vulnerabilities",
   "summaryCritical": "{{count}} critical",
-  "summaryExploited": "{{count}} actively exploited"
+  "summaryExploited": "{{count}} actively exploited",
+  "createRollingUpdateWizardActions": {
+    "checkingHAConstraints": "Checking HA constraints"
+  }
 }

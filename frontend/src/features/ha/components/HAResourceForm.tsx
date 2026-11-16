@@ -25,6 +25,7 @@ import {
 import { ApiClientError } from "@/lib/api-client";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { VMResponse } from "@/types/api";
+import { useTranslation } from "react-i18next";
 
 function describeHAResourceError(err: unknown): string {
   if (err instanceof ApiClientError) return err.body.message;
@@ -148,6 +149,7 @@ function changedFields(
 }
 
 export function HAResourceForm(props: Props) {
+  const { t } = useTranslation("ha");
   const groupsQuery = useHAGroups(props.clusterId);
   const createMut = useCreateHAResource(props.clusterId);
   const updateMut = useUpdateHAResource(props.clusterId);
@@ -221,7 +223,7 @@ export function HAResourceForm(props: Props) {
           ...(comment ? { comment } : {}),
         }),
         {
-          action: `Adding ${sid} to HA`,
+          action: t("haResourceFormActions.addingSidToHA", { sid }),
           onSuccess: () => {
             props.onSuccess();
           },
@@ -248,7 +250,9 @@ export function HAResourceForm(props: Props) {
         return;
       }
       settle(updateMut.mutateAsync({ sid: props.resource.sid, ...changes }), {
-        action: `Saving HA resource ${props.resource.sid}`,
+        action: t("haResourceFormActions.savingHAResourceSid", {
+          sid: props.resource.sid,
+        }),
         onSuccess: () => {
           props.onSuccess();
         },

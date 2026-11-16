@@ -72,6 +72,7 @@ import {
   PVE_FEATURES,
 } from "@/lib/pve-version";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
 
 interface ClusterHATabProps {
   clusterId: string;
@@ -166,6 +167,7 @@ function vmToSID(vm: VMResponse): string {
 }
 
 export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
+  const { t } = useTranslation("clusters");
   const { canManage } = useAuth();
   // PVE 9 deprecated HA groups in favor of node-affinity rules and soft-disables
   // the groups write API once migrated. Gate group creation/editing accordingly.
@@ -294,7 +296,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         ...(grpComment ? { comment: grpComment } : {}),
       }),
       {
-        action: `Creating HA group ${grpName}`,
+        action: t("clusterHATabActions.creatingHAGroupGrpName", { grpName }),
         onSuccess: () => {
           setGrpCreateOpen(false);
           clearGroupForm();
@@ -315,7 +317,9 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         comment: grpComment,
       }),
       {
-        action: `Saving HA group ${grpEditing.group}`,
+        action: t("clusterHATabActions.savingHAGroupGroup", {
+          group: grpEditing.group,
+        }),
         onSuccess: () => {
           setGrpEditing(null);
         },
@@ -339,7 +343,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
       return;
     }
     settle(updateResource.mutateAsync({ sid, state }), {
-      action: `Setting ${sid} to ${state}`,
+      action: t("clusterHATabActions.settingSidToState", { sid, state }),
       onError: handleMutationError,
     });
   };
@@ -352,7 +356,9 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         disable: disabled ? 1 : 0,
       }),
       {
-        action: `${disabled ? "Disabling" : "Enabling"} HA rule ${rule.rule}`,
+        action: disabled
+          ? t("clusterHATabActions.disablingHARule", { rule: rule.rule })
+          : t("clusterHATabActions.enablingHARule", { rule: rule.rule }),
         onError: handleMutationError,
       },
     );
@@ -360,21 +366,21 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
 
   const handleDeleteResource = (sid: string) => {
     settle(deleteResource.mutateAsync(sid), {
-      action: `Removing ${sid} from HA`,
+      action: t("clusterHATabActions.removingSidFromHA", { sid }),
       onError: handleMutationError,
     });
   };
 
   const handleDeleteGroup = (group: string) => {
     settle(deleteGroup.mutateAsync(group), {
-      action: `Deleting HA group ${group}`,
+      action: t("clusterHATabActions.deletingHAGroupGroup", { group }),
       onError: handleMutationError,
     });
   };
 
   const handleDeleteRule = (rule: string) => {
     settle(deleteRule.mutateAsync(rule), {
-      action: `Deleting HA rule ${rule}`,
+      action: t("clusterHATabActions.deletingHARuleRule", { rule }),
       onError: handleMutationError,
     });
   };
@@ -1285,7 +1291,10 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         }}
         onConfirm={(p) => {
           settle(updateResource.mutateAsync({ sid: p.sid, state: p.state }), {
-            action: `Setting ${p.sid} to ${p.state}`,
+            action: t("clusterHATabActions.settingSidToState", {
+              sid: p.sid,
+              state: p.state,
+            }),
             onError: handleMutationError,
           });
         }}

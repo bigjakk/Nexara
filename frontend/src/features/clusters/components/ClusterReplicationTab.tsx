@@ -46,6 +46,7 @@ import {
 } from "@/features/clusters/api/cluster-queries";
 import { DateTime } from "@/components/DateTime";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface ClusterReplicationTabProps {
   clusterId: string;
@@ -277,6 +278,7 @@ function CreateJobForm({
   clusterId: string;
   onSuccess: () => void;
 }) {
+  const { t } = useTranslation("clusters");
   const vmsQuery = useClusterVMs(clusterId);
   const nodesQuery = useClusterNodes(clusterId);
   const jobsQuery = useReplicationJobs(clusterId);
@@ -312,7 +314,9 @@ function CreateJobForm({
         ...(comment ? { comment } : {}),
       }),
       {
-        action: `Creating replication job ${jobId}`,
+        action: t("clusterReplicationTabActions.creatingReplicationJobJobId", {
+          jobId,
+        }),
         onSuccess,
         onError: () => undefined, // shown below from the mutation's state
       },
@@ -423,6 +427,7 @@ function EditJobDialog({
   job: ReplicationJob;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("clusters");
   const updateJob = useUpdateReplicationJob(clusterId);
   const settle = useSaveOutcome(job.id);
 
@@ -442,7 +447,9 @@ function EditJobDialog({
         disable: Number(disable),
       }),
       {
-        action: `Saving replication job ${job.id}`,
+        action: t("clusterReplicationTabActions.savingReplicationJobId", {
+          id: job.id,
+        }),
         onSuccess: onClose,
         onError: () => undefined, // shown below from the mutation's state
       },

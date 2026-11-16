@@ -25,6 +25,7 @@ import type {
   GuestToolsConfigRequest,
   GuestToolsMode,
 } from "../types/guest-tools";
+import { useTranslation } from "react-i18next";
 
 /** Sentinel for "follow the cluster's virtio-win target" — Select can't hold "". */
 const FOLLOW_ISO_TARGET = "__iso_target__";
@@ -34,6 +35,7 @@ interface GuestToolsPolicyCardProps {
 }
 
 export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
+  const { t } = useTranslation("guest-tools");
   const { data: config, isLoading } = useGuestToolsConfig(clusterId);
   const { data: releases } = useVirtioWinReleases();
   const updateConfig = useUpdateGuestToolsConfig(clusterId);
@@ -73,7 +75,7 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
       snapshot_before: snapshotBefore,
     };
     settle(updateConfig.mutateAsync(request), {
-      action: "Saving the guest tools policy",
+      action: t("guestToolsPolicyCardActions.savingTheGuestToolsPolicy"),
       onSuccess: () => {
         setSaveStatus("saved");
         setTimeout(() => {

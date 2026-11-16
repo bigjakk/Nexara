@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Panel } from "@/components/page/Panel";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
@@ -236,6 +237,7 @@ export function ZFSPoolsSection({
   clusterId: string;
   nodeName: string;
 }) {
+  const { t } = useTranslation("clusters");
   const poolsQuery = useNodeZFSPools(clusterId, nodeName);
   const pools = poolsQuery.data;
   const liveDisksQuery = useLiveDisks(clusterId, nodeName);
@@ -474,7 +476,10 @@ export function ZFSPoolsSection({
                                 cleanupConfig,
                               }),
                               {
-                                action: `Destroying ZFS pool ${p.name}`,
+                                action: t(
+                                  "nodeStorageSectionsActions.destroyingZFSPoolName",
+                                  { name: p.name },
+                                ),
                                 onError: () => undefined, // shown above from the mutation's state
                               },
                             );
@@ -590,6 +595,7 @@ export function LVMSection({
   clusterId: string;
   nodeName: string;
 }) {
+  const { t } = useTranslation("clusters");
   const vgsQuery = useNodeLVM(clusterId, nodeName);
   const vgs = vgsQuery.data;
   const liveDisksQuery = useLiveDisks(clusterId, nodeName);
@@ -739,7 +745,10 @@ export function LVMSection({
                                 cleanupConfig: lvmCleanupConfig,
                               }),
                               {
-                                action: `Destroying volume group ${vg.name}`,
+                                action: t(
+                                  "nodeStorageSectionsActions.destroyingVolumeGroupName",
+                                  { name: vg.name },
+                                ),
                                 onError: () => undefined, // shown above from the mutation's state
                               },
                             );
@@ -767,6 +776,7 @@ export function LVMThinSection({
   clusterId: string;
   nodeName: string;
 }) {
+  const { t } = useTranslation("clusters");
   const poolsQuery = useNodeLVMThin(clusterId, nodeName);
   const pools = poolsQuery.data;
   const liveDisksQuery = useLiveDisks(clusterId, nodeName);
@@ -919,7 +929,10 @@ export function LVMThinSection({
                                 cleanupConfig: thinCleanupConfig,
                               }),
                               {
-                                action: `Destroying thin pool ${p.vg}/${p.lv}`,
+                                action: t(
+                                  "nodeStorageSectionsActions.destroyingThinPoolVgLv",
+                                  { vg: p.vg, lv: p.lv },
+                                ),
                                 onError: () => undefined, // shown above from the mutation's state
                               },
                             );

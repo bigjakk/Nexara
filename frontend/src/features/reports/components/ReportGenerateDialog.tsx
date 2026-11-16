@@ -24,6 +24,7 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import type { ReportParameters } from "@/types/api";
 import { REPORT_TYPES, reportTypeInfo, reportTypeLabel } from "../report-types";
 import { ReportParametersFields } from "./ReportParametersFields";
+import { useTranslation } from "react-i18next";
 
 interface ReportGenerateDialogProps {
   /** Pre-selects a type when opened from a catalogue card. */
@@ -38,6 +39,7 @@ export function ReportGenerateDialog({
   open: controlledOpen,
   onOpenChange,
 }: ReportGenerateDialogProps) {
+  const { t } = useTranslation("reports");
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
@@ -86,7 +88,9 @@ export function ReportGenerateDialog({
         parameters,
       }),
       {
-        action: `Generating the ${reportTypeLabel(reportType)} report`,
+        action: t("reportGenerateDialogActions.generatingTheReportTypeReport", {
+          reportType: reportTypeLabel(reportType),
+        }),
         onSuccess: (run) => {
           setOpen(false);
           void navigate(`/reports/runs/${run.id}`);

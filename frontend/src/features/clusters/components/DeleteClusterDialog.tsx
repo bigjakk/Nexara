@@ -16,6 +16,7 @@ import { CopyableName } from "@/components/CopyableName";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { ClusterResponse } from "@/types/api";
+import { useTranslation } from "react-i18next";
 
 interface DeleteClusterDialogProps {
   cluster: ClusterResponse;
@@ -31,6 +32,7 @@ export function DeleteClusterDialog({
   onOpenChange,
   onDeleted,
 }: DeleteClusterDialogProps) {
+  const { t } = useTranslation("clusters");
   const [confirmName, setConfirmName] = useState("");
   const [revokeCredentials, setRevokeCredentials] = useState(false);
   const deleteMutation = useDeleteCluster();
@@ -62,7 +64,9 @@ export function DeleteClusterDialog({
         revokePveCredentials: canRevoke && revokeCredentials,
       }),
       {
-        action: `Deleting cluster ${cluster.name}`,
+        action: t("deleteClusterDialogActions.deletingClusterName", {
+          name: cluster.name,
+        }),
         onSuccess: () => {
           onOpenChange(false);
           onDeleted?.();
