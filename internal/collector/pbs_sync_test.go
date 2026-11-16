@@ -174,3 +174,19 @@ func TestSyncAllPBSBoundsEachServersTurn(t *testing.T) {
 		t.Fatal("the pass never got past a server that did not answer")
 	}
 }
+
+// A server's turn is never shorter than pbsServerSyncTimeout, and a slow cadence
+// stretches it to four intervals.
+func TestPBSServerDeadline(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		interval, want time.Duration
+	}{
+		{0, pbsServerSyncTimeout},
+		{time.Hour, 4 * time.Hour},
+	} {
+		if got := pbsServerDeadline(tc.interval); got != tc.want {
+			t.Errorf("pbsServerDeadline(%v) = %v, want %v", tc.interval, got, tc.want)
+		}
+	}
+}

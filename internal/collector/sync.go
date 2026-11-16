@@ -1487,6 +1487,12 @@ func appendOSDSnapshots(dst []cephOSDMetricSnapshot, clusterID uuid.UUID, node *
 // passes it spaces.
 const pbsServerSyncTimeout = 2 * proxmox.CachedClientTimeout
 
+// pbsServerDeadline is one PBS server's turn in a pass run every interval: the
+// larger of pbsServerSyncTimeout and four intervals.
+func pbsServerDeadline(interval time.Duration) time.Duration {
+	return max(pbsServerSyncTimeout, 4*interval)
+}
+
 // SetPBSInterval tells the syncer how often the PBS pass runs, which scales each
 // server's deadline (pbsServerSyncTimeout).
 func (s *Syncer) SetPBSInterval(d time.Duration) { s.pbsInterval = d }
@@ -1499,7 +1505,7 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 		return nil
 	}
 
-	timeout := cmp.Or(s.pbsServerTimeout, max(pbsServerSyncTimeout, 4*s.pbsInterval))
+	timeout := cmp.Or(s.pbsServerTimeout, pbsServerDeadline(s.pbsInterval))
 	var results []*PBSMetricResult
 	for _, server := range servers {
 		s.logger.Info("syncing PBS server", "pbs_id", server.ID, "name", server.Name)
@@ -1510,7 +1516,7 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 		result, err := s.syncPBSServer(serverCtx, server)
 		if errors.Is(serverCtx.Err(), context.DeadlineExceeded) {
 			s.logger.Warn("PBS server sync ran out of its deadline; what it had not read yet waits for the next pass",
-				"pbs_id", server.ID, "deadline", timeout)
+				"pbs_id", server.ID, "name", server.Name, "deadline", timeout)
 		}
 		cancel()
 		if err != nil {
