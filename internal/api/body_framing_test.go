@@ -865,13 +865,15 @@ func TestStreamedUploadExemptionIsNoLooserThanItsRoute(t *testing.T) {
 
 // TestChunkedBodyClosesTheConnectionAfterItsStreamIsReleased is why a chunked body closes the connection
 // whether or not its stream is still attached. A chunk-size line that is not hex makes the stream's read
-// fail (readHexInt consumes the byte it rejects) and c.Body() then releases the stream as at the last
-// chunk, with the rest of the body still on the connection; the precondition twin, an app without
-// closeConnectionsLeftMidBody, shows the stream is no longer attached once the handler has read (a check
-// of the stream alone would have kept the connection). Since fasthttp v1.75 the twin closes as well, on
-// the failed read (requestStream.failed), so the wrapper's close here is the second of two. It
-// runs on a bare app with the server's Fiber config: on the assembled server a chunked body reaches only
-// the storage upload, whose handler reads the stream itself and never calls c.Body().
+// fail (readHexInt consumes the byte it rejects) and fasthttp's Request.Body then releases the stream as
+// at the last chunk, with the rest of the body still on the connection; the precondition twin, an app
+// without closeConnectionsLeftMidBody, shows the stream is no longer attached once the handler has read
+// (a check of the stream alone would have kept the connection). Since Fiber v3.7 c.Body() reads a chunked
+// stream itself (internal/bodystream) and leaves a failed one attached, so the handler calls Request.Body.
+// Since fasthttp v1.75 the twin closes as well, on the failed read (requestStream.failed), so the
+// wrapper's close here is the second of two. It runs on a bare app with the server's Fiber config: on
+// the assembled server a chunked body reaches only the storage upload, whose handler reads the stream
+// itself and never calls c.Body().
 func TestChunkedBodyClosesTheConnectionAfterItsStreamIsReleased(t *testing.T) {
 	serve := func(t *testing.T, guarded bool) (string, *atomic.Int32, *atomic.Bool) {
 		t.Helper()
@@ -882,7 +884,7 @@ func TestChunkedBodyClosesTheConnectionAfterItsStreamIsReleased(t *testing.T) {
 		hits := new(atomic.Int32)
 		released := new(atomic.Bool)
 		app.Post("/reads-its-body", func(c fiber.Ctx) error {
-			n := len(c.Body())
+			n := len(c.Request().Body())
 			released.Store(!c.Request().IsBodyStream())
 			return c.SendString(strconv.Itoa(n))
 		})

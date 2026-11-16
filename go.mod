@@ -6,9 +6,9 @@ require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/go-ldap/ldap/v3 v3.4.15
-	github.com/gofiber/contrib/v3/websocket v1.2.9
-	github.com/gofiber/fiber/v3 v3.6.1
-	github.com/gofiber/utils/v2 v2.6.2
+	github.com/gofiber/contrib/v3/websocket v1.2.14
+	github.com/gofiber/fiber/v3 v3.7.0
+	github.com/gofiber/utils/v2 v2.6.5
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/google/uuid v1.6.0
@@ -21,10 +21,10 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/valyala/fasthttp v1.79.0
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/oauth2 v0.37.0
-	golang.org/x/sync v0.24.0
-	golang.org/x/text v0.43.0
+	golang.org/x/sync v0.25.0
+	golang.org/x/text v0.44.0
 )
 
 require (
@@ -34,7 +34,7 @@ require (
 	github.com/fasthttp/websocket v1.5.12 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
-	github.com/gofiber/schema v1.9.0 // indirect
+	github.com/gofiber/schema v1.9.4 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/klauspost/compress v1.20.4 // indirect

@@ -1192,7 +1192,7 @@ const (
 )
 
 // routerFold lower-cases path the way Fiber's router does for its detection path
-// (appendLowerASCII, helpers.go in v3.6.1): ASCII letters only. strings.ToLower
+// (appendLowerASCII, helpers.go in v3.7.0): ASCII letters only. strings.ToLower
 // folds Unicode too ("İ" and "K" to "i" and "k"), which would have a gate match
 // a path the router does not.
 func routerFold(path string) string {

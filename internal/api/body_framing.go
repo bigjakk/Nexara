@@ -12,11 +12,12 @@ import (
 )
 
 // The fasthttp and Fiber internals this file names are those of the versions
-// go.mod pins, read from their source: fasthttp v1.76.0 (http.go,
-// streaming.go, server.go, header.go, headerscanner.go) and Fiber v3.6.1
-// (router.go, router_skip.go, ctx.go, path.go, app.go). The tests in body_framing_test.go
-// exercise that behaviour over real connections; SkipUnmatchedRoutes, which is
-// off, is the one thing named here that none of them turns on.
+// go.mod pins, read from their source: fasthttp v1.79.0 (http.go,
+// streaming.go, server.go, header.go, headerscanner.go) and Fiber v3.7.0
+// (router.go, router_skip.go, ctx.go, req.go, path.go, app.go, internal/bodystream). The tests
+// in body_framing_test.go exercise that behaviour over real connections;
+// SkipUnmatchedRoutes, which is off, is the one thing named here that none of
+// them turns on.
 
 // closeConnectionsLeftMidBody makes every answer to a request whose body was
 // not read to its end close the connection it goes out on, so that what is
@@ -89,10 +90,10 @@ import (
 // After the handler, the connection is closed when the head was ambiguous,
 // when part of the body may still be on the connection (bodyMayBeLeftUnread),
 // and whenever the body deadline has passed. A read the deadline cuts fails,
-// and Request.bodyBytes — what c.Body() reads through — closes the stream on
-// that failure exactly as it does at the end of the body, with the rest of the
-// body still on the connection; once the stream is closed nothing tells the two
-// apart. So an answer given after the deadline closes the connection whether
+// and Request.bodyBytes — what c.Body() reads a Content-Length body within
+// BodyLimit through — closes the stream on that failure exactly as it does at
+// the end of the body, with the rest of the body still on the connection; once
+// the stream is closed nothing tells the two apart. So an answer given after the deadline closes the connection whether
 // or not a read was cut: a handler that read its whole body and then took
 // longer than bodyTimeout to answer loses its connection too, the safe way to
 // be wrong.
@@ -192,7 +193,10 @@ func closeConnectionsLeftMidBody(app *fiber.App, bodyTimeout time.Duration) {
 //     is attached. The stream reports a malformed chunk as a read error,
 //     bodyBytes closes it on that error exactly as it does at the last chunk,
 //     and the rest of the body is then still on the connection — once the
-//     stream is closed, nothing tells the two apart.
+//     stream is closed, nothing tells the two apart. (Since Fiber v3.7 c.Body()
+//     reads a chunked stream itself and leaves a failed one attached, and
+//     since fasthttp v1.75 serveConn closes after a failed read too, so this
+//     close is the second of two; it stays for a reader that does neither.)
 //     refuseChunkedRequestBodies lets a chunked body reach the storage upload
 //     alone, so this costs one connection per chunked upload.
 func bodyMayBeLeftUnread(framing int, streamAttached bool) bool {
@@ -290,10 +294,11 @@ const chunkedBodyRefusal = "a chunked request body is not accepted: send the bod
 //
 // Every bound Nexara puts on a body reads its Content-Length — the 10 MiB
 // body-size guard and bodyValues' 64 KiB — and a chunked body has none.
-// BodyLimit bounds no read of it either: under StreamRequestBody fasthttp
-// streams a body rather than refusing it, and c.Body() — or c.Bind(), which
-// reads through it — copies every byte the client sends, on routes that need
-// no session among them (login, register, logout). RFC 9112 §6.3 lets a server
+// Under StreamRequestBody fasthttp streams a body rather than refusing it, and
+// c.Body() — or c.Bind(), which reads through it — copies what the client
+// sends up to BodyLimit (32 MiB; Fiber v3.7 internal/bodystream answers 413
+// past it), three times the guard, on routes that need no session among them
+// (login, register, logout). RFC 9112 §6.3 lets a server
 // reject a request that carries a body but no Content-Length with 411, the
 // status RFC 9110 §15.5.12 defines for exactly that refusal; the client may
 // repeat the request with a Content-Length.
