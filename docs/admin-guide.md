@@ -2234,7 +2234,8 @@ Navigate to **Admin > Branding**.
 - **Theme** — light, dark, or system (follows OS preference), remembered per browser
 - **Accent Color** — the default or one of 9 presets, which theme the entire UI
 - **Storage Units** — binary (GiB) or decimal (GB)
-- **Date Format** and **Default Refresh Interval** — saved, but nothing reads them yet. The dashboard has its own refresh control
+- **Date Format** — how every date and time in the app is written: **Relative** ("5m ago", the default; point at one to see the exact time), **ISO 8601** (`2026-03-08T14:30:00+00:00`, with the browser's offset) or **Local** (the browser's locale). A date-only field stays a date, and chart axes always show the clock
+- **Default Refresh Interval** — how often lists and status pages reload on their own: 10 s, 30 s (the default), 1 min, 5 min, or **Manual**, which reloads only after your own changes and on live updates. Running tasks, log tails and live charts keep their own pace, and the dashboard's live metrics keep their own refresh control
 - **Open consoles in** — **Floating window** (the default) or **New browser tab**; see [Consoles](#consoles)
 
 ---
