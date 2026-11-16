@@ -204,6 +204,33 @@ func TestNutPoller_Polls(t *testing.T) {
 	}
 }
 
+// A connection lost between two GET DESC answers keeps the descriptions read
+// before it: they are marked described, so a dropped batch is never re-read.
+func TestNutPoller_KeepsDescriptionsReadBeforeAConnectionError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fake := nuttest.NewServer(t)
+	fake.SetDevice("ups01", nuttest.Device{Description: "Rack UPS",
+		Vars:  map[string]string{"battery.charge": "100", "ups.load": "38", "ups.status": "OL"},
+		Descs: map[string]string{"battery.charge": "Battery charge (percent)"}})
+	fake.DropOn("GET DESC ups01 ups.load")
+	host, port := fake.Addr()
+	q := newFakeNutQueries(db.NutServer{ID: uuid.New(), Name: "nut01", Host: host, Port: int32(port), TlsMode: "off", Enabled: true})
+	p := NewNutPoller(q, "", NutPollerConfig{Interval: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	st := p.loadServerState(ctx, q.server)
+	defer st.closeConn()
+	p.poll(ctx, st)
+
+	var descs map[string]string
+	_ = json.Unmarshal(q.device("ups01").VarDescriptions, &descs)
+	if descs["battery.charge"] != "Battery charge (percent)" {
+		t.Errorf("stored descriptions %v; want battery.charge's kept", descs)
+	}
+	if st.devices["ups01"].described["ups.load"] {
+		t.Error("ups.load marked described; its GET DESC never got an answer")
+	}
+}
+
 // A failed attempt can take a whole timeout. The backoff runs from when it
 // failed, or a dead host would be redialled on every tick.
 func TestNutPoller_BacksOffFromTheFailure(t *testing.T) {

@@ -79,6 +79,7 @@ type Server struct {
 	mu       sync.Mutex
 	devices  map[string]Device
 	failures map[string]string
+	drops    map[string]bool
 	tlsCfg   *tls.Config
 	down     bool
 	conns    map[net.Conn]struct{}
@@ -108,6 +109,7 @@ func NewServer(t testing.TB) *Server {
 		ln:       ln,
 		devices:  make(map[string]Device),
 		failures: make(map[string]string),
+		drops:    make(map[string]bool),
 		conns:    make(map[net.Conn]struct{}),
 		users:    make(map[string]User),
 		tracked:  make(map[string]*trackedRun),
@@ -199,6 +201,14 @@ func (s *Server) Fail(command, code string) {
 		return
 	}
 	s.failures[command] = code
+}
+
+// DropOn makes the next arrival of the exact command line close its
+// connection without an answer, as a network failure mid-poll does.
+func (s *Server) DropOn(command string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.drops[command] = true
 }
 
 // SetReachable false drops every open connection and closes new ones as soon
@@ -319,6 +329,10 @@ func (s *Server) answer(sess *session, line string) (reply string, startTLS, qui
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.received = append(s.received, line)
+	if s.drops[line] {
+		delete(s.drops, line)
+		return "", false, true
+	}
 	if code, ok := s.failures[line]; ok {
 		return "ERR " + code + "\n", false, false
 	}

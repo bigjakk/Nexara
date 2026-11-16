@@ -601,6 +601,7 @@ func (p *NutPoller) describe(ctx context.Context, st *nutServerState) {
 	for _, name := range sortedDeviceNames(st.devices) {
 		d := st.devices[name]
 		found := map[string]string{}
+		broken := false
 		for _, v := range d.varNames {
 			if budget == 0 {
 				break
@@ -611,7 +612,10 @@ func (p *NutPoller) describe(ctx context.Context, st *nutServerState) {
 			desc, err := st.conn.VarDescription(ctx, name, v)
 			var pe *nut.ProtocolError
 			if err != nil && !errors.As(err, &pe) {
-				return // the connection is in trouble; the next poll finds out
+				// The connection is in trouble; the next poll finds out. What
+				// was read before it is kept: it is marked described already.
+				broken = true
+				break
 			}
 			budget--
 			d.described[v] = true
@@ -623,7 +627,7 @@ func (p *NutPoller) describe(ctx context.Context, st *nutServerState) {
 				p.logger.Warn("nut: storing descriptions failed", "ups", name, "error", err)
 			}
 		}
-		if budget == 0 {
+		if broken || budget == 0 {
 			return
 		}
 	}
