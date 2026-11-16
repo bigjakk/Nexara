@@ -255,7 +255,9 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 		Path:   userScope + "/:id/totp",
 		Description: "Clear another user's 2FA enrollment, for the operator who has to get a locked-out " +
 			"colleague back in. A caller cannot reset their OWN this way — that is the self-service " +
-			"disable, which requires a code.",
+			"disable, which requires a code. Every session of the user ends in the same transaction, and a " +
+			"sign-in waiting at its second step is refused; 503 or 500 when the sessions cannot be ended, " +
+			"and nothing is changed. The user's API keys are left as they are.",
 		Group:       "Two-Factor Authentication",
 		Permissions: globalCheck("manage", "user"),
 		Parameters:  apischema.Properties{"id": userIDParam},
