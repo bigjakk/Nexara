@@ -2,8 +2,12 @@ package handlers
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
+	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -81,5 +85,22 @@ func TestSortIssues(t *testing.T) {
 	// Within warnings, alphabetical by summary ("Failed tasks" before "Storage near full").
 	if items[2].Summary != "Failed tasks" || items[3].Summary != "Storage near full" {
 		t.Errorf("warn order by summary wrong: %q, %q", items[2].Summary, items[3].Summary)
+	}
+}
+
+// The cluster_name_changed issue carries its two names as fields, which the
+// "Accept new name" button sends, so the client need not parse Detail; other
+// issue types leave them out of the JSON.
+func TestClusterNameChangedIssueNamesBothNames(t *testing.T) {
+	t.Parallel()
+	got, _ := json.Marshal(clusterNameChangedIssue(db.ListClusterCorosyncNameMismatchesRow{
+		ID: uuid.New(), CorosyncName: "cluster01", CorosyncNameReported: "cluster02"}))
+	var issue map[string]any
+	_ = json.Unmarshal(got, &issue)
+	if issue["recorded_name"] != "cluster01" || issue["reported_name"] != "cluster02" {
+		t.Errorf("issue %s, want recorded_name cluster01 and reported_name cluster02", got)
+	}
+	if other, _ := json.Marshal(healthIssueResponse{Type: "node_offline"}); strings.Contains(string(other), "_name") {
+		t.Errorf("another issue type carries the name fields: %s", other)
 	}
 }

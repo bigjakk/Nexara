@@ -29,6 +29,11 @@ type healthIssueResponse struct {
 	Target   string `json:"target"`   // affected resource name ("" for cluster-scoped)
 	Summary  string `json:"summary"`  // short category label
 	Detail   string `json:"detail"`   // human-readable reason
+	// RecordedName and ReportedName are a cluster_name_changed issue's two
+	// corosync names, so a client need not parse them out of Detail; unset on
+	// every other type.
+	RecordedName string `json:"recorded_name,omitempty"`
+	ReportedName string `json:"reported_name,omitempty"`
 }
 
 // endpointFingerprintStale reports whether a (cluster, node) pair shows the
@@ -133,16 +138,7 @@ func buildAllClusterIssues(ctx context.Context, q *db.Queries) map[uuid.UUID][]h
 	// operator accepts the new name (ClusterHandler.AcceptClusterName).
 	if rows, err := q.ListClusterCorosyncNameMismatches(ctx); err == nil {
 		for _, r := range rows {
-			add(r.ID, healthIssueResponse{
-				Type: "cluster_name_changed", Severity: healthSevWarn, Scope: "cluster",
-				Summary: "Cluster name changed",
-				Detail: fmt.Sprintf(
-					"The API URL now reaches a cluster named %s, not %s, so Nexara removes no node from this "+
-						"cluster. If the cluster was renamed or this entry was moved to it on purpose, accept the "+
-						"new name (POST /api/v1/clusters/%s/accept-cluster-name). Otherwise point the API URL back "+
-						"at %s.",
-					r.CorosyncNameReported, r.CorosyncName, r.ID, r.CorosyncName),
-			})
+			add(r.ID, clusterNameChangedIssue(r))
 		}
 	}
 
@@ -363,5 +359,22 @@ func cephStatusLabel(status string) string {
 		return "Error"
 	default:
 		return status
+	}
+}
+
+// clusterNameChangedIssue is the issue of a cluster whose API URL answers with
+// another corosync cluster's name than the one recorded.
+func clusterNameChangedIssue(r db.ListClusterCorosyncNameMismatchesRow) healthIssueResponse {
+	return healthIssueResponse{
+		Type: "cluster_name_changed", Severity: healthSevWarn, Scope: "cluster",
+		Summary: "Cluster name changed",
+		Detail: fmt.Sprintf(
+			"The API URL now reaches a cluster named %s, not %s, so Nexara removes no node from this "+
+				"cluster. If the cluster was renamed or this entry was moved to it on purpose, accept the "+
+				"new name (POST /api/v1/clusters/%s/accept-cluster-name). Otherwise point the API URL back "+
+				"at %s.",
+			r.CorosyncNameReported, r.CorosyncName, r.ID, r.CorosyncName),
+		RecordedName: r.CorosyncName,
+		ReportedName: r.CorosyncNameReported,
 	}
 }
