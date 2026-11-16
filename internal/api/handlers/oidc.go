@@ -877,7 +877,11 @@ func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *au
 	}
 	if acct.Found {
 		user := acct.User
-		if !acct.Bound {
+		// Linked here only when nothing after the provider's word can still refuse the
+		// sign-in: a second factor (checked after the exchange) or a deactivated account
+		// would leave a link written by a sign-in that was then refused, so such an
+		// account signs in as before, by its address, and stays unlinked.
+		if !acct.Bound && user.IsActive && !user.TotpSecret.Valid {
 			if user, err = h.linkOIDCAccount(c, user, userInfo); err != nil {
 				return db.User{}, err
 			}

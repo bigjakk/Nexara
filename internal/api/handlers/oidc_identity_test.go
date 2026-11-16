@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -34,6 +35,8 @@ func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 		// want is the index of the account signed in to (-1: a new one), or failure.
 		want    int
 		failure string
+		// unlinked: signed in to, but left unlinked (a later check can still refuse it).
+		unlinked bool
 	}{
 		{name: "the bound account, though the address now names another",
 			users: []db.User{account(epochLoginEmail, "oidc", epochIssuer, epochSubject), account(carol, "oidc", "", "")}, want: 0},
@@ -48,6 +51,10 @@ func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 		{name: "a first sign-in that loses the link to another identity is refused",
 			users: []db.User{account(carol, "oidc", "", "")}, race: true, failure: mismatch},
 		{name: "a new account is bound to the identity", want: -1},
+		{name: "an unlinked account with a second factor is not linked before it",
+			users: []db.User{withTOTP(account(carol, "oidc", "", ""))}, unlinked: true},
+		{name: "a deactivated unlinked account is not linked",
+			users: []db.User{deactivated(account(carol, "oidc", "", ""))}, unlinked: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -85,6 +92,12 @@ func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 				t.Errorf("signed in to %v, want %v", user.ID, tc.users[tc.want].ID)
 			}
 			got := store.user(user.ID)
+			if tc.unlinked {
+				if got.OidcSubject != "" {
+					t.Errorf("the account was linked to %q before its sign-in could be refused", got.OidcSubject)
+				}
+				return
+			}
 			if got.OidcIssuer != epochIssuer || got.OidcSubject != epochSubject {
 				t.Errorf("the account holds %q %q, want bound to the identity", got.OidcIssuer, got.OidcSubject)
 			}
@@ -93,6 +106,16 @@ func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func withTOTP(u db.User) db.User {
+	u.TotpSecret = pgtype.Text{String: "secret", Valid: true}
+	return u
+}
+
+func deactivated(u db.User) db.User {
+	u.IsActive = false
+	return u
 }
 
 // requireNoLinkWritten fails if a refused sign-in linked any account to its identity.
