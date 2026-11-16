@@ -78,6 +78,11 @@ func TestPlanNodeRemovals(t *testing.T) {
 		{name: "not quorate", listed: twoOfThree, status: status(0, "pve-01", "pve-02"), prev: pending, wantSkip: true},
 		{name: "node list and cluster status disagree", listed: twoOfThree,
 			status: status(1, "pve-01", "pve-02", "pve-03"), prev: pending, wantSkip: true},
+		// clinfo's cluster node count lags the nodelist mid-change.
+		{name: "cluster node count disagrees with the lists", listed: twoOfThree,
+			status: []proxmox.ClusterStatusEntry{{Type: "cluster", Name: "cluster01", Quorate: 1, Nodes: 3},
+				{Type: "node", Name: "pve-01"}, {Type: "node", Name: "pve-02"}},
+			prev: pending, wantSkip: true},
 		{name: "lacks every row on record", listed: listed("pve-09"), status: status(1, "pve-09"),
 			prev:       map[string]bool{"pve-01": true, "pve-02": true, "pve-03": true},
 			wantAbsent: []string{"pve-01", "pve-02", "pve-03"}},
