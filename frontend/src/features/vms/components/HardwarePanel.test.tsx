@@ -870,6 +870,32 @@ describe("HardwarePanel dirty check", () => {
     expect(mockedPut).not.toHaveBeenCalled();
   });
 
+  // One Save resizes each disk with a request of its own over one mutation,
+  // whose state holds only the last: a failure is kept per disk, and named.
+  it("names the disk whose resize failed when one Save resizes two", async () => {
+    mockedPost.mockImplementation((_path: string, body: unknown) =>
+      (body as { disk: string }).disk === "scsi1"
+        ? Promise.reject(new Error("Refused for a reason"))
+        : Promise.resolve({ upid: "", status: "completed" }),
+    );
+    const save = await renderPanel(
+      nicVM({
+        scsi0: "store01:vm-101-disk-0,size=32G",
+        scsi1: "store01:vm-101-disk-1,size=16G",
+      }),
+    );
+
+    fill(control(diskCard("scsi0"), "Resize to"), "40G");
+    fill(control(diskCard("scsi1"), "Resize to"), "20G");
+    await user.click(save);
+
+    expect(
+      await screen.findByText("Resize failed: scsi1: Refused for a reason"),
+    ).toBeInTheDocument();
+    expect(mockedPost).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/Resize failed: scsi0/)).toBeNull();
+  });
+
   // Proxmox refuses a boot order naming a device the same request deletes,
   // but only after it has written the deletes (and possibly other options)
   // to the VM's pending changes, which then apply later anyway. So a device

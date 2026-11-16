@@ -1329,7 +1329,7 @@ export function HardwarePanel({
             action: `Resizing disk ${key}`,
             onError: (err) => {
               const msg = describeError(err) || "the request failed";
-              setResizeErrors((prev) => [...prev, msg]);
+              setResizeErrors((prev) => [...prev, `${key}: ${msg}`]);
             },
           },
         );
