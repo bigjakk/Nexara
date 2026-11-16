@@ -1675,7 +1675,7 @@ Rules are addressed by position, so every rule listing returns a `digest` on eac
 | DELETE | `/clusters/:id/ha/groups/:group` | Delete HA group |
 | GET | `/clusters/:id/ha/status` | Get HA status |
 | GET | `/clusters/:id/ha/rules` | List HA rules |
-| POST | `/clusters/:id/ha/rules` | Create HA rule |
+| POST | `/clusters/:id/ha/rules` | Create HA rule. `400` on a cluster older than Proxmox VE 9.0, which has no HA rules |
 | PUT | `/clusters/:id/ha/rules/:rule` | Update HA rule |
 | DELETE | `/clusters/:id/ha/rules/:rule` | Delete HA rule |
 | GET | `/clusters/:id/ha/manager-status` | Get HA manager status |

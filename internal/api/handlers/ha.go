@@ -754,12 +754,18 @@ func (h *HAHandler) CreateRule(c fiber.Ctx, p *apischema.Params) error {
 		Affinity:  p.String("affinity"),
 		Comment:   p.String("comment"),
 	}
+	if err := requireHARules(c, h.queries, clusterID); err != nil {
+		return err
+	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 	if err := pxClient.CreateHARule(c.Context(), ruleType, req); err != nil {
+		if proxmox.IsHARulesUnsupportedError(err) {
+			return fiber.NewError(fiber.StatusBadRequest, haRulesUnsupportedMessage)
+		}
 		return mapProxmoxError(err)
 	}
 	detailMap := map[string]any{"rule": req.Rule, "type": ruleType}
