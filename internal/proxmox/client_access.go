@@ -89,11 +89,15 @@ func validateTokenID(tokenid string) error {
 // Used on the one that comes BACK from Proxmox rather than the ones going out:
 // the mint response echoes a full-tokenid that becomes an Authorization header,
 // a stored column and an audit value, and no other validator sees it.
+//
+// It splits at the LAST "!", as Proxmox does (pve-access-control, AccessControl.pm
+// token_full_regex): a user name may contain "!", a realm and a token name may not.
 func validateFullTokenID(full string) error {
-	userid, name, ok := strings.Cut(full, "!")
-	if !ok {
+	i := strings.LastIndex(full, "!")
+	if i < 0 {
 		return fmt.Errorf("%w: token id %q must be in user@realm!name form", ErrInvalidInput, full)
 	}
+	userid, name := full[:i], full[i+1:]
 	if err := validateUserID(userid); err != nil {
 		return err
 	}
