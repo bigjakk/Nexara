@@ -779,11 +779,13 @@ func (h *AccessHandler) CreateToken(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
+	// That a comment was given, never its text: view:audit is held by every
+	// built-in Viewer, and a comment is free text.
 	details, _ := json.Marshal(map[string]any{
-		"userid":  userid,
-		"tokenid": tokenid,
-		"privsep": bool(created.Info.PrivSep),
-		"comment": req.Comment,
+		"userid":      userid,
+		"tokenid":     tokenid,
+		"privsep":     bool(created.Info.PrivSep),
+		"comment_set": req.Comment != "",
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_token", created.FullTokenID, "created", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_token", created.FullTokenID, "created")
@@ -932,7 +934,8 @@ func (h *AccessHandler) CreateGroup(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.CreateAccessGroup(c.Context(), groupID, comment); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"groupid": groupID, "comment": comment})
+	// That a comment was given, never its text, as on a token.
+	details, _ := json.Marshal(map[string]any{"groupid": groupID, "comment_set": comment != ""})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_group", groupID, "created", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_group", groupID, "created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
@@ -959,7 +962,8 @@ func (h *AccessHandler) UpdateGroup(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateAccessGroup(c.Context(), groupid, proxmox.UpdateAccessGroupParams{Comment: comment}); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"groupid": groupid, "comment": p.String("comment")})
+	// Whether the request changed the comment ("" clears it), never its text.
+	details, _ := json.Marshal(map[string]any{"groupid": groupid, "comment_changed": comment != nil})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_group", groupid, "updated", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_group", groupid, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})

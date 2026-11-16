@@ -295,6 +295,10 @@ func TestLogGuardLookupFailure(t *testing.T) {
 // accessUserResponse).
 var secretishKey = []string{"password", "secret", "token_secret", "value", "ticket", "otp", "csrf", "privatekey", "bind_password", "keys"}
 
+// freeTextKey matches audit-detail keys whose value is someone's free text, which a
+// Viewer must not read either: a row records that it was set (comment_set), not what.
+var freeTextKey = []string{"comment", "email", "firstname", "lastname"}
+
 // accessAuditBuilders are the functions whose result access.go may hand to
 // json.Marshal in place of a map literal. The guard below holds a builder's body, and
 // the arguments it is called with, to its rules about credential-shaped keys and
@@ -380,6 +384,10 @@ func TestGuard_AccessAuditDetailsCarryNoSecrets(t *testing.T) {
 			}
 			if name, ok := stringLit(key); ok && slices.Contains(secretishKey, name) {
 				t.Errorf("%s:%d: audit details carry key %q — token secrets and passwords must never reach an audit row (view:audit is held by every Viewer)",
+					"access.go", line(key), name)
+			}
+			if name, ok := stringLit(key); ok && slices.Contains(freeTextKey, name) {
+				t.Errorf("%s:%d: audit details carry key %q — free text is recorded as set or changed, never as its text (view:audit is held by every Viewer)",
 					"access.go", line(key), name)
 			}
 			return true

@@ -1521,6 +1521,10 @@ request set that field, `enable` and `expire` as sent and `groups_set: true` —
 never the password, e-mail, comment, names, the two-factor keys field or the
 group list.
 
+A token create's row and a group create's carry `comment_set`, whether a
+non-empty comment was given, and a group update's `comment_changed`, whether the
+request set the comment (`""` clears it) — never the comment's text.
+
 ### Metrics
 
 | Method | Path | Description |
