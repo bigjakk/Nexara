@@ -4,6 +4,8 @@
  * show is labelled the same in both.
  */
 
+import { formatDate } from "@/lib/format";
+
 function detailKeyLabel(key: string): string {
   const labels: Record<string, string> = {
     vm_type: "Type",
@@ -28,6 +30,8 @@ function detailKeyLabel(key: string): string {
     ha_requested_by: "Requested by",
     migration_upid: "Part of migration",
     target_start_upid: "Start on target",
+    // A Proxmox user's or token's expiry (handlers/access.go).
+    expire: "Expires",
   };
   return (
     labels[key] ??
@@ -50,7 +54,13 @@ export function detailPairs(details: string): Array<[string, string]> | null {
     const d = JSON.parse(details) as Record<string, unknown>;
     const pairs: Array<[string, string]> = [];
     for (const [k, v] of Object.entries(d)) {
-      pairs.push([detailKeyLabel(k), detailValue(v)]);
+      pairs.push([
+        detailKeyLabel(k),
+        // Proxmox's epoch seconds, 0 for never, as the access tables show it.
+        k === "expire" && typeof v === "number"
+          ? formatDate(v * 1000, "Never")
+          : detailValue(v),
+      ]);
     }
     return pairs.length > 0 ? pairs : null;
   } catch {
