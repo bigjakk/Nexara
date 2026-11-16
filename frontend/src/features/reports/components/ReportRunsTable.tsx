@@ -43,6 +43,7 @@ import {
 } from "../api/report-queries";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { ReportRun } from "@/types/api";
 import { reportTypeLabel, periodLabel, runFileName } from "../report-types";
 import { ReportEmailDialog } from "./ReportEmailDialog";
@@ -77,7 +78,10 @@ function RunStatus({ run }: { run: ReportRun }) {
 export function ReportRunsTable() {
   const { data: runs, isLoading, error } = useReportRuns();
   const { data: clusters } = useClusters();
-  const deleteRun = useDeleteReportRun();
+  const deleteRun = useDeleteReportRun(true);
+  // The table shows a failed delete itself, and one that lands after it was
+  // left is toasted instead.
+  const settle = useSaveOutcome();
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "report");
   const canGenerate = hasPermission("generate", "report");
@@ -286,7 +290,8 @@ export function ReportRunsTable() {
                   // The delete is cluster-scoped on the server while the
                   // button is gated on the global grant, so a refusal must
                   // be shown rather than swallowed.
-                  deleteRun.mutate(deleteTarget.id, {
+                  settle(deleteRun.mutateAsync(deleteTarget.id), {
+                    action: "Deleting the report run",
                     onError: (err) => {
                       setDeleteError(
                         err instanceof Error

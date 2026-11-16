@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiFetch } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type { ReportSchedule, ReportRun, ReportParameters } from "@/types/api";
 
 // --- Report Schedules ---
@@ -119,9 +120,15 @@ export function useReportRun(id: string) {
   });
 }
 
-export function useDeleteReportRun() {
+/**
+ * `errorsShownByCaller`: the caller shows a failure itself and settles it
+ * through useSaveOutcome, so the app's error toast stays out of it. Left
+ * false, the toast reports it.
+ */
+export function useDeleteReportRun(errorsShownByCaller = false) {
   const qc = useQueryClient();
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: (id: string) =>
       apiClient.delete(apiPath`/api/v1/reports/runs/${id}`),
     onSuccess: () => {
