@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useDRSHistory } from "../api/drs-queries";
+import { DateTime } from "@/components/DateTime";
 
 interface DRSHistoryTableProps {
   clusterId: string;
@@ -40,9 +41,8 @@ function statusVariant(status: string): BadgeVariant {
   }
 }
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "-";
-  return new Date(dateStr).toLocaleString();
+function formatDate(dateStr: string | null) {
+  return <DateTime value={dateStr} fallback="-" />;
 }
 
 export function DRSHistoryTable({ clusterId }: DRSHistoryTableProps) {
