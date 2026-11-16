@@ -101,6 +101,7 @@ async function pressCreate(status = "running") {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   localStorage.clear();
   clearTokens();
   queryClient.clear();
@@ -189,6 +190,32 @@ it("toasts a pre-flight check that fails after the dialog was closed, once", asy
 
   view.rerender(dialog("running"));
   expect(screen.queryByText("Refused for a reason")).toBeNull();
+});
+
+// The app's toast reports a refused execute; the dialog's own promise must not
+// reject unhandled beside it (vitest fails the file on one).
+it("reports a refused execute once, through the app's toast", async () => {
+  server.routes["GET /api/v1/migrations/job-01"] = () =>
+    json({
+      id: "job-01",
+      status: "pending",
+      check_results: { passed: true, checks: [] },
+    });
+  server.routes["POST /api/v1/migrations/job-01/execute"] = () =>
+    json({ error: "bad_request", message: "Refused for a reason" }, 400);
+  await signInAs(ADMIN);
+  await pressCreate();
+  created.resolve(json({ id: "job-01", status: "pending" }));
+
+  await userEvent
+    .setup()
+    .click(await screen.findByRole("button", { name: "Execute migration" }));
+
+  await waitFor(() => {
+    expect(toast.error).toHaveBeenCalledWith("Refused for a reason");
+  });
+  await flush();
+  expect(toast.error).toHaveBeenCalledTimes(1);
 });
 
 describe("MigrateJobDialog, a stopped HA guest", () => {

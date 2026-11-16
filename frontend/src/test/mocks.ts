@@ -48,7 +48,15 @@ export async function apiClientMock(
 
 /** sonner, with the toasts a component raises (success, warning, error) as spies. */
 export function sonnerMock() {
-  return { toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } };
+  return {
+    toast: {
+      success: vi.fn(),
+      warning: vi.fn(),
+      error: vi.fn(),
+      // The session reset dismisses what a session left on screen.
+      dismiss: vi.fn(),
+    },
+  };
 }
 
 /**

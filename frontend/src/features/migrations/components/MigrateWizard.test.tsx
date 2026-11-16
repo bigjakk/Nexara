@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { clearTokens } from "@/lib/api-client";
 import { queryClient } from "@/lib/query-client";
 import {
@@ -19,6 +20,8 @@ import { emptyPerSessionStores } from "@/test/per-session-stores";
 import type { User } from "@/types/api";
 import { useAuthStore } from "@/stores/auth-store";
 import { MigrateWizard } from "./MigrateWizard";
+
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 /**
  * Creating a migration job and running its pre-flight check are two requests,
@@ -98,6 +101,7 @@ async function pressCreate() {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   localStorage.clear();
   clearTokens();
   queryClient.clear();
@@ -163,5 +167,23 @@ describe("MigrateWizard, creating a job and checking it", () => {
     });
 
     expect(checkCallers).toEqual([ADMIN.id]);
+  });
+
+  // The app's toast reports a refused create; the wizard's own promise must
+  // not reject unhandled beside it (vitest fails the file on one).
+  it("reports a refused create once, through the app's toast, and checks nothing", async () => {
+    await signInAs(ADMIN);
+    await pressCreate();
+
+    created.resolve(
+      json({ error: "bad_request", message: "Refused for a reason" }, 400),
+    );
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Refused for a reason");
+    });
+    await flush();
+
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(server.times(CHECK)).toBe(0);
   });
 });
