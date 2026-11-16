@@ -1779,7 +1779,7 @@ true` when the deleted one had a comment — never the comment's text.
 | GET | `/clusters/:id/backup-jobs` | List backup jobs |
 | POST | `/clusters/:id/backup-jobs` | Create backup job |
 | PUT | `/clusters/:id/backup-jobs/:job_id` | Update backup job |
-| DELETE | `/clusters/:id/backup-jobs/:job_id` | Delete backup job |
+| DELETE | `/clusters/:id/backup-jobs/:job_id` | Delete backup job. Its audit row records what the job was (schedule, storage, node, mode, enabled, the guests it backed up), read before the delete, or `prior_state_unknown: true`; never its comment |
 | POST | `/clusters/:id/backup-jobs/:job_id/run` | Run backup job |
 
 A restore reads the snapshot through the cluster's Proxmox storage for the

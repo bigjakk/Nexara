@@ -1573,15 +1573,45 @@ func (h *BackupHandler) DeleteBackupJob(c fiber.Ctx, p *apischema.Params) error 
 		return err
 	}
 
+	// Read before the delete, so the row says what the job was: its id alone
+	// (backup-<hex>) names nothing a reader recognises.
+	job, readErr := client.GetBackupJob(c.Context(), jobID)
 	if err := client.DeleteBackupJob(c.Context(), jobID); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	// Marshalling a string map cannot fail.
-	details, _ := json.Marshal(map[string]string{"job_id": jobID})
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_deleted", details)
+	if readErr != nil || job.ID == "" {
+		job = nil
+	}
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_deleted",
+		backupJobDeleteDetails(jobID, job))
 
 	return c.JSON(fiber.Map{"status": "deleted"})
+}
+
+// backupJobDeleteDetails is a backup job delete's row: the job's id and what it
+// was, as a create's row records it (schedule, storage, node, mode, enabled,
+// the guests it backed up), or prior_state_unknown when it could not be read
+// first. Never its comment, which is free text a Viewer may not read.
+func backupJobDeleteDetails(jobID string, job *proxmox.BackupJob) json.RawMessage {
+	fields := map[string]any{"job_id": jobID}
+	if job == nil {
+		fields["prior_state_unknown"] = true
+	} else {
+		all := job.All
+		was := backupJobRequest{Schedule: job.Schedule, Storage: job.Storage, Mode: job.Mode,
+			VMID: job.VMID, All: &all, Exclude: job.Exclude, Pool: job.Pool}
+		for key, value := range map[string]string{"schedule": was.Schedule, "storage": was.Storage,
+			"node": job.Node, "mode": was.Mode, "selection": was.selectionSummary()} {
+			if value != "" {
+				fields[key] = value
+			}
+		}
+		// vzdump runs a job that never set enabled.
+		fields["enabled"] = job.Enabled == nil || *job.Enabled != 0
+	}
+	details, _ := json.Marshal(fields)
+	return details
 }
 
 // backupJobRunResponse is what a backup job run answers when it confirmed at

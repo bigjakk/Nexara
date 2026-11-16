@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -124,5 +125,39 @@ func TestBackupJobChangeRowsNameTheJob(t *testing.T) {
 				t.Errorf("audit rows are %+v, want one %s row for %s naming it as job_id", rows, tt.action, backupRunJobID)
 			}
 		})
+	}
+}
+
+// A job's delete records what the job was, read before the delete, and never
+// its comment, which is free text a Viewer may not read.
+func TestBackupJobDeleteRowSaysWhatTheJobWas(t *testing.T) {
+	t.Parallel()
+	pve := &backupRunPVE{handle: func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/api2/json/cluster/backup/"+backupRunJobID {
+			return false
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"data":{"id":"` + backupRunJobID + `","schedule":"sun 01:00","storage":"store01",` +
+				`"mode":"snapshot","pool":"pool01","enabled":0,"comment":"sentinel-comment"}}`))
+			return true
+		}
+		_, _ = w.Write([]byte(`{"data":null}`))
+		return true
+	}}
+	path := clusterScope + "/backup-jobs/:job_id"
+	app, dbtx := newBackupAppAs(t, pve, grantsOf("delete:backup"), fiber.MethodDelete, path, (*handlers.BackupHandler).DeleteBackupJob)
+	req := httptest.NewRequest(fiber.MethodDelete, backupRoute(path), nil)
+	req.Header.Set("X-Test-User", "yes")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	_ = resp.Body.Close()
+	rows := dbtx.decodedAudits(t)
+	want := map[string]any{"job_id": backupRunJobID, "schedule": "sun 01:00", "storage": "store01", "mode": "snapshot",
+		"selection": "pool pool01", "enabled": false}
+	if resp.StatusCode != http.StatusOK || len(rows) != 1 || !reflect.DeepEqual(rows[0].details, want) {
+		t.Errorf("status %d, rows %+v; want one row with details %v", resp.StatusCode, rows, want)
 	}
 }
