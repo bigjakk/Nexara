@@ -130,8 +130,13 @@ export function AlertRulesTable() {
                   <Trans
                     t={t}
                     i18nKey="alertRulesTable.upsSpanUpsIdSpan"
-                    values={{ upsId: upsName(rule.ups_id) }}
-                    components={{ span: <span className="font-mono" /> }}
+                    components={{
+                      ups: (
+                        <span className="font-mono">
+                          {upsName(rule.ups_id)}
+                        </span>
+                      ),
+                    }}
                   />
                 </TableCell>
               ) : (

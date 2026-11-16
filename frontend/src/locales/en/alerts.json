@@ -205,7 +205,7 @@
     "actions": "Actions",
     "loading": "Loading...",
     "noAlertRulesConfigured": "No alert rules configured",
-    "upsSpanUpsIdSpan": "UPS <span>{{upsId}}</span>",
+    "upsSpanUpsIdSpan": "UPS <ups/>",
     "no": "No",
     "enablingItTakesViewUps": "Enabling it takes view:ups",
     "disableRule": "Disable rule",

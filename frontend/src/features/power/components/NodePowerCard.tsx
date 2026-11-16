@@ -50,7 +50,7 @@ function NodePowerCardBody({ clusterId, nodeName, online, className }: Props) {
     <Panel title={t("nodePowerCard.power")} className={className}>
       {feeding.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          <Trans t={t} i18nKey="nodePowerCard.noUPSNexaraKnowsPowers" values={{ nodeName }} components={{ navlink: <Link to="/power" className="text-primary hover:underline" /> }} />
+          <Trans t={t} i18nKey="nodePowerCard.noUPSNexaraKnowsPowers" components={{ node: <>{nodeName}</>, navlink: <Link to="/power" className="text-primary hover:underline" /> }} />
         </p>
       ) : (
         // One block per UPS, divided by a rule: no box inside the panel.
@@ -95,7 +95,7 @@ function FedBy({ device, feed, server, clusterId, nodeName, online, stillFedBy }
     <div className="space-y-3 py-3.5 first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-center gap-2">
         <span>
-          <Trans t={t} i18nKey="nodePowerCard.poweredByLinkNameLink" values={{ name: device.name, serverName: device.server_name }} components={{ navlink: <Link to={`/power/${device.id}`} className="font-medium hover:underline" />, span: <span className="text-muted-foreground" /> }} />
+          <Trans t={t} i18nKey="nodePowerCard.poweredByLinkNameLink" components={{ name: <>{device.name}</>, server: <>{device.server_name}</>, navlink: <Link to={`/power/${device.id}`} className="font-medium hover:underline" />, span: <span className="text-muted-foreground" /> }} />
         </span>
         <UpsStatusBadges device={device} />
       </div>

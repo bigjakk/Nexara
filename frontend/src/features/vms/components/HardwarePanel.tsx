@@ -4095,9 +4095,12 @@ export function HardwarePanel({
               <Trans
                 t={t}
                 i18nKey="hardwarePanel.thisWillPermanentlyDeleteSpan"
-                values={{ volume: unusedToDelete?.volume }}
                 components={{
-                  span: <span className="font-mono font-semibold" />,
+                  volume: (
+                    <span className="font-mono font-semibold">
+                      {unusedToDelete?.volume}
+                    </span>
+                  ),
                 }}
               />
             </AlertDialogDescription>
@@ -4174,9 +4177,12 @@ export function HardwarePanel({
               <Trans
                 t={t}
                 i18nKey="hardwarePanel.whenTheRemovalAppliesOn"
-                values={{ volume: cloudInitToRemove?.volume }}
                 components={{
-                  span: <span className="font-mono font-semibold" />,
+                  volume: (
+                    <span className="font-mono font-semibold">
+                      {cloudInitToRemove?.volume}
+                    </span>
+                  ),
                 }}
               />
             </AlertDialogDescription>

@@ -71,4 +71,15 @@ describe("NodePowerCard", () => {
 
     expect(apiClient.put).toHaveBeenCalledWith("/api/v1/ups-devices/u1/feeds/f1", { protected_elsewhere: true });
   });
+
+  // A name a UPS driver or an operator supplies is text in a translated
+  // sentence, never markup <Trans> would parse into a component.
+  it("shows a UPS and server name that contains markup as literal text", async () => {
+    serve([upsDevice({ name: "<span>x</span>", server_name: "<span>y</span>", feeds: [upsFeed({ id: "f1", node_name: "pve-03" })] })]);
+
+    renderWithProviders(<NodePowerCard clusterId="c1" nodeName="pve-03" online />);
+
+    expect(await screen.findByRole("link", { name: "<span>x</span>" })).toBeInTheDocument();
+    expect(screen.getByText("via <span>y</span>", { exact: false })).toBeInTheDocument();
+  });
 });

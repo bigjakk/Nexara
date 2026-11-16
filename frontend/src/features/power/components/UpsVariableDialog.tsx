@@ -71,8 +71,11 @@ export function UpsVariableDialog({
             <Trans
               t={t}
               i18nKey="upsVariableDialog.setOnNameThroughServerName"
-              values={{ name: device.name, serverName: device.server_name, value: variable.value || t("upsVariableDialog.empty") }}
-              components={{ span: <span className="font-mono" /> }}
+              components={{
+                name: <>{device.name}</>,
+                server: <>{device.server_name}</>,
+                value: <span className="font-mono">{variable.value || t("upsVariableDialog.empty")}</span>,
+              }}
             />
           </DialogDescription>
         </DialogHeader>
@@ -133,7 +136,7 @@ export function UpsVariableDialog({
           {variable.confirm === "typed" && (
             <div className="space-y-1.5">
               <Label htmlFor={`${id}-confirm`}>
-                <Trans t={t} i18nKey="upsVariableDialog.typeSpanNameSpanTo" values={{ name: device.name }} components={{ span: <span className="font-mono font-semibold" /> }} />
+                <Trans t={t} i18nKey="upsVariableDialog.typeSpanNameSpanTo" components={{ name: <span className="font-mono font-semibold">{device.name}</span> }} />
               </Label>
               <Input
                 id={`${id}-confirm`}

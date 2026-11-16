@@ -303,9 +303,12 @@ function MoveVolumeDialog({
               <Trans
                 t={t}
                 i18nKey="containerResourcesPanel.currentStorageSpanCurrentStorageSpan"
-                values={{ currentStorage }}
                 components={{
-                  span: <span className="font-mono font-medium" />,
+                  storage: (
+                    <span className="font-mono font-medium">
+                      {currentStorage}
+                    </span>
+                  ),
                 }}
               />
             </p>
