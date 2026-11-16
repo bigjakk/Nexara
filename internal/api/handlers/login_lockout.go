@@ -258,6 +258,21 @@ func (h *AuthHandler) forgetLoginFailures(c fiber.Ctx, a loginAttempt) {
 	}
 }
 
+// handBackLoginAttempt gives back the one attempt a's check took, because its
+// credential verified and nothing about it changed: the two-factor setup's directory
+// password (ProveDirectoryPassword). A sign-in that succeeds clears the count instead
+// (forgetLoginFailures). If a armed the lock, the lock is lifted. Best effort.
+func (h *AuthHandler) handBackLoginAttempt(c fiber.Ctx, a loginAttempt) {
+	if !a.counted {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)
+	defer cancel()
+	if err := h.loginLockoutStore().release(ctx, a.subject, a.res); err != nil {
+		slog.Warn("sign-in: could not give back the attempt a verified credential took; it stays counted until its window ends", "error", err)
+	}
+}
+
 // Failed sign-ins are audited, as login_failed, under the account they named, with
 // the source address, the method and the class of the failure (wrong_password,
 // account_disabled, sso_only_account, directory_rejected): never what was typed.

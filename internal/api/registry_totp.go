@@ -138,9 +138,12 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 			"out of both for 30 minutes, and while the lock lasts every request with a password is answered 429 with a " +
 			"Retry-After header (in seconds); a right one gives back the attempt it took, and when the attempt " +
 			"cannot be counted (Redis cannot be reached) the answer is 503 and nothing is checked. The route is " +
-			"also capped at 15 requests a minute per client address, in the budget login uses. An account " +
-			"that signs in through LDAP or " +
-			"single sign-on has no Nexara password: it must have signed in within the last 10 minutes, and " +
+			"also capped at 15 requests a minute per client address, in the budget login uses. An LDAP " +
+			"account sends its directory password instead, checked by a bind as its own directory entry and " +
+			"counted in its sign-in lockout: 403 when wrong, 429 while sign-in is locked (the wrong password " +
+			"that uses up the limit locks sign-in too), 503 when the attempt cannot be counted or the directory " +
+			"cannot be reached. An account that signs in through " +
+			"single sign-on has no password: it must have signed in within the last 10 minutes, and " +
 			"is answered 403, saying to sign in again, otherwise.",
 		Group:       "Two-Factor Authentication",
 		Permissions: Permissions{SelfService: "enrolls the caller's own second factor"},
@@ -152,9 +155,9 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 				Optional:  true,
 				MaxLength: apischema.Ptr(1024),
 				Typetext:  "<string>",
-				Description: "The account's current password. Required for an account that signs in with a Nexara " +
-					"password; an account that signs in through LDAP or single sign-on has none, and its value is not " +
-					"looked at. Never returned, and never recorded in an audit row.",
+				Description: "The account's current password: its Nexara password, or for an LDAP account its " +
+					"directory password. Required for both; an account that signs in through single sign-on has none, " +
+					"and its value is not looked at. Never returned, and never recorded in an audit row.",
 			},
 		},
 		Handler: h.BeginSetup,

@@ -657,6 +657,8 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 			followUpTimeout: opts.followUpTimeout}
 		ah.SetTOTPHandler(a.totp)
 		a.totp.SetIssueTokensFn(ah.IssueTokens)
+		a.totp.SetCurrentPasswordCheck(ah.ProveCurrentPassword)
+		a.totp.SetDirectoryPasswordCheck(ah.ProveDirectoryPassword)
 	}
 
 	uh := &UserHandler{
@@ -715,6 +717,9 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 	app.Get("/auth/oidc/callback", a.oidc.Callback)
 	if a.totp != nil {
 		app.Post("/auth/totp/verify-login", withRequestParams(t, totpVerifyLoginMirror(), nil, a.totp.VerifyLogin))
+		app.Post("/auth/totp/setup", withRequestParams(t, apischema.Properties{
+			"current_password": {Type: apischema.String, Optional: true},
+		}, nil, a.totp.BeginSetup))
 		app.Delete("/auth/totp", withRequestParams(t, totpDisableMirror(), nil, a.totp.Disable))
 		app.Post("/auth/totp/recovery-codes/regenerate", withRequestParams(t, totpConfirmSetupMirror(), nil, a.totp.RegenerateRecoveryCodes))
 	}

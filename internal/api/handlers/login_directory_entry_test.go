@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ type fakeSignInDirectory struct {
 	names    map[string]bool
 	entry    auth.LDAPUser
 	password string
+	binds    *atomic.Int32 // when set, counts the binds made
 }
 
 func (d fakeSignInDirectory) Search(username string) (*auth.LDAPUser, error) {
@@ -28,6 +30,9 @@ func (d fakeSignInDirectory) Search(username string) (*auth.LDAPUser, error) {
 }
 
 func (d fakeSignInDirectory) Authenticate(_ *auth.LDAPUser, password string) error {
+	if d.binds != nil {
+		d.binds.Add(1)
+	}
 	if password != d.password {
 		return fmt.Errorf("%w: invalid credentials", auth.ErrLDAPUserBindFailed)
 	}

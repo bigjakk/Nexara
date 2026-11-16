@@ -512,6 +512,8 @@ func (s *Server) wireAuthCompositions() {
 		s.totpHandler.SetIssueTokensFn(s.authHandler.IssueTokens)
 		// A setup proves a local account's current password in change-password's budget.
 		s.totpHandler.SetCurrentPasswordCheck(s.authHandler.ProveCurrentPassword)
+		// And a directory account's password by a bind, in the sign-in's budgets.
+		s.totpHandler.SetDirectoryPasswordCheck(s.authHandler.ProveDirectoryPassword)
 	}
 }
 

@@ -1000,6 +1000,114 @@ func (h *AuthHandler) directoryAccount(c fiber.Ctx, entry *auth.LDAPUser, typed 
 	return &u
 }
 
+// ProveDirectoryPassword checks the password of the caller's own directory account
+// for POST /auth/totp/setup (TOTPHandler.BeginSetup, through the function
+// wireAuthCompositions gives it), as a sign-in would: the same directory session
+// (open, search, bind), the entry found by the name the account last signed in with
+// (users.ldap_login_name; its address when none is stored and the user filter matches
+// the address, as the sync searches), and accepted only when that entry is the
+// account's (sameAddress, the sync's rule). The bind is counted, before it is made, in
+// the sign-in's two budgets: the name's (loginSubject) and the entry's
+// (loginEntrySubject). So a guesser holding a stolen session spends the budgets a
+// sign-in spends, and Nexara's lock sits in front of the directory's own.
+//
+// Unlike a sign-in it fails closed: an attempt that cannot be counted is refused 503,
+// with nothing sent to the directory. A wrong password is 403 (not 401: see
+// refuseWrongPassword), the attempt that uses up a budget the 429 of the sign-in lock
+// it arms, audited as a sign-in's is; a locked budget is 429; a directory that cannot
+// be reached is 503. A right password gives back only the attempts it took, as
+// ProveCurrentPassword does. Nothing typed is logged: only classes of failure.
+//
+// nil means the password is right and the route may go on.
+func (h *AuthHandler) ProveDirectoryPassword(c fiber.Ctx, userID uuid.UUID, password string) error {
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return totpSetupNotChecked("read the user", userID, err)
+	}
+	if user.AuthSource != "ldap" {
+		return fiber.NewError(fiber.StatusForbidden, "This account does not sign in through a directory")
+	}
+	if h.ldapHandler == nil {
+		slog.Error("two-factor setup: no LDAP handler is wired, so no directory account can prove its password", "user_id", userID)
+		return fiber.NewError(fiber.StatusServiceUnavailable, totpDirectoryUnavailableMessage)
+	}
+	ldapCfg, err := h.queries.GetEnabledLDAPConfig(c.Context())
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		slog.Warn("two-factor setup: no LDAP configuration is enabled, so the directory password cannot be checked", "user_id", userID)
+		return fiber.NewError(fiber.StatusServiceUnavailable, totpDirectoryUnavailableMessage)
+	case err != nil:
+		return totpSetupNotChecked("read the LDAP configuration", userID, err)
+	}
+	name := user.LdapLoginName
+	if name == "" {
+		if userFilterMatchesAddress(ldapCfg.UserFilter, ldapCfg.EmailAttribute) != filterMatches {
+			return fiber.NewError(fiber.StatusForbidden, totpDirectorySignInAgainMessage)
+		}
+		name = user.Email
+	}
+	authCfg, err := h.ldapHandler.BuildLDAPConfigFromDB(ldapCfg)
+	if err != nil {
+		slog.Error("two-factor setup: the stored LDAP configuration is not usable", "user_id", userID, "error", err)
+		return fiber.NewError(fiber.StatusInternalServerError, totpSetupFailedMessage)
+	}
+
+	dir, err := h.ldapHandler.openSignIn(authCfg)
+	if err != nil {
+		slog.Warn("two-factor setup: the directory could not be opened", "user_id", userID, "reason", ldapFailureClass(err))
+		return fiber.NewError(fiber.StatusServiceUnavailable, totpDirectoryUnavailableMessage)
+	}
+	defer dir.Close()
+	entry, err := dir.Search(name)
+	switch {
+	case errors.Is(err, auth.ErrLDAPUserNotFound):
+		slog.Warn("two-factor setup: the account's directory entry was not found", "user_id", userID)
+		return fiber.NewError(fiber.StatusForbidden, totpDirectoryEntryMissingMessage)
+	case err != nil:
+		slog.Warn("two-factor setup: the directory search failed", "user_id", userID, "reason", ldapFailureClass(err))
+		return fiber.NewError(fiber.StatusServiceUnavailable, totpDirectoryUnavailableMessage)
+	case entry.Email == "" || !sameAddress(entry.Email, user.Email):
+		slog.Warn("two-factor setup: the name the account signs in with finds another directory entry", "user_id", userID)
+		return fiber.NewError(fiber.StatusForbidden, totpDirectoryEntryMissingMessage)
+	}
+
+	attempts := make([]loginAttempt, 0, 2)
+	for _, subject := range []uuid.UUID{h.loginSubject(name), h.loginEntrySubject(entry.DN)} {
+		a, locked := h.admitLoginAttempt(c, subject)
+		if locked != nil {
+			return locked
+		}
+		if !a.counted {
+			return fiber.NewError(fiber.StatusServiceUnavailable, totpSetupUnavailableMessage)
+		}
+		attempts = append(attempts, a)
+	}
+	if err := dir.Authenticate(entry, password); err != nil {
+		slog.Warn("two-factor setup: wrong directory password", "user_id", userID, "ip", c.IP(), "reason", ldapFailureClass(err))
+		for _, a := range attempts {
+			if a.res.admission == lockoutAdmittedLast {
+				h.recordLoginLock(c, a, &user)
+				return lockedFor(c, a.res.retryAfter, loginLockedMessage(a.res.retryAfter))
+			}
+		}
+		return fiber.NewError(fiber.StatusForbidden, "Directory password is incorrect")
+	}
+	for _, a := range attempts {
+		h.handBackLoginAttempt(c, a)
+	}
+	return nil
+}
+
+// The answers of a directory account's proof that are not the sign-in's own.
+const (
+	totpDirectoryUnavailableMessage = "Your directory password cannot be checked right now because the directory could not be reached; " +
+		"nothing was changed. Try again shortly."
+	totpDirectorySignInAgainMessage = "Nexara does not know the name you sign in to the directory with yet. Sign out and sign in again, " +
+		"then set up two-factor authentication."
+	totpDirectoryEntryMissingMessage = "Your directory entry could not be found under the name you sign in with, so your password " +
+		"cannot be checked. Sign out and sign in again, then set up two-factor authentication."
+)
+
 // ldapFailureClass names what went wrong with a directory sign-in, for the log, and
 // nothing else: the directory's error text can carry the search filter, and with it
 // what was typed into the sign-in form, which is sometimes a password.

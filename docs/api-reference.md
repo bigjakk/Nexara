@@ -631,7 +631,8 @@ is not a rate limit and is not in the table: five wrong current passwords within
 60 minutes, on either route, lock both for that session for 30 minutes, whatever
 addresses they came from. Its `429` is the handlers' own — the JSON error envelope,
 with a `Retry-After` header in seconds — and is described under Authentication
-above.
+above. An LDAP account's directory password at `POST /auth/totp/setup` counts in
+the `POST /auth/login` guard above instead, not in this one.
 
 ## Request Parameters
 
@@ -800,7 +801,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | GET | `/auth/oidc/callback` | OIDC callback (internal) |
 | POST | `/auth/oidc/token-exchange` | Exchange OIDC code for JWT |
 | POST | `/auth/totp/verify-login` | Complete TOTP challenge (`429` with `Retry-After` while the account's codes are locked; `503` when the attempt cannot be counted, and the code is not checked) |
-| POST | `/auth/totp/setup` | Begin TOTP enrollment. Send `current_password` (`400` without one, `403` when wrong, `429` while locked out with change-password, which shares the limit); an LDAP or SSO account sends none and must have signed in within the last 10 minutes (`403` otherwise) |
+| POST | `/auth/totp/setup` | Begin TOTP enrollment. Send `current_password` (`400` without one, `403` when wrong, `429` while locked out with change-password, which shares the limit). An LDAP account sends its directory password instead: it is checked by a bind as the account's own directory entry and counted in that account's sign-in limits, so `403` when wrong, `429` (with `Retry-After`) while sign-in is locked, and the wrong password that uses up the limit locks sign-in too; `503` when the attempt cannot be counted or the directory cannot be reached, with nothing sent to it. An SSO account sends none and must have signed in within the last 10 minutes (`403` otherwise) |
 | POST | `/auth/totp/setup/verify` | Confirm TOTP enrollment |
 | DELETE | `/auth/totp` | Disable TOTP (`429` with `Retry-After` while this session's codes are locked — five wrong ones in 10 minutes, counted apart from sign-in's second step; `503` when the attempt cannot be counted, and nothing changes) |
 | GET | `/auth/totp/status` | Get TOTP enrollment status (interactive session only: `403` for an API key) |

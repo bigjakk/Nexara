@@ -56,7 +56,10 @@ const (
 )
 
 // The answers of a setup that cannot go on until the caller proves it is the owner.
-const totpPasswordRequiredMessage = "Enter your current password to set up two-factor authentication."
+const (
+	totpPasswordRequiredMessage          = "Enter your current password to set up two-factor authentication."
+	totpDirectoryPasswordRequiredMessage = "Enter your directory password to set up two-factor authentication."
+)
 
 var totpSignInAgainMessage = fmt.Sprintf("To set up two-factor authentication, sign out and sign in again, then start within %d minutes: "+
 	"your account signs in through LDAP or single sign-on, so Nexara has no password of yours to confirm and asks for a recent sign-in instead.",
@@ -86,6 +89,10 @@ type TOTPHandler struct {
 	// budget. Wired by SetCurrentPasswordCheck; nil refuses every local account's
 	// setup rather than skipping the check.
 	proveCurrentPassword func(c fiber.Ctx, userID uuid.UUID, password string) error
+	// proveDirectoryPassword is AuthHandler.ProveDirectoryPassword: the same for an LDAP
+	// account, by a bind as its entry under the sign-in's budgets. Wired by
+	// SetDirectoryPasswordCheck; nil refuses every directory account's setup.
+	proveDirectoryPassword func(c fiber.Ctx, userID uuid.UUID, password string) error
 
 	// followUpTimeout bounds each follow-up of a decision that has been made — the
 	// audit row of a second step that was refused — and is authFollowUpTimeout when
@@ -145,6 +152,12 @@ func (h *TOTPHandler) SetCurrentPasswordCheck(fn func(c fiber.Ctx, userID uuid.U
 	h.proveCurrentPassword = fn
 }
 
+// SetDirectoryPasswordCheck sets the check of a directory account's password that
+// BeginSetup asks for (AuthHandler.ProveDirectoryPassword; called from server setup).
+func (h *TOTPHandler) SetDirectoryPasswordCheck(fn func(c fiber.Ctx, userID uuid.UUID, password string) error) {
+	h.proveDirectoryPassword = fn
+}
+
 // BeginSetup handles POST /api/v1/auth/totp/setup — starts TOTP enrollment.
 //
 // The secret it hands out is what turns a second factor on (ConfirmSetup needs a
@@ -200,17 +213,18 @@ func (h *TOTPHandler) BeginSetup(c fiber.Ctx, p *apischema.Params) error {
 // the account is locked out of both routes, 503 when the attempt cannot be counted.
 // An empty password is no attempt at all and counts nothing.
 //
-// An account that signs in through LDAP or single sign-on has no Nexara password —
-// its password_hash is empty — so it proves a recent sign-in instead: the session
-// this request came with began within totpFreshSignIn (its created_at is the
-// sign-in; a refresh rotates the token and keeps it). A token stolen from an older
-// session cannot begin a setup; signing in again, through the directory or the
-// identity provider, is the proof. A password it sends is not looked at. An LDAP
-// account's password could be proved with a directory bind, as its sign-in is; the
-// recent sign-in is asked instead because it serves OIDC accounts too, which have
-// no password anywhere, and keeps a guesser's attempts off the directory, whose own
-// lockout they would spend. Its cost: a token stolen within the window can still
-// begin a setup.
+// An account that signs in through LDAP proves its directory password instead, by a
+// bind as its own entry counted in the sign-in's budgets (proveDirectoryPassword), with
+// the same answers: 400 when none is sent, 403 wrong, 429 locked, 503 when the attempt
+// cannot be counted or the directory cannot be reached. Nexara's budget sits in front of
+// the bind, so a guesser locks Nexara's sign-in before the directory's own lockout.
+//
+// An account that signs in through single sign-on has no password anywhere, so it
+// proves a recent sign-in instead: the session this request came with began within
+// totpFreshSignIn (its created_at is the sign-in; a refresh rotates the token and keeps
+// it). A token stolen from an older session cannot begin a setup; signing in again at
+// the identity provider is the proof. A password it sends is not looked at. Its cost: a
+// token stolen within the window can still begin a setup.
 func (h *TOTPHandler) confirmItIsTheOwner(c fiber.Ctx, user db.User, password string) error {
 	if user.AuthSource == "local" {
 		if password == "" {
@@ -221,6 +235,16 @@ func (h *TOTPHandler) confirmItIsTheOwner(c fiber.Ctx, user db.User, password st
 			return fiber.NewError(fiber.StatusInternalServerError, totpSetupFailedMessage)
 		}
 		return h.proveCurrentPassword(c, user.ID, password)
+	}
+	if user.AuthSource == "ldap" {
+		if password == "" {
+			return fiber.NewError(fiber.StatusBadRequest, totpDirectoryPasswordRequiredMessage)
+		}
+		if h.proveDirectoryPassword == nil {
+			slog.Error("two-factor setup: no directory-password check is wired, so no directory account can begin a setup", "user_id", user.ID)
+			return fiber.NewError(fiber.StatusInternalServerError, totpSetupFailedMessage)
+		}
+		return h.proveDirectoryPassword(c, user.ID, password)
 	}
 
 	sessionID, _ := c.Locals(LocalsSessionID).(uuid.UUID)

@@ -99,7 +99,7 @@ func TestGuard_OnlyThePasswordRoutesTouchTheLockout(t *testing.T) {
 			// and the second factor's and sign-in's lockouts, which count in the same stores
 			// under keys of their own and are cleared only by a credential that verified.
 			"reserve": {"admitPasswordAttempt", "admitTOTPAttempt", "admitLoginAttempt"},
-			"release": {"handBackAttempt"},
+			"release": {"handBackAttempt", "handBackLoginAttempt"},
 			"clear":   {"forgetPasswordFailures", "forgetTOTPFailures", "forgetLoginFailures"},
 		}
 		selectorOnly := map[string]bool{"reserve": true, "release": true, "clear": true}
@@ -162,69 +162,72 @@ func TestGuard_OnlyThePasswordRoutesTouchTheLockout(t *testing.T) {
 	})
 }
 
-// TestGuard_ADirectorySignInFailureLogsNothingTyped: tryLDAPLogin's log calls pass none
-// of its typed parameters (the identifier is sometimes a password), and none from the
-// search on passes a raw err: the search's and the bind's error text can carry the
-// search filter, and with it what was typed.
+// TestGuard_ADirectorySignInFailureLogsNothingTyped: the directory checks' log calls
+// (tryLDAPLogin's, and the two-factor setup's ProveDirectoryPassword) pass none of what
+// was typed (the identifier is sometimes a password), and none from the search on passes
+// a raw err: the search's and the bind's error text can carry the search filter, and
+// with it what was typed. typed nil means every parameter.
 func TestGuard_ADirectorySignInFailureLogsNothingTyped(t *testing.T) {
 	t.Parallel()
 	_, sources := authParsedSources(t)
-	var fn *ast.FuncDecl
-	for _, src := range sources {
-		if src.rel != "internal/api/handlers/auth.go" {
-			continue
-		}
-		for _, d := range src.file.Decls {
-			if f, ok := d.(*ast.FuncDecl); ok && f.Name.Name == "tryLDAPLogin" {
-				fn = f
+	for name, only := range map[string][]string{"tryLDAPLogin": nil, "ProveDirectoryPassword": {"password"}} {
+		var fn *ast.FuncDecl
+		for _, src := range sources {
+			if src.rel != "internal/api/handlers/auth.go" {
+				continue
+			}
+			for _, d := range src.file.Decls {
+				if f, ok := d.(*ast.FuncDecl); ok && f.Name.Name == name {
+					fn = f
+				}
 			}
 		}
-	}
-	if fn == nil {
-		t.Fatal("tryLDAPLogin not found: this guard has gone stale")
-	}
-	typed := map[string]bool{}
-	for _, field := range fn.Type.Params.List {
-		for _, n := range field.Names {
-			typed[n.Name] = true
+		if fn == nil {
+			t.Fatalf("%s not found: this guard has gone stale", name)
 		}
-	}
-	var bind, search token.Pos // the first directory call that sees the typed name, and the bind
-	logs := 0
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		switch sel.Sel.Name {
-		case "Authenticate":
-			bind = call.Pos()
-		case "Search":
-			if !search.IsValid() {
-				search = call.Pos()
+		typed := map[string]bool{}
+		for _, field := range fn.Type.Params.List {
+			for _, n := range field.Names {
+				typed[n.Name] = only == nil || slices.Contains(only, n.Name)
 			}
 		}
-		if x, ok := sel.X.(*ast.Ident); !ok || (x.Name != "slog" && x.Name != "logger") {
-			return true
-		}
-		logs++
-		for _, arg := range call.Args {
-			id, ok := arg.(*ast.Ident)
-			switch {
-			case !ok:
-			case typed[id.Name]:
-				t.Errorf("tryLDAPLogin logs %s, what the caller typed", id.Name)
-			case id.Name == "err" && search.IsValid() && call.Pos() > search:
-				t.Error("tryLDAPLogin logs a raw err from the search on, whose text can carry the typed identifier")
+		var bind, search token.Pos // the first directory call that sees the typed name, and the bind
+		logs := 0
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
 			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch sel.Sel.Name {
+			case "Authenticate":
+				bind = call.Pos()
+			case "Search":
+				if !search.IsValid() {
+					search = call.Pos()
+				}
+			}
+			if x, ok := sel.X.(*ast.Ident); !ok || (x.Name != "slog" && x.Name != "logger") {
+				return true
+			}
+			logs++
+			for _, arg := range call.Args {
+				id, ok := arg.(*ast.Ident)
+				switch {
+				case !ok:
+				case typed[id.Name]:
+					t.Errorf("%s logs %s, what the caller typed", name, id.Name)
+				case id.Name == "err" && search.IsValid() && call.Pos() > search:
+					t.Errorf("%s logs a raw err from the search on, whose text can carry the typed identifier", name)
+				}
+			}
+			return true
+		})
+		if !bind.IsValid() || !search.IsValid() || logs == 0 {
+			t.Fatalf("%s: found the search: %t, the bind: %t, log calls: %d: this guard has gone stale", name, search.IsValid(), bind.IsValid(), logs)
 		}
-		return true
-	})
-	if !bind.IsValid() || !search.IsValid() || logs == 0 {
-		t.Fatalf("found the search: %t, the bind: %t, log calls: %d: this guard has gone stale", search.IsValid(), bind.IsValid(), logs)
 	}
 }
