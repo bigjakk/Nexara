@@ -88,13 +88,15 @@ func (s *Server) RegisterFrontend(distFS fs.FS) {
 }
 
 // isHashedAsset reports whether this request is for a file under Vite's
-// content-hashed /assets/. It reads the once-decoded, normalised path fasthttp
-// hands the file server, not the raw one c.Path() returns, so
-// `/assets/..%2findex.html` is the shell. The static middleware decodes again
-// until nothing changes and turns "\" into "/", and Vite's names hold neither,
-// so a path that still has a "%" or a "\" is never treated as an asset.
+// content-hashed /assets/. It reads c.Path(), the path the router matched and
+// the one the static middleware opens (Fiber v3.6 middleware/static, requestPath
+// from c.Path()): escapes of unreserved characters decoded, every other escape
+// kept, dot segments removed. fasthttp's own Path decodes every escape, so
+// `/assets%2Fx.js` was an asset to it while the file server, which refuses an
+// escaped slash, answers that request with the shell. Vite's names hold no "%"
+// and no "\", so a path that has either is never treated as an asset.
 func isHashedAsset(c fiber.Ctx) bool {
-	p := string(c.RequestCtx().Path())
+	p := c.Path()
 	return strings.HasPrefix(p, "/assets/") && !strings.ContainsAny(p, `%\`)
 }
 
@@ -112,7 +114,7 @@ func applyFrontendCacheHeaders(c fiber.Ctx) {
 	// The Go mime table doesn't know .webmanifest, so the PWA manifest falls
 	// back to application/octet-stream — which browsers refuse under
 	// X-Content-Type-Options: nosniff.
-	if strings.HasSuffix(string(c.RequestCtx().Path()), ".webmanifest") {
+	if strings.HasSuffix(c.Path(), ".webmanifest") {
 		c.Set(fiber.HeaderContentType, "application/manifest+json")
 	}
 }

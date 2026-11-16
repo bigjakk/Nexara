@@ -132,6 +132,10 @@ func TestRegisterFrontend_CacheHeaders(t *testing.T) {
 		// it must NOT inherit the immutable policy or the wrong body gets
 		// cached under the asset URL for a year.
 		{"/assets/app-oldhash.js", "no-cache"},
+		// The asset itself, which the file server opens from the path the
+		// router normalized; fasthttp's own path folds the "//" first and
+		// would call this "/app-123.js".
+		{"/assets//../app-123.js", "public, max-age=31536000, immutable"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
