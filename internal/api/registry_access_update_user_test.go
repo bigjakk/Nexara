@@ -45,7 +45,7 @@ func accessUpdateRequest(user, query, body string) *http.Request {
 const accessUpdateEverything = `{
 	"enable": false, "expire": 1767225600, "groups": "sentinel-group-list", "append": true,
 	"comment": "sentinel-comment", "email": "sentinel-email@example.com",
-	"firstname": "sentinel-first", "lastname": "sentinel-last", "keys": "sentinel-keys"
+	"firstname": "sentinel-first", "lastname": "sentinel-last", "keys": "sentinelkeys"
 }`
 
 var accessUpdateEverythingForm = url.Values{
@@ -57,7 +57,7 @@ var accessUpdateEverythingForm = url.Values{
 	"email":     {"sentinel-email@example.com"},
 	"firstname": {"sentinel-first"},
 	"lastname":  {"sentinel-last"},
-	"keys":      {"sentinel-keys"},
+	"keys":      {"sentinelkeys"},
 }
 
 // TestAccessUpdateUserAuditRow follows a user edit to the form Proxmox receives and

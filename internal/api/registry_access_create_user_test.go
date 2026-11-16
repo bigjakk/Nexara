@@ -31,7 +31,7 @@ const accessCreatePassword = "PROBE-CREATE-PASSWORD-NOT-A-REAL-VALUE"
 // carry. The group list is here too: the row says a membership was set, not what it is.
 var accessCreateNeverRecorded = []string{
 	accessCreatePassword, "sentinel-comment", "sentinel-email@example.com",
-	"sentinel-first", "sentinel-last", "sentinel-keys", "sentinel-group-list",
+	"sentinel-first", "sentinel-last", "sentinelkeys", "sentinel-group-list",
 }
 
 // TestAccessCreateUserAuditRow follows a user create to the form Proxmox receives
@@ -52,12 +52,12 @@ func TestAccessCreateUserAuditRow(t *testing.T) {
 	}
 	everything := `"userid": "alice@pve", "password": "` + accessCreatePassword + `",
 		"comment": "sentinel-comment", "email": "sentinel-email@example.com",
-		"firstname": "sentinel-first", "lastname": "sentinel-last", "keys": "sentinel-keys",
+		"firstname": "sentinel-first", "lastname": "sentinel-last", "keys": "sentinelkeys",
 		"groups": "sentinel-group-list"`
 	everythingForm := url.Values{
 		"userid": {"alice@pve"}, "password": {accessCreatePassword}, "comment": {"sentinel-comment"},
 		"email": {"sentinel-email@example.com"}, "firstname": {"sentinel-first"}, "lastname": {"sentinel-last"},
-		"keys": {"sentinel-keys"}, "groups": {"sentinel-group-list"},
+		"keys": {"sentinelkeys"}, "groups": {"sentinel-group-list"},
 	}
 	withEnable := url.Values{"enable": {"0"}, "expire": {"1767225600"}}
 	for k, v := range everythingForm {

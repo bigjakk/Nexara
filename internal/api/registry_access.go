@@ -709,10 +709,18 @@ func accessUserFieldParams() apischema.Properties {
 		"groups": optString(4096, "<group[,group...]>",
 			"Comma-separated group membership. Replaces the stored list unless append is set; sent "+
 				"empty, it removes the account from every group."),
-		// 4096 is User.pm's user-keys pattern, [0-9a-zA-Z!=]{0,4096}.
-		"keys": optString(4096, "<string>",
-			"Legacy realm two-factor keys: YubiKey ids, or OATH (TOTP) secret keys. Not SSH keys. "+
-				"Sent empty, it clears them."),
+		// User.pm's user-keys standard option, transcribed: pattern
+		// [0-9a-zA-Z!=]{0,4096}, which PVE::JSONSchema anchors at both ends. The
+		// 4096 is MaxLength, since Go's regexp caps a repeat count at 1000.
+		"keys": {
+			Type:      apischema.String,
+			Optional:  true,
+			Pattern:   `^[0-9a-zA-Z!=]*$`,
+			MaxLength: apischema.Ptr(4096),
+			Typetext:  "<string>",
+			Description: "Legacy realm two-factor keys: YubiKey ids, or OATH (TOTP) secret keys, joined by " +
+				"\"!\" — letters, digits, \"!\" and \"=\" only. Not SSH keys. Sent empty, it clears them.",
+		},
 		"enable": {
 			Type:     apischema.Boolean,
 			Optional: true,

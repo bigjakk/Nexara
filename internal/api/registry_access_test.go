@@ -382,6 +382,27 @@ func TestAccessPatternsAreNoNarrowerThanWhatACallerCanSend(t *testing.T) {
 	walk("", 3)
 }
 
+// The user keys field carries PVE's user-keys pattern, [0-9a-zA-Z!=]{0,4096}
+// (pve-access-control User.pm), on the create and the edit alike; the length is
+// TestAccessUserKeysAreBoundedAsProxmoxBoundsThem's.
+func TestAccessUserKeysCarryPVEsPattern(t *testing.T) {
+	t.Parallel()
+	for _, route := range []struct{ method, path string }{
+		{fiber.MethodPost, accessScope + "/users"},
+		{fiber.MethodPut, accessScope + "/users/:userid"},
+	} {
+		re := regexp.MustCompile(declaredEndpoint(t, route.method, route.path).Parameters["keys"].Pattern)
+		for value, want := range map[string]bool{
+			"": true, "ccccccabcdef!JBSWY3DPEHPK3PXP": true, "abc=": true,
+			"a,b": false, "a b": false, "a-b": false, "a\nb": false,
+		} {
+			if got := re.MatchString(value); got != want {
+				t.Errorf("%s %s: keys %q accepted = %v, want %v", route.method, route.path, value, got, want)
+			}
+		}
+	}
+}
+
 // TestAccessTraversalIsRefusedAtTheRoute proves a traversal segment never
 // reaches the handler on a real request. Since v3.6 Fiber removes it, raw or
 // escaped, before it routes, so the route is never matched (404 in this
