@@ -48,9 +48,14 @@ RETURNING *;
 -- Self-exclusion is explicit rather than relying on the caller having already
 -- deleted the row, so this stays correct if it is ever asked before the delete
 -- (a dry-run or a preview endpoint).
+--
+-- The owner is everything before the LAST "!", as Proxmox splits a token id
+-- (pve-access-control, PVE/AccessControl.pm token_full_regex): a user name may
+-- contain "!" (user_regex is [^\s:/]+), a realm and a token name may not. A token
+-- id with no "!" is compared whole, as split_part did.
 SELECT count(*) FROM clusters
 WHERE id <> sqlc.arg(exclude_cluster_id)
-  AND split_part(token_id, '!', 1) = sqlc.arg(bootstrap_user_id);
+  AND left(token_id, length(token_id) - strpos(reverse(token_id), '!')) = sqlc.arg(bootstrap_user_id);
 
 -- name: ClearClusterCredentialProvenance :exec
 -- Forget that Nexara minted this cluster's credential.

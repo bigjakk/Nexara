@@ -470,6 +470,11 @@ type Querier interface {
 	// Self-exclusion is explicit rather than relying on the caller having already
 	// deleted the row, so this stays correct if it is ever asked before the delete
 	// (a dry-run or a preview endpoint).
+	//
+	// The owner is everything before the LAST "!", as Proxmox splits a token id
+	// (pve-access-control, PVE/AccessControl.pm token_full_regex): a user name may
+	// contain "!" (user_regex is [^\s:/]+), a realm and a token name may not. A token
+	// id with no "!" is compared whole, as split_part did.
 	CountClustersSharingBootstrapUser(ctx context.Context, arg CountClustersSharingBootstrapUserParams) (int64, error)
 	CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (CountCompletedNodesRow, error)
 	CountGuestToolsInFlightForCluster(ctx context.Context, clusterID uuid.UUID) (int64, error)
