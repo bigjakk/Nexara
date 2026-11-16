@@ -310,7 +310,8 @@ func (b browserBinding) matches(c fiber.Ctx, value, record string) bool {
 // provider's cross-site redirect, which a browser may not store a Strict cookie from;
 // Lax gives nothing away, as it is read only on the setup POST, which carries a bearer
 // token and is never a cross-site navigation. __Host- at / when
-// Secure, otherwise unprefixed and sent only to the setup routes. The proof keeps only
+// Secure, otherwise unprefixed and sent only to the setup routes, under the prefix a
+// reverse proxy puts the redirect URI under (totpStepUpCookiePathFor). The proof keeps only
 // its record (bindingRecord), so the session's token alone, or a cookie planted
 // unprefixed on a Secure install, cannot use it.
 const (
@@ -318,16 +319,28 @@ const (
 	totpStepUpCookiePath = "/api/v1/auth/totp/setup"
 )
 
-func totpStepUpCookie(secure bool) (name, path string) {
+func totpStepUpCookie(secure bool, redirectURI string) (name, path string) {
 	if secure {
 		return hostCookiePrefix + totpStepUpCookieName, "/"
 	}
-	return totpStepUpCookieName, totpStepUpCookiePath
+	return totpStepUpCookieName, totpStepUpCookiePathFor(redirectURI)
 }
 
-// setTOTPStepUpCookie gives the browser the secret its proof is bound to.
-func setTOTPStepUpCookie(c fiber.Ctx, secret string, secure bool, ttl time.Duration) {
-	name, path := totpStepUpCookie(secure)
+// totpStepUpCookiePathFor is the setup routes' path as the browser sees it: under the
+// prefix the redirect URI's callback sits under (oidcCallbackCookiePath), none when it
+// has none or does not end in the callback.
+func totpStepUpCookiePathFor(redirectURI string) string {
+	prefix, ok := strings.CutSuffix(oidcCallbackCookiePath(redirectURI), oidcCallbackPath)
+	if !ok {
+		prefix = ""
+	}
+	return prefix + totpStepUpCookiePath
+}
+
+// setTOTPStepUpCookie gives the browser the secret its proof is bound to; redirectURI is
+// the configuration's, which places the cookie.
+func setTOTPStepUpCookie(c fiber.Ctx, secret string, secure bool, ttl time.Duration, redirectURI string) {
+	name, path := totpStepUpCookie(secure, redirectURI)
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	c.Cookie(&fiber.Cookie{Name: name, Value: secret, Path: path, HTTPOnly: true, Secure: secure, SameSite: "Lax",
 		MaxAge: int(ttl / time.Second)})
@@ -352,10 +365,10 @@ func totpStepUpCookieRecords(c fiber.Ctx) []string {
 }
 
 // clearTOTPStepUpCookie expires the step-up cookie, under both names, once its proof is
-// used.
-func clearTOTPStepUpCookie(c fiber.Ctx) {
+// used, at the path setTOTPStepUpCookie gave it for redirectURI.
+func clearTOTPStepUpCookie(c fiber.Ctx, redirectURI string) {
 	for _, secure := range []bool{true, false} {
-		name, path := totpStepUpCookie(secure)
+		name, path := totpStepUpCookie(secure, redirectURI)
 		c.Cookie(&fiber.Cookie{Name: name, Value: "", Path: path, HTTPOnly: true, Secure: secure, SameSite: "Lax",
 			Expires: time.Unix(0, 0), MaxAge: -1})
 	}

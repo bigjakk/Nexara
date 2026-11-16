@@ -772,7 +772,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(h.exchangeFailure(c, err)))
 	}
 	if stepUp != "" || userInfo.StepUp != "" {
-		return stepUpRedirect(c, h.finishStepUp(c, stepUp, userInfo, oidcBindingSecure(cfg.RedirectUri), cfg.RelaxedStepUp))
+		return stepUpRedirect(c, h.finishStepUp(c, stepUp, userInfo, cfg.RedirectUri, cfg.RelaxedStepUp))
 	}
 
 	_, exchangeCode, failure := h.provisionAndStoreExchange(c, cfg, userInfo)
@@ -908,12 +908,14 @@ func (h *OIDCHandler) ssoStepUpIsSameAccount(ctx context.Context, userID uuid.UU
 // It is split out of Callback, like provisionAndStoreExchange, so a test can drive it.
 //
 // The proof is bound to this browser as well as to the session: a random secret goes
-// into the browser's step-up cookie (setTOTPStepUpCookie, Secure as secure says) and only
+// into the browser's step-up cookie (setTOTPStepUpCookie, Secure and placed as the
+// configuration's redirectURI says) and only
 // its record into the proof, so a stolen token of the same session cannot use it.
 //
 // relaxed is the configuration's relaxed_step_up: auth_time is then neither required
 // nor judged. The audit row says which rule the proof passed under.
-func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUserInfo, secure, relaxed bool) string {
+func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUserInfo, redirectURI string, relaxed bool) string {
+	secure := oidcBindingSecure(redirectURI)
 	sessionID, userID, ok := parseStepUpRecord(stepUp)
 	if !ok || info.StepUp != stepUp {
 		return h.refuseStepUp(c, stepUp, "malformed_state")
@@ -957,7 +959,7 @@ func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUs
 	if n == 0 {
 		return h.refuseStepUp(c, stepUp, "session_ended")
 	}
-	setTOTPStepUpCookie(c, secret, secure, ssoStepUpProofTTL)
+	setTOTPStepUpCookie(c, secret, secure, ssoStepUpProofTTL, redirectURI)
 	rule := "strict"
 	if relaxed {
 		rule = "relaxed"

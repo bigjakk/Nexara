@@ -335,7 +335,13 @@ func (h *TOTPHandler) useSSOStepUp(c fiber.Ctx, user db.User) error {
 	if n == 0 {
 		return fiber.NewError(fiber.StatusForbidden, totpSSOStepUpRequiredMessage)
 	}
-	clearTOTPStepUpCookie(c)
+	// Cleared where it was set: under the redirect URI's prefix. A configuration that
+	// cannot be read clears the unprefixed path; the proof is spent either way.
+	redirectURI := ""
+	if cfg, err := h.queries.GetEnabledOIDCConfig(c.Context()); err == nil {
+		redirectURI = cfg.RedirectUri
+	}
+	clearTOTPStepUpCookie(c, redirectURI)
 	return nil
 }
 

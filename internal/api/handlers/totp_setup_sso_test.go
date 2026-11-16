@@ -59,7 +59,7 @@ func stepUpCookieOf(resp *http.Response) string {
 func confirmStepUp(t *testing.T, a *epochApp, record string, info *auth.OIDCUserInfo, relaxed ...bool) (answer, cookie string) {
 	t.Helper()
 	a.probe = func(c fiber.Ctx) error {
-		return c.SendString(a.oidc.finishStepUp(c, record, info, false, len(relaxed) > 0 && relaxed[0]))
+		return c.SendString(a.oidc.finishStepUp(c, record, info, "", len(relaxed) > 0 && relaxed[0]))
 	}
 	resp := a.send(t, http.MethodGet, "/probe", "", nil, 20*time.Second)
 	return readBody(t, resp.Body), stepUpCookieOf(resp)
@@ -213,19 +213,22 @@ func TestTOTPSetup_TheRelaxedStepUpAcceptsARoundTripWithoutAuthTime(t *testing.T
 
 // TestTOTPSetup_TheStepUpCookieIsLaxAndReachesTheSetup: the step-up cookie is set on the
 // response to the provider's cross-site redirect, so it is Lax (a browser may drop a
-// Strict one), HttpOnly, with a Max-Age, and sent to the setup route.
+// Strict one), HttpOnly, with a Max-Age, and sent to the setup route, under the
+// redirect URI's prefix when a reverse proxy serves Nexara under one.
 func TestTOTPSetup_TheStepUpCookieIsLaxAndReachesTheSetup(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		secure     bool
-		name, path string
+		secure      bool
+		redirectURI string
+		name, path  string
 	}{
-		{false, totpStepUpCookieName, "/api/v1/auth/totp/setup"},
-		{true, hostCookiePrefix + totpStepUpCookieName, "/"},
+		{false, "http://nexara.example.com/api/v1/auth/oidc/callback", totpStepUpCookieName, "/api/v1/auth/totp/setup"},
+		{false, "http://nexara.example.com/nexara/api/v1/auth/oidc/callback", totpStepUpCookieName, "/nexara/api/v1/auth/totp/setup"},
+		{true, "https://nexara.example.com/nexara/api/v1/auth/oidc/callback", hostCookiePrefix + totpStepUpCookieName, "/"},
 	} {
 		app := fiber.New()
 		app.Get("/set", func(c fiber.Ctx) error {
-			setTOTPStepUpCookie(c, "secret", tc.secure, time.Minute)
+			setTOTPStepUpCookie(c, "secret", tc.secure, time.Minute, tc.redirectURI)
 			return c.SendStatus(http.StatusNoContent)
 		})
 		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/set", nil))
