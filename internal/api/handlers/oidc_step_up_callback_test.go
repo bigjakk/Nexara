@@ -98,7 +98,7 @@ func TestOIDCCallback_AStepUpRoundTripRecordsAProofAndSignsNobodyIn(t *testing.T
 	idp.mu.Lock()
 	idp.nonce = authURL.Query().Get("nonce")
 	idp.mu.Unlock()
-	var binding []string
+	binding := make([]string, 0, len(start.Cookies()))
 	for _, ck := range start.Cookies() {
 		binding = append(binding, ck.Name+"="+ck.Value)
 	}
