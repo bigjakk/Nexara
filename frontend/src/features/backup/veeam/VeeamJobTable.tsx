@@ -175,14 +175,14 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
     label: "Last run",
     width: 170,
     sortValue: (job) => toEpoch(job.last_run),
-    cell: (job) => <DateTime value={job.last_run} fallback="Never" />,
+    cell: (job) => <DateTime value={job.last_run} fallback="Never" compact />,
   },
   {
     key: "nextRun",
     label: "Next run",
     width: 170,
     sortValue: (job) => toEpoch(job.next_run),
-    cell: (job) => <DateTime value={job.next_run} fallback="Never" />,
+    cell: (job) => <DateTime value={job.next_run} fallback="Never" compact />,
   },
   {
     key: "repository",

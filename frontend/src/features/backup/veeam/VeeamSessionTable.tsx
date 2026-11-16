@@ -132,7 +132,7 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
     label: "Started",
     width: 170,
     sortValue: (session) => toEpoch(session.creation_time),
-    cell: (session) => <DateTime value={session.creation_time} />,
+    cell: (session) => <DateTime value={session.creation_time} compact />,
   },
   {
     key: "duration",

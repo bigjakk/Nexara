@@ -56,7 +56,7 @@ export const HISTORY_COLUMNS: ColumnDef<
           className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${ctx.expanded ? "" : "-rotate-90"}`}
         />
         {statusIcon(ctx.display)}
-        <DateTime value={entry.occurred_at} />
+        <DateTime value={entry.occurred_at} compact />
       </div>
     ),
   },

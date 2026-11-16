@@ -270,7 +270,7 @@ type RunKey = "expand" | "when" | "who" | "what" | "status";
 
 const RUN_COLUMNS: ColumnDef<UpsCommandRun, RunKey, { expanded: Set<string> }>[] = [
   expandColumn("expand"),
-  { key: "when", label: "When", width: 180, sortValue: (r) => r.requested_at, cell: (r) => <DateTime value={r.requested_at} /> },
+  { key: "when", label: "When", width: 180, sortValue: (r) => r.requested_at, cell: (r) => <DateTime value={r.requested_at} compact /> },
   { key: "who", label: "Who", width: 160, sortValue: (r) => r.user_display_name || r.user_email, cell: (r) => r.user_display_name || r.user_email || "—" },
   {
     key: "what",

@@ -186,7 +186,7 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
     align: "right",
     cell: (row) => (
       <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-        <DateTime value={row.entry.created_at} />
+        <DateTime value={row.entry.created_at} auto="relative" compact />
       </span>
     ),
   },

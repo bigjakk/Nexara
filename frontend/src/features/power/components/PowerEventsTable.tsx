@@ -40,7 +40,7 @@ function columns(showUps: boolean): ColumnDef<UpsEvent, SortKey, Ctx>[] {
       label: "When",
       width: 190,
       sortValue: (e) => e.started_at,
-      cell: (e) => <span className="text-sm"><DateTime value={e.started_at} /></span>,
+      cell: (e) => <span className="text-sm"><DateTime value={e.started_at} compact /></span>,
     },
     {
       key: "event",
