@@ -14,7 +14,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
-import { describeError } from "@/lib/api-error";
 import { useAuth } from "@/hooks/useAuth";
 import { PackagePreviewTable } from "./PackagePreviewTable";
 import {
@@ -59,7 +58,8 @@ export function NodeUpdatePanel({
   //
   // "Could not check" is kept distinct from "not configured": when the read
   // fails, leave the button enabled and let the create endpoint speak; it
-  // returns a precise message if they really are missing, rendered below.
+  // returns a precise message if they really are missing, which the app's
+  // error toast shows.
   const sshUnknown = ssh.unknown;
   const hasSSH = ssh.configured;
   const allowed = canManage("rolling_update");
@@ -68,8 +68,6 @@ export function NodeUpdatePanel({
   function applyUpdates() {
     update.mutate({ clusterId, nodeName });
   }
-
-  const failure = describeError(update.error);
 
   const hasTable = count > 0 && packages !== undefined;
 
@@ -144,10 +142,6 @@ export function NodeUpdatePanel({
             </Link>
             .
           </p>
-        )}
-
-        {failure !== "" && (
-          <p className="text-sm text-destructive">{failure}</p>
         )}
 
         {update.isSuccess && !busy && (

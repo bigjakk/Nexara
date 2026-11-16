@@ -289,6 +289,7 @@ export function useNodePackagePreview(clusterId: string, nodeName: string) {
 
 export function usePreflightHA() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       nodes,

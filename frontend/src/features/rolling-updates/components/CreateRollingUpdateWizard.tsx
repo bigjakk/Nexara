@@ -38,6 +38,8 @@ import {
 } from "../api/rolling-update-queries";
 import { useNotificationChannels } from "@/features/alerts/api/alert-queries";
 import type { HAConflict, HAPreFlightReport } from "@/types/api";
+import { describeError } from "@/lib/api-error";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface CreateRollingUpdateWizardProps {
   clusterId: string;
@@ -94,6 +96,7 @@ export function CreateRollingUpdateWizard({
   const createJob = useCreateRollingUpdateJob();
   const startJob = useStartRollingUpdateJob();
   const preflight = usePreflightHA();
+  const settle = useSaveOutcome(open);
 
   const hasSSH = ssh.configured;
   // A failed read is "could not check", not "none" (as in NodeUpdatePanel):
@@ -128,12 +131,18 @@ export function CreateRollingUpdateWizard({
   // step before this one.
   useEffect(() => {
     if (step === "ha_review" && selectedNodes.length > 0) {
-      preflight.mutate(
-        { clusterId, nodes: selectedNodes, parallelism: effectiveParallelism },
+      settle(
+        preflight.mutateAsync({
+          clusterId,
+          nodes: selectedNodes,
+          parallelism: effectiveParallelism,
+        }),
         {
+          action: "Checking HA constraints",
           onSuccess: (report) => {
             setPreflightReport(report);
           },
+          onError: () => undefined, // shown below from the mutation's state
         },
       );
     }
@@ -382,6 +391,9 @@ export function CreateRollingUpdateWizard({
               <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm">
                 <p>
                   Failed to check HA constraints. You can proceed with caution.
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {describeError(preflight.error)}
                 </p>
               </div>
             ) : preflightReport !== null &&
