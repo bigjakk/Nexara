@@ -12,12 +12,12 @@ import { EmptyState } from "@/components/EmptyState";
 import { UsageBar } from "@/components/UsageBar";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
-import { formatDateTime } from "@/lib/format";
 import { useMigrationJobs } from "../api/migration-queries";
 import { MigrateWizard } from "../components/MigrateWizard";
 import { MigrationStatusText } from "../components/MigrationStatusText";
 import { ACTIVE_MIGRATION_STATUSES, jobSummary } from "../lib/job-summary";
 import type { MigrationJob } from "../types/migration";
+import { DateTime } from "@/components/DateTime";
 
 const TYPE_LABEL: Record<MigrationJob["migration_type"], string> = {
   "intra-cluster": "Within the cluster",
@@ -116,7 +116,7 @@ export function MigrationsPage() {
                     <MigrationProgress job={job} />
                   </TableCell>
                   <TableCell className="whitespace-nowrap py-2 text-[12.5px] text-muted-foreground">
-                    {formatDateTime(job.created_at)}
+                    <DateTime value={job.created_at} />
                   </TableCell>
                 </TableRow>
               ))}
