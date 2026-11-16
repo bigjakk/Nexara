@@ -1372,6 +1372,8 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
           } If Nexara reaches this cluster through ${p.node} and has pinned its certificate, Nexara's live calls to the cluster fail until you verify the new certificate on the cluster's page.`
         }
         confirmLabel={(p) => (p.kind === "order" ? "Order Certificate" : "Renew")}
+        // Renewing revokes the old certificate; an order replaces nothing.
+        destructive={(p) => p.kind !== "order"}
       />
     </div>
   );

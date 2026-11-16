@@ -34,6 +34,12 @@ interface ConfirmDeleteDialogProps<T> {
    * shows, so it holds while the dialog closes.
    */
   confirmLabel?: string | ((target: T) => string);
+  /**
+   * Whether the confirm button is drawn as a danger (red). True by default;
+   * false, or a function of the target that answers false, for an action that
+   * loses nothing, such as starting a job. Red means danger only.
+   */
+  destructive?: boolean | ((target: T) => boolean);
   /** The dismiss button's text, for a dialog whose action is itself a cancel. */
   cancelLabel?: string | ((target: T) => string) | undefined;
   /**
@@ -57,7 +63,8 @@ interface ConfirmDeleteDialogProps<T> {
 
 /**
  * The confirmation every destructive one-row action goes through: the button
- * opens this, and only its confirm button sends the request.
+ * opens this, and only its confirm button sends the request. An action that
+ * asks first without being a danger passes `destructive={false}`.
  *
  * Usage:
  *
@@ -78,6 +85,7 @@ export function ConfirmDeleteDialog<T>({
   title,
   description,
   confirmLabel = "Delete",
+  destructive = true,
   cancelLabel = "Cancel",
   confirmDisabled = false,
   fallbackFocus,
@@ -121,7 +129,15 @@ export function ConfirmDeleteDialog<T>({
                   : cancelLabel}
               </AlertDialogCancel>
               <AlertDialogAction
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                className={
+                  (
+                    typeof destructive === "function"
+                      ? destructive(current)
+                      : destructive
+                  )
+                    ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    : undefined
+                }
                 disabled={confirmDisabled}
                 onClick={() => {
                   // Only an open dialog confirms: the closing content is

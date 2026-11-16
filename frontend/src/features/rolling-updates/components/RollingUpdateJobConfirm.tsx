@@ -94,6 +94,7 @@ export function RollingUpdateJobConfirm({
       confirmLabel={(a) =>
         a.kind === "cancel" ? t("cancelJob") : t("startJob")
       }
+      destructive={(a) => a.kind === "cancel"}
       cancelLabel={(a) =>
         a.kind === "cancel" ? t("keepJob") : t("cancel", { ns: "common" })
       }

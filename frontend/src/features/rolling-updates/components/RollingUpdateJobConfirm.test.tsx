@@ -82,8 +82,11 @@ describe("RollingUpdateJobsTable — Start and Cancel ask first", () => {
     expect(dialog).toHaveTextContent("Then the node is rebooted.");
     expect(dialog).toHaveTextContent("HA rules that name one of the node's");
     expect(onStart).not.toHaveBeenCalled();
+    // Red means danger only: starting is not drawn as one, cancelling is.
+    const start = within(dialog).getByRole("button", { name: "Start" });
+    expect(start.className).not.toContain("bg-destructive");
 
-    await user.click(within(dialog).getByRole("button", { name: "Start" }));
+    await user.click(start);
     expect(onStart).toHaveBeenCalledWith("j1");
   });
 
@@ -112,10 +115,10 @@ describe("RollingUpdateJobsTable — Start and Cancel ask first", () => {
       "an upgrade already running finishes, but the node is not rebooted",
     );
     expect(onCancel).not.toHaveBeenCalled();
+    const cancel = within(dialog).getByRole("button", { name: "Cancel job" });
+    expect(cancel.className).toContain("bg-destructive");
 
-    await user.click(
-      within(dialog).getByRole("button", { name: "Cancel job" }),
-    );
+    await user.click(cancel);
     expect(onCancel).toHaveBeenCalledWith("j1");
   });
 });
