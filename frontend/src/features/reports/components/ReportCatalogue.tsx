@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
 import { CalendarClock } from "lucide-react";
-import { formatDateTime, formatExactDateTime } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 import type { ReportRun } from "@/types/api";
 import { REPORT_TYPES, type ReportTypeInfo } from "../report-types";
 
@@ -113,7 +113,8 @@ function CatalogueEntry({
             className="text-primary hover:underline"
             title={formatExactDateTime(latest.created_at)}
           >
-            Open the run from {formatDateTime(latest.created_at)}
+            Open the run from{" "}
+            {formatExactDateTime(latest.created_at, "—", "relative")}
           </Link>
         ) : (
           <span className="text-muted-foreground/75">Never run</span>

@@ -48,7 +48,7 @@ import type { ReportRun } from "@/types/api";
 import { reportTypeLabel, periodLabel, runFileName } from "../report-types";
 import { ReportEmailDialog } from "./ReportEmailDialog";
 import { DateTime } from "@/components/DateTime";
-import { formatDateTime, formatExactDateTime } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 
 /** A run's state in words. A finished run is the ordinary case and stays plain. */
 function RunStatus({ run }: { run: ReportRun }) {
@@ -279,7 +279,7 @@ export function ReportRunsTable() {
             <AlertDialogTitle>Delete this report run?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget
-                ? `${reportTypeLabel(deleteTarget.report_type)} for ${clusterName(deleteTarget.cluster_id)}, created ${formatDateTime(deleteTarget.created_at)}. The stored HTML and CSV are removed; this cannot be undone.`
+                ? `${reportTypeLabel(deleteTarget.report_type)} for ${clusterName(deleteTarget.cluster_id)}, created ${formatExactDateTime(deleteTarget.created_at)}. The stored HTML and CSV are removed; this cannot be undone.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>

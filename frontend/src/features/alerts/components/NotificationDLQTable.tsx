@@ -26,7 +26,7 @@ import {
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
-import { formatDateTime } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
@@ -216,7 +216,7 @@ export function NotificationDLQTable() {
           del.mutate(entry.id);
         }}
         title={(entry) =>
-          `Delete the failed notification to ${entry.channel_name} from ${formatDateTime(entry.created_at)}?`
+          `Delete the failed notification to ${entry.channel_name} from ${formatExactDateTime(entry.created_at, "—", "relative")}?`
         }
         description={() =>
           "The entry, its stored payload and its last error are deleted, so this notification can no longer be retried or inspected. This cannot be undone."
@@ -288,7 +288,7 @@ function DLQRow({
           {entry.last_error}
         </TableCell>
         <TableCell className="text-xs text-muted-foreground">
-          <DateTime value={entry.created_at} />
+          <DateTime value={entry.created_at} auto="relative" />
         </TableCell>
         {canManage && (
           <TableCell
@@ -316,7 +316,7 @@ function DLQRow({
                 </>
               )}
               <Button
-                aria-label={`Delete failed notification to ${entry.channel_name} from ${formatDateTime(entry.created_at)}`}
+                aria-label={`Delete failed notification to ${entry.channel_name} from ${formatExactDateTime(entry.created_at, "—", "relative")}`}
                 variant="ghost"
                 size="sm"
                 className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
@@ -335,10 +335,10 @@ function DLQRow({
               {entry.failure_kind}
             </DetailField>
             <DetailField label="Created" variant="mono">
-              <DateTime value={entry.created_at} exact />
+              <DateTime value={entry.created_at} exact auto="as-sent" />
             </DetailField>
             <DetailField label="Last update" variant="mono">
-              <DateTime value={entry.updated_at} exact />
+              <DateTime value={entry.updated_at} exact auto="as-sent" />
             </DetailField>
             {entry.alert_id && (
               <DetailField label="Alert ID" variant="mono">
