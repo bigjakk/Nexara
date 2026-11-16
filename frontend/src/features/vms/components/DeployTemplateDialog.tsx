@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCloneVM, useClusterVMIDs } from "../api/vm-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
@@ -34,6 +35,7 @@ export function DeployTemplateDialog({
   onOpenChange,
 }: DeployTemplateDialogProps) {
   const cloneMutation = useCloneVM();
+  const settle = useSaveOutcome(open ? vmId : null);
   const { data: existingIds } = useClusterVMIDs(clusterId);
   const { data: nodes } = useClusterNodes(clusterId);
   const { data: storages } = useClusterStorage(clusterId);
@@ -96,8 +98,8 @@ export function DeployTemplateDialog({
     const parsedId = parseInt(newId, 10);
     if (isNaN(parsedId) || parsedId < 100) return;
 
-    cloneMutation.mutate(
-      {
+    settle(
+      cloneMutation.mutateAsync({
         clusterId,
         resourceId: vmId,
         kind,
@@ -108,11 +110,13 @@ export function DeployTemplateDialog({
           full: fullClone,
           storage,
         },
-      },
+      }),
       {
+        action: `Deploying ${templateName}`,
         onSuccess: (data) => {
           setUpid(data.upid);
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

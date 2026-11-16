@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { CheckField, Field } from "@/components/page/Field";
 import { WarningCallout } from "@/components/WarningCallout";
 import { useCreateSnapshot, useSnapshotCapability } from "../api/vm-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { useTaskStatus } from "@/features/tasks/api/tasks-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import { useTaskLogStore } from "@/stores/task-log-store";
@@ -49,6 +50,7 @@ export function CreateSnapshotDialog({
 }: CreateSnapshotDialogProps) {
   const queryClient = useQueryClient();
   const createMutation = useCreateSnapshot();
+  const settle = useSaveOutcome(open ? resourceId : null);
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
@@ -115,8 +117,25 @@ export function CreateSnapshotDialog({
   function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
     if (!canSubmit) return;
-    createMutation.mutate(
-      {
+    const watch = (data: { upid: string }) => {
+      // A new dispatch replaces any still-watched previous task; the old
+      // one stays visible in the task log, it just loses this watcher.
+      setTask({
+        upid: data.upid,
+        clusterId,
+        resourceId,
+        queryKey: [
+          "clusters",
+          clusterId,
+          kind === "ct" ? "containers" : "vms",
+          resourceId,
+          "snapshots",
+        ],
+        description: `Snapshot ${resourceName}`,
+      });
+    };
+    settle(
+      createMutation.mutateAsync({
         clusterId,
         resourceId,
         kind,
@@ -125,25 +144,14 @@ export function CreateSnapshotDialog({
           ...(description ? { description } : {}),
           ...(kind === "vm" ? { vmstate } : {}),
         },
-      },
+      }),
       {
-        onSuccess: (data) => {
-          // A new dispatch replaces any still-watched previous task; the old
-          // one stays visible in the task log, it just loses this watcher.
-          setTask({
-            upid: data.upid,
-            clusterId,
-            resourceId,
-            queryKey: [
-              "clusters",
-              clusterId,
-              kind === "ct" ? "containers" : "vms",
-              resourceId,
-              "snapshots",
-            ],
-            description: `Snapshot ${resourceName}`,
-          });
-        },
+        action: `Taking a snapshot of ${resourceName}`,
+        onSuccess: watch,
+        // Dismissed before the dispatch answered: watched in the background, as a
+        // dismissal mid-task is (handleClose).
+        onLateSuccess: watch,
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

@@ -15,6 +15,7 @@ import {
   useClusterStorage,
 } from "@/features/clusters/api/cluster-queries";
 import { useCloneVM, useClusterVMIDs } from "../api/vm-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
 
@@ -39,6 +40,7 @@ export function CloneDialog({
   const { data: storageList } = useClusterStorage(clusterId);
   const { data: usedVMIDs } = useClusterVMIDs(clusterId);
   const cloneMutation = useCloneVM();
+  const settle = useSaveOutcome(open ? resourceId : null);
 
   // Deduplicate storage names (same pool may appear on multiple nodes)
   const storageOptions = storageList
@@ -81,8 +83,8 @@ export function CloneDialog({
 
   function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
-    cloneMutation.mutate(
-      {
+    settle(
+      cloneMutation.mutateAsync({
         clusterId,
         resourceId,
         kind,
@@ -93,11 +95,13 @@ export function CloneDialog({
           full,
           storage: full ? storage : "",
         },
-      },
+      }),
       {
+        action: `Cloning ${sourceName}`,
         onSuccess: (data) => {
           setUpid(data.upid);
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

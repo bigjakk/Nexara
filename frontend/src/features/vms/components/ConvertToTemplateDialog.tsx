@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { CopyableName } from "@/components/CopyableName";
 import { ConfirmNameField } from "@/components/TypeToConfirmDialog";
 import { useConvertToTemplate } from "../api/vm-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
 
@@ -32,6 +33,7 @@ export function ConvertToTemplateDialog({
   resourceName,
 }: ConvertToTemplateDialogProps) {
   const convertMutation = useConvertToTemplate();
+  const settle = useSaveOutcome(open ? resourceId : null);
   const [upid, setUpid] = useState<string | null>(null);
   const [confirmText, setConfirmText] = useState("");
 
@@ -40,14 +42,13 @@ export function ConvertToTemplateDialog({
 
   function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
-    convertMutation.mutate(
-      { clusterId, resourceId, kind },
-      {
-        onSuccess: (data) => {
-          setUpid(data.upid);
-        },
+    settle(convertMutation.mutateAsync({ clusterId, resourceId, kind }), {
+      action: `Converting ${resourceName} to a template`,
+      onSuccess: (data) => {
+        setUpid(data.upid);
       },
-    );
+      onError: () => undefined, // shown below from the mutation's state
+    });
   }
 
   function handleClose() {

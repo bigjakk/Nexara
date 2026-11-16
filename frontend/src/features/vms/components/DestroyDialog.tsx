@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { CopyableName } from "@/components/CopyableName";
 import { ConfirmNameField } from "@/components/TypeToConfirmDialog";
 import { useDestroyVM } from "../api/vm-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
 
@@ -33,7 +34,8 @@ export function DestroyDialog({
   resourceName,
 }: DestroyDialogProps) {
   const navigate = useNavigate();
-  const destroyMutation = useDestroyVM();
+  const destroyMutation = useDestroyVM(true);
+  const settle = useSaveOutcome(open ? resourceId : null);
   const [upid, setUpid] = useState<string | null>(null);
   const [confirmText, setConfirmText] = useState("");
 
@@ -41,14 +43,13 @@ export function DestroyDialog({
 
   function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
-    destroyMutation.mutate(
-      { clusterId, resourceId, kind },
-      {
-        onSuccess: (data) => {
-          setUpid(data.upid);
-        },
+    settle(destroyMutation.mutateAsync({ clusterId, resourceId, kind }), {
+      action: `Destroying ${resourceName}`,
+      onSuccess: (data) => {
+        setUpid(data.upid);
       },
-    );
+      onError: () => undefined, // shown below from the mutation's state
+    });
   }
 
   function handleClose() {

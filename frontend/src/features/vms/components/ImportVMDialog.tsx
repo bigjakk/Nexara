@@ -173,6 +173,9 @@ export function ImportVMDialog({
   const urlMetaMutation = useQueryURLMetadata();
   const enableImportMutation = useEnableImportContent();
   const startMutation = useStartImport();
+  // Each step shows its own failure, and one that lands after the dialog was
+  // closed is toasted instead.
+  const settle = useSaveOutcome(open);
 
   const selectedSource = useMemo(
     () =>
@@ -406,14 +409,15 @@ export function ImportVMDialog({
   }
 
   function goToInspect() {
-    metadataMutation.mutate(
-      {
+    settle(
+      metadataMutation.mutateAsync({
         clusterId,
         node: sourceNode,
         storage: sourceStorageName,
         volume: selectedVolume,
-      },
+      }),
       {
+        action: `Reading ${volidBasename(selectedVolume)}`,
         onSuccess: (meta: ImportMetadataResponse) => {
           if (!name) setName(meta.name);
           if (!targetNode) setTargetNode(sourceNode);
@@ -433,6 +437,7 @@ export function ImportVMDialog({
           if (!cpuType && ca["cpu"]) setCpuType(ca["cpu"]);
           setStep("inspect");
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }
@@ -479,8 +484,8 @@ export function ImportVMDialog({
     if (!downloadUrlValid || !effectiveDownloadFilename || !sourcePoolId)
       return;
     setDownloadUpid(null);
-    downloadMutation.mutate(
-      {
+    settle(
+      downloadMutation.mutateAsync({
         clusterId,
         storageId: sourcePoolId,
         data: {
@@ -488,11 +493,13 @@ export function ImportVMDialog({
           content: "import",
           filename: effectiveDownloadFilename,
         },
-      },
+      }),
       {
+        action: `Downloading ${effectiveDownloadFilename}`,
         onSuccess: (res) => {
           setDownloadUpid(res.upid || null);
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }
@@ -579,14 +586,13 @@ export function ImportVMDialog({
       if (multiqueue) body.multiqueue = Number(multiqueue);
     }
 
-    startMutation.mutate(
-      { clusterId, body },
-      {
-        onSuccess: (job) => {
-          setImportUpid(job.upid ?? null);
-        },
+    settle(startMutation.mutateAsync({ clusterId, body }), {
+      action: `Importing ${name || volidBasename(selectedVolume)}`,
+      onSuccess: (job) => {
+        setImportUpid(job.upid ?? null);
       },
-    );
+      onError: () => undefined, // shown below from the mutation's state
+    });
   }
 
   const stepIdx = steps.indexOf(step);
@@ -766,12 +772,17 @@ export function ImportVMDialog({
                                 variant="outline"
                                 disabled={enableImportMutation.isPending}
                                 onClick={() => {
-                                  enableImportMutation.mutate(
-                                    { clusterId, storage: s },
+                                  settle(
+                                    enableImportMutation.mutateAsync({
+                                      clusterId,
+                                      storage: s,
+                                    }),
                                     {
+                                      action: `Enabling import content on ${s}`,
                                       onSuccess: () => {
                                         setPendingSelectStorage(s);
                                       },
+                                      onError: () => undefined, // shown below from the mutation's state
                                     },
                                   );
                                 }}

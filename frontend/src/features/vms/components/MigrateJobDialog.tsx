@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ViewMigrationsLink } from "@/features/migrations/components/ViewMigrationsLink";
-import { apiClient, sessionScope } from "@/lib/api-client";
+import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import {
   Dialog,
@@ -59,6 +59,7 @@ import type {
   CheckSeverity,
 } from "@/features/migrations/types/migration";
 import type { ResourceKind } from "../types/vm";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   ArrowRight,
   CheckCircle2,
@@ -236,8 +237,9 @@ export function MigrateJobDialog({
 
   const queryClient = useQueryClient();
   // Mutation hooks
-  const createMutation = useCreateMigration();
-  const checkMutation = useRunPreFlightCheck();
+  const createMutation = useCreateMigration(true);
+  const checkMutation = useRunPreFlightCheck(true);
+  const settle = useSaveOutcome(open);
   const executeMutation = useExecuteMigration();
   const { data: job } = useMigrationJob(jobId);
 
@@ -327,18 +329,31 @@ export function MigrateJobDialog({
           : "",
     };
 
-    // The session this was started in. The check is a write to the job the create
-    // just made — it sets it to "checking", records the report and moves it on, to
-    // pending or to failed — and needs manage:migration, not ownership of the job:
-    // sent after the session changed hands it would run as whoever is signed in
-    // next, on the previous user's job.
-    const ended = sessionScope();
-    void createMutation.mutateAsync(req).then((created) => {
-      if (ended()) return;
-      setJobId(created.id);
-      void checkMutation.mutateAsync(created.id).then(() => {
-        setStep("preflight");
+    // The check is a write to the job the create just made — it sets it to
+    // "checking", records the report and moves it on, to pending or to failed —
+    // and needs manage:migration, not ownership of the job: sent after the
+    // session changed hands it would run as whoever is signed in next, on the
+    // previous user's job. useSaveOutcome drops a create that lands after that.
+    // Closed before the create answered, the job is still checked.
+    const check = (id: string, onChecked?: () => void) => {
+      settle(checkMutation.mutateAsync(id), {
+        action: t("migrationCheckAction", { name: vmName }),
+        ...(onChecked ? { onSuccess: onChecked } : {}),
+        onError: () => undefined, // shown below from the mutation's state
       });
+    };
+    settle(createMutation.mutateAsync(req), {
+      action: t("migrationCreateAction", { name: vmName }),
+      onSuccess: (created) => {
+        setJobId(created.id);
+        check(created.id, () => {
+          setStep("preflight");
+        });
+      },
+      onLateSuccess: (created) => {
+        check(created.id);
+      },
+      onError: () => undefined, // shown below from the mutation's state
     });
   }
 

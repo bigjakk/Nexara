@@ -138,6 +138,8 @@ import type {
   SMBIOSTextField,
 } from "../lib/vm-config-parsers";
 import type { VMConfig } from "../types/vm";
+import { describeError } from "@/lib/api-error";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 const DISK_KEY_RE = /^(scsi|ide|sata|virtio|efidisk|tpmstate|unused)\d+$/;
 
@@ -374,6 +376,12 @@ export function HardwarePanel({
   const { data: config, isLoading } = useVMConfig(clusterId, vmId);
   const setConfigMutation = useSetVMConfig();
   const resizeMutation = useResizeDisk();
+  // The panel shows a failed save or resize in its save bar, and a delete's in
+  // its dialog; one that lands after either has gone is toasted instead. One
+  // Save can resize several disks over one mutation, so their failures are
+  // kept here rather than read from its state, which holds only the last.
+  const settle = useSaveOutcome();
+  const [resizeErrors, setResizeErrors] = useState<string[]>([]);
 
   // Removing an unusedN key DESTROYS the volume it holds, if this VM owns it:
   // Proxmox frees it on the spot, where removing a live drive only parks its
@@ -385,6 +393,7 @@ export function HardwarePanel({
     key: string;
     volume: string;
   } | null>(null);
+  const settleDelete = useSaveOutcome(unusedToDelete?.key ?? null);
 
   // Removing a cloud-init drive frees its volume, where removing an ISO drive
   // only empties a slot (vmconfig_register_unused_drive,
@@ -1055,6 +1064,7 @@ export function HardwarePanel({
 
   function handleSave() {
     if (!original || memoryMissing) return;
+    setResizeErrors([]);
     const fields: Record<string, string> = {};
     const deleteFields: string[] = [];
 
@@ -1308,22 +1318,32 @@ export function HardwarePanel({
     for (const [key, edit] of Object.entries(diskEdits)) {
       if (disksToRemove.has(key)) continue;
       if (edit.newSize) {
-        resizeMutation.mutate({
-          clusterId,
-          vmId,
-          disk: key,
-          size: edit.newSize,
-        });
+        settle(
+          resizeMutation.mutateAsync({
+            clusterId,
+            vmId,
+            disk: key,
+            size: edit.newSize,
+          }),
+          {
+            action: `Resizing disk ${key}`,
+            onError: (err) => {
+              const msg = describeError(err) || "the request failed";
+              setResizeErrors((prev) => [...prev, msg]);
+            },
+          },
+        );
       }
     }
 
     if (Object.keys(fields).length === 0) return;
 
-    setConfigMutation.mutate(
-      { clusterId, vmId, fields },
+    settle(setConfigMutation.mutateAsync({ clusterId, vmId, fields }), {
+      action: "Saving the hardware settings",
       // Clear pending state after successful save
-      { onSuccess: clearStagedChanges },
-    );
+      onSuccess: clearStagedChanges,
+      onError: () => undefined, // shown in the save bar from the mutation's state
+    });
   }
 
   /**
@@ -3790,9 +3810,14 @@ export function HardwarePanel({
                 // a failure stays on screen.
                 e.preventDefault();
                 if (!unusedToDelete) return;
-                detachDisk.mutate(
-                  { clusterId, vmId, disk: unusedToDelete.key },
+                settleDelete(
+                  detachDisk.mutateAsync({
+                    clusterId,
+                    vmId,
+                    disk: unusedToDelete.key,
+                  }),
                   {
+                    action: `Deleting unused disk ${unusedToDelete.key}`,
                     onSuccess: () => {
                       // The delete changed the config, so the refetch
                       // re-populates every field and the unsaved edits are
@@ -3802,6 +3827,7 @@ export function HardwarePanel({
                       clearStagedChanges();
                       closeUnusedDelete();
                     },
+                    onError: () => undefined, // shown below from the mutation's state
                   },
                 );
               }}
@@ -3855,7 +3881,7 @@ export function HardwarePanel({
         hideIdle={
           setConfigMutation.isError ||
           setConfigMutation.isSuccess ||
-          resizeMutation.isError ||
+          resizeErrors.length > 0 ||
           resizeMutation.isSuccess
         }
       >
@@ -3869,11 +3895,11 @@ export function HardwarePanel({
             Saved.{isRunning ? " Some changes need a restart." : ""}
           </span>
         )}
-        {resizeMutation.isError && (
-          <span className="text-destructive">
-            Resize failed: {resizeMutation.error.message}
+        {resizeErrors.map((msg, i) => (
+          <span key={i} className="text-destructive">
+            Resize failed: {msg}
           </span>
-        )}
+        ))}
         {resizeMutation.isSuccess && (
           <span className="text-muted-foreground">
             Disk resized successfully.

@@ -68,6 +68,8 @@
   "executeMigrationAnyway": "Execute migration anyway",
   "executeMigrationsAnyway_one": "Execute {{count}} migration anyway",
   "executeMigrationsAnyway_other": "Execute {{count}} migrations anyway",
+  "migrationCreateAction": "Creating the migration of {{name}}",
+  "migrationCheckAction": "Checking the migration of {{name}}",
   "destroyTitle": "Destroy {{type}}",
   "destroyDesc": "This will permanently destroy <strong>{{name}}</strong> and all its data. This action cannot be undone.",
   "typeToConfirm": "Type <strong>{{name}}</strong> to confirm",

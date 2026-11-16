@@ -36,6 +36,7 @@ import {
   useCreateVM,
   useResourcePools,
 } from "../api/vm-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { NodeResponse, VMResponse } from "@/types/api";
@@ -130,6 +131,7 @@ export function CreateVMDialog({
   const { data: clusterVMs } = useClusterVMs(clusterId);
   const { data: resourcePools } = useResourcePools(clusterId);
   const createMutation = useCreateVM();
+  const settle = useSaveOutcome(open);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Storage pools filtered for disk images
@@ -631,14 +633,13 @@ export function CreateVMDialog({
     if (tags) body.tags = tags;
     if (pool) body.pool = pool;
 
-    createMutation.mutate(
-      { clusterId, body },
-      {
-        onSuccess: (data) => {
-          setUpid(data.upid);
-        },
+    settle(createMutation.mutateAsync({ clusterId, body }), {
+      action: `Creating VM ${name || vmid}`,
+      onSuccess: (data) => {
+        setUpid(data.upid);
       },
-    );
+      onError: () => undefined, // shown below from the mutation's state
+    });
   }
 
   function handleClose() {

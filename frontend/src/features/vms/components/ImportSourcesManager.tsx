@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useDeleteImportSource, useImportSources } from "../api/import-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { EsxiSourceForm } from "./EsxiSourceForm";
 import type { ImportSource } from "@/types/api";
 
@@ -33,6 +34,7 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
   const deleteMutation = useDeleteImportSource();
   const [showEsxiForm, setShowEsxiForm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const settle = useSaveOutcome(deleteTarget);
   // Where focus goes when Remove closes: the list, whose row goes with the
   // source.
   const section = useRef<HTMLDivElement>(null);
@@ -61,14 +63,14 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
 
   function confirmDelete() {
     if (!deleteTarget) return;
-    deleteMutation.mutate(
-      { clusterId, storage: deleteTarget },
-      {
-        onSettled: () => {
-          setDeleteTarget(null);
-        },
+    // A failure keeps the dialog open, which shows it.
+    settle(deleteMutation.mutateAsync({ clusterId, storage: deleteTarget }), {
+      action: `Removing import source ${deleteTarget}`,
+      onSuccess: () => {
+        setDeleteTarget(null);
       },
-    );
+      onError: () => undefined, // shown in the dialog from the mutation's state
+    });
   }
 
   return (
@@ -144,6 +146,8 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
                     size="sm"
                     className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
                     onClick={() => {
+                      // Not the failure of another source's remove.
+                      if (!deleteMutation.isPending) deleteMutation.reset();
                       setDeleteTarget(g.storage);
                     }}
                   >

@@ -71,6 +71,7 @@ import {
   fieldInputClass,
   fieldSelectClass,
 } from "./hardware/field-classes";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface ContainerResourcesPanelProps {
   clusterId: string;
@@ -211,6 +212,7 @@ function MoveVolumeDialog({
   const [deleteOriginal, setDeleteOriginal] = useState(false);
   const [bwlimit, setBwlimit] = useState("");
   const moveMutation = useMoveContainerVolume();
+  const settle = useSaveOutcome(open);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
   const filteredOptions = storageOptions.filter((s) => s !== currentStorage);
@@ -218,29 +220,43 @@ function MoveVolumeDialog({
 
   function handleMove() {
     if (!targetStorage || bwlimitInvalid) return;
-    moveMutation.mutate(
-      {
+    const focus = (data: { upid: string }) => {
+      if (data.upid) {
+        setFocusedTask({
+          clusterId,
+          upid: data.upid,
+          description: `Move ${volumeKey} → ${targetStorage}`,
+        });
+      }
+    };
+    const reset = () => {
+      setTargetStorage("");
+      setDeleteOriginal(false);
+      setBwlimit("");
+    };
+    settle(
+      moveMutation.mutateAsync({
         clusterId,
         ctId,
         volume: volumeKey,
         storage: targetStorage,
         deleteOriginal,
         bwlimitKib,
-      },
+      }),
       {
+        action: `Moving ${volumeKey} to ${targetStorage}`,
         onSuccess: (data) => {
-          if (data.upid) {
-            setFocusedTask({
-              clusterId,
-              upid: data.upid,
-              description: `Move ${volumeKey} → ${targetStorage}`,
-            });
-          }
+          focus(data);
           setOpen(false);
-          setTargetStorage("");
-          setDeleteOriginal(false);
-          setBwlimit("");
+          reset();
         },
+        // The dialog stays mounted while closed: follow the task and put the
+        // form away as onSuccess would have.
+        onLateSuccess: (data, now) => {
+          focus(data);
+          if (!now.open) reset();
+        },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }
@@ -329,6 +345,7 @@ function MoveVolumeDialog({
 function useVolumeResize(clusterId: string, ctId: string, disk: string) {
   const [resizeSize, setResizeSize] = useState("");
   const resizeMutation = useResizeContainerDisk();
+  const settle = useSaveOutcome();
   return {
     size: resizeSize,
     setSize: setResizeSize,
@@ -336,12 +353,19 @@ function useVolumeResize(clusterId: string, ctId: string, disk: string) {
     isSuccess: resizeMutation.isSuccess,
     error: resizeMutation.isError ? resizeMutation.error.message : null,
     send: () => {
-      resizeMutation.mutate(
-        { clusterId, ctId, disk, size: resizeSize.trim() },
+      settle(
+        resizeMutation.mutateAsync({
+          clusterId,
+          ctId,
+          disk,
+          size: resizeSize.trim(),
+        }),
         {
+          action: `Resizing ${disk}`,
           onSuccess: () => {
             setResizeSize("");
           },
+          onError: () => undefined, // shown below from the mutation's state
         },
       );
     },
@@ -793,7 +817,8 @@ export function ContainerResourcesPanel({
   // dropping it too soon could list a deleted volume again.
   const [afterSave, setAfterSave] = useState<AfterSave | null>(null);
   const config = currentConfig(fetchedConfig, dataUpdatedAt, afterSave);
-  const setConfigMutation = useSetResourceConfig();
+  const setConfigMutation = useSetResourceConfig(true);
+  const settle = useSaveOutcome();
   const queryClient = useQueryClient();
   // useContainerConfig's key, so saveChanges can read the newest copy at the
   // moment it checks.
@@ -1262,27 +1287,36 @@ export function ContainerResourcesPanel({
     // runs those only while this panel's observer has listeners, and a parent
     // that keeps the panel alive while hiding it (<Activity>) takes them
     // away, which would leave the Save forever unsettled and Save dead.
-    void setConfigMutation
-      .mutateAsync({ clusterId, resourceId: ctId, kind: "ct", fields })
-      .then(
-        () => {
-          // Closed first, as the populate effect waits while it is open.
-          // That then re-reads every field from the config as it now stands
-          // and clears all that was staged, so nothing sent is sent or
-          // offered again.
-          setConfirmation((current) => ({ ...current, open: false }));
-          if (shown !== undefined && fetched !== undefined) {
-            setAfterSave({
-              over: fetched,
-              config: applyConfigWrite(shown, fields),
-              at: Date.now(),
-            });
-          }
-        },
-        // Already shown: the dialog and the Save bar read the mutation's
-        // error, and the app's mutation cache toasts it.
-        () => undefined,
-      )
+    const save = setConfigMutation.mutateAsync({
+      clusterId,
+      resourceId: ctId,
+      kind: "ct",
+      fields,
+    });
+    const saved = () => {
+      // Closed first, as the populate effect waits while it is open.
+      // That then re-reads every field from the config as it now stands
+      // and clears all that was staged, so nothing sent is sent or
+      // offered again.
+      setConfirmation((current) => ({ ...current, open: false }));
+      if (shown !== undefined && fetched !== undefined) {
+        setAfterSave({
+          over: fetched,
+          config: applyConfigWrite(shown, fields),
+          at: Date.now(),
+        });
+      }
+    };
+    // Hidden under <Activity> counts as gone to useSaveOutcome, so a success
+    // then is applied all the same.
+    settle(save, {
+      action: "Saving the container's resources",
+      onSuccess: saved,
+      onLateSuccess: saved,
+      onError: () => undefined, // the dialog and the Save bar read the mutation's error
+    });
+    void save
+      .catch(() => undefined)
       .finally(() => {
         setSavesSettled((settled) => settled + 1);
       });

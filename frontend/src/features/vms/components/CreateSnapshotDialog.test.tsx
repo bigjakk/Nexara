@@ -19,14 +19,10 @@ vi.mock("../api/vm-queries", async (importOriginal) => {
       isLoading: false,
     }),
     useCreateSnapshot: () => ({
-      mutate: (
-        _vars: unknown,
-        opts?: { onSuccess?: (data: { upid: string }) => void },
-      ) => {
-        opts?.onSuccess?.({
+      mutateAsync: () =>
+        Promise.resolve({
           upid: "UPID:pve2:0001:0002:0003:vzsnapshot:102:root@pam:",
-        });
-      },
+        }),
       isPending: false,
       isError: false,
       reset: () => {},

@@ -10,6 +10,7 @@ import {
   SettingsSection,
 } from "@/components/page/Settings";
 import { useVMConfig, useSetVMConfig } from "../api/vm-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface CloudInitPanelProps {
   clusterId: string;
@@ -19,6 +20,7 @@ interface CloudInitPanelProps {
 export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
   const { data: config, isLoading } = useVMConfig(clusterId, vmId);
   const setConfigMutation = useSetVMConfig();
+  const settle = useSaveOutcome();
 
   const [ciuser, setCiuser] = useState("");
   const [cipassword, setCipassword] = useState("");
@@ -74,7 +76,10 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
 
     if (Object.keys(fields).length === 0) return;
 
-    setConfigMutation.mutate({ clusterId, vmId, fields });
+    settle(setConfigMutation.mutateAsync({ clusterId, vmId, fields }), {
+      action: "Saving the cloud-init settings",
+      onError: () => undefined, // shown below from the mutation's state
+    });
   }
 
   if (isLoading) {

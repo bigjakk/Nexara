@@ -33,6 +33,7 @@ import {
   useCreateContainer,
   useResourcePools,
 } from "../api/vm-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import { filterStorageByContent } from "../lib/storage-filter";
 
@@ -103,6 +104,7 @@ export function CreateCTDialog({
   const { data: pools } = useResourcePools(clusterId);
   const { data: clusterVMs } = useClusterVMs(clusterId);
   const createMutation = useCreateContainer();
+  const settle = useSaveOutcome(open);
 
   // Template storage selection for browsing vztmpl content
   // Target node name (Step 1). Declared up here so the storage filters below
@@ -303,8 +305,8 @@ export function CreateCTDialog({
     if (startup) extra["startup"] = startup;
     if (cmode && cmode !== "tty") extra["cmode"] = cmode;
 
-    createMutation.mutate(
-      {
+    settle(
+      createMutation.mutateAsync({
         clusterId,
         body: {
           vmid: Number(vmid),
@@ -328,11 +330,13 @@ export function CreateCTDialog({
           searchdomain: searchdomain || undefined,
           extra: Object.keys(extra).length > 0 ? extra : undefined,
         },
-      },
+      }),
       {
+        action: `Creating container ${hostname || vmid}`,
         onSuccess: (data) => {
           setUpid(data.upid);
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

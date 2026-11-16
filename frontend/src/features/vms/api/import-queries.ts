@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type {
   EsxiSourceRequest,
   ImportMetadataResponse,
@@ -14,6 +15,7 @@ import type {
 // Parse an importable source (OVA/OVF/ESXi guest) into a pre-filled guest definition.
 export function useImportMetadata() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       node,
@@ -90,6 +92,7 @@ export function useQueryURLMetadata() {
 export function useStartImport() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       body,
@@ -155,6 +158,7 @@ export function useCancelImport() {
 export function useRegisterEsxiSource() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       body,
@@ -180,6 +184,7 @@ export function useRegisterEsxiSource() {
 export function useDeleteImportSource() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       storage,
@@ -204,6 +209,7 @@ export function useDeleteImportSource() {
 export function useEnableImportContent() {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       storage,

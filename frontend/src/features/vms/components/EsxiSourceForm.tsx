@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRegisterEsxiSource } from "../api/import-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface EsxiSourceFormProps {
   clusterId: string;
@@ -25,6 +26,7 @@ export function EsxiSourceForm({
   const [password, setPassword] = useState("");
   const [skipCert, setSkipCert] = useState(false);
   const register = useRegisterEsxiSource();
+  const settle = useSaveOutcome();
 
   const storageValid = storageIdPattern.test(storage) && storage.length <= 64;
   const canSubmit =
@@ -35,8 +37,8 @@ export function EsxiSourceForm({
 
   function submit() {
     if (!canSubmit) return;
-    register.mutate(
-      {
+    settle(
+      register.mutateAsync({
         clusterId,
         body: {
           storage: storage.trim(),
@@ -45,11 +47,13 @@ export function EsxiSourceForm({
           password,
           skip_cert_verification: skipCert,
         },
-      },
+      }),
       {
+        action: `Registering ESXi source ${storage.trim()}`,
         onSuccess: () => {
           onRegistered(storage.trim());
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

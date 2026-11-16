@@ -15,6 +15,7 @@ import {
   useClusterStorage,
 } from "@/features/clusters/api/cluster-queries";
 import { useCloneToTemplate, useClusterVMIDs } from "../api/vm-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
 
@@ -39,6 +40,7 @@ export function CloneToTemplateDialog({
   const { data: storageList } = useClusterStorage(clusterId);
   const { data: usedVMIDs } = useClusterVMIDs(clusterId);
   const cloneToTemplateMutation = useCloneToTemplate();
+  const settle = useSaveOutcome(open ? resourceId : null);
 
   const storageOptions = storageList
     ? [
@@ -81,8 +83,8 @@ export function CloneToTemplateDialog({
 
   function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
-    cloneToTemplateMutation.mutate(
-      {
+    settle(
+      cloneToTemplateMutation.mutateAsync({
         clusterId,
         resourceId,
         kind,
@@ -93,11 +95,13 @@ export function CloneToTemplateDialog({
           full,
           storage: full ? storage : "",
         },
-      },
+      }),
       {
+        action: `Cloning ${sourceName} to a template`,
         onSuccess: (data) => {
           setUpid(data.upid);
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

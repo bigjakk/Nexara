@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type { VMResponse } from "@/types/api";
 import type {
   VMAction,
@@ -134,6 +135,7 @@ export function useCloneVM() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, resourceId, kind, body }: CloneParams) => {
       const base =
         kind === "ct"
@@ -160,6 +162,7 @@ export function useCloneToTemplate() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       resourceId,
@@ -190,6 +193,7 @@ export function useConvertToTemplate() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, resourceId, kind }: ConvertToTemplateParams) => {
       const base =
         kind === "ct"
@@ -255,10 +259,16 @@ interface DestroyParams {
   kind: ResourceKind;
 }
 
-export function useDestroyVM() {
+/**
+ * `errorsShownByCaller`: the caller shows a failure itself and settles it
+ * through useSaveOutcome, so the app's error toast stays out of it. Left
+ * false, the toast reports it.
+ */
+export function useDestroyVM(errorsShownByCaller = false) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: ({ clusterId, resourceId, kind }: DestroyParams) => {
       const base =
         kind === "ct"
@@ -341,6 +351,7 @@ export function useCreateSnapshot() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       resourceId,
@@ -463,6 +474,7 @@ export function useResizeDisk() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, vmId, disk, size }: ResizeDiskParams) =>
       apiClient.post<VMActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/disks/resize`,
@@ -493,6 +505,7 @@ export function useCreateVM() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, body }: CreateVMParams) =>
       apiClient.post<VMActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/vms`,
@@ -515,6 +528,7 @@ export function useCreateContainer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, body }: CreateContainerParams) =>
       apiClient.post<VMActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/containers`,
@@ -571,6 +585,7 @@ export function useResizeContainerDisk() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, ctId, disk, size }: ResizeContainerDiskParams) =>
       apiClient.post<VMActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/containers/${ctId}/disks/resize`,
@@ -600,6 +615,7 @@ export function useSetVMConfig() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, vmId, fields }: SetVMConfigParams) =>
       apiClient.put<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/config`,
@@ -626,10 +642,16 @@ interface SetResourceConfigParams {
   fields: Record<string, string>;
 }
 
-export function useSetResourceConfig() {
+/**
+ * `errorsShownByCaller`: the caller shows a failure itself and settles it
+ * through useSaveOutcome, so the app's error toast stays out of it. Left
+ * false, the toast reports it.
+ */
+export function useSetResourceConfig(errorsShownByCaller = false) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: ({
       clusterId,
       resourceId,
@@ -814,6 +836,7 @@ export function useMoveDisk() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       vmId,
@@ -867,6 +890,7 @@ export function useMoveContainerVolume() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       ctId,
@@ -955,6 +979,7 @@ export function useDetachDisk() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, vmId, disk }: DetachDiskParams) =>
       apiClient.post<VMActionResponse>(
         apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/disks/detach`,

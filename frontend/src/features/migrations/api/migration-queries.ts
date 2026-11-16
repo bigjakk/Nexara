@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type {
   MigrationJob,
   CreateMigrationRequest,
@@ -53,9 +54,15 @@ export function useMigrationJobsByCluster(
   });
 }
 
-export function useCreateMigration() {
+/**
+ * `errorsShownByCaller`: the caller shows a failure itself and settles it
+ * through useSaveOutcome, so the app's error toast stays out of it. Left
+ * false, the toast reports it.
+ */
+export function useCreateMigration(errorsShownByCaller = false) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: (req: CreateMigrationRequest) =>
       apiClient.post<MigrationJob>(apiPath`/api/v1/migrations`, req),
     onSuccess: () => {
@@ -64,9 +71,15 @@ export function useCreateMigration() {
   });
 }
 
-export function useRunPreFlightCheck() {
+/**
+ * `errorsShownByCaller`: the caller shows a failure itself and settles it
+ * through useSaveOutcome, so the app's error toast stays out of it. Left
+ * false, the toast reports it.
+ */
+export function useRunPreFlightCheck(errorsShownByCaller = false) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: (id: string) =>
       apiClient.post<PreFlightReport>(apiPath`/api/v1/migrations/${id}/check`),
     onSuccess: (_data, id) => {

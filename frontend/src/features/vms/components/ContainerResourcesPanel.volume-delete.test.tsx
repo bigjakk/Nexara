@@ -1248,7 +1248,7 @@ describe("ContainerResourcesPanel save gate", () => {
     // whole (destructured, aliased, passed or indexed), and exactly one of
     // those reads is a send (mutate or mutateAsync), inside saveChanges.
     const declared = panelSource.indexOf(
-      "const setConfigMutation = useSetResourceConfig();",
+      "const setConfigMutation = useSetResourceConfig(true);",
     );
     expect(declared).toBeGreaterThan(-1);
     const reads = Array.from(
