@@ -63,6 +63,7 @@ func TestPlanNodeRemovals(t *testing.T) {
 		statusErr  error
 		prev       map[string]bool
 		expected   string
+		accepted   bool
 		wantRemove []string
 		wantAbsent []string
 		wantSkip   bool
@@ -92,10 +93,13 @@ func TestPlanNodeRemovals(t *testing.T) {
 			wantAbsent: []string{"pve-01", "pve-02", "pve-03"}},
 		{name: "names another cluster", listed: twoOfThree, status: status(1, "pve-01", "pve-02"),
 			prev: pending, expected: "cluster02", wantSkip: true},
+		{name: "lacks every row on record, name accepted", listed: listed("pve-09"), status: status(1, "pve-09"),
+			prev: map[string]bool{"pve-01": true, "pve-02": true, "pve-03": true}, accepted: true,
+			wantRemove: []string{"pve-01", "pve-02", "pve-03"}, wantAbsent: []string{"pve-01", "pve-02", "pve-03"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			plan := planNodeRemovals(rows, tc.listed, tc.status, tc.statusErr, tc.prev, tc.expected)
+			plan := planNodeRemovals(rows, tc.listed, tc.status, tc.statusErr, tc.prev, tc.expected, tc.accepted)
 			if (plan.skip != "") != tc.wantSkip {
 				t.Fatalf("skip = %q, want skip %v", plan.skip, tc.wantSkip)
 			}
@@ -258,8 +262,9 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 // TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster: a cluster row whose
 // API URL is moved to another cluster keeps its nodes however many passes run,
 // when the two share a node name, and when the name was recorded before this
-// process started (clusters.corosync_name). The mismatch is audited once, and
-// accepting the new name lets the ordinary removal run.
+// process started (clusters.corosync_name). The mismatch is audited once, no
+// rules reattach meanwhile, and accepting the new name removes the rows the new
+// cluster does not list, even when it shares no node name with them.
 func TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster(t *testing.T) {
 	t.Parallel()
 
@@ -271,6 +276,7 @@ func TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster(t *testing.T) {
 	}{
 		{name: "no node in common, nothing on record", other: []string{"pve-09"}},
 		{name: "shares a node name", seenFirst: true, other: []string{"pve-01", "pve-09"}},
+		{name: "no node in common, name recorded", seenFirst: true, other: []string{"pve-09"}},
 		{name: "shares a node name, first pass after a restart", stored: "cluster01", other: []string{"pve-01", "pve-09"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -300,6 +306,7 @@ func TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster(t *testing.T) {
 			}
 
 			fake.set("cluster02", tc.other...)
+			mq.reattachCalls = 0
 			pass(4)
 			for _, n := range []string{"pve-01", "pve-02", "pve-03"} {
 				if _, kept := mq.nodes[cluster.ID.String()+":"+n]; !kept {
@@ -317,17 +324,25 @@ func TestSyncCluster_KeepsNodesWhenTheURLReachesAnotherCluster(t *testing.T) {
 			if len(mq.auditLogs) != wantAudits || (recorded && mq.auditLogs[0].Action != "cluster_name_mismatch") {
 				t.Fatalf("audit entries = %+v, want %d cluster_name_mismatch", mq.auditLogs, wantAudits)
 			}
-			if !recorded || len(tc.other) < 2 {
+			if !recorded {
 				return
 			}
+			// Another cluster's node of a detached name must not take the rules.
+			if mq.reattachCalls != 0 {
+				t.Errorf("reattached on %d passes that named another cluster", mq.reattachCalls)
+			}
 			// An operator accepts the new name (AcceptClusterCorosyncName): the
-			// rows the other cluster does not list go.
-			mq.setCorosync(cluster.ID, db.GetClusterCorosyncNameRow{CorosyncName: "cluster02"})
-			pass(2)
-			for n, want := range map[string]bool{"pve-01": true, "pve-02": false, "pve-03": false} {
-				if _, kept := mq.nodes[cluster.ID.String()+":"+n]; kept != want {
+			// rows the other cluster does not list go, with no node in common too.
+			mq.setCorosync(cluster.ID, db.GetClusterCorosyncNameRow{CorosyncName: "cluster02", CorosyncNameAccepted: true})
+			pass(3)
+			for _, n := range []string{"pve-01", "pve-02", "pve-03", "pve-09"} {
+				_, kept := mq.nodes[cluster.ID.String()+":"+n]
+				if want := slices.Contains(tc.other, n); kept != want {
 					t.Errorf("after accepting: %s's row kept = %v, want %v", n, kept, want)
 				}
+			}
+			if mq.corosync[cluster.ID].CorosyncNameAccepted {
+				t.Error("the waiver outlived a pass that found every row listed")
 			}
 		})
 	}

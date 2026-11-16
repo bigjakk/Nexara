@@ -1,5 +1,5 @@
 -- Automatic in-place upgrade — no manual steps, no operator action required.
--- Purely additive: five columns, each NOT NULL with a DEFAULT that PostgreSQL
+-- Purely additive: six columns, each NOT NULL with a DEFAULT that PostgreSQL
 -- fills on existing rows, and two partial indexes. No row is changed or deleted.
 --
 -- clusters.corosync_name is the corosync cluster name the cluster row's nodes
@@ -16,7 +16,11 @@
 -- collector removes no node row from the cluster and the clusters API reports
 -- a "cluster_name_changed" issue. It clears itself when the cluster reports
 -- the recorded name again; POST /api/v1/clusters/:id/accept-cluster-name makes
--- the reported name the recorded one, for a deliberate rename or move.
+-- the reported name the recorded one, for a deliberate rename or move, and
+-- sets clusters.corosync_name_accepted: until a pass finds every node row
+-- listed again, the rows the accepted cluster does not list are removed by the
+-- usual two-pass rule without needing a row it still lists from before (after a
+-- move to a cluster that shares no node name there is none).
 --
 -- alert_rules.detached_node_name / detached_enabled and
 -- maintenance_windows.detached_node_name keep the name of the node a removed
@@ -30,8 +34,10 @@
 
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS corosync_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS corosync_name_reported TEXT NOT NULL DEFAULT '';
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS corosync_name_accepted BOOLEAN NOT NULL DEFAULT false;
 COMMENT ON COLUMN clusters.corosync_name IS 'The corosync cluster name this row''s nodes were read from; '''' until recorded or for a single node';
 COMMENT ON COLUMN clusters.corosync_name_reported IS 'Another corosync name the API URL answered with; while set, no node row is removed';
+COMMENT ON COLUMN clusters.corosync_name_accepted IS 'An operator accepted corosync_name; node rows it does not list go without an established member, until none is left';
 
 ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS detached_node_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS detached_enabled BOOLEAN NOT NULL DEFAULT false;

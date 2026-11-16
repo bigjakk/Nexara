@@ -38,7 +38,7 @@ func (q *Queries) DeleteGuestSmbiosForVanishedGuests(ctx context.Context, arg De
 }
 
 const listClustersWithVeeamPlatform = `-- name: ListClustersWithVeeamPlatform :many
-SELECT DISTINCT c.id, c.name, c.api_url, c.token_id, c.token_secret_encrypted, c.tls_fingerprint, c.sync_interval_seconds, c.is_active, c.created_at, c.updated_at, c.pve_version, c.quorate, c.credential_source, c.bootstrap_user_id, c.bootstrap_token_name, c.bootstrap_created_user, c.bootstrap_created_acl, c.bootstrap_created_at, c.corosync_name, c.corosync_name_reported
+SELECT DISTINCT c.id, c.name, c.api_url, c.token_id, c.token_secret_encrypted, c.tls_fingerprint, c.sync_interval_seconds, c.is_active, c.created_at, c.updated_at, c.pve_version, c.quorate, c.credential_source, c.bootstrap_user_id, c.bootstrap_token_name, c.bootstrap_created_user, c.bootstrap_created_acl, c.bootstrap_created_at, c.corosync_name, c.corosync_name_reported, c.corosync_name_accepted
 FROM clusters c
 JOIN veeam_platforms p ON p.cluster_id = c.id
 JOIN veeam_servers s ON s.id = p.veeam_server_id AND s.enabled
@@ -80,6 +80,7 @@ func (q *Queries) ListClustersWithVeeamPlatform(ctx context.Context) ([]Cluster,
 			&i.BootstrapCreatedAt,
 			&i.CorosyncName,
 			&i.CorosyncNameReported,
+			&i.CorosyncNameAccepted,
 		); err != nil {
 			return nil, err
 		}

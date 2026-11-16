@@ -108,9 +108,10 @@ SET tls_fingerprint = $2,
 WHERE id = $1 AND api_url = $3;
 
 -- name: GetClusterCorosyncName :one
--- The corosync name the cluster's node rows were read from, and another one
--- its API URL answered with since ('' when none). Syncer.pruneRemovedNodes.
-SELECT corosync_name, corosync_name_reported FROM clusters WHERE id = $1;
+-- The corosync name the cluster's node rows were read from, another one its
+-- API URL answered with since ('' when none), and whether an operator accepted
+-- the name (AcceptClusterCorosyncName). Syncer.pruneRemovedNodes.
+SELECT corosync_name, corosync_name_reported, corosync_name_accepted FROM clusters WHERE id = $1;
 
 -- name: RecordClusterCorosyncName :execrows
 -- Records the name a reading that can tell the cluster's members named: the
@@ -129,7 +130,7 @@ WHERE id = @id
 -- one. One row only when the reported name changes, so the caller audits each
 -- mismatch once.
 UPDATE clusters
-SET corosync_name_reported = @reported
+SET corosync_name_reported = @reported, corosync_name_accepted = false
 WHERE id = @id
   AND corosync_name <> ''
   AND corosync_name <> @reported
@@ -140,8 +141,12 @@ WHERE id = @id
 -- row moved to another cluster on purpose. Only the name they were shown: zero
 -- rows when no mismatch is reported or another name is reported now.
 UPDATE clusters
-SET corosync_name = corosync_name_reported, corosync_name_reported = ''
+SET corosync_name = corosync_name_reported, corosync_name_reported = '', corosync_name_accepted = true
 WHERE id = @id AND corosync_name_reported <> '' AND corosync_name_reported = @reported;
+
+-- name: ClearClusterCorosyncNameAccepted :exec
+-- An accepted name's waiver ends once a pass finds every node row listed.
+UPDATE clusters SET corosync_name_accepted = false WHERE id = $1 AND corosync_name_accepted;
 
 -- name: ListClusterCorosyncNameMismatches :many
 -- The clusters whose API URL answers with another cluster's name, for the

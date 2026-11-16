@@ -325,6 +325,8 @@ type Querier interface {
 	// The reset of every SSO account's link at once (after an issuer change), returning
 	// the accounts it cleared.
 	ClearAllOIDCIdentities(ctx context.Context) ([]uuid.UUID, error)
+	// An accepted name's waiver ends once a pass finds every node row listed.
+	ClearClusterCorosyncNameAccepted(ctx context.Context, id uuid.UUID) error
 	// Forget that Nexara minted this cluster's credential.
 	//
 	// Run when the cluster is re-pointed at a different endpoint or a different
@@ -991,8 +993,9 @@ type Querier interface {
 	// pinned by the WHERE clause, so each bucket yields exactly one row.
 	GetCephClusterMetricsHistory(ctx context.Context, arg GetCephClusterMetricsHistoryParams) ([]GetCephClusterMetricsHistoryRow, error)
 	GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
-	// The corosync name the cluster's node rows were read from, and another one
-	// its API URL answered with since ('' when none). Syncer.pruneRemovedNodes.
+	// The corosync name the cluster's node rows were read from, another one its
+	// API URL answered with since ('' when none), and whether an operator accepted
+	// the name (AcceptClusterCorosyncName). Syncer.pruneRemovedNodes.
 	GetClusterCorosyncName(ctx context.Context, id uuid.UUID) (GetClusterCorosyncNameRow, error)
 	// pve_task_failed / pve_backup_failed: how many Proxmox tasks failed in a window.
 	//

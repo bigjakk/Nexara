@@ -1404,7 +1404,9 @@ func decideCertificateVerify(pinned, live, attested string) certVerifyOutcome {
 // cluster, or a row moved to another cluster on purpose. Pinned to the name the
 // operator was shown, so a different cluster answering since is not accepted
 // with it. Node rows the accepted cluster does not list are then removed by
-// the ordinary two-pass rule.
+// the two-pass rule, even when it shares no node name with them: the accept
+// sets clusters.corosync_name_accepted, which waives the rule's need for a row
+// still listed from before until a pass finds every row listed.
 func (h *ClusterHandler) AcceptClusterName(c fiber.Ctx, p *apischema.Params) error {
 	id, err := parseParamUUID(p.String("id"))
 	if err != nil {

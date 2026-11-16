@@ -162,6 +162,7 @@ type SyncQueries interface {
 	GetClusterCorosyncName(ctx context.Context, id uuid.UUID) (db.GetClusterCorosyncNameRow, error)
 	RecordClusterCorosyncName(ctx context.Context, arg db.RecordClusterCorosyncNameParams) (int64, error)
 	ReportClusterCorosyncNameMismatch(ctx context.Context, arg db.ReportClusterCorosyncNameMismatchParams) (int64, error)
+	ClearClusterCorosyncNameAccepted(ctx context.Context, id uuid.UUID) error
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) (int64, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
 	DeleteStaleVMsForNodes(ctx context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error)
@@ -723,7 +724,6 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	clusterStatus, statusErr := client.GetClusterStatus(ctx)
 	s.syncNodeAddresses(ctx, cluster.ID, clusterStatus, statusErr)
 	nodesRemoved := s.pruneRemovedNodes(ctx, cluster, knownNodes, knownErr, nodes, clusterStatus, statusErr)
-	s.reattachNodeRows(ctx, cluster.ID)
 
 	// Collect storage-replication job status.
 	s.syncReplication(ctx, client, cluster.ID)

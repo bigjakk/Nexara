@@ -20,13 +20,14 @@ var (
 	m151Rule    = uuid.MustParse("15100000-0000-4000-8000-0000000000e1")
 	m151Moved   = uuid.MustParse("15100000-0000-4000-8000-0000000000e2")
 	m151Window  = uuid.MustParse("15100000-0000-4000-8000-0000000000f1")
+	m151MovedW  = uuid.MustParse("15100000-0000-4000-8000-0000000000f2")
 )
 
 // TestMigration151_NodeRejoinAndClusterName: rows from before 000151 read the
 // new columns as empty; a removed node's rule and window reattach to the new
 // row of a node that rejoins under its name (the rule turned back on, a rule
-// moved to another node meanwhile left there); the recorded corosync name is
-// set once, a mismatch reported once, and only the shown name accepted. The
+// or window moved to another node meanwhile left there); the recorded corosync
+// name is set once, a mismatch reported once, and only the shown name accepted. The
 // down step is reversible. Not parallel: it migrates the shared schema.
 func TestMigration151_NodeRejoinAndClusterName(t *testing.T) {
 	env := setupMigration(t)
@@ -61,7 +62,8 @@ func TestMigration151_NodeRejoinAndClusterName(t *testing.T) {
 	                      ($2, 'mem', 'mem_usage', '>', 90, 'node', $3, $4, $5)`,
 		m151Rule, m151Moved, m151Cluster, m151Gone, m151User)
 	exec("window", `INSERT INTO maintenance_windows (id, cluster_id, node_id, starts_at, ends_at, created_by)
-	                VALUES ($1, $2, $3, now(), now() + interval '1 day', $4)`, m151Window, m151Cluster, m151Gone, m151User)
+	                VALUES ($1, $3, $4, now(), now() + interval '1 day', $5),
+	                       ($2, $3, $4, now(), now() + interval '1 day', $5)`, m151Window, m151MovedW, m151Cluster, m151Gone, m151User)
 	migrateUp(t, m)
 
 	q := gen.New(pool)
@@ -74,13 +76,14 @@ func TestMigration151_NodeRejoinAndClusterName(t *testing.T) {
 	if n, err := q.DetachNodeAlertRules(ctx, gen.DetachNodeAlertRulesParams{NodeID: gone, NodeName: "pve-02"}); err != nil || n != 2 {
 		t.Fatalf("DetachNodeAlertRules = %d, %v; want 2 rules that were on", n, err)
 	}
-	if n, err := q.DetachNodeMaintenanceWindows(ctx, gen.DetachNodeMaintenanceWindowsParams{NodeID: gone, NodeName: "pve-02"}); err != nil || n != 1 {
-		t.Fatalf("DetachNodeMaintenanceWindows = %d, %v; want 1", n, err)
+	if n, err := q.DetachNodeMaintenanceWindows(ctx, gen.DetachNodeMaintenanceWindowsParams{NodeID: gone, NodeName: "pve-02"}); err != nil || n != 2 {
+		t.Fatalf("DetachNodeMaintenanceWindows = %d, %v; want 2", n, err)
 	}
 	if removed, err := q.DeleteClusterNodes(ctx, gen.DeleteClusterNodesParams{ClusterID: m151Cluster, Ids: []uuid.UUID{m151Gone}}); err != nil || len(removed) != 1 {
 		t.Fatalf("DeleteClusterNodes = %+v, %v", removed, err)
 	}
 	exec("move rule", `UPDATE alert_rules SET node_id = $2 WHERE id = $1`, m151Moved, m151Kept)
+	exec("move window", `UPDATE maintenance_windows SET node_id = $2 WHERE id = $1`, m151MovedW, m151Kept)
 
 	// pve-02 rejoins with a new id.
 	var rejoined uuid.UUID
@@ -94,19 +97,21 @@ func TestMigration151_NodeRejoinAndClusterName(t *testing.T) {
 	if n, err := q.ReattachNodeMaintenanceWindows(ctx, m151Cluster); err != nil || n != 1 {
 		t.Errorf("ReattachNodeMaintenanceWindows = %d, %v; want 1", n, err)
 	}
-	var ruleNode, movedNode, windowNode uuid.UUID
+	var ruleNode, movedNode, windowNode, movedWindowNode uuid.UUID
 	var ruleOn, movedOn bool
 	if err := pool.QueryRow(ctx, `SELECT (SELECT node_id FROM alert_rules WHERE id = $1), (SELECT enabled FROM alert_rules WHERE id = $1),
 	                                     (SELECT node_id FROM alert_rules WHERE id = $2), (SELECT enabled FROM alert_rules WHERE id = $2),
-	                                     (SELECT node_id FROM maintenance_windows WHERE id = $3)`,
-		m151Rule, m151Moved, m151Window).Scan(&ruleNode, &ruleOn, &movedNode, &movedOn, &windowNode); err != nil {
+	                                     (SELECT node_id FROM maintenance_windows WHERE id = $3),
+	                                     (SELECT node_id FROM maintenance_windows WHERE id = $4)`,
+		m151Rule, m151Moved, m151Window, m151MovedW).Scan(&ruleNode, &ruleOn, &movedNode, &movedOn, &windowNode, &movedWindowNode); err != nil {
 		t.Fatalf("read back: %v", err)
 	}
 	if ruleNode != rejoined || !ruleOn || windowNode != rejoined {
 		t.Errorf("rule on %v (enabled %v), window on %v; want both on the rejoined row %v, the rule on", ruleNode, ruleOn, windowNode, rejoined)
 	}
-	if movedNode != m151Kept || movedOn {
-		t.Errorf("the moved rule is on %v (enabled %v); want it left on pve-01, off", movedNode, movedOn)
+	if movedNode != m151Kept || movedOn || movedWindowNode != m151Kept {
+		t.Errorf("the moved rule is on %v (enabled %v), the moved window on %v; want both left on pve-01, the rule off",
+			movedNode, movedOn, movedWindowNode)
 	}
 
 	// The corosync name: recorded once, a mismatch reported once, only the shown name accepted.
@@ -145,8 +150,14 @@ func TestMigration151_NodeRejoinAndClusterName(t *testing.T) {
 		}
 	}
 	if got, err := q.GetClusterCorosyncName(ctx, m151Cluster); err != nil ||
-		got != (gen.GetClusterCorosyncNameRow{CorosyncName: "cluster02"}) {
-		t.Errorf("names after accepting = %+v, %v; want cluster02 recorded, nothing reported", got, err)
+		got != (gen.GetClusterCorosyncNameRow{CorosyncName: "cluster02", CorosyncNameAccepted: true}) {
+		t.Errorf("names after accepting = %+v, %v; want cluster02 recorded and accepted, nothing reported", got, err)
+	}
+	if err := q.ClearClusterCorosyncNameAccepted(ctx, m151Cluster); err != nil {
+		t.Fatalf("ClearClusterCorosyncNameAccepted: %v", err)
+	}
+	if got, err := q.GetClusterCorosyncName(ctx, m151Cluster); err != nil || got.CorosyncNameAccepted {
+		t.Errorf("names after the waiver ended = %+v, %v; want it off", got, err)
 	}
 
 	if err := m.Migrate(150); err != nil {

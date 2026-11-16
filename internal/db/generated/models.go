@@ -202,6 +202,8 @@ type Cluster struct {
 	CorosyncName string `json:"corosync_name"`
 	// Another corosync name the API URL answered with; while set, no node row is removed
 	CorosyncNameReported string `json:"corosync_name_reported"`
+	// An operator accepted corosync_name; node rows it does not list go without an established member, until none is left
+	CorosyncNameAccepted bool `json:"corosync_name_accepted"`
 }
 
 type ClusterObjectBaseline struct {

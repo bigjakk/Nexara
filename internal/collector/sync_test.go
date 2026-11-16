@@ -437,7 +437,7 @@ func (*mockQueries) ReattachNodeMaintenanceWindows(context.Context, uuid.UUID) (
 	return 0, nil
 }
 
-// The three corosync-name queries, as queries/clusters.sql writes them.
+// The corosync-name queries, as queries/clusters.sql writes them.
 func (m *mockQueries) GetClusterCorosyncName(_ context.Context, id uuid.UUID) (db.GetClusterCorosyncNameRow, error) {
 	return m.corosync[id], nil
 }
@@ -457,9 +457,16 @@ func (m *mockQueries) ReportClusterCorosyncNameMismatch(_ context.Context, arg d
 	if cur.CorosyncName == "" || cur.CorosyncName == arg.Reported || cur.CorosyncNameReported == arg.Reported {
 		return 0, nil
 	}
-	cur.CorosyncNameReported = arg.Reported
+	cur.CorosyncNameReported, cur.CorosyncNameAccepted = arg.Reported, false
 	m.setCorosync(arg.ID, cur)
 	return 1, nil
+}
+
+func (m *mockQueries) ClearClusterCorosyncNameAccepted(_ context.Context, id uuid.UUID) error {
+	cur := m.corosync[id]
+	cur.CorosyncNameAccepted = false
+	m.setCorosync(id, cur)
+	return nil
 }
 
 func (m *mockQueries) setCorosync(id uuid.UUID, row db.GetClusterCorosyncNameRow) {

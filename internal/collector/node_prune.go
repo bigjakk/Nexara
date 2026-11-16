@@ -88,7 +88,9 @@ type membershipPlan struct {
 // planNodeRemovals decides which node rows go. known is the cluster's rows as
 // they stood before this pass wrote any; prevAbsent is what the previous
 // reading lacked; expected is the cluster name the rows were read from ("" when
-// none is on record yet). A row goes when all of these hold:
+// none is on record yet); accepted is an operator's acceptance of that name
+// (clusters.corosync_name_accepted), which waives the last condition below. A
+// row goes when all of these hold:
 //   - this reading and the previous one could both tell (clusterMembers), and
 //     both lack its node;
 //   - this reading names the expected cluster: an API URL moved to another
@@ -99,7 +101,7 @@ type membershipPlan struct {
 //
 // Otherwise nothing goes and the count starts over.
 func planNodeRemovals(known []db.Node, listed []proxmox.NodeListEntry, status []proxmox.ClusterStatusEntry,
-	statusErr error, prevAbsent map[string]bool, expected string) membershipPlan {
+	statusErr error, prevAbsent map[string]bool, expected string, accepted bool) membershipPlan {
 	members, name, skip := clusterMembers(listed, status, statusErr)
 	if skip != "" {
 		return membershipPlan{skip: skip}
@@ -114,7 +116,7 @@ func planNodeRemovals(known []db.Node, listed []proxmox.NodeListEntry, status []
 		}
 	}
 	for _, r := range known {
-		if plan.absent[r.Name] && prevAbsent[r.Name] && establishedMemberRemains(known, members, r) {
+		if plan.absent[r.Name] && prevAbsent[r.Name] && (accepted || establishedMemberRemains(known, members, r)) {
 			plan.remove = append(plan.remove, r)
 		}
 	}
@@ -140,13 +142,14 @@ func establishedMemberRemains(known []db.Node, members map[string]bool, gone db.
 // come back by the normal path once their configs are on a member. History,
 // audit and task rows keep theirs (migrations/000148); its alert rules and
 // maintenance windows are detached first and wait for the name to rejoin
-// (reattachNodeRows).
+// (reattachNodeRows), which runs only on a pass that names the recorded cluster.
 //
 // The cluster name the rows were read from is clusters.corosync_name
 // (migrations/000151), so a restart does not forget it. A reading that names
 // another cluster removes nothing and is recorded in corosync_name_reported,
 // which the clusters API reports as an issue, until the cluster names the
-// recorded one again or an operator accepts the new name.
+// recorded one again or an operator accepts the new name (which then waives
+// the established-member condition, corosync_name_accepted).
 func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, known []db.Node, knownErr error,
 	listed []proxmox.NodeListEntry, status []proxmox.ClusterStatusEntry, statusErr error) bool {
 	prev, _ := s.nodeAbsent.Load(cluster.ID)
@@ -165,7 +168,7 @@ func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, know
 			"cluster_id", cluster.ID, "error", err)
 		return false
 	}
-	plan := planNodeRemovals(known, listed, status, statusErr, prevAbsent, stored.CorosyncName)
+	plan := planNodeRemovals(known, listed, status, statusErr, prevAbsent, stored.CorosyncName, stored.CorosyncNameAccepted)
 	remove, absent, skip := plan.remove, plan.absent, plan.skip
 	if skip == skipOtherCluster {
 		s.nodeAbsent.Delete(cluster.ID)
@@ -191,6 +194,15 @@ func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, know
 				"cluster_id", cluster.ID, "error", err)
 			s.nodeAbsent.Store(cluster.ID, absent)
 			return false
+		}
+	}
+	// Only a pass that names the recorded cluster reattaches: another cluster's
+	// node of the same name must not take this cluster's rules and windows.
+	defer s.reattachNodeRows(ctx, cluster.ID)
+	if stored.CorosyncNameAccepted && len(absent) == 0 {
+		if err := s.queries.ClearClusterCorosyncNameAccepted(ctx, cluster.ID); err != nil {
+			s.logger.Warn("node membership: could not end an accepted cluster name's waiver",
+				"cluster_id", cluster.ID, "error", err)
 		}
 	}
 	for name := range absent {
