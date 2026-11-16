@@ -69,6 +69,9 @@ describe("RestoreDialog — Start after restore", () => {
         name: "Start after restore",
       });
       expect(start.hasAttribute("disabled")).toBe(!enabled);
+      expect(
+        screen.queryByText(/needs the execute:vm permission/) === null,
+      ).toBe(enabled);
     } finally {
       useAuthStore.setState({ permissions: [] });
     }

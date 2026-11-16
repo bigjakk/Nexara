@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -47,9 +48,9 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
   // The server holds a start after restore to what the guest's power route
   // needs (execute on its kind), so the tick is offered only to a holder.
   const { canExecute } = usePermissions();
-  const canStart = canExecute(
-    snapshot.backup_type === "ct" ? "container" : "vm",
-  );
+  const { t } = useTranslation("vms");
+  const startKind = snapshot.backup_type === "ct" ? "container" : "vm";
+  const canStart = canExecute(startKind);
   const [error, setError] = useState<string | null>(null);
   const [restoreUpid, setRestoreUpid] = useState<string | null>(null);
 
@@ -337,6 +338,13 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                   />
                   Start after restore
                 </label>
+                {!canStart && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("startNeedsExecute", {
+                      permission: `execute:${startKind}`,
+                    })}
+                  </p>
+                )}
               </div>
 
               {force && (
