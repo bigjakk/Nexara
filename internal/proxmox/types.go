@@ -1841,7 +1841,23 @@ type SDNVNet struct {
 	Tag       int    `json:"tag,omitempty"`
 	Alias     string `json:"alias,omitempty"`
 	VLANAware int    `json:"vlanaware,omitempty"`
-	Isolate   int    `json:"isolate,omitempty"`
+	// Isolate is pve-network's "isolate-ports" (VnetPlugin.pm), read by UnmarshalJSON and
+	// sent by the VNet forms; Nexara's own API has always called it "isolate".
+	Isolate int `json:"isolate,omitempty"`
+}
+
+// UnmarshalJSON reads Proxmox's "isolate-ports" into Isolate.
+func (v *SDNVNet) UnmarshalJSON(data []byte) error {
+	type alias SDNVNet
+	aux := struct {
+		*alias
+		IsolatePorts FlexInt `json:"isolate-ports"`
+	}{alias: (*alias)(v)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	v.Isolate = int(aux.IsolatePorts)
+	return nil
 }
 
 // SDNSubnet represents an SDN subnet from GET /cluster/sdn/vnets/{vnet}/subnets.

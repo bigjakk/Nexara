@@ -535,7 +535,7 @@ func sdnVNetCreateToForm(p CreateSDNVNetParams) url.Values {
 		form.Set("vlanaware", strconv.Itoa(p.VLANAware))
 	}
 	if p.Isolate != 0 {
-		form.Set("isolate", strconv.Itoa(p.Isolate))
+		form.Set("isolate-ports", strconv.Itoa(p.Isolate))
 	}
 	return form
 }
@@ -556,7 +556,7 @@ func sdnVNetUpdateToForm(p UpdateSDNVNetParams) url.Values {
 		form.Set("vlanaware", strconv.Itoa(p.VLANAware))
 	}
 	if p.Isolate != 0 {
-		form.Set("isolate", strconv.Itoa(p.Isolate))
+		form.Set("isolate-ports", strconv.Itoa(p.Isolate))
 	}
 	return form
 }
