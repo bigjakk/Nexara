@@ -648,6 +648,31 @@ describe("HardwarePanel dirty check", () => {
     ]);
   });
 
+  // ssd=on is as true to Proxmox as ssd=1 (parse_boolean): the disk opens
+  // clean, and an edit to another option keeps it as stored.
+  it("reads a disk's ssd=on as ticked and keeps it on another edit", async () => {
+    const save = await renderPanel(
+      nicVM({ scsi0: "store01:vm-101-disk-0,ssd=on,size=32G" }),
+    );
+    expect(save).toBeDisabled();
+    const card = diskCard("scsi0");
+    expect(
+      within(card).getByRole("checkbox", { name: "SSD emulation" }),
+    ).toBeChecked();
+
+    fill(control(card, "Cache"), "writeback");
+    expect(await saveAndGetFields(save)).toEqual([
+      [
+        CONFIG_URL,
+        {
+          fields: {
+            scsi0: "store01:vm-101-disk-0,ssd=on,size=32G,cache=writeback",
+          },
+        },
+      ],
+    ]);
+  });
+
   // No memory line runs at $memory_fmt's default of 512 MiB (Memory.pm), so
   // that is what the field shows, and the panel opens clean on it.
   it("shows an absent memory as Proxmox's default of 512", async () => {

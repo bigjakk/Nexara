@@ -1162,25 +1162,23 @@ export function HardwarePanel({
             kv.set(seg.slice(0, eqIdx).trim(), seg.slice(eqIdx + 1).trim());
           }
         }
-        if (edit.cache) {
-          kv.set("cache", edit.cache);
-        } else {
-          kv.delete("cache");
+        // Only what was edited is rewritten: a flag left alone keeps its
+        // spelling (ssd=on is as true to Proxmox as ssd=1).
+        if (edit.cache !== origDisk.cache) {
+          if (edit.cache) kv.set("cache", edit.cache);
+          else kv.delete("cache");
         }
-        if (edit.discard) {
-          kv.set("discard", "on");
-        } else {
-          kv.delete("discard");
+        if (edit.discard !== origDisk.discard) {
+          if (edit.discard) kv.set("discard", "on");
+          else kv.delete("discard");
         }
-        if (edit.ssd) {
-          kv.set("ssd", "1");
-        } else {
-          kv.delete("ssd");
+        if (edit.ssd !== origDisk.ssd) {
+          if (edit.ssd) kv.set("ssd", "1");
+          else kv.delete("ssd");
         }
-        if (edit.iothread) {
-          kv.set("iothread", "1");
-        } else {
-          kv.delete("iothread");
+        if (edit.iothread !== origDisk.iothread) {
+          if (edit.iothread) kv.set("iothread", "1");
+          else kv.delete("iothread");
         }
         const optParts: string[] = [];
         for (const [k, v] of kv) {

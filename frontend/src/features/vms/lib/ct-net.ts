@@ -1,4 +1,4 @@
-import { parseKVString, buildKVString } from "./vm-config-parsers";
+import { parseKVString, buildKVString, pveBoolean } from "./vm-config-parsers";
 
 /**
  * An LXC network interface as the Resources form edits it.
@@ -18,6 +18,12 @@ export interface CTNetEdit {
   ip6: string;
   gw6: string;
   firewall: boolean;
+  /**
+   * firewall= as stored. A boolean (pve-container's net format), which
+   * Proxmox reads as 1, on, yes or true, and kept in its spelling while its
+   * value is unchanged.
+   */
+  firewallStored?: string | undefined;
   rate: string;
   mtu: string;
   tag: string;
@@ -74,7 +80,8 @@ export function parseCTNet(raw: string): CTNetEdit {
   result.gw = kv.get("gw") ?? "";
   result.ip6 = kv.get("ip6") ?? "";
   result.gw6 = kv.get("gw6") ?? "";
-  result.firewall = kv.get("firewall") === "1";
+  result.firewallStored = kv.get("firewall");
+  result.firewall = pveBoolean(result.firewallStored ?? "");
   result.rate = kv.get("rate") ?? "";
   result.mtu = kv.get("mtu") ?? "";
   result.tag = kv.get("tag") ?? "";
@@ -100,7 +107,10 @@ export function buildCTNet(n: CTNetEdit): string {
   if (n.gw) modelled.set("gw", n.gw);
   if (n.ip6) modelled.set("ip6", n.ip6);
   if (n.gw6) modelled.set("gw6", n.gw6);
-  if (n.firewall) modelled.set("firewall", "1");
+  const stored = n.firewallStored;
+  if (stored !== undefined && pveBoolean(stored) === n.firewall)
+    modelled.set("firewall", stored);
+  else if (n.firewall) modelled.set("firewall", "1");
   else if (wasPresent.has("firewall")) modelled.set("firewall", "0");
   if (n.rate) modelled.set("rate", n.rate);
   if (n.mtu) modelled.set("mtu", n.mtu);

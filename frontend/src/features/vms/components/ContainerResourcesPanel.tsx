@@ -45,6 +45,7 @@ import { parseBwlimit } from "@/features/storage/lib/disk-move";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import {
   parseKVString,
+  pveBoolean,
   parseStartup,
   buildStartup,
   type ParsedStartup,
@@ -180,11 +181,17 @@ function parseMountPoint(raw: string): CTMountPoint {
   }
   result.path = kv.get("mp") ?? "";
   result.size = kv.get("size") ?? "";
-  result.acl = kv.get("acl") === "1";
-  result.backup = kv.get("backup") !== "0";
-  result.quota = kv.get("quota") === "1";
-  result.ro = kv.get("ro") === "1";
-  result.replicate = kv.get("replicate") !== "0";
+  // Booleans of pve-container's mount point format (src/PVE/LXC/Config.pm),
+  // read as Proxmox reads them; backup and replicate default to on.
+  const flag = (key: string, absent: boolean) => {
+    const v = kv.get(key);
+    return v === undefined ? absent : pveBoolean(v);
+  };
+  result.acl = flag("acl", false);
+  result.backup = flag("backup", true);
+  result.quota = flag("quota", false);
+  result.ro = flag("ro", false);
+  result.replicate = flag("replicate", true);
   return result;
 }
 

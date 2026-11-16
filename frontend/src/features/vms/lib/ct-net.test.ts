@@ -53,6 +53,22 @@ describe("CT NIC round-trip", () => {
     );
   });
 
+  // firewall is a boolean, which Proxmox reads as 1, on, yes or true
+  // (parse_boolean); one set up as firewall=on is on, and keeps its spelling.
+  it.each([
+    ["on", true, "0"],
+    ["yes", true, "0"],
+    ["off", false, "1"],
+  ])("reads firewall=%s as %s, keeps it, and toggles it to %s", (v, on, to) => {
+    const raw = `name=eth0,bridge=vmbr0,firewall=${v},type=veth`;
+    const nic = parseCTNet(raw);
+    expect(nic.firewall).toBe(on);
+    expect(buildCTNet(nic)).toBe(raw);
+    expect(buildCTNet({ ...nic, firewall: !on })).toBe(
+      `name=eth0,bridge=vmbr0,firewall=${to},type=veth`,
+    );
+  });
+
   it("exposes unmodelled keys separately from the modelled ones", () => {
     const nic = parseCTNet("name=eth0,bridge=vmbr0,ip=dhcp,type=veth");
     expect(nic.bridge).toBe("vmbr0");

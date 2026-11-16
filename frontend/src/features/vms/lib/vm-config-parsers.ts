@@ -708,11 +708,13 @@ export function parseDisk(raw: string): ParsedDisk {
       case "discard":
         result.discard = val === "on";
         break;
+      // Booleans in qemu-server's drive format (%ssd_fmt, %iothread_fmt in
+      // src/PVE/QemuServer/Drive.pm); discard is the enum ignore|on.
       case "ssd":
-        result.ssd = val === "1";
+        result.ssd = pveBoolean(val);
         break;
       case "iothread":
-        result.iothread = val === "1";
+        result.iothread = pveBoolean(val);
         break;
     }
   }
@@ -992,7 +994,7 @@ export function parseVirtioFS(raw: string): ParsedVirtioFS {
   return {
     dirid: kv.get("dirid") ?? "",
     cache: kv.get("cache") ?? "auto",
-    directIo: kv.get("direct-io") === "1",
+    directIo: pveBoolean(kv.get("direct-io") ?? ""),
   };
 }
 
@@ -1038,7 +1040,7 @@ export function parseEFIDisk(raw: string): ParsedEFIDisk {
         result.efitype = val;
         break;
       case "pre-enrolled-keys":
-        result.preEnrolledKeys = val === "1";
+        result.preEnrolledKeys = pveBoolean(val);
         break;
     }
   }
@@ -1272,7 +1274,7 @@ export function parseSMBIOS(raw: string): ParsedSMBIOS {
   if (!raw.trim()) return result;
 
   const kv = parseKVString(raw);
-  const isBase64 = kv.get("base64") === "1";
+  const isBase64 = pveBoolean(kv.get("base64") ?? "");
   result.uuid = kv.get("uuid") ?? "";
   for (const field of SMBIOS_TEXT_FIELDS) {
     const v = kv.get(field);

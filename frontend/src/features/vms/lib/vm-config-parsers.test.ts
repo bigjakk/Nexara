@@ -687,6 +687,18 @@ describe("parseDisk", () => {
     expect(d.iothread).toBe(true);
   });
 
+  // ssd and iothread are booleans, which Proxmox reads as 1, on, yes or true
+  // and 0, off, no or false, in any case (pve-common's parse_boolean).
+  it.each([
+    ["ssd=on,iothread=yes", true],
+    ["ssd=TRUE,iothread=1", true],
+    ["ssd=off,iothread=no", false],
+    ["ssd=0,iothread=false", false],
+  ])("reads %s as %s", (flags, on) => {
+    const d = parseDisk(`store01:vm-100-disk-0,size=32G,${flags}`);
+    expect([d.ssd, d.iothread]).toEqual([on, on]);
+  });
+
   it("derives the format from the volume extension when format= is absent", () => {
     // How Proxmox actually writes file-based disks — the extension is the only
     // record of the image format.
