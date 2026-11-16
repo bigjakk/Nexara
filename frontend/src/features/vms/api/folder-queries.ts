@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type { VMFolder, VMFolderListResponse } from "@/types/api";
 
 const FOLDER_LIST_KEY = (clusterId: string) =>
@@ -27,6 +28,7 @@ interface CreateFolderParams {
 export function useCreateVMFolder() {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, name, parent_id }: CreateFolderParams) =>
       apiClient.post<VMFolder>(
         apiPath`/api/v1/clusters/${clusterId}/vm-folders`,
@@ -51,6 +53,7 @@ interface UpdateFolderParams {
 export function useUpdateVMFolder() {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       folderId,
@@ -95,9 +98,15 @@ interface AssignVMParams {
   folder_id: string | null;
 }
 
-export function useAssignVMToFolder() {
+/**
+ * `errorsShownByCaller`: the caller shows a failure itself and settles it
+ * through useSaveOutcome, so the app's error toast stays out of it. Left
+ * false, the toast reports it.
+ */
+export function useAssignVMToFolder(errorsShownByCaller = false) {
   const qc = useQueryClient();
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: ({ clusterId, vmId, folder_id }: AssignVMParams) =>
       apiClient.put<null>(
         apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/folder`,

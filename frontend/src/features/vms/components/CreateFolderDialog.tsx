@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/page/Field";
 import { useCreateVMFolder } from "../api/folder-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface CreateFolderDialogProps {
   open: boolean;
@@ -30,6 +31,9 @@ export function CreateFolderDialog({
   parentLabel,
 }: CreateFolderDialogProps) {
   const create = useCreateVMFolder();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -47,9 +51,10 @@ export function CreateFolderDialog({
       return;
     }
     setError(null);
-    create.mutate(
-      { clusterId, name: trimmed, parent_id: parentId },
+    settle(
+      create.mutateAsync({ clusterId, name: trimmed, parent_id: parentId }),
       {
+        action: `Creating folder ${trimmed}`,
         onSuccess: () => {
           onOpenChange(false);
         },

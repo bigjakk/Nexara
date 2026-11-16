@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/page/Field";
 import { useUpdateVMFolder } from "../api/folder-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface RenameFolderDialogProps {
   open: boolean;
@@ -28,6 +29,9 @@ export function RenameFolderDialog({
   currentName,
 }: RenameFolderDialogProps) {
   const update = useUpdateVMFolder();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open ? folderId : null);
   const [name, setName] = useState(currentName);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,19 +53,17 @@ export function RenameFolderDialog({
       return;
     }
     setError(null);
-    update.mutate(
-      { clusterId, folderId, name: trimmed },
-      {
-        onSuccess: () => {
-          onOpenChange(false);
-        },
-        onError: (err: unknown) => {
-          setError(
-            err instanceof Error ? err.message : "Failed to rename folder",
-          );
-        },
+    settle(update.mutateAsync({ clusterId, folderId, name: trimmed }), {
+      action: `Renaming folder ${currentName}`,
+      onSuccess: () => {
+        onOpenChange(false);
       },
-    );
+      onError: (err: unknown) => {
+        setError(
+          err instanceof Error ? err.message : "Failed to rename folder",
+        );
+      },
+    });
   }
 
   return (

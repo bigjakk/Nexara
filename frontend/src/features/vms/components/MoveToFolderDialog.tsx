@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Field } from "@/components/page/Field";
 import { cn } from "@/lib/utils";
 import { useVMFolders, useAssignVMToFolder } from "../api/folder-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { buildFolderTree, flattenFolderTree } from "../lib/folder-tree";
 
 interface MoveToFolderDialogProps {
@@ -31,7 +32,10 @@ export function MoveToFolderDialog({
   vmName,
 }: MoveToFolderDialogProps) {
   const foldersQuery = useVMFolders(open ? clusterId : "");
-  const assign = useAssignVMToFolder();
+  const assign = useAssignVMToFolder(true);
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open ? vmId : null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,17 +57,15 @@ export function MoveToFolderDialog({
 
   function handleSubmit() {
     setError(null);
-    assign.mutate(
-      { clusterId, vmId, folder_id: selected },
-      {
-        onSuccess: () => {
-          onOpenChange(false);
-        },
-        onError: (err: unknown) => {
-          setError(err instanceof Error ? err.message : "Failed to move VM");
-        },
+    settle(assign.mutateAsync({ clusterId, vmId, folder_id: selected }), {
+      action: `Moving ${vmName}`,
+      onSuccess: () => {
+        onOpenChange(false);
       },
-    );
+      onError: (err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to move VM");
+      },
+    });
   }
 
   return (
