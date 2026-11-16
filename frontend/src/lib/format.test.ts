@@ -162,6 +162,8 @@ describe("dates under the Date format preference", () => {
     // argument), a fixed clock stays one, the server's text stays as sent.
     ["auto", (v) => formatDateTime(v, "—", "relative"), at(-30_000), "30s ago"],
     ["auto", (v) => formatDateTime(v, "—", "relative"), at(-2 * DAY), "2d ago"],
+    // A bare date under the old relative wording counts calendar days.
+    ["auto", (v) => formatDateTime(v, "—", "relative"), isoDate(NOW), "today"],
     ["auto", (v) => formatExactDateTime(v, "—", "relative"), past, "5m ago"],
     ["auto", (v) => formatExactDateTime(v, "—", "clock"), past, isoTime(past)],
     ["auto", (v) => formatDateValue(v, { exact: true, auto: "as-sent" }), "2026-09-03T11:55:00Z", "2026-09-03T11:55:00Z"],

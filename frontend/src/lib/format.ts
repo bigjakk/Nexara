@@ -203,11 +203,15 @@ function isToday(d: Date, now: number): boolean {
   return isoDate(d) === isoDate(new Date(now));
 }
 
-function render(d: Date, o: DateOptions): string {
+function render(d: Date, o: DateOptions, bareDate = false): string {
   const kind = o.kind ?? "datetime";
   const format = dateFormat();
   const now = Date.now();
   if (format === "auto") {
+    // A day has no time of its own to count from: it reads in calendar days.
+    if (o.auto === "relative" && (kind === "date" || bareDate)) {
+      return relativeDate(d, now);
+    }
     if (o.auto === "relative" && kind !== "time") {
       return formatRelativeTime(d.toISOString());
     }
@@ -246,7 +250,7 @@ export function formatDateValue(value: DateInput, options: DateOptions = {}): st
   ) {
     return value;
   }
-  return render(d, options);
+  return render(d, options, typeof value === "string" && DATE_ONLY.test(value));
 }
 
 /**
