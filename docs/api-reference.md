@@ -373,7 +373,9 @@ An account that signs in through single sign-on has no password to send to
    (`__Host-nexara_totp_step_up` at `/` when `Secure`; `nexara_totp_step_up` at
    `/api/v1/auth/totp/setup` otherwise), and redirects to `/settings/security?sso_step_up=confirmed`. Anything
    else is refused and audited (`totp_step_up_refused`, with the class of the refusal), and
-   redirects to `/settings/security?sso_step_up_error=<message>`. A provider that sends no
+   redirects to `/settings/security?sso_step_up_error=<class>`, a reason class such as
+   `another_browser`, `another_account`, `no_auth_time`, `stale_sign_in` or
+   `session_ended` (never text), which the page puts in its own words. A provider that sends no
    `auth_time` although `max_age` was asked cannot confirm anything.
 3. `POST /api/v1/auth/totp/setup` from the same session and the same browser (its cookie),
    with no body, uses up the proof, clears the cookie and answers the secret. Without a proof,

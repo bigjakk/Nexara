@@ -34,6 +34,19 @@ import {
 
 type SetupStep = "idle" | "qr" | "verify" | "recovery";
 
+/**
+ * The words for a refused step-up, by the reason class the SSO callback sends
+ * back. Only these classes are read; anything else in the link, which anyone
+ * can craft, is shown as the one generic sentence.
+ */
+const STEP_UP_REFUSALS: Record<string, string> = {
+  another_browser: "stepUpRefusedAnotherBrowser",
+  another_account: "stepUpRefusedAnotherAccount",
+  no_auth_time: "stepUpRefusedNoAuthTime",
+  stale_sign_in: "stepUpRefusedStale",
+  session_ended: "stepUpRefusedSessionEnded",
+};
+
 export function SecurityPage() {
   const { t } = useTranslation("settings");
   const { data: status, isLoading: statusLoading } = useTOTPStatus();
@@ -69,7 +82,8 @@ export function SecurityPage() {
   // Back from the identity provider: the callback says whether it confirmed
   // the sign-in. Confirmed, the setup continues in the dialog by itself (the
   // effect below, once the dialog is on screen); refused, the dialog opens on
-  // the reason. The query is dropped either way, so a reload does neither.
+  // the reason, in the page's own words. The query is dropped either way, so a
+  // reload does neither.
   const [searchParams, setSearchParams] = useSearchParams();
   const stepUpConfirmed = searchParams.get("sso_step_up") === "confirmed";
   const stepUpError = searchParams.get("sso_step_up_error");
@@ -77,10 +91,18 @@ export function SecurityPage() {
   useEffect(() => {
     if (!stepUpConfirmed && stepUpError === null) return;
     setSearchParams({}, { replace: true });
-    setSetupError(stepUpError ?? "");
+    setSetupError(
+      stepUpError === null
+        ? ""
+        : t(
+            Object.hasOwn(STEP_UP_REFUSALS, stepUpError)
+              ? (STEP_UP_REFUSALS[stepUpError] ?? "stepUpRefused")
+              : "stepUpRefused",
+          ),
+    );
     setContinueAfterStepUp(stepUpConfirmed);
     setSetupDialogOpen(true);
-  }, [stepUpConfirmed, stepUpError, setSearchParams]);
+  }, [stepUpConfirmed, stepUpError, setSearchParams, t]);
 
   const [disableDialogOpen, setDisableDialogOpen] = useState(false);
   // Where focus goes when Disable 2FA closes: the section, whose Disable 2FA

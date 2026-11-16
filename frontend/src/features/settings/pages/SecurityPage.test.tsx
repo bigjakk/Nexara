@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocation } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { SecurityPage } from "./SecurityPage";
@@ -34,6 +35,11 @@ function serve(authSource: "local" | "ldap" | "oidc") {
     ),
   );
   mockedList.mockResolvedValue([]);
+}
+
+/** The router's query string, to see the page drop what it has read. */
+function LocationProbe() {
+  return <span data-testid="search">{useLocation().search}</span>;
 }
 
 const secret = { secret: "JBSWY3DPEHPK3PXP", otpauth_url: "otpauth://totp/x" };
@@ -181,9 +187,15 @@ describe("SecurityPage: beginning a 2FA setup", () => {
   it.each([
     ["confirmed", "?sso_step_up=confirmed", /Step 1: Scan the QR code/, 1],
     [
-      "refused",
-      "?sso_step_up_error=Nothing%20was%20confirmed.",
-      /Nothing was confirmed\./,
+      "refused as stale",
+      "?sso_step_up_error=stale_sign_in",
+      /sign in when the provider asks/,
+      0,
+    ],
+    [
+      "sent a crafted text",
+      "?sso_step_up_error=Call%20the%20helpdesk%20now",
+      /did not confirm the sign-in, so nothing was confirmed/,
       0,
     ],
   ])(
@@ -191,12 +203,18 @@ describe("SecurityPage: beginning a 2FA setup", () => {
     async (_, query, shown, setups) => {
       serve("oidc");
       mockedPost.mockResolvedValueOnce(secret);
-      renderWithProviders(<SecurityPage />, {
-        router: { initialEntries: ["/settings/security" + query] },
-      });
+      renderWithProviders(
+        <>
+          <SecurityPage />
+          <LocationProbe />
+        </>,
+        { router: { initialEntries: ["/settings/security" + query] } },
+      );
 
       expect(await screen.findByText(shown)).toBeInTheDocument();
+      expect(screen.queryByText(/helpdesk/)).not.toBeInTheDocument();
       expect(mockedPost).toHaveBeenCalledTimes(setups);
+      expect(screen.getByTestId("search")).toHaveTextContent(/^$/);
     },
   );
 });

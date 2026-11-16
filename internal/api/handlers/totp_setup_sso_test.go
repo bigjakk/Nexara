@@ -65,23 +65,22 @@ func TestTOTPSetup_AnSSOAccountProvesAFreshSignInAtItsProvider(t *testing.T) {
 		name, email string
 		authTime    time.Time
 		setupIn     string // "asking" or "other": the session the setup comes from
-		message     string
-		setups      []int // the answers of successive setups
-		reason      string
+		setups      []int  // the answers of successive setups
+		reason      string // the refusal's class, "" for none
 	}{
-		{"a fresh sign-in as the account", "erin@example.com", time.Now(), "asking", "", []int{200, 403}, ""},
-		{"used from another session", "erin@example.com", time.Now(), "other", "", []int{403}, ""},
-		{"another account", "frank@example.com", time.Now(), "asking", ssoStepUpAnotherAccountMessage, []int{403}, "another_account"},
-		{"no auth_time", "erin@example.com", time.Time{}, "asking", ssoStepUpNoAuthTimeMessage, []int{403}, "no_auth_time"},
-		{"a sign-in ten minutes old", "erin@example.com", time.Now().Add(-10 * time.Minute), "asking", ssoStepUpStaleMessage, []int{403}, "stale_sign_in"},
+		{"a fresh sign-in as the account", "erin@example.com", time.Now(), "asking", []int{200, 403}, ""},
+		{"used from another session", "erin@example.com", time.Now(), "other", []int{403}, ""},
+		{"another account", "frank@example.com", time.Now(), "asking", []int{403}, "another_account"},
+		{"no auth_time", "erin@example.com", time.Time{}, "asking", []int{403}, "no_auth_time"},
+		{"a sign-in ten minutes old", "erin@example.com", time.Now().Add(-10 * time.Minute), "asking", []int{403}, "stale_sign_in"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			a, erin, session := ssoSetupApp(t)
 			record := stepUpRecord(session, erin.ID)
 			got, cookie := confirmStepUp(t, a, record, &auth.OIDCUserInfo{Email: tc.email, AuthTime: tc.authTime, StepUp: record})
-			if got != tc.message {
-				t.Errorf("the callback's answer = %q, want %q", got, tc.message)
+			if got != tc.reason {
+				t.Errorf("the callback's answer = %q, want %q", got, tc.reason)
 			}
 			from := session
 			if tc.setupIn == "other" {
@@ -115,7 +114,7 @@ func TestOIDCCallback_AStepUpInAnotherBrowserIsRefusedAndNeverASignIn(t *testing
 	}
 	resp := a.send(t, http.MethodGet, "/auth/oidc/callback?code=idp-code&state=the-state", "", nil, 20*time.Second)
 	loc, _ := url.Parse(resp.Header.Get("Location"))
-	if resp.StatusCode != http.StatusFound || loc.Path != ssoStepUpPage || loc.Query().Get("sso_step_up_error") != ssoStepUpNotThisBrowserMessage {
+	if resp.StatusCode != http.StatusFound || loc.Path != ssoStepUpPage || loc.Query().Get("sso_step_up_error") != "another_browser" {
 		t.Errorf("answer %d to %q, want a redirect to the Security page saying it was not this browser", resp.StatusCode, loc)
 	}
 	if _, details := auditOf(a, ssoStepUpRefusedAction); len(details) != 1 || !strings.Contains(details[0], `"reason":"another_browser"`) {
