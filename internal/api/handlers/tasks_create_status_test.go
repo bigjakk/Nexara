@@ -256,22 +256,27 @@ func TestTaskUpdateWritesOnlyARunningNexaraTask(t *testing.T) {
 		"progress":    {Type: apischema.Number, Optional: true},
 		"finished_at": {Type: apischema.String, Optional: true},
 	})
+	caller := uuid.New()
 	for _, tt := range []struct {
 		status, source, body string
+		owner                uuid.UUID
 		want                 int
 	}{
-		{"running", "nexara", `{"progress":40}`, http.StatusOK},
-		{"completed", "nexara", `{"progress":40}`, http.StatusConflict},
-		{"running", "proxmox", `{"progress":40}`, http.StatusConflict},
-		{"running", "nexara", `{"status":"failed"}`, http.StatusBadRequest},
-		{"running", "nexara", `{"finished_at":"2026-01-01T00:00:00Z"}`, http.StatusBadRequest},
+		{"running", "filed", `{"progress":40}`, caller, http.StatusOK},
+		{"completed", "filed", `{"progress":40}`, caller, http.StatusConflict},
+		{"running", "filed", `{"status":"failed"}`, caller, http.StatusBadRequest},
+		{"running", "filed", `{"finished_at":"2026-01-01T00:00:00Z"}`, caller, http.StatusBadRequest},
+		// Only the caller's own filing: not a task Nexara or Proxmox recorded, nor another user's.
+		{"running", "nexara", `{"progress":40}`, caller, http.StatusForbidden},
+		{"running", "proxmox", `{"progress":40}`, caller, http.StatusForbidden},
+		{"running", "filed", `{"exit_status":"forged"}`, uuid.New(), http.StatusForbidden},
 	} {
-		dbtx := &taskInsertDBTX{task: &db.TaskHistory{ClusterID: clusterID, Status: tt.status, Source: tt.source}}
+		dbtx := &taskInsertDBTX{task: &db.TaskHistory{ClusterID: clusterID, Status: tt.status, Source: tt.source, UserID: tt.owner}}
 		handler := NewTaskHandler(db.New(dbtx), nil, 0)
 		handler.taskStatus = runningTask
 		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 		app.Use(func(c fiber.Ctx) error {
-			c.Locals("user_id", uuid.New())
+			c.Locals("user_id", caller)
 			c.Locals("rbac_engine", clusterGrantEngine{"manage", "task", clusterID})
 			return c.Next()
 		})

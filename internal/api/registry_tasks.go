@@ -347,10 +347,10 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 		Path:   taskHistoryScope + "/:upid",
 		Description: "Update a running task's progress. Requires manage:task on the CLUSTER the recorded " +
 			"task belongs to, which is read from the row rather than supplied. Not a partial update: every " +
-			"field is written on every call, so one left out is cleared rather than kept. Only a running " +
-			"task Nexara recorded is written, and it stays running: how a task ends is the collector's, " +
-			"read from Proxmox, so a task that has finished or was recorded from Proxmox is refused with " +
-			"409, and a status other than running or a finish time with 400.",
+			"field is written on every call, so one left out is cleared rather than kept. Only a task the " +
+			"caller filed (POST, still source filed) is written, 403 for any other, and it stays running: " +
+			"how a task ends is the collector's, read from Proxmox, so a task that has finished is refused " +
+			"with 409, and a status other than running or a finish time with 400.",
 		Group: "Tasks",
 		Permissions: Permissions{Deferred: "the cluster is read from the task ROW the :upid resolves to, " +
 			"not from the request, so middleware has nothing to resolve; the handler loads the row and then " +

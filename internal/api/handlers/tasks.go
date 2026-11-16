@@ -469,6 +469,11 @@ func (h *TaskHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	if err := requireClusterPerm(c, "manage", "task", task.ClusterID); err != nil {
 		return err
 	}
+	// Only what the caller filed is the caller's to report on: a task Nexara
+	// dispatched, or another user's filing, takes no exit text or progress from them.
+	if uid, _ := c.Locals("user_id").(uuid.UUID); task.Source != "filed" || task.UserID != uid {
+		return fiber.NewError(fiber.StatusForbidden, "Only a task you filed can be updated")
+	}
 	// A finished task's verdict, and a task the collector recorded from
 	// Proxmox, are the collector's: see UpdateTaskHistory.
 	if task.Status != "running" || task.Source == "proxmox" {
