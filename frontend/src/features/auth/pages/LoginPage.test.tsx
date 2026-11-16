@@ -10,6 +10,7 @@ import {
 } from "@/test/fake-server";
 import { useAuthStore } from "@/stores/auth-store";
 import { LoginPage } from "./LoginPage";
+import { ssoErrorKey } from "../lib/sso-error";
 
 /**
  * Once someone is signed in the login page sends them on to returnTo, which
@@ -123,4 +124,14 @@ describe("LoginPage, after a refused single sign-on", () => {
     ).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(crafted);
   });
+});
+
+describe("ssoErrorKey", () => {
+  // A code that names a property every object has is still an unknown code.
+  it.each(["__proto__", "constructor", "toString"])(
+    "answers %s with the generic sentence",
+    (code) => {
+      expect(ssoErrorKey(code)).toBe("ssoErrorUnknown");
+    },
+  );
 });
