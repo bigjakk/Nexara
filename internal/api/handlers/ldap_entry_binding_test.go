@@ -349,3 +349,20 @@ func TestLDAPLogin_ASecondFactorAccountGetsItsRolesOnlyAfterItsCode(t *testing.T
 		t.Errorf("after the code: role writes %v, name %q; want the owner's ops role and name", assigned, f.store.user(f.carol.ID).DisplayName)
 	}
 }
+
+// TestLDAPLogin_AFailedGroupLookupChangesNoRoleAfterTheCode: a group search that
+// failed says nothing about the groups, so the code applies no roles at all; the sync
+// would otherwise revoke every role of an account whose groups were simply unread.
+func TestLDAPLogin_AFailedGroupLookupChangesNoRoleAfterTheCode(t *testing.T) {
+	t.Parallel()
+	f := newSecondFactorDirectoryFixture(t, []byte(`{"cn=ops,dc=example,dc=com":"`+uuid.NewString()+`"}`))
+	f.own.GroupLookupFailed = true
+	f.directory("carol", f.own)
+	token := epochFirstStep(t, f.a, "carol")
+	if resp := f.a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, f.plain)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("verify-login = %d", resp.StatusCode)
+	}
+	if n := len(f.store.named("RevokeAllUserRoles")) + len(f.store.named("AssignUserRole")); n != 0 {
+		t.Errorf("%d role writes after the code, want none: the group search failed", n)
+	}
+}
