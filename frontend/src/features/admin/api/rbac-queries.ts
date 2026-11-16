@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
@@ -183,6 +184,24 @@ export function useUpdateUser() {
       role?: string;
     }) => apiClient.put<UserListItem>(apiPath`/api/v1/users/${id}`, data),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin", "users"] });
+    },
+  });
+}
+
+/**
+ * Clears an SSO account's link to its provider identity and ends its sessions;
+ * its next sign-in links again by address. A failure is the global toast's.
+ */
+export function useResetSSOLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient.delete(apiPath`/api/v1/users/${id}/sso-link`),
+    onSuccess: () => {
+      toast.success(
+        "SSO link reset. The account's sessions have ended; it links again at its next sign-in.",
+      );
       void qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });

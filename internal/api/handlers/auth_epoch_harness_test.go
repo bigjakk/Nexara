@@ -240,6 +240,16 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 			s.ldapConfig.LastSyncAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 		}
 		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case "ClearOIDCIdentity":
+		// id; the SQL's WHERE: a linked SSO account.
+		u, ok := s.users[args[0].(uuid.UUID)]
+		if !ok || u.AuthSource != "oidc" || u.OidcSubject == "" {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
+		}
+		before := *u
+		remember(func() { *u = before })
+		u.OidcIssuer, u.OidcSubject = "", ""
+		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "DeleteRecoveryCode":
 		id := args[0].(uuid.UUID)
 		for uid, codes := range s.recoveryCodes {
@@ -681,6 +691,8 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 		app.Post("/auth/totp/recovery-codes/regenerate", withRequestParams(t, totpConfirmSetupMirror(), nil, a.totp.RegenerateRecoveryCodes))
 	}
 	app.Put("/users/:id", withRequestParams(t, epochUserUpdateMirror(), []string{"id"}, uh.Update))
+	app.Delete("/users/:id/sso-link", withRequestParams(t, apischema.Properties{
+		"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}}, []string{"id"}, uh.ResetSSOLink))
 	app.Post("/auth/console-token", withRequestParams(t, consoleTokenMirror(), nil, ah.ConsoleToken))
 	app.Post("/auth/ws-token", withRequestParams(t, apischema.Properties{}, nil, ah.WSToken))
 	app.Get("/probe", func(c fiber.Ctx) error { return a.probe(c) })

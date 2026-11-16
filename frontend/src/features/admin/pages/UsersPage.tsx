@@ -19,7 +19,12 @@ import {
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
 import { MoreHorizontal, UserPlus } from "lucide-react";
-import { useUsers, useUpdateUser, useDeleteUser } from "../api/rbac-queries";
+import {
+  useUsers,
+  useUpdateUser,
+  useDeleteUser,
+  useResetSSOLink,
+} from "../api/rbac-queries";
 import { useAdminResetTOTP } from "@/features/settings/api/totp-queries";
 import { RoleAssignDialog } from "../components/RoleAssignDialog";
 import { CreateUserDialog } from "../components/CreateUserDialog";
@@ -38,6 +43,7 @@ export function UsersPage() {
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
   const resetTotp = useAdminResetTOTP();
+  const resetSSOLink = useResetSSOLink();
   const [roleDialogUserId, setRoleDialogUserId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
@@ -105,6 +111,11 @@ export function UsersPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {SOURCE_LABELS[user.auth_source] ?? "Local"}
+                    {user.auth_source === "oidc" && !user.sso_linked && (
+                      <div className="whitespace-nowrap text-[12.5px]">
+                        Not linked yet
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     {user.totp_enabled ? (
@@ -174,6 +185,21 @@ export function UsersPage() {
                               }}
                             >
                               Reset 2FA
+                            </DropdownMenuItem>
+                          )}
+                          {user.auth_source === "oidc" && user.sso_linked && (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    `Reset the SSO link of ${user.email}? Their sessions end now, and their next SSO sign-in links the account to whichever identity presents this address.`,
+                                  )
+                                ) {
+                                  resetSSOLink.mutate(user.id);
+                                }
+                              }}
+                            >
+                              Reset SSO link
                             </DropdownMenuItem>
                           )}
                           <DropdownMenuItem

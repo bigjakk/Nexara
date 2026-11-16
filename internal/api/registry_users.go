@@ -11,7 +11,7 @@ import (
 // optString — lives in registry_vms.go, where the first migrated domain
 // defined it.
 
-// userScope is the prefix the four account-management routes hang off.
+// userScope is the prefix the account-management routes hang off.
 //
 // These are NEXARA accounts — who may sign in to this install — as opposed
 // to the Proxmox users in registry_access.go, which belong to one cluster.
@@ -56,10 +56,10 @@ const userUpdateReason = "the gate is CONDITIONAL on the body: the handler requi
 	"edit and an ADDITIONAL manage:role when `role` is present, which middleware cannot decide because " +
 	"it runs before the body is read — and a static Check would document only the first of the two"
 
-// registerUserEndpoints declares all 4 of UserHandler's routes.
-//
-// Three are a plain global Check (two view:user, one manage:user) and the
-// fourth is the conditional Deferred above.
+// registerUserEndpoints declares UserHandler's routes: the four account routes
+// — three a plain global Check (two view:user, one manage:user) and the fourth
+// the conditional Deferred above — and the single sign-on link reset, a global
+// manage:user Check.
 //
 // What stays in the handlers is what the declaration cannot see: the refusal
 // to touch the system account, the refusal to change your own role or active
@@ -113,6 +113,21 @@ func registerUserEndpoints(reg *Registry, h *handlers.UserHandler) {
 		Permissions: globalCheck("manage", "user"),
 		Parameters:  apischema.Properties{"id": userIDParam},
 		Handler:     h.Delete,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodDelete,
+		Path:   userScope + "/:id/sso-link",
+		Description: "Reset a single sign-on account's link to its identity provider: the stored issuer and " +
+			"subject are cleared, so the account's next SSO sign-in links again to whichever identity " +
+			"presents its address, and every session of the account ends at once (an access token " +
+			"already issued stays valid until it expires). 400 when the account has no link (a local or " +
+			"LDAP account never has one). A caller cannot reset their own. The reset and the end of the " +
+			"sessions are one transaction: an answer that says the link was NOT reset changed nothing; " +
+			"one that says it could not be confirmed may have taken effect, and repeating it is safe.",
+		Group:       "User Management",
+		Permissions: globalCheck("manage", "user"),
+		Parameters:  apischema.Properties{"id": userIDParam},
+		Handler:     h.ResetSSOLink,
 	})
 }
 

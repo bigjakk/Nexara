@@ -84,6 +84,7 @@ type userListResponse struct {
 	IsActive    bool      `json:"is_active"`
 	AuthSource  string    `json:"auth_source"`
 	TotpEnabled bool      `json:"totp_enabled"`
+	SSOLinked   bool      `json:"sso_linked"` // bound to a provider identity, which is never returned
 	CreatedAt   string    `json:"created_at"`
 	UpdatedAt   string    `json:"updated_at"`
 }
@@ -113,6 +114,7 @@ func (h *UserHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 			IsActive:    u.IsActive,
 			AuthSource:  u.AuthSource,
 			TotpEnabled: u.TotpEnabled,
+			SSOLinked:   u.SsoLinked,
 			CreatedAt:   u.CreatedAt.Format(time.RFC3339Nano),
 			UpdatedAt:   u.UpdatedAt.Format(time.RFC3339Nano),
 		}
@@ -144,6 +146,7 @@ func (h *UserHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
 		TotpEnabled: user.TotpSecret.Valid,
+		SSOLinked:   user.OidcSubject != "",
 		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339Nano),
 	})
@@ -276,6 +279,7 @@ func (h *UserHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
 		TotpEnabled: user.TotpSecret.Valid,
+		SSOLinked:   user.OidcSubject != "",
 		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339Nano),
 	})
@@ -475,4 +479,133 @@ func (h *UserHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "user", id.String(), "user_deleted", details)
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// errNotSSOLinked is a reset of an account that has no single sign-on link to reset.
+var errNotSSOLinked = errors.New("the account has no single sign-on link")
+
+// ResetSSOLink handles DELETE /api/v1/users/:id/sso-link: it clears the provider identity
+// an SSO account is bound to, so that its next sign-in links again by address, and ends
+// every session of the account (the identity behind them is in question).
+func (h *UserHandler) ResetSSOLink(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
+	if err != nil {
+		return err
+	}
+	if callerID, _ := c.Locals("user_id").(uuid.UUID); callerID == id {
+		return fiber.NewError(fiber.StatusForbidden, "Cannot reset your own single sign-on link")
+	}
+	user, err := h.queries.GetUserByID(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusNotFound, "User not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get user")
+	}
+
+	revoked, unconfirmed, err := h.resetSSOLinks(c, func(ctx context.Context, qx *db.Queries) ([]uuid.UUID, error) {
+		n, err := qx.ClearOIDCIdentity(ctx, id)
+		if err == nil && n == 0 {
+			err = errNotSSOLinked
+		}
+		return []uuid.UUID{id}, err
+	})
+	if errors.Is(err, errNotSSOLinked) {
+		return fiber.NewError(fiber.StatusBadRequest, "This account has no single sign-on link to reset")
+	}
+	if err != nil && !unconfirmed {
+		return err
+	}
+	details := map[string]string{"email": user.Email}
+	if unconfirmed {
+		details["outcome"] = "unconfirmed"
+	}
+	raw, _ := json.Marshal(details)
+	h.withFollowUp(c, func() {
+		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "user", id.String(), "user_sso_link_reset", raw)
+	})
+	if err != nil {
+		return err
+	}
+	h.forgetSessions(c, revoked)
+	return c.JSON(fiber.Map{"message": "Single sign-on link reset; the account's sessions have ended"})
+}
+
+// resetSSOLinks runs clear — which clears links and returns the accounts it cleared —
+// and ends every session of each of those accounts, in ONE transaction, for the reason
+// deactivate gives: a reset whose sessions could not be ended is not done. It returns
+// the revoked sessions, for their Redis rows. unconfirmed is a COMMIT whose answer was
+// lost: the reset may have taken effect, and repeating it is safe.
+func (h *UserHandler) resetSSOLinks(c fiber.Ctx, clear func(context.Context, *db.Queries) ([]uuid.UUID, error)) (revoked []uuid.UUID, unconfirmed bool, err error) {
+	if h.pool == nil {
+		return nil, false, fiber.NewError(fiber.StatusInternalServerError, ssoLinkNotResetMessage)
+	}
+	d := h.dbTimeout
+	if d <= 0 {
+		d = authDBTimeout
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), d)
+	defer cancel()
+
+	// READ COMMITTED, for the reason deactivate pins it.
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, false, ssoLinkNotReset(err)
+	}
+	defer releaseTx(tx, "reset sso link")()
+	qx := h.queries.WithTx(tx)
+
+	accounts, err := clear(ctx, qx)
+	if err != nil {
+		if errors.Is(err, errNotSSOLinked) {
+			return nil, false, err
+		}
+		return nil, false, ssoLinkNotReset(err)
+	}
+	for _, id := range accounts {
+		ids, err := auth.RevokeAllUserSessionsIn(ctx, qx, id)
+		if err != nil {
+			return nil, false, ssoLinkNotReset(err)
+		}
+		revoked = append(revoked, ids...)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if !commitOutcomeUnknown(err) {
+			return nil, false, ssoLinkNotReset(err)
+		}
+		slog.Error("reset sso link: the commit's outcome is UNCONFIRMED", "error", err)
+		if isTransientDBError(err) {
+			return nil, true, fiber.NewError(fiber.StatusServiceUnavailable, ssoLinkUnconfirmedMessage)
+		}
+		return nil, true, fiber.NewError(fiber.StatusInternalServerError, ssoLinkUnconfirmedMessage)
+	}
+	return revoked, false, nil
+}
+
+// The answers of a reset that did not complete: rolled back, nothing changed; or a
+// COMMIT whose answer was lost.
+const (
+	ssoLinkNotResetMessage    = "The single sign-on link was NOT reset; the account and its sessions are as they were."
+	ssoLinkUnconfirmedMessage = "The reset could not be confirmed: the link may be cleared and the sessions ended, " +
+		"or not. Check the account; repeating the reset is safe."
+)
+
+// ssoLinkNotReset answers a reset that rolled back: 503 when the database was away
+// (isTransientDBError), else 500.
+func ssoLinkNotReset(err error) error {
+	slog.Warn("reset sso link: not done; nothing was changed", "error", err)
+	if isTransientDBError(err) {
+		return fiber.NewError(fiber.StatusServiceUnavailable, ssoLinkNotResetMessage)
+	}
+	return fiber.NewError(fiber.StatusInternalServerError, ssoLinkNotResetMessage)
+}
+
+// forgetSessions drops the Redis rows of revoked sessions under a follow-up deadline.
+func (h *UserHandler) forgetSessions(c fiber.Ctx, revoked []uuid.UUID) {
+	if h.sessions == nil || len(revoked) == 0 {
+		return
+	}
+	fctx, cancel := h.followUp(c.Context())
+	h.sessions.ForgetSessions(fctx, revoked)
+	cancel()
 }

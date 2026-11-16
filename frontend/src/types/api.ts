@@ -57,6 +57,8 @@ export interface UserListItem {
   is_active: boolean;
   auth_source: "local" | "ldap" | "oidc";
   totp_enabled: boolean;
+  /** An SSO account bound to its identity provider's subject. */
+  sso_linked: boolean;
   created_at: string;
   updated_at: string;
 }

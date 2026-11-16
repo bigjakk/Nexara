@@ -16,7 +16,11 @@ import (
 // admin TOTP reset that shares their path prefix is TOTPHandler's route and is
 // counted with the TOTP domain. See vmRouteCount in registry_vms_test.go for
 // why the registry total is a sum of per-domain constants.
-const userRouteCount = 4
+const userRouteCount = 4 + userSSOLinkRouteCount
+
+// userSSOLinkRouteCount is the single sign-on link reset, which came after the
+// migration the tally below records.
+const userSSOLinkRouteCount = 1
 
 const testUserRowID = "c3d4e5f6-0000-4000-8000-000000000044"
 
@@ -48,10 +52,11 @@ var userLegacyPermissions = map[string]struct {
 // contrast is registry_access.go, whose 25 routes are one cluster's PROXMOX
 // users and are cluster-scoped for exactly that reason.
 var userRoutesOutsideTheClusterCheckShape = map[string]string{
-	"GET /api/v1/users":        "a Nexara account is instance-wide; the path names no cluster",
-	"GET /api/v1/users/:id":    "a Nexara account is instance-wide; the path names no cluster",
-	"PUT /api/v1/users/:id":    "Deferred: manage:user always, plus manage:role only when the body carries `role`",
-	"DELETE /api/v1/users/:id": "a Nexara account is instance-wide; the path names no cluster",
+	"GET /api/v1/users":                 "a Nexara account is instance-wide; the path names no cluster",
+	"GET /api/v1/users/:id":             "a Nexara account is instance-wide; the path names no cluster",
+	"PUT /api/v1/users/:id":             "Deferred: manage:user always, plus manage:role only when the body carries `role`",
+	"DELETE /api/v1/users/:id":          "a Nexara account is instance-wide; the path names no cluster",
+	"DELETE /api/v1/users/:id/sso-link": "a Nexara account is instance-wide; the path names no cluster",
 }
 
 // declaredUserEndpoints returns every declaration in this domain, keyed
@@ -70,12 +75,12 @@ func declaredUserEndpoints(t *testing.T) map[string]Endpoint {
 // kept in UserHandler.Update because its second one is conditional.
 func TestUserRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	declared := declaredUserEndpoints(t)
-	if len(declared) != userRouteCount {
-		t.Fatalf("the registry declares %d user routes, want %d", len(declared), userRouteCount)
+	if len(declared) != userRouteCount-userSSOLinkRouteCount {
+		t.Fatalf("the registry declares %d user routes, want %d", len(declared), userRouteCount-userSSOLinkRouteCount)
 	}
-	if len(userLegacyPermissions) != userRouteCount {
+	if len(userLegacyPermissions) != userRouteCount-userSSOLinkRouteCount {
 		t.Fatalf("userLegacyPermissions has %d entries, want %d — the table must cover every migrated route",
-			len(userLegacyPermissions), userRouteCount)
+			len(userLegacyPermissions), userRouteCount-userSSOLinkRouteCount)
 	}
 
 	calls, hoisted := 0, 0
@@ -355,5 +360,14 @@ func TestEveryUserEndpointIsDocumented(t *testing.T) {
 		if e.Group != "User Management" {
 			t.Errorf("%s declares group %q, want %q", key, e.Group, "User Management")
 		}
+	}
+}
+
+// TestUserSSOLinkResetIsGatedByManageUser: the link reset ends another account's
+// sessions, so it takes the permission the other user-admin writes take.
+func TestUserSSOLinkResetIsGatedByManageUser(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodDelete, userScope+"/:id/sso-link")
+	if e.Permissions.Check == nil || e.Permissions.Describe() != "manage:user" || e.Permissions.Check.Scope != ScopeGlobal {
+		t.Errorf("declares %q, want a global manage:user Check", e.Permissions.Describe())
 	}
 }

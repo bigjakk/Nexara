@@ -223,6 +223,16 @@ func TestOIDCIdentity_SQL(t *testing.T) {
 		if n, err := q.CountUsersLinkedToIssuer(ctx, iss); err != nil || n != 1 {
 			t.Errorf("CountUsersLinkedToIssuer = %d, %v; want 1", n, err)
 		}
+		// The users list says whether an account is linked, not to what.
+		listed, err := q.ListUsersWithRoles(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, u := range listed {
+			if want := u.ID == ids["oidc"]; (u.ID == ids["oidc"] || u.ID == ids["local"]) && u.SsoLinked != want {
+				t.Errorf("ListUsersWithRoles: %s sso_linked = %t, want %t", u.Email, u.SsoLinked, want)
+			}
+		}
 		// A second account for the identity, and an identity on a local account: each
 		// inside a savepoint, so the refusal does not end the transaction.
 		for _, st := range []struct {
