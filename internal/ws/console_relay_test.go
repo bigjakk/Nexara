@@ -88,6 +88,8 @@ type sessionDB struct {
 	cluster db.Cluster
 	// revoked makes checker answer that the console permission is gone.
 	revoked atomic.Bool
+	// deleted makes GetCluster answer that the cluster is gone.
+	deleted atomic.Bool
 	// asked is every permission checker was asked for.
 	asked []permissionAsk
 }
@@ -123,7 +125,7 @@ func (d *sessionDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.R
 		return row
 	}
 	if len(args) == 1 {
-		if id, ok := args[0].(uuid.UUID); ok && id == d.cluster.ID {
+		if id, ok := args[0].(uuid.UUID); ok && id == d.cluster.ID && !d.deleted.Load() {
 			return clusterRow{d.cluster}
 		}
 	}
@@ -402,43 +404,49 @@ func TestConsoleRelay_HeldToItsCredential(t *testing.T) {
 		})
 
 		// A revoked console grant closes it with its own code, which the SPA does
-		// not read as a sign-out. What is asked is the grant the console was minted
-		// under: console:vm on its cluster, for both kinds here.
-		t.Run(kind+": closed when its console permission is removed while open", func(t *testing.T) {
-			t.Parallel()
-			sockets := make(chan *gorillaws.Conn, 1)
-			pve := newFakeProxmox(t, func(c *gorillaws.Conn) {
-				sockets <- c
-				for {
-					if _, _, err := c.ReadMessage(); err != nil {
-						return
+		// not read as a sign-out, and so does its cluster's deletion, which a global
+		// grant outlives. What is asked is the grant the console was minted under:
+		// console:vm on its cluster, for both kinds here.
+		for removal, remove := range map[string]func(*sessionDB){
+			"its console permission is removed": func(d *sessionDB) { d.revoked.Store(true) },
+			"its cluster is deleted":            func(d *sessionDB) { d.deleted.Store(true) },
+		} {
+			t.Run(kind+": closed when "+removal+" while open", func(t *testing.T) {
+				t.Parallel()
+				sockets := make(chan *gorillaws.Conn, 1)
+				pve := newFakeProxmox(t, func(c *gorillaws.Conn) {
+					sockets <- c
+					for {
+						if _, _, err := c.ReadMessage(); err != nil {
+							return
+						}
+					}
+				})
+				// Lets the stand-in's reader return however the test ends.
+				t.Cleanup(func() {
+					select {
+					case c := <-sockets:
+						_ = c.Close()
+					default:
+					}
+				})
+				sdb := newSessionDB(t, scope, pve.srv.URL)
+				browser := openSessionWith(t, kind, scope, sdb, 10*time.Millisecond, "", testLogger())
+				readConnected(t, browser)
+
+				remove(sdb)
+
+				_ = browser.SetReadDeadline(time.Now().Add(5 * time.Second))
+				if _, _, err := browser.ReadMessage(); !gorillaws.IsCloseError(err, closeAccessRemoved) {
+					t.Fatalf("after %s: %v, want a Close %d", removal, err, closeAccessRemoved)
+				}
+				want := permissionAsk{testCredential.UserID, "console", "vm", "cluster", uuid.MustParse(scope.ClusterID)}
+				for _, got := range sdb.permissionsAsked() {
+					if got != want {
+						t.Fatalf("the checker was asked %+v, want %+v", got, want)
 					}
 				}
 			})
-			// Lets the stand-in's reader return however the test ends.
-			t.Cleanup(func() {
-				select {
-				case c := <-sockets:
-					_ = c.Close()
-				default:
-				}
-			})
-			sdb := newSessionDB(t, scope, pve.srv.URL)
-			browser := openSessionWith(t, kind, scope, sdb, 10*time.Millisecond, "", testLogger())
-			readConnected(t, browser)
-
-			sdb.revoked.Store(true)
-
-			_ = browser.SetReadDeadline(time.Now().Add(5 * time.Second))
-			if _, _, err := browser.ReadMessage(); !gorillaws.IsCloseError(err, closeAccessRemoved) {
-				t.Fatalf("after the permission was removed: %v, want a Close %d", err, closeAccessRemoved)
-			}
-			want := permissionAsk{testCredential.UserID, "console", "vm", "cluster", uuid.MustParse(scope.ClusterID)}
-			for _, got := range sdb.permissionsAsked() {
-				if got != want {
-					t.Fatalf("the checker was asked %+v, want %+v", got, want)
-				}
-			}
-		})
+		}
 	}
 }

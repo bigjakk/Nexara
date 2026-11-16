@@ -2620,7 +2620,8 @@ or a password change.
   close code alone. A client should stop reconnecting then.
 - On the same check, a console whose user no longer holds the `console:*`
   permission it was minted under, on that cluster, is closed with close code
-  `3003` ("console access removed"). The sign-in is untouched: a client should
+  `3003` ("console access removed"), and so is one whose cluster has been
+  removed from Nexara, whatever grant its user holds. The sign-in is untouched: a client should
   stop reconnecting, and not sign out. Permission changes can take up to the
   RBAC cache's lifetime (about five minutes) to be seen.
 - A console whose sign-in or permission could not be checked for about a minute is closed with

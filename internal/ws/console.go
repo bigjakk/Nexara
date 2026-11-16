@@ -237,7 +237,7 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// Send a connected status to the browser.
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(`{"type":"connected"}`))
 
-	watch := watchRelay(live, consoleAllowed(h.checkPermission, userID, scope), h.checkEvery, conn, pxConn, credLogger)
+	watch := watchRelay(live, consoleAllowed(h.checkPermission, h.queries, userID, scope), h.checkEvery, conn, pxConn, credLogger)
 	defer watch.stop()
 
 	var wg sync.WaitGroup

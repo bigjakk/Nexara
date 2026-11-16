@@ -12,6 +12,7 @@ import (
 	fiberWs "github.com/gofiber/contrib/v3/websocket"
 	"github.com/google/uuid"
 	gorillaWs "github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/auth"
@@ -222,19 +223,31 @@ func consoleResource(scopeType string) string {
 }
 
 // consoleAllowed asks RBAC whether userID still holds console:<resource> on the
-// scope's cluster: what the console token was minted for. With no checker, or a
-// scope it cannot name, it answers an error, never a yes.
-func consoleAllowed(check PermissionChecker, userID uuid.UUID, scope *auth.ConsoleScope) liveCheck {
+// scope's cluster: what the console token was minted for. Then whether that
+// cluster is still there: a global grant holds on a deleted cluster's id, and
+// its console must close too. With no checker or queries, or a scope it cannot
+// name, it answers an error, never a yes.
+func consoleAllowed(check PermissionChecker, queries *db.Queries, userID uuid.UUID, scope *auth.ConsoleScope) liveCheck {
 	return func(ctx context.Context) (bool, error) {
 		clusterID, err := uuid.Parse(scope.ClusterID)
 		resource := consoleResource(scope.Type)
 		switch {
-		case check == nil:
+		case check == nil || queries == nil:
 			return false, errors.New("no permission checker configured")
 		case err != nil || resource == "":
 			return false, fmt.Errorf("console scope names no permission: %q on %q", scope.Type, scope.ClusterID)
 		}
-		return check(ctx, userID, "console", resource, "cluster", clusterID)
+		held, err := check(ctx, userID, "console", resource, "cluster", clusterID)
+		if err != nil || !held {
+			return held, err
+		}
+		if _, err := queries.GetCluster(ctx, clusterID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil
+			}
+			return false, fmt.Errorf("look up the console's cluster: %w", err)
+		}
+		return true, nil
 	}
 }
 

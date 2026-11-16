@@ -195,7 +195,7 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	connectedMsg := `{"type":"connected","password":` + strconv.Quote(password) + `}`
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(connectedMsg))
 
-	watch := watchRelay(live, consoleAllowed(h.checkPermission, userID, scope), h.checkEvery, conn, pxConn, credLogger)
+	watch := watchRelay(live, consoleAllowed(h.checkPermission, h.queries, userID, scope), h.checkEvery, conn, pxConn, credLogger)
 	defer watch.stop()
 
 	// Bidirectional proxy: browser WebSocket ↔ Proxmox WebSocket.
