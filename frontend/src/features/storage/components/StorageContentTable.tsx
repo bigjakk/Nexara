@@ -14,7 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { StorageContentItem } from "../types/storage";
 import { useDeleteContent } from "../api/storage-queries";
 import { sessionScope } from "@/lib/api-client";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatDateTime } from "@/lib/format";
 import { contentKindName } from "../lib/store-rows";
 
 interface StorageContentTableProps {
@@ -26,8 +26,7 @@ interface StorageContentTableProps {
 }
 
 function formatDate(unixTs: number): string {
-  if (unixTs === 0) return "—";
-  return new Date(unixTs * 1000).toLocaleString();
+  return formatDateTime(unixTs * 1000);
 }
 
 /**
