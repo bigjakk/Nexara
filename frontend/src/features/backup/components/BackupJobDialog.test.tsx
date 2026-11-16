@@ -5,9 +5,9 @@ import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
 import { BackupJobDialog } from "./BackupJobDialog";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { list: vi.fn(), post: vi.fn(), put: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedList = vi.mocked(apiClient.list);
 const mockedPost = vi.mocked(apiClient.post);

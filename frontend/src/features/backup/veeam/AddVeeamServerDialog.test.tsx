@@ -5,9 +5,9 @@ import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
 import { AddVeeamServerDialog } from "./AddVeeamServerDialog";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { post: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedPost = vi.mocked(apiClient.post);
 
