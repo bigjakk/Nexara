@@ -2261,7 +2261,7 @@ Navigate to **Admin > Branding**.
 **Settings** in the sidebar opens **Appearance**, for your own account:
 
 - **Language** — only English ships today; see the [translation guide](../frontend/src/locales/CONTRIBUTING.md)
-- **Theme** — light, dark, or system (follows OS preference), remembered per browser
+- **Theme** — light, dark, or system (follows OS preference), saved with your account once you pick one, wherever you pick it (here, the header's toggle or the command palette); the sign-in page and an account that never picked one keep the browser's own choice
 - **Accent Color** — the default or one of 9 presets, which theme the entire UI
 - **Storage Units** — binary (GiB) or decimal (GB)
 - **Date Format** — how every date and time in the app is written: **Automatic** (the default: each place as it has always been, relative in recent-activity lists and the browser's locale elsewhere), **Relative** ("5m ago"; point at one to see the exact time), **ISO 8601** (`2026-03-08T14:30:00+00:00`, with the browser's offset) or **Browser locale**. A date-only field stays a date, narrow time columns show the clock for today and the date otherwise with the exact time on hover, and chart axes always show the clock

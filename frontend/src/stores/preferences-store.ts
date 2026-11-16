@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import i18n from "@/lib/i18n";
+import type { ThemeMode } from "@/stores/theme-store";
 
 export type ByteUnit = "binary" | "decimal";
 /** The retired Date format value: saved by older versions, never read. */
@@ -22,6 +23,11 @@ export interface UserPreferences {
   accentColor: string; // HSL string e.g. "240 5.9% 10%" or preset name
   language: string; // BCP 47 language code e.g. "en", "de", "fr"
   consoleOpenMode: ConsoleOpenMode;
+  /**
+   * Light or dark, saved per user. Absent until the user picks one, and then
+   * the browser keeps its own (theme-store), as it does before sign-in.
+   */
+  theme?: ThemeMode;
 }
 
 interface PreferencesState {

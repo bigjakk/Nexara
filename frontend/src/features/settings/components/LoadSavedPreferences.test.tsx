@@ -3,6 +3,7 @@ import { waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { usePreferencesStore } from "@/stores/preferences-store";
+import { useThemeStore } from "@/stores/theme-store";
 import { settingsKeys } from "@/features/settings/api/settings-queries";
 import { LoadSavedPreferences } from "./LoadSavedPreferences";
 
@@ -60,5 +61,37 @@ describe("LoadSavedPreferences", () => {
     const primary =
       document.documentElement.style.getPropertyValue("--primary");
     expect(primary !== "").toBe(c.accent);
+  });
+
+  // Protects the theme saved per user: the saved one is applied, and a change
+  // made after that is saved with the rest (not before: the local copy may be
+  // the previous user's).
+  it("applies the saved theme and saves a change to it", async () => {
+    useThemeStore.getState().setMode("light");
+    vi.mocked(apiClient.get).mockResolvedValue({
+      value: { accentColor: "purple", theme: "dark" },
+    });
+    vi.mocked(apiClient.put).mockResolvedValue({});
+    renderWithProviders(<LoadSavedPreferences />);
+
+    await waitFor(() => {
+      expect(useThemeStore.getState().mode).toBe("dark");
+    });
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(apiClient.put).not.toHaveBeenCalled();
+
+    useThemeStore.getState().setMode("light");
+    await waitFor(() => {
+      expect(apiClient.put).toHaveBeenCalledWith(
+        "/api/v1/settings/user.preferences",
+        {
+          value: expect.objectContaining({
+            theme: "light",
+            accentColor: "purple",
+          }) as unknown,
+          scope: "user",
+        },
+      );
+    });
   });
 });

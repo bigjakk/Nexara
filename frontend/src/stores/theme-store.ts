@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { applyAccentColor } from "@/lib/accent";
 
-type ThemeMode = "light" | "dark" | "system";
+export type ThemeMode = "light" | "dark" | "system";
 
 interface ThemeState {
   mode: ThemeMode;
