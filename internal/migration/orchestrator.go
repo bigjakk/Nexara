@@ -1012,24 +1012,14 @@ func (e *scrubbedError) Unwrap() error { return e.err }
 // scrubEndpointSecret removes the target cluster's API token secret from err's
 // message.
 //
-// Why here and not in the Proxmox client: APIError.Message carries Proxmox's
-// own words — the raw response body when the {"errors":{…}} envelope does not
-// parse, and the flattened "field: msg" pairs when it does — and either shape
-// can contain a value the vendor chose to echo. The rest of the client reads
-// that text. Scrubbing centrally would mean teaching the client about a
-// credential that only this one call site holds, and would change error text
-// everything else depends on. So the scrub sits at the narrow end — the single
-// function that both assembles the credential and owns the error on its way to
-// a persisted, Viewer-readable column.
-//
-// Scope, stated honestly: this is a STRUCTURAL exposure, not a demonstrated
-// leak. PVE's JSONSchema rejections generally name the parameter and the rule
-// rather than the value, and nothing here has observed PVE echoing a rejected
-// target-endpoint back. What is true is that the endpoint's property string
-// carries a stored, long-lived API token, that the whole response body reaches
-// APIError.Message untouched, and that the only thing standing between the two
-// is an upstream vendor's error-formatting choice we neither control nor
-// re-check on upgrade.
+// The Proxmox client scrubs it too: every error text it builds, APIError.Message
+// included, is cleaned of the request's secrets, the target-endpoint's token
+// secret among them (requestSecrets, cleanErrorText in internal/proxmox). This
+// is the second layer, at the one function that both assembles the credential
+// and owns the error on its way to a persisted, Viewer-readable column, so a
+// path that reaches it without going through the client's scrub — a wrapper
+// that adds the endpoint to the text, or a change to the client — still keeps
+// the secret out.
 //
 // It scrubs the SECRET HALF rather than the whole "<tokenid>=<secret>" pair.
 // The secret is the part that authenticates, and it is the narrower needle:

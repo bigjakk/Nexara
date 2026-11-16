@@ -192,7 +192,7 @@ func TestExecuteCrossCluster_ScrubsTheTargetTokenFromTheFailure(t *testing.T) {
 		},
 		{
 			// Anything that is not that envelope reaches APIError.Message as
-			// the raw body, untouched.
+			// the body's text, cleaned and scrubbed by the client.
 			name: "raw body",
 			make: func(endpoint string) (int, string) {
 				return http.StatusInternalServerError,
