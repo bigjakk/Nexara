@@ -10,7 +10,7 @@ import (
 
 // TestAuthLimiterCannotBeSpelledAround is a regression test for a live authentication brute-force
 // bypass. Fiber routes on a lowercased, slash-trimmed path (CaseSensitive and StrictRouting are both false
-// in buildFiberConfig) while c.Path() returns the raw path, and the auth limiter matched the raw path
+// in buildFiberConfig) while c.Path() returns the path before that fold, and the auth limiter matched it
 // exactly. "POST /api/v1/auth/login/" reached the login handler with NO rate limit (the auth limiter's
 // switch missed it and the general limiter's "/api/v1/auth/" prefix check still matched, so that skipped it
 // too: 15/min became unlimited); "POST /API/v1/auth/login" fell through to the general limiter's budget,
@@ -26,6 +26,10 @@ func TestAuthLimiterCannotBeSpelledAround(t *testing.T) {
 		"/api/v1/auth/login/",
 		"/API/v1/auth/login",
 		"/api/V1/Auth/Login",
+		// Fiber v3.6 routes these to login too, so the limiters must read the
+		// normalized path the router matches (c.Path()), never the raw one.
+		"/api/v1/x/../auth/login",
+		"/api/v1/auth/%6cogin",
 	} {
 		t.Run(path, func(t *testing.T) {
 			s := newTestServer(t)
