@@ -2077,7 +2077,7 @@ after the node is back).
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/notification-channels` | List channels |
-| POST | `/notification-channels` | Create channel. A target that resolves to a private address (RFC 1918, IPv6 unique-local) answers 422 `private_address_confirm_required` with `details.ip`; re-send with `allow_private_address: true` to store the confirmation on the channel. A loopback, link-local or unspecified target answers 400 |
+| POST | `/notification-channels` | Create channel. A target that resolves to a private address (RFC 1918, IPv6 unique-local) answers 422 `private_address_confirm_required` with `details.ip`; re-send with `allow_private_address: true` to store the confirmation on the channel. A loopback, link-local, unspecified or cloud metadata target answers 400 |
 | GET | `/notification-channels/:id` | Get channel |
 | PUT | `/notification-channels/:id` | Update channel. A new `config` is checked as a create's is, and `allow_private_address` is decided again for it; an update without `config` keeps the stored confirmation |
 | DELETE | `/notification-channels/:id` | Delete channel |

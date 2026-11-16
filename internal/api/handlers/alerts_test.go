@@ -908,11 +908,13 @@ func TestCreateChannel_PrivateTargetNeedsConfirming(t *testing.T) {
 		allow     bool
 		status    int
 		stored    bool
+		says      string
 	}{
-		{"private, not confirmed", "https://10.0.0.5/hook", false, http.StatusUnprocessableEntity, false},
-		{"private, confirmed", "https://10.0.0.5/hook", true, http.StatusCreated, true},
-		{"loopback, confirmed", "https://127.0.0.1/hook", true, http.StatusBadRequest, false},
-		{"public, confirmed", "https://203.0.113.10/hook", true, http.StatusCreated, false},
+		{"private, not confirmed", "https://10.0.0.5/hook", false, http.StatusUnprocessableEntity, false, ""},
+		{"private, confirmed", "https://10.0.0.5/hook", true, http.StatusCreated, true, ""},
+		{"loopback, confirmed", "https://127.0.0.1/hook", true, http.StatusBadRequest, false, "a loopback, link-local"},
+		{"cloud metadata, confirmed", "https://100.100.100.200/hook", true, http.StatusBadRequest, false, "a cloud metadata address"},
+		{"public, confirmed", "https://203.0.113.10/hook", true, http.StatusCreated, false, ""},
 	} {
 		dbtx := &auditRowsDBTX{rowFor: map[string]any{"InsertNotificationChannel": db.NotificationChannel{ID: uuid.New()}},
 			execOK: map[string]bool{"InsertAuditLog": true}}
@@ -932,6 +934,9 @@ func TestCreateChannel_PrivateTargetNeedsConfirming(t *testing.T) {
 		_ = resp.Body.Close()
 		if resp.StatusCode != tt.status {
 			t.Errorf("%s: status %d %s, want %d", tt.name, resp.StatusCode, got, tt.status)
+		}
+		if !strings.Contains(got, tt.says) {
+			t.Errorf("%s: %s does not say %q", tt.name, got, tt.says)
 		}
 		if tt.status == http.StatusUnprocessableEntity && !strings.Contains(got, "private_address_confirm_required") {
 			t.Errorf("%s: %s lacks the prompt code", tt.name, got)

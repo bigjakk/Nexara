@@ -25,10 +25,14 @@ import (
 //
 // Unreadable marks an address that does not parse as one IP — an IPv6 zone
 // ("::1%1") is the case that matters — refused like a loopback one.
+//
+// Metadata marks a cloud metadata service's address that sits in a range a
+// confirmation relaxes (cloudMetadata), so the refusal names it as one.
 type TargetAddressError struct {
 	IP          string
 	Overridable bool
 	Unreadable  bool
+	Metadata    bool
 }
 
 // Error names the class of address and not the address itself, which a
@@ -40,6 +44,9 @@ func (e *TargetAddressError) Error() string {
 	if e.Unreadable {
 		return "an address with a zone, or one that cannot be read, which no channel may use"
 	}
+	if e.Metadata {
+		return "a cloud metadata address, which no channel may use"
+	}
 	return "a loopback, link-local or unspecified address, which no channel may use"
 }
 
@@ -49,8 +56,9 @@ func (e *TargetAddressError) Error() string {
 // channel's confirmation (ChannelContext).
 func checkTargetIP(ip net.IP, allowPrivate bool) error {
 	switch {
-	case ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
-		cloudMetadata(ip):
+	case cloudMetadata(ip):
+		return &TargetAddressError{IP: ip.String(), Metadata: true}
+	case ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified():
 		return &TargetAddressError{IP: ip.String()}
 	case (ip.IsPrivate() || cgnat.Contains(ip)) && !allowPrivate:
 		return &TargetAddressError{IP: ip.String(), Overridable: true}

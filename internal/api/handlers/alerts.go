@@ -403,7 +403,7 @@ func channelConfigJSON(p *apischema.Params) (json.RawMessage, error) {
 // only for a private target the caller confirmed with allow_private_address —
 // or the refusal for renderAddressPolicyError: a private target not confirmed
 // (422, which the form turns into a prompt), or one no channel may use, a
-// loopback, link-local or unspecified address (400).
+// loopback, link-local, unspecified or cloud metadata address (400).
 func channelTargetAllowance(c fiber.Ctx, channelType string, config json.RawMessage, confirmed bool) (bool, error) {
 	private, err := notifications.CheckChannelTarget(c.Context(), channelType, config, confirmed)
 	var refused *notifications.TargetAddressError
@@ -411,6 +411,11 @@ func channelTargetAllowance(c fiber.Ctx, channelType string, config json.RawMess
 		if refused.Unreadable {
 			return false, &addressPolicyError{HardReject: true, IP: refused.IP, Reason: "The channel's target " +
 				"has an address with a zone, or one that cannot be read, which a notification channel may never use."}
+		}
+		if refused.Metadata {
+			return false, &addressPolicyError{HardReject: true, IP: refused.IP, Reason: fmt.Sprintf(
+				"The channel's target resolves to %s, a cloud metadata address, "+
+					"which a notification channel may never use.", refused.IP)}
 		}
 		if !refused.Overridable {
 			return false, &addressPolicyError{HardReject: true, IP: refused.IP, Reason: fmt.Sprintf(
