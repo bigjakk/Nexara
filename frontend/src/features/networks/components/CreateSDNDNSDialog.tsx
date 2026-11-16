@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Plus, Pencil } from "lucide-react";
 import { useCreateSDNDNS, useUpdateSDNDNS } from "../api/network-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNDNS, CreateSDNDNSRequest } from "../types/network";
 
 interface CreateSDNDNSDialogProps {
@@ -39,6 +40,7 @@ export function CreateSDNDNSDialog({
   const [key, setKey] = useState("");
 
   const create = useCreateSDNDNS(clusterId);
+  const settle = useSaveOutcome(open);
   const update = useUpdateSDNDNS(clusterId);
   const mutation = isEdit ? update : create;
   const errorMessage =
@@ -70,19 +72,23 @@ export function CreateSDNDNSDialog({
         Object.fromEntries(
           Object.entries(params).filter(([k]) => k !== "dns" && k !== "type"),
         );
-      update.mutate(
-        { dns: initialData.dns, params: updateParams },
+      settle(
+        update.mutateAsync({ dns: initialData.dns, params: updateParams }),
         {
+          action: `Saving DNS server ${initialData.dns}`,
           onSuccess: () => {
             setOpen(false);
           },
+          onError: () => undefined, // shown below from the mutation's state
         },
       );
     } else {
-      create.mutate(params, {
+      settle(create.mutateAsync(params), {
+        action: `Creating DNS server ${dns}`,
         onSuccess: () => {
           setOpen(false);
         },
+        onError: () => undefined, // shown below from the mutation's state
       });
     }
   };

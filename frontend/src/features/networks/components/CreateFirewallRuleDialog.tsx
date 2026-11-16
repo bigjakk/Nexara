@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { useCreateClusterFirewallRule } from "../api/network-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { useFirewallSecurityGroups } from "../api/firewall-extra-queries";
 import type { FirewallRuleRequest } from "../types/network";
 
@@ -46,6 +47,7 @@ export function CreateFirewallRuleDialog({
   const groups = useFirewallSecurityGroups(open && isGroup ? clusterId : "");
 
   const create = useCreateClusterFirewallRule(clusterId);
+  const settle = useSaveOutcome(open);
   const errorMessage =
     create.error instanceof Error ? create.error.message : "";
 
@@ -65,16 +67,26 @@ export function CreateFirewallRuleDialog({
       if (dport) req.dport = dport;
     }
     if (comment) req.comment = comment;
-    create.mutate(req, {
+    // The dialog stays mounted while closed, so a create that lands after it
+    // closed clears the form too.
+    const clear = () => {
+      setProto("");
+      setSource("");
+      setDest("");
+      setDport("");
+      setComment("");
+      setGroup("");
+    };
+    settle(create.mutateAsync(req), {
+      action: t("createFirewallRuleAction"),
       onSuccess: () => {
         setOpen(false);
-        setProto("");
-        setSource("");
-        setDest("");
-        setDport("");
-        setComment("");
-        setGroup("");
+        clear();
       },
+      onLateSuccess: (_result, now) => {
+        if (!now.open) clear();
+      },
+      onError: () => undefined, // shown below from the mutation's state
     });
   };
 

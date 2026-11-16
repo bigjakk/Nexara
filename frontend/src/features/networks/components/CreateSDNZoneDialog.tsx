@@ -19,6 +19,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Pencil } from "lucide-react";
 import { useCreateSDNZone, useUpdateSDNZone } from "../api/network-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNZone, CreateSDNZoneRequest } from "../types/network";
 
 interface CreateSDNZoneDialogProps {
@@ -53,6 +54,7 @@ export function CreateSDNZoneDialog({
   const [disableArpNdSuppression, setDisableArpNdSuppression] = useState(false);
 
   const create = useCreateSDNZone(clusterId);
+  const settle = useSaveOutcome(open);
   const update = useUpdateSDNZone(clusterId);
   const mutation = isEdit ? update : create;
   const errorMessage =
@@ -130,19 +132,23 @@ export function CreateSDNZoneDialog({
         Object.fromEntries(
           Object.entries(params).filter(([k]) => k !== "zone" && k !== "type"),
         );
-      update.mutate(
-        { zone: initialData.zone, params: updateParams },
+      settle(
+        update.mutateAsync({ zone: initialData.zone, params: updateParams }),
         {
+          action: `Saving zone ${initialData.zone}`,
           onSuccess: () => {
             setOpen(false);
           },
+          onError: () => undefined, // shown below from the mutation's state
         },
       );
     } else {
-      create.mutate(params, {
+      settle(create.mutateAsync(params), {
+        action: `Creating zone ${zone}`,
         onSuccess: () => {
           setOpen(false);
         },
+        onError: () => undefined, // shown below from the mutation's state
       });
     }
   };

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath, keepColons } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import { onRuleWriteError, requireRuleDigest } from "./firewall-rule-digest";
 import type {
   NodeInterfaces,
@@ -60,6 +61,7 @@ export function useNodeNetworkInterfaces(clusterId: string, nodeName: string) {
 export function useCreateNetworkInterface(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: CreateNetworkInterfaceRequest) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/networks/${nodeName}`,
@@ -76,6 +78,7 @@ export function useCreateNetworkInterface(clusterId: string, nodeName: string) {
 export function useUpdateNetworkInterface(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       iface,
       params,
@@ -156,6 +159,7 @@ export function useClusterFirewallRules(clusterId: string) {
 export function useCreateClusterFirewallRule(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (rule: FirewallRuleRequest) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/firewall/rules`,
@@ -340,6 +344,7 @@ export function useSDNVNets(clusterId: string) {
 export function useCreateSDNZone(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: CreateSDNZoneRequest) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/sdn/zones`,
@@ -356,6 +361,7 @@ export function useCreateSDNZone(clusterId: string) {
 export function useUpdateSDNZone(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       zone,
       params,
@@ -393,6 +399,7 @@ export function useDeleteSDNZone(clusterId: string) {
 export function useCreateSDNVNet(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: CreateSDNVNetRequest) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/sdn/vnets`,
@@ -409,6 +416,7 @@ export function useCreateSDNVNet(clusterId: string) {
 export function useUpdateSDNVNet(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       vnet,
       params,
@@ -457,6 +465,7 @@ export function useSDNSubnets(clusterId: string, vnet: string) {
 export function useCreateSDNSubnet(clusterId: string, vnet: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: CreateSDNSubnetRequest) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets`,
@@ -473,6 +482,7 @@ export function useCreateSDNSubnet(clusterId: string, vnet: string) {
 export function useUpdateSDNSubnet(clusterId: string, vnet: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       subnet,
       params,
@@ -538,6 +548,7 @@ export function useSDNControllers(clusterId: string) {
 export function useCreateSDNController(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (req: CreateSDNControllerRequest) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/sdn/controllers`,
@@ -554,6 +565,7 @@ export function useCreateSDNController(clusterId: string) {
 export function useUpdateSDNController(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       controller,
       params,
@@ -602,6 +614,7 @@ export function useSDNIPAMs(clusterId: string) {
 export function useCreateSDNIPAM(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (req: CreateSDNIPAMRequest) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/sdn/ipams`,
@@ -618,6 +631,7 @@ export function useCreateSDNIPAM(clusterId: string) {
 export function useUpdateSDNIPAM(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       ipam,
       params,
@@ -666,6 +680,7 @@ export function useSDNDNSPlugins(clusterId: string) {
 export function useCreateSDNDNS(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (req: CreateSDNDNSRequest) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/sdn/dns`,
@@ -682,6 +697,7 @@ export function useCreateSDNDNS(clusterId: string) {
 export function useUpdateSDNDNS(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       dns,
       params,

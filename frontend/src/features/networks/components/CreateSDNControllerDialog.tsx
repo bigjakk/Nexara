@@ -21,6 +21,7 @@ import {
   useCreateSDNController,
   useUpdateSDNController,
 } from "../api/network-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type {
   SDNController,
   CreateSDNControllerRequest,
@@ -52,6 +53,7 @@ export function CreateSDNControllerDialog({
   const [ebgpMultihop, setEbgpMultihop] = useState("");
 
   const create = useCreateSDNController(clusterId);
+  const settle = useSaveOutcome(open);
   const update = useUpdateSDNController(clusterId);
   const mutation = isEdit ? update : create;
   const errorMessage =
@@ -112,19 +114,26 @@ export function CreateSDNControllerDialog({
           ([k]) => k !== "controller" && k !== "type",
         ),
       );
-      update.mutate(
-        { controller: initialData.controller, params: updateParams },
+      settle(
+        update.mutateAsync({
+          controller: initialData.controller,
+          params: updateParams,
+        }),
         {
+          action: `Saving controller ${initialData.controller}`,
           onSuccess: () => {
             setOpen(false);
           },
+          onError: () => undefined, // shown below from the mutation's state
         },
       );
     } else {
-      create.mutate(params, {
+      settle(create.mutateAsync(params), {
+        action: `Creating controller ${controller}`,
         onSuccess: () => {
           setOpen(false);
         },
+        onError: () => undefined, // shown below from the mutation's state
       });
     }
   };

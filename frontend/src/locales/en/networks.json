@@ -27,6 +27,7 @@
   "noFirewallRules": "No firewall rules found.",
   "createRule": "Create Rule",
   "createFirewallRule": "Create Firewall Rule",
+  "createFirewallRuleAction": "Creating the firewall rule",
   "securityGroup": "Security group",
   "chooseSecurityGroup": "Choose a group",
   "noSecurityGroups": "This cluster has no security groups. Create one under Firewall, Security groups.",

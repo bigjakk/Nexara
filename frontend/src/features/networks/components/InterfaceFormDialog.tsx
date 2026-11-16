@@ -22,6 +22,7 @@ import {
   useUpdateNetworkInterface,
   useNodeNetworkInterfaces,
 } from "../api/network-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type {
   CreateNetworkInterfaceRequest,
   NetworkInterface,
@@ -73,6 +74,7 @@ export function InterfaceFormDialog({
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const create = useCreateNetworkInterface(clusterId, nodeName);
+  const settle = useSaveOutcome(open);
   const update = useUpdateNetworkInterface(clusterId, nodeName);
   const mutation = isEdit ? update : create;
 
@@ -162,22 +164,23 @@ export function InterfaceFormDialog({
       const req: UpdateNetworkInterfaceRequest = { type, ...options };
       const cleared = clearedSettings(existing, options, type);
       if (cleared.length > 0) req.delete = cleared;
-      update.mutate(
-        { iface: existing.iface, params: req },
-        {
-          onSuccess: () => {
-            onOpenChange(false);
-          },
+      settle(update.mutateAsync({ iface: existing.iface, params: req }), {
+        action: `Saving interface ${existing.iface}`,
+        onSuccess: () => {
+          onOpenChange(false);
         },
-      );
+        onError: () => undefined, // shown below from the mutation's state
+      });
       return;
     }
 
     const req: CreateNetworkInterfaceRequest = { iface, type, ...options };
-    create.mutate(req, {
+    settle(create.mutateAsync(req), {
+      action: `Creating interface ${iface}`,
       onSuccess: () => {
         onOpenChange(false);
       },
+      onError: () => undefined, // shown below from the mutation's state
     });
   };
 

@@ -23,6 +23,7 @@ import {
   useUpdateSDNVNet,
   useSDNZones,
 } from "../api/network-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNVNet, CreateSDNVNetRequest } from "../types/network";
 
 interface CreateSDNVNetDialogProps {
@@ -45,6 +46,7 @@ export function CreateSDNVNetDialog({
 
   const { data: zones } = useSDNZones(clusterId);
   const create = useCreateSDNVNet(clusterId);
+  const settle = useSaveOutcome(open);
   const update = useUpdateSDNVNet(clusterId);
   const mutation = isEdit ? update : create;
   const errorMessage =
@@ -87,19 +89,23 @@ export function CreateSDNVNetDialog({
         Object.fromEntries(
           Object.entries(params).filter(([k]) => k !== "vnet"),
         ) as Omit<CreateSDNVNetRequest, "vnet">;
-      update.mutate(
-        { vnet: initialData.vnet, params: updateParams },
+      settle(
+        update.mutateAsync({ vnet: initialData.vnet, params: updateParams }),
         {
+          action: `Saving VNet ${initialData.vnet}`,
           onSuccess: () => {
             setOpen(false);
           },
+          onError: () => undefined, // shown below from the mutation's state
         },
       );
     } else {
-      create.mutate(params, {
+      settle(create.mutateAsync(params), {
+        action: `Creating VNet ${vnet}`,
         onSuccess: () => {
           setOpen(false);
         },
+        onError: () => undefined, // shown below from the mutation's state
       });
     }
   };

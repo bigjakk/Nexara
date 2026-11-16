@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Pencil } from "lucide-react";
 import { useCreateSDNSubnet, useUpdateSDNSubnet } from "../api/network-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNSubnet, CreateSDNSubnetRequest } from "../types/network";
 
 interface CreateSDNSubnetDialogProps {
@@ -34,6 +35,7 @@ export function CreateSDNSubnetDialog({
   const [dhcpDnsServer, setDhcpDnsServer] = useState("");
 
   const create = useCreateSDNSubnet(clusterId, vnet);
+  const settle = useSaveOutcome(open);
   const update = useUpdateSDNSubnet(clusterId, vnet);
   const mutation = isEdit ? update : create;
   const errorMessage =
@@ -76,19 +78,26 @@ export function CreateSDNSubnetDialog({
       if (gateway) updateParams.gateway = gateway;
       if (dhcpRange) updateParams["dhcp-range"] = dhcpRange;
       if (dhcpDnsServer) updateParams["dhcp-dns-server"] = dhcpDnsServer;
-      update.mutate(
-        { subnet: initialData.subnet, params: updateParams },
+      settle(
+        update.mutateAsync({
+          subnet: initialData.subnet,
+          params: updateParams,
+        }),
         {
+          action: `Saving subnet ${initialData.subnet}`,
           onSuccess: () => {
             setOpen(false);
           },
+          onError: () => undefined, // shown below from the mutation's state
         },
       );
     } else {
-      create.mutate(params, {
+      settle(create.mutateAsync(params), {
+        action: `Creating subnet ${subnet}`,
         onSuccess: () => {
           setOpen(false);
         },
+        onError: () => undefined, // shown below from the mutation's state
       });
     }
   };
