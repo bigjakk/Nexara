@@ -2234,8 +2234,8 @@ Navigate to **Admin > Branding**.
 - **Theme** — light, dark, or system (follows OS preference), remembered per browser
 - **Accent Color** — the default or one of 9 presets, which theme the entire UI
 - **Storage Units** — binary (GiB) or decimal (GB)
-- **Date Format** — how every date and time in the app is written: **Relative** ("5m ago", the default; point at one to see the exact time), **ISO 8601** (`2026-03-08T14:30:00+00:00`, with the browser's offset) or **Local** (the browser's locale). A date-only field stays a date, and chart axes always show the clock
-- **Default Refresh Interval** — how often lists and status pages reload on their own: 10 s, 30 s (the default), 1 min, 5 min, or **Manual**, which reloads only after your own changes and on live updates. Running tasks, log tails and live charts keep their own pace, and the dashboard's live metrics keep their own refresh control
+- **Date Format** — how every date and time in the app is written: **Automatic** (the default: each place as it has always been, relative in recent-activity lists and the browser's locale elsewhere), **Relative** ("5m ago"; point at one to see the exact time), **ISO 8601** (`2026-03-08T14:30:00+00:00`, with the browser's offset) or **Browser locale**. A date-only field stays a date, narrow time columns show the clock for today and the date otherwise with the exact time on hover, and chart axes always show the clock
+- **Default Refresh Interval** — scales how often lists and status pages reload on their own: at 30 s (the default) each view keeps its designed pace, and heavier views reload at two or four times the chosen interval; 10 s makes everything three times as fast, 1 min and 5 min slow it down, never below 10 s. **Manual** reloads only after your own changes and on live updates. Running tasks, log tails, the guest-agent check and live charts keep their own pace, and the dashboard's live metrics keep their own refresh control
 - **Open consoles in** — **Floating window** (the default) or **New browser tab**; see [Consoles](#consoles)
 
 ---
