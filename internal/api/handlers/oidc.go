@@ -555,16 +555,17 @@ func (h *OIDCHandler) Authorize(c fiber.Ctx, _ *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to initialize OIDC provider")
 	}
 
-	secret, digest, err := newBindingSecret()
+	secure := oidcBindingSecure(cfg.RedirectUri)
+	secret, record, err := newBinding(secure)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
 	}
-	authURL, state, err := provider.GenerateAuthURL(c.Context(), digest)
+	authURL, state, err := provider.GenerateAuthURL(c.Context(), record)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
 	}
 	// The callback refuses a state this browser was not given (oidcStateBinding).
-	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).set(c, state, secret)
+	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).set(c, state, secret, secure)
 
 	return c.JSON(fiber.Map{"redirect_url": authURL})
 }
@@ -593,7 +594,8 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		errMsg := c.Query("error_description", c.Query("error", "unknown error"))
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("SSO failed: "+errMsg))
 	}
-	if !oidcStateBinding.matches(c, state, auth.OIDCStateBindingDigest(c.Context(), h.rdb, state)) {
+	binding := auth.OIDCStateBindingDigest(c.Context(), h.rdb, state)
+	if !oidcStateBinding.matches(c, state, binding) {
 		slog.Warn("oidc callback: refused a sign-in that was not started in this browser", "ip", c.IP())
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcNotThisBrowserMessage))
 	}
@@ -602,7 +604,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 	if err != nil {
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("OIDC not configured"))
 	}
-	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).spend(c, state)
+	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).spend(c, state, binding)
 
 	oidcCfg, err := h.buildOIDCConfig(cfg)
 	if err != nil {
@@ -692,15 +694,16 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 	// Store short-lived exchange code in Redis (5 second TTL), with the digest of the
 	// browser binding's secret: the exchange refuses a code this browser was not given
 	// (oidcExchangeBinding).
-	secret, digest, err := newBindingSecret()
+	secure := oidcBindingSecure(cfg.RedirectUri)
+	secret, record, err := newBinding(secure)
 	if err == nil {
-		exchangeCode, err = h.storeExchange(c.Context(), user, digest)
+		exchangeCode, err = h.storeExchange(c.Context(), user, record)
 	}
 	if err != nil {
 		slog.Error("OIDC callback: could not store the exchange code", "user_id", user.ID, "error", err)
 		return db.User{}, "", "Internal error"
 	}
-	oidcExchangeBinding.set(c, exchangeCode, secret)
+	oidcExchangeBinding.set(c, exchangeCode, secret, secure)
 	return user, exchangeCode, ""
 }
 
@@ -716,9 +719,9 @@ const oidcExchangeTTL = 5 * time.Second
 // value and not against whatever the user's row holds when the browser comes back
 // with the code, so that a password change, a sign-out of all devices or a
 // deactivation that lands in between refuses the session instead of being
-// outlived by it. bindingDigest is the digest of the secret the browser's binding
+// outlived by it. binding is the record of the secret the browser's binding
 // cookie holds (oidcExchangeBinding), kept under oidcExchangeBindingKey.
-func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, bindingDigest string) (string, error) {
+func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, binding string) (string, error) {
 	code, err := auth.GenerateRandomString(32)
 	if err != nil {
 		return "", fmt.Errorf("generating the exchange code: %w", err)
@@ -726,7 +729,7 @@ func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, bindingDi
 	data, _ := json.Marshal(map[string]string{
 		"user_id":              user.ID.String(),
 		oidcExchangeEpochKey:   strconv.FormatInt(user.AuthEpoch, 10),
-		oidcExchangeBindingKey: bindingDigest,
+		oidcExchangeBindingKey: binding,
 	})
 	if err := h.rdb.Set(ctx, "oidc:exchange:"+code, string(data), oidcExchangeTTL).Err(); err != nil {
 		return "", fmt.Errorf("storing the exchange code: %w", err)

@@ -31,7 +31,7 @@ func TestOIDCCallback_RefusesASignInThisBrowserDidNotStart(t *testing.T) {
 	t.Parallel()
 	const state, secret = "state-this-browser-started", "secret-this-browser-holds"
 	bound := oidcStateBinding.cookieName(false, state)
-	stored := "nonce|verifier|" + bindingDigest(secret)
+	stored := "nonce|verifier|" + bindingRecord(false, secret)
 	for _, tc := range []struct {
 		name, cookie, stored string
 		passes               bool
@@ -42,6 +42,7 @@ func TestOIDCCallback_RefusesASignInThisBrowserDidNotStart(t *testing.T) {
 		{"this sign-in's cookie holding the state", bound + "=" + state, stored, false},
 		{"this sign-in's binding, its state gone", bound + "=" + secret, "", false},
 		{"a state stored before the binding was (an upgrade)", bound + "=" + secret, "nonce|verifier", false},
+		{"a Secure binding, the unprefixed cookie only", bound + "=" + secret, "nonce|verifier|" + bindingRecord(true, secret), false},
 		{"this sign-in's binding", bound + "=" + secret, stored, true},
 		{"this sign-in's binding behind a stray one", bound + "=stray; " + bound + "=" + secret, stored, true},
 	} {
@@ -150,7 +151,7 @@ func TestOIDCBrowserBindings_AreLaxHttpOnlyCookiesForTheirOneRoute(t *testing.T)
 	} {
 		app := fiber.New()
 		app.Get("/set", func(c fiber.Ctx) error {
-			tc.binding.set(c, "value", "secret")
+			tc.binding.set(c, "value", "secret", false)
 			return c.SendStatus(http.StatusNoContent)
 		})
 		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/set", nil))
@@ -178,21 +179,19 @@ func TestOIDCBrowserBindings_AreLaxHttpOnlyCookiesForTheirOneRoute(t *testing.T)
 }
 
 // TestOIDCBrowserBindings_AreHostPrefixedWhenSecure: a Secure binding is a __Host-
-// cookie at / (which the prefix requires), and only that name is read, so the same
-// secret under the unprefixed name — which a sibling subdomain or a plain-http page
-// can plant — is no binding. Not parallel: it sets SECURE_COOKIES, process-wide.
+// cookie at / (which the prefix requires), and only that name is read, on a plain-http
+// request too, so the same secret under the unprefixed name — which a sibling subdomain
+// or a plain-http man in the middle can plant — is no binding.
 func TestOIDCBrowserBindings_AreHostPrefixedWhenSecure(t *testing.T) {
-	was := cookieSecureMode
-	SetCookieSecureMode("always")
-	t.Cleanup(func() { cookieSecureMode = was })
-	digest := bindingDigest("secret")
+	t.Parallel()
+	record := bindingRecord(true, "secret")
 	app := fiber.New()
 	app.Get("/set", func(c fiber.Ctx) error {
-		oidcStateBinding.set(c, "value", "secret")
+		oidcStateBinding.set(c, "value", "secret", true)
 		return c.SendStatus(http.StatusNoContent)
 	})
 	app.Get("/match", func(c fiber.Ctx) error {
-		return c.SendString(strconv.FormatBool(oidcStateBinding.matches(c, "value", digest)))
+		return c.SendString(strconv.FormatBool(oidcStateBinding.matches(c, "value", record)))
 	})
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/set", nil))
 	if err != nil {
@@ -217,6 +216,35 @@ func TestOIDCBrowserBindings_AreHostPrefixedWhenSecure(t *testing.T) {
 		if string(body) != want {
 			t.Errorf("matches with %q = %s, want %s", cookie, body, want)
 		}
+	}
+}
+
+// TestOIDCBindingSecure_IsTheRedirectURIsUnderAuto: under SECURE_COOKIES=auto the
+// bindings are Secure exactly when the redirect URI is https, whatever the request: the
+// exchange binding a plain-http request is handed for an https install is __Host-.
+func TestOIDCBindingSecure_IsTheRedirectURIsUnderAuto(t *testing.T) {
+	t.Parallel()
+	for uri, want := range map[string]bool{
+		"https://nexara.example.com/api/v1/auth/oidc/callback": true,
+		"http://nexara.example.com/api/v1/auth/oidc/callback":  false,
+	} {
+		if got := oidcBindingSecure(uri); got != want {
+			t.Errorf("oidcBindingSecure(%q) = %v, want %v", uri, got, want)
+		}
+	}
+	u := epochUser(t, epochLoginEmail, 0)
+	u.AuthSource, u.PasswordHash = "oidc", ""
+	a := newEpochApp(t, newEpochStore(u), epochOptions{})
+	var code string
+	a.probe = func(c fiber.Ctx) error {
+		_, code, _ = a.oidc.provisionAndStoreExchange(c,
+			db.OidcConfig{RedirectUri: "https://nexara.example.com/api/v1/auth/oidc/callback"},
+			&auth.OIDCUserInfo{Email: u.Email, DisplayName: u.DisplayName})
+		return c.SendStatus(http.StatusNoContent)
+	}
+	probe := a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)
+	if got := cookiesNamed(probe, oidcExchangeBinding.cookieName(true, code)); len(got) != 1 || !got[0].Secure {
+		t.Errorf("the exchange binding for an https install over plain http is %+v, want one Secure __Host- cookie", got)
 	}
 }
 

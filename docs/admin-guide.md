@@ -745,8 +745,9 @@ The sign-in is bound to the browser that started it, with a cookie set at step 1
 link from someone else's sign-in — the provider's redirect back, or the `/oidc-callback` page it leads to —
 opened in another browser signs nobody in, so an attacker cannot sign a victim's browser in as themselves. Each cookie
 holds a random secret that Nexara stores only as a hash, so a sign-in link that ends up in a log is no use on its own.
-When the cookies are `Secure` (`SECURE_COOKIES`) they are named `__Host-nexara_oidc_…`, which no other site on
-the domain and no plain-http page can set. A sign-in that was in flight while Nexara was upgraded to this release is
+When the cookies are `Secure` — `SECURE_COOKIES=always`, or the default `auto` with an `https` Redirect URI — they
+are named `__Host-nexara_oidc_…`, which no other site on the domain and no plain-http page can set, and Nexara then
+reads no other name. A sign-in that was in flight while Nexara was upgraded to this release is
 refused once; start it again.
 
 ### Two-Factor Authentication (TOTP)

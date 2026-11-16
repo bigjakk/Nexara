@@ -329,7 +329,8 @@ of, redirecting to the login page with an error; the callback sets one for the
 exchange code in turn (`__Host-nexara_oidc_exchange_…`, or `nexara_oidc_exchange_…`
 sent only to the exchange), and the exchange refuses, with `401` and before spending
 it, a code no such cookie holds the secret of. A `Secure` install reads only the
-`__Host-` names. `Secure` follows `SECURE_COOKIES`, as the refresh cookie's does.
+`__Host-` names. `Secure` is decided by configuration, not by the request:
+`SECURE_COOKIES=always`, or `auto` with an `https` redirect URI.
 So a client keeps cookies between the steps and starts and finishes the sign-in at
 one address, the one the redirect URI names, within the 10 minutes the state lives.
 The exchange code it ends with lives 5 seconds, so exchange it at once.

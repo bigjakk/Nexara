@@ -284,7 +284,8 @@ func generateCodeChallenge(verifier string) string {
 // oidcStateKey is where a sign-in's state data waits for its callback.
 func oidcStateKey(state string) string { return "oidc:state:" + state }
 
-// OIDCStateBindingDigest is the browser binding's digest stored with state by
+// OIDCStateBindingDigest is the browser binding's record (the digest of its secret, and
+// whether its cookie is Secure; opaque here) stored with state by
 // GenerateAuthURL, without spending the state; "" when there is none — an unknown or
 // expired state, Redis not answering, or state data written before the binding was
 // stored (a sign-in in flight across that upgrade), which the callback refuses.

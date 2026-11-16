@@ -2396,7 +2396,7 @@ func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error 
 		slog.Info("oidc token exchange: refused a code that was not handed to this browser", "ip", c.IP())
 		return fiber.NewError(fiber.StatusUnauthorized, oidcNotThisBrowserMessage)
 	}
-	oidcExchangeBinding.spend(c, code)
+	oidcExchangeBinding.spend(c, code, exchangeBindingDigest(stored))
 
 	// Atomic GetDel — single-use exchange code
 	data, err := h.oidcHandler.rdb.GetDel(c.Context(), "oidc:exchange:"+code).Result()
