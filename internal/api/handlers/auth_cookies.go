@@ -306,7 +306,10 @@ func (b browserBinding) matches(c fiber.Ctx, value, record string) bool {
 
 // The SSO step-up's proof is bound to the browser that made the round trip by a cookie
 // the callback sets (finishStepUp) and the setup reads (useSSOStepUp): HttpOnly,
-// SameSite=Strict (the setup is a same-site request from the SPA), __Host- at / when
+// SameSite=Lax, as the sign-in's binding is, since it is set on the response to the
+// provider's cross-site redirect, which a browser may not store a Strict cookie from;
+// Lax gives nothing away, as it is read only on the setup POST, which carries a bearer
+// token and is never a cross-site navigation. __Host- at / when
 // Secure, otherwise unprefixed and sent only to the setup routes. The proof keeps only
 // its record (bindingRecord), so the session's token alone, or a cookie planted
 // unprefixed on a Secure install, cannot use it.
@@ -326,7 +329,7 @@ func totpStepUpCookie(secure bool) (name, path string) {
 func setTOTPStepUpCookie(c fiber.Ctx, secret string, secure bool, ttl time.Duration) {
 	name, path := totpStepUpCookie(secure)
 	c.Set(fiber.HeaderCacheControl, "no-store")
-	c.Cookie(&fiber.Cookie{Name: name, Value: secret, Path: path, HTTPOnly: true, Secure: secure, SameSite: "Strict",
+	c.Cookie(&fiber.Cookie{Name: name, Value: secret, Path: path, HTTPOnly: true, Secure: secure, SameSite: "Lax",
 		MaxAge: int(ttl / time.Second)})
 }
 
@@ -353,7 +356,7 @@ func totpStepUpCookieRecords(c fiber.Ctx) []string {
 func clearTOTPStepUpCookie(c fiber.Ctx) {
 	for _, secure := range []bool{true, false} {
 		name, path := totpStepUpCookie(secure)
-		c.Cookie(&fiber.Cookie{Name: name, Value: "", Path: path, HTTPOnly: true, Secure: secure, SameSite: "Strict",
+		c.Cookie(&fiber.Cookie{Name: name, Value: "", Path: path, HTTPOnly: true, Secure: secure, SameSite: "Lax",
 			Expires: time.Unix(0, 0), MaxAge: -1})
 	}
 }

@@ -378,7 +378,7 @@ An account that signs in through single sign-on has no password to send to
    carries neither `prompt` nor `max_age`, and `auth_time` is neither required nor judged:
    the completed round trip, in the same browser, for the same session and account, is the
    proof. The `totp_step_up_confirmed` row's `rule` says `strict` or `relaxed`. It then records a proof for the session that asked, good for
-   5 minutes and one setup, bound to this browser by an HttpOnly, SameSite=Strict cookie
+   5 minutes and one setup, bound to this browser by an HttpOnly, SameSite=Lax cookie
    (`__Host-nexara_totp_step_up` at `/` when `Secure`; `nexara_totp_step_up` at
    `/api/v1/auth/totp/setup` otherwise), and redirects to `/settings/security?sso_step_up=confirmed`. Anything
    else is refused and audited (`totp_step_up_refused`, with the class of the refusal), and

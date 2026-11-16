@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -206,6 +207,35 @@ func TestTOTPSetup_TheRelaxedStepUpAcceptsARoundTripWithoutAuthTime(t *testing.T
 		}
 		if _, details := auditOf(a, ssoStepUpConfirmedAction); relaxed && (len(details) != 1 || !strings.Contains(details[0], `"rule":"relaxed"`)) {
 			t.Errorf("confirmation rows %v, want one under the relaxed rule", details)
+		}
+	}
+}
+
+// TestTOTPSetup_TheStepUpCookieIsLaxAndReachesTheSetup: the step-up cookie is set on the
+// response to the provider's cross-site redirect, so it is Lax (a browser may drop a
+// Strict one), HttpOnly, with a Max-Age, and sent to the setup route.
+func TestTOTPSetup_TheStepUpCookieIsLaxAndReachesTheSetup(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		secure     bool
+		name, path string
+	}{
+		{false, totpStepUpCookieName, "/api/v1/auth/totp/setup"},
+		{true, hostCookiePrefix + totpStepUpCookieName, "/"},
+	} {
+		app := fiber.New()
+		app.Get("/set", func(c fiber.Ctx) error {
+			setTOTPStepUpCookie(c, "secret", tc.secure, time.Minute)
+			return c.SendStatus(http.StatusNoContent)
+		})
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/set", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := cookiesNamed(resp, tc.name)
+		if len(got) != 1 || got[0].Path != tc.path || !got[0].HttpOnly || got[0].Secure != tc.secure ||
+			got[0].SameSite != http.SameSiteLaxMode || got[0].MaxAge <= 0 {
+			t.Errorf("secure %v: Set-Cookie = %+v, want one %s, HttpOnly, SameSite=Lax, with a Max-Age, at %s", tc.secure, got, tc.name, tc.path)
 		}
 	}
 }
