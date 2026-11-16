@@ -433,6 +433,85 @@ export function parseBootOrder(raw: string): string[] {
   return order.split(/[;,\s]+/).filter(Boolean);
 }
 
+/**
+ * qemu-server's drive names in valid_drive_names order (src/PVE/QemuServer/
+ * Drive.pm: 4 ide, 31 scsi, 16 virtio, 6 sata, then efidisk0 and tpmstate0),
+ * the order foreach_volume walks a config in.
+ */
+const DRIVE_NAMES: readonly string[] = [
+  ...Array.from({ length: 4 }, (_, i) => `ide${String(i)}`),
+  ...Array.from({ length: 31 }, (_, i) => `scsi${String(i)}`),
+  ...Array.from({ length: 16 }, (_, i) => `virtio${String(i)}`),
+  ...Array.from({ length: 6 }, (_, i) => `sata${String(i)}`),
+  "efidisk0",
+  "tpmstate0",
+];
+
+/** $MAX_NETS in src/PVE/QemuServer.pm. */
+const MAX_NETS = 32;
+
+export interface BootDevices {
+  /** The devices the VM boots from, in the order it tries them. */
+  devices: string[];
+  /**
+   * The legacy [acdn] value they come from ("cdn" when there is no boot
+   * line), or null for an order= value.
+   */
+  legacy: string | null;
+}
+
+/**
+ * The devices a VM boots from, as device_bootorder reads its config. An
+ * order= value names them. A legacy value, or no boot line at all (the
+ * format's default, "cdn"), goes through bootorder_from_legacy: each letter
+ * gets a rank by its place (100, 200, ...), and the drives are walked in
+ * DRIVE_NAMES order: every CD-ROM but a cloud-init drive takes d's next rank,
+ * any other drive c's, though only the one `bootdisk` names is booted; then
+ * every NIC takes n's. Floppy (a) names nothing. Booted in rank order.
+ */
+export function bootDevices(config: Record<string, unknown>): BootDevices {
+  const text = (v: unknown) =>
+    typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
+  let legacy = "cdn";
+  if (config["boot"] != null) {
+    const raw = text(config["boot"]);
+    const seg = splitSegments(raw).find((s) =>
+      isDefaultKeySegment(s, "legacy"),
+    );
+    if (!seg) return { devices: parseBootOrder(raw), legacy: null };
+    legacy = seg.value || legacy;
+  }
+  const rank = new Map<string, number>();
+  for (let i = 0; i < legacy.length; i++) {
+    rank.set(legacy.charAt(i), (i + 1) * 100);
+  }
+  const next = (letter: string): number | undefined => {
+    const r = rank.get(letter);
+    if (r !== undefined) rank.set(letter, r + 1);
+    return r;
+  };
+  const ranked: Array<[string, number]> = [];
+  for (const key of DRIVE_NAMES) {
+    if (config[key] == null) continue;
+    const drive = parseDriveMedia(text(config[key]));
+    if (drive.cdrom && !isCloudInitVolume(drive.file)) {
+      const r = next("d");
+      if (r !== undefined) ranked.push([key, r]);
+    } else {
+      const r = next("c");
+      if (r !== undefined && config["bootdisk"] === key) ranked.push([key, r]);
+    }
+  }
+  for (let i = 0; i < MAX_NETS; i++) {
+    const key = `net${String(i)}`;
+    if (!config[key]) continue;
+    const r = next("n");
+    if (r !== undefined) ranked.push([key, r]);
+  }
+  ranked.sort((a, b) => a[1] - b[1]);
+  return { devices: ranked.map(([key]) => key), legacy };
+}
+
 export function buildBootOrder(devices: string[]): string {
   if (devices.length === 0) return "";
   return `order=${devices.join(";")}`;

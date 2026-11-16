@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
   ChevronDown,
@@ -109,7 +110,7 @@ import {
   buildAudio,
   parseStartup,
   buildStartup,
-  parseBootOrder,
+  bootDevices,
   buildBootOrder,
   parseMachine,
   buildMachine,
@@ -380,6 +381,7 @@ export function HardwarePanel({
   vmStatus,
   nodeName,
 }: HardwarePanelProps) {
+  const { t } = useTranslation("vms");
   const { data: config, isLoading } = useVMConfig(clusterId, vmId);
   const setConfigMutation = useSetVMConfig();
   const resizeMutation = useResizeDisk();
@@ -887,11 +889,11 @@ export function HardwarePanel({
     setLocaltime(bool01(config["localtime"]));
     // Only devices the VM has: Proxmox refuses an order naming one it does
     // not (see bootToSend), and boots by the rest.
-    const bootDevices = parseBootOrder(str(config["boot"] ?? "")).filter(
-      (d) => config[d] != null,
-    );
+    // A legacy boot value (boot: cdn), or none, is read as Proxmox boots by
+    // it, so it shows what boots; it is rewritten only when the order is.
+    const booted = bootDevices(config).devices.filter((d) => config[d] != null);
     // Build full boot order: enabled devices first (in order), then all other bootable devices (disabled)
-    const enabledSet = new Set(bootDevices);
+    const enabledSet = new Set(booted);
     const allBootable: string[] = [];
     for (const key of Object.keys(config)) {
       if (BOOT_DISK_KEY_RE.test(key)) allBootable.push(key);
@@ -900,7 +902,7 @@ export function HardwarePanel({
     allBootable.sort((a, b) => a.localeCompare(b));
     const ordered: Array<{ device: string; enabled: boolean }> = [];
     // First: enabled devices in their configured order
-    for (const d of bootDevices) {
+    for (const d of booted) {
       ordered.push({ device: d, enabled: true });
     }
     // Then: remaining bootable devices not in boot order (disabled)
@@ -1478,13 +1480,19 @@ export function HardwarePanel({
    * device the VM lacks it keeps, and boots by the rest (device_bootorder):
    * left out of both, an order naming one is not sent just to drop it.
    */
+  // The legacy value the stored boot order comes from, or null (bootDevices).
+  const legacyBoot = useMemo(
+    () => (original ? bootDevices(original).legacy : null),
+    [original],
+  );
+
   const bootToSend = useMemo(() => {
     if (!original) return null;
     const kept = (device: string) =>
       original[device] != null &&
       !disksToRemove.has(device) &&
       !deviceRemovals.has(device);
-    const stored = parseBootOrder(str(original["boot"] ?? "")).filter(kept);
+    const stored = bootDevices(original).devices.filter(kept);
     const enabled = bootOrder
       .filter((b) => b.enabled && kept(b.device))
       .map((b) => b.device);
@@ -3684,6 +3692,13 @@ export function HardwarePanel({
                 {bootOrder.length === 0 && (
                   <p className="text-sm text-muted-foreground">
                     No bootable devices
+                  </p>
+                )}
+                {legacyBoot !== null && bootOrder.length > 0 && (
+                  <p className="pb-1 text-[12.5px] text-muted-foreground">
+                    {original?.["boot"] == null
+                      ? t("bootLegacyDefault")
+                      : t("bootLegacy", { value: legacyBoot })}
                   </p>
                 )}
                 <ol className="-mx-1.5 space-y-0.5">

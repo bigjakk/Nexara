@@ -1000,6 +1000,37 @@ describe("HardwarePanel dirty check", () => {
     );
   }
 
+  // A legacy boot value is what Proxmox boots by (bootorder_from_legacy): the
+  // devices it boots are ticked, the panel says so and opens clean, and an
+  // order is written only when the order is changed.
+  it("ticks what a legacy boot line boots, and sends an order only on a reorder", async () => {
+    const save = await renderPanel({
+      ...bootVM(),
+      boot: "cdn",
+      bootdisk: "scsi1",
+      ide2: "store01:iso/install.iso,media=cdrom",
+    });
+    expect(save).toBeDisabled();
+    expect(screen.getByText(/legacy boot setting \(cdn\)/)).toBeInTheDocument();
+    for (const [device, ticked] of [
+      ["scsi1", true],
+      ["ide2", true],
+      ["net0", true],
+      ["net1", true],
+      ["scsi0", false],
+    ] as const) {
+      const box = document.getElementById(`boot-${device}`);
+      if (ticked) expect(box, device).toBeChecked();
+      else expect(box, device).not.toBeChecked();
+    }
+
+    await moveEarlierInBoot(NET0_BOOT);
+
+    expect(await saveAndGetFields(save)).toEqual([
+      [CONFIG_URL, { fields: { boot: "order=scsi1;net0;ide2;net1" } }],
+    ]);
+  });
+
   it("sends a reordered boot order when every device in it is kept", async () => {
     const save = await renderPanel(bootVM());
 

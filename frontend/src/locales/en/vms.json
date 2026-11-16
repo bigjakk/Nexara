@@ -26,6 +26,8 @@
     "debug": "Halted by a debugger. Resume to continue.",
     "asleep": "Asleep (S3). Resume wakes it."
   },
+  "bootLegacy": "Proxmox boots this VM by its legacy boot setting ({{value}}): the devices ticked here. Changing the order saves it as an order instead.",
+  "bootLegacyDefault": "No boot order is set, so Proxmox boots this VM by its legacy default (cdn): the devices ticked here. Changing the order saves one.",
   "vnc": "VNC",
   "serial": "Serial",
   "attach": "Attach",

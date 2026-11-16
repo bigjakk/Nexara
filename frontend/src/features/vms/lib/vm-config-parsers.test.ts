@@ -11,6 +11,7 @@ import {
   parseAudio,
   buildAudio,
   parseBootOrder,
+  bootDevices,
   buildBootOrder,
   parseMachine,
   buildMachine,
@@ -552,6 +553,40 @@ describe("parseBootOrder / buildBootOrder", () => {
 
   it("builds empty", () => {
     expect(buildBootOrder([])).toBe("");
+  });
+});
+
+// device_bootorder and bootorder_from_legacy (src/PVE/QemuServer.pm): a
+// legacy value, or no boot line, ranks CD-ROMs by d, the bootdisk by c and
+// NICs by n, in the letters' order; a cloud-init drive is not a CD-ROM here.
+describe("bootDevices", () => {
+  const vm = {
+    ide0: "store01:vm-101-cloudinit,media=cdrom",
+    ide2: "store01:iso/install.iso,media=cdrom",
+    scsi0: "store01:vm-101-disk-0,size=32G",
+    scsi1: "store01:vm-101-disk-1,size=16G",
+    net0: "virtio=02:00:00:00:00:01,bridge=vmbr0",
+    net1: "virtio=02:00:00:00:00:02,bridge=vmbr0",
+    bootdisk: "scsi1",
+  };
+  it.each([
+    [undefined, ["scsi1", "ide2", "net0", "net1"], "cdn"],
+    ["dcn", ["ide2", "scsi1", "net0", "net1"], "dcn"],
+    ["legacy=n", ["net0", "net1"], "n"],
+    ["a", [], "a"],
+    ["cdn,order=scsi0", ["scsi1", "ide2", "net0", "net1"], "cdn"],
+    ["order=scsi0;net1", ["scsi0", "net1"], null],
+  ])("reads boot %j as %j (legacy %j)", (boot, devices, legacy) => {
+    expect(bootDevices(boot === undefined ? vm : { ...vm, boot })).toEqual({
+      devices,
+      legacy,
+    });
+  });
+
+  it("boots no disk by c without a bootdisk", () => {
+    expect(
+      bootDevices({ ...vm, bootdisk: undefined, boot: "c" }).devices,
+    ).toEqual([]);
   });
 });
 
