@@ -180,13 +180,13 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 		a.ReportGen = reports.NewGenerator(a.Queries, reportPerms, logger.With("component", "report-gen"))
 
 		a.VirtioWin = virtiowin.NewEngine(a.Queries, cfg.EncryptionKey, logger.With("component", "virtio-win"))
-		a.GuestTools = guesttools.NewEngine(a.Queries, cfg.EncryptionKey, logger.With("component", "guest-tools"))
+		a.GuestTools = guesttools.NewEngine(a.Queries, cfg.EncryptionKey, logger.With("component", "guest-tools"), a.EventPub)
 		// One reader for the daily pass and a node page's Read now, so its
 		// per-node singleflight covers both.
 		queries, encKey := a.Queries, cfg.EncryptionKey
 		a.NodeMemory = nodememory.NewReader(func(ctx context.Context, clusterID uuid.UUID, nodeName, command string) (*sshpkg.ExecResult, error) {
 			return rolling.RunNodeCommandLimited(ctx, queries, encKey, clusterID, nodeName, command, nodememory.MaxOutput)
-		}, a.Queries, cfg.NodeMemoryReadInterval, logger.With("component", "node-memory"))
+		}, a.Queries, cfg.NodeMemoryReadInterval, logger.With("component", "node-memory"), a.EventPub)
 
 		// Nil-safe on every setter; a keyless or DB-less install simply leaves
 		// the engines building clients per call.

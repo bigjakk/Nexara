@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -743,7 +744,7 @@ func (e *Engine) auditSupersededCancel(ctx context.Context, state db.GuestToolsS
 		// Recorded because it is the difference between "gone" and "defused".
 		"task_removed": taskRemoved,
 	})
-	if err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	if err := audit.Write(ctx, e.queries, e.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: state.ClusterID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "vm",

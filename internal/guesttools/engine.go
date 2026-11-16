@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/safeconv"
 	"github.com/bigjakk/nexara/internal/virtiowin"
@@ -25,14 +26,15 @@ type Engine struct {
 	encryptionKey string
 	cache         *proxmox.ClientCache // nil-safe
 	logger        *slog.Logger
+	eventPub      *events.Publisher // nil-safe; audit.Write announces and forwards through it
 }
 
 // NewEngine builds the guest tools engine.
-func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger) *Engine {
+func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher) *Engine {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Engine{queries: queries, encryptionKey: encryptionKey, logger: logger}
+	return &Engine{queries: queries, encryptionKey: encryptionKey, logger: logger, eventPub: eventPub}
 }
 
 // SetProxmoxCache attaches the shared per-server client cache. Nil-safe.

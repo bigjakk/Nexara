@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/cronspec"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -1144,7 +1145,7 @@ func (s *Scheduler) trackTask(ctx context.Context, p trackTaskParams) {
 	}
 
 	details, _ := json.Marshal(p.Details)
-	if err := s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	if err := audit.Write(ctx, s.queries, s.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: p.ClusterID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: p.ResourceType,
@@ -1159,8 +1160,6 @@ func (s *Scheduler) trackTask(ctx context.Context, p trackTaskParams) {
 	if s.eventPub != nil {
 		s.eventPub.ClusterEvent(ctx, p.ClusterID.String(),
 			events.KindTaskCreated, "task", p.UPID, p.Action)
-		s.eventPub.ClusterEvent(ctx, p.ClusterID.String(),
-			events.KindAuditEntry, p.ResourceType, p.ResourceID, p.Action)
 	}
 }
 

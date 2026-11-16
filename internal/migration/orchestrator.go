@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -1407,7 +1408,7 @@ func (o *Orchestrator) auditLog(ctx context.Context, mc *migrationContext, actio
 		resourceType = "migration"
 		resourceID = mc.job.ID.String()
 	}
-	_ = o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	_ = audit.Write(ctx, o.queries, o.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: mc.job.SourceClusterID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: mc.userID, Valid: true},
 		ResourceType: resourceType,
@@ -1415,7 +1416,6 @@ func (o *Orchestrator) auditLog(ctx context.Context, mc *migrationContext, actio
 		Action:       action,
 		Details:      json.RawMessage(detailsJSON),
 	})
-	o.eventPub.ClusterEvent(ctx, mc.job.SourceClusterID.String(), events.KindAuditEntry, resourceType, resourceID, action)
 }
 
 // recordDiskMove is the single place that records a disk move for tracking.

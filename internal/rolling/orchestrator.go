@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	auditlog "github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -3310,7 +3311,7 @@ func (o *Orchestrator) auditLog(ctx context.Context, clusterID uuid.UUID, jobID 
 		details = json.RawMessage(`{}`)
 	}
 
-	err := o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	err := auditlog.Write(ctx, o.queries, o.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "rolling_update",
@@ -3334,7 +3335,7 @@ func (o *Orchestrator) auditObject(ctx context.Context, clusterID, jobID uuid.UU
 		details[k] = v
 	}
 	raw, _ := json.Marshal(details)
-	err := o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	err := auditlog.Write(ctx, o.queries, o.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: resourceType,

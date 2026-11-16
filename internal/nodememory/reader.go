@@ -14,8 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/rolling"
 	"github.com/bigjakk/nexara/internal/safeconv"
 	sshpkg "github.com/bigjakk/nexara/internal/ssh"
@@ -70,6 +72,7 @@ type Reader struct {
 	interval time.Duration
 	now      func() time.Time
 	logger   *slog.Logger
+	eventPub *events.Publisher // nil-safe; audit.Write announces and forwards through it
 	sf       singleflight.Group
 
 	mu     sync.Mutex
@@ -79,11 +82,11 @@ type Reader struct {
 // NewReader builds a Reader. interval is how old a node's last read may get
 // before the daily pass repeats it; 0 turns the pass off, and Read now still
 // works.
-func NewReader(run Runner, store Store, interval time.Duration, logger *slog.Logger) *Reader {
+func NewReader(run Runner, store Store, interval time.Duration, logger *slog.Logger, eventPub *events.Publisher) *Reader {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Reader{run: run, store: store, interval: interval, now: time.Now, logger: logger, dialed: map[uuid.UUID]time.Time{}}
+	return &Reader{run: run, store: store, interval: interval, now: time.Now, logger: logger, eventPub: eventPub, dialed: map[uuid.UUID]time.Time{}}
 }
 
 // Interval is the daily pass's re-read interval; 0 means the pass is off.
@@ -237,7 +240,7 @@ func (r *Reader) read(ctx context.Context, clusterID, nodeID uuid.UUID, nodeName
 // node.
 func (r *Reader) audit(ctx context.Context, clusterID uuid.UUID, nodeName, status string) {
 	details, _ := json.Marshal(map[string]string{"status": status, "trigger": "daily"})
-	if err := r.store.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	if err := audit.Write(ctx, r.store, r.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "node",

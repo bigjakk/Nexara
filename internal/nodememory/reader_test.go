@@ -131,7 +131,7 @@ func TestRunDue(t *testing.T) {
 				}
 				return tt.res, tt.err
 			}
-			r := NewReader(run, store, interval, nil)
+			r := NewReader(run, store, interval, nil, nil)
 			r.now = func() time.Time { return testNow }
 			r.RunDue(context.Background())
 
@@ -202,7 +202,7 @@ func TestReadNowCooldown(t *testing.T) {
 				}
 				return &sshpkg.ExecResult{Stdout: qemuGuest}, nil
 			}
-			r := NewReader(run, &recordingStore{}, 24*time.Hour, nil)
+			r := NewReader(run, &recordingStore{}, 24*time.Hour, nil, nil)
 			r.now = func() time.Time { return now }
 			cluster, node := uuid.New(), uuid.New()
 			if err := r.ReadNode(context.Background(), cluster, node, "pve-01"); err != nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -499,7 +500,7 @@ func (e *Executor) auditLog(ctx context.Context, clusterID uuid.UUID, resourceID
 		resourceID = fmt.Sprintf("vmid:%d", rec.VMID)
 	}
 
-	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	err := audit.Write(ctx, e.queries, e.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "vm",

@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -1958,7 +1959,7 @@ func (s *Syncer) reportEndpointFailover(ctx context.Context, cluster db.Cluster,
 		"error":         reason,
 	})
 
-	_ = s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	_ = audit.Write(ctx, s.queries, s.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "cluster",
@@ -1966,10 +1967,6 @@ func (s *Syncer) reportEndpointFailover(ctx context.Context, cluster db.Cluster,
 		Action:       action,
 		Details:      details,
 	})
-
-	if s.eventPub != nil {
-		s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindAuditEntry, "cluster", cluster.ID.String(), action)
-	}
 }
 
 // reportSyncError writes an audit log entry and publishes an event when a cluster sync fails.
@@ -1987,7 +1984,7 @@ func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncEr
 		"error":        errMsg,
 	})
 
-	_ = s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	_ = audit.Write(ctx, s.queries, s.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "cluster",
@@ -1995,8 +1992,4 @@ func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncEr
 		Action:       action,
 		Details:      details,
 	})
-
-	if s.eventPub != nil {
-		s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindAuditEntry, "cluster", cluster.ID.String(), action)
-	}
 }
