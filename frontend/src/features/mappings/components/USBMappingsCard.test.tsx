@@ -640,13 +640,22 @@ describe("USBMappingsCard edits", () => {
       "node=pve-04,id=1234:5678",
     ]);
     const reads = listReads();
+    // The re-read the save starts is held, as a network would, so the dialog
+    // finds it still out when the 409 reaches it.
+    const reread = deferred<ClusterUSBMapping[]>();
+    listGate = reread.promise;
     await user.click(save(dialog));
+    expect(
+      await within(dialog).findByText(/Reloading them…/),
+    ).toBeInTheDocument();
+    listGate = null;
+    reread.resolve(listing);
     expect(
       await within(dialog).findByText(/This dialog now shows them as they are/),
     ).toBeInTheDocument();
-    // The save's own re-read and at most the dialog's: it joins that one while
-    // it is out, and here the fake answers it before the save settles.
-    expect(listReads()).toBeLessThanOrEqual(reads + 2);
+    // One read after the conflict: the dialog joins the one the save started
+    // instead of cancelling it for a second.
+    expect(listReads()).toBe(reads + 1);
     expect(
       within(dialog).getByText(/a change to any USB mapping counts/),
     ).toBeInTheDocument();
