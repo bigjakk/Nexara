@@ -39,6 +39,11 @@ describe("i18n configuration", () => {
       "ceph",
       "networks",
       "snapshots",
+      "power",
+      "events",
+      "mappings",
+      "ha",
+      "guest-tools",
     ];
     const actualNamespaces = Object.keys(resources.en);
     for (const ns of expectedNamespaces) {
@@ -95,6 +100,23 @@ describe("i18n configuration", () => {
         Object.keys(translations as Record<string, string>).length,
       ).toBeGreaterThan(0);
     }
+  });
+
+  // <Trans> parses a value's tags as HTML, and a void element's tag (<link>)
+  // takes no children, so the text inside it is dropped from the sentence.
+  it("no translation value uses a void HTML element as a tag", () => {
+    const voidTag =
+      /<\/?(area|base|br|col|embed|hr|img|input|link|meta|source|track|wbr)\b/;
+    const found: string[] = [];
+    const walk = (node: unknown, path: string) => {
+      if (typeof node === "string") {
+        if (voidTag.test(node)) found.push(path);
+      } else if (node && typeof node === "object") {
+        for (const [k, v] of Object.entries(node)) walk(v, `${path}.${k}`);
+      }
+    };
+    walk(resources.en, "en");
+    expect(found).toEqual([]);
   });
 
   it("no translation values are empty strings", () => {
