@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import {
   act,
+  cleanup,
   fireEvent,
   screen,
   waitFor,
@@ -9,7 +10,13 @@ import {
 import userEvent from "@testing-library/user-event";
 import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { apiClient, ApiClientError } from "@/lib/api-client";
+import { toast } from "sonner";
 import { deferred } from "@/test/fake-server";
+import {
+  settle,
+  signInAsAdmin,
+  signOutForGood,
+} from "@/test/late-toast-sessions";
 import type { NodeUSBDevice } from "@/features/vms/api/vm-queries";
 import type {
   ClusterUSBMapping,
@@ -31,6 +38,7 @@ import {
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
 );
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedList = vi.mocked(apiClient.list);
@@ -186,6 +194,10 @@ beforeEach(() => {
   mockedPut.mockResolvedValue({ status: "ok" });
   mockedPost.mockResolvedValue({ status: "ok" });
   mockedDelete.mockResolvedValue({ status: "ok" });
+});
+
+afterEach(() => {
+  signOutForGood();
 });
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -423,6 +435,37 @@ describe("USBMappingsCard listing", () => {
       ).not.toBeInTheDocument();
     }
   });
+});
+
+// The hook silences the app's toast for the dialog, which shows a failure
+// itself; once the dialog is gone (the page left), it is toasted instead.
+it("toasts a New mapping create that fails after the dialog has gone, once", async () => {
+  signInAsAdmin();
+  const post = deferred<unknown>();
+  mockedPost.mockReturnValue(post.promise);
+  const user = userEvent.setup();
+  renderCard(card());
+  await mappingRow("usbdev01");
+  await user.click(screen.getByRole("button", { name: /^New mapping$/ }));
+  const dialog = await screen.findByRole("dialog");
+  await user.selectOptions(within(dialog).getByLabelText("Node"), "pve-01");
+  await user.selectOptions(
+    await within(dialog).findByLabelText("Device"),
+    "5555:0004",
+  );
+  await clickIn(user, dialog, "Create mapping");
+  await within(dialog).findByRole("button", { name: "Creating…" });
+
+  cleanup();
+  post.reject(
+    new ApiClientError(400, { error: "bad_request", message: "Refused" }),
+  );
+  await settle();
+
+  expect(toast.error).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(toast.error).mock.calls[0]?.[0]).toMatch(
+    /^Creating USB mapping .+ failed: Refused$/,
+  );
 });
 
 describe("USBMappingsCard edits", () => {

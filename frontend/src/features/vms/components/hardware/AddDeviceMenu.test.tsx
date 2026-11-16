@@ -1,7 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { renderWithProviders } from "@/test/test-utils";
+import {
+  settle,
+  signInAsAdmin,
+  signOutForGood,
+} from "@/test/late-toast-sessions";
 import { deferred } from "@/test/fake-server";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import {
@@ -23,6 +29,7 @@ import { AddDeviceMenu } from "./AddDeviceMenu";
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
 );
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedList = vi.mocked(apiClient.list);
 const mockedPost = vi.mocked(apiClient.post);
@@ -253,6 +260,7 @@ function mount(options: MenuOptions) {
   const view = renderWithProviders(menuElement(options, onAdd));
   return {
     onAdd,
+    unmount: view.unmount,
     rerender: (next: MenuOptions) => {
       view.rerender(menuElement(next, onAdd));
     },
@@ -284,6 +292,10 @@ const optionsOf = (select: HTMLElement) =>
     .map((o) => o.textContent);
 const ACK = "The node does not need it; pass it through";
 const ack = (dialog: HTMLElement) => within(dialog).getByLabelText(ACK);
+
+afterEach(() => {
+  signOutForGood();
+});
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -569,6 +581,29 @@ describe.each([USB, PCI])("Add $kind device dialog", (k) => {
     });
     expect(onAdd).toHaveBeenCalledWith(`${k.slots.prefix}0`, k.create.staged);
     expect(mockedPost).toHaveBeenCalledTimes(1);
+  });
+
+  // The hook silences the app's toast for the dialog, which shows a failure
+  // itself; once the dialog is gone (the panel left), it is toasted instead.
+  it("toasts a create that fails after the dialog has gone, once", async () => {
+    signInAsAdmin();
+    const post = deferred<unknown>();
+    mockedPost.mockReturnValue(post.promise);
+    const { user, dialog, unmount } = await start(k);
+    await user.selectOptions(device(dialog), k.create.pick);
+    await user.click(await button(dialog, "Create mapping & add"));
+    await button(dialog, "Creating mapping…");
+
+    unmount();
+    post.reject(
+      new ApiClientError(400, { error: "bad_request", message: "Refused" }),
+    );
+    await settle();
+
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith(
+      `Creating ${k.kind} mapping ${k.create.name} failed: Refused`,
+    );
   });
 
   it("waits for the mapping listing before a host pick can add", async () => {
