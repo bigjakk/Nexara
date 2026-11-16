@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -71,6 +72,21 @@ func TestFiledTaskGivesWayToWhoeverRanIt(t *testing.T) {
 			UserID: systemUserID, Upid: upid, Description: "Start linux01", Status: "running", Node: "pve-01",
 			TaskType: "qmstart", StartedAt: proxmoxStart.Add(-time.Minute)})
 	}
+	// The filer's word on how it ended, then Proxmox's.
+	forged := func(u string) error {
+		if err := file(filedCluster, u); err != nil {
+			return err
+		}
+		_, err := q.UpdateTaskHistory(ctx, gen.UpdateTaskHistoryParams{Upid: u, Status: "completed", ExitStatus: "OK",
+			FinishedAt: pgtype.Timestamptz{Time: proxmoxStart.Add(time.Hour), Valid: true}})
+		return err
+	}
+	ingestFailed := func(upid string) error {
+		return q.InsertExternalTaskHistory(ctx, gen.InsertExternalTaskHistoryParams{ClusterID: filedCluster,
+			UserID: systemUserID, Upid: upid, Description: "Start linux01", Status: "failed", ExitStatus: "boom",
+			Node: "pve-01", TaskType: "qmstart", StartedAt: proxmoxStart,
+			FinishedAt: pgtype.Timestamptz{Time: proxmoxStart.Add(time.Minute), Valid: true}})
+	}
 	tests := []struct {
 		name          string
 		first, second func(string) error
@@ -78,11 +94,15 @@ func TestFiledTaskGivesWayToWhoeverRanIt(t *testing.T) {
 		user          uuid.UUID
 		source        string
 		start         time.Time
+		verdict       string // status/exit/finish, when the case is about it
 	}{
-		{"filed, then dispatched", func(u string) error { return file(filedCluster, u) }, dispatch, nil, filedRunner, "nexara", proxmoxStart},
-		{"filed, then ingested", func(u string) error { return file(filedCluster, u) }, ingest, nil, systemUserID, "proxmox", proxmoxStart.Add(-time.Minute)},
-		{"dispatched, then filed", dispatch, func(u string) error { return file(filedCluster, u) }, pgx.ErrNoRows, filedRunner, "nexara", time.Time{}},
-		{"filed in another cluster, then dispatched here", func(u string) error { return file(filedOther, u) }, dispatch, pgx.ErrNoRows, filedFiler, "filed", proxmoxStart},
+		{"filed, then dispatched", func(u string) error { return file(filedCluster, u) }, dispatch, nil, filedRunner, "nexara", proxmoxStart, ""},
+		{"filed, then ingested", func(u string) error { return file(filedCluster, u) }, ingest, nil, systemUserID, "proxmox", proxmoxStart.Add(-time.Minute), ""},
+		{"dispatched, then filed", dispatch, func(u string) error { return file(filedCluster, u) }, pgx.ErrNoRows, filedRunner, "nexara", time.Time{}, ""},
+		{"filed in another cluster, then dispatched here", func(u string) error { return file(filedOther, u) }, dispatch, pgx.ErrNoRows, filedFiler, "filed", proxmoxStart, ""},
+		{"filed and forged completed, then ingested failed", forged, ingestFailed, nil, systemUserID, "proxmox", proxmoxStart,
+			"failed/boom/" + proxmoxStart.Add(time.Minute).UTC().Format(time.RFC3339)},
+		{"filed and forged completed, then dispatched", forged, dispatch, nil, filedRunner, "nexara", proxmoxStart, "running//"},
 	}
 	for i, tt := range tests {
 		upid := fmt.Sprintf("UPID:pve-01:%08X:00000001:6553F100:qmstart:100:root@pam:", i+1)
@@ -99,6 +119,13 @@ func TestFiledTaskGivesWayToWhoeverRanIt(t *testing.T) {
 		if row.UserID != tt.user || row.Source != tt.source || !tt.start.IsZero() && !row.StartedAt.Equal(tt.start) {
 			t.Errorf("%s: row is %s/%s from %s, want %s/%s from %s", tt.name, row.UserID, row.Source, row.StartedAt,
 				tt.user, tt.source, tt.start)
+		}
+		finished := ""
+		if row.FinishedAt.Valid {
+			finished = row.FinishedAt.Time.UTC().Format(time.RFC3339)
+		}
+		if got := row.Status + "/" + row.ExitStatus + "/" + finished; tt.verdict != "" && got != tt.verdict {
+			t.Errorf("%s: verdict %s, want %s", tt.name, got, tt.verdict)
 		}
 	}
 

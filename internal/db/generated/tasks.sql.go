@@ -282,7 +282,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'proxmox',
          THEN split_part($3, ':', 7)::int END)
 ON CONFLICT (upid) DO UPDATE
 SET user_id = EXCLUDED.user_id, source = EXCLUDED.source, description = EXCLUDED.description,
-    task_type = EXCLUDED.task_type, started_at = LEAST(task_history.started_at, EXCLUDED.started_at)
+    task_type = EXCLUDED.task_type, started_at = LEAST(task_history.started_at, EXCLUDED.started_at),
+    status = EXCLUDED.status, exit_status = EXCLUDED.exit_status, finished_at = EXCLUDED.finished_at,
+    progress = EXCLUDED.progress
 WHERE task_history.source = 'filed' AND task_history.cluster_id = EXCLUDED.cluster_id
 `
 
@@ -383,7 +385,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7,
          THEN split_part($3, ':', 7)::int END)
 ON CONFLICT (upid) DO UPDATE
 SET user_id = EXCLUDED.user_id, source = EXCLUDED.source, description = EXCLUDED.description,
-    task_type = EXCLUDED.task_type, started_at = LEAST(task_history.started_at, EXCLUDED.started_at)
+    task_type = EXCLUDED.task_type, started_at = LEAST(task_history.started_at, EXCLUDED.started_at),
+    status = EXCLUDED.status, exit_status = EXCLUDED.exit_status, finished_at = EXCLUDED.finished_at,
+    progress = EXCLUDED.progress
 WHERE task_history.source = 'filed' AND task_history.cluster_id = EXCLUDED.cluster_id
 RETURNING id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid
 `
@@ -407,7 +411,9 @@ type InsertTaskHistoryParams struct {
 //
 // A row someone FILED (POST /api/v1/tasks, source 'filed') gives way to the
 // one who ran the task: both inserts take it over in the same cluster, actor,
-// source and description, and never move its start later. Any other row
+// source, description and verdict (status, exit, finish, progress: a filed
+// row's are its filer's word; a running one is left to the reconciler), and
+// never move its start later. Any other row
 // already on record wins, so the conflict returns no row.
 func (q *Queries) InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error) {
 	row := q.db.QueryRow(ctx, insertTaskHistory,

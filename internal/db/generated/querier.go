@@ -1513,7 +1513,9 @@ type Querier interface {
 	//
 	// A row someone FILED (POST /api/v1/tasks, source 'filed') gives way to the
 	// one who ran the task: both inserts take it over in the same cluster, actor,
-	// source and description, and never move its start later. Any other row
+	// source, description and verdict (status, exit, finish, progress: a filed
+	// row's are its filer's word; a running one is left to the reconciler), and
+	// never move its start later. Any other row
 	// already on record wins, so the conflict returns no row.
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	InsertUpsCommand(ctx context.Context, arg InsertUpsCommandParams) (UpsCommand, error)
