@@ -751,10 +751,12 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on. Only one enabled
 
 An SSO account is bound to one identity at the provider: the ID token's issuer (`iss`) and subject (`sub`), stored on the account when it is created or first linked. At every sign-in:
 
-- the account bound to this issuer and subject is the account, whatever address the token carries now. Its address is not rewritten from the token;
-- otherwise, the SSO account whose address the token carries (exact spelling first, else the one account that differs only by case) is linked to this identity, if it has no link yet, and signed in. An account with two-factor authentication is linked, and has its roles and name updated from the provider, only once its second-factor code passes; if by then another identity has taken the account, the sign-in is refused and nothing is issued. A deactivated account is not linked;
+- the account bound to this issuer and subject is the account, whatever address the token carries now. Its address is not rewritten from the token. Its roles and name are synced from the provider at the callback, before any second-factor code;
+- otherwise, the SSO account whose address the token carries (exact spelling first, else the one account that differs only by case) is linked to this identity, if it has no link yet, and signed in. An account with two-factor authentication is linked, and has its roles and name updated from the provider, only once its second-factor code passes; if by then another identity has taken the account, the sign-in is refused and nothing is issued. A deactivated account is not linked. Writing a link is recorded in the audit log as `oidc_identity_linked` under the account, without the subject or issuer. The configuration must be unchanged while the code is typed: an edit to it in between refuses the sign-in, which is started again;
 - otherwise, with **Auto-Provision Users** on, a new account is created, bound to this identity;
 - an SSO account with that address that is already bound to **another** identity — another subject, or another issuer — is refused. Nothing is created or linked; the sign-in page says *This sign-in does not match the single sign-on identity your account is linked to. Contact an administrator.*, and the audit log records `login_failed` under that account with reason `identity_mismatch`. The record carries the account's own address, never the subject, issuer or address the provider sent.
+
+For an account with two-factor authentication, bound or not, the sign-in's audit entry (`oidc_callback`, then `oidc_login`) appears only once the code has passed and the session exists; a sign-in that stops at the code prompt leaves none.
 
 The unverified-address and allowed-domain refusals above happen before any of this, so neither can link an account. A local or LDAP account is never linked.
 
