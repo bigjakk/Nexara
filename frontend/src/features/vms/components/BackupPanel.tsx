@@ -34,10 +34,11 @@ import { RestoreDialog } from "@/features/backup/components/RestoreDialog";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { PBSSnapshot } from "@/features/backup/types/backup";
 import { Play, Trash2, Loader2 } from "lucide-react";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatExactDateTime } from "@/lib/format";
 
+// The exact time: the Latest stat already gives its age (timeAgo).
 function formatUnixTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleString();
+  return formatExactDateTime(ts * 1000);
 }
 
 function timeAgo(ts: number): string {

@@ -12,6 +12,7 @@ import {
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import { CreateSnapshotDialog } from "./CreateSnapshotDialog";
 import type { ResourceKind, Snapshot } from "../types/vm";
+import { formatDateTime, formatExactDate } from "@/lib/format";
 
 interface SnapshotPanelProps {
   clusterId: string;
@@ -78,8 +79,7 @@ export function SnapshotPanel({
   }
 
   function formatDate(ts: number | undefined): string {
-    if (!ts) return "--";
-    return new Date(ts * 1000).toLocaleString();
+    return formatDateTime(ts === undefined ? null : ts * 1000, "--");
   }
 
   // Build tree from flat list using parent field
@@ -138,7 +138,7 @@ export function SnapshotPanel({
             ? "Loading..."
             : taken.length === 0
               ? undefined
-              : `${String(taken.length)} taken${newest !== undefined ? `, the newest on ${new Date(newest * 1000).toLocaleDateString()}` : ""}`
+              : `${String(taken.length)} taken${newest !== undefined ? `, the newest on ${formatExactDate(newest * 1000)}` : ""}`
         }
         actions={
           <Button

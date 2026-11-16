@@ -14,7 +14,6 @@ import {
 import { EmptyState } from "@/components/EmptyState";
 import { DetailField } from "@/components/DetailField";
 import { DefGrid, Panel } from "@/components/page/Panel";
-import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -26,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { useImportJobs, useCancelImport } from "../api/import-queries";
 import type { VMImportJob } from "@/types/api";
+import { DateTime } from "@/components/DateTime";
 
 interface ImportHistoryTableProps {
   clusterId: string;
@@ -280,7 +280,7 @@ function RowGroup({
           <ImportStatus status={job.status} />
         </TableCell>
         <TableCell className="whitespace-nowrap py-2 text-[12.5px] text-muted-foreground">
-          {formatDateTime(job.created_at)}
+          <DateTime value={job.created_at} />
         </TableCell>
         <TableCell className="py-1 text-right">
           {cancellable && (

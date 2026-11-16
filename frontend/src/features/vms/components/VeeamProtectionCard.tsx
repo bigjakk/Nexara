@@ -12,14 +12,16 @@ import {
 } from "@/components/ui/table";
 import { ShieldOff, AlertTriangle } from "lucide-react";
 import { ApiClientError } from "@/lib/api-client";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatExactDateTime } from "@/lib/format";
 import { useVeeamGuestProtection } from "@/features/backup/api/backup-queries";
 import type { VeeamGuestProtection } from "@/features/backup/types/backup";
+import { DateTime } from "@/components/DateTime";
 
 function formatTime(value: string | null): string {
   if (value == null || value === "") return "Never";
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "Unknown" : parsed.toLocaleString();
+  // Shown beside its age, so the time itself is the exact one.
+  return Number.isNaN(parsed.getTime()) ? "Unknown" : formatExactDateTime(parsed);
 }
 
 function ageLabel(value: string | null): string {
@@ -235,7 +237,7 @@ export function VeeamProtectionCard({
               {data.restore_points.map((point) => (
                 <TableRow key={point.id}>
                   <TableCell className="whitespace-nowrap tabular-nums">
-                    {formatTime(point.creation_time)}
+                    <DateTime value={point.creation_time} fallback="Never" />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {point.point_type || "—"}

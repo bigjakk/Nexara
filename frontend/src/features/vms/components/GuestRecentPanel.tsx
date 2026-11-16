@@ -3,9 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
 import { useHistory } from "@/features/history/api/history-queries";
 import { historyExclusions } from "@/features/history/lib/history";
-import { formatRelativeTime } from "@/lib/format";
 import { guestHistoryKind, guestRowNaming } from "../lib/guest-history-kind";
 import { guestHistoryTarget } from "../lib/guest-history-target";
+import { DateTime } from "@/components/DateTime";
 
 /** How many entries the Overview shows before pointing at the History tab. */
 const RECENT_COUNT = 5;
@@ -71,7 +71,7 @@ export function GuestRecentPanel({
                 )}
               </span>
               <span className="shrink-0 text-[12.5px] text-muted-foreground/75">
-                {formatRelativeTime(entry.occurred_at)}
+                <DateTime value={entry.occurred_at} />
               </span>
             </li>
           );

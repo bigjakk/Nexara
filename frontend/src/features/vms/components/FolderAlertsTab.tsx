@@ -22,6 +22,7 @@ import {
   useResolveAlert,
 } from "@/features/alerts/api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
+import { formatDateTime } from "@/lib/format";
 
 interface FolderAlertsTabProps {
   clusterId: string;
@@ -61,10 +62,7 @@ export function FolderAlertsTab({ clusterId, vmids }: FolderAlertsTabProps) {
     [alerts, vmids],
   );
 
-  const formatDate = (s?: string) => {
-    if (!s) return "—";
-    return new Date(s).toLocaleString();
-  };
+  const formatDate = (s?: string) => formatDateTime(s);
 
   const colSpan = canAcknowledge ? 8 : 7;
 

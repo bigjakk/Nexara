@@ -35,6 +35,7 @@ import {
 } from "../lib/snapshot-name";
 import { scheduleRunState } from "../lib/schedule-status";
 import type { ResourceKind } from "../types/vm";
+import { DateTime } from "@/components/DateTime";
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
@@ -196,14 +197,10 @@ export function SchedulePanel({
                     </div>
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-[12.5px] tabular-nums text-muted-foreground">
-                    {s.next_run_at
-                      ? new Date(s.next_run_at).toLocaleString()
-                      : "--"}
+                    <DateTime value={s.next_run_at} fallback="--" />
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-[12.5px] tabular-nums text-muted-foreground">
-                    {s.last_run_at
-                      ? new Date(s.last_run_at).toLocaleString()
-                      : "--"}
+                    <DateTime value={s.last_run_at} fallback="--" />
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
