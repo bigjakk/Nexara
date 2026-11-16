@@ -119,7 +119,6 @@ type Config struct {
 	// and only terminal ones are swept, so the cost of the longer window is a
 	// table roughly 7x larger and still measured in megabytes.
 	TaskHistoryRetention time.Duration `envconfig:"TASK_HISTORY_RETENTION" default:"168h"`
-	WSPort               int           `envconfig:"WS_PORT" default:"8081"`
 	WSPingInterval       time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
 	WSPongTimeout        time.Duration `envconfig:"WS_PONG_TIMEOUT" default:"30s"`
 	// WSAllowedOrigins is a comma-separated list of origins (scheme +
@@ -132,7 +131,6 @@ type Config struct {
 	// gofiber/contrib/v3/websocket's Origins field.
 	WSAllowedOrigins string `envconfig:"WS_ALLOWED_ORIGINS"`
 	DataDir          string `envconfig:"DATA_DIR" default:"/data/nexara"`
-	MaxUploadSize    int64  `envconfig:"MAX_UPLOAD_SIZE" default:"16106127360"`
 	WSMaxConnections int    `envconfig:"WS_MAX_CONNECTIONS" default:"1000"`
 	PprofEnabled     bool   `envconfig:"PPROF_ENABLED" default:"false"`
 	PprofPort        string `envconfig:"PPROF_PORT" default:"6060"`

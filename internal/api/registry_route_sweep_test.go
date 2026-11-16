@@ -135,7 +135,6 @@ func newSweepServer(t *testing.T) *Server {
 		// never mounted here at all — see below.
 		RateLimitMax:        1_000_000,
 		RateLimitExpiration: time.Minute,
-		MaxUploadSize:       16106127360,
 		ProxyHeader:         "X-Forwarded-For",
 	}
 

@@ -579,7 +579,7 @@ make lint           # Run golangci-lint
 make generate       # Run sqlc generate
 make migrate-up     # Apply pending migrations
 make migrate-down   # Rollback last migration
-make docker-build   # docker compose build: builds nothing, docker-compose.yml has no build section (use the dev overlay above)
+make docker-build   # Build the image docker-compose.yml runs, tagged ghcr.io/bigjakk/nexara:${NEXARA_VERSION:-latest}
 make docker-up      # Start full stack from the published image
 make docker-down    # Stop full stack
 make frontend-build # npm ci + vite build, then copy dist/ into cmd/nexara/ for go:embed

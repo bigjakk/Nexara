@@ -63,9 +63,12 @@ migrate-up:
 migrate-down:
 	migrate -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) down 1
 
-## docker-build: Build Docker image
+## docker-build: Build the image docker-compose.yml runs (ghcr.io/bigjakk/nexara:$NEXARA_VERSION, default latest)
+NEXARA_VERSION?=latest
 docker-build:
-	docker compose build
+	docker build -f docker/nexara/Dockerfile \
+		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) \
+		-t ghcr.io/bigjakk/nexara:$(NEXARA_VERSION) .
 
 ## docker-up: Start all services
 docker-up:
