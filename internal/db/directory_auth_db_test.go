@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
@@ -234,20 +235,27 @@ func TestOIDCIdentity_SQL(t *testing.T) {
 			}
 		}
 		// A second account for the identity, and an identity on a local account: each
-		// inside a savepoint, so the refusal does not end the transaction.
+		// inside a savepoint, so the refusal does not end the transaction. The first is
+		// refused by the key the link's race handling names (handlers.usersOIDCIdentityKey).
 		for _, st := range []struct {
-			sql  string
-			args []any
+			sql        string
+			args       []any
+			constraint string
 		}{
-			{`INSERT INTO users (email, password_hash, display_name, auth_source, oidc_issuer, oidc_subject) VALUES ('erin@example.com', '', 'x', 'oidc', $1, 'sub-1')`, []any{iss}},
-			{`UPDATE users SET oidc_issuer = $1, oidc_subject = 'sub-3' WHERE id = $2`, []any{iss, ids["local"]}},
+			{`INSERT INTO users (email, password_hash, display_name, auth_source, oidc_issuer, oidc_subject) VALUES ('erin@example.com', '', 'x', 'oidc', $1, 'sub-1')`, []any{iss}, "users_oidc_identity_key"},
+			{`UPDATE users SET oidc_issuer = $1, oidc_subject = 'sub-3' WHERE id = $2`, []any{iss, ids["local"]}, ""},
 		} {
 			sp, err := tx.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := sp.Exec(ctx, st.sql, st.args...); err == nil {
+			_, err = sp.Exec(ctx, st.sql, st.args...)
+			if err == nil {
 				t.Errorf("%s: accepted, want refused", st.sql)
+			}
+			var pgErr *pgconn.PgError
+			if st.constraint != "" && (!errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != st.constraint) {
+				t.Errorf("%s: refused with %v, want SQLSTATE 23505 on %s", st.sql, err, st.constraint)
 			}
 			_ = sp.Rollback(ctx)
 		}
